@@ -1281,10 +1281,6 @@ const buildUserMessageEffect = Effect.fn("buildUserMessageEffect")(function* (
   const text = buildPromptText(input, dependencies.boundInstanceId, dependencies.modelCatalog);
   const sdkContent: Array<Record<string, unknown>> = [];
 
-  if (text.length > 0) {
-    sdkContent.push({ type: "text", text });
-  }
-
   for (const attachment of input.attachments ?? []) {
     // Claude ingests images only. Generic files reach the agent through the
     // path line ProviderService puts in the prompt.
@@ -1330,6 +1326,16 @@ const buildUserMessageEffect = Effect.fn("buildUserMessageEffect")(function* (
         bytes,
       }),
     );
+  }
+
+  // The text block goes last on purpose. The Claude CLI only reads a streamed
+  // user message as a slash-command invocation when the final content block is
+  // text; anything ahead of it rides along as preceding input blocks and is
+  // preserved through the expansion. Leading with the text instead made every
+  // turn that carried an image fall back to a plain prompt, so `/skill args`
+  // reached the agent as literal text with no command expansion and no error.
+  if (text.length > 0) {
+    sdkContent.push({ type: "text", text });
   }
 
   return buildUserMessage({ sdkContent });
