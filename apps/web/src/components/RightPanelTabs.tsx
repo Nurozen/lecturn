@@ -941,6 +941,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                       return (
                         <MenuSub key={action.label}>
                           <MenuSubTrigger
+                            className="[&>svg:last-child]:ms-0"
                             aria-keyshortcuts={action.shortcut}
                             onClick={(event) => {
                               const pointerType =
