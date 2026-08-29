@@ -18,6 +18,7 @@ import {
   BROWSER_IMPORT_SOURCES,
   chromiumProcessIsAlive,
   chromiumSingletonLockIsHeld,
+  cookieDatabaseCandidatePaths,
   isSourceInstalled,
   isSourceRunning,
   listSourceProfiles,
@@ -306,15 +307,14 @@ describe("listSourceProfiles", () => {
   );
 });
 
-describe("cookieDatabasePath", () => {
+describe("cookieDatabaseCandidatePaths", () => {
   it.effect("places the database under the requested source profile", () =>
     run(
       Effect.gen(function* () {
         const context = yield* withSourceHome();
-        assert.equal(
-          cookieDatabasePath(helium, context, "Profile 1"),
+        assert.deepEqual(cookieDatabaseCandidatePaths(helium, context, "Profile 1"), [
           `${context.home}/Library/Application Support/net.imput.helium/Profile 1/Cookies`,
-        );
+        ]);
       }),
     ),
   );
