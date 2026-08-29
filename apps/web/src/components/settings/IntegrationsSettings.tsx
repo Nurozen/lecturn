@@ -105,6 +105,14 @@ export async function clearBrowserProfileData(
   );
 }
 
+export function browserProfileRemovalAvailable(
+  bridgeAvailable: boolean,
+  environmentsReady: boolean,
+  environmentCount: number,
+): boolean {
+  return bridgeAvailable && environmentsReady && environmentCount > 0;
+}
+
 /**
  * The size a "Responsive" default falls back to when the user switches away
  * from Fill and hasn't typed dimensions yet. Fill has no dimensions to carry
@@ -560,6 +568,11 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const [profilePendingRemoval, setProfilePendingRemoval] = useState<BrowserProfile | null>(null);
   const [profileRemovalError, setProfileRemovalError] = useState<string | null>(null);
   const [profileRemovalInFlight, setProfileRemovalInFlight] = useState(false);
+  const removalAvailable = browserProfileRemovalAvailable(
+    previewBridge !== null,
+    environmentsReady,
+    environments.length,
+  );
 
   const addProfile = () => {
     const currentProfiles = getClientSettings().browserProfiles;
@@ -587,6 +600,10 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   };
 
   const removeProfile = async (id: string) => {
+    if (!removalAvailable) {
+      setProfileRemovalError("Connect to an environment before removing this profile.");
+      return;
+    }
     setProfileRemovalError(null);
     setProfileRemovalInFlight(true);
     // Drop the partition's data too, otherwise a removed profile's cookies
@@ -683,7 +700,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                       <Button
                         size="icon-sm"
                         variant="ghost-muted"
-                        disabled={disabled || !environmentsReady}
+                        disabled={disabled || !removalAvailable}
                         aria-label={`Remove ${profile.name}`}
                         onClick={() => setProfilePendingRemoval(profile)}
                       >
@@ -691,7 +708,11 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                       </Button>
                     }
                   />
-                  <TooltipPopup side="top">Remove profile and its data</TooltipPopup>
+                  <TooltipPopup side="top">
+                    {removalAvailable
+                      ? "Remove profile and its data"
+                      : "Connect to an environment to remove this profile"}
+                  </TooltipPopup>
                 </Tooltip>
               )}
             </div>
@@ -719,6 +740,11 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                 {profileRemovalError}
               </p>
             ) : null}
+            {!removalAvailable ? (
+              <p className="text-sm text-muted-foreground">
+                Connect to an environment to remove this profile and its data.
+              </p>
+            ) : null}
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogClose
@@ -729,9 +755,11 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
             </AlertDialogClose>
             <Button
               variant="destructive"
-              disabled={profileRemovalInFlight}
+              disabled={profileRemovalInFlight || !removalAvailable}
               onClick={() => {
-                if (profilePendingRemoval) void removeProfile(profilePendingRemoval.id);
+                if (profilePendingRemoval && removalAvailable) {
+                  void removeProfile(profilePendingRemoval.id);
+                }
               }}
             >
               {profileRemovalInFlight ? "Removing…" : "Remove profile"}
