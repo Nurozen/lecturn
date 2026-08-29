@@ -38,7 +38,7 @@ import type { ReactNode } from "react";
 import { ScreenRotationIcon } from "~/browser/ScreenRotationIcon";
 import { previewBridge } from "~/components/preview/previewBridge";
 import { cn, randomUUID } from "~/lib/utils";
-import { usePrimaryEnvironment } from "~/state/environments";
+import { useEnvironments } from "~/state/environments";
 import { isElectron } from "../../env";
 
 import { Badge } from "../ui/badge";
@@ -556,7 +556,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const userProfiles = useClientSettings((settings) => settings.browserProfiles);
   const defaultProfileId = useClientSettings((settings) => settings.browserDefaultProfileId);
   const updateSettings = useUpdatePrimarySettings();
-  const environmentId = usePrimaryEnvironment()?.environmentId;
+  const { environments, isReady: environmentsReady } = useEnvironments();
   const [profilePendingRemoval, setProfilePendingRemoval] = useState<BrowserProfile | null>(null);
   const [profileRemovalError, setProfileRemovalError] = useState<string | null>(null);
   const [profileRemovalInFlight, setProfileRemovalInFlight] = useState(false);
@@ -590,7 +590,11 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
     // Drop the partition's data too, otherwise a removed profile's cookies
     // stay on disk with nothing in the UI pointing at them.
     try {
-      await clearBrowserProfileData(previewBridge, environmentId ? [environmentId] : [], id);
+      await clearBrowserProfileData(
+        previewBridge,
+        environmentsReady ? environments.map((environment) => environment.environmentId) : [],
+        id,
+      );
     } catch {
       setProfileRemovalError("Profile data could not be deleted. Try again.");
       setProfileRemovalInFlight(false);
@@ -674,7 +678,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                       <Button
                         size="icon-sm"
                         variant="ghost-muted"
-                        disabled={disabled}
+                        disabled={disabled || !environmentsReady}
                         aria-label={`Remove ${profile.name}`}
                         onClick={() => setProfilePendingRemoval(profile)}
                       >
