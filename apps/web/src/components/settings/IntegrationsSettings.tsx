@@ -79,6 +79,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   getClientSettings,
   useClientSettings,
+  useClientSettingsHydrated,
   usePrimarySettings,
   useUpdatePrimarySettings,
 } from "~/hooks/useSettings";
@@ -598,6 +599,7 @@ function DesktopOnlyBrowserDefaults({ children }: { readonly children: ReactNode
 function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const userProfiles = useClientSettings((settings) => settings.browserProfiles);
   const defaultProfileId = useClientSettings((settings) => settings.browserDefaultProfileId);
+  const settingsHydrated = useClientSettingsHydrated();
   const updateSettings = useUpdatePrimarySettings();
   const { environments, isReady: environmentsReady } = useEnvironments();
   const primaryEnvironment = usePrimaryEnvironment();
@@ -617,6 +619,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   );
   const importInFlightRef = useRef(false);
   const [importInFlight, setImportInFlight] = useState(false);
+  const profileWritesDisabled = disabled || !settingsHydrated;
 
   const profiles = resolveBrowserProfiles(userProfiles);
   // Incognito is deliberately not a row — it holds nothing to manage — so the
@@ -628,7 +631,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
     findBrowserProfile(listedProfiles, defaultProfileId)?.id ?? DEFAULT_BROWSER_PROFILE_ID;
 
   const createProfile = (baseName: string) => {
-    if (importInFlightRef.current) return undefined;
+    if (!settingsHydrated || importInFlightRef.current) return undefined;
     const currentProfiles = getClientSettings().browserProfiles;
     const resolvedProfiles = resolveBrowserProfiles(currentProfiles);
     const taken = new Set(resolvedProfiles.map((profile) => profile.name));
@@ -640,7 +643,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   };
 
   const renameProfile = (id: string, next: string) => {
-    if (importInFlightRef.current) return;
+    if (!settingsHydrated || importInFlightRef.current) return;
     const name = next.trim().slice(0, BROWSER_PROFILE_NAME_MAX_LENGTH);
     if (name === "") return;
     const currentProfiles = getClientSettings().browserProfiles;
@@ -652,7 +655,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   };
 
   const clearProfileData = (id: string, name: string) => {
-    if (importInFlightRef.current) return;
+    if (!settingsHydrated || importInFlightRef.current) return;
     if (!previewBridge || !environmentsReady || environments.length === 0) {
       toastManager.add({
         type: "error",
@@ -675,7 +678,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   };
 
   const removeProfile = async (id: string) => {
-    if (importInFlightRef.current) return;
+    if (!settingsHydrated || importInFlightRef.current) return;
     if (!removalAvailable) {
       setProfileRemovalError("Connect to an environment before removing this profile.");
       return;
@@ -741,6 +744,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
     input: { readonly sourceProfileDirectory: string; readonly target: WizardTarget },
   ): Promise<ImportOutcome> => {
     if (!previewBridge) return { kind: "blocked", reason: "sessionUnavailable" };
+    if (!settingsHydrated) return { kind: "blocked", reason: "sessionUnavailable" };
     if (importInFlightRef.current) return { kind: "blocked", reason: "readFailed" };
     importInFlightRef.current = true;
     setImportInFlight(true);
@@ -813,13 +817,22 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
       control={
         <Menu onOpenChange={(open) => open && loadSources()}>
           <MenuTrigger
-            render={<Button size="sm" variant="outline" disabled={disabled || importInFlight} />}
+            render={
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={profileWritesDisabled || importInFlight}
+              />
+            }
           >
             <PlusIcon />
             Add profile
           </MenuTrigger>
           <MenuPopup align="end" className="min-w-56">
-            <MenuItem disabled={atProfileLimit} onClick={() => createProfile("New profile")}>
+            <MenuItem
+              disabled={!settingsHydrated || atProfileLimit}
+              onClick={() => createProfile("New profile")}
+            >
               Blank profile
             </MenuItem>
             <MenuSeparator />
@@ -836,9 +849,9 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                 importableSources.map((source) => (
                   <MenuItem
                     key={source.id}
-                    disabled={primaryEnvironment == null}
+                    disabled={!settingsHydrated || primaryEnvironment == null}
                     onClick={() => {
-                      if (primaryEnvironment == null) return;
+                      if (!settingsHydrated || primaryEnvironment == null) return;
                       setImportSession({
                         source,
                         environmentId: primaryEnvironment.environmentId,
@@ -879,7 +892,10 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                   // own, landing them near 0.41 while every other disabled
                   // control in the block sits at 0.64.
                   <span
-                    className={cn("truncate text-sm text-foreground", disabled && "opacity-64")}
+                    className={cn(
+                      "truncate text-sm text-foreground",
+                      profileWritesDisabled && "opacity-64",
+                    )}
                   >
                     {profile.name}
                   </span>
@@ -889,7 +905,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                     size="sm"
                     className="w-full max-w-56"
                     aria-label={`Rename ${profile.name}`}
-                    disabled={disabled || importInFlight}
+                    disabled={profileWritesDisabled || importInFlight}
                     maxLength={BROWSER_PROFILE_NAME_MAX_LENGTH}
                     value={profile.name}
                     onCommit={(next) => renameProfile(profile.id, next)}
@@ -901,7 +917,9 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                   otherwise sit at full strength beside a name, rename field
                   and menu button that are all at 0.64.
                 */}
-                {isDefault ? <Badge className={cn(disabled && "opacity-64")}>Default</Badge> : null}
+                {isDefault ? (
+                  <Badge className={cn(profileWritesDisabled && "opacity-64")}>Default</Badge>
+                ) : null}
               </span>
               <Menu>
                 <MenuTrigger
@@ -909,7 +927,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                     <Button
                       size="icon-sm"
                       variant="ghost-muted"
-                      disabled={disabled || importInFlight}
+                      disabled={profileWritesDisabled || importInFlight}
                       aria-label={`${profile.name} options`}
                     />
                   }
@@ -918,13 +936,17 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                 </MenuTrigger>
                 <MenuPopup align="end" className="min-w-44">
                   <MenuItem
-                    disabled={isDefault}
-                    onClick={() => updateSettings({ browserDefaultProfileId: profile.id })}
+                    disabled={!settingsHydrated || isDefault}
+                    onClick={() => {
+                      if (settingsHydrated) {
+                        updateSettings({ browserDefaultProfileId: profile.id });
+                      }
+                    }}
                   >
                     Set as default
                   </MenuItem>
                   <MenuItem
-                    disabled={!removalAvailable}
+                    disabled={!settingsHydrated || !removalAvailable}
                     onClick={() => clearProfileData(profile.id, profile.name)}
                   >
                     Clear cookies and cache
@@ -932,8 +954,10 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                   {builtIn ? null : (
                     <MenuItem
                       variant="destructive"
-                      disabled={!removalAvailable}
-                      onClick={() => setProfilePendingRemoval(profile)}
+                      disabled={!settingsHydrated || !removalAvailable}
+                      onClick={() => {
+                        if (settingsHydrated) setProfilePendingRemoval(profile);
+                      }}
                     >
                       Remove profile and data
                     </MenuItem>
@@ -990,9 +1014,9 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
             </AlertDialogClose>
             <Button
               variant="destructive"
-              disabled={profileRemovalInFlight || !removalAvailable}
+              disabled={profileRemovalInFlight || !settingsHydrated || !removalAvailable}
               onClick={() => {
-                if (profilePendingRemoval && removalAvailable) {
+                if (profilePendingRemoval && settingsHydrated && removalAvailable) {
                   void removeProfile(profilePendingRemoval.id);
                 }
               }}
@@ -1007,7 +1031,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
           source={importSession.source}
           destinationEnvironmentName={importSession.environmentName}
           targetProfiles={listedProfiles.map((profile) => ({ id: profile.id, name: profile.name }))}
-          canCreateProfile={!atProfileLimit}
+          canCreateProfile={settingsHydrated && !atProfileLimit}
           onImport={(input) =>
             runWizardImport(importSession.source, importSession.environmentId, input)
           }
