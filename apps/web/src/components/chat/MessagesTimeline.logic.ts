@@ -4,6 +4,7 @@ import {
   omitSupersededLifecycleMarkers,
   summarizeToolGroup,
   toolGroupSummaryKind,
+  workEntryViewedImagePath,
   type ToolGroupSummaryKind,
 } from "@t3tools/client-runtime/work-log/presentation";
 export {
@@ -40,6 +41,15 @@ export function workEntryIsVisibleInGroup(
         entry.sourceActivityKind === "task.progress")) ||
     !workEntryIndicatesToolNeutralStatus(entry)
   );
+}
+
+/**
+ * Rows that preview an image the agent viewed or produced. They stay out of
+ * tool groups and out of the settled-turn fold: the image is the answer the
+ * user asked for, not tool noise to hide behind "Worked for ...".
+ */
+function workEntryRendersImagePreview(entry: WorkLogEntry): boolean {
+  return workEntryViewedImagePath(entry) !== null;
 }
 
 export interface TimelineEndState {
@@ -473,6 +483,9 @@ function deriveTurnFolds(input: {
       if (entry.kind === "work" && entry.entry.agentSpawn !== undefined) {
         continue;
       }
+      if (entry.kind === "work" && workEntryRendersImagePreview(entry.entry)) {
+        continue;
+      }
       hiddenEntryIds.add(entry.id);
     }
     if (hiddenEntryIds.size === 0) {
@@ -687,7 +700,11 @@ export function deriveMessagesTimelineRows(input: {
     }
 
     if (timelineEntry.kind === "work") {
-      if (timelineEntry.entry.agentSpawn !== undefined || timelineEntry.entry.tone === "error") {
+      if (
+        timelineEntry.entry.agentSpawn !== undefined ||
+        timelineEntry.entry.tone === "error" ||
+        workEntryRendersImagePreview(timelineEntry.entry)
+      ) {
         nextRows.push({
           kind: "work",
           id: timelineEntry.id,
@@ -707,6 +724,7 @@ export function deriveMessagesTimelineRows(input: {
           nextEntry.kind !== "work" ||
           nextEntry.entry.agentSpawn !== undefined ||
           nextEntry.entry.tone === "error" ||
+          workEntryRendersImagePreview(nextEntry.entry) ||
           activeWorkEntryIds.has(nextEntry.id) ||
           collapsedEntryIds.has(nextEntry.id) ||
           foldsByAnchorEntryId.has(nextEntry.id)
