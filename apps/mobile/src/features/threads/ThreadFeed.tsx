@@ -2,6 +2,7 @@ import * as Haptics from "expo-haptics";
 import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
 import { type LegendListRef } from "@legendapp/list/react-native";
 import type {
+  AssetResource,
   ChatAttachment,
   ChatFileAttachment,
   ChatImageAttachment,
@@ -17,7 +18,11 @@ import {
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { classifyMarkdownImageSource } from "@t3tools/client-runtime/markdown-images";
+import {
+  classifyMarkdownImageSource,
+  markdownImageSourceFragment,
+} from "@t3tools/client-runtime/markdown-images";
+import { resolveViewedImageAsset } from "@t3tools/client-runtime/work-log/presentation";
 import {
   renderCodexFileCitationsAsMarkdown,
   splitCodexArtifactTemplateMarkdown,
@@ -70,7 +75,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
   FadeIn,
   FadeInUp,
-  FadeOut,
   LinearTransition,
   type SharedValue,
 } from "react-native-reanimated";
@@ -132,6 +136,7 @@ import {
 } from "./thread-feed-live-follow";
 import {
   collapsedWorkLogHeight,
+  ThreadDisclosureChevron,
   ThreadWorkGroupToggle,
   ThreadWorkLog,
   THREAD_DISCLOSURE_TRANSITION_MS,
@@ -166,11 +171,12 @@ function formatMessageTime(input: string): string {
 // text-sm line at every supported base font size (26px at the 22pt maximum),
 // so its height is a constant; a drifted value costs one correction on
 // measure, not a persistent offset.
-const TURN_FOLD_HEIGHT = 56; // min-h-11 (44) + mb-3 (12)
+const TURN_FOLD_HEIGHT = 48; // min-h-11 (44) + mb-1 (4)
 const THREAD_FEED_LAYOUT_TRANSITION = LinearTransition.duration(THREAD_DISCLOSURE_TRANSITION_MS);
-const THREAD_FEED_DISCLOSURE_ENTER_TRANSITION = FadeIn.duration(140);
-const THREAD_FEED_DISCLOSURE_EXIT_TRANSITION = FadeOut.duration(120);
-const EMPTY_DISCLOSURE_ENTRY_IDS: ReadonlySet<string> = new Set();
+// Let neighboring rows move out of the new rows' space before showing their text.
+const THREAD_FEED_DISCLOSURE_ENTER_TRANSITION = FadeIn.delay(
+  THREAD_DISCLOSURE_TRANSITION_MS,
+).duration(140);
 
 // Entering animations must only play for rows born just now — LegendList
 // remounts rows when they scroll back into view, and replaying an entrance for
@@ -565,24 +571,24 @@ function ThreadMarkdownImageRequest(props: {
   );
 }
 
-/** Markdown image whose src is a workspace file — loads through a signed asset URL. */
+/** Environment-hosted image that loads through a signed asset URL. */
 function ThreadMarkdownImage(props: {
   readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-  readonly path: string;
+  readonly resource: Extract<AssetResource, { readonly _tag: "attachment" | "workspace-file" }>;
   readonly alt: string | null;
+  readonly srcFragment?: string;
   readonly onPressPreview: (source: FilePreviewSource) => void;
 }) {
-  const assetUrl = useAssetUrlState(props.environmentId, {
-    _tag: "workspace-file",
-    threadId: props.threadId,
-    path: props.path,
-  });
+  const assetUrl = useAssetUrlState(props.environmentId, props.resource);
 
   return (
     <ThreadMarkdownImageView
-      uri={assetUrl._tag === "Success" ? assetUrl.url : null}
-      sourceKey={props.path}
+      uri={assetUrl._tag === "Success" ? assetUrl.url + (props.srcFragment ?? "") : null}
+      sourceKey={
+        props.resource._tag === "attachment"
+          ? `attachment:${props.resource.attachmentId}`
+          : `workspace:${props.resource.path}`
+      }
       unavailable={assetUrl._tag === "Failure"}
       alt={props.alt}
       onPressPreview={props.onPressPreview}
@@ -1333,6 +1339,7 @@ function renderFeedEntry(
     readonly onPressVideo: (attachment: ChatFileAttachment, sourceIdentifier: string) => void;
     readonly onMarkdownLinkPress: (href: string) => void;
     readonly renderMarkdownImage: MarkdownImageRenderer;
+    readonly renderViewedImage: MarkdownImageRenderer;
     readonly iconSubtleColor: string | import("react-native").ColorValue;
     readonly userBubbleColor: string | import("react-native").ColorValue;
     readonly markdownStyles: MarkdownStyleSets;
@@ -1352,16 +1359,16 @@ function renderFeedEntry(
         accessibilityState={{ expanded: entry.expanded }}
         onPress={() => props.onToggleTurnFold(entry.turnId)}
         hitSlop={4}
-        className="mb-3 min-h-11 flex-row items-center gap-2 border-b border-adaptive-neutral-200-a80-white-a8 px-2"
+        className="mb-1 min-h-11 flex-row items-center gap-2 border-b border-adaptive-neutral-200-a80-white-a8 px-2"
       >
         <Text className="font-t3-medium text-sm tabular-nums text-foreground-muted">
           {entry.label}
         </Text>
-        <SymbolView
-          name={entry.expanded ? "chevron.down" : "chevron.right"}
+        <ThreadDisclosureChevron
+          expanded={entry.expanded}
+          collapsedDirection="right"
           size={15}
-          tintColorClassName={"accent-icon-subtle"}
-          type="monochrome"
+          tintColor={iconSubtleColor}
         />
       </Pressable>
     );
@@ -1489,7 +1496,7 @@ function renderFeedEntry(
     const enterAnimated = isFreshTimestamp(message.createdAt);
     return (
       <Animated.View
-        className={cn(showAssistantMeta ? "mb-5 px-1" : "mb-2 px-1")}
+        className={cn(showAssistantMeta ? "mb-5 px-1" : "mb-1 px-1")}
         {...(enterAnimated ? { entering: FadeIn.duration(220) } : {})}
       >
         {renderedText.trim().length > 0 ? (
@@ -1552,6 +1559,7 @@ function renderFeedEntry(
       themeAppearance={props.themeAppearance}
       onCopyRow={props.onCopyWorkRow}
       onToggleRow={props.onToggleWorkRow}
+      renderImage={props.renderViewedImage}
     />
   );
 }
@@ -1833,7 +1841,6 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const disclosureSettleFrameRef = useRef<number | null>(null);
   const disclosureSettleSecondFrameRef = useRef<number | null>(null);
   const disclosureAnchorKeyRef = useRef<string | null>(null);
-  const previousPresentedFeedRef = useRef<ReadonlyArray<ThreadFeedEntry> | null>(null);
   const headerMaterialVisibleRef = useRef(false);
   const previousLatestTurnRef = useRef(props.latestTurn);
   const userScrollSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1846,12 +1853,12 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   // Live-follow latch. LegendList's maintainScrollAtEnd alone re-pins the feed
   // whenever the viewport drifts back inside its geometric threshold, which
   // yanked users off history they were reading every time a stream chunk grew
-  // a row. Follow breaks when the user scrolls up and away, and re-arms only
-  // when the list actually returns to the end (or on send / thread switch).
+  // a row. Scrolling away or expanding a disclosure above the end breaks
+  // follow; reaching the end (or sending / switching threads) re-arms it.
   const [endFollowEnabled, setEndFollowEnabled] = useState(true);
   const endFollowEnabledRef = useRef(true);
   // A "user scroll session" spans from drag start through the end of its
-  // momentum; only motion inside a session can break follow, so MVCP
+  // momentum; scroll events only break follow inside that session, so MVCP
   // compensations and programmatic scrolls never strand a follower.
   const userScrollSessionRef = useRef(false);
   const setEndFollow = useCallback(
@@ -1991,12 +1998,34 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       return (
         <ThreadMarkdownImage
           environmentId={props.environmentId}
-          threadId={props.threadId}
-          path={imageSource.path}
+          resource={{
+            _tag: "workspace-file",
+            threadId: props.threadId,
+            path: imageSource.path,
+          }}
           alt={image.alt}
+          srcFragment={markdownImageSourceFragment(image.href)}
           onPressPreview={(source) => setExpandedFile((current) => current ?? source)}
         />
       );
+    },
+    [props.environmentId, props.threadId, props.workspaceRoot],
+  );
+  const renderViewedImage = useCallback<MarkdownImageRenderer>(
+    (image) => {
+      const viewedImage = resolveViewedImageAsset(image.href, {
+        threadId: props.threadId,
+        workspaceRoot: props.workspaceRoot,
+      });
+      return viewedImage ? (
+        <ThreadMarkdownImage
+          environmentId={props.environmentId}
+          resource={viewedImage.resource}
+          alt={viewedImage.alt}
+          srcFragment={viewedImage.srcFragment}
+          onPressPreview={(source) => setExpandedFile((current) => current ?? source)}
+        />
+      ) : null;
     },
     [props.environmentId, props.threadId, props.workspaceRoot],
   );
@@ -2166,33 +2195,6 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       props.latestTurn,
     ],
   );
-  const disclosureEnteringEntryIds = useMemo(() => {
-    const anchorKey = disclosureAnchorKeyRef.current;
-    const previousPresentedFeed = previousPresentedFeedRef.current;
-    if (!disclosureToggleSettling || anchorKey === null || previousPresentedFeed === null) {
-      return EMPTY_DISCLOSURE_ENTRY_IDS;
-    }
-
-    const previousIds = new Set(previousPresentedFeed.map((entry) => entry.id));
-    const anchorIndex = presentedFeed.findIndex((entry) => entry.id === anchorKey);
-    const enteringIds = new Set<string>();
-    if (anchorIndex < 0) {
-      return enteringIds;
-    }
-    for (let index = anchorIndex + 1; index < presentedFeed.length; index += 1) {
-      const entryId = presentedFeed[index]!.id;
-      if (previousIds.has(entryId)) {
-        break;
-      }
-      enteringIds.add(entryId);
-    }
-    return enteringIds;
-  }, [disclosureToggleSettling, presentedFeed]);
-
-  useLayoutEffect(() => {
-    previousPresentedFeedRef.current = presentedFeed;
-  }, [presentedFeed]);
-
   // The empty↔filled key below remounts the list and resets its imperative
   // content-inset override. Seed the fresh instance synchronously with the
   // current overlay height before the scroll integration's next reaction;
@@ -2279,13 +2281,23 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     }
     disclosureSettleFrameRef.current = requestAnimationFrame(() => {
       disclosureSettleSecondFrameRef.current = requestAnimationFrame(() => {
+        // A disclosure can leave the reader above the end without a drag.
+        // Reconcile follow before a later layout or resume can re-pin it.
+        const listState = props.listRef.current?.getState();
+        if (listState) {
+          transitionEndFollow({
+            type: "disclosure-settled",
+            isAtEnd: listState.isAtEnd,
+            userScrollSessionActive: userScrollSessionRef.current,
+          });
+        }
         disclosureAnchorKeyRef.current = null;
         setDisclosureToggleSettling(false);
         disclosureSettleFrameRef.current = null;
         disclosureSettleSecondFrameRef.current = null;
       });
     });
-  }, []);
+  }, [props.listRef, transitionEndFollow]);
 
   const suspendEndScrollMaintenanceForDisclosure = useCallback((anchorKey: string | null) => {
     disclosureAnchorKeyRef.current = anchorKey;
@@ -2426,16 +2438,13 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     [expandedWorkRows],
   );
 
+  // Disclosures can mount existing offscreen rows as well as new work rows.
+  // Fade those in after movement; never retain removed rows over replacements.
   const renderItem = useCallback(
     (info: { item: ThreadFeedEntry; index: number }) => (
       <Animated.View
         key={info.item.id}
-        entering={
-          disclosureEnteringEntryIds.has(info.item.id)
-            ? THREAD_FEED_DISCLOSURE_ENTER_TRANSITION
-            : undefined
-        }
-        exiting={THREAD_FEED_DISCLOSURE_EXIT_TRANSITION}
+        entering={disclosureToggleSettling ? THREAD_FEED_DISCLOSURE_ENTER_TRANSITION : undefined}
       >
         {renderFeedEntry(info, {
           environmentId: props.environmentId,
@@ -2451,6 +2460,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
           onPressVideo,
           onMarkdownLinkPress,
           renderMarkdownImage,
+          renderViewedImage,
           iconSubtleColor,
           userBubbleColor,
           markdownStyles,
@@ -2465,7 +2475,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     ),
     [
       copiedRowId,
-      disclosureEnteringEntryIds,
+      disclosureToggleSettling,
       expandedWorkRows,
       terminalAssistantMessageIds,
       unsettledTurnId,
@@ -2487,6 +2497,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       props.onUseArtifactTemplate,
       props.skills,
       renderMarkdownImage,
+      renderViewedImage,
     ],
   );
 
