@@ -308,7 +308,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "browser-default-profile",
-    title: "Default profile",
+    title: "Default browser profile",
     to: "/settings/integrations",
     targetId: "browser-profiles",
   },
