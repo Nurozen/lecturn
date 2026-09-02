@@ -34,9 +34,14 @@ export function deriveAssetUrlState(input: {
     case "reconnecting":
     case "error":
       return { _tag: "Failure", reason: "disconnected" };
-    // "available" means the environment has not been dialled yet, so the URL is
-    // still on its way rather than lost.
+    // "available" is the idle, not yet dialled state. A pending query there is
+    // still on its way, but the query atom fails at once while idle, so a
+    // failure means the environment is not connected rather than the file is
+    // missing.
     case "available":
+      return input.query._tag === "Failed"
+        ? { _tag: "Failure", reason: "disconnected" }
+        : { _tag: "Loading" };
     case "connecting":
       return { _tag: "Loading" };
     case "connected":
