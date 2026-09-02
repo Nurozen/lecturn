@@ -603,15 +603,7 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
 
   if (claims.kind === "native-app-icon") {
     const nativeAppIconResolver = yield* NativeAppIconResolver.NativeAppIconResolver;
-    const iconPath = yield* nativeAppIconResolver.resolve(claims.app).pipe(
-      Effect.tapError((cause) =>
-        Effect.logDebug("Failed to resolve native application icon.", {
-          app: claims.app,
-          cause,
-        }),
-      ),
-      Effect.orElseSucceed(() => null),
-    );
+    const iconPath = yield* nativeAppIconResolver.resolve(claims.app);
     return iconPath ? ({ kind: "file", path: iconPath } satisfies ResolvedAsset) : null;
   }
 

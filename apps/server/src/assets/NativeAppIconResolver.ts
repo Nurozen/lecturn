@@ -28,9 +28,7 @@ export class NativeAppIconResolver extends Context.Service<
   NativeAppIconResolver,
   {
     /** Returns a cached PNG path for the application, or `null` when no icon is available. */
-    readonly resolve: (
-      app: ToolActivityNativeAppReference,
-    ) => Effect.Effect<string | null, PlatformError.PlatformError | Cause.TimeoutError>;
+    readonly resolve: (app: ToolActivityNativeAppReference) => Effect.Effect<string | null>;
   }
 >()("t3/assets/NativeAppIconResolver") {}
 
@@ -212,7 +210,12 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const hostPlatform = yield* HostProcessPlatform;
   const resolutionSemaphore = yield* Semaphore.make(2);
-  const resolutionCache = yield* Cache.makeWith(
+  type ResolutionAttempt = Option.Option<string | null>;
+  const resolutionCache: Cache.Cache<
+    string,
+    ResolutionAttempt,
+    PlatformError.PlatformError | Cause.TimeoutError
+  > = yield* Cache.makeWith(
     (key: string) =>
       resolutionSemaphore.withPermitsIfAvailable(1)(
         resolveNativeAppIconUncached(appFromCacheKey(key)),
@@ -220,10 +223,8 @@ export const make = Effect.gen(function* () {
     {
       capacity: RESOLUTION_CACHE_MAX_ENTRIES,
       timeToLive: Exit.match({
-        onSuccess: Option.match({
-          onNone: () => Duration.zero,
-          onSome: () => RESOLUTION_CACHE_TTL,
-        }),
+        // The semaphore uses None for saturation and wraps a real miss as Some(null).
+        onSuccess: (attempt) => (Option.isNone(attempt) ? Duration.zero : RESOLUTION_CACHE_TTL),
         onFailure: () => Duration.zero,
       }),
     },
@@ -238,7 +239,7 @@ export const make = Effect.gen(function* () {
       }),
     );
 
-  const resolve = Effect.fn("NativeAppIconResolver.resolve")(function* (
+  const resolveAttempt = Effect.fn("NativeAppIconResolver.resolve")(function* (
     app: ToolActivityNativeAppReference,
   ) {
     if (
@@ -249,14 +250,22 @@ export const make = Effect.gen(function* () {
     }
 
     const key = appCacheKey(app);
-    const cached = yield* Cache.get(resolutionCache, key);
-    if (Option.isNone(cached) || cached.value === null) return null;
-    if (yield* cachedFileExists(cached.value)) return cached.value;
+    const attempt = yield* Cache.get(resolutionCache, key);
+    if (Option.isNone(attempt) || attempt.value === null) return null;
+    if (yield* cachedFileExists(attempt.value)) return attempt.value;
 
     yield* Cache.invalidate(resolutionCache, key);
     const refreshed = yield* Cache.get(resolutionCache, key);
     return Option.isSome(refreshed) ? refreshed.value : null;
   });
+
+  const resolve: NativeAppIconResolver["Service"]["resolve"] = (app) =>
+    resolveAttempt(app).pipe(
+      Effect.tapError((cause) =>
+        Effect.logDebug("Failed to resolve native application icon.", { app, cause }),
+      ),
+      Effect.orElseSucceed(() => null),
+    );
 
   return NativeAppIconResolver.of({ resolve });
 });
