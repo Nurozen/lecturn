@@ -169,6 +169,23 @@ function activitySource(value: unknown): ToolActivitySource | undefined {
   return { key, name, kind, ...(icon ? { icon } : {}) };
 }
 
+function themedLogoIcon(
+  ...values: ReadonlyArray<unknown>
+): Extract<ToolActivityIcon, { readonly _tag: "themed-logo" }> | undefined {
+  for (const value of values) {
+    const record = asRecord(value);
+    const logoUrl = imageUrl(record?.logoUrl);
+    if (!logoUrl) continue;
+    const logoUrlDark = imageUrl(record?.logoUrlDark ?? record?.logoDarkUrl);
+    return {
+      _tag: "themed-logo",
+      logoUrl,
+      ...(logoUrlDark ? { logoUrlDark } : {}),
+    };
+  }
+  return undefined;
+}
+
 /**
  * Reads the provider-neutral fields first, then falls back to raw Codex metadata
  * so a newer client still presents existing threads written by an older server.
@@ -193,7 +210,12 @@ export function extractToolActivityPresentation(
 
   const item = asRecord(asRecord(payload?.data)?.item);
   const metadata = asRecord(asRecord(item?.result)?._meta);
-  const surface = asRecord(metadata?.["codex/toolSurface"]);
+  const surface = explicitSurface ? undefined : asRecord(metadata?.["codex/toolSurface"]);
+  const sourceLogo = themedLogoIcon(
+    surface,
+    asRecord(metadata?.source),
+    asRecord(item?.appContext),
+  );
   if (surface?.kind === "browserUse") {
     const screenshot = asRecord(surface.screenshot);
     const browserUse = asRecord(metadata?.browser_use);
@@ -238,9 +260,11 @@ export function extractToolActivityPresentation(
           key: `browser-use:${sourceKeyPart(name) || "browser"}`,
           name,
           kind: name === "Browser" ? "browser" : "integration",
-          ...(nativeBrowserApp
-            ? { icon: { _tag: "native-app", app: nativeBrowserApp } as const }
-            : {}),
+          ...(sourceLogo
+            ? { icon: sourceLogo }
+            : nativeBrowserApp
+              ? { icon: { _tag: "native-app", app: nativeBrowserApp } as const }
+              : {}),
         } satisfies ToolActivitySource),
     };
   }
@@ -273,7 +297,11 @@ export function extractToolActivityPresentation(
                 : "computer-use",
           name,
           kind: "computer",
-          ...(app ? { icon: { _tag: "native-app", app } as const } : {}),
+          ...(sourceLogo
+            ? { icon: sourceLogo }
+            : app
+              ? { icon: { _tag: "native-app", app } as const }
+              : {}),
         } satisfies ToolActivitySource),
     };
   }

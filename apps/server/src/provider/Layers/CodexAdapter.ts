@@ -542,11 +542,6 @@ function computerUseToolTitle(
     normalizedDisplayName(args?.application) ??
     normalizedDisplayName(typeof args?.app === "string" ? args.app : undefined);
   const withApp = (label: string) => (appName ? `${label} in ${appName}` : label);
-  const withDetail = (label: string, value: unknown) => {
-    const detail = boundedToolArgument(value);
-    return `${label}${detail ? ` “${detail}”` : ""}${appName ? ` in ${appName}` : ""}`;
-  };
-
   switch (tool) {
     case "list_apps":
       return inProgress ? "Listing apps" : "Listed apps";
@@ -571,9 +566,9 @@ function computerUseToolTitle(
       return withApp(`${inProgress ? "Scrolling" : "Scrolled"}${direction ? ` ${direction}` : ""}`);
     }
     case "set_value":
-      return withDetail(inProgress ? "Setting to" : "Set to", args?.value);
+      return withApp(inProgress ? "Setting value" : "Set value");
     case "type_text":
-      return withDetail(inProgress ? "Typing text" : "Typed text", args?.text ?? args?.value);
+      return withApp(inProgress ? "Typing text" : "Typed text");
     default:
       return undefined;
   }

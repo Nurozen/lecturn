@@ -970,7 +970,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
           },
           {
             type: "item.completed",
-            title: "Typed text “Hello world” in TextEdit",
+            title: "Typed text in TextEdit",
             toolSurface: "computer",
             toolIcon: {
               _tag: "native-app",

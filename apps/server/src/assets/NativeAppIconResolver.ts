@@ -210,21 +210,17 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const hostPlatform = yield* HostProcessPlatform;
   const resolutionSemaphore = yield* Semaphore.make(2);
-  type ResolutionAttempt = Option.Option<string | null>;
   const resolutionCache: Cache.Cache<
     string,
-    ResolutionAttempt,
+    string | null,
     PlatformError.PlatformError | Cause.TimeoutError
   > = yield* Cache.makeWith(
     (key: string) =>
-      resolutionSemaphore.withPermitsIfAvailable(1)(
-        resolveNativeAppIconUncached(appFromCacheKey(key)),
-      ),
+      resolutionSemaphore.withPermits(1)(resolveNativeAppIconUncached(appFromCacheKey(key))),
     {
       capacity: RESOLUTION_CACHE_MAX_ENTRIES,
       timeToLive: Exit.match({
-        // The semaphore uses None for saturation and wraps a real miss as Some(null).
-        onSuccess: (attempt) => (Option.isNone(attempt) ? Duration.zero : RESOLUTION_CACHE_TTL),
+        onSuccess: () => RESOLUTION_CACHE_TTL,
         onFailure: () => Duration.zero,
       }),
     },
@@ -250,13 +246,12 @@ export const make = Effect.gen(function* () {
     }
 
     const key = appCacheKey(app);
-    const attempt = yield* Cache.get(resolutionCache, key);
-    if (Option.isNone(attempt) || attempt.value === null) return null;
-    if (yield* cachedFileExists(attempt.value)) return attempt.value;
+    const cached = yield* Cache.get(resolutionCache, key);
+    if (cached === null) return null;
+    if (yield* cachedFileExists(cached)) return cached;
 
     yield* Cache.invalidate(resolutionCache, key);
-    const refreshed = yield* Cache.get(resolutionCache, key);
-    return Option.isSome(refreshed) ? refreshed.value : null;
+    return yield* Cache.get(resolutionCache, key);
   });
 
   const resolve: NativeAppIconResolver["Service"]["resolve"] = (app) =>

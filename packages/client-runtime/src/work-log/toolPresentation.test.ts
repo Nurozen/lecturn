@@ -115,6 +115,64 @@ describe("extractToolActivityPresentation", () => {
     ).toEqual({ _tag: "themed-logo", logoUrl: "https://example.com/logo.png" });
   });
 
+  it("honors an explicit surface over conflicting legacy metadata", () => {
+    expect(
+      extractToolActivityPresentation({
+        toolSurface: "browser",
+        data: {
+          item: {
+            result: {
+              _meta: { "codex/toolSurface": { kind: "computerUse" } },
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      toolSurface: "browser",
+      toolSource: { key: "browser-use:browser", name: "Browser", kind: "browser" },
+    });
+  });
+
+  it("recovers source logos from older raw Codex events", () => {
+    expect(
+      extractToolActivityPresentation({
+        data: {
+          item: {
+            appContext: {
+              appName: "Chrome",
+              logoUrl: "https://example.com/chrome.png",
+              logoUrlDark: "https://example.com/chrome-dark.png",
+            },
+            result: {
+              _meta: { "codex/toolSurface": { kind: "browserUse" } },
+            },
+          },
+        },
+      }).toolSource?.icon,
+    ).toEqual({
+      _tag: "themed-logo",
+      logoUrl: "https://example.com/chrome.png",
+      logoUrlDark: "https://example.com/chrome-dark.png",
+    });
+
+    expect(
+      extractToolActivityPresentation({
+        data: {
+          item: {
+            result: {
+              _meta: {
+                "codex/toolSurface": {
+                  kind: "computerUse",
+                  logoUrl: "https://example.com/editor.png",
+                },
+              },
+            },
+          },
+        },
+      }).toolSource?.icon,
+    ).toEqual({ _tag: "themed-logo", logoUrl: "https://example.com/editor.png" });
+  });
+
   it("uses collision-resistant source keys consistently", () => {
     const presentationForApp = (displayName: string) =>
       extractToolActivityPresentation({
