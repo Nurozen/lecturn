@@ -339,7 +339,7 @@ function assertOk(
 }
 
 describe("assembleThreadFork", () => {
-  it("forks at the last completed turn: keeps all completed turns, atEnd, ordinal", () => {
+  it("forks at the last completed turn: keeps all completed turns, ordinal; a trailing running turn defeats atEnd", () => {
     const result = assembleThreadFork(makeInput());
     assertOk(result);
     const { command } = result;
@@ -351,7 +351,8 @@ describe("assembleThreadFork", () => {
     expect(command.createdAt).toBe(t(10));
     expect(command.history.turns.map((turn) => turn.turnId)).toEqual([turn1, turn2, turn3]);
     expect(command.forkSource).not.toBeNull();
-    expect(command.forkSource?.atEnd).toBe(true);
+    // turn-4 is still running behind the fork point, so this is not "at end".
+    expect(command.forkSource?.atEnd).toBe(false);
     expect(command.forkSource?.throughTurnOrdinal).toBe(3);
     expect(command.forkSource?.providerTurnRef).toBe("prov-turn-3");
     expect(command.forkSource?.providerInstanceId).toBe(sourceBinding.providerInstanceId);
@@ -557,13 +558,11 @@ describe("assembleThreadFork", () => {
     const result = assembleThreadFork(
       makeInput({
         throughTurnId: turn2,
-        sourceTurns: sourceTurns
-          .slice(1, 2)
-          .map((turn) => ({
-            ...turn,
-            sourceProposedPlanThreadId: null,
-            sourceProposedPlanId: null,
-          })),
+        sourceTurns: sourceTurns.slice(1, 2).map((turn) => ({
+          ...turn,
+          sourceProposedPlanThreadId: null,
+          sourceProposedPlanId: null,
+        })),
       }),
     );
     assertOk(result);
@@ -603,17 +602,18 @@ describe("assembleThreadFork", () => {
     expect(otherChild.attachmentCopies[0]?.uuid).not.toBe(copy?.uuid);
   });
 
-  it("computes throughTurnOrdinal from assistant-emitting turns and atEnd from completed turns", () => {
+  it("computes throughTurnOrdinal from assistant-emitting turns and atEnd only for the last turn row", () => {
     const midFork = assembleThreadFork(makeInput({ throughTurnId: turn2 }));
     assertOk(midFork);
     expect(midFork.command.forkSource?.throughTurnOrdinal).toBe(2);
     expect(midFork.command.forkSource?.atEnd).toBe(false);
     expect(midFork.command.forkSource?.providerTurnRef).toBeNull();
 
-    // turn-4 is running, so forking through turn-3 is still at end.
+    // turn-4 is running and may already hold native content, so forking
+    // through turn-3 is NOT at end — only the literal last turn row is.
     const endFork = assembleThreadFork(makeInput({ throughTurnId: turn3 }));
     assertOk(endFork);
-    expect(endFork.command.forkSource?.atEnd).toBe(true);
+    expect(endFork.command.forkSource?.atEnd).toBe(false);
 
     // An interrupted turn that still emitted an assistant message occupies a
     // slot in the provider's native assistant-message list, so it advances
@@ -727,7 +727,7 @@ describe("assembleThreadFork", () => {
     // parent's own lineage.
     expect(result.command.forkSource?.providerTurnRef).toBe("prov-turn-3");
     expect(result.command.forkSource?.throughTurnOrdinal).toBe(3);
-    expect(result.command.forkSource?.atEnd).toBe(true);
+    expect(result.command.forkSource?.atEnd).toBe(false);
 
     const cold = assembleThreadFork(makeInput({ sourceBinding: null, sourceForkSource: null }));
     assertOk(cold);
@@ -750,14 +750,26 @@ describe("assembleThreadFork", () => {
     expect(tolerated.command.forkSource?.providerTurnRef).toBeNull();
     expect(tolerated.command.forkSource?.atEnd).toBe(false);
 
-    // Fork at end passes even without an anchor.
-    const anchorlessEnd = assembleThreadFork(
+    // A fork at the literal last turn row passes even without an anchor —
+    // but only when nothing (running or interrupted) trails it.
+    const anchorlessBehindRunning = assembleThreadFork(
       makeInput({
         requiresAnchor: true,
         throughTurnId: turn3,
         sourceTurns: sourceTurns.map((turn) =>
           turn.turnId === turn3 ? { ...turn, providerTurnRef: null } : turn,
         ),
+      }),
+    );
+    expect(anchorlessBehindRunning.ok).toBe(false);
+
+    const anchorlessEnd = assembleThreadFork(
+      makeInput({
+        requiresAnchor: true,
+        throughTurnId: turn3,
+        sourceTurns: sourceTurns
+          .slice(0, 3)
+          .map((turn) => (turn.turnId === turn3 ? { ...turn, providerTurnRef: null } : turn)),
       }),
     );
     assertOk(anchorlessEnd);

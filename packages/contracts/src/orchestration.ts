@@ -465,7 +465,7 @@ export const ThreadForkProviderSource = Schema.Struct({
   // mirroring the provider's native assistant-message list; used as the
   // positional boundary when the anchor is null or unresolvable.
   throughTurnOrdinal: NonNegativeInt,
-  // Source had no completed turn after the fork turn.
+  // The fork turn is the source's last turn row (later rows in any state may hold native session content).
   atEnd: Schema.Boolean,
 });
 export type ThreadForkProviderSource = typeof ThreadForkProviderSource.Type;

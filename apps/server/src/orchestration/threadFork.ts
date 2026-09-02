@@ -195,7 +195,12 @@ export function assembleThreadFork(input: AssembleThreadForkInput): AssembleThre
   // turns can still emit an assistant message, so every kept turn that
   // produced one advances the positional fork boundary.
   const throughTurnOrdinal = keptRows.filter((row) => row.assistantMessageId !== null).length;
-  const atEnd = !input.sourceTurns.slice(forkIndex + 1).some((row) => row.state === "completed");
+  // "At end" means the fork turn is literally the source's last turn row: a
+  // later running, interrupted or errored turn may already have content in
+  // the provider's native session even though it never completed, so a
+  // whole-session fork there would give the agent history the child does not
+  // show.
+  const atEnd = forkIndex === input.sourceTurns.length - 1;
   const anchor = forkTurn.providerTurnRef ?? null;
 
   if (input.requiresAnchor && anchor === null && !atEnd) {
