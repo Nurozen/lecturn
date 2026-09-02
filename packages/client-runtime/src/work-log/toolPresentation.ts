@@ -287,10 +287,10 @@ export function extractToolActivityPresentation(
       "Computer Use";
     return {
       toolSurface: "computer",
-      ...(app
-        ? { toolIcon: { _tag: "native-app", app } }
-        : explicitIcon
-          ? { toolIcon: explicitIcon }
+      ...(explicitIcon
+        ? { toolIcon: explicitIcon }
+        : app
+          ? { toolIcon: { _tag: "native-app", app } }
           : {}),
       toolSource:
         explicitSource ??

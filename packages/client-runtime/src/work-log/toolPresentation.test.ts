@@ -115,6 +115,30 @@ describe("extractToolActivityPresentation", () => {
     ).toEqual({ _tag: "themed-logo", logoUrl: "https://example.com/logo.png" });
   });
 
+  it("prefers an explicit icon over matching raw computer metadata", () => {
+    expect(
+      extractToolActivityPresentation({
+        toolSurface: "computer",
+        toolIcon: {
+          _tag: "themed-logo",
+          logoUrl: "https://example.com/editor.png",
+        },
+        data: {
+          item: {
+            result: {
+              _meta: {
+                "codex/toolSurface": {
+                  kind: "computerUse",
+                  app: { kind: "appId", appId: "com.example.Editor" },
+                },
+              },
+            },
+          },
+        },
+      }).toolIcon,
+    ).toEqual({ _tag: "themed-logo", logoUrl: "https://example.com/editor.png" });
+  });
+
   it("honors an explicit surface over conflicting legacy metadata", () => {
     expect(
       extractToolActivityPresentation({
