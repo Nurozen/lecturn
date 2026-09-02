@@ -44,6 +44,7 @@ describe("resolveNativeAppIcon", () => {
     });
     const dependencies = Layer.mergeAll(
       configLayer,
+      Layer.succeed(HostProcessPlatform, "darwin"),
       Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
     ).pipe(Layer.provideMerge(NodeServices.layer));
     const testLayer = NativeAppIconResolver.layer.pipe(Layer.provide(dependencies));
@@ -69,6 +70,6 @@ describe("resolveNativeAppIcon", () => {
       expect(commands).toHaveLength(257);
       expect(yield* resolver.resolve(app)).toBeNull();
       expect(commands).toHaveLength(258);
-    }).pipe(Effect.provideService(HostProcessPlatform, "darwin"), Effect.provide(testLayer));
+    }).pipe(Effect.provide(testLayer));
   });
 });
