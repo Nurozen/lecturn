@@ -16,18 +16,15 @@ export type AssetUrlState =
 
 /**
  * Folds the asset URL query, the environment connection phase, and the prepared
- * connection into the state a preview renders. A query still pending on an
- * environment that is offline, retrying, or in error is terminal, so previews can
- * offer a retry instead of spinning until the user leaves the screen.
+ * connection into the state a preview renders. The connection phase is checked
+ * before the query outcome because a dead environment fails the query too, and
+ * that failure must read as "disconnected" rather than "file unavailable".
  */
 export function deriveAssetUrlState(input: {
   readonly connectionPhase: EnvironmentConnectionPhase;
   readonly httpBaseUrl: string | null;
   readonly query: AssetUrlQuery;
 }): AssetUrlState {
-  if (input.query._tag === "Failed") {
-    return { _tag: "Failure", reason: "failed" };
-  }
   if (input.query._tag === "Resolved" && input.httpBaseUrl !== null) {
     const url = resolveAssetUrl(input.httpBaseUrl, input.query.relativeUrl);
     return url === null ? { _tag: "Failure", reason: "failed" } : { _tag: "Success", url };
@@ -41,7 +38,10 @@ export function deriveAssetUrlState(input: {
     // still on its way rather than lost.
     case "available":
     case "connecting":
-    case "connected":
       return { _tag: "Loading" };
+    case "connected":
+      return input.query._tag === "Failed"
+        ? { _tag: "Failure", reason: "failed" }
+        : { _tag: "Loading" };
   }
 }
