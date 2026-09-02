@@ -5,6 +5,7 @@ import * as Clock from "effect/Clock";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Semaphore from "effect/Semaphore";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
@@ -15,8 +16,9 @@ const COMMAND_TIMEOUT = "5 seconds";
 const RESOLUTION_CACHE_TTL_MS = 60 * 60 * 1000;
 const resolvedIconPathByApp = new Map<
   string,
-  { readonly path: string; readonly expiresAt: number }
+  { readonly path: string | null; readonly expiresAt: number }
 >();
+const resolutionSemaphore = Semaphore.makeUnsafe(2);
 
 function appCacheKey(cacheDirectory: string, app: ToolActivityNativeAppReference): string {
   const identity = app._tag === "app-id" ? `id:${app.appId}` : `name:${app.displayName}`;
@@ -63,7 +65,7 @@ const plistValue = Effect.fn("NativeAppIconResolver.plistValue")(function* (
 });
 
 function escapeSpotlightString(value: string): string {
-  return value.replace(/\\/gu, "\\\\").replace(/'/gu, "\\'");
+  return value.replace(/([\\'*?])/gu, "\\$1");
 }
 
 function containsControlCharacter(value: string): boolean {
@@ -113,25 +115,12 @@ const resolveApplicationPath = Effect.fn("NativeAppIconResolver.resolveApplicati
   return mostRecentlyUsed?.path ?? null;
 });
 
-/** Resolves and caches a macOS application icon without exposing host paths to clients. */
-export const resolveNativeAppIcon = Effect.fn("NativeAppIconResolver.resolve")(function* (
+const resolveNativeAppIconUncached = Effect.fn("NativeAppIconResolver.resolveUncached")(function* (
   app: ToolActivityNativeAppReference,
 ) {
-  if (
-    (yield* HostProcessPlatform) !== "darwin" ||
-    (app._tag === "display-name" && containsControlCharacter(app.displayName))
-  ) {
-    return null;
-  }
-
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const config = yield* ServerConfig.ServerConfig;
-  const resolvedAppCacheKey = appCacheKey(config.providerStatusCacheDir, app);
-  const now = yield* Clock.currentTimeMillis;
-  const cached = resolvedIconPathByApp.get(resolvedAppCacheKey);
-  if (cached && cached.expiresAt > now && (yield* existingFile(cached.path))) return cached.path;
-
   const appPath = yield* resolveApplicationPath(app);
   if (!appPath) return null;
 
@@ -176,13 +165,7 @@ export const resolveNativeAppIcon = Effect.fn("NativeAppIconResolver.resolve")(f
     .digest("hex");
   const cacheDirectory = path.join(config.providerStatusCacheDir, "native-app-icons");
   const cachePath = path.join(cacheDirectory, `${cacheKey}.png`);
-  if (yield* existingFile(cachePath)) {
-    resolvedIconPathByApp.set(resolvedAppCacheKey, {
-      path: cachePath,
-      expiresAt: now + RESOLUTION_CACHE_TTL_MS,
-    });
-    return cachePath;
-  }
+  if (yield* existingFile(cachePath)) return cachePath;
 
   yield* fileSystem.makeDirectory(cacheDirectory, { recursive: true });
   const temporaryPath = path.join(
@@ -205,12 +188,38 @@ export const resolveNativeAppIcon = Effect.fn("NativeAppIconResolver.resolve")(f
       fileSystem.remove(temporaryPath).pipe(Effect.catchTags({ PlatformError: () => Effect.void })),
     ),
   );
-  const resolvedPath = yield* existingFile(cachePath);
-  if (resolvedPath) {
-    resolvedIconPathByApp.set(resolvedAppCacheKey, {
-      path: resolvedPath,
-      expiresAt: now + RESOLUTION_CACHE_TTL_MS,
-    });
+  return yield* existingFile(cachePath);
+});
+
+/** Resolves and caches a macOS application icon without exposing host paths to clients. */
+export const resolveNativeAppIcon = Effect.fn("NativeAppIconResolver.resolve")(function* (
+  app: ToolActivityNativeAppReference,
+) {
+  if (
+    (yield* HostProcessPlatform) !== "darwin" ||
+    (app._tag === "display-name" && containsControlCharacter(app.displayName))
+  ) {
+    return null;
   }
+
+  const config = yield* ServerConfig.ServerConfig;
+  const resolvedAppCacheKey = appCacheKey(config.providerStatusCacheDir, app);
+  const now = yield* Clock.currentTimeMillis;
+  const cached = resolvedIconPathByApp.get(resolvedAppCacheKey);
+  if (cached && cached.expiresAt > now) {
+    if (cached.path === null) return null;
+    if (yield* existingFile(cached.path)) return cached.path;
+  }
+
+  const availableResolution = yield* resolutionSemaphore.withPermitsIfAvailable(1)(
+    resolveNativeAppIconUncached(app),
+  );
+  if (Option.isNone(availableResolution)) return null;
+
+  const resolvedPath = availableResolution.value;
+  resolvedIconPathByApp.set(resolvedAppCacheKey, {
+    path: resolvedPath,
+    expiresAt: now + RESOLUTION_CACHE_TTL_MS,
+  });
   return resolvedPath;
 });
