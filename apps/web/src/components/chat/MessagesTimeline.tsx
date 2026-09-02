@@ -1338,6 +1338,10 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
   const ctx = use(TimelineRowCtx);
   const activity = use(TimelineRowActivityCtx);
+  // A native disabled attribute would swallow the pointer events, hiding the
+  // tooltip that explains why reverting is blocked.
+  const revertBlocked =
+    ctx.revertDisabledReason !== null || activity.isRevertingCheckpoint || activity.isWorking;
 
   return (
     <Tooltip>
@@ -1347,12 +1351,13 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
             type="button"
             size="xs"
             variant="ghost"
-            disabled={
-              ctx.revertDisabledReason !== null ||
-              activity.isRevertingCheckpoint ||
-              activity.isWorking
-            }
-            onClick={() => ctx.onRevertUserMessage(messageId)}
+            aria-disabled={revertBlocked}
+            className={revertBlocked ? "opacity-50" : undefined}
+            onClick={() => {
+              if (!revertBlocked) {
+                ctx.onRevertUserMessage(messageId);
+              }
+            }}
             aria-label="Revert to this message"
           />
         }
@@ -1378,7 +1383,7 @@ function ForkFromMessageButton({ messageId }: { messageId: MessageId }) {
             type="button"
             size="xs"
             variant="ghost"
-            disabled={activity.isRevertingCheckpoint || activity.isWorking}
+            disabled={activity.isRevertingCheckpoint}
             onClick={() => ctx.onForkFromMessage(messageId)}
             aria-label="Fork from here"
           />

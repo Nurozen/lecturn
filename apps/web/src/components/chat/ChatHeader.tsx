@@ -25,6 +25,7 @@ import {
 import GitActionsControl from "../GitActionsControl";
 import { isTrailingDoubleClick } from "../Sidebar.logic";
 import { type DraftId } from "~/composerDraftStore";
+import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import ProjectScriptsControl, {
@@ -406,11 +407,13 @@ export const ChatHeader = memo(function ChatHeader({
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <button
+                  <Button
                     type="button"
+                    size="micro"
+                    variant="ghost"
                     aria-label={forkChipLabel}
                     onClick={openParentThread}
-                    className="ml-2 inline-flex max-w-48 shrink-0 cursor-pointer items-center gap-1 rounded-full border border-border/70 px-1.5 py-px text-xs font-normal text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                    className="ml-2 max-w-48 shrink-0 gap-1 rounded-full border border-border/70 font-normal text-muted-foreground"
                   />
                 }
               >
