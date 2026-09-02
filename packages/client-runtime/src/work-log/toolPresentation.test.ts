@@ -133,6 +133,33 @@ describe("extractToolActivityPresentation", () => {
     });
   });
 
+  it("uses matching legacy metadata to enrich an explicit surface", () => {
+    expect(
+      extractToolActivityPresentation({
+        toolSurface: "browser",
+        data: {
+          item: {
+            result: {
+              _meta: {
+                "codex/toolSurface": {
+                  kind: "browserUse",
+                  screenshot: {
+                    pageUrl: "https://example.com/docs",
+                    faviconUrl: "https://example.com/favicon.png",
+                  },
+                },
+              },
+            },
+          },
+        },
+      }).toolIcon,
+    ).toEqual({
+      _tag: "website",
+      pageUrl: "https://example.com/docs",
+      faviconUrl: "https://example.com/favicon.png",
+    });
+  });
+
   it("recovers source logos from older raw Codex events", () => {
     expect(
       extractToolActivityPresentation({

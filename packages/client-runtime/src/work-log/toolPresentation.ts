@@ -210,7 +210,13 @@ export function extractToolActivityPresentation(
 
   const item = asRecord(asRecord(payload?.data)?.item);
   const metadata = asRecord(asRecord(item?.result)?._meta);
-  const surface = explicitSurface ? undefined : asRecord(metadata?.["codex/toolSurface"]);
+  const rawSurface = asRecord(metadata?.["codex/toolSurface"]);
+  const surface =
+    explicitSurface === undefined ||
+    (explicitSurface === "browser" && rawSurface?.kind === "browserUse") ||
+    (explicitSurface === "computer" && rawSurface?.kind === "computerUse")
+      ? rawSurface
+      : undefined;
   const sourceLogo = themedLogoIcon(
     surface,
     asRecord(metadata?.source),
