@@ -634,7 +634,12 @@ describe("isSourceRunning for Firefox", () => {
         const fileSystem = yield* FileSystem.FileSystem;
         const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-firefox-" });
         const context = yield* sourcePathContext.pipe(
-          Effect.provideService(HostProcessEnvironment, { HOME: home }),
+          // Firefox's win32 root hangs off %APPDATA%; without it the root is
+          // undefined and the fixture would escape the sandbox into the repo.
+          Effect.provideService(HostProcessEnvironment, {
+            HOME: home,
+            APPDATA: `${home}/AppData/Roaming`,
+          }),
           Effect.provideService(HostProcessPlatform, "win32"),
         );
         const root = firefox.userDataDirectory(context)!;
