@@ -53,6 +53,18 @@ describe("deriveAssetUrlState", () => {
     }
   });
 
+  it("does not hand out a resolved URL for a disconnected environment", () => {
+    for (const connectionPhase of ["offline", "reconnecting", "error"] as const) {
+      expect(
+        deriveAssetUrlState({
+          connectionPhase,
+          httpBaseUrl: BASE_URL,
+          query: { _tag: "Resolved", relativeUrl: "/api/assets/abc" },
+        }),
+      ).toEqual({ _tag: "Failure", reason: "disconnected" });
+    }
+  });
+
   it("reports a failed query on a connected environment", () => {
     expect(
       deriveAssetUrlState({

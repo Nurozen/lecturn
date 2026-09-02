@@ -25,15 +25,20 @@ export function deriveAssetUrlState(input: {
   readonly httpBaseUrl: string | null;
   readonly query: AssetUrlQuery;
 }): AssetUrlState {
+  // A dead environment wins over everything else. Even a resolved URL is
+  // unreachable there, and a failed query is caused by the outage, not the file.
+  if (
+    input.connectionPhase === "offline" ||
+    input.connectionPhase === "reconnecting" ||
+    input.connectionPhase === "error"
+  ) {
+    return { _tag: "Failure", reason: "disconnected" };
+  }
   if (input.query._tag === "Resolved" && input.httpBaseUrl !== null) {
     const url = resolveAssetUrl(input.httpBaseUrl, input.query.relativeUrl);
     return url === null ? { _tag: "Failure", reason: "failed" } : { _tag: "Success", url };
   }
   switch (input.connectionPhase) {
-    case "offline":
-    case "reconnecting":
-    case "error":
-      return { _tag: "Failure", reason: "disconnected" };
     // "available" is the idle, not yet dialled state. A pending query there is
     // still on its way, but the query atom fails at once while idle, so a
     // failure means the environment is not connected rather than the file is
