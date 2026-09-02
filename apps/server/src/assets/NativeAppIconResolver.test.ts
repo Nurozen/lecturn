@@ -55,6 +55,18 @@ describe("resolveNativeAppIcon", () => {
       expect(commands).toHaveLength(1);
       expect(commands[0]).toMatchObject({ command: "/usr/bin/mdfind" });
       expect(commands[0]?.args[0]).toContain("Review \\* App");
+
+      for (let index = 0; index < 256; index += 1) {
+        expect(
+          yield* resolveNativeAppIcon({
+            _tag: "display-name",
+            displayName: `Missing Review App ${index}`,
+          }),
+        ).toBeNull();
+      }
+      expect(commands).toHaveLength(257);
+      expect(yield* resolveNativeAppIcon(app)).toBeNull();
+      expect(commands).toHaveLength(258);
     }).pipe(Effect.provideService(HostProcessPlatform, "darwin"), Effect.provide(testLayer));
   });
 });

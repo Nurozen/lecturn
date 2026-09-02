@@ -14,6 +14,7 @@ import * as ServerConfig from "../config.ts";
 const ICON_SIZE = 64;
 const COMMAND_TIMEOUT = "5 seconds";
 const RESOLUTION_CACHE_TTL_MS = 60 * 60 * 1000;
+const RESOLUTION_CACHE_MAX_ENTRIES = 256;
 const resolvedIconPathByApp = new Map<
   string,
   { readonly path: string | null; readonly expiresAt: number }
@@ -23,6 +24,19 @@ const resolutionSemaphore = Semaphore.makeUnsafe(2);
 function appCacheKey(cacheDirectory: string, app: ToolActivityNativeAppReference): string {
   const identity = app._tag === "app-id" ? `id:${app.appId}` : `name:${app.displayName}`;
   return `${cacheDirectory}\0${identity.toLowerCase()}`;
+}
+
+function cacheResolution(key: string, path: string | null, now: number): void {
+  for (const [cachedKey, cached] of resolvedIconPathByApp) {
+    if (cached.expiresAt <= now) resolvedIconPathByApp.delete(cachedKey);
+  }
+  resolvedIconPathByApp.delete(key);
+  while (resolvedIconPathByApp.size >= RESOLUTION_CACHE_MAX_ENTRIES) {
+    const oldestKey = resolvedIconPathByApp.keys().next().value;
+    if (oldestKey === undefined) break;
+    resolvedIconPathByApp.delete(oldestKey);
+  }
+  resolvedIconPathByApp.set(key, { path, expiresAt: now + RESOLUTION_CACHE_TTL_MS });
 }
 
 const existingFile = Effect.fn("NativeAppIconResolver.existingFile")(function* (filePath: string) {
@@ -170,7 +184,7 @@ const resolveNativeAppIconUncached = Effect.fn("NativeAppIconResolver.resolveUnc
   yield* fileSystem.makeDirectory(cacheDirectory, { recursive: true });
   const temporaryPath = path.join(
     cacheDirectory,
-    `.${cacheKey}-${process.pid}-${(yield* Clock.currentTimeMillis).toString(36)}.png`,
+    `.${cacheKey}-${process.pid}-${(yield* Clock.currentTimeMillis).toString(36)}-${NodeCrypto.randomUUID()}.png`,
   );
   yield* commandOutput("/usr/bin/sips", [
     "-z",
@@ -210,6 +224,7 @@ export const resolveNativeAppIcon = Effect.fn("NativeAppIconResolver.resolve")(f
     if (cached.path === null) return null;
     if (yield* existingFile(cached.path)) return cached.path;
   }
+  if (cached) resolvedIconPathByApp.delete(resolvedAppCacheKey);
 
   const availableResolution = yield* resolutionSemaphore.withPermitsIfAvailable(1)(
     resolveNativeAppIconUncached(app),
@@ -217,9 +232,6 @@ export const resolveNativeAppIcon = Effect.fn("NativeAppIconResolver.resolve")(f
   if (Option.isNone(availableResolution)) return null;
 
   const resolvedPath = availableResolution.value;
-  resolvedIconPathByApp.set(resolvedAppCacheKey, {
-    path: resolvedPath,
-    expiresAt: now + RESOLUTION_CACHE_TTL_MS,
-  });
+  cacheResolution(resolvedAppCacheKey, resolvedPath, now);
   return resolvedPath;
 });

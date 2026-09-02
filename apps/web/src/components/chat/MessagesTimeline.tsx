@@ -2271,6 +2271,8 @@ function NativeAppToolActivityIcon({
   );
 }
 
+const loadedToolActivityIconSrcs = new Set<string>();
+
 function ToolActivityImageIcon({
   src,
   fallbackName,
@@ -2280,7 +2282,9 @@ function ToolActivityImageIcon({
   fallbackName: WorkEntryIconName;
   className: string;
 }) {
-  const [status, setStatus] = useState<"loading" | "loaded" | "failed">("loading");
+  const [status, setStatus] = useState<"loading" | "loaded" | "failed">(() =>
+    loadedToolActivityIconSrcs.has(src) ? "loaded" : "loading",
+  );
   return (
     <>
       {status !== "loaded" ? <WorkEntryIconSvg name={fallbackName} className={className} /> : null}
@@ -2297,9 +2301,11 @@ function ToolActivityImageIcon({
             status !== "loaded" && "hidden",
           )}
           onLoad={() => {
+            loadedToolActivityIconSrcs.add(src);
             setStatus("loaded");
           }}
           onError={() => {
+            loadedToolActivityIconSrcs.delete(src);
             setStatus("failed");
           }}
         />
