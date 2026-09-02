@@ -31,6 +31,15 @@ export const TIMELINE_MINIMAP_MAX_HEIGHT_CSS = "calc(100vh - 18rem)";
 export const TIMELINE_CONTENT_MAX_WIDTH = 768;
 export const TIMELINE_MINIMAP_PERSISTENT_GUTTER = 48;
 
+/**
+ * Rows that preview an image the agent viewed or produced. They stay out of
+ * tool groups and out of the settled-turn fold: the image is the answer the
+ * user asked for, not tool noise to hide behind "Worked for ...".
+ */
+function workEntryRendersImagePreview(entry: WorkLogEntry): boolean {
+  return workEntryViewedImagePath(entry) !== null;
+}
+
 export function workEntryIsVisibleInGroup(
   entry: WorkLogEntry,
   expandedToolGroupEntry = false,
@@ -39,17 +48,11 @@ export function workEntryIsVisibleInGroup(
     (expandedToolGroupEntry &&
       (entry.toolLifecycleStatus === "inProgress" ||
         entry.sourceActivityKind === "task.progress")) ||
+    // An image row stands alone outside any group, so the neutral filter
+    // would leave an empty gap while its tool is still in progress.
+    workEntryRendersImagePreview(entry) ||
     !workEntryIndicatesToolNeutralStatus(entry)
   );
-}
-
-/**
- * Rows that preview an image the agent viewed or produced. They stay out of
- * tool groups and out of the settled-turn fold: the image is the answer the
- * user asked for, not tool noise to hide behind "Worked for ...".
- */
-function workEntryRendersImagePreview(entry: WorkLogEntry): boolean {
-  return workEntryViewedImagePath(entry) !== null;
 }
 
 export interface TimelineEndState {
