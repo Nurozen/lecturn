@@ -801,6 +801,19 @@ describe("buildThreadFeed", () => {
             title: "Call repository tool",
             itemType: "mcp_tool_call",
             toolSurface: "computer",
+            toolIcon: {
+              _tag: "native-app",
+              app: { _tag: "app-id", appId: "com.example.Editor" },
+            },
+            toolSource: {
+              key: "native-app:com.example.editor",
+              name: "Computer Use",
+              kind: "computer",
+              icon: {
+                _tag: "native-app",
+                app: { _tag: "app-id", appId: "com.example.Editor" },
+              },
+            },
             detail: "repository.search",
             status: "completed",
             data: {
@@ -808,14 +821,6 @@ describe("buildThreadFeed", () => {
                 server: "repository",
                 tool: "search",
                 arguments: { query: "work log" },
-                result: {
-                  _meta: {
-                    "codex/toolSurface": {
-                      kind: "computerUse",
-                      app: { kind: "appId", appId: "com.example.Editor" },
-                    },
-                  },
-                },
               },
             },
           },

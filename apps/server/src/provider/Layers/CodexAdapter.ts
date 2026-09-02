@@ -260,24 +260,6 @@ function nativeAppReference(value: unknown): ToolActivityNativeAppReference | un
   return undefined;
 }
 
-function invocationNativeAppReference(
-  args: Record<string, unknown> | undefined,
-): ToolActivityNativeAppReference | undefined {
-  const explicit =
-    nativeAppReference(args?.app) ??
-    nativeAppReference({ kind: "appId", appId: args?.appId }) ??
-    nativeAppReference({ kind: "displayName", displayName: args?.appName ?? args?.application });
-  if (explicit) return explicit;
-  if (typeof args?.app === "string") {
-    const displayName = normalizedDisplayName(args.app);
-    if (displayName) return { _tag: "display-name", displayName };
-  }
-  const code = typeof args?.code === "string" ? args.code : "";
-  const codeApp = /\bapp\s*:\s*["'](?<name>[^"'\r\n]{1,160})["']/u.exec(code)?.groups?.name;
-  const displayName = normalizedDisplayName(codeApp);
-  return displayName ? { _tag: "display-name", displayName } : undefined;
-}
-
 function themedLogoIcon(
   ...records: ReadonlyArray<Record<string, unknown> | undefined>
 ): ToolActivityIcon | undefined {
@@ -392,38 +374,6 @@ function mcpToolPresentation(
     };
   }
 
-  const args = asUnknownRecord(item.arguments);
-  const code = typeof args?.code === "string" ? args.code : "";
-  if (
-    /\b(?:setupBrowserRuntime|agent\.browsers|browser\.tabs|(?:tab|chrome|edge|iab)\.)/u.test(code)
-  ) {
-    return {
-      toolSurface: "browser",
-      toolSource: { key: "browser-use:browser", name: "Browser", kind: "browser" },
-    };
-  }
-  if (/(?:@oai\/sky|\bsky\.)/u.test(code)) {
-    const app = invocationNativeAppReference(args);
-    const name =
-      (app?._tag === "display-name" ? app.displayName : undefined) ??
-      (app?._tag === "app-id" ? appDisplayNameFromId(app.appId) : undefined) ??
-      "Computer Use";
-    return {
-      toolSurface: "computer",
-      ...(app ? { toolIcon: { _tag: "native-app", app } as const } : {}),
-      toolSource: app
-        ? {
-            key:
-              app._tag === "app-id"
-                ? nativeAppSourceKey(app.appId)
-                : `native-app-name:${normalizedSourceKeyPart(app.displayName)}`,
-            name,
-            kind: "computer",
-            icon: { _tag: "native-app", app },
-          }
-        : { key: "computer-use", name: "Computer Use", kind: "computer" },
-    };
-  }
   return {};
 }
 

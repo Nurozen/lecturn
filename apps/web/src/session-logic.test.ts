@@ -1230,15 +1230,7 @@ describe("deriveWorkLogEntries", () => {
       tool: "preview_status",
       arguments: {},
       status: "completed",
-      result: {
-        _meta: {
-          "codex/toolSurface": {
-            kind: "browserUse",
-            screenshot: { pageUrl: "https://example.com/checkout" },
-          },
-        },
-        content: [{ type: "text", text: "attached" }],
-      },
+      result: { content: [{ type: "text", text: "attached" }] },
     };
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -1249,6 +1241,12 @@ describe("deriveWorkLogEntries", () => {
           itemType: "mcp_tool_call",
           title: "t3-code · preview_status",
           toolSurface: "browser",
+          toolIcon: { _tag: "website", pageUrl: "https://example.com/checkout" },
+          toolSource: {
+            key: "browser-use:browser",
+            name: "Browser",
+            kind: "browser",
+          },
           data: { item },
         },
       }),
