@@ -206,10 +206,13 @@ export function assembleThreadFork(input: AssembleThreadForkInput): AssembleThre
   // time bounds them: a user message queued after the fork point stays with
   // the source, while genuinely pre-first-turn rows (which predate every
   // turn) ride along.
-  const forkCompletedAt = forkTurn.completedAt;
+  // Compared as epoch milliseconds, not strings: canonical timestamps are
+  // UTC ISO strings, but a numeric compare stays correct even if an offset
+  // form ever reaches a persisted row.
+  const forkCompletedAtMs = forkTurn.completedAt === null ? null : Date.parse(forkTurn.completedAt);
   const keepsRow = (turnId: TurnId | null, createdAt: IsoDateTime) =>
     turnId === null
-      ? forkCompletedAt === null || createdAt <= forkCompletedAt
+      ? forkCompletedAtMs === null || Date.parse(createdAt) <= forkCompletedAtMs
       : keptTurnIds.has(turnId);
 
   const attachmentCopies: Array<ThreadForkAttachmentCopy> = [];
