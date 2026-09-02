@@ -808,6 +808,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 3)).pipe(
         Effect.forkChild,
       );
+      const longIntentTitle = `  ${"a".repeat(39)}   ${"a".repeat(38)}😀bc  `;
 
       yield* runtime.emit({
         id: asEventId("evt-computer-start"),
@@ -829,7 +830,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
             tool: "js",
             arguments: {
               code: 'await sky.click({ app: "Finder", x: 10, y: 20 })',
-              title: "  Open   the Finder menu  ",
+              title: longIntentTitle,
             },
             durationMs: null,
             error: null,
@@ -932,7 +933,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         [
           {
             type: "item.started",
-            title: "Open the Finder menu",
+            title: `${"a".repeat(39)} ${"a".repeat(38)}😀…`,
             toolSurface: "computer",
             toolIcon: {
               _tag: "native-app",
@@ -994,6 +995,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
   it.effect("preserves failed and declined outcomes on completed tool items", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();
+      const maxLengthAppId = `com.${"a".repeat(508)}`;
       const items = [
         {
           type: "commandExecution",
@@ -1011,6 +1013,24 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
           tool: "build",
           arguments: {},
           error: { message: "Build failed" },
+          status: "failed",
+        },
+        {
+          type: "mcpToolCall",
+          id: "failed-computer",
+          server: "computer-use",
+          tool: "click",
+          arguments: { app: "Finder" },
+          error: { message: "Click failed" },
+          result: {
+            _meta: {
+              "codex/toolSurface": {
+                kind: "computerUse",
+                app: { kind: "appId", appId: maxLengthAppId },
+              },
+            },
+            content: [],
+          },
           status: "failed",
         },
         {
@@ -1047,6 +1067,10 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
           return;
         }
         NodeAssert.equal(firstEvent.value.payload.status, item.status);
+        if (item.id === "failed-computer") {
+          NodeAssert.equal(firstEvent.value.payload.title, "computer-use · click");
+          NodeAssert.equal(firstEvent.value.payload.toolSource?.key.length, 512);
+        }
       }
     }),
   );

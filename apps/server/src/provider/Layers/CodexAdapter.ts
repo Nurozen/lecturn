@@ -161,7 +161,8 @@ function normalizeMcpIntentTitle(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.trim().replace(/\s+/gu, " ");
   if (!normalized) return undefined;
-  return normalized.length <= 80 ? normalized : `${normalized.slice(0, 79)}…`;
+  const characters = Array.from(normalized);
+  return characters.length <= 80 ? normalized : `${characters.slice(0, 79).join("")}…`;
 }
 
 function normalizedHttpUrl(value: unknown): string | undefined {
@@ -202,6 +203,10 @@ function normalizedDisplayName(value: unknown): string | undefined {
 
 function normalizedSourceKeyPart(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function nativeAppSourceKey(appId: string): string {
+  return `native-app:${appId.toLowerCase()}`.slice(0, 512);
 }
 
 function browserDisplayName(value: unknown): string | undefined {
@@ -372,7 +377,7 @@ function mcpToolPresentation(
     const sourceIcon = sourceLogo ?? (app ? ({ _tag: "native-app", app } as const) : undefined);
     const sourceKey = app
       ? app._tag === "app-id"
-        ? `native-app:${app.appId.toLowerCase()}`
+        ? nativeAppSourceKey(app.appId)
         : `native-app-name:${normalizedSourceKeyPart(app.displayName)}`
       : "computer-use";
     return {
@@ -410,7 +415,7 @@ function mcpToolPresentation(
         ? {
             key:
               app._tag === "app-id"
-                ? `native-app:${app.appId.toLowerCase()}`
+                ? nativeAppSourceKey(app.appId)
                 : `native-app-name:${normalizedSourceKeyPart(app.displayName)}`,
             name,
             kind: "computer",
@@ -531,6 +536,7 @@ function computerUseToolTitle(
   presentation: McpToolPresentation,
 ): string | undefined {
   if (normalizeItemType(item.server) !== "computer use") return undefined;
+  if (item.status === "failed") return undefined;
   const tool = normalizeItemType(normalizedMcpToolName(item.tool)).replace(/ /gu, "_");
   const inProgress = item.status === "inProgress";
   const args = asUnknownRecord(item.arguments);

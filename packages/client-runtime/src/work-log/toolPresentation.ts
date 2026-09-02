@@ -107,6 +107,10 @@ function sourceKeyPart(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function nativeAppSourceKey(appId: string): string {
+  return `native-app:${appId.toLowerCase()}`.slice(0, 512);
+}
+
 function invocationNativeAppReference(
   args: Record<string, unknown> | undefined,
 ): ToolActivityNativeAppReference | undefined {
@@ -297,7 +301,7 @@ export function extractToolActivityPresentation(
         ({
           key:
             app?._tag === "app-id"
-              ? `native-app:${app.appId.toLowerCase()}`
+              ? nativeAppSourceKey(app.appId)
               : app?._tag === "display-name"
                 ? `native-app-name:${app.displayName.toLowerCase()}`
                 : "computer-use",
@@ -327,7 +331,7 @@ export function extractToolActivityPresentation(
       toolSource: {
         key:
           app?._tag === "app-id"
-            ? `native-app:${app.appId.toLowerCase()}`
+            ? nativeAppSourceKey(app.appId)
             : app?._tag === "display-name"
               ? `native-app-name:${sourceKeyPart(app.displayName)}`
               : "computer-use",
@@ -342,6 +346,50 @@ export function extractToolActivityPresentation(
       toolSurface: "browser",
       ...(explicitIcon ? { toolIcon: explicitIcon } : {}),
       toolSource: { key: "browser-use:browser", name: "Browser", kind: "browser" },
+    };
+  }
+
+  const args = asRecord(item?.arguments);
+  const code = typeof args?.code === "string" ? args.code : "";
+  if (
+    /\b(?:setupBrowserRuntime|agent\.browsers|browser\.tabs|(?:tab|chrome|edge|iab)\.)/u.test(code)
+  ) {
+    return {
+      toolSurface: "browser",
+      ...(explicitIcon ? { toolIcon: explicitIcon } : {}),
+      toolSource: explicitSource ?? {
+        key: "browser-use:browser",
+        name: "Browser",
+        kind: "browser",
+      },
+    };
+  }
+  if (/(?:@oai\/sky|\bsky\.)/u.test(code)) {
+    const app = invocationNativeAppReference(args);
+    const name =
+      (app?._tag === "display-name" ? app.displayName : undefined) ??
+      (app?._tag === "app-id" ? knownAppName(app.appId) : undefined) ??
+      "Computer Use";
+    return {
+      toolSurface: "computer",
+      ...(explicitIcon
+        ? { toolIcon: explicitIcon }
+        : app
+          ? { toolIcon: { _tag: "native-app", app } }
+          : {}),
+      toolSource:
+        explicitSource ??
+        (app
+          ? {
+              key:
+                app._tag === "app-id"
+                  ? nativeAppSourceKey(app.appId)
+                  : `native-app-name:${sourceKeyPart(app.displayName)}`,
+              name,
+              kind: "computer",
+              icon: { _tag: "native-app", app },
+            }
+          : { key: "computer-use", name: "Computer Use", kind: "computer" }),
     };
   }
   return {

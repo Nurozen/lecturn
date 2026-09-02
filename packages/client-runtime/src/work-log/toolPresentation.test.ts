@@ -224,6 +224,46 @@ describe("extractToolActivityPresentation", () => {
     ).toEqual({ _tag: "themed-logo", logoUrl: "https://example.com/editor.png" });
   });
 
+  it("recovers browser and computer identity from older raw Codex code", () => {
+    expect(
+      extractToolActivityPresentation({
+        data: {
+          item: {
+            arguments: { code: "const browser = await setupBrowserRuntime();" },
+          },
+        },
+      }),
+    ).toEqual({
+      toolSurface: "browser",
+      toolSource: { key: "browser-use:browser", name: "Browser", kind: "browser" },
+    });
+
+    expect(
+      extractToolActivityPresentation({
+        data: {
+          item: {
+            arguments: { code: 'await sky.click({ app: "Finder" })' },
+          },
+        },
+      }),
+    ).toEqual({
+      toolSurface: "computer",
+      toolIcon: {
+        _tag: "native-app",
+        app: { _tag: "display-name", displayName: "Finder" },
+      },
+      toolSource: {
+        key: "native-app-name:finder",
+        name: "Finder",
+        kind: "computer",
+        icon: {
+          _tag: "native-app",
+          app: { _tag: "display-name", displayName: "Finder" },
+        },
+      },
+    });
+  });
+
   it("uses collision-resistant source keys consistently", () => {
     const presentationForApp = (displayName: string) =>
       extractToolActivityPresentation({
@@ -249,5 +289,23 @@ describe("extractToolActivityPresentation", () => {
         data: { item: { arguments: { app: "Foo Bar" } } },
       }).toolSource?.key,
     ).toBe("native-app-name:foo bar");
+
+    const maxLengthAppId = `com.${"a".repeat(508)}`;
+    expect(
+      extractToolActivityPresentation({
+        data: {
+          item: {
+            result: {
+              _meta: {
+                "codex/toolSurface": {
+                  kind: "computerUse",
+                  app: { kind: "appId", appId: maxLengthAppId },
+                },
+              },
+            },
+          },
+        },
+      }).toolSource?.key,
+    ).toHaveLength(512);
   });
 });
