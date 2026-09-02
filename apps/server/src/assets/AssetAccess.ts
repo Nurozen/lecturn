@@ -42,7 +42,7 @@ import { parseAttachmentFileExtension, resolveAttachmentPathById } from "../atta
 import * as ServerConfig from "../config.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
-import { resolveNativeAppIcon } from "./NativeAppIconResolver.ts";
+import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
 
 export const ASSET_ROUTE_PREFIX = "/api/assets";
 
@@ -542,7 +542,8 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
   }
 
   if (claims.kind === "native-app-icon") {
-    const iconPath = yield* resolveNativeAppIcon(claims.app).pipe(
+    const nativeAppIconResolver = yield* NativeAppIconResolver.NativeAppIconResolver;
+    const iconPath = yield* nativeAppIconResolver.resolve(claims.app).pipe(
       Effect.tapError((cause) =>
         Effect.logDebug("Failed to resolve native application icon.", {
           app: claims.app,

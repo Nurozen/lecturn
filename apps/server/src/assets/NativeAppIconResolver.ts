@@ -1,8 +1,13 @@
 import * as NodeCrypto from "node:crypto";
 import type { ToolActivityNativeAppReference } from "@t3tools/contracts";
+import * as Cache from "effect/Cache";
 import * as Effect from "effect/Effect";
 import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Semaphore from "effect/Semaphore";
@@ -13,30 +18,15 @@ import * as ServerConfig from "../config.ts";
 
 const ICON_SIZE = 64;
 const COMMAND_TIMEOUT = "5 seconds";
-const RESOLUTION_CACHE_TTL_MS = 60 * 60 * 1000;
+const RESOLUTION_CACHE_TTL = Duration.hours(1);
 const RESOLUTION_CACHE_MAX_ENTRIES = 256;
-const resolvedIconPathByApp = new Map<
-  string,
-  { readonly path: string | null; readonly expiresAt: number }
->();
-const resolutionSemaphore = Semaphore.makeUnsafe(2);
 
-function appCacheKey(cacheDirectory: string, app: ToolActivityNativeAppReference): string {
-  const identity = app._tag === "app-id" ? `id:${app.appId}` : `name:${app.displayName}`;
-  return `${cacheDirectory}\0${identity.toLowerCase()}`;
+function appCacheKey(app: ToolActivityNativeAppReference): string {
+  return JSON.stringify(app);
 }
 
-function cacheResolution(key: string, path: string | null, now: number): void {
-  for (const [cachedKey, cached] of resolvedIconPathByApp) {
-    if (cached.expiresAt <= now) resolvedIconPathByApp.delete(cachedKey);
-  }
-  resolvedIconPathByApp.delete(key);
-  while (resolvedIconPathByApp.size >= RESOLUTION_CACHE_MAX_ENTRIES) {
-    const oldestKey = resolvedIconPathByApp.keys().next().value;
-    if (oldestKey === undefined) break;
-    resolvedIconPathByApp.delete(oldestKey);
-  }
-  resolvedIconPathByApp.set(key, { path, expiresAt: now + RESOLUTION_CACHE_TTL_MS });
+function appFromCacheKey(key: string): ToolActivityNativeAppReference {
+  return JSON.parse(key) as ToolActivityNativeAppReference;
 }
 
 const existingFile = Effect.fn("NativeAppIconResolver.existingFile")(function* (filePath: string) {
@@ -205,33 +195,63 @@ const resolveNativeAppIconUncached = Effect.fn("NativeAppIconResolver.resolveUnc
   return yield* existingFile(cachePath);
 });
 
-/** Resolves and caches a macOS application icon without exposing host paths to clients. */
-export const resolveNativeAppIcon = Effect.fn("NativeAppIconResolver.resolve")(function* (
-  app: ToolActivityNativeAppReference,
-) {
-  if (
-    (yield* HostProcessPlatform) !== "darwin" ||
-    (app._tag === "display-name" && containsControlCharacter(app.displayName))
-  ) {
-    return null;
-  }
-
-  const config = yield* ServerConfig.ServerConfig;
-  const resolvedAppCacheKey = appCacheKey(config.providerStatusCacheDir, app);
-  const now = yield* Clock.currentTimeMillis;
-  const cached = resolvedIconPathByApp.get(resolvedAppCacheKey);
-  if (cached && cached.expiresAt > now) {
-    if (cached.path === null) return null;
-    if (yield* existingFile(cached.path)) return cached.path;
-  }
-  if (cached) resolvedIconPathByApp.delete(resolvedAppCacheKey);
-
-  const availableResolution = yield* resolutionSemaphore.withPermitsIfAvailable(1)(
-    resolveNativeAppIconUncached(app),
+export const make = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const hostPlatform = yield* HostProcessPlatform;
+  const resolutionSemaphore = yield* Semaphore.make(2);
+  const resolutionCache = yield* Cache.makeWith(
+    (key: string) =>
+      resolutionSemaphore.withPermitsIfAvailable(1)(
+        resolveNativeAppIconUncached(appFromCacheKey(key)),
+      ),
+    {
+      capacity: RESOLUTION_CACHE_MAX_ENTRIES,
+      timeToLive: Exit.match({
+        onSuccess: Option.match({
+          onNone: () => Duration.zero,
+          onSome: () => RESOLUTION_CACHE_TTL,
+        }),
+        onFailure: () => Duration.zero,
+      }),
+    },
   );
-  if (Option.isNone(availableResolution)) return null;
 
-  const resolvedPath = availableResolution.value;
-  cacheResolution(resolvedAppCacheKey, resolvedPath, now);
-  return resolvedPath;
+  const cachedFileExists = (filePath: string) =>
+    fileSystem.stat(filePath).pipe(
+      Effect.map((info) => info.type === "File"),
+      Effect.catchTags({
+        PlatformError: (error) =>
+          error.reason._tag === "NotFound" ? Effect.succeed(false) : Effect.fail(error),
+      }),
+    );
+
+  const resolve = Effect.fn("NativeAppIconResolver.resolve")(function* (
+    app: ToolActivityNativeAppReference,
+  ) {
+    if (
+      hostPlatform !== "darwin" ||
+      (app._tag === "display-name" && containsControlCharacter(app.displayName))
+    ) {
+      return null;
+    }
+
+    const key = appCacheKey(app);
+    const cached = yield* Cache.get(resolutionCache, key);
+    if (Option.isNone(cached) || cached.value === null) return null;
+    if (yield* cachedFileExists(cached.value)) return cached.value;
+
+    yield* Cache.invalidate(resolutionCache, key);
+    const refreshed = yield* Cache.get(resolutionCache, key);
+    return Option.isSome(refreshed) ? refreshed.value : null;
+  });
+
+  return { resolve };
 });
+
+/** Resolves and caches macOS application icons without exposing host paths to clients. */
+export class NativeAppIconResolver extends Context.Service<
+  NativeAppIconResolver,
+  Effect.Success<typeof make>
+>()("t3/assets/NativeAppIconResolver") {}
+
+export const layer = Layer.effect(NativeAppIconResolver, make);

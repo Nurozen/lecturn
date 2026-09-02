@@ -8,7 +8,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 import * as ServerConfig from "../config.ts";
-import { resolveNativeAppIcon } from "./NativeAppIconResolver.ts";
+import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
 
 function emptyProcessHandle() {
   return ChildProcessSpawner.makeHandle({
@@ -42,15 +42,17 @@ describe("resolveNativeAppIcon", () => {
     const configLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
       prefix: "t3-native-app-icon-test-",
     });
-    const testLayer = Layer.mergeAll(
+    const dependencies = Layer.mergeAll(
       configLayer,
       Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
     ).pipe(Layer.provideMerge(NodeServices.layer));
+    const testLayer = NativeAppIconResolver.layer.pipe(Layer.provide(dependencies));
     const app = { _tag: "display-name", displayName: "Review * App" } as const;
 
     return Effect.gen(function* () {
-      expect(yield* resolveNativeAppIcon(app)).toBeNull();
-      expect(yield* resolveNativeAppIcon(app)).toBeNull();
+      const resolver = yield* NativeAppIconResolver.NativeAppIconResolver;
+      expect(yield* resolver.resolve(app)).toBeNull();
+      expect(yield* resolver.resolve(app)).toBeNull();
 
       expect(commands).toHaveLength(1);
       expect(commands[0]).toMatchObject({ command: "/usr/bin/mdfind" });
@@ -58,14 +60,14 @@ describe("resolveNativeAppIcon", () => {
 
       for (let index = 0; index < 256; index += 1) {
         expect(
-          yield* resolveNativeAppIcon({
+          yield* resolver.resolve({
             _tag: "display-name",
             displayName: `Missing Review App ${index}`,
           }),
         ).toBeNull();
       }
       expect(commands).toHaveLength(257);
-      expect(yield* resolveNativeAppIcon(app)).toBeNull();
+      expect(yield* resolver.resolve(app)).toBeNull();
       expect(commands).toHaveLength(258);
     }).pipe(Effect.provideService(HostProcessPlatform, "darwin"), Effect.provide(testLayer));
   });
