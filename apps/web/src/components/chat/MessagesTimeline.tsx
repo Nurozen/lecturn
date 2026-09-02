@@ -26,6 +26,7 @@ const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import { toolActivityFaviconUrl } from "@t3tools/shared/favicon";
+import { getProjectFaviconCacheKey } from "@t3tools/shared/projectFavicon";
 import {
   createContext,
   Fragment,
@@ -2221,6 +2222,7 @@ function ToolActivityIconView({
     return src ? (
       <ToolActivityImageIcon
         key={src}
+        cacheKey={src}
         src={src}
         fallbackName={fallbackName}
         className={className}
@@ -2234,6 +2236,7 @@ function ToolActivityIconView({
     return (
       <ToolActivityImageIcon
         key={src}
+        cacheKey={src}
         src={src}
         fallbackName={fallbackName}
         className={className}
@@ -2259,55 +2262,79 @@ function NativeAppToolActivityIcon({
     _tag: "native-app-icon",
     app,
   });
-  return asset._tag === "Success" ? (
+  if (asset._tag !== "Success") {
+    return <WorkEntryIconSvg name={fallbackName} className={className} />;
+  }
+
+  const cacheKey = getProjectFaviconCacheKey(
+    activeThreadEnvironmentId,
+    JSON.stringify(app),
+    asset.url,
+  );
+  return (
     <ToolActivityImageIcon
-      key={asset.url}
+      key={cacheKey}
+      cacheKey={cacheKey}
       src={asset.url}
       fallbackName={fallbackName}
       className={className}
     />
-  ) : (
-    <WorkEntryIconSvg name={fallbackName} className={className} />
   );
 }
 
-const loadedToolActivityIconSrcs = new Set<string>();
+const loadedToolActivityIconSrcs = new Map<string, string>();
 
 function ToolActivityImageIcon({
+  cacheKey,
   src,
   fallbackName,
   className,
 }: {
+  cacheKey: string;
   src: string;
   fallbackName: WorkEntryIconName;
   className: string;
 }) {
-  const [status, setStatus] = useState<"loading" | "loaded" | "failed">(() =>
-    loadedToolActivityIconSrcs.has(src) ? "loaded" : "loading",
+  const [displayedSrc, setDisplayedSrc] = useState<string | null>(
+    () => loadedToolActivityIconSrcs.get(cacheKey) ?? null,
   );
+  const isLoading = displayedSrc !== src;
+  const handleLoadError = (failedSrc: string) => {
+    if (loadedToolActivityIconSrcs.get(cacheKey) === failedSrc) {
+      loadedToolActivityIconSrcs.delete(cacheKey);
+    }
+    setDisplayedSrc((currentSrc) => (currentSrc === failedSrc ? null : currentSrc));
+  };
+
   return (
     <>
-      {status !== "loaded" ? <WorkEntryIconSvg name={fallbackName} className={className} /> : null}
-      {status !== "failed" ? (
+      {displayedSrc === null ? (
+        <WorkEntryIconSvg name={fallbackName} className={className} />
+      ) : null}
+      {displayedSrc ? (
+        <img
+          src={displayedSrc}
+          alt=""
+          aria-hidden
+          decoding="async"
+          referrerPolicy="no-referrer"
+          className={cn(className, "rounded-[3px] bg-background object-contain")}
+          onError={() => handleLoadError(displayedSrc)}
+        />
+      ) : null}
+      {isLoading ? (
         <img
           src={src}
           alt=""
           aria-hidden
           decoding="async"
           referrerPolicy="no-referrer"
-          className={cn(
-            className,
-            "rounded-[3px] bg-background object-contain opacity-100",
-            status !== "loaded" && "hidden",
-          )}
+          className="hidden"
           onLoad={() => {
-            loadedToolActivityIconSrcs.add(src);
-            setStatus("loaded");
+            loadedToolActivityIconSrcs.set(cacheKey, src);
+            setDisplayedSrc(src);
           }}
-          onError={() => {
-            loadedToolActivityIconSrcs.delete(src);
-            setStatus("failed");
-          }}
+          onError={() => handleLoadError(src)}
         />
       ) : null}
     </>
