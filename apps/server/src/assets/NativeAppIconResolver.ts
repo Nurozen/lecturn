@@ -1,6 +1,7 @@
 import * as NodeCrypto from "node:crypto";
 import type { ToolActivityNativeAppReference } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -10,6 +11,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as PlatformError from "effect/PlatformError";
 import * as Semaphore from "effect/Semaphore";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
@@ -20,6 +22,17 @@ const ICON_SIZE = 64;
 const COMMAND_TIMEOUT = "5 seconds";
 const RESOLUTION_CACHE_TTL = Duration.hours(1);
 const RESOLUTION_CACHE_MAX_ENTRIES = 256;
+
+/** Resolves and caches macOS application icons without exposing host paths to clients. */
+export class NativeAppIconResolver extends Context.Service<
+  NativeAppIconResolver,
+  {
+    /** Returns a cached PNG path for the application, or `null` when no icon is available. */
+    readonly resolve: (
+      app: ToolActivityNativeAppReference,
+    ) => Effect.Effect<string | null, PlatformError.PlatformError | Cause.TimeoutError>;
+  }
+>()("t3/assets/NativeAppIconResolver") {}
 
 function appCacheKey(app: ToolActivityNativeAppReference): string {
   return JSON.stringify(app);
@@ -245,13 +258,7 @@ export const make = Effect.gen(function* () {
     return Option.isSome(refreshed) ? refreshed.value : null;
   });
 
-  return { resolve };
+  return NativeAppIconResolver.of({ resolve });
 });
-
-/** Resolves and caches macOS application icons without exposing host paths to clients. */
-export class NativeAppIconResolver extends Context.Service<
-  NativeAppIconResolver,
-  Effect.Success<typeof make>
->()("t3/assets/NativeAppIconResolver") {}
 
 export const layer = Layer.effect(NativeAppIconResolver, make);
