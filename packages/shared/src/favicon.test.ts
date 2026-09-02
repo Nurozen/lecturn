@@ -1,10 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import {
-  explicitFaviconUrl,
-  faviconUrlForPage,
-  toolActivityFaviconUrl,
-} from "./favicon.ts";
+import { explicitFaviconUrl, faviconUrlForPage, toolActivityFaviconUrl } from "./favicon.ts";
 
 describe("faviconUrlForPage", () => {
   it("uses the page origin instead of a third-party favicon service", () => {
@@ -17,12 +13,12 @@ describe("faviconUrlForPage", () => {
   });
 
   it("selects site-owned light and dark variants without filtering full-color icons", () => {
-    expect(
-      toolActivityFaviconUrl({ pageUrl: "https://github.com/openai/codex" }, "light"),
-    ).toBe("https://github.githubassets.com/favicons/favicon.svg");
-    expect(
-      toolActivityFaviconUrl({ pageUrl: "https://github.com/openai/codex" }, "dark"),
-    ).toBe("https://github.githubassets.com/favicons/favicon-dark.svg");
+    expect(toolActivityFaviconUrl({ pageUrl: "https://github.com/openai/codex" }, "light")).toBe(
+      "https://github.githubassets.com/favicons/favicon.svg",
+    );
+    expect(toolActivityFaviconUrl({ pageUrl: "https://github.com/openai/codex" }, "dark")).toBe(
+      "https://github.githubassets.com/favicons/favicon-dark.svg",
+    );
 
     const fullColorIcon = {
       pageUrl: "https://example.com/docs",
