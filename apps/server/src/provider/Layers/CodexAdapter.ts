@@ -201,10 +201,7 @@ function normalizedDisplayName(value: unknown): string | undefined {
 }
 
 function normalizedSourceKeyPart(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/gu, "-")
-    .replace(/^-+|-+$/gu, "");
+  return value.trim().toLowerCase();
 }
 
 function browserDisplayName(value: unknown): string | undefined {
@@ -315,18 +312,20 @@ function mcpToolPresentation(
       .toReversed()
       .map(asUnknownRecord)
       .find((tab) => normalizedHttpUrl(tab?.url) !== undefined);
-    const pageUrl =
-      normalizedHttpUrl(screenshot?.pageUrl) ??
-      normalizedHttpUrl(browserUse?.url) ??
-      normalizedHttpUrl(latestOpenTab?.url);
-    const faviconUrl =
-      normalizedImageUrl(screenshot?.faviconUrl ?? screenshot?.favIconUrl) ??
-      normalizedImageUrl(browserUse?.faviconUrl ?? browserUse?.favIconUrl) ??
-      normalizedImageUrl(latestOpenTab?.faviconUrl ?? latestOpenTab?.favIconUrl);
-    const faviconUrlDark =
-      normalizedImageUrl(screenshot?.faviconUrlDark ?? screenshot?.favIconUrlDark) ??
-      normalizedImageUrl(browserUse?.faviconUrlDark ?? browserUse?.favIconUrlDark) ??
-      normalizedImageUrl(latestOpenTab?.faviconUrlDark ?? latestOpenTab?.favIconUrlDark);
+    const selectedPage = [
+      { record: screenshot, url: screenshot?.pageUrl },
+      { record: browserUse, url: browserUse?.url },
+      { record: latestOpenTab, url: latestOpenTab?.url },
+    ]
+      .map((candidate) => ({ ...candidate, pageUrl: normalizedHttpUrl(candidate.url) }))
+      .find((candidate) => candidate.pageUrl !== undefined);
+    const pageUrl = selectedPage?.pageUrl;
+    const faviconUrl = normalizedImageUrl(
+      selectedPage?.record?.faviconUrl ?? selectedPage?.record?.favIconUrl,
+    );
+    const faviconUrlDark = normalizedImageUrl(
+      selectedPage?.record?.faviconUrlDark ?? selectedPage?.record?.favIconUrlDark,
+    );
     const name =
       browserDisplayName(appContext?.appName) ??
       browserDisplayName(surface.browserFamily) ??

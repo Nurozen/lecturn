@@ -12,6 +12,16 @@ import * as ServerConfig from "../config.ts";
 
 const ICON_SIZE = 64;
 const COMMAND_TIMEOUT = "5 seconds";
+const RESOLUTION_CACHE_TTL_MS = 60 * 60 * 1000;
+const resolvedIconPathByApp = new Map<
+  string,
+  { readonly path: string; readonly expiresAt: number }
+>();
+
+function appCacheKey(cacheDirectory: string, app: ToolActivityNativeAppReference): string {
+  const identity = app._tag === "app-id" ? `id:${app.appId}` : `name:${app.displayName}`;
+  return `${cacheDirectory}\0${identity.toLowerCase()}`;
+}
 
 const existingFile = Effect.fn("NativeAppIconResolver.existingFile")(function* (filePath: string) {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -117,6 +127,11 @@ export const resolveNativeAppIcon = Effect.fn("NativeAppIconResolver.resolve")(f
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const config = yield* ServerConfig.ServerConfig;
+  const resolvedAppCacheKey = appCacheKey(config.providerStatusCacheDir, app);
+  const now = yield* Clock.currentTimeMillis;
+  const cached = resolvedIconPathByApp.get(resolvedAppCacheKey);
+  if (cached && cached.expiresAt > now && (yield* existingFile(cached.path))) return cached.path;
+
   const appPath = yield* resolveApplicationPath(app);
   if (!appPath) return null;
 
@@ -145,7 +160,13 @@ export const resolveNativeAppIcon = Effect.fn("NativeAppIconResolver.resolve")(f
   if (!sourceIconCandidate) return null;
   const sourceIconPath = yield* fileSystem.realPath(sourceIconCandidate);
   const relativeSource = path.relative(resourcesDirectory, sourceIconPath);
-  if (relativeSource.startsWith("..") || path.isAbsolute(relativeSource)) return null;
+  if (
+    relativeSource === ".." ||
+    relativeSource.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativeSource)
+  ) {
+    return null;
+  }
 
   const appVersion =
     (yield* plistValue(infoPlistPath, "CFBundleVersion")) ||
@@ -155,7 +176,13 @@ export const resolveNativeAppIcon = Effect.fn("NativeAppIconResolver.resolve")(f
     .digest("hex");
   const cacheDirectory = path.join(config.providerStatusCacheDir, "native-app-icons");
   const cachePath = path.join(cacheDirectory, `${cacheKey}.png`);
-  if (yield* existingFile(cachePath)) return cachePath;
+  if (yield* existingFile(cachePath)) {
+    resolvedIconPathByApp.set(resolvedAppCacheKey, {
+      path: cachePath,
+      expiresAt: now + RESOLUTION_CACHE_TTL_MS,
+    });
+    return cachePath;
+  }
 
   yield* fileSystem.makeDirectory(cacheDirectory, { recursive: true });
   const temporaryPath = path.join(
@@ -178,5 +205,12 @@ export const resolveNativeAppIcon = Effect.fn("NativeAppIconResolver.resolve")(f
       fileSystem.remove(temporaryPath).pipe(Effect.catchTags({ PlatformError: () => Effect.void })),
     ),
   );
-  return yield* existingFile(cachePath);
+  const resolvedPath = yield* existingFile(cachePath);
+  if (resolvedPath) {
+    resolvedIconPathByApp.set(resolvedAppCacheKey, {
+      path: resolvedPath,
+      expiresAt: now + RESOLUTION_CACHE_TTL_MS,
+    });
+  }
+  return resolvedPath;
 });

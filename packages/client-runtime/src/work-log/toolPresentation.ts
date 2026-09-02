@@ -104,10 +104,7 @@ function knownAppName(appId: string): string | undefined {
 }
 
 function sourceKeyPart(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/gu, "-")
-    .replace(/^-+|-+$/gu, "");
+  return value.trim().toLowerCase();
 }
 
 function invocationNativeAppReference(
@@ -201,23 +198,20 @@ export function extractToolActivityPresentation(
     const screenshot = asRecord(surface.screenshot);
     const browserUse = asRecord(metadata?.browser_use);
     const tabs = Array.isArray(surface.openTabs) ? surface.openTabs.map(asRecord).toReversed() : [];
-    const resolvedPageUrl = [screenshot?.pageUrl, browserUse?.url, ...tabs.map((tab) => tab?.url)]
-      .map(pageUrl)
-      .find((value) => value !== undefined);
-    const faviconUrl = [
-      screenshot?.faviconUrl ?? screenshot?.favIconUrl,
-      browserUse?.faviconUrl ?? browserUse?.favIconUrl,
-      ...tabs.map((tab) => tab?.faviconUrl ?? tab?.favIconUrl),
+    const selectedPage = [
+      { record: screenshot, url: screenshot?.pageUrl },
+      { record: browserUse, url: browserUse?.url },
+      ...tabs.map((tab) => ({ record: tab, url: tab?.url })),
     ]
-      .map(imageUrl)
-      .find((value) => value !== undefined);
-    const faviconUrlDark = [
-      screenshot?.faviconUrlDark ?? screenshot?.favIconUrlDark,
-      browserUse?.faviconUrlDark ?? browserUse?.favIconUrlDark,
-      ...tabs.map((tab) => tab?.faviconUrlDark ?? tab?.favIconUrlDark),
-    ]
-      .map(imageUrl)
-      .find((value) => value !== undefined);
+      .map((candidate) => ({ ...candidate, pageUrl: pageUrl(candidate.url) }))
+      .find((candidate) => candidate.pageUrl !== undefined);
+    const resolvedPageUrl = selectedPage?.pageUrl;
+    const faviconUrl = imageUrl(
+      selectedPage?.record?.faviconUrl ?? selectedPage?.record?.favIconUrl,
+    );
+    const faviconUrlDark = imageUrl(
+      selectedPage?.record?.faviconUrlDark ?? selectedPage?.record?.favIconUrlDark,
+    );
     const name =
       browserName(asRecord(item?.appContext)?.appName) ??
       browserName(surface.browserFamily) ??
@@ -226,17 +220,17 @@ export function extractToolActivityPresentation(
     const nativeBrowserApp = browserApp(name);
     return {
       toolSurface: "browser",
-      ...(resolvedPageUrl
-        ? {
-            toolIcon: {
-              _tag: "website",
-              pageUrl: resolvedPageUrl,
-              ...(faviconUrl ? { faviconUrl } : {}),
-              ...(faviconUrlDark ? { faviconUrlDark } : {}),
-            },
-          }
-        : explicitIcon
-          ? { toolIcon: explicitIcon }
+      ...(explicitIcon
+        ? { toolIcon: explicitIcon }
+        : resolvedPageUrl
+          ? {
+              toolIcon: {
+                _tag: "website",
+                pageUrl: resolvedPageUrl,
+                ...(faviconUrl ? { faviconUrl } : {}),
+                ...(faviconUrlDark ? { faviconUrlDark } : {}),
+              },
+            }
           : {}),
       toolSource:
         explicitSource ??

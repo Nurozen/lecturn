@@ -535,10 +535,13 @@ export function ThreadWorkGroupToggle(props: {
       >
         {props.shimmer ? (
           <ShimmeringWorkContent
+            environmentId={props.environmentId}
             icon={icon}
             iconSubtleColor={props.iconSubtleColor}
             label={props.summary}
             showIcon
+            themeAppearance={props.themeAppearance}
+            toolIcon={props.toolIcon}
           />
         ) : (
           <>
