@@ -599,7 +599,8 @@ export function deriveMessagesTimelineRows(input: {
       !entryBelongsToActiveTurn(entry, index) ||
       entry.kind !== "work" ||
       entry.entry.agentSpawn !== undefined ||
-      entry.entry.tone === "error"
+      entry.entry.tone === "error" ||
+      workEntryRendersImagePreview(entry.entry)
     ) {
       break;
     }
