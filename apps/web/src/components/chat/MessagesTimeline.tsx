@@ -2494,7 +2494,9 @@ function ToolActivityIconView(props: {
   }
   if (props.icon._tag === "themed-logo") {
     const src =
-      resolvedTheme === "dark" ? (props.icon.logoUrlDark ?? props.icon.logoUrl) : props.icon.logoUrl;
+      resolvedTheme === "dark"
+        ? (props.icon.logoUrlDark ?? props.icon.logoUrl)
+        : props.icon.logoUrl;
     return (
       <ToolActivityImageIcon
         key={src}

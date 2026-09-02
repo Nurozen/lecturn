@@ -1505,19 +1505,19 @@ function renderFeedEntry(
   }
 
   if (entry.type === "work-toggle") {
-      return (
-        <ThreadWorkGroupToggle
-          environmentId={props.environmentId}
-          rowSizing={props.workRowSizing}
+    return (
+      <ThreadWorkGroupToggle
+        environmentId={props.environmentId}
+        rowSizing={props.workRowSizing}
         expanded={entry.expanded}
         hiddenCount={entry.hiddenCount}
         iconSubtleColor={iconSubtleColor}
         summary={entry.summary}
         summaryKind={entry.summaryKind}
-          themeAppearance={props.themeAppearance}
-          toolSurface={entry.toolSurface}
-          toolIcon={entry.toolIcon}
-          summaryToolIcon={entry.summaryToolIcon}
+        themeAppearance={props.themeAppearance}
+        toolSurface={entry.toolSurface}
+        toolIcon={entry.toolIcon}
+        summaryToolIcon={entry.summaryToolIcon}
         hasFailure={entry.hasFailure}
         shimmer={entry.shimmer}
         onToggle={() => props.onToggleWorkGroup(entry.groupId, entry.id)}
