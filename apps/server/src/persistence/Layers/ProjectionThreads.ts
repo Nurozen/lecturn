@@ -14,12 +14,19 @@ import {
   ProjectionThreadRepository,
   type ProjectionThreadRepositoryShape,
 } from "../Services/ProjectionThreads.ts";
-import { ModelSelection, ThreadLinkedPullRequest } from "@t3tools/contracts";
+import {
+  ModelSelection,
+  ThreadForkOrigin,
+  ThreadForkProviderSource,
+  ThreadLinkedPullRequest,
+} from "@t3tools/contracts";
 
 const ProjectionThreadDbRow = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
     linkedPullRequest: Schema.NullOr(Schema.fromJsonString(ThreadLinkedPullRequest)),
+    forkedFrom: Schema.NullOr(Schema.fromJsonString(ThreadForkOrigin)),
+    forkSource: Schema.NullOr(Schema.fromJsonString(ThreadForkProviderSource)),
   }),
 );
 type ProjectionThreadDbRow = typeof ProjectionThreadDbRow.Type;
@@ -41,6 +48,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           branch,
           worktree_path,
           linked_pull_request_json,
+          forked_from_json,
+          fork_source_json,
           latest_turn_id,
           created_at,
           updated_at,
@@ -70,6 +79,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.branch},
           ${row.worktreePath},
           ${row.linkedPullRequest === undefined || row.linkedPullRequest === null ? null : JSON.stringify(row.linkedPullRequest)},
+          ${row.forkedFrom === undefined || row.forkedFrom === null ? null : JSON.stringify(row.forkedFrom)},
+          ${row.forkSource === undefined || row.forkSource === null ? null : JSON.stringify(row.forkSource)},
           ${row.latestTurnId},
           ${row.createdAt},
           ${row.updatedAt},
@@ -99,6 +110,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           branch = excluded.branch,
           worktree_path = excluded.worktree_path,
           linked_pull_request_json = excluded.linked_pull_request_json,
+          forked_from_json = excluded.forked_from_json,
+          fork_source_json = excluded.fork_source_json,
           latest_turn_id = excluded.latest_turn_id,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
@@ -135,6 +148,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
+          forked_from_json AS "forkedFrom",
+          fork_source_json AS "forkSource",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -173,6 +188,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
+          forked_from_json AS "forkedFrom",
+          fork_source_json AS "forkSource",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",

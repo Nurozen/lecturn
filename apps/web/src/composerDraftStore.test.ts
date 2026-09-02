@@ -508,6 +508,17 @@ describe("composerDraftStore file attachments", () => {
     expect(store.getComposerDraft(threadRef)).toBeNull();
   });
 
+  it("creates a server-thread draft when a prompt is set without one", () => {
+    const store = useComposerDraftStore.getState();
+    expect(store.getComposerDraft(threadRef)).toBeNull();
+
+    store.setPrompt(threadRef, "Continue from the fork point");
+
+    expect(useComposerDraftStore.getState().getComposerDraft(threadRef)?.prompt).toBe(
+      "Continue from the fork point",
+    );
+  });
+
   it("removes generic files when a prompt is moved into the stash", () => {
     const store = useComposerDraftStore.getState();
     store.setPrompt(threadRef, "Review the report");

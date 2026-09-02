@@ -169,7 +169,12 @@ describe("ProviderSessionReaper", () => {
       respondToUserInput: () => unsupported(),
       stopSession,
       listSessions: () => Effect.succeed([]),
-      getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+      getCapabilities: () =>
+        Effect.succeed({
+          sessionModelSwitch: "in-session",
+          conversationFork: "native",
+          conversationForkRequiresAnchor: false,
+        }),
       getInstanceInfo: (instanceId) => {
         const driverKind = ProviderDriverKind.make(String(instanceId));
         return Effect.succeed({
@@ -224,6 +229,9 @@ describe("ProviderSessionReaper", () => {
             ),
           getThreadDetailById: () => Effect.die("unused"),
           getThreadDetailSnapshot: () => Effect.die("unused"),
+          listThreadActivitiesById: () => Effect.die("unused"),
+          listThreadTurnsById: () => Effect.die("unused"),
+          getThreadForkContextById: () => Effect.die("unused"),
           listThreadIdsByWorktreePath: () => Effect.die("unused"),
           searchThreads: () => Effect.succeed({ matches: [] }),
         }),

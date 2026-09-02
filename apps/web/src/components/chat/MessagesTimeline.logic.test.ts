@@ -639,6 +639,124 @@ describe("deriveMessagesTimelineRows", () => {
     expect(assistantRow?.assistantTurnDiffSummary).toBe(assistantTurnDiffSummary);
   });
 
+  it("projects fork turn ids onto user and assistant message rows", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "user-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: "user-1" as never,
+            role: "user",
+            text: "Do the thing",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "assistant-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:20Z",
+          message: {
+            id: "assistant-1" as never,
+            role: "assistant",
+            text: "Done",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:20Z",
+            updatedAt: "2026-01-01T00:00:30Z",
+            streaming: false,
+          },
+        },
+      ],
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+      forkTurnIdByMessageId: new Map([
+        ["user-1" as never, "turn-1" as never],
+        ["assistant-1" as never, "turn-1" as never],
+      ]),
+    });
+
+    const userRow = rows.find(
+      (row): row is Extract<(typeof rows)[number], { kind: "message" }> =>
+        row.kind === "message" && row.message.role === "user",
+    );
+    const assistantRow = rows.find(
+      (row): row is Extract<(typeof rows)[number], { kind: "message" }> =>
+        row.kind === "message" && row.message.role === "assistant",
+    );
+
+    expect(userRow?.forkTurnId).toBe("turn-1");
+    expect(assistantRow?.forkTurnId).toBe("turn-1");
+  });
+
+  it("emits the fork divider immediately after its anchor message row", () => {
+    const timelineEntries = [
+      {
+        id: "user-entry",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:00Z",
+        message: {
+          id: "user-1" as never,
+          role: "user" as const,
+          text: "Do the thing",
+          turnId: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          streaming: false,
+        },
+      },
+      {
+        id: "assistant-entry",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:20Z",
+        message: {
+          id: "assistant-1" as never,
+          role: "assistant" as const,
+          text: "Done",
+          turnId: "turn-1" as never,
+          createdAt: "2026-01-01T00:00:20Z",
+          updatedAt: "2026-01-01T00:00:30Z",
+          streaming: false,
+        },
+      },
+    ];
+    const baseInput = {
+      timelineEntries,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    };
+
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      forkDividerAfterMessageId: "user-1" as never,
+    });
+    expect(rows.map((row) => row.id)).toEqual([
+      "user-entry",
+      "fork-divider-row",
+      "assistant-entry",
+    ]);
+    expect(rows[1]).toMatchObject({ kind: "fork-divider" });
+
+    const unmatchedRows = deriveMessagesTimelineRows({
+      ...baseInput,
+      forkDividerAfterMessageId: "not-in-timeline" as never,
+    });
+    expect(unmatchedRows.some((row) => row.kind === "fork-divider")).toBe(false);
+
+    const noAnchorRows = deriveMessagesTimelineRows({
+      ...baseInput,
+      forkDividerAfterMessageId: null,
+    });
+    expect(noAnchorRows.some((row) => row.kind === "fork-divider")).toBe(false);
+  });
+
   it("folds the first assistant message and settled work before the terminal response", () => {
     const timelineEntries = [
       {
@@ -1988,6 +2106,43 @@ describe("computeStableMessagesTimelineRows", () => {
 
     expect(repeated).toBe(initial);
     expect(repeated.result[0]).toBe(initial.result[0]);
+  });
+
+  it("keeps the fork divider row identity stable across equivalent derives", () => {
+    const userEntry = {
+      id: "user-entry",
+      kind: "message" as const,
+      createdAt: "2026-01-01T00:00:00Z",
+      message: {
+        id: "user-1" as never,
+        role: "user" as const,
+        text: "Do the thing",
+        turnId: null,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+        streaming: false,
+      },
+    };
+    const createRows = () =>
+      deriveMessagesTimelineRows({
+        timelineEntries: [userEntry],
+        isWorking: false,
+        activeTurnStartedAt: null,
+        turnDiffSummaryByAssistantMessageId: new Map(),
+        revertTurnCountByUserMessageId: new Map(),
+        forkDividerAfterMessageId: "user-1" as never,
+      });
+
+    const initial = computeStableMessagesTimelineRows(createRows(), {
+      byId: new Map(),
+      result: [],
+    });
+    const dividerRow = initial.byId.get("fork-divider-row");
+    expect(dividerRow).toMatchObject({ kind: "fork-divider" });
+
+    const repeated = computeStableMessagesTimelineRows(createRows(), initial);
+    expect(repeated).toBe(initial);
+    expect(repeated.byId.get("fork-divider-row")).toBe(dividerRow);
   });
 
   it("returns a new result when row order changes without content changes", () => {

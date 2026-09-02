@@ -47,6 +47,23 @@ describe("ServerProvider", () => {
     expect(parsed.updateState).toBeUndefined();
   });
 
+  it("leaves conversation fork support absent on legacy provider snapshots", () => {
+    expect(decodeServerProvider(baseProviderSnapshot).conversationFork).toBeUndefined();
+  });
+
+  it("preserves conversation fork support, including values newer than this client", () => {
+    expect(
+      decodeServerProvider({ ...baseProviderSnapshot, conversationFork: "native" })
+        .conversationFork,
+    ).toBe("native");
+    // Open string: an unknown future value must decode (consumers treat it
+    // as unsupported) instead of failing the whole provider snapshot.
+    expect(
+      decodeServerProvider({ ...baseProviderSnapshot, conversationFork: "replay" })
+        .conversationFork,
+    ).toBe("replay");
+  });
+
   it("defaults one-click update support when decoding older advisory snapshots", () => {
     const parsed = decodeServerProvider({
       instanceId: "codex",

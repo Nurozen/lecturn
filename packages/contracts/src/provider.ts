@@ -4,6 +4,7 @@ import {
   ApprovalRequestId,
   EventId,
   IsoDateTime,
+  NonNegativeInt,
   ProviderItemId,
   ThreadId,
   TurnId,
@@ -59,6 +60,27 @@ export const ProviderSessionStartInput = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
   modelSelection: Schema.optional(ModelSelection),
   resumeCursor: Schema.optional(Schema.Unknown),
+  // Fork the source conversation instead of starting fresh. Mutually
+  // exclusive with resumeCursor: a forked child has no cursor of its own
+  // until the adapter adopts the forked native session.
+  fork: Schema.optional(
+    Schema.Struct({
+      // Source's native session cursor (opaque per adapter).
+      sourceResumeCursor: Schema.Unknown,
+      sourceProviderInstanceId: ProviderInstanceId,
+      // Provider-side anchor of the fork turn; null marks a legacy turn
+      // recorded before anchors were captured.
+      providerTurnRef: Schema.NullOr(TrimmedNonEmptyString),
+      throughTurnId: TurnId,
+      // 1-based index of the fork turn among the source's turns that emitted
+      // an assistant message (any state), mirroring the provider's native
+      // assistant-message list; the positional boundary when the anchor is
+      // null or unresolvable.
+      throughTurnOrdinal: NonNegativeInt,
+      // Source had no completed turn after the fork turn.
+      atEnd: Schema.Boolean,
+    }),
+  ),
   approvalPolicy: Schema.optional(ProviderApprovalPolicy),
   sandboxMode: Schema.optional(ProviderSandboxMode),
   runtimeMode: RuntimeMode,

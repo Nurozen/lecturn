@@ -71,6 +71,12 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
       threadId: this.options.threadId,
       cwd: this.options.cwd,
       ...(this.options.model ? { model: this.options.model } : {}),
+      // The real runtime adopts the forked native thread id as the child's
+      // cursor; mirror that so cursor assertions can tell it apart from the
+      // source's cursor.
+      ...(this.options.fork
+        ? { resumeCursor: { threadId: `forked-from-${this.options.fork.sourceThreadId}` } }
+        : {}),
       createdAt: this.now,
       updatedAt: this.now,
     } satisfies ProviderSession),
@@ -295,6 +301,102 @@ validationLayer("CodexAdapterLive validation", (it) => {
         threadId: asThreadId("thread-1"),
         runtimeMode: "full-access",
       });
+    }),
+  );
+
+  it.effect("forks from the source Codex cursor without inheriting it", () =>
+    Effect.gen(function* () {
+      validationRuntimeFactory.factory.mockClear();
+      const adapter = yield* CodexAdapter;
+
+      const session = yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-fork-child"),
+        runtimeMode: "full-access",
+        fork: {
+          sourceResumeCursor: { threadId: "source-provider-thread" },
+          sourceProviderInstanceId: ProviderInstanceId.make("codex"),
+          providerTurnRef: "provider-turn-3",
+          throughTurnId: asTurnId("turn-3"),
+          throughTurnOrdinal: 3,
+          atEnd: false,
+        },
+      });
+
+      // The runtime options carry the fork boundary and no resumeCursor: the
+      // child's cursor comes from the runtime adopting the forked thread id.
+      NodeAssert.deepStrictEqual(validationRuntimeFactory.factory.mock.calls[0]?.[0], {
+        binaryPath: "codex",
+        cwd: process.cwd(),
+        launchArgs: "",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        threadId: asThreadId("thread-fork-child"),
+        runtimeMode: "full-access",
+        fork: { sourceThreadId: "source-provider-thread", lastTurnId: "provider-turn-3" },
+      });
+      NodeAssert.deepStrictEqual(session.resumeCursor, {
+        threadId: "forked-from-source-provider-thread",
+      });
+    }),
+  );
+
+  it.effect("falls back to the recorded turn id for legacy fork turns", () =>
+    Effect.gen(function* () {
+      validationRuntimeFactory.factory.mockClear();
+      const adapter = yield* CodexAdapter;
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-fork-legacy"),
+        runtimeMode: "full-access",
+        fork: {
+          sourceResumeCursor: { threadId: "source-provider-thread" },
+          sourceProviderInstanceId: ProviderInstanceId.make("codex"),
+          providerTurnRef: null,
+          throughTurnId: asTurnId("turn-9"),
+          throughTurnOrdinal: 9,
+          atEnd: true,
+        },
+      });
+
+      NodeAssert.deepStrictEqual(validationRuntimeFactory.factory.mock.calls[0]?.[0]?.fork, {
+        sourceThreadId: "source-provider-thread",
+        lastTurnId: "turn-9",
+      });
+    }),
+  );
+
+  it.effect("rejects forks whose source cursor is not a Codex cursor", () =>
+    Effect.gen(function* () {
+      validationRuntimeFactory.factory.mockClear();
+      const adapter = yield* CodexAdapter;
+
+      const result = yield* adapter
+        .startSession({
+          provider: ProviderDriverKind.make("codex"),
+          threadId: asThreadId("thread-fork-invalid"),
+          runtimeMode: "full-access",
+          fork: {
+            sourceResumeCursor: { sessionId: "claude-session" },
+            sourceProviderInstanceId: ProviderInstanceId.make("codex"),
+            providerTurnRef: "provider-turn-3",
+            throughTurnId: asTurnId("turn-3"),
+            throughTurnOrdinal: 3,
+            atEnd: false,
+          },
+        })
+        .pipe(Effect.result);
+
+      NodeAssert.equal(result._tag, "Failure");
+      NodeAssert.deepStrictEqual(
+        result.failure,
+        new ProviderAdapterValidationError({
+          provider: ProviderDriverKind.make("codex"),
+          operation: "startSession",
+          issue: "Fork requires a Codex resume cursor for the source session.",
+        }),
+      );
+      NodeAssert.equal(validationRuntimeFactory.factory.mock.calls.length, 0);
     }),
   );
 });

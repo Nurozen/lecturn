@@ -46,6 +46,14 @@ export interface DeleteCheckpointRefsInput {
   readonly checkpointRefs: ReadonlyArray<CheckpointRef>;
 }
 
+export interface AliasCheckpointRefsInput {
+  readonly cwd: string;
+  readonly refs: ReadonlyArray<{
+    readonly from: CheckpointRef;
+    readonly to: CheckpointRef;
+  }>;
+}
+
 /** Service tag for checkpoint persistence and restore operations. */
 export class CheckpointStore extends Context.Service<
   CheckpointStore,
@@ -93,6 +101,16 @@ export class CheckpointStore extends Context.Service<
     readonly deleteCheckpointRefs: (
       input: DeleteCheckpointRefsInput,
     ) => Effect.Effect<void, CheckpointStoreError>;
+
+    /**
+     * Point new checkpoint refs at the commits of existing ones.
+     *
+     * Returns the refs actually created; pairs whose source ref does not
+     * resolve are skipped rather than failing. Idempotent.
+     */
+    readonly aliasCheckpointRefs: (
+      input: AliasCheckpointRefsInput,
+    ) => Effect.Effect<ReadonlyArray<CheckpointRef>, CheckpointStoreError>;
   }
 >()("t3/checkpointing/CheckpointStore") {}
 
@@ -157,6 +175,13 @@ export const make = Effect.gen(function* () {
     return yield* checkpoints.deleteCheckpointRefs(input);
   });
 
+  const aliasCheckpointRefs: CheckpointStore["Service"]["aliasCheckpointRefs"] = Effect.fn(
+    "aliasCheckpointRefs",
+  )(function* (input) {
+    const checkpoints = yield* resolveCheckpoints("CheckpointStore.aliasCheckpointRefs", input.cwd);
+    return yield* checkpoints.aliasCheckpointRefs(input);
+  });
+
   return CheckpointStore.of({
     isGitRepository,
     captureCheckpoint,
@@ -164,6 +189,7 @@ export const make = Effect.gen(function* () {
     restoreCheckpoint,
     diffCheckpoints,
     deleteCheckpointRefs,
+    aliasCheckpointRefs,
   });
 });
 

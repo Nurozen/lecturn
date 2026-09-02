@@ -222,6 +222,9 @@ export const make = Effect.gen(function* () {
       threadPinReorder: true,
       threadTitleRegeneration: true,
       threadPullRequestLinking: true,
+      // Config-driven kill switch: clients hide every fork entry point when
+      // the capability is absent, and the ws dispatcher enforces it besides.
+      ...(serverConfig.threadForkingEnabled ? { threadForking: true } : {}),
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
       ...(serverSelfUpdate === "boot-service" || desktopAppUpdate
         ? { serverSelfUpdateProgress: true }

@@ -50,10 +50,11 @@ import { CursorListAvailableModelsResponse } from "../acp/CursorAcpExtension.ts"
 const decodeCursorListAvailableModelsResponse = Schema.decodeUnknownEffect(
   CursorListAvailableModelsResponse,
 );
-const CURSOR_PRESENTATION = {
+export const CURSOR_PRESENTATION = {
   displayName: "Cursor",
   badgeLabel: "Early Access",
   showInteractionModeToggle: true,
+  conversationFork: "unsupported",
 } as const;
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],

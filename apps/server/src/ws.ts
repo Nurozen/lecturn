@@ -1,6 +1,11 @@
+// @effect-diagnostics nodeBuiltinImport:off - assembleThreadFork mints ids through a synchronous callback, which the Effect Crypto service cannot satisfy
+import * as NodeCrypto from "node:crypto";
+
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
+import * as FileSystem from "effect/FileSystem";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -15,7 +20,9 @@ import {
   type AuthAccessStreamEvent,
   type AuthEnvironmentScope,
   AuthSessionId,
+  type CheckpointRef,
   GitCommandError,
+  type ClientOrchestrationCommand,
   ClientConnectionMethod,
   ClientDeviceType,
   ClientOs,
@@ -72,7 +79,10 @@ import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgro
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
+import { copyClaimedAttachment } from "./attachmentStore.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
+import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
+import { resolveThreadWorkspaceCwd } from "./checkpointing/Utils.ts";
 import * as ServerConfig from "./config.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
@@ -83,9 +93,16 @@ import {
 } from "./orchestration/ActivityPayloadProjection.ts";
 import { makeThreadLiveEventCoalescer } from "./orchestration/ThreadLiveEventCoalescer.ts";
 import {
+  canonicalizeClientCommandTimestamps,
   cleanupFailedUploadedAttachments,
   normalizeDispatchCommand,
 } from "./orchestration/Normalizer.ts";
+import {
+  assembleThreadFork,
+  resolveForkSessionSource,
+  type ThreadForkAssemblyFailure,
+} from "./orchestration/threadFork.ts";
+import { OrchestrationCommandReceiptRepository } from "./persistence/Services/OrchestrationCommandReceipts.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
@@ -96,6 +113,7 @@ import {
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import * as ProviderService from "./provider/Services/ProviderService.ts";
+import * as ProviderSessionDirectory from "./provider/Services/ProviderSessionDirectory.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -147,6 +165,24 @@ const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchComma
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
+
+/** Client-facing message for each way a fork request can fail to assemble. */
+function describeThreadForkAssemblyFailure(failure: ThreadForkAssemblyFailure): string {
+  switch (failure.kind) {
+    case "source-deleted":
+      return "The thread to fork from has been deleted.";
+    case "turn-not-found":
+      return "The turn to fork from no longer exists on the source thread.";
+    case "turn-not-completed":
+      return `Only completed turns can be forked; the selected turn is ${failure.state}.`;
+    case "anchor-unavailable":
+      return "This turn was recorded without a provider anchor, so the provider cannot fork the conversation there.";
+    case "attachment-id-underivable":
+      return "An attachment in the inherited history cannot be copied into the fork.";
+    case "duplicate-alias-target":
+      return "The source thread's checkpoint history is inconsistent; cannot fork.";
+  }
+}
 
 const resolveDiscoveryForConfig = <A, E, R>(
   discovery: Effect.Effect<A, E, R>,
@@ -468,6 +504,7 @@ const makeWsRpcLayer = (
       const crypto = yield* Crypto.Crypto;
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
       const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
+      const commandReceipts = yield* OrchestrationCommandReceiptRepository;
       const threadDeletionReactor = yield* ThreadDeletionReactor;
       const analytics = yield* AnalyticsService.AnalyticsService;
       // Every command dispatched on this connection carries the connecting
@@ -498,6 +535,9 @@ const makeWsRpcLayer = (
         }
       };
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
+      const checkpointStore = yield* CheckpointStore.CheckpointStore;
+      const providerSessionDirectory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+      const fileSystem = yield* FileSystem.FileSystem;
       const keybindings = yield* Keybindings.Keybindings;
       const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
@@ -1170,6 +1210,320 @@ const makeWsRpcLayer = (
           );
         });
 
+      // Server-side materialization of a client fork request: read the source
+      // thread, assemble the inherited history (pure, in threadFork.ts), run
+      // the compensable side effects (checkpoint ref aliases, attachment file
+      // copies) and dispatch the materialized command. Runs before
+      // normalizeDispatchCommand, which rejects raw thread.fork commands on
+      // every other transport.
+      const dispatchThreadFork = (
+        forkCommand: Extract<ClientOrchestrationCommand, { type: "thread.fork" }>,
+      ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> => {
+        const forkProgram = Effect.gen(function* () {
+          const forkStartedAtMs = yield* Clock.currentTimeMillis;
+          if (!config.threadForkingEnabled) {
+            return yield* new OrchestrationDispatchCommandError({
+              message: "Thread forking is disabled on this server.",
+            });
+          }
+          // The same server-time canonicalization the normalizer applies on
+          // the normal dispatch path; the helper only rewrites createdAt for
+          // a fork command, so the narrowing cast is sound.
+          const command = canonicalizeClientCommandTimestamps(
+            forkCommand,
+            yield* nowIso,
+          ) as typeof forkCommand;
+          if (command.workspace !== "inherit") {
+            return yield* new OrchestrationDispatchCommandError({
+              message: "Forking into a new worktree is not supported yet.",
+            });
+          }
+
+          const readError = (cause: unknown) =>
+            toDispatchCommandError(cause, "Failed to read the source thread for the fork.");
+
+          // A client retry of an already-handled fork must not replay side
+          // effects (ref aliasing, attachment copies) or re-record analytics:
+          // the engine's command receipt is the recorded outcome, so return
+          // it verbatim before touching anything.
+          const priorReceipt = Option.getOrUndefined(
+            yield* commandReceipts
+              .getByCommandId({ commandId: command.commandId })
+              .pipe(
+                Effect.mapError((cause) =>
+                  toDispatchCommandError(cause, "Failed to read the fork command's receipt."),
+                ),
+              ),
+          );
+          if (
+            priorReceipt !== undefined &&
+            priorReceipt.aggregateKind === "thread" &&
+            priorReceipt.aggregateId === command.threadId
+          ) {
+            if (priorReceipt.status === "accepted") {
+              return { sequence: priorReceipt.resultSequence };
+            }
+            return yield* new OrchestrationDispatchCommandError({
+              message: priorReceipt.error ?? "Previously rejected.",
+            });
+          }
+
+          // The side effects below write into the child's checkpoint-ref
+          // namespace, so a child id colliding with a live thread would
+          // clobber that thread's refs (and the rollback would then delete
+          // them). Soft-deleted ids stay forkable; the decider and
+          // projectors handle recreating them.
+          const existingChild = yield* projectionSnapshotQuery
+            .getThreadShellById(command.threadId)
+            .pipe(Effect.mapError(readError));
+          if (Option.isSome(existingChild)) {
+            return yield* new OrchestrationDispatchCommandError({
+              message: "A thread with the fork's id already exists.",
+            });
+          }
+
+          const source = Option.getOrUndefined(
+            yield* projectionSnapshotQuery
+              .getThreadDetailById(command.sourceThreadId)
+              .pipe(Effect.mapError(readError)),
+          );
+          if (source === undefined) {
+            return yield* new OrchestrationDispatchCommandError({
+              message: "The thread to fork from no longer exists.",
+            });
+          }
+          const { sourceTurns, sourceActivities, forkContext, project, sourceBinding } =
+            yield* Effect.all(
+              {
+                sourceTurns: projectionSnapshotQuery.listThreadTurnsById(command.sourceThreadId),
+                sourceActivities: projectionSnapshotQuery.listThreadActivitiesById(
+                  command.sourceThreadId,
+                ),
+                forkContext: projectionSnapshotQuery.getThreadForkContextById(
+                  command.sourceThreadId,
+                ),
+                project: projectionSnapshotQuery.getProjectShellById(source.projectId),
+                sourceBinding: providerSessionDirectory.getBinding(command.sourceThreadId),
+              },
+              { concurrency: 1 },
+            ).pipe(Effect.mapError(readError));
+
+          const sourceForkSource = Option.match(forkContext, {
+            onNone: () => null,
+            onSome: (context) => context.forkSource,
+          });
+          // The fork executes on the nearest-ancestor provider session (the
+          // source's live binding, or the snapshot an unsent fork inherited),
+          // which can differ from the source thread's own instance after a
+          // model switch - so the capability gate keys off the instance the
+          // fork will actually run on.
+          const forkSessionSource = resolveForkSessionSource({
+            sourceBinding: Option.getOrNull(sourceBinding),
+            sourceForkSource,
+          });
+          const providerInstanceId =
+            forkSessionSource?.providerInstanceId ??
+            source.session?.providerInstanceId ??
+            source.modelSelection.instanceId;
+          const capabilities = yield* providerService
+            .getCapabilities(providerInstanceId)
+            .pipe(
+              Effect.mapError((cause) =>
+                toDispatchCommandError(cause, "Failed to resolve the provider's fork capability."),
+              ),
+            );
+          if (capabilities.conversationFork === "unsupported") {
+            return yield* new OrchestrationDispatchCommandError({
+              message: `The '${providerInstanceId}' provider does not support forking threads.`,
+            });
+          }
+
+          const assembly = assembleThreadFork({
+            source,
+            sourceTurns,
+            sourceActivities,
+            sourceForkSource,
+            sourceBinding: Option.getOrNull(sourceBinding),
+            childThreadId: command.threadId,
+            throughTurnId: command.throughTurnId,
+            sourceMessageId: command.sourceMessageId ?? null,
+            title: command.title ?? null,
+            createdAt: command.createdAt,
+            // Only providers without a positional fallback (Claude) need the
+            // recorded provider-side anchor; the assembler still allows a
+            // missing anchor at the end of the thread, where the provider
+            // forks the whole conversation.
+            requiresAnchor: capabilities.conversationForkRequiresAnchor,
+            mintUuid: () => NodeCrypto.randomUUID(),
+          });
+          if (!assembly.ok) {
+            return yield* new OrchestrationDispatchCommandError({
+              message: describeThreadForkAssemblyFailure(assembly.failure),
+            });
+          }
+
+          const workspaceCwd = resolveThreadWorkspaceCwd({
+            thread: source,
+            projects: Option.match(project, {
+              onNone: (): { readonly id: ProjectId; readonly workspaceRoot: string }[] => [],
+              onSome: (shell) => [shell],
+            }),
+          });
+
+          // Side effects run before dispatch and are compensated when a later
+          // step fails: created child aliases are deleted and copied files
+          // removed, so a failed fork leaves nothing behind.
+          const createdAliasRefs: CheckpointRef[] = [];
+          const copiedAttachmentPaths: string[] = [];
+          const rollbackForkSideEffects = Effect.gen(function* () {
+            if (createdAliasRefs.length > 0 && workspaceCwd !== undefined) {
+              yield* checkpointStore
+                .deleteCheckpointRefs({
+                  cwd: workspaceCwd,
+                  checkpointRefs: [...createdAliasRefs],
+                })
+                .pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning(
+                      "failed to remove child checkpoint aliases after a failed fork",
+                      { threadId: command.threadId, cause },
+                    ),
+                  ),
+                );
+            }
+            yield* Effect.forEach(
+              copiedAttachmentPaths,
+              (attachmentPath) =>
+                fileSystem.remove(attachmentPath, { force: true }).pipe(
+                  Effect.tapError((cause) =>
+                    Effect.logWarning("failed to remove a copied fork attachment", {
+                      attachmentPath,
+                      cause,
+                    }),
+                  ),
+                  Effect.orElseSucceed(() => undefined),
+                ),
+              { concurrency: 1 },
+            );
+          });
+
+          const applySideEffectsAndDispatch = Effect.gen(function* () {
+            if (assembly.aliasRefs.length > 0) {
+              if (workspaceCwd === undefined) {
+                return yield* new OrchestrationDispatchCommandError({
+                  message: "Cannot resolve the source thread's workspace to copy its checkpoints.",
+                });
+              }
+              const aliased = yield* checkpointStore
+                .aliasCheckpointRefs({ cwd: workspaceCwd, refs: assembly.aliasRefs })
+                .pipe(
+                  Effect.mapError((cause) =>
+                    toDispatchCommandError(
+                      cause,
+                      "Failed to copy the source thread's checkpoints.",
+                    ),
+                  ),
+                );
+              createdAliasRefs.push(...aliased);
+              // All or nothing: a child missing any inherited checkpoint ref
+              // would revert or diff against unrelated workspace state.
+              if (aliased.length !== assembly.aliasRefs.length) {
+                return yield* new OrchestrationDispatchCommandError({
+                  message: "The source thread's checkpoints are unavailable; cannot fork.",
+                });
+              }
+            }
+
+            yield* Effect.forEach(
+              assembly.attachmentCopies,
+              (copy) =>
+                Effect.gen(function* () {
+                  const claim = copyClaimedAttachment({
+                    attachmentsDir: config.attachmentsDir,
+                    attachment: copy.attachment,
+                    childThreadId: command.threadId,
+                    uuid: copy.uuid,
+                  });
+                  if (!claim.ok) {
+                    return yield* new OrchestrationDispatchCommandError({
+                      message: `Attachment '${copy.attachment.name}' cannot be copied into the fork: ${claim.reason}.`,
+                    });
+                  }
+                  // The assembler already rewrote the copied message rows to
+                  // this id; a divergent claim would strand those references.
+                  if (claim.finalId !== copy.finalId) {
+                    return yield* new OrchestrationDispatchCommandError({
+                      message: `Attachment '${copy.attachment.name}' cannot be copied into the fork: derived attachment ids diverged.`,
+                    });
+                  }
+                  // A copy, not a hard link: an agent editing the child's
+                  // file in place must not mutate the source thread's copy.
+                  yield* fileSystem
+                    .copyFile(claim.currentPath, claim.finalPath)
+                    .pipe(
+                      Effect.mapError((cause) =>
+                        toDispatchCommandError(
+                          cause,
+                          `Failed to copy attachment '${copy.attachment.name}' into the fork.`,
+                        ),
+                      ),
+                    );
+                  copiedAttachmentPaths.push(claim.finalPath);
+                }),
+              { concurrency: 1, discard: true },
+            );
+
+            // The client's commandId identifies the fork, so a retried
+            // request deduplicates through the engine's command receipts
+            // instead of creating a second child.
+            const dispatched = yield* dispatchFromClient({
+              ...assembly.command,
+              commandId: command.commandId,
+            }).pipe(
+              Effect.mapError((cause) =>
+                toDispatchCommandError(cause, "Failed to dispatch orchestration command"),
+              ),
+            );
+            // Same deletion-cleanup fence as thread.create: the child may
+            // reuse a previously deleted thread id.
+            yield* threadDeletionReactor.drainThrough(dispatched.sequence);
+            return dispatched;
+          });
+
+          const result = yield* applySideEffectsAndDispatch.pipe(
+            Effect.tapError(() => rollbackForkSideEffects),
+          );
+
+          yield* analytics.record("client.thread.forked", {
+            ...clientAnalyticsProps,
+            provider: providerInstanceId,
+            atEnd: assembly.command.forkSource?.atEnd ?? null,
+            workspace: command.workspace,
+          });
+          const durationMs = (yield* Clock.currentTimeMillis) - forkStartedAtMs;
+          yield* Effect.logInfo("thread fork dispatched", {
+            threadId: command.threadId,
+            sourceThreadId: command.sourceThreadId,
+            durationMs,
+            messageCount: assembly.command.history.messages.length,
+            activityCount: assembly.command.history.activities.length,
+            turnCount: assembly.command.history.turns.length,
+            proposedPlanCount: assembly.command.history.proposedPlans.length,
+            aliasedCheckpointRefCount: assembly.aliasRefs.length,
+            copiedAttachmentCount: assembly.attachmentCopies.length,
+          });
+          return result;
+        });
+
+        return startup
+          .enqueueCommand(forkProgram)
+          .pipe(
+            Effect.mapError((cause) =>
+              toDispatchCommandError(cause, "Failed to dispatch orchestration command"),
+            ),
+          );
+      };
+
       const dispatchNormalizedCommand = (
         normalizedCommand: OrchestrationCommand,
       ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> => {
@@ -1263,6 +1617,12 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,
             Effect.gen(function* () {
+              // Fork requests are materialized server-side from the source
+              // thread's projections, so they branch off before normalization
+              // (the normalizer rejects raw thread.fork on every transport).
+              if (command.type === "thread.fork") {
+                return yield* dispatchThreadFork(command);
+              }
               const normalizedCommand = yield* normalizeDispatchCommand(command);
               // Archive removes the thread from the client, so this transport
               // closes its session and terminals after the command lands.

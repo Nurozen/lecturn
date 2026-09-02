@@ -316,6 +316,7 @@ export type MessagesTimelineRow =
       assistantCopyStreaming: boolean;
       assistantTurnDiffSummary?: TurnDiffSummary | undefined;
       revertTurnCount?: number | undefined;
+      forkTurnId?: TurnId | undefined;
     }
   | {
       kind: "proposed-plan";
@@ -332,6 +333,12 @@ export type MessagesTimelineRow =
       kind: "thinking";
       id: string;
       createdAt: string | null;
+    }
+  | {
+      // Static marker in a forked thread showing where it diverged from the
+      // source conversation. At most one per timeline.
+      kind: "fork-divider";
+      id: string;
     };
 
 export interface StableMessagesTimelineRowsState {
@@ -622,6 +629,8 @@ export function deriveMessagesTimelineRows(input: {
   activeTurnStartedAt: string | null;
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
+  forkTurnIdByMessageId?: ReadonlyMap<MessageId, TurnId>;
+  forkDividerAfterMessageId?: MessageId | null;
 }): MessagesTimelineRow[] {
   const nextRows: MessagesTimelineRow[] = [];
   const durationStartByMessageId = computeMessageDurationStart(
@@ -911,7 +920,15 @@ export function deriveMessagesTimelineRows(input: {
         timelineEntry.message.role === "user"
           ? input.revertTurnCountByUserMessageId.get(timelineEntry.message.id)
           : undefined,
+      forkTurnId: input.forkTurnIdByMessageId?.get(timelineEntry.message.id),
     });
+
+    if (
+      input.forkDividerAfterMessageId != null &&
+      timelineEntry.message.id === input.forkDividerAfterMessageId
+    ) {
+      nextRows.push({ kind: "fork-divider", id: "fork-divider-row" });
+    }
   }
 
   if (input.isWorking && activeTurnHeaderIndex === input.timelineEntries.length) {
@@ -956,6 +973,10 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "working":
     case "thinking":
       return a.createdAt === (b as typeof a).createdAt;
+
+    // Fully determined by kind and id, both already compared above.
+    case "fork-divider":
+      return true;
 
     case "turn-fold": {
       const bf = b as typeof a;
@@ -1007,7 +1028,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
         a.assistantCopyStreaming === bm.assistantCopyStreaming &&
         a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
-        a.revertTurnCount === bm.revertTurnCount
+        a.revertTurnCount === bm.revertTurnCount &&
+        a.forkTurnId === bm.forkTurnId
       );
     }
   }

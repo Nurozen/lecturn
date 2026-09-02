@@ -434,6 +434,78 @@ export const ThreadLinkedPullRequest = Schema.Struct({
 });
 export type ThreadLinkedPullRequest = typeof ThreadLinkedPullRequest.Type;
 
+/** Lineage of a forked thread: where it came from and how much it inherited. */
+export const ThreadForkOrigin = Schema.Struct({
+  // Parent thread the fork was cut from.
+  threadId: ThreadId,
+  // Fork point: the child inherits the parent's history through this turn, inclusive.
+  turnId: TurnId,
+  // Parent's checkpoint turn count at the fork point.
+  turnCount: NonNegativeInt,
+  // UI anchor the user clicked to fork; null for fork-at-end entry points.
+  messageId: Schema.NullOr(MessageId),
+});
+export type ThreadForkOrigin = typeof ThreadForkOrigin.Type;
+
+/**
+ * Server-only snapshot of the parent's provider session at fork time,
+ * persisted in `projection_threads.fork_source_json` so the child's first
+ * send can natively fork the provider conversation. Never exposed on thread
+ * shells or details.
+ */
+export const ThreadForkProviderSource = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  // Source's native session cursor (opaque per adapter).
+  resumeCursor: Schema.Unknown,
+  // Provider-side anchor of the fork turn; null marks a legacy turn recorded
+  // before anchors were captured.
+  providerTurnRef: Schema.NullOr(TrimmedNonEmptyString),
+  // 1-based index of the fork turn among the source's turns that produced an
+  // assistant message (any state - interrupted turns can emit one too),
+  // mirroring the provider's native assistant-message list; used as the
+  // positional boundary when the anchor is null or unresolvable.
+  throughTurnOrdinal: NonNegativeInt,
+  // Source had no completed turn after the fork turn.
+  atEnd: Schema.Boolean,
+});
+export type ThreadForkProviderSource = typeof ThreadForkProviderSource.Type;
+
+export const ProjectionThreadTurnStatus = Schema.Literals([
+  "running",
+  "completed",
+  "interrupted",
+  "error",
+]);
+export type ProjectionThreadTurnStatus = typeof ProjectionThreadTurnStatus.Type;
+
+/** One inherited turn row, replayable into the child's turn projection. */
+export const ForkedTurnRow = Schema.Struct({
+  turnId: TurnId,
+  state: ProjectionThreadTurnStatus,
+  requestedAt: IsoDateTime,
+  startedAt: Schema.NullOr(IsoDateTime),
+  completedAt: Schema.NullOr(IsoDateTime),
+  pendingMessageId: Schema.NullOr(MessageId),
+  assistantMessageId: Schema.NullOr(MessageId),
+  sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  // checkpointRef inside is already child-namespaced by the fork assembler.
+  checkpoint: Schema.optional(OrchestrationCheckpointSummary),
+  providerTurnRef: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type ForkedTurnRow = typeof ForkedTurnRow.Type;
+
+/** Full inherited history carried by a materialized fork command and its event. */
+export const ThreadForkHistory = Schema.Struct({
+  // Copied messages always carry explicit attachments ([] if none): the
+  // message projection COALESCEs attachments on upsert, so an absent field
+  // would silently keep stale rows.
+  messages: Schema.Array(OrchestrationMessage),
+  activities: Schema.Array(OrchestrationThreadActivity),
+  proposedPlans: Schema.Array(OrchestrationProposedPlan),
+  turns: Schema.Array(ForkedTurnRow),
+});
+export type ThreadForkHistory = typeof ThreadForkHistory.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -446,6 +518,9 @@ export const OrchestrationThread = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
+  // Lineage of a forked thread. Optional so payloads from pre-fork servers
+  // and cached snapshots still decode.
+  forkedFrom: Schema.optional(Schema.NullOr(ThreadForkOrigin)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -522,6 +597,9 @@ export const OrchestrationThreadShell = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
+  // Lineage of a forked thread. Optional so payloads from pre-fork servers
+  // and cached snapshots still decode.
+  forkedFrom: Schema.optional(Schema.NullOr(ThreadForkOrigin)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -885,12 +963,14 @@ const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
-const ThreadTurnStartBootstrapPrepareWorktree = Schema.Struct({
+export const ThreadTurnStartBootstrapPrepareWorktree = Schema.Struct({
   projectCwd: TrimmedNonEmptyString,
   baseBranch: TrimmedNonEmptyString,
   branch: Schema.optional(TrimmedNonEmptyString),
   startFromOrigin: Schema.optional(Schema.Boolean),
 });
+export type ThreadTurnStartBootstrapPrepareWorktree =
+  typeof ThreadTurnStartBootstrapPrepareWorktree.Type;
 
 const ThreadTurnStartBootstrap = Schema.Struct({
   createThread: Schema.optional(ThreadTurnStartBootstrapCreateThread),
@@ -938,6 +1018,53 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
+});
+
+// Client wire shape of a fork request. Lives in ClientOrchestrationCommand
+// only: the server materializes it (assembling the inherited history) before
+// dispatch, so this shape can never reach the decider.
+const ClientThreadForkCommand = Schema.Struct({
+  type: Schema.Literal("thread.fork"),
+  commandId: CommandId,
+  // The new child thread id, minted by the client.
+  threadId: ThreadId,
+  sourceThreadId: ThreadId,
+  throughTurnId: TurnId,
+  sourceMessageId: Schema.optional(MessageId),
+  title: Schema.optional(Schema.String),
+  // Where the child works. Absent from P0 clients, so decoding defaults to
+  // inheriting the parent's branch/worktree.
+  workspace: Schema.Literals(["inherit", "new-worktree"]).pipe(
+    Schema.withDecodingDefault(Effect.succeed("inherit" as const)),
+  ),
+  prepareWorktree: Schema.optional(ThreadTurnStartBootstrapPrepareWorktree),
+  createdAt: IsoDateTime,
+});
+
+// Server-materialized fork command, sharing the "thread.fork" literal with the
+// client shape the way the turn-start pair does. Lives in
+// DispatchableClientOrchestrationCommand only; the ws dispatcher is its sole
+// producer.
+const ThreadForkCommand = Schema.Struct({
+  type: Schema.Literal("thread.fork"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  sourceThreadId: ThreadId,
+  throughTurnId: TurnId,
+  createdAt: IsoDateTime,
+  // The child thread's creation fields, resolved from the parent.
+  thread: Schema.Struct({
+    projectId: ProjectId,
+    title: Schema.String,
+    modelSelection: ModelSelection,
+    runtimeMode: RuntimeMode,
+    interactionMode: ProviderInteractionMode,
+    branch: Schema.NullOr(Schema.String),
+    worktreePath: Schema.NullOr(Schema.String),
+  }),
+  forkedFrom: ThreadForkOrigin,
+  forkSource: Schema.NullOr(ThreadForkProviderSource),
+  history: ThreadForkHistory,
 });
 
 const ThreadTurnInterruptCommand = Schema.Struct({
@@ -992,6 +1119,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
   ThreadCreateCommand,
+  ThreadForkCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
@@ -1020,6 +1148,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
   ThreadCreateCommand,
+  ClientThreadForkCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
@@ -1047,6 +1176,12 @@ const ThreadSessionSetCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   session: OrchestrationSession,
+  // Provider-side anchor of the turn that just completed; the decider stamps
+  // it into event metadata. Absent from producers that predate turn anchors.
+  providerTurnId: Schema.optional(TrimmedNonEmptyString),
+  // The turn the anchor belongs to. Absent when the session update is not a
+  // turn completion.
+  completedTurnId: Schema.optional(TurnId),
   createdAt: IsoDateTime,
 });
 
@@ -1164,6 +1299,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "thread.forked",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -1376,6 +1512,10 @@ export const ThreadSessionStopRequestedPayload = Schema.Struct({
 export const ThreadSessionSetPayload = Schema.Struct({
   threadId: ThreadId,
   session: OrchestrationSession,
+  // Which turn the metadata providerTurnId anchor belongs to, so the
+  // projection can stamp exactly that row. Optional so events from pre-anchor
+  // servers still decode.
+  completedTurnId: Schema.optional(TurnId),
 });
 
 export const ThreadProposedPlanUpsertedPayload = Schema.Struct({
@@ -1398,6 +1538,19 @@ export const ThreadActivityAppendedPayload = Schema.Struct({
   threadId: ThreadId,
   activity: OrchestrationThreadActivity,
 });
+
+export const ThreadForkedPayload = Schema.Struct({
+  threadId: ThreadId,
+  forkedFrom: ThreadForkOrigin,
+  // Server-only provider snapshot for the child's first send; never mapped
+  // onto wire thread shapes.
+  forkSource: Schema.NullOr(ThreadForkProviderSource),
+  history: ThreadForkHistory,
+  // The fork inherits the parent's linked pull request. Optional so events
+  // recorded by pre-fork servers still decode.
+  linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
+});
+export type ThreadForkedPayload = typeof ThreadForkedPayload.Type;
 
 /**
  * Which client connection dispatched the command that produced an event.
@@ -1579,6 +1732,11 @@ export const OrchestrationEvent = Schema.Union([
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
   }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.forked"),
+    payload: ThreadForkedPayload,
+  }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;
 
@@ -1629,14 +1787,6 @@ export const ProviderSessionRuntimeStatus = Schema.Literals([
   "error",
 ]);
 export type ProviderSessionRuntimeStatus = typeof ProviderSessionRuntimeStatus.Type;
-
-const ProjectionThreadTurnStatus = Schema.Literals([
-  "running",
-  "completed",
-  "interrupted",
-  "error",
-]);
-export type ProjectionThreadTurnStatus = typeof ProjectionThreadTurnStatus.Type;
 
 const ProjectionCheckpointRow = Schema.Struct({
   threadId: ThreadId,

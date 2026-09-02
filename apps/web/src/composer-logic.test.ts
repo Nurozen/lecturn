@@ -509,5 +509,12 @@ describe("parseStandaloneComposerSlashCommand", () => {
 
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
+    expect(parseStandaloneComposerSlashCommand("/fork now")).toBeNull();
+  });
+
+  it("parses standalone /fork command case-insensitively with trailing spaces", () => {
+    expect(parseStandaloneComposerSlashCommand("/fork")).toBe("fork");
+    expect(parseStandaloneComposerSlashCommand("/FORK")).toBe("fork");
+    expect(parseStandaloneComposerSlashCommand("/fork  ")).toBe("fork");
   });
 });

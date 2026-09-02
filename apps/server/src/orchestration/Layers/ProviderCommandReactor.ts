@@ -8,7 +8,9 @@ import {
   type ProjectId,
   type OrchestrationSession,
   ThreadId,
+  type ProviderInstanceId,
   type ProviderSession,
+  type ProviderSessionStartInput,
   type RuntimeMode,
   type TurnId,
 } from "@t3tools/contracts";
@@ -35,6 +37,7 @@ import type { ProviderServiceError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -66,6 +69,39 @@ type ProviderIntentEvent = Extract<
       | "thread.settled";
   }
 >;
+
+type ThreadForkStartInput = NonNullable<ProviderSessionStartInput["fork"]>;
+
+/**
+ * Structural equality over opaque resume cursors (plain JSON values round-
+ * tripped through the session directory), used to detect a parent binding
+ * that advanced past a fork's persisted snapshot.
+ */
+function resumeCursorEquals(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) {
+    return true;
+  }
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) {
+    return false;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item, index) => resumeCursorEquals(item, b[index]))
+    );
+  }
+  const aRecord = a as Record<string, unknown>;
+  const bRecord = b as Record<string, unknown>;
+  const aKeys = Object.keys(aRecord);
+  return (
+    aKeys.length === Object.keys(bRecord).length &&
+    aKeys.every(
+      (key) => Object.hasOwn(bRecord, key) && resumeCursorEquals(aRecord[key], bRecord[key]),
+    )
+  );
+}
 
 function toNonEmptyProviderInput(value: string | undefined): string | undefined {
   const normalized = value?.trim();
@@ -310,6 +346,7 @@ const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
   const providerRegistry = yield* ProviderRegistry;
+  const providerSessionDirectory = yield* ProviderSessionDirectory;
   const gitWorkflow = yield* GitWorkflowService;
   const fileSystem = yield* FileSystem.FileSystem;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
@@ -519,6 +556,86 @@ const make = Effect.gen(function* () {
     });
   });
 
+  // A fork child's first provider session natively forks the source
+  // conversation on the source's provider instance. Only a child that has
+  // never bound a provider session of its own forks; once a binding exists,
+  // restarts resume the child's own cursor and never re-fork.
+  const resolveForkStartOptions = Effect.fnUntraced(function* (threadId: ThreadId) {
+    const forkContext = Option.getOrUndefined(
+      yield* projectionSnapshotQuery.getThreadForkContextById(threadId),
+    );
+    const forkSource = forkContext?.forkSource ?? null;
+    const forkedFrom = forkContext?.forkedFrom ?? null;
+    if (forkSource === null || forkedFrom === null) {
+      return undefined;
+    }
+    const childBinding = yield* providerSessionDirectory.getBinding(threadId);
+    if (Option.isSome(childBinding)) {
+      return undefined;
+    }
+    // Prefer the parent's live cursor over the persisted fork snapshot: the
+    // snapshot goes stale when the parent keeps working after the fork.
+    const parentBinding = Option.getOrUndefined(
+      yield* providerSessionDirectory.getBinding(forkedFrom.threadId),
+    );
+    const parentLiveCursor =
+      parentBinding !== undefined &&
+      parentBinding.providerInstanceId === forkSource.providerInstanceId &&
+      parentBinding.resumeCursor !== undefined &&
+      parentBinding.resumeCursor !== null
+        ? parentBinding.resumeCursor
+        : undefined;
+    // An anchor-less fork on an anchor-requiring provider resumes the whole
+    // conversation at the source cursor. That is only faithful while the
+    // parent still sits at the fork point: once its live cursor moves past
+    // the snapshot, resuming would silently inherit the parent's newer
+    // turns, so the turn fails instead of forking the wrong history.
+    if (
+      forkSource.providerTurnRef === null &&
+      forkSource.atEnd &&
+      parentLiveCursor !== undefined &&
+      !resumeCursorEquals(parentLiveCursor, forkSource.resumeCursor)
+    ) {
+      const capabilities = yield* providerService
+        .getCapabilities(forkSource.providerInstanceId)
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapterRequestError({
+                provider: providerErrorLabelFromInstanceHint({
+                  instanceId: String(forkSource.providerInstanceId),
+                }),
+                method: "thread.turn.start",
+                detail: `Thread '${threadId}' cannot resolve fork capabilities for provider instance '${forkSource.providerInstanceId}'.`,
+                cause,
+              }),
+          ),
+        );
+      if (capabilities.conversationForkRequiresAnchor) {
+        return yield* new ProviderAdapterRequestError({
+          provider: providerErrorLabelFromInstanceHint({
+            instanceId: String(forkSource.providerInstanceId),
+          }),
+          method: "thread.turn.start",
+          detail: `Thread '${threadId}' was forked without a provider anchor and the source thread has advanced since; the provider can no longer fork at that point. Fork the source thread again to branch from its current state.`,
+        });
+      }
+    }
+    const sourceResumeCursor = parentLiveCursor ?? forkSource.resumeCursor;
+    const fork: ThreadForkStartInput = {
+      sourceResumeCursor,
+      sourceProviderInstanceId: forkSource.providerInstanceId,
+      providerTurnRef: forkSource.providerTurnRef,
+      throughTurnId: forkedFrom.turnId,
+      throughTurnOrdinal: forkSource.throughTurnOrdinal,
+      atEnd: forkSource.atEnd,
+    };
+    return {
+      providerInstanceId: forkSource.providerInstanceId,
+      fork,
+    };
+  });
+
   const ensureSessionForThread = Effect.fn("ensureSessionForThread")(function* (
     threadId: ThreadId,
     createdAt: string,
@@ -666,16 +783,19 @@ const make = Effect.gen(function* () {
     const startProviderSession = (input?: {
       readonly resumeCursor?: unknown;
       readonly provider?: ProviderDriverKind;
+      readonly providerInstanceId?: ProviderInstanceId;
+      readonly fork?: ThreadForkStartInput;
     }) =>
       providerService
         .startSession(threadId, {
           threadId,
           ...(preferredProvider ? { provider: preferredProvider } : {}),
-          providerInstanceId: desiredInstanceId,
+          providerInstanceId: input?.providerInstanceId ?? desiredInstanceId,
           ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
           ...(thread.title ? { title: thread.title } : {}),
           modelSelection: desiredModelSelection,
           ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
+          ...(input?.fork !== undefined ? { fork: input.fork } : {}),
           runtimeMode: desiredRuntimeMode,
         })
         .pipe(Effect.tap(() => refreshWorkspaceSnapshot));
@@ -777,7 +897,7 @@ const make = Effect.gen(function* () {
       return restartedSession.threadId;
     }
 
-    const startedSession = yield* startProviderSession(undefined);
+    const startedSession = yield* startProviderSession(yield* resolveForkStartOptions(threadId));
     yield* bindSessionToThread(startedSession);
     return startedSession.threadId;
   });
@@ -1153,8 +1273,16 @@ const make = Effect.gen(function* () {
 
     yield* ensureThreadWorktree(thread);
 
+    // A forked thread starts with inherited user messages whose timestamps
+    // predate the child thread's createdAt (the fork time), so the first-turn
+    // title/branch generation also fires on the fork's first post-fork turn.
+    const userMessages = thread.messages.filter((entry) => entry.role === "user");
+    const threadCreatedAtMs = Date.parse(thread.createdAt);
     const isFirstUserMessageTurn =
-      thread.messages.filter((entry) => entry.role === "user").length === 1;
+      userMessages.length === 1 ||
+      (thread.forkedFrom != null &&
+        userMessages.filter((entry) => Date.parse(entry.createdAt) > threadCreatedAtMs).length ===
+          1);
     if (isFirstUserMessageTurn) {
       const project = yield* resolveProject(thread.projectId);
       const generationCwd =

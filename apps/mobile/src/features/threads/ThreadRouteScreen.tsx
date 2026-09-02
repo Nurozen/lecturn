@@ -38,7 +38,10 @@ import {
 import { useKnownTerminalSessions } from "../../state/use-terminal-session";
 import { useSelectedThreadDetailState } from "../../state/use-thread-detail";
 import { useThreadSelection } from "../../state/use-thread-selection";
+import { useThreadShells } from "../../state/entities";
+import { useForkThread } from "../home/useThreadListActions";
 import { GitActionProgressOverlay } from "./GitActionProgressOverlay";
+import { resolveThreadForkAvailability } from "./thread-fork-menu";
 import {
   buildTerminalMenuSessions,
   nextOpenTerminalId,
@@ -283,6 +286,7 @@ function ThreadRouteContent(
   const routeConnectionState =
     routeEnvironmentRuntime?.connectionState ?? (environmentId ? "available" : connectionState);
   const routeConnectionError = routeEnvironmentRuntime?.connectionError ?? null;
+  const serverConfig = routeEnvironmentRuntime?.serverConfig ?? null;
   const selectedThreadWithDraftSettings = useMemo(
     () =>
       selectedThread
@@ -298,9 +302,25 @@ function ThreadRouteContent(
 
   /* ─── Native header theming ──────────────────────────────────────── */
   const usesNativeHeaderGlass = NATIVE_LIQUID_GLASS_SUPPORTED;
+  const threadShells = useThreadShells();
+  // Fork lineage reads as part of the subtitle (not tappable); the parent's
+  // title comes from the live shell list, which omits deleted and archived
+  // threads, so the label falls back to neutral wording.
+  const forkedFromLabel = useMemo(() => {
+    if (selectedThread === null || selectedThread.forkedFrom == null) {
+      return null;
+    }
+    const origin = selectedThread.forkedFrom;
+    const parent = threadShells.find(
+      (shell) =>
+        shell.environmentId === selectedThread.environmentId && shell.id === origin.threadId,
+    );
+    return parent !== undefined ? `Forked from ${parent.title}` : "Forked from another thread";
+  }, [selectedThread, threadShells]);
   const headerSubtitle = [
     selectedThreadProject?.title ?? null,
     selectedEnvironmentConnection?.environmentLabel ?? null,
+    forkedFromLabel,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -678,6 +698,96 @@ function ThreadRouteContent(
     ],
     [panes.primarySidebarVisible, props.onReturnToThread, navigation, togglePrimarySidebar],
   );
+  /* ─── Fork (thread actions) ───────────────────────────────────────── */
+  const forkThread = useForkThread();
+  const forkProvider = useMemo(
+    () =>
+      selectedThread === null
+        ? undefined
+        : serverConfig?.providers.find(
+            (candidate) =>
+              candidate.instanceId ===
+              (selectedThread.session?.providerInstanceId ??
+                selectedThread.modelSelection.instanceId),
+          ),
+    [selectedThread, serverConfig],
+  );
+  // "supported" hides the action entirely (old server or non-forking
+  // provider); the availability check below only disables it while a fork
+  // cannot dispatch right now.
+  const forkSupported =
+    serverConfig?.environment.capabilities.threadForking === true &&
+    forkProvider?.conversationFork === "native";
+  const forkAvailable =
+    selectedThread !== null &&
+    resolveThreadForkAvailability({
+      serverSupportsForking: serverConfig?.environment.capabilities.threadForking === true,
+      providerConversationFork: forkProvider?.conversationFork ?? null,
+      latestTurn: selectedThread.latestTurn,
+      sessionStatus: selectedThread.session?.status ?? null,
+      connected: routeConnectionState === "connected",
+    }).available;
+  const handleForkCurrentThread = useCallback(async () => {
+    if (selectedThread === null) {
+      return;
+    }
+    const child = await forkThread(selectedThread);
+    if (child === null) {
+      return;
+    }
+    // Replace (never push) so Thread routes don't nest; deferred a frame so
+    // the dismissing native menu cannot swallow the transition.
+    requestAnimationFrame(() => {
+      navigation.dispatch(
+        StackActions.replace("Thread", {
+          environmentId: String(child.environmentId),
+          threadId: String(child.threadId),
+        }),
+      );
+    });
+  }, [forkThread, navigation, selectedThread]);
+  const threadActionsHeaderItem = useMemo(
+    () =>
+      forkSupported
+        ? {
+            accessibilityLabel: "Thread actions",
+            icon: { name: "ellipsis.circle", type: "sfSymbol" as const },
+            identifier: "thread-right-thread-actions",
+            label: "Thread",
+            menu: {
+              items: [
+                {
+                  description: "Start a new thread with this history",
+                  disabled: !forkAvailable,
+                  icon: { name: "arrow.triangle.branch", type: "sfSymbol" as const },
+                  label: "Fork thread",
+                  onPress: () => void handleForkCurrentThread(),
+                  type: "action" as const,
+                },
+              ],
+              title: "Thread",
+            },
+            sharesBackground: true,
+            type: "menu" as const,
+            variant: "plain" as const,
+          }
+        : null,
+    [forkAvailable, forkSupported, handleForkCurrentThread],
+  );
+  const splitRightHeaderItems = useMemo<NativeHeaderItems>(
+    () =>
+      threadActionsHeaderItem === null
+        ? threadCenterHeaderItems
+        : [...threadCenterHeaderItems, threadActionsHeaderItem],
+    [threadActionsHeaderItem, threadCenterHeaderItems],
+  );
+  const compactRightHeaderItemsWithActions = useMemo<NativeHeaderItems>(
+    () =>
+      threadActionsHeaderItem === null
+        ? compactRightHeaderItems
+        : [...compactRightHeaderItems, threadActionsHeaderItem],
+    [compactRightHeaderItems, threadActionsHeaderItem],
+  );
   const androidHeaderActions = useMemo<ReadonlyArray<AndroidHeaderAction>>(() => {
     if (Platform.OS !== "android") return [];
 
@@ -708,6 +818,14 @@ function ThreadRouteContent(
       icon: "point.topleft.down.curvedto.point.bottomright.up",
       onPress: handleOpenGitInspector,
     });
+    if (forkSupported) {
+      actions.push({
+        accessibilityLabel: "Fork thread",
+        icon: "arrow.triangle.branch",
+        disabled: !forkAvailable,
+        onPress: () => void handleForkCurrentThread(),
+      });
+    }
     if (fileInspector.supported && selectedThreadCwd !== null) {
       actions.push({
         accessibilityLabel: "Toggle inspector",
@@ -718,6 +836,9 @@ function ThreadRouteContent(
     return actions;
   }, [
     fileInspector.supported,
+    forkAvailable,
+    forkSupported,
+    handleForkCurrentThread,
     handleOpenFilesInspector,
     handleOpenTerminal,
     handleOpenGitInspector,
@@ -758,7 +879,6 @@ function ThreadRouteContent(
     detailDeleted: selectedThreadDetailState.status === "deleted",
     connectionState: routeConnectionState,
   });
-  const serverConfig = routeEnvironmentRuntime?.serverConfig ?? null;
   const renderThreadRouteBody = (showActionControls: boolean) => (
     <>
       <ThreadGitControls {...threadGitControlProps} showActionControls={showActionControls} />
@@ -846,7 +966,8 @@ function ThreadRouteContent(
           // reserved for future breadcrumbs/status).
           unstable_headerRightItems:
             Platform.OS === "ios"
-              ? () => (layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems)
+              ? () =>
+                  layout.usesSplitView ? splitRightHeaderItems : compactRightHeaderItemsWithActions
               : undefined,
           unstable_headerSubtitle: usesNativeHeaderGlass ? headerSubtitle : undefined,
         }}

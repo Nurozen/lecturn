@@ -9,7 +9,7 @@ import {
   mergeEnvironmentThread,
 } from "@t3tools/client-runtime/state/threads";
 import type { ScopedProjectRef, ScopedThreadRef, ServerConfig } from "@t3tools/contracts";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ServerProvider } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 import { useMemo } from "react";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -220,6 +220,27 @@ export function readEnvironmentSupportsPinReorder(environmentId: EnvironmentId):
     appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
       .threadPinReorder === true
   );
+}
+
+/** Whether the environment's server understands thread.fork.
+    Same version-skew contract as settlement. */
+export function readEnvironmentSupportsForking(environmentId: EnvironmentId): boolean {
+  return (
+    appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
+      .threadForking === true
+  );
+}
+
+/** Provider snapshots for an environment, for gating reads outside React
+    (menus, palette actions, keybindings). Empty until the config loads. */
+export function readEnvironmentProviders(
+  environmentId: EnvironmentId,
+): ReadonlyArray<ServerProvider> {
+  return appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.providers ?? [];
+}
+
+export function readThreadDetail(ref: ScopedThreadRef): EnvironmentThread | null {
+  return appAtomRegistry.get(environmentThreadDetails.detailAtom(ref));
 }
 
 export function readEnvironmentThreadRefs(

@@ -2725,4 +2725,258 @@ projectionSnapshotLayer("ProjectionSnapshotQuery windowed thread detail", (it) =
       }
     }),
   );
+
+  it.effect("surfaces fork lineage on wire shapes without exposing the provider source", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_sessions`;
+      yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM projection_thread_messages`;
+      yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_projects`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at
+        )
+        VALUES ('project-fork', 'Fork project', '/tmp/project-fork', '[]',
+          '2026-03-03T00:00:00.000Z', '2026-03-03T00:00:00.000Z', NULL)
+      `;
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode,
+          forked_from_json, fork_source_json, archived_at,
+          pending_approval_count, pending_user_input_count, has_actionable_proposed_plan,
+          created_at, updated_at, deleted_at
+        )
+        VALUES ('thread-fork-child', 'project-fork', 'Fork child',
+          '{"provider":"codex","model":"gpt-5-codex"}', 'full-access', 'default',
+          '{"threadId":"thread-fork-parent","turnId":"turn-9","turnCount":9,"messageId":null}',
+          '{"providerInstanceId":"codex","resumeCursor":{"sessionId":"s-1"},"providerTurnRef":"resp_parent_9","throughTurnOrdinal":9,"atEnd":true}',
+          NULL, 0, 0, 0, '2026-03-03T00:00:01.000Z', '2026-03-03T00:00:01.000Z', NULL)
+      `;
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode,
+          forked_from_json, fork_source_json, archived_at,
+          pending_approval_count, pending_user_input_count, has_actionable_proposed_plan,
+          created_at, updated_at, deleted_at
+        )
+        VALUES ('thread-plain', 'project-fork', 'Plain thread',
+          '{"provider":"codex","model":"gpt-5-codex"}', 'full-access', 'default',
+          NULL, NULL, NULL, 0, 0, 0,
+          '2026-03-03T00:00:02.000Z', '2026-03-03T00:00:02.000Z', NULL)
+      `;
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode,
+          forked_from_json, fork_source_json, archived_at,
+          pending_approval_count, pending_user_input_count, has_actionable_proposed_plan,
+          created_at, updated_at, deleted_at
+        )
+        VALUES ('thread-fork-archived', 'project-fork', 'Archived fork',
+          '{"provider":"codex","model":"gpt-5-codex"}', 'full-access', 'default',
+          '{"threadId":"thread-fork-parent","turnId":"turn-2","turnCount":2,"messageId":"message-2"}',
+          NULL, '2026-03-03T00:00:05.000Z', 0, 0, 0,
+          '2026-03-03T00:00:03.000Z', '2026-03-03T00:00:03.000Z', NULL)
+      `;
+
+      const expectedForkedFrom = {
+        threadId: ThreadId.make("thread-fork-parent"),
+        turnId: asTurnId("turn-9"),
+        turnCount: 9,
+        messageId: null,
+      };
+
+      const shellSnapshot = yield* snapshotQuery.getShellSnapshot();
+      const childShell = shellSnapshot.threads.find((thread) => thread.id === "thread-fork-child");
+      const plainShell = shellSnapshot.threads.find((thread) => thread.id === "thread-plain");
+      assert.deepEqual(childShell?.forkedFrom, expectedForkedFrom);
+      assert.ok(plainShell !== undefined && !("forkedFrom" in plainShell));
+      assert.ok(childShell !== undefined && !("forkSource" in childShell));
+
+      const archivedSnapshot = yield* snapshotQuery.getArchivedShellSnapshot();
+      const archivedShell = archivedSnapshot.threads.find(
+        (thread) => thread.id === "thread-fork-archived",
+      );
+      assert.deepEqual(archivedShell?.forkedFrom, {
+        threadId: ThreadId.make("thread-fork-parent"),
+        turnId: asTurnId("turn-2"),
+        turnCount: 2,
+        messageId: asMessageId("message-2"),
+      });
+      assert.ok(archivedShell !== undefined && !("forkSource" in archivedShell));
+
+      const shellById = yield* snapshotQuery.getThreadShellById(ThreadId.make("thread-fork-child"));
+      assert.equal(shellById._tag, "Some");
+      if (shellById._tag === "Some") {
+        assert.deepEqual(shellById.value.forkedFrom, expectedForkedFrom);
+        assert.ok(!("forkSource" in shellById.value));
+      }
+
+      const detail = yield* snapshotQuery.getThreadDetailById(ThreadId.make("thread-fork-child"));
+      assert.equal(detail._tag, "Some");
+      if (detail._tag === "Some") {
+        assert.deepEqual(detail.value.forkedFrom, expectedForkedFrom);
+        assert.ok(!("forkSource" in detail.value));
+      }
+      const plainDetail = yield* snapshotQuery.getThreadDetailById(ThreadId.make("thread-plain"));
+      assert.equal(plainDetail._tag, "Some");
+      if (plainDetail._tag === "Some") {
+        assert.ok(!("forkedFrom" in plainDetail.value));
+      }
+
+      const readModel = yield* snapshotQuery.getCommandReadModel();
+      const childCommandThread = readModel.threads.find(
+        (thread) => thread.id === "thread-fork-child",
+      );
+      const plainCommandThread = readModel.threads.find((thread) => thread.id === "thread-plain");
+      assert.deepEqual(childCommandThread?.forkedFrom, expectedForkedFrom);
+      assert.ok(plainCommandThread !== undefined && !("forkedFrom" in plainCommandThread));
+      assert.ok(childCommandThread !== undefined && !("forkSource" in childCommandThread));
+    }),
+  );
+
+  it.effect("round-trips fork context and scopes it to non-deleted threads", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      const forkContext = yield* snapshotQuery.getThreadForkContextById(
+        ThreadId.make("thread-fork-child"),
+      );
+      assert.equal(forkContext._tag, "Some");
+      if (forkContext._tag === "Some") {
+        assert.deepEqual(forkContext.value.forkedFrom, {
+          threadId: ThreadId.make("thread-fork-parent"),
+          turnId: asTurnId("turn-9"),
+          turnCount: 9,
+          messageId: null,
+        });
+        assert.deepEqual(forkContext.value.forkSource, {
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          resumeCursor: { sessionId: "s-1" },
+          providerTurnRef: "resp_parent_9",
+          throughTurnOrdinal: 9,
+          atEnd: true,
+        });
+      }
+
+      const plainContext = yield* snapshotQuery.getThreadForkContextById(
+        ThreadId.make("thread-plain"),
+      );
+      assert.equal(plainContext._tag, "Some");
+      if (plainContext._tag === "Some") {
+        assert.equal(plainContext.value.forkedFrom, null);
+        assert.equal(plainContext.value.forkSource, null);
+      }
+
+      yield* sql`
+        UPDATE projection_threads
+        SET deleted_at = '2026-03-03T00:00:09.000Z'
+        WHERE thread_id = 'thread-plain'
+      `;
+      const deletedContext = yield* snapshotQuery.getThreadForkContextById(
+        ThreadId.make("thread-plain"),
+      );
+      assert.equal(deletedContext._tag, "None");
+
+      const missingContext = yield* snapshotQuery.getThreadForkContextById(
+        ThreadId.make("thread-missing"),
+      );
+      assert.equal(missingContext._tag, "None");
+    }),
+  );
+
+  it.effect("reads full activity history past the detail cap", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      for (let index = 0; index < 505; index += 1) {
+        const activityId = `activity-${String(index).padStart(5, "0")}`;
+        yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json, sequence, created_at
+          )
+          VALUES (${activityId}, 'thread-fork-child', NULL, 'info', 'runtime.note',
+            'note', '{}', ${index}, '2026-03-03T00:00:04.000Z')
+        `;
+      }
+
+      const detail = yield* snapshotQuery.getThreadDetailById(ThreadId.make("thread-fork-child"));
+      assert.equal(detail._tag, "Some");
+      if (detail._tag === "Some") {
+        assert.equal(detail.value.activities.length, 500);
+      }
+
+      const activities = yield* snapshotQuery.listThreadActivitiesById(
+        ThreadId.make("thread-fork-child"),
+      );
+      assert.equal(activities.length, 505);
+      assert.equal(activities[0]?.id, "activity-00000");
+      assert.equal(activities[504]?.id, "activity-00504");
+      assert.equal(activities[0]?.sequence, 0);
+    }),
+  );
+
+  it.effect("lists concrete turn rows with provider anchors and skips pending placeholders", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`
+        INSERT INTO projection_turns (
+          thread_id, turn_id, pending_message_id, source_proposed_plan_thread_id,
+          source_proposed_plan_id, assistant_message_id, state, requested_at, started_at,
+          completed_at, checkpoint_turn_count, checkpoint_ref, checkpoint_status,
+          checkpoint_files_json, provider_turn_ref
+        )
+        VALUES
+          ('thread-fork-child', 'turn-f1', NULL, NULL, NULL, NULL, 'completed',
+            '2026-03-03T00:01:00.000Z', '2026-03-03T00:01:00.000Z', '2026-03-03T00:01:01.000Z',
+            1, 'checkpoint-f1', 'ready', '[]', 'resp_child_1'),
+          ('thread-fork-child', 'turn-f2', NULL, NULL, NULL, NULL, 'completed',
+            '2026-03-03T00:02:00.000Z', '2026-03-03T00:02:00.000Z', '2026-03-03T00:02:01.000Z',
+            NULL, NULL, NULL, '[]', NULL),
+          ('thread-fork-child', NULL, 'message-pending', NULL, NULL, NULL, 'pending',
+            '2026-03-03T00:03:00.000Z', NULL, NULL, NULL, NULL, NULL, '[]', NULL)
+      `;
+
+      const turns = yield* snapshotQuery.listThreadTurnsById(ThreadId.make("thread-fork-child"));
+      assert.equal(turns.length, 2);
+      assert.deepEqual(
+        turns.map((turn) => turn.turnId),
+        [asTurnId("turn-f1"), asTurnId("turn-f2")],
+      );
+      assert.equal(turns[0]?.providerTurnRef, "resp_child_1");
+      assert.equal(turns[1]?.providerTurnRef, null);
+    }),
+  );
+
+  it.effect("lists thread ids by worktree path including archived threads", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`
+        UPDATE projection_threads
+        SET worktree_path = '/tmp/wt-shared'
+        WHERE thread_id IN ('thread-fork-child', 'thread-fork-archived', 'thread-plain')
+      `;
+
+      const threadIds = yield* snapshotQuery.listThreadIdsByWorktreePath("/tmp/wt-shared");
+      // thread-plain was soft-deleted above; the archived thread still counts.
+      assert.deepEqual(threadIds, [
+        ThreadId.make("thread-fork-child"),
+        ThreadId.make("thread-fork-archived"),
+      ]);
+
+      const unmatched = yield* snapshotQuery.listThreadIdsByWorktreePath("/tmp/wt-other");
+      assert.deepEqual(unmatched, []);
+    }),
+  );
 });

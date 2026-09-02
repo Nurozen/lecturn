@@ -1,14 +1,19 @@
 import {
+  CheckpointRef,
   EnvironmentId,
   MessageId,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
   TurnId,
+  type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import type { Atom } from "effect/unstable/reactivity";
 
-import type { Thread, ThreadShell } from "../types";
+import type { Thread, ThreadShell, TurnDiffSummary } from "../types";
+import type { TimelineEntry } from "../session-logic";
 import type { CodexArtifactTemplate } from "@t3tools/client-runtime/codex-artifact-templates";
 import {
   MAX_HIDDEN_MOUNTED_PREVIEW_THREADS,
@@ -43,6 +48,32 @@ import {
   shouldWriteThreadErrorToCurrentServerThread,
   toolGroupConsumesUpwardNavigation,
 } from "./ChatView.logic";
+import {
+  buildForkTitle,
+  buildForkTurnIdByMessageId,
+  resolveForkDisabledReason,
+  waitForThreadShell,
+} from "./ChatView.logic";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { environmentThreadShells } from "../state/threads";
+
+// `waitForThreadShell` reads the app-level shell atoms, whose real
+// implementation is fed by the connection runtime. Substitute a writable
+// atom family so tests can seed and mutate shell rows through the registry.
+vi.mock("../state/threads", async () => {
+  const { Atom } = await import("effect/unstable/reactivity");
+  const shellAtoms = Atom.family((_key: string) => Atom.make<ThreadShell | null>(null));
+  const detailAtoms = Atom.family((_key: string) => Atom.make<Thread | null>(null));
+  const refKey = (ref: ScopedThreadRef) => `${ref.environmentId}\u0000${ref.threadId}`;
+  return {
+    environmentThreadShells: {
+      threadShellAtom: (ref: ScopedThreadRef) => shellAtoms(refKey(ref)),
+    },
+    environmentThreadDetails: {
+      detailAtom: (ref: ScopedThreadRef) => detailAtoms(refKey(ref)),
+    },
+  };
+});
 
 describe("isVideoPreviewRequestCurrent", () => {
   it("rejects changed threads and replaced previews", () => {
@@ -734,6 +765,321 @@ describe("getStartedThreadModelChangeBlockReason", () => {
       description:
         "This provider does not allow switching models after a conversation has started.",
     });
+  });
+});
+
+describe("buildForkTitle", () => {
+  it("derives the child title from the parent title", () => {
+    expect(buildForkTitle("Fix login redirect")).toBe("Fix login redirect (fork)");
+  });
+
+  it("trims the parent title before suffixing", () => {
+    expect(buildForkTitle("  Fix login redirect  ")).toBe("Fix login redirect (fork)");
+  });
+
+  it("falls back for empty, whitespace, and missing parent titles", () => {
+    // The fallback keeps the "(fork)" suffix so the first-turn titleSeed
+    // guard still recognizes the minted title and auto-retitles the child.
+    expect(buildForkTitle("")).toBe("Untitled (fork)");
+    expect(buildForkTitle("   ")).toBe("Untitled (fork)");
+    expect(buildForkTitle(null)).toBe("Untitled (fork)");
+    expect(buildForkTitle(undefined)).toBe("Untitled (fork)");
+  });
+});
+
+describe("buildForkTurnIdByMessageId", () => {
+  const turnA = TurnId.make("turn-a");
+  const turnB = TurnId.make("turn-b");
+  const userM1 = MessageId.make("user-1");
+  const assistantM1 = MessageId.make("assistant-1");
+  const userM2 = MessageId.make("user-2");
+  const assistantM2 = MessageId.make("assistant-2");
+  const userM3 = MessageId.make("user-3");
+
+  const messageEntry = (id: MessageId, role: "user" | "assistant"): TimelineEntry => ({
+    id,
+    kind: "message",
+    createdAt: now,
+    message: {
+      id,
+      role,
+      text: "message text",
+      turnId: null,
+      streaming: false,
+      createdAt: now,
+      updatedAt: now,
+    },
+  });
+
+  const summaryFor = (
+    turnId: TurnId,
+    assistantMessageId: MessageId,
+    status: TurnDiffSummary["status"],
+  ): TurnDiffSummary => ({
+    turnId,
+    checkpointTurnCount: 1,
+    checkpointRef: CheckpointRef.make(`ref-${turnId}`),
+    status,
+    files: [],
+    assistantMessageId,
+    completedAt: now,
+  });
+
+  const entries = [
+    messageEntry(userM1, "user"),
+    messageEntry(assistantM1, "assistant"),
+    messageEntry(userM2, "user"),
+    messageEntry(assistantM2, "assistant"),
+    messageEntry(userM3, "user"),
+  ];
+
+  it("maps assistant rows to their own turn and user rows to the previous checkpoint's turn", () => {
+    const byMessageId = buildForkTurnIdByMessageId({
+      timelineEntries: entries,
+      turnDiffSummaryByAssistantMessageId: new Map([
+        [assistantM1, summaryFor(turnA, assistantM1, "ready")],
+        [assistantM2, summaryFor(turnB, assistantM2, "ready")],
+      ]),
+      activeRunningTurnId: null,
+    });
+
+    // The first user row has no prior checkpoint to fork through.
+    expect(byMessageId.get(userM1)).toBeUndefined();
+    expect(byMessageId.get(assistantM1)).toBe(turnA);
+    expect(byMessageId.get(userM2)).toBe(turnA);
+    expect(byMessageId.get(assistantM2)).toBe(turnB);
+    expect(byMessageId.get(userM3)).toBe(turnB);
+  });
+
+  it.each(["missing", "error"] as const)(
+    "skips %s checkpoints for both the assistant row and following user rows",
+    (status) => {
+      const byMessageId = buildForkTurnIdByMessageId({
+        timelineEntries: entries,
+        turnDiffSummaryByAssistantMessageId: new Map([
+          [assistantM1, summaryFor(turnA, assistantM1, "ready")],
+          [assistantM2, summaryFor(turnB, assistantM2, status)],
+        ]),
+        activeRunningTurnId: null,
+      });
+
+      // The interrupted/failed turn is never a fork point; the user row
+      // after it falls back to the last ready checkpoint instead of
+      // forking through the broken turn.
+      expect(byMessageId.get(assistantM2)).toBeUndefined();
+      expect(byMessageId.get(userM3)).toBe(turnA);
+      expect(byMessageId.get(assistantM1)).toBe(turnA);
+      expect(byMessageId.get(userM2)).toBe(turnA);
+    },
+  );
+
+  it("offers no fork points when no checkpoint is ready", () => {
+    const byMessageId = buildForkTurnIdByMessageId({
+      timelineEntries: entries,
+      turnDiffSummaryByAssistantMessageId: new Map([
+        [assistantM1, summaryFor(turnA, assistantM1, "missing")],
+        [assistantM2, summaryFor(turnB, assistantM2, "error")],
+      ]),
+      activeRunningTurnId: null,
+    });
+
+    expect(byMessageId.size).toBe(0);
+  });
+
+  it("excludes the active running turn", () => {
+    const byMessageId = buildForkTurnIdByMessageId({
+      timelineEntries: entries,
+      turnDiffSummaryByAssistantMessageId: new Map([
+        [assistantM1, summaryFor(turnA, assistantM1, "ready")],
+        [assistantM2, summaryFor(turnB, assistantM2, "ready")],
+      ]),
+      activeRunningTurnId: turnB,
+    });
+
+    expect(byMessageId.get(assistantM2)).toBeUndefined();
+    expect(byMessageId.get(userM3)).toBe(turnA);
+  });
+});
+
+describe("resolveForkDisabledReason", () => {
+  const nativeInstance = ProviderInstanceId.make("codex");
+  const cursorInstance = ProviderInstanceId.make("cursor");
+  const grokInstance = ProviderInstanceId.make("grok");
+  const legacyInstance = ProviderInstanceId.make("claudeAgent");
+  const replayInstance = ProviderInstanceId.make("opencode");
+  const providers = [
+    {
+      instanceId: nativeInstance,
+      driver: ProviderDriverKind.make("codex"),
+      conversationFork: "native",
+    },
+    {
+      instanceId: cursorInstance,
+      driver: ProviderDriverKind.make("cursor"),
+      displayName: "Cursor",
+      conversationFork: "unsupported",
+    },
+    {
+      instanceId: grokInstance,
+      driver: ProviderDriverKind.make("grok"),
+      conversationFork: "unsupported",
+    },
+    {
+      instanceId: legacyInstance,
+      driver: ProviderDriverKind.make("claudeAgent"),
+    },
+    {
+      instanceId: replayInstance,
+      driver: ProviderDriverKind.make("opencode"),
+      conversationFork: "replay",
+    },
+  ];
+  const allowedInput = {
+    providers,
+    modelSelection: { instanceId: nativeInstance, model: "gpt-5.4" },
+    capability: true,
+    hasCompletedTurn: true,
+  };
+
+  it("blocks every entry point until the server supports forking", () => {
+    expect(resolveForkDisabledReason({ ...allowedInput, capability: false })).toEqual({
+      title: "Forking needs a server update",
+      description: "Update the T3 Code server on this environment to fork threads.",
+    });
+  });
+
+  it("allows forking for a native provider with a completed turn", () => {
+    expect(resolveForkDisabledReason(allowedInput)).toBeNull();
+  });
+
+  it("names unsupported providers by display name when present", () => {
+    expect(
+      resolveForkDisabledReason({
+        ...allowedInput,
+        modelSelection: { instanceId: cursorInstance, model: "composer-2" },
+      }),
+    ).toEqual({
+      title: "Forking isn't supported for Cursor yet",
+      description: "This provider cannot resume a conversation into a new session.",
+    });
+  });
+
+  it("falls back to the driver slug for unsupported providers without a display name", () => {
+    expect(
+      resolveForkDisabledReason({
+        ...allowedInput,
+        modelSelection: { instanceId: grokInstance, model: "grok-build" },
+      }),
+    ).toMatchObject({ title: "Forking isn't supported for grok yet" });
+  });
+
+  it("treats an absent conversationFork flag as unsupported", () => {
+    expect(
+      resolveForkDisabledReason({
+        ...allowedInput,
+        modelSelection: { instanceId: legacyInstance, model: "claude-fable-5" },
+      }),
+    ).toMatchObject({ title: "Forking isn't supported for claudeAgent yet" });
+  });
+
+  it("treats unknown conversationFork values as unsupported", () => {
+    expect(
+      resolveForkDisabledReason({
+        ...allowedInput,
+        modelSelection: { instanceId: replayInstance, model: "opencode-default" },
+      }),
+    ).toMatchObject({ title: "Forking isn't supported for opencode yet" });
+  });
+
+  it("blocks forking before the thread has a completed turn", () => {
+    expect(resolveForkDisabledReason({ ...allowedInput, hasCompletedTurn: false })).toEqual({
+      title: "Nothing to fork yet",
+      description: "Forking becomes available once the thread has a completed turn.",
+    });
+  });
+
+  it("resolves the provider from the session over the composer selection", () => {
+    expect(
+      resolveForkDisabledReason({
+        ...allowedInput,
+        modelSelection: { instanceId: nativeInstance, model: "gpt-5.4" },
+        sessionProviderInstanceId: cursorInstance,
+      }),
+    ).toMatchObject({ title: "Forking isn't supported for Cursor yet" });
+    expect(
+      resolveForkDisabledReason({
+        ...allowedInput,
+        modelSelection: { instanceId: cursorInstance, model: "composer-2" },
+        sessionProviderInstanceId: nativeInstance,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("waitForThreadShell", () => {
+  let nextThreadOrdinal = 0;
+  const makeShellRef = (): ScopedThreadRef => ({
+    environmentId,
+    threadId: ThreadId.make(`thread-shell-${nextThreadOrdinal++}`),
+  });
+  const makeShell = (ref: ScopedThreadRef): ThreadShell => ({
+    environmentId: ref.environmentId,
+    id: ref.threadId,
+    projectId,
+    title: "Forked thread",
+    modelSelection: {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5.4",
+    },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+    latestTurn: null,
+    createdAt: now,
+    updatedAt: now,
+    archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
+    snoozedUntil: null,
+    snoozedAt: null,
+    session: null,
+    latestUserMessageAt: null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
+  });
+  const writableShellAtom = (ref: ScopedThreadRef) =>
+    environmentThreadShells.threadShellAtom(ref) as unknown as Atom.Writable<ThreadShell | null>;
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("resolves immediately when the shell row already exists", async () => {
+    const ref = makeShellRef();
+    appAtomRegistry.set(writableShellAtom(ref), makeShell(ref));
+
+    await expect(waitForThreadShell(ref)).resolves.toBe(true);
+  });
+
+  it("resolves once the shell row appears after subscribing", async () => {
+    const ref = makeShellRef();
+    const pending = waitForThreadShell(ref);
+
+    appAtomRegistry.set(writableShellAtom(ref), makeShell(ref));
+
+    await expect(pending).resolves.toBe(true);
+  });
+
+  it("resolves false when no shell row appears before the timeout", async () => {
+    vi.useFakeTimers();
+    const ref = makeShellRef();
+    const pending = waitForThreadShell(ref);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await expect(pending).resolves.toBe(false);
   });
 });
 

@@ -23,6 +23,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { ServerConfig } from "../../config.ts";
@@ -86,6 +87,9 @@ const runtimeMock = {
     promptEchoEvents: [] as Array<unknown>,
     closeError: null as Error | null,
     messages: [] as MessageEntry[],
+    // Per-session message lists (source vs forked child); sessions without
+    // an entry fall back to the shared `messages` list.
+    sessionMessagesById: new Map<string, MessageEntry[]>(),
     subscribedEvents: [] as Array<unknown | Promise<unknown>>,
     eventSubscribeObserved: null as (() => void) | null,
     permissionReplyCalls: [] as Array<{ requestID: string; reply: string }>,
@@ -110,7 +114,7 @@ const runtimeMock = {
     permissionListImplementation: null as (() => Promise<Array<PermissionRequest>>) | null,
     questionListImplementation: null as (() => Promise<Array<QuestionRequest>>) | null,
     sessionUpdateCalls: [] as Array<{ sessionID: string; permission: unknown }>,
-    forkCalls: [] as Array<{ sessionID: string; directory?: string }>,
+    forkCalls: [] as Array<{ sessionID: string; directory?: string; messageID?: string }>,
   },
   reset() {
     this.state.startCalls.length = 0;
@@ -136,6 +140,7 @@ const runtimeMock = {
     this.state.promptEchoEvents.length = 0;
     this.state.closeError = null;
     this.state.messages = [];
+    this.state.sessionMessagesById.clear();
     this.state.subscribedEvents = [];
     this.state.eventSubscribeObserved = null;
     this.state.permissionReplyCalls.length = 0;
@@ -244,10 +249,22 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
           runtimeMock.state.sessionUpdateCalls.push({ sessionID, permission });
           return { data: { id: sessionID } };
         },
-        fork: async ({ sessionID, directory }: { sessionID: string; directory?: string }) => {
+        fork: async ({
+          sessionID,
+          directory,
+          messageID,
+        }: {
+          sessionID: string;
+          directory?: string;
+          messageID?: string;
+        }) => {
           // Fork clones history into a new session bound to the directory.
           const forkedId = `${sessionID}_fork`;
-          runtimeMock.state.forkCalls.push({ sessionID, ...(directory ? { directory } : {}) });
+          runtimeMock.state.forkCalls.push({
+            sessionID,
+            ...(directory ? { directory } : {}),
+            ...(messageID ? { messageID } : {}),
+          });
           if (directory) {
             runtimeMock.state.sessionDirectoryById.set(forkedId, directory);
           }
@@ -313,7 +330,9 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
             });
           }
         },
-        messages: async () => ({ data: runtimeMock.state.messages }),
+        messages: async ({ sessionID }: { sessionID: string }) => ({
+          data: runtimeMock.state.sessionMessagesById.get(sessionID) ?? runtimeMock.state.messages,
+        }),
         message: async ({ sessionID, messageID }: { sessionID: string; messageID: string }) => {
           runtimeMock.state.messageCalls.push({ sessionID, messageID });
           if (runtimeMock.state.messageFailures > 0) {
@@ -498,6 +517,14 @@ const questionRequest = (id: string, sessionID: string): QuestionRequest => ({
     },
   ],
 });
+
+// Two-turn source history used by the conversation-fork tests: [u1, a1, u2, a2].
+const forkSourceHistory = (): MessageEntry[] => [
+  { info: { id: "msg-u1", role: "user" }, parts: [] },
+  { info: { id: "msg-a1", role: "assistant" }, parts: [] },
+  { info: { id: "msg-u2", role: "user" }, parts: [] },
+  { info: { id: "msg-a2", role: "assistant" }, parts: [] },
+];
 
 it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
   it.effect("reuses a configured OpenCode server URL instead of spawning a local server", () =>
@@ -1112,6 +1139,186 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("forks the source conversation before the successor of the anchor turn", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-fork-anchor");
+      runtimeMock.state.sessionMessagesById.set("ses_forksrc", forkSourceHistory());
+
+      const session = yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+        fork: {
+          sourceResumeCursor: { schemaVersion: 1, sessionId: "ses_forksrc" },
+          sourceProviderInstanceId: ProviderInstanceId.make("opencode"),
+          providerTurnRef: "msg-a1",
+          throughTurnId: TurnId.make("turn-fork-anchor"),
+          throughTurnOrdinal: 1,
+          atEnd: false,
+        },
+      });
+
+      // `session.fork`'s messageID is exclusive: passing the anchor's
+      // successor (msg-u2) keeps the child strictly through the fork turn.
+      NodeAssert.equal(runtimeMock.state.forkCalls.length, 1);
+      NodeAssert.equal(runtimeMock.state.forkCalls[0]?.sessionID, "ses_forksrc");
+      NodeAssert.equal(runtimeMock.state.forkCalls[0]?.messageID, "msg-u2");
+      NodeAssert.deepEqual(runtimeMock.state.revertCalls, []);
+      NodeAssert.deepEqual(runtimeMock.state.sessionCreateUrls, []);
+      // Fork copies history but not the permission ruleset — the child gets
+      // the requested runtimeMode asserted explicitly.
+      NodeAssert.equal(runtimeMock.state.sessionUpdateCalls.length, 1);
+      NodeAssert.equal(runtimeMock.state.sessionUpdateCalls[0]?.sessionID, "ses_forksrc_fork");
+      NodeAssert.equal(runtimeMock.state.sessionUpdateCalls[0]?.permission != null, true);
+      // The child's durable cursor is the forked session, never the source.
+      NodeAssert.deepEqual(session.resumeCursor, {
+        schemaVersion: 1,
+        sessionId: "ses_forksrc_fork",
+      });
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("falls back to the fork turn ordinal when no anchor was recorded", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-fork-ordinal");
+      runtimeMock.state.sessionMessagesById.set("ses_forkord", forkSourceHistory());
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+        fork: {
+          sourceResumeCursor: { schemaVersion: 1, sessionId: "ses_forkord" },
+          sourceProviderInstanceId: ProviderInstanceId.make("opencode"),
+          // Legacy fork turn: no provider anchor, so the 1-based assistant
+          // ordinal locates the fork turn (1st assistant = msg-a1).
+          providerTurnRef: null,
+          throughTurnId: TurnId.make("turn-fork-ordinal"),
+          throughTurnOrdinal: 1,
+          atEnd: false,
+        },
+      });
+
+      NodeAssert.equal(runtimeMock.state.forkCalls.length, 1);
+      NodeAssert.equal(runtimeMock.state.forkCalls[0]?.sessionID, "ses_forkord");
+      NodeAssert.equal(runtimeMock.state.forkCalls[0]?.messageID, "msg-u2");
+      NodeAssert.deepEqual(runtimeMock.state.revertCalls, []);
+      NodeAssert.equal(runtimeMock.state.sessionUpdateCalls.length, 1);
+      NodeAssert.equal(runtimeMock.state.sessionUpdateCalls[0]?.sessionID, "ses_forkord_fork");
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("forks at the live end and reverts messages the source appended mid-fork", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-fork-end-appended");
+      runtimeMock.state.sessionMessagesById.set("ses_forkend", forkSourceHistory());
+      // The source raced another turn between the adapter's live read and
+      // the fork call, so the unbounded fork copied two extra messages.
+      runtimeMock.state.sessionMessagesById.set("ses_forkend_fork", [
+        ...forkSourceHistory(),
+        { info: { id: "msg-u3", role: "user" }, parts: [] },
+        { info: { id: "msg-a3", role: "assistant" }, parts: [] },
+      ]);
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+        fork: {
+          sourceResumeCursor: { schemaVersion: 1, sessionId: "ses_forkend" },
+          sourceProviderInstanceId: ProviderInstanceId.make("opencode"),
+          providerTurnRef: "msg-a2",
+          throughTurnId: TurnId.make("turn-fork-end"),
+          throughTurnOrdinal: 2,
+          atEnd: true,
+        },
+      });
+
+      // No successor at read time → fork the whole session (no messageID)…
+      NodeAssert.equal(runtimeMock.state.forkCalls.length, 1);
+      NodeAssert.equal(runtimeMock.state.forkCalls[0]?.sessionID, "ses_forkend");
+      NodeAssert.equal(runtimeMock.state.forkCalls[0]?.messageID, undefined);
+      // …then trim the copied-over surplus back to the fork turn.
+      NodeAssert.deepEqual(runtimeMock.state.revertCalls, [
+        { sessionID: "ses_forkend_fork", messageID: "msg-u3" },
+      ]);
+      NodeAssert.equal(runtimeMock.state.sessionUpdateCalls.length, 1);
+      NodeAssert.equal(runtimeMock.state.sessionUpdateCalls[0]?.sessionID, "ses_forkend_fork");
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("forks at the live end without reverting when the source stayed idle", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-fork-end-idle");
+      runtimeMock.state.sessionMessagesById.set("ses_forkidle", forkSourceHistory());
+      runtimeMock.state.sessionMessagesById.set("ses_forkidle_fork", forkSourceHistory());
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+        fork: {
+          sourceResumeCursor: { schemaVersion: 1, sessionId: "ses_forkidle" },
+          sourceProviderInstanceId: ProviderInstanceId.make("opencode"),
+          providerTurnRef: "msg-a2",
+          throughTurnId: TurnId.make("turn-fork-idle"),
+          throughTurnOrdinal: 2,
+          atEnd: true,
+        },
+      });
+
+      NodeAssert.equal(runtimeMock.state.forkCalls.length, 1);
+      NodeAssert.equal(runtimeMock.state.forkCalls[0]?.messageID, undefined);
+      // The child already ends at the fork turn — nothing to revert.
+      NodeAssert.deepEqual(runtimeMock.state.revertCalls, []);
+      NodeAssert.equal(runtimeMock.state.sessionUpdateCalls.length, 1);
+      NodeAssert.equal(runtimeMock.state.sessionUpdateCalls[0]?.sessionID, "ses_forkidle_fork");
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect(
+    "fails fork start through the typed error channel when the source cursor is invalid",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* OpenCodeAdapter;
+        const threadId = asThreadId("thread-opencode-fork-bad-cursor");
+
+        const error = yield* adapter
+          .startSession({
+            provider: ProviderDriverKind.make("opencode"),
+            threadId,
+            runtimeMode: "full-access",
+            fork: {
+              // Wrong schema version: parseOpenCodeResume yields no session id.
+              sourceResumeCursor: { schemaVersion: 99, sessionId: "ses_forkbad" },
+              sourceProviderInstanceId: ProviderInstanceId.make("opencode"),
+              providerTurnRef: null,
+              throughTurnId: TurnId.make("turn-fork-bad"),
+              throughTurnOrdinal: 1,
+              atEnd: false,
+            },
+          })
+          .pipe(Effect.flip);
+
+        NodeAssert.equal(error._tag, "ProviderAdapterValidationError");
+        NodeAssert.deepEqual(runtimeMock.state.forkCalls, []);
+        NodeAssert.deepEqual(runtimeMock.state.sessionCreateUrls, []);
+        NodeAssert.equal(yield* adapter.hasSession(threadId), false);
+      }),
+  );
+
   it.effect("fails sendTurn for missing sessions through the typed error channel", () =>
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;
@@ -1331,6 +1538,62 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       NodeAssert.equal(session?.status, "running");
       NodeAssert.equal(String(session?.activeTurnId), String(turn.turnId));
       NodeAssert.equal(runtimeMock.state.promptCalls.length, 2);
+    }),
+  );
+
+  it.effect("anchors the idle turn completion to the last assistant message id", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-idle-anchor");
+      const assistantMessageEvent = promiseWithResolvers<unknown>();
+      const idleEvent = promiseWithResolvers<unknown>();
+      runtimeMock.state.subscribedEvents = [assistantMessageEvent.promise, idleEvent.promise];
+
+      const completedFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId && event.type === "turn.completed"),
+        Stream.runHead,
+        Effect.forkChild,
+      );
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId,
+        input: "Do the work",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "opencode/kimi-k3",
+        ),
+      });
+
+      assistantMessageEvent.resolve({
+        id: "evt-assistant-anchor",
+        type: "message.updated",
+        properties: {
+          sessionID: "http://127.0.0.1:9999/session",
+          info: { id: "msg_anchor_assistant_1", role: "assistant" },
+        },
+      });
+      idleEvent.resolve({
+        id: "evt-idle-anchor",
+        type: "session.status",
+        properties: {
+          sessionID: "http://127.0.0.1:9999/session",
+          status: { type: "idle" },
+        },
+      });
+      yield* advanceTestClock(250);
+
+      const completed = Option.getOrUndefined(
+        yield* Fiber.join(completedFiber).pipe(Effect.timeout("1 second")),
+      );
+      NodeAssert.equal(completed?.type, "turn.completed");
+      NodeAssert.equal(String(completed?.turnId), String(turn.turnId));
+      // The completion carries the assistant message id as the provider-side
+      // anchor for the turn.
+      NodeAssert.equal(completed?.providerRefs?.providerTurnId, "msg_anchor_assistant_1");
     }),
   );
 

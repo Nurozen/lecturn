@@ -97,6 +97,8 @@ import {
   resolveFileManagerRevealKindForConfig,
 } from "./ws.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
+import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
+import * as ProviderSessionDirectory from "./provider/Services/ProviderSessionDirectory.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
@@ -111,6 +113,7 @@ import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSna
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import { PersistenceSqlError } from "./persistence/Errors.ts";
+import { OrchestrationCommandReceiptRepository } from "./persistence/Services/OrchestrationCommandReceipts.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import * as ProviderService from "./provider/Services/ProviderService.ts";
 import { ProviderAdapterRequestError } from "./provider/Errors.ts";
@@ -154,7 +157,11 @@ import * as UsageService from "./usage/UsageService.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as Data from "effect/Data";
 
-import { makeOrchestrationIntegrationHarness } from "../integration/OrchestrationEngineHarness.integration.ts";
+import {
+  gitRefExists,
+  makeOrchestrationIntegrationHarness,
+} from "../integration/OrchestrationEngineHarness.integration.ts";
+import { checkpointRefForThreadTurn } from "./checkpointing/Utils.ts";
 import {
   measureHttpGet,
   openMeasuredWsClient,
@@ -451,10 +458,15 @@ const buildAppUnderTest = (options?: {
     >;
     terminalManager?: Partial<TerminalManager.TerminalManager["Service"]>;
     orchestrationEngine?: Partial<OrchestrationEngine.OrchestrationEngineService["Service"]>;
+    commandReceipts?: Partial<OrchestrationCommandReceiptRepository["Service"]>;
     threadDeletionReactor?: Partial<ThreadDeletionReactor["Service"]>;
     analyticsService?: Partial<AnalyticsService.AnalyticsService["Service"]>;
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"]>;
     checkpointDiffQuery?: Partial<CheckpointDiffQuery.CheckpointDiffQuery["Service"]>;
+    checkpointStore?: Partial<CheckpointStore.CheckpointStore["Service"]>;
+    providerSessionDirectory?: Partial<
+      ProviderSessionDirectory.ProviderSessionDirectory["Service"]
+    >;
     browserTraceCollector?: Partial<BrowserTraceCollector.BrowserTraceCollector["Service"]>;
     serverLifecycleEvents?: Partial<ServerLifecycleEvents.ServerLifecycleEvents["Service"]>;
     serverRuntimeStartup?: Partial<ServerRuntimeStartup.ServerRuntimeStartup["Service"]>;
@@ -506,6 +518,7 @@ const buildAppUnderTest = (options?: {
       logWebSocketEvents: false,
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,
+      threadForkingEnabled: true,
       ...options?.config,
     };
     const layerConfig = ServerConfig.layer(config);
@@ -844,6 +857,11 @@ const buildAppUnderTest = (options?: {
             latestSequence: Effect.succeed(0),
             ...options?.layers?.orchestrationEngine,
           }),
+          Layer.mock(OrchestrationCommandReceiptRepository)({
+            upsert: () => Effect.void,
+            getByCommandId: () => Effect.succeed(Option.none()),
+            ...options?.layers?.commandReceipts,
+          }),
           Layer.mock(ThreadDeletionReactor)({
             start: () => Effect.void,
             drainThrough: () => Effect.void,
@@ -889,23 +907,32 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(CheckpointDiffQuery.CheckpointDiffQuery)({
-          getTurnDiff: () =>
-            Effect.succeed({
-              threadId: defaultThreadId,
-              fromTurnCount: 0,
-              toTurnCount: 0,
-              diff: "",
-            }),
-          getFullThreadDiff: () =>
-            Effect.succeed({
-              threadId: defaultThreadId,
-              fromTurnCount: 0,
-              toTurnCount: 0,
-              diff: "",
-            }),
-          ...options?.layers?.checkpointDiffQuery,
-        }),
+        Layer.mergeAll(
+          Layer.mock(CheckpointStore.CheckpointStore)({
+            ...options?.layers?.checkpointStore,
+          }),
+          Layer.mock(ProviderSessionDirectory.ProviderSessionDirectory)({
+            getBinding: () => Effect.succeed(Option.none()),
+            ...options?.layers?.providerSessionDirectory,
+          }),
+          Layer.mock(CheckpointDiffQuery.CheckpointDiffQuery)({
+            getTurnDiff: () =>
+              Effect.succeed({
+                threadId: defaultThreadId,
+                fromTurnCount: 0,
+                toTurnCount: 0,
+                diff: "",
+              }),
+            getFullThreadDiff: () =>
+              Effect.succeed({
+                threadId: defaultThreadId,
+                fromTurnCount: 0,
+                toTurnCount: 0,
+                diff: "",
+              }),
+            ...options?.layers?.checkpointDiffQuery,
+          }),
+        ),
       ),
     );
 
@@ -9332,7 +9359,449 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assertFailure(result, terminalError);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
+
+  it("never streams thread.forked as a live thread detail event", () => {
+    assert.isFalse(
+      isThreadDetailEvent({
+        sequence: 1,
+        eventId: "evt-fork-detail-1",
+        commandId: CommandId.make("cmd-fork-detail-1"),
+        aggregateKind: "thread",
+        aggregateId: "thread-fork-detail-child",
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        type: "thread.forked",
+        payload: { threadId: "thread-fork-detail-child" },
+      } as unknown as OrchestrationEvent),
+    );
+  });
+
+  it.effect("rejects thread.fork when the kill switch is off and records no analytics", () =>
+    Effect.gen(function* () {
+      const analyticsEvents: Array<{
+        event: string;
+        properties: Readonly<Record<string, unknown>> | undefined;
+      }> = [];
+      yield* buildAppUnderTest({
+        config: { threadForkingEnabled: false },
+        layers: {
+          analyticsService: {
+            record: (event, properties) =>
+              Effect.sync(() => analyticsEvents.push({ event, properties })),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const error = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.fork",
+            commandId: CommandId.make("fork-disabled-cmd"),
+            threadId: ThreadId.make("fork-disabled-child"),
+            sourceThreadId: ThreadId.make("fork-disabled-source"),
+            throughTurnId: TurnId.make("fork-disabled-turn"),
+            workspace: "inherit",
+            createdAt: "2026-07-01T00:00:00.000Z",
+          }).pipe(Effect.flip),
+        ),
+      );
+      assertInclude(String(error), "disabled");
+      assert.isFalse(analyticsEvents.some((entry) => entry.event === "client.thread.forked"));
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "short-circuits a retried thread.fork to its recorded receipt without side effects",
+    () =>
+      Effect.gen(function* () {
+        const analyticsEvents: Array<string> = [];
+        let engineDispatches = 0;
+        const acceptedCommandId = CommandId.make("fork-replay-accepted-cmd");
+        const rejectedCommandId = CommandId.make("fork-replay-rejected-cmd");
+        const childThreadId = ThreadId.make("fork-replay-child");
+        yield* buildAppUnderTest({
+          layers: {
+            commandReceipts: {
+              getByCommandId: ({ commandId }) =>
+                Effect.succeed(
+                  commandId === acceptedCommandId
+                    ? Option.some({
+                        commandId,
+                        aggregateKind: "thread" as const,
+                        aggregateId: childThreadId,
+                        acceptedAt: "2026-07-01T00:00:00.000Z",
+                        resultSequence: 41,
+                        status: "accepted" as const,
+                        error: null,
+                      })
+                    : commandId === rejectedCommandId
+                      ? Option.some({
+                          commandId,
+                          aggregateKind: "thread" as const,
+                          aggregateId: childThreadId,
+                          acceptedAt: "2026-07-01T00:00:00.000Z",
+                          resultSequence: 0,
+                          status: "rejected" as const,
+                          error: "Recorded fork rejection.",
+                        })
+                      : Option.none(),
+                ),
+            },
+            orchestrationEngine: {
+              dispatch: () =>
+                Effect.sync(() => {
+                  engineDispatches += 1;
+                  return { sequence: 99 };
+                }),
+            },
+            analyticsService: {
+              record: (event) => Effect.sync(() => analyticsEvents.push(event)),
+            },
+          },
+        });
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const forkCommand = (commandId: CommandId) =>
+          ({
+            type: "thread.fork",
+            commandId,
+            threadId: childThreadId,
+            sourceThreadId: ThreadId.make("fork-replay-source"),
+            throughTurnId: TurnId.make("fork-replay-turn"),
+            workspace: "inherit",
+            createdAt: "2026-07-01T00:00:00.000Z",
+          }) as const;
+        const dispatched = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.dispatchCommand](forkCommand(acceptedCommandId)),
+          ),
+        );
+        assert.equal(dispatched.sequence, 41);
+
+        const rejection = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.dispatchCommand](forkCommand(rejectedCommandId)).pipe(
+              Effect.flip,
+            ),
+          ),
+        );
+        assertInclude(String(rejection), "Recorded fork rejection.");
+
+        assert.equal(engineDispatches, 0);
+        assert.isFalse(analyticsEvents.includes("client.thread.forked"));
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects thread.fork onto a live thread id before running any side effects", () =>
+    Effect.gen(function* () {
+      const analyticsEvents: Array<string> = [];
+      let engineDispatches = 0;
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getThreadShellById: (threadId) =>
+              Effect.succeed(
+                threadId === defaultThreadId
+                  ? Option.some(makeDefaultOrchestrationThreadShell())
+                  : Option.none(),
+              ),
+          },
+          orchestrationEngine: {
+            dispatch: () =>
+              Effect.sync(() => {
+                engineDispatches += 1;
+                return { sequence: 99 };
+              }),
+          },
+          analyticsService: {
+            record: (event) => Effect.sync(() => analyticsEvents.push(event)),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const error = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.fork",
+            commandId: CommandId.make("fork-collision-cmd"),
+            threadId: defaultThreadId,
+            sourceThreadId: ThreadId.make("fork-collision-source"),
+            throughTurnId: TurnId.make("fork-collision-turn"),
+            workspace: "inherit",
+            createdAt: "2026-07-01T00:00:00.000Z",
+          }).pipe(Effect.flip),
+        ),
+      );
+      assertInclude(String(error), "already exists");
+      assert.equal(engineDispatches, 0);
+      assert.isFalse(analyticsEvents.includes("client.thread.forked"));
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("gates fork capability on the instance the fork actually runs on", () =>
+    Effect.gen(function* () {
+      // The source thread's own selection points at a fork-capable instance,
+      // but its nearest-ancestor fork source (an unsent fork, or a source that
+      // switched models) lives on one that cannot fork - the gate must reject
+      // using that instance.
+      const legacyInstanceId = ProviderInstanceId.make("cursor_legacy");
+      const sourceThreadId = ThreadId.make("fork-gate-source");
+      const sourceDetail = {
+        ...makeDefaultOrchestrationReadModel().threads[0]!,
+        id: sourceThreadId,
+      };
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getThreadShellById: () => Effect.succeed(Option.none()),
+            getThreadDetailById: (threadId) =>
+              Effect.succeed(
+                threadId === sourceThreadId ? Option.some(sourceDetail) : Option.none(),
+              ),
+            listThreadTurnsById: () => Effect.succeed([]),
+            listThreadActivitiesById: () => Effect.succeed([]),
+            getThreadForkContextById: () =>
+              Effect.succeed(
+                Option.some({
+                  forkedFrom: {
+                    threadId: ThreadId.make("fork-gate-grandparent"),
+                    turnId: TurnId.make("fork-gate-grandparent-turn"),
+                    turnCount: 1,
+                    messageId: null,
+                  },
+                  forkSource: {
+                    providerInstanceId: legacyInstanceId,
+                    resumeCursor: { opaque: "grandparent-cursor" },
+                    providerTurnRef: null,
+                    throughTurnOrdinal: 1,
+                    atEnd: true,
+                  },
+                }),
+              ),
+            getProjectShellById: () => Effect.succeed(Option.none()),
+          },
+          providerService: {
+            getCapabilities: (instanceId) =>
+              Effect.succeed(
+                instanceId === legacyInstanceId
+                  ? {
+                      sessionModelSwitch: "in-session" as const,
+                      conversationFork: "unsupported" as const,
+                      conversationForkRequiresAnchor: false,
+                    }
+                  : {
+                      sessionModelSwitch: "in-session" as const,
+                      conversationFork: "native" as const,
+                      conversationForkRequiresAnchor: false,
+                    },
+              ),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const error = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.fork",
+            commandId: CommandId.make("fork-gate-cmd"),
+            threadId: ThreadId.make("fork-gate-child"),
+            sourceThreadId,
+            throughTurnId: TurnId.make("fork-gate-turn"),
+            workspace: "inherit",
+            createdAt: "2026-07-01T00:00:00.000Z",
+          }).pipe(Effect.flip),
+        ),
+      );
+      assertInclude(String(error), "cursor_legacy");
+      assertInclude(String(error), "does not support forking");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
 });
+
+it.live(
+  "forks a thread over the WebSocket into a child that inherits the sliced history",
+  () =>
+    Effect.gen(function* () {
+      const provider = ProviderDriverKind.make("codex");
+      const projectId = ProjectId.make("fork-ws-project");
+      const sourceThreadId = ThreadId.make("fork-ws-source");
+      const childThreadId = ThreadId.make("fork-ws-child");
+      const modelSelection = transferModelSelection(provider);
+      const analyticsEvents: Array<{
+        event: string;
+        properties: Readonly<Record<string, unknown>> | undefined;
+      }> = [];
+
+      yield* Effect.acquireUseRelease(
+        makeOrchestrationIntegrationHarness({ provider }),
+        (harness) =>
+          Effect.gen(function* () {
+            yield* harness.engine.dispatch({
+              type: "project.create",
+              commandId: CommandId.make("fork-ws:project-create"),
+              projectId,
+              title: "Fork Project",
+              workspaceRoot: harness.workspaceDir,
+              defaultModelSelection: modelSelection,
+              createdAt: "2026-07-01T00:00:00.000Z",
+            });
+            yield* harness.engine.dispatch({
+              type: "thread.create",
+              commandId: CommandId.make("fork-ws:thread-create"),
+              threadId: sourceThreadId,
+              projectId,
+              title: "Fork Source",
+              modelSelection,
+              runtimeMode: "approval-required",
+              interactionMode: "default",
+              branch: null,
+              worktreePath: harness.workspaceDir,
+              createdAt: "2026-07-01T00:00:00.000Z",
+            });
+            yield* harness.adapterHarness!.queueTurnResponseForNextSession({
+              events: [
+                {
+                  type: "turn.started",
+                  eventId: EventId.make("fork-ws-evt-1"),
+                  provider,
+                  createdAt: "2026-07-01T00:01:00.000Z",
+                  threadId: sourceThreadId,
+                  turnId: "fork-ws-provider-turn-1",
+                },
+                {
+                  type: "message.delta",
+                  eventId: EventId.make("fork-ws-evt-2"),
+                  provider,
+                  createdAt: "2026-07-01T00:01:00.100Z",
+                  threadId: sourceThreadId,
+                  turnId: "fork-ws-provider-turn-1",
+                  delta: "Reply worth inheriting.\n",
+                },
+                {
+                  type: "turn.completed",
+                  eventId: EventId.make("fork-ws-evt-3"),
+                  provider,
+                  createdAt: "2026-07-01T00:01:00.200Z",
+                  threadId: sourceThreadId,
+                  turnId: "fork-ws-provider-turn-1",
+                  status: "completed",
+                },
+              ],
+            });
+            yield* harness.engine.dispatch({
+              type: "thread.turn.start",
+              commandId: CommandId.make("fork-ws:turn-1"),
+              threadId: sourceThreadId,
+              message: {
+                messageId: MessageId.make("fork-ws-user-1"),
+                role: "user",
+                text: "Establish some history to fork.",
+                attachments: [],
+              },
+              modelSelection,
+              runtimeMode: "approval-required",
+              interactionMode: "default",
+              createdAt: "2026-07-01T00:01:00.000Z",
+            });
+            yield* harness.waitForReceipt(
+              (receipt) =>
+                receipt.type === "turn.processing.quiesced" &&
+                receipt.threadId === sourceThreadId &&
+                receipt.checkpointTurnCount === 1,
+            );
+            yield* harness.drainProviderRuntime;
+            yield* harness.drainCheckpointReactor;
+            const source = yield* harness.waitForThread(
+              sourceThreadId,
+              (thread) =>
+                thread.session?.status === "ready" &&
+                thread.checkpoints.length === 1 &&
+                thread.messages.some(
+                  (message) => message.role === "assistant" && message.streaming === false,
+                ),
+            );
+            const sourceTurns = yield* harness.snapshotQuery.listThreadTurnsById(sourceThreadId);
+            const throughTurnId = sourceTurns.find((turn) => turn.state === "completed")?.turnId;
+            assert.isDefined(throughTurnId);
+            assert.isNotNull(throughTurnId);
+
+            yield* buildAppUnderTest({
+              layers: {
+                orchestrationEngine: harness.engine,
+                projectionSnapshotQuery: harness.snapshotQuery,
+                providerService: harness.providerService,
+                checkpointStore: harness.checkpointStore,
+                analyticsService: {
+                  record: (event, properties) =>
+                    Effect.sync(() => analyticsEvents.push({ event, properties })),
+                },
+              },
+            });
+
+            const wsUrl = yield* getWsServerUrl("/ws");
+            const dispatched = yield* Effect.scoped(
+              withWsRpcClient(wsUrl, (client) =>
+                client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+                  type: "thread.fork",
+                  commandId: CommandId.make("fork-ws:fork-1"),
+                  threadId: childThreadId,
+                  sourceThreadId,
+                  throughTurnId: throughTurnId!,
+                  title: "Forked over WS",
+                  workspace: "inherit",
+                  createdAt: "2026-07-01T00:02:00.000Z",
+                }),
+              ),
+            );
+            assert.isAbove(dispatched.sequence, 0);
+
+            const child = yield* harness.waitForThread(
+              childThreadId,
+              (thread) => (thread.forkedFrom ?? null) !== null,
+            );
+            assert.equal(child.forkedFrom?.threadId, sourceThreadId);
+            assert.equal(child.forkedFrom?.turnId, throughTurnId);
+            assert.equal(child.title, "Forked over WS");
+            assert.deepEqual(
+              child.messages.map((message) => [message.role, message.text]),
+              source.messages.map((message) => [message.role, message.text]),
+            );
+            assert.equal(child.checkpoints.length, source.checkpoints.length);
+            assert.equal(child.activities.length, source.activities.length);
+
+            // The D23 aliases: the child's canonical refs resolve in the
+            // shared checkpoint ref store.
+            assert.isTrue(
+              gitRefExists(harness.workspaceDir, checkpointRefForThreadTurn(childThreadId, 0)),
+            );
+            assert.isTrue(
+              gitRefExists(harness.workspaceDir, checkpointRefForThreadTurn(childThreadId, 1)),
+            );
+
+            const parentAfter = yield* harness.snapshotQuery
+              .getThreadDetailById(sourceThreadId)
+              .pipe(Effect.map(Option.getOrThrow));
+            assert.equal(parentAfter.messages.length, source.messages.length);
+            assert.equal(parentAfter.forkedFrom ?? null, null);
+
+            const childShell = yield* harness.snapshotQuery
+              .getThreadShellById(childThreadId)
+              .pipe(Effect.map(Option.getOrThrow));
+            assert.equal(childShell.forkedFrom?.threadId, sourceThreadId);
+
+            const forkAnalytics = analyticsEvents.filter(
+              (entry) => entry.event === "client.thread.forked",
+            );
+            assert.equal(forkAnalytics.length, 1);
+            assert.equal(forkAnalytics[0]?.properties?.workspace, "inherit");
+          }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+        (harness) => harness.dispose,
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
+  60_000,
+);
 
 it.live(
   "reports thread HTTP and WebSocket transfer budgets",

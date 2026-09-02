@@ -3,6 +3,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
   type OrchestrationShellSnapshot,
   type OrchestrationThread,
 } from "@t3tools/contracts";
@@ -205,6 +206,7 @@ describe("environment entity projections", () => {
       title: "Cached thread",
       branch: "stale-branch",
       worktreePath: "/repo/stale-worktree",
+      forkedFrom: null,
       deletedAt: null,
       messages,
       proposedPlans: [],
@@ -217,6 +219,12 @@ describe("environment entity projections", () => {
       title: "Current thread",
       branch: "current-branch",
       worktreePath: "/repo/current-worktree",
+      forkedFrom: {
+        threadId: OTHER_THREAD_ID,
+        turnId: TurnId.make("turn-3"),
+        turnCount: 3,
+        messageId: null,
+      },
     };
 
     const merged = mergeEnvironmentThread(detail, shell);
@@ -225,6 +233,12 @@ describe("environment entity projections", () => {
       title: "Current thread",
       branch: "current-branch",
       worktreePath: "/repo/current-worktree",
+      forkedFrom: {
+        threadId: OTHER_THREAD_ID,
+        turnId: "turn-3",
+        turnCount: 3,
+        messageId: null,
+      },
     });
     expect(merged?.messages).toBe(messages);
   });

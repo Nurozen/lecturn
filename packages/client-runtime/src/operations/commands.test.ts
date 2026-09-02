@@ -4,6 +4,7 @@ import {
   ORCHESTRATION_WS_METHODS,
   ProjectId,
   ThreadId,
+  TurnId,
   type ClientOrchestrationCommand,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
@@ -24,6 +25,7 @@ import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import {
   archiveThread,
   createProject,
+  forkThread,
   settleThread,
   stopThreadSession,
   unsettleThread,
@@ -95,6 +97,34 @@ describe("environment commands", () => {
           title: "Project",
           workspaceRoot: "/workspace/project",
           createdAt: "2026-06-06T00:00:00.000Z",
+        },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("dispatches thread.fork with timestamped command metadata", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+
+      const result = yield* forkThread({
+        threadId: ThreadId.make("thread-child"),
+        sourceThreadId: ThreadId.make("thread-1"),
+        throughTurnId: TurnId.make("turn-3"),
+        workspace: "inherit",
+        createdAt: "2026-06-06T00:02:00.000Z",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(result).toEqual({ sequence: 1 });
+      expect(dispatched).toEqual([
+        {
+          type: "thread.fork",
+          commandId: "00000000-0000-4000-8000-000000000000",
+          threadId: "thread-child",
+          sourceThreadId: "thread-1",
+          throughTurnId: "turn-3",
+          workspace: "inherit",
+          createdAt: "2026-06-06T00:02:00.000Z",
         },
       ]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),

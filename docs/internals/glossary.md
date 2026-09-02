@@ -43,6 +43,18 @@ A single user-to-assistant work cycle inside a thread. It starts with user input
 
 A user-visible log item attached to a thread. In [the contracts][1], activities cover important non-message events like approvals, tool actions, and failures. They are projected into thread state in [projector.ts][4].
 
+#### Fork
+
+A new thread that continues an existing thread from a completed point. In [the contracts][1], the server-materialized `thread.fork` command produces `thread.created` plus `thread.forked` on the child aggregate, with lineage stored as `forkedFrom`. History assembly lives in [threadFork.ts][27].
+
+#### Fork point
+
+The turn boundary a fork continues from: through turn _N_, inclusive. It is anchored by the command's `throughTurnId` and, on the provider side, by the native turn reference recorded per completed turn. See [the contracts][1] and [threadFork.ts][27].
+
+#### Inherited history
+
+The messages, activities, proposed plans, and turns copied into a fork through the fork point, keeping their original timestamps. The `ThreadForkHistory` payload in [the contracts][1] is projected into real rows for the child by [projector.ts][4].
+
 ### Orchestration
 
 Orchestration is the server-side domain layer that turns runtime activity into stable app state. The main entry point is [OrchestrationEngine.ts][7], with core logic in [decider.ts][8] and [projector.ts][4].
@@ -201,3 +213,4 @@ ships T3 Code already matching it.
 [24]: ./overview.md
 [25]: ../../apps/server/src/environmentTheme.ts
 [26]: ../user/environment-theme.md
+[27]: ../../apps/server/src/orchestration/threadFork.ts

@@ -54,6 +54,12 @@ it.effect("parses keybinding rules", () =>
     });
     assert.strictEqual(parsedClose.command, "terminal.close");
 
+    const parsedChatFork = yield* decode(KeybindingRule, {
+      key: "mod+shift+f",
+      command: "chat.fork",
+    });
+    assert.strictEqual(parsedChatFork.command, "chat.fork");
+
     const parsedDiffToggle = yield* decode(KeybindingRule, {
       key: "mod+d",
       command: "diff.toggle",

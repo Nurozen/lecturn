@@ -10,6 +10,7 @@ import { usePrimaryEnvironmentId } from "../state/environments";
 import { selectProjectGroupingSettings } from "../logicalProject";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { dispatchPreviewAction } from "../components/preview/previewActionBus";
+import { useForkThread } from "../hooks/useForkThread";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { isPreviewFocused } from "../lib/previewFocus";
@@ -27,6 +28,7 @@ function ChatRouteGlobalShortcuts() {
   const selectedThreadKeysSize = useThreadSelectionStore((state) => state.selectedThreadKeys.size);
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
     useHandleNewThread();
+  const { forkThreadAtLatestTurn } = useForkThread();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const legacySidebarEnabled = useLegacySidebarEnabled();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
@@ -108,6 +110,17 @@ function ChatRouteGlobalShortcuts() {
         return;
       }
 
+      if (command === "chat.fork") {
+        event.preventDefault();
+        event.stopPropagation();
+        // Only server threads fork; drafts and non-thread routes no-op. The
+        // fork callback toasts when provider or turn state blocks it.
+        if (routeThreadRef) {
+          void forkThreadAtLatestTurn(routeThreadRef);
+        }
+        return;
+      }
+
       if (command === "preview.toggle") {
         event.preventDefault();
         event.stopPropagation();
@@ -160,6 +173,7 @@ function ChatRouteGlobalShortcuts() {
     activeDraftThread,
     activeThread,
     clearSelection,
+    forkThreadAtLatestTurn,
     handleNewThread,
     keybindings,
     defaultProjectRef,

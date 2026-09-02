@@ -1657,10 +1657,20 @@ const make = Effect.gen(function* () {
             );
           }
 
+          const completedTurnAnchor =
+            event.type === "turn.completed"
+              ? {
+                  ...(event.providerRefs?.providerTurnId !== undefined
+                    ? { providerTurnId: event.providerRefs.providerTurnId }
+                    : {}),
+                  ...(eventTurnId !== undefined ? { completedTurnId: eventTurnId } : {}),
+                }
+              : {};
           yield* orchestrationEngine.dispatch({
             type: "thread.session.set",
             commandId: yield* providerCommandId(event, "thread-session-set"),
             threadId: thread.id,
+            ...completedTurnAnchor,
             session: {
               threadId: thread.id,
               status,

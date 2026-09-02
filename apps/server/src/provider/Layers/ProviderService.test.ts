@@ -246,6 +246,8 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     provider,
     capabilities: {
       sessionModelSwitch: "in-session",
+      conversationFork: "native",
+      conversationForkRequiresAnchor: false,
     },
     startSession,
     sendTurn,
@@ -2527,6 +2529,125 @@ describe("agent browser access", () => {
       const issued = yield* startSessionWith(true, threadId);
 
       assert.deepEqual(issued, [threadId]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("startSession fork", () => {
+  const makeForkLayer = (codex: ReturnType<typeof makeFakeCodexAdapter>) => {
+    const recorded: Array<{
+      readonly event: string;
+      readonly properties: Readonly<Record<string, unknown>> | undefined;
+    }> = [];
+    const registry = makeAdapterRegistryMock({
+      [ProviderDriverKind.make("codex")]: codex.adapter,
+    });
+    const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+      Layer.provide(SqlitePersistenceMemory),
+    );
+    const layer = makeProviderServiceLive().pipe(
+      Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
+      Layer.provide(ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer))),
+      Layer.provide(defaultServerSettingsLayer),
+      Layer.provide(serverConfigTestLayer),
+      Layer.provide(
+        Layer.succeed(
+          AnalyticsService.AnalyticsService,
+          AnalyticsService.AnalyticsService.of({
+            record: (event, properties) =>
+              Effect.sync(() => {
+                recorded.push({ event, properties });
+              }),
+            flush: Effect.void,
+          }),
+        ),
+      ),
+      Layer.provide(
+        Layer.succeed(
+          ProviderEventLoggers.ProviderEventLoggers,
+          ProviderEventLoggers.NoOpProviderEventLoggers,
+        ),
+      ),
+    );
+    return { layer, recorded };
+  };
+
+  const forkInput = {
+    sourceResumeCursor: { opaque: "parent-cursor" },
+    sourceProviderInstanceId: codexInstanceId,
+    providerTurnRef: "provider-anchor-1",
+    throughTurnId: asTurnId("turn-fork-1"),
+    throughTurnOrdinal: 1,
+    atEnd: false,
+  };
+
+  it.effect("fork survives decode, reaches the adapter and marks analytics", () =>
+    Effect.gen(function* () {
+      const codex = makeFakeCodexAdapter();
+      const { layer, recorded } = makeForkLayer(codex);
+
+      yield* Effect.gen(function* () {
+        const provider = yield* ProviderService.ProviderService;
+        yield* provider.startSession(asThreadId("thread-fork-child"), {
+          threadId: asThreadId("thread-fork-child"),
+          provider: CODEX_DRIVER,
+          providerInstanceId: codexInstanceId,
+          fork: forkInput,
+          runtimeMode: "full-access",
+        });
+      }).pipe(Effect.provide(layer));
+
+      assert.equal(codex.startSession.mock.calls.length, 1);
+      const adapterInput = codex.startSession.mock.calls[0]?.[0];
+      assert.deepEqual(adapterInput?.fork, forkInput);
+      assert.isFalse("resumeCursor" in (adapterInput ?? {}));
+      const started = recorded.find((entry) => entry.event === "provider.session.started");
+      assert.equal(started?.properties?.forked, true);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects fork together with resumeCursor before touching the adapter", () =>
+    Effect.gen(function* () {
+      const codex = makeFakeCodexAdapter();
+      const { layer } = makeForkLayer(codex);
+
+      const failure = yield* Effect.flip(
+        Effect.gen(function* () {
+          const provider = yield* ProviderService.ProviderService;
+          return yield* provider.startSession(asThreadId("thread-fork-conflict"), {
+            threadId: asThreadId("thread-fork-conflict"),
+            provider: CODEX_DRIVER,
+            providerInstanceId: codexInstanceId,
+            fork: forkInput,
+            resumeCursor: { opaque: "child-cursor" },
+            runtimeMode: "full-access",
+          });
+        }).pipe(Effect.provide(layer)),
+      );
+
+      assert.instanceOf(failure, ProviderValidationError);
+      assert.include(failure.issue, "mutually exclusive");
+      assert.equal(codex.startSession.mock.calls.length, 0);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("marks non-fork session starts as not forked", () =>
+    Effect.gen(function* () {
+      const codex = makeFakeCodexAdapter();
+      const { layer, recorded } = makeForkLayer(codex);
+
+      yield* Effect.gen(function* () {
+        const provider = yield* ProviderService.ProviderService;
+        yield* provider.startSession(asThreadId("thread-plain"), {
+          threadId: asThreadId("thread-plain"),
+          provider: CODEX_DRIVER,
+          providerInstanceId: codexInstanceId,
+          runtimeMode: "full-access",
+        });
+      }).pipe(Effect.provide(layer));
+
+      const started = recorded.find((entry) => entry.event === "provider.session.started");
+      assert.equal(started?.properties?.forked, false);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

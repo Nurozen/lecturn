@@ -32,11 +32,12 @@ import {
   type SessionPhase,
   type Thread,
   type ThreadShell,
+  type TurnDiffSummary,
 } from "../types";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import * as Schema from "effect/Schema";
 import { appAtomRegistry } from "../rpc/atomRegistry";
-import { environmentThreadDetails } from "../state/threads";
+import { environmentThreadDetails, environmentThreadShells } from "../state/threads";
 import {
   filterTerminalContextsWithText,
   stripInlineTerminalContextPlaceholders,
@@ -633,6 +634,147 @@ export function getStartedThreadModelChangeBlockReason(input: {
     title: "Start a new chat to change models",
     description: "This provider does not allow switching models after a conversation has started.",
   };
+}
+
+/** Child thread title minted at fork time; also sent as the first-turn
+    titleSeed so the server's retitle gate accepts a replacement. The
+    untitled fallback keeps the "(fork)" suffix so that gate still matches. */
+export function buildForkTitle(parentTitle: string | null | undefined): string {
+  const base = parentTitle?.trim();
+  return base ? `${base} (fork)` : "Untitled (fork)";
+}
+
+/**
+ * Fork points per hover row: an assistant message forks through its own
+ * turn; a user message forks through the previous assistant checkpoint's
+ * turn (its text is re-seeded into the child's composer). Only `ready`
+ * checkpoints are offered — interrupted or failed turns (`missing`/`error`)
+ * and the active running turn have no forkable checkpoint, and the server
+ * rejects forks through them.
+ */
+export function buildForkTurnIdByMessageId(input: {
+  timelineEntries: ReadonlyArray<TimelineEntry>;
+  turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
+  activeRunningTurnId: TurnId | null;
+}): Map<MessageId, TurnId> {
+  const byMessageId = new Map<MessageId, TurnId>();
+  let lastCompletedTurnId: TurnId | null = null;
+  for (const entry of input.timelineEntries) {
+    if (entry.kind !== "message") {
+      continue;
+    }
+    const message = entry.message;
+    if (message.role === "user") {
+      if (lastCompletedTurnId !== null) {
+        byMessageId.set(message.id, lastCompletedTurnId);
+      }
+      continue;
+    }
+    if (message.role !== "assistant") {
+      continue;
+    }
+    const summary = input.turnDiffSummaryByAssistantMessageId.get(message.id);
+    if (!summary || summary.status !== "ready" || summary.turnId === input.activeRunningTurnId) {
+      continue;
+    }
+    byMessageId.set(message.id, summary.turnId);
+    lastCompletedTurnId = summary.turnId;
+  }
+  return byMessageId;
+}
+
+/**
+ * Why forking is unavailable for a thread, or null when it is allowed.
+ * Mirrors `getStartedThreadModelChangeBlockReason`: pure, fed provider
+ * snapshots plus the environment capability so every entry point (message
+ * hover, menus, palette, keybinding, /fork) blocks with the same copy.
+ */
+export function resolveForkDisabledReason(input: {
+  providers: ReadonlyArray<
+    Pick<ServerProvider, "instanceId" | "driver" | "displayName" | "conversationFork">
+  >;
+  modelSelection: ModelSelection | null;
+  sessionProviderInstanceId?: ModelSelection["instanceId"] | null | undefined;
+  capability: boolean;
+  hasCompletedTurn: boolean;
+}): { title: string; description: string } | null {
+  if (!input.capability) {
+    return {
+      title: "Forking needs a server update",
+      description: "Update the T3 Code server on this environment to fork threads.",
+    };
+  }
+  const instanceId = input.sessionProviderInstanceId ?? input.modelSelection?.instanceId ?? null;
+  const provider =
+    instanceId === null
+      ? null
+      : (input.providers.find((snapshot) => snapshot.instanceId === instanceId) ?? null);
+  // Unknown or absent values read as unsupported, matching the contract's
+  // forward-compatibility rule for `conversationFork`.
+  if (provider?.conversationFork !== "native") {
+    const label = provider?.displayName ?? provider?.driver ?? "this provider";
+    return {
+      title: `Forking isn't supported for ${label} yet`,
+      description: "This provider cannot resume a conversation into a new session.",
+    };
+  }
+  if (!input.hasCompletedTurn) {
+    return {
+      title: "Nothing to fork yet",
+      description: "Forking becomes available once the thread has a completed turn.",
+    };
+  }
+  return null;
+}
+
+/**
+ * Resolves once the child thread's shell row exists (or the timeout lapses,
+ * returning false). Forks never satisfy `waitForStartedServerThread` — that
+ * waiter looks for a *started* detail, and a fork has no session until its
+ * first send — so navigation-after-fork waits on the shell atom instead.
+ */
+export async function waitForThreadShell(
+  threadRef: ScopedThreadRef,
+  timeoutMs = 5_000,
+): Promise<boolean> {
+  const shellAtom = environmentThreadShells.threadShellAtom(threadRef);
+  const getShell = () => appAtomRegistry.get(shellAtom);
+
+  if (getShell() !== null) {
+    return true;
+  }
+
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    let timeoutId: ReturnType<typeof globalThis.setTimeout> | null = null;
+    const finish = (result: boolean) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timeoutId !== null) {
+        globalThis.clearTimeout(timeoutId);
+      }
+      unsubscribe();
+      resolve(result);
+    };
+
+    const unsubscribe = appAtomRegistry.subscribe(shellAtom, (shell) => {
+      if (shell === null) {
+        return;
+      }
+      finish(true);
+    });
+
+    if (getShell() !== null) {
+      finish(true);
+      return;
+    }
+
+    timeoutId = globalThis.setTimeout(() => {
+      finish(false);
+    }, timeoutMs);
+  });
 }
 
 export async function waitForStartedServerThread(

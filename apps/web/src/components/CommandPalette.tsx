@@ -45,6 +45,7 @@ import {
   FileSearchIcon,
   FolderIcon,
   FolderPlusIcon,
+  GitForkIcon,
   LinkIcon,
   MessageSquareIcon,
   PaletteIcon,
@@ -69,6 +70,7 @@ import { useAtomValue } from "@effect/atom-react";
 
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
+import { useForkThread } from "../hooks/useForkThread";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { useClientSettings } from "../hooks/useSettings";
@@ -83,7 +85,12 @@ import { vcsEnvironment } from "../state/vcs";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import { useProject, useProjects, useThreadShells } from "../state/entities";
+import {
+  readEnvironmentSupportsForking,
+  useProject,
+  useProjects,
+  useThreadShells,
+} from "../state/entities";
 import { useThreadSearch } from "../state/queries";
 import * as ThreadPr from "./ThreadStatusIndicators";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
@@ -593,8 +600,9 @@ function OpenCommandPaletteDialog(props: {
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
+  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
     useHandleNewThread();
+  const { forkThreadAtLatestTurn } = useForkThread();
   const projects = useProjects();
   const changeRequestSnapshotByKey = useAtomValue(ThreadPr.threadChangeRequestSnapshotsAtom);
   const activeThreadProject = useProject(
@@ -1603,6 +1611,29 @@ function OpenCommandPaletteDialog(props: {
       icon: <LinkIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "thread.copyReference",
       run: copyActiveThreadReference,
+    });
+  }
+
+  // Forking acts on the viewed server thread; drafts and non-thread routes
+  // have nothing to fork, and environments without the capability never
+  // offer it. Finer gating (provider support, completed turn) toasts at
+  // invoke time via the shared fork dispatcher.
+  if (
+    activeThread &&
+    routeThreadRef &&
+    readEnvironmentSupportsForking(routeThreadRef.environmentId)
+  ) {
+    const forkThreadRef = routeThreadRef;
+    actionItems.push({
+      kind: "action",
+      value: "action:fork-thread",
+      searchTerms: ["fork thread", "fork", "branch", "duplicate", "continue from here"],
+      title: "Fork thread",
+      icon: <GitForkIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "chat.fork",
+      run: async () => {
+        await forkThreadAtLatestTurn(forkThreadRef);
+      },
     });
   }
 

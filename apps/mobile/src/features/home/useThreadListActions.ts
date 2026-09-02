@@ -1,5 +1,7 @@
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
+import { ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Haptics from "expo-haptics";
 import { useCallback, useRef } from "react";
@@ -7,6 +9,7 @@ import { Alert } from "react-native";
 
 import { showConfirmDialog } from "../../components/ConfirmDialogHost";
 import { scopedThreadKey } from "../../lib/scopedEntities";
+import { uuidv4 } from "../../lib/uuid";
 import { refreshArchivedThreadsForEnvironment } from "../archive/useArchivedThreadSnapshots";
 import {
   pinOrderKeyBetween,
@@ -17,6 +20,11 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { environmentServerConfigsAtom } from "../../state/server";
 import { environmentThreadShells, threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
+import {
+  resolveThreadForkAvailability,
+  type ThreadForkUnavailableReason,
+} from "../threads/thread-fork-menu";
 
 /** Version skew: never send settle/unsettle to a server that predates them
     (capability defaults false on decode for older servers). */
@@ -54,6 +62,13 @@ function environmentSupportsTitleRegeneration(
   return (
     appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
       .threadTitleRegeneration === true
+  );
+}
+
+function environmentSupportsThreadForking(environmentId: EnvironmentThreadShell["environmentId"]) {
+  return (
+    appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
+      .threadForking === true
   );
 }
 
@@ -213,6 +228,99 @@ function useConfirmDeleteThread(
   );
 }
 
+const FORK_UNAVAILABLE_MESSAGES: Record<ThreadForkUnavailableReason, string> = {
+  disconnected: "This environment is offline. Reconnect to fork this thread.",
+  "server-unsupported":
+    "This environment's server does not support forking yet. Update the server to fork threads.",
+  "provider-unsupported": "This thread's agent does not support forking conversations.",
+  "turn-in-progress": "This thread is working. Wait for the turn to finish, then try again.",
+  "no-completed-turn": "This thread has no completed turn to fork from yet.",
+};
+
+/**
+ * Forks a thread at its latest completed turn and resolves to the new child
+ * thread's ref (null when the fork was refused or failed, after alerting).
+ * Shared by the thread list rows and the thread screen's header action so
+ * every surface applies the same availability gates.
+ */
+export function useForkThread(): (
+  thread: EnvironmentThreadShell,
+) => Promise<ScopedThreadRef | null> {
+  const forkMutation = useAtomCommand(threadEnvironment.fork, { reportFailure: false });
+  const { connectedEnvironments } = useRemoteConnectionStatus();
+  const forkInFlightThreadKeys = useRef(new Set<string>());
+
+  return useCallback(
+    async (thread: EnvironmentThreadShell) => {
+      const key = scopedThreadKey(thread.environmentId, thread.id);
+      if (forkInFlightThreadKeys.current.has(key)) {
+        return null;
+      }
+      const provider = appAtomRegistry
+        .get(environmentServerConfigsAtom)
+        .get(thread.environmentId)
+        ?.providers.find(
+          (candidate) =>
+            candidate.instanceId ===
+            (thread.session?.providerInstanceId ?? thread.modelSelection.instanceId),
+        );
+      const latestTurn = thread.latestTurn;
+      const availability = resolveThreadForkAvailability({
+        serverSupportsForking: environmentSupportsThreadForking(thread.environmentId),
+        providerConversationFork: provider?.conversationFork ?? null,
+        latestTurn,
+        sessionStatus: thread.session?.status ?? null,
+        connected: connectedEnvironments.some(
+          (environment) =>
+            environment.environmentId === thread.environmentId &&
+            environment.connectionState === "connected",
+        ),
+      });
+      if (!availability.available || latestTurn === null) {
+        Alert.alert(
+          "Could not fork thread",
+          FORK_UNAVAILABLE_MESSAGES[
+            availability.available ? "no-completed-turn" : availability.reason
+          ],
+        );
+        return null;
+      }
+
+      forkInFlightThreadKeys.current.add(key);
+      selectionHaptic();
+      try {
+        const childThreadId = ThreadId.make(uuidv4());
+        const result = await forkMutation({
+          environmentId: thread.environmentId,
+          input: {
+            threadId: childThreadId,
+            sourceThreadId: thread.id,
+            throughTurnId: latestTurn.turnId,
+            // The untitled fallback keeps the "(fork)" suffix so the
+            // first-turn titleSeed guard still auto-retitles the child.
+            title: thread.title.trim() ? `${thread.title.trim()} (fork)` : "Untitled (fork)",
+            workspace: "inherit",
+          },
+        });
+        if (result._tag === "Failure") {
+          const error = Cause.squash(result.cause);
+          Alert.alert(
+            "Could not fork thread",
+            error instanceof Error && error.message.trim().length > 0
+              ? error.message
+              : "The thread could not be forked.",
+          );
+          return null;
+        }
+        return scopeThreadRef(thread.environmentId, childThreadId);
+      } finally {
+        forkInFlightThreadKeys.current.delete(key);
+      }
+    },
+    [connectedEnvironments, forkMutation],
+  );
+}
+
 export function useThreadListActions(): {
   readonly archiveThread: (thread: EnvironmentThreadShell) => void;
   readonly confirmDeleteThread: (thread: EnvironmentThreadShell) => void;
@@ -227,8 +335,10 @@ export function useThreadListActions(): {
     direction: "up" | "down",
   ) => Promise<boolean>;
   readonly regenerateThreadTitle: (thread: EnvironmentThreadShell) => Promise<boolean>;
+  readonly forkThread: (thread: EnvironmentThreadShell) => Promise<ScopedThreadRef | null>;
 } {
   const executeAction = useThreadActionExecutor();
+  const forkThread = useForkThread();
   const snoozeMutation = useAtomCommand(threadEnvironment.snooze, { reportFailure: false });
   const unsnoozeMutation = useAtomCommand(threadEnvironment.unsnooze, { reportFailure: false });
   const pinMutation = useAtomCommand(threadEnvironment.pin, { reportFailure: false });
@@ -543,6 +653,7 @@ export function useThreadListActions(): {
     unpinThread,
     movePinnedThread,
     regenerateThreadTitle,
+    forkThread,
   };
 }
 

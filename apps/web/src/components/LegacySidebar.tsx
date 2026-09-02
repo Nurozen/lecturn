@@ -80,12 +80,14 @@ import { releaseProjectDraftUploads } from "../lib/composerDraftUploads";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isMacPlatform } from "../lib/utils";
 import {
+  readEnvironmentSupportsForking,
   readThreadShell,
   useProject,
   useProjects,
   useThreadShells,
   useThreadShellsForProjectRefs,
 } from "../state/entities";
+import { readForkAtLatestTurn, useForkThread } from "../hooks/useForkThread";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useThreadDiscoveredPorts } from "../portDiscoveryState";
@@ -1157,6 +1159,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
+  const { forkThreadAtLatestTurn } = useForkThread();
   const updateSettings = useUpdateClientSettings();
   const sidebarThreadPreviewCount = useClientSettings<SidebarThreadPreviewCount>(
     (settings) => settings.sidebarThreadPreviewCount,
@@ -2181,6 +2184,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           ...(thread.branch
             ? [{ id: "new-thread-on-branch", label: `New thread on ${thread.branch}` }]
             : []),
+          ...(readEnvironmentSupportsForking(thread.environmentId)
+            ? [
+                {
+                  id: "fork",
+                  label: "Fork thread",
+                  disabled: readForkAtLatestTurn(threadRef).blockReason !== null,
+                },
+              ]
+            : []),
           { id: "rename", label: "Rename thread" },
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },
@@ -2221,6 +2233,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             }),
           );
         }
+        return;
+      }
+
+      if (clicked === "fork") {
+        // Toasts its own block reason / failure; nothing to report here.
+        await forkThreadAtLatestTurn(threadRef);
         return;
       }
 
@@ -2281,6 +2299,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
+      forkThreadAtLatestTurn,
       handleNewThread,
       isMobile,
       markThreadUnread,

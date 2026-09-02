@@ -715,6 +715,18 @@ export function useThreadOutboxDrain(): void {
       if (!isQueuedMessagePayloadCurrent(persistedMessage, deliveryRevision)) {
         return true;
       }
+      // A forked thread keeps its minted "<parent> (fork)" title until its
+      // first turn; sending that title as the seed lets the server swap in a
+      // generated title once the turn completes, while a user rename (which
+      // drops the suffix) keeps the title untouched.
+      const targetThread = findThread(
+        appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
+        queuedMessage,
+      );
+      const forkTitleSeed =
+        targetThread?.forkedFrom != null && targetThread.title.trim().endsWith("(fork)")
+          ? targetThread.title.trim()
+          : undefined;
       const deliveryResult = await startTurn({
         environmentId: queuedMessage.environmentId,
         input: {
@@ -727,6 +739,7 @@ export function useThreadOutboxDrain(): void {
             attachments: prepared.attachments,
           },
           modelSelection: settings.modelSelection,
+          ...(forkTitleSeed !== undefined ? { titleSeed: forkTitleSeed } : {}),
           runtimeMode: settings.runtimeMode,
           interactionMode: settings.interactionMode,
           createdAt: queuedMessage.createdAt,

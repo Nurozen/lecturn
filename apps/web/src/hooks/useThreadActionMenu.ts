@@ -19,6 +19,7 @@ import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
+  readEnvironmentSupportsForking,
   readEnvironmentSupportsPinning,
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
@@ -36,6 +37,7 @@ import {
 import { buildPhysicalToLogicalProjectKeyMap } from "../sidebarProjectGrouping";
 import { useUiStateStore } from "../uiStateStore";
 import { useCopyToClipboard } from "./useCopyToClipboard";
+import { readForkAtLatestTurn, useForkThread } from "./useForkThread";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
 import { useThreadActions } from "./useThreadActions";
@@ -94,6 +96,7 @@ export function useThreadActionMenu(input: {
     reportFailure: false,
   });
   const handleNewThread = useNewThreadHandler();
+  const { forkThreadAtLatestTurn } = useForkThread();
   const markThreadUnread = useUiStateStore((s) => s.markThreadUnread);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
@@ -134,6 +137,7 @@ export function useThreadActionMenu(input: {
           snooze: readEnvironmentSupportsSnooze(threadRef.environmentId),
           pinning: readEnvironmentSupportsPinning(threadRef.environmentId),
           titleRegeneration: readEnvironmentSupportsTitleRegeneration(threadRef.environmentId),
+          fork: readEnvironmentSupportsForking(threadRef.environmentId),
         };
         const isRegeneratingTitle = thread.titleRegeneration != null;
         const snoozePresets = resolveSnoozePresets(now, timestampFormat);
@@ -145,6 +149,7 @@ export function useThreadActionMenu(input: {
           canSnoozeNow: canSnooze(thread, { now: now.toISOString() }),
           isRegeneratingTitle,
           isRunning: thread.session?.status === "running" && thread.session.activeTurnId != null,
+          canForkNow: readForkAtLatestTurn(threadRef).blockReason === null,
           supports,
           snoozePresets,
         });
@@ -222,6 +227,10 @@ export function useThreadActionMenu(input: {
             }
             return;
           }
+          case "fork":
+            // Toasts its own block reason / failure; nothing to report here.
+            await forkThreadAtLatestTurn(threadRef);
+            return;
           case "settle":
             await reportFailure("Failed to settle thread", () => settleThread(threadRef));
             return;
@@ -337,6 +346,7 @@ export function useThreadActionMenu(input: {
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
+      forkThreadAtLatestTurn,
       handleNewThread,
       logicalProjectKeyByPhysicalKey,
       markThreadUnread,

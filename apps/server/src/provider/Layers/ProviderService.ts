@@ -587,6 +587,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         payload: rawInput,
       });
 
+      if (parsed.fork !== undefined && parsed.resumeCursor !== undefined) {
+        return yield* toValidationError(
+          "ProviderService.startSession",
+          "fork and resumeCursor are mutually exclusive: a forked child adopts its cursor from the forked native session.",
+        );
+      }
       const resolvedInstanceId = yield* requireBindingInstanceId(
         "ProviderService.startSession",
         parsed,
@@ -620,11 +626,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           );
         }
         const persistedBinding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+        // A forked child must reach the adapter cursor-less: its identity
+        // comes from the forked native session, never a persisted cursor.
         const effectiveResumeCursor =
-          input.resumeCursor ??
-          (persistedBinding?.providerInstanceId === resolvedInstanceId
-            ? persistedBinding.resumeCursor
-            : undefined);
+          input.fork !== undefined
+            ? undefined
+            : (input.resumeCursor ??
+              (persistedBinding?.providerInstanceId === resolvedInstanceId
+                ? persistedBinding.resumeCursor
+                : undefined));
         const effectiveCwd =
           input.cwd ??
           (persistedBinding?.providerInstanceId === resolvedInstanceId
@@ -682,6 +692,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         yield* analytics.record("provider.session.started", {
           provider: sessionWithInstance.provider,
           runtimeMode: input.runtimeMode,
+          forked: input.fork !== undefined,
           hasResumeCursor: sessionWithInstance.resumeCursor !== undefined,
           hasCwd: typeof effectiveCwd === "string" && effectiveCwd.trim().length > 0,
           hasModel:

@@ -10,10 +10,21 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
+  buildServerProvider,
   isCommandMissingCause,
   providerModelsFromSettings,
   spawnAndCollect,
 } from "./providerSnapshot.ts";
+import { CLAUDE_ADAPTER_CAPABILITIES } from "./Layers/ClaudeAdapter.ts";
+import { CLAUDE_PRESENTATION } from "./Layers/ClaudeProvider.ts";
+import { CODEX_ADAPTER_CAPABILITIES } from "./Layers/CodexAdapter.ts";
+import { CODEX_PRESENTATION } from "./Layers/CodexProvider.ts";
+import { CURSOR_ADAPTER_CAPABILITIES } from "./Layers/CursorAdapter.ts";
+import { CURSOR_PRESENTATION } from "./Layers/CursorProvider.ts";
+import { GROK_ADAPTER_CAPABILITIES } from "./Layers/GrokAdapter.ts";
+import { GROK_PRESENTATION } from "./Layers/GrokProvider.ts";
+import { OPENCODE_ADAPTER_CAPABILITIES } from "./Layers/OpenCodeAdapter.ts";
+import { OPENCODE_PRESENTATION } from "./Layers/OpenCodeProvider.ts";
 
 const OPENCODE_CUSTOM_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [
@@ -133,4 +144,70 @@ describe("ProviderCommandNotFoundError", () => {
       expect(error.message).not.toContain("secret-token-value");
     });
   });
+});
+
+describe("conversationFork capability/presentation parity", () => {
+  const drivers = [
+    {
+      driver: "codex",
+      capabilities: CODEX_ADAPTER_CAPABILITIES,
+      presentation: CODEX_PRESENTATION,
+    },
+    {
+      driver: "claudeAgent",
+      capabilities: CLAUDE_ADAPTER_CAPABILITIES,
+      presentation: CLAUDE_PRESENTATION,
+    },
+    {
+      driver: "opencode",
+      capabilities: OPENCODE_ADAPTER_CAPABILITIES,
+      presentation: OPENCODE_PRESENTATION,
+    },
+    {
+      driver: "cursor",
+      capabilities: CURSOR_ADAPTER_CAPABILITIES,
+      presentation: CURSOR_PRESENTATION,
+    },
+    {
+      driver: "grok",
+      capabilities: GROK_ADAPTER_CAPABILITIES,
+      presentation: GROK_PRESENTATION,
+    },
+  ] as const;
+
+  it.each(drivers)(
+    "$driver presentation matches the adapter capability",
+    ({ capabilities, presentation }) => {
+      expect(presentation.conversationFork).toBe(capabilities.conversationFork);
+    },
+  );
+
+  it.each(drivers)("$driver snapshot carries conversationFork", ({ presentation }) => {
+    const snapshot = buildServerProvider({
+      presentation,
+      enabled: true,
+      checkedAt: "2026-01-01T00:00:00.000Z",
+      models: [],
+      probe: {
+        installed: true,
+        version: null,
+        status: "ready",
+        auth: { status: "unknown" },
+      },
+    });
+    expect(snapshot.conversationFork).toBe(presentation.conversationFork);
+  });
+
+  // Claude is the only provider without a positional fallback for anchor-less
+  // turns, so it alone rejects mid-thread forks of pre-anchor history.
+  it.each(drivers)("$driver declares its fork anchor requirement", ({ driver, capabilities }) => {
+    expect(capabilities.conversationForkRequiresAnchor).toBe(driver === "claudeAgent");
+  });
+
+  it.each(drivers)(
+    "$driver keeps the anchor requirement off the presentation",
+    ({ presentation }) => {
+      expect(presentation).not.toHaveProperty("conversationForkRequiresAnchor");
+    },
+  );
 });

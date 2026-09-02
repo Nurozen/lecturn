@@ -1,4 +1,4 @@
-import { ProjectId, ThreadId, ProviderInstanceId } from "@t3tools/contracts";
+import { MessageId, ProjectId, ThreadId, TurnId, ProviderInstanceId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -8,13 +8,16 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlitePersistenceMemory } from "./Sqlite.ts";
 import { ProjectionProjectRepositoryLive } from "./ProjectionProjects.ts";
 import { ProjectionThreadRepositoryLive } from "./ProjectionThreads.ts";
+import { ProjectionTurnRepositoryLive } from "./ProjectionTurns.ts";
 import { ProjectionProjectRepository } from "../Services/ProjectionProjects.ts";
 import { ProjectionThreadRepository } from "../Services/ProjectionThreads.ts";
+import { ProjectionTurnRepository } from "../Services/ProjectionTurns.ts";
 
 const projectionRepositoriesLayer = it.layer(
   Layer.mergeAll(
     ProjectionProjectRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     ProjectionThreadRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+    ProjectionTurnRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     SqlitePersistenceMemory,
   ),
 );
@@ -255,6 +258,132 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
 
       const cleared = yield* threads.getById({ threadId: ThreadId.make("thread-linked-pr") });
       assert.strictEqual(Option.getOrNull(cleared)?.linkedPullRequest, null);
+    }),
+  );
+
+  it.effect("round-trips fork lineage through the thread row", () =>
+    Effect.gen(function* () {
+      const threads = yield* ProjectionThreadRepository;
+      const forkedFrom = {
+        threadId: ThreadId.make("thread-fork-parent"),
+        turnId: TurnId.make("turn-3"),
+        turnCount: 3,
+        messageId: MessageId.make("message-3"),
+      };
+      const forkSource = {
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        resumeCursor: { sessionId: "session-1" },
+        providerTurnRef: "resp_abc123",
+        throughTurnOrdinal: 3,
+        atEnd: false,
+      };
+
+      yield* threads.upsert({
+        threadId: ThreadId.make("thread-fork-child"),
+        projectId: ProjectId.make("project-fork"),
+        title: "Fork child",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.4",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        forkedFrom,
+        forkSource,
+        latestTurnId: null,
+        createdAt: "2026-03-24T00:00:00.000Z",
+        updatedAt: "2026-03-24T00:00:00.000Z",
+        archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
+        unsettledAt: null,
+        snoozedUntil: null,
+        snoozedAt: null,
+        pinnedAt: null,
+        latestUserMessageAt: null,
+        pendingApprovalCount: 0,
+        pendingUserInputCount: 0,
+        hasActionableProposedPlan: 0,
+        deletedAt: null,
+      });
+
+      const persisted = yield* threads.getById({ threadId: ThreadId.make("thread-fork-child") });
+      assert.deepStrictEqual(Option.getOrNull(persisted)?.forkedFrom, forkedFrom);
+      assert.deepStrictEqual(Option.getOrNull(persisted)?.forkSource, forkSource);
+
+      const row = Option.getOrNull(persisted);
+      if (row === null) return yield* Effect.die("Expected fork child thread row to exist.");
+      yield* threads.upsert({ ...row, forkedFrom: null, forkSource: null });
+
+      const cleared = yield* threads.getById({ threadId: ThreadId.make("thread-fork-child") });
+      assert.strictEqual(Option.getOrNull(cleared)?.forkedFrom, null);
+      assert.strictEqual(Option.getOrNull(cleared)?.forkSource, null);
+    }),
+  );
+
+  it.effect("round-trips the provider turn ref through the turn row", () =>
+    Effect.gen(function* () {
+      const turns = yield* ProjectionTurnRepository;
+      const baseRow = {
+        threadId: ThreadId.make("thread-turn-ref"),
+        turnId: TurnId.make("turn-ref-1"),
+        pendingMessageId: null,
+        sourceProposedPlanThreadId: null,
+        sourceProposedPlanId: null,
+        assistantMessageId: null,
+        state: "completed" as const,
+        requestedAt: "2026-03-24T00:00:00.000Z",
+        startedAt: "2026-03-24T00:00:01.000Z",
+        completedAt: "2026-03-24T00:00:02.000Z",
+        checkpointTurnCount: null,
+        checkpointRef: null,
+        checkpointStatus: null,
+        checkpointFiles: [],
+      };
+
+      yield* turns.upsertByTurnId({ ...baseRow, providerTurnRef: "resp_turn_ref" });
+
+      const persisted = yield* turns.getByTurnId({
+        threadId: ThreadId.make("thread-turn-ref"),
+        turnId: TurnId.make("turn-ref-1"),
+      });
+      assert.strictEqual(Option.getOrNull(persisted)?.providerTurnRef, "resp_turn_ref");
+
+      // An upsert without the anchor clears it back to NULL.
+      yield* turns.upsertByTurnId(baseRow);
+      const cleared = yield* turns.getByTurnId({
+        threadId: ThreadId.make("thread-turn-ref"),
+        turnId: TurnId.make("turn-ref-1"),
+      });
+      assert.strictEqual(Option.getOrNull(cleared)?.providerTurnRef, null);
+    }),
+  );
+
+  it.effect("inserts pending turn placeholders after migration 045", () =>
+    Effect.gen(function* () {
+      const turns = yield* ProjectionTurnRepository;
+
+      yield* turns.replacePendingTurnStart({
+        threadId: ThreadId.make("thread-pending-045"),
+        messageId: MessageId.make("message-pending-045"),
+        sourceProposedPlanThreadId: null,
+        sourceProposedPlanId: null,
+        requestedAt: "2026-03-24T00:00:00.000Z",
+      });
+
+      const pending = yield* turns.getPendingTurnStartByThreadId({
+        threadId: ThreadId.make("thread-pending-045"),
+      });
+      assert.strictEqual(Option.getOrNull(pending)?.messageId, "message-pending-045");
+
+      const rows = yield* turns.listByThreadId({
+        threadId: ThreadId.make("thread-pending-045"),
+      });
+      assert.strictEqual(rows.length, 1);
+      assert.strictEqual(rows[0]?.turnId, null);
+      assert.strictEqual(rows[0]?.providerTurnRef, null);
     }),
   );
 });

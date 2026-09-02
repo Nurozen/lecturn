@@ -139,6 +139,9 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  // Environment-only kill switch, no CLI flag: rollback is an operator
+  // action, not a per-invocation option.
+  threadForkingEnabled: Config.boolean("T3CODE_THREAD_FORKING").pipe(Config.withDefault(true)),
 });
 
 export interface CliServerFlags {
@@ -384,6 +387,7 @@ export const resolveServerConfig = (
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,
+      threadForkingEnabled: env.threadForkingEnabled,
     };
 
     return config;

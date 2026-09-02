@@ -21,6 +21,7 @@ import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import { useThreadPr } from "../../state/use-thread-pr";
 import { ThreadSwipeable } from "../home/thread-swipe-actions";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
+import { buildThreadForkMenuItems } from "./thread-fork-menu";
 import { buildThreadTitleRegenerationMenuItems } from "./thread-title-regeneration-menu";
 import {
   resolveThreadListV2SnoozeMenuSelection,
@@ -358,6 +359,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly pinningSupported: boolean;
   /** False on servers that predate thread title regeneration. */
   readonly titleRegenerationSupported: boolean;
+  /** False on servers without the forking capability or when the thread's
+      provider cannot fork its conversation natively. */
+  readonly forkSupported: boolean;
+  readonly onForkThread: (thread: EnvironmentThreadShell) => void;
   /** False on servers that predate thread.pin.reorder. Gates the pinned
       Move up / Move down menu items. */
   readonly pinReorderSupported?: boolean;
@@ -381,6 +386,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     variant,
     onSelectThread,
     onDeleteThread,
+    onForkThread,
     onRegenerateThreadTitle,
     onSettleThread,
     onSnoozeThread,
@@ -409,6 +415,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const timeLabel = threadTimeLabel(thread);
 
   const handleDelete = useCallback(() => onDeleteThread(thread), [onDeleteThread, thread]);
+  const handleFork = useCallback(() => onForkThread(thread), [onForkThread, thread]);
   const handleRegenerateTitle = useCallback(
     () => onRegenerateThreadTitle(thread),
     [onRegenerateThreadTitle, thread],
@@ -510,6 +517,15 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       }),
     [props.titleRegenerationSupported, thread.titleRegeneration],
   );
+  const threadForkMenuItems = useMemo<MenuAction[]>(
+    () =>
+      buildThreadForkMenuItems({
+        supported: props.forkSupported,
+        inFlight: false,
+        canForkNow: thread.latestTurn?.state === "completed",
+      }),
+    [props.forkSupported, thread.latestTurn],
+  );
   const snoozableCardMenuActions = useMemo<MenuAction[]>(
     () => [
       { id: "settle", title: "Settle", image: "checkmark" },
@@ -520,36 +536,49 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         subactions: snoozePresetActions,
       },
       ...pinMenuItem,
+      ...threadForkMenuItems,
       ...titleRegenerationMenuItems,
       { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
     ],
-    [pinMenuItem, snoozePresetActions, titleRegenerationMenuItems],
+    [pinMenuItem, snoozePresetActions, threadForkMenuItems, titleRegenerationMenuItems],
   );
   const cardMenuActions = useMemo<MenuAction[]>(
     () => [
       CARD_MENU_ACTIONS[0]!,
       ...pinMenuItem,
+      ...threadForkMenuItems,
       ...titleRegenerationMenuItems,
       ...CARD_MENU_ACTIONS.slice(1),
     ],
-    [pinMenuItem, titleRegenerationMenuItems],
+    [pinMenuItem, threadForkMenuItems, titleRegenerationMenuItems],
   );
   const slimMenuActions = useMemo<MenuAction[]>(
     () => [
       SLIM_MENU_ACTIONS[0]!,
       ...(thread.pinnedAt != null ? pinMenuItem : []),
+      ...threadForkMenuItems,
       ...titleRegenerationMenuItems,
       SLIM_MENU_ACTIONS[1]!,
     ],
-    [pinMenuItem, thread.pinnedAt, titleRegenerationMenuItems],
+    [pinMenuItem, thread.pinnedAt, threadForkMenuItems, titleRegenerationMenuItems],
   );
   const snoozedMenuActions = useMemo<MenuAction[]>(
-    () => [SNOOZED_MENU_ACTIONS[0]!, ...titleRegenerationMenuItems, SNOOZED_MENU_ACTIONS[1]!],
-    [titleRegenerationMenuItems],
+    () => [
+      SNOOZED_MENU_ACTIONS[0]!,
+      ...threadForkMenuItems,
+      ...titleRegenerationMenuItems,
+      SNOOZED_MENU_ACTIONS[1]!,
+    ],
+    [threadForkMenuItems, titleRegenerationMenuItems],
   );
   const legacyMenuActions = useMemo<MenuAction[]>(
-    () => [LEGACY_MENU_ACTIONS[0]!, ...titleRegenerationMenuItems, LEGACY_MENU_ACTIONS[1]!],
-    [titleRegenerationMenuItems],
+    () => [
+      LEGACY_MENU_ACTIONS[0]!,
+      ...threadForkMenuItems,
+      ...titleRegenerationMenuItems,
+      LEGACY_MENU_ACTIONS[1]!,
+    ],
+    [threadForkMenuItems, titleRegenerationMenuItems],
   );
   const handleMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {
@@ -561,6 +590,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       if (nativeEvent.event === "move-pin-up") handleMovePinnedUp();
       if (nativeEvent.event === "move-pin-down") handleMovePinnedDown();
       if (nativeEvent.event === "archive") handleArchive();
+      if (nativeEvent.event === "fork-thread") handleFork();
       if (nativeEvent.event === "regenerate-title") handleRegenerateTitle();
       if (nativeEvent.event === "delete") handleDelete();
       const snoozeSelection = resolveThreadListV2SnoozeMenuSelection({
@@ -577,6 +607,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     [
       handleArchive,
       handleDelete,
+      handleFork,
       handleRegenerateTitle,
       handleMovePinnedDown,
       handleMovePinnedUp,

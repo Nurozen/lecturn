@@ -84,6 +84,13 @@ import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogg
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 
 const PROVIDER = ProviderDriverKind.make("grok");
+
+// Exported so capability/presentation parity is testable without a runtime.
+export const GROK_ADAPTER_CAPABILITIES = {
+  sessionModelSwitch: "in-session",
+  conversationFork: "unsupported",
+  conversationForkRequiresAnchor: false,
+} as const;
 const GROK_RESUME_VERSION = 1 as const;
 const NANOS_PER_MILLI = 1_000_000n;
 // ACP does not expose Grok's private `streaming_reasoning` phase. Once it has
@@ -958,6 +965,13 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               provider: PROVIDER,
               operation: "startSession",
               issue: "cwd is required and must be non-empty.",
+            });
+          }
+          if (input.fork !== undefined) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "startSession",
+              issue: "Conversation fork is not supported by this provider.",
             });
           }
 
@@ -2112,7 +2126,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
 
     return {
       provider: PROVIDER,
-      capabilities: { sessionModelSwitch: "in-session" },
+      capabilities: GROK_ADAPTER_CAPABILITIES,
       startSession,
       sendTurn,
       interruptTurn,

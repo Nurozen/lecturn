@@ -9,6 +9,7 @@ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled"
 export type ThreadActionMenuId =
   | "new-thread-on-branch"
   | "project-settings"
+  | "fork"
   | "pin"
   | "unpin"
   | "settle"
@@ -35,11 +36,15 @@ export interface ThreadActionMenuState {
   readonly isRegeneratingTitle: boolean;
   /** Archive rejects a thread with an active turn, so disable it here rather than let the action fail. */
   readonly isRunning: boolean;
+  /** Shell surfaces fork at the latest completed turn, so the action is
+      disabled until the thread has one (and its provider can fork). */
+  readonly canForkNow: boolean;
   readonly supports: {
     readonly settlement: boolean;
     readonly snooze: boolean;
     readonly pinning: boolean;
     readonly titleRegeneration: boolean;
+    readonly fork: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
 }
@@ -59,6 +64,16 @@ export function buildThreadActionMenuItems(
             id: "new-thread-on-branch" as const,
             label: `New thread on ${state.branch}`,
             icon: "message-square-plus",
+          },
+        ]
+      : []),
+    ...(state.supports.fork
+      ? [
+          {
+            id: "fork" as const,
+            label: "Fork thread",
+            icon: "git-fork",
+            disabled: !state.canForkNow,
           },
         ]
       : []),

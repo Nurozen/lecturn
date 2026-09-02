@@ -101,7 +101,9 @@ interface ThreadNavigationSidebarProps {
   readonly onOpenEnvironmentSettings: () => void;
   readonly onNewThreadInProject: (project: EnvironmentProject) => void;
   readonly onSearchQueryChange: (query: string) => void;
-  readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
+  /** Only the scoping fields are needed: forking selects a child thread whose
+      full shell has not arrived yet. */
+  readonly onSelectThread: (thread: Pick<EnvironmentThreadShell, "environmentId" | "id">) => void;
   readonly onRequestVisibility: () => void;
   readonly searchQuery: string;
 }
@@ -159,6 +161,7 @@ function ThreadNavigationSidebarPane(
     unpinThread,
     movePinnedThread,
     regenerateThreadTitle,
+    forkThread,
   } = useThreadListActions();
   const threadListV2Enabled = useThreadListV2Enabled();
   const pendingTasks = usePendingNewTasks();
@@ -441,6 +444,15 @@ function ThreadNavigationSidebarPane(
     }
     return supported;
   }, [serverConfigs]);
+  const forkingEnvironmentIds = useMemo(() => {
+    const supported = new Set<EnvironmentId>();
+    for (const [environmentId, config] of serverConfigs) {
+      if (config.environment.capabilities.threadForking === true) {
+        supported.add(environmentId);
+      }
+    }
+    return supported;
+  }, [serverConfigs]);
   // Canonical arranged pinned order for Move up/down flags — computed from
   // all shells so search/scope filtering never disables a valid move.
   const arrangedPinnedKeys = useMemo(() => {
@@ -707,6 +719,19 @@ function ThreadNavigationSidebarPane(
     },
     [props.onSelectThread],
   );
+  // Fork-then-open: select the child immediately; the detail pane shows its
+  // loading state until the child's shell arrives over the socket.
+  const handleForkThread = useCallback(
+    async (thread: EnvironmentThreadShell) => {
+      const child = await forkThread(thread);
+      if (child === null) {
+        return;
+      }
+      openSwipeableRef.current?.close();
+      props.onSelectThread({ environmentId: child.environmentId, id: child.threadId });
+    },
+    [forkThread, props.onSelectThread],
+  );
   const handleScrollBeginDrag = useCallback(() => {
     openSwipeableRef.current?.close();
   }, []);
@@ -829,6 +854,13 @@ function ThreadNavigationSidebarPane(
         case "v2-thread": {
           const thread = item.item.thread;
           const scopeKey = scopedProjectKey(thread.environmentId, thread.projectId);
+          const provider = serverConfigs
+            .get(thread.environmentId)
+            ?.providers.find(
+              (candidate) =>
+                candidate.instanceId ===
+                (thread.session?.providerInstanceId ?? thread.modelSelection.instanceId),
+            );
           return (
             <ThreadListV2Row
               thread={thread}
@@ -839,15 +871,7 @@ function ThreadNavigationSidebarPane(
               snoozeWakeLabelText={item.snoozeWakeLabelText}
               project={projectByKey.get(scopeKey) ?? null}
               projectTitle={projectTitleByProjectKey.get(scopeKey)}
-              providerDriver={
-                serverConfigs
-                  .get(thread.environmentId)
-                  ?.providers.find(
-                    (provider) =>
-                      provider.instanceId ===
-                      (thread.session?.providerInstanceId ?? thread.modelSelection.instanceId),
-                  )?.driver ?? null
-              }
+              providerDriver={provider?.driver ?? null}
               environmentLabel={
                 Object.keys(savedConnectionsById).length > 1
                   ? (savedConnectionsById[thread.environmentId]?.environmentLabel ?? null)
@@ -868,6 +892,11 @@ function ThreadNavigationSidebarPane(
               onSelectThread={handleSelectThread}
               onDeleteThread={confirmDeleteThread}
               onArchiveThread={archiveThread}
+              onForkThread={handleForkThread}
+              forkSupported={
+                forkingEnvironmentIds.has(thread.environmentId) &&
+                provider?.conversationFork === "native"
+              }
               onRegenerateThreadTitle={regenerateThreadTitle}
               titleRegenerationSupported={titleRegenerationEnvironmentIds.has(thread.environmentId)}
               settlementSupported={settlementEnvironmentIds.has(thread.environmentId)}
@@ -963,6 +992,13 @@ function ThreadNavigationSidebarPane(
           );
         case "thread": {
           const thread = item.thread;
+          const provider = serverConfigs
+            .get(thread.environmentId)
+            ?.providers.find(
+              (candidate) =>
+                candidate.instanceId ===
+                (thread.session?.providerInstanceId ?? thread.modelSelection.instanceId),
+            );
           return (
             <ThreadListRow
               variant="sidebar"
@@ -988,6 +1024,11 @@ function ThreadNavigationSidebarPane(
               fullSwipeWidth={props.width - 20}
               onArchiveThread={archiveThread}
               onDeleteThread={confirmDeleteThread}
+              onForkThread={handleForkThread}
+              forkSupported={
+                forkingEnvironmentIds.has(thread.environmentId) &&
+                provider?.conversationFork === "native"
+              }
               onRegenerateThreadTitle={regenerateThreadTitle}
               titleRegenerationSupported={titleRegenerationEnvironmentIds.has(thread.environmentId)}
               onSelectThread={handleSelectThread}
@@ -1016,7 +1057,9 @@ function ThreadNavigationSidebarPane(
       confirmDeleteThread,
       handleSelectThread,
       handleSwipeableClose,
+      handleForkThread,
       handleSwipeableWillOpen,
+      forkingEnvironmentIds,
       movePinnedThread,
       openPendingTask,
       pinReorderEnvironmentIds,

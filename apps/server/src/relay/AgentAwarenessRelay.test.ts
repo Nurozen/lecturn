@@ -203,6 +203,23 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
     ).toBe(false);
   });
 
+  it("does not publish thread.forked, whose child shell inherits a completed latestTurn", () => {
+    expect(
+      AgentAwarenessRelay.shouldPublishAgentAwarenessEvent({
+        sequence: 1,
+        eventId: "evt-fork-1",
+        commandId: CommandId.make("cmd-fork-1"),
+        aggregateKind: "thread",
+        aggregateId: "thread-child" as ThreadId,
+        occurredAt: "2026-05-25T00:00:00.000Z",
+        type: "thread.forked",
+        payload: {
+          threadId: "thread-child" as ThreadId,
+        },
+      } as unknown as OrchestrationEvent),
+    ).toBe(false);
+  });
+
   it("deduplicates awareness state updates whose only change is their event timestamp", () => {
     expect(AgentAwarenessRelay.agentAwarenessPublishIdentity(state)).toBe(
       AgentAwarenessRelay.agentAwarenessPublishIdentity({

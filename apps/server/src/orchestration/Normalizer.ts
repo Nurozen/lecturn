@@ -129,6 +129,16 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
       } satisfies OrchestrationCommand;
     }
 
+    // A client-shaped fork carries no inherited history; only the WebSocket
+    // dispatcher materializes it before dispatch. Rejecting here keeps the
+    // HTTP and CLI paths, which feed normalizer output straight to the
+    // engine, from ever handing the decider a raw fork.
+    if (canonicalCommand.type === "thread.fork") {
+      return yield* new OrchestrationDispatchCommandError({
+        message: "thread.fork is materialized only by the WebSocket dispatcher.",
+      });
+    }
+
     if (canonicalCommand.type !== "thread.turn.start") {
       return canonicalCommand as OrchestrationCommand;
     }

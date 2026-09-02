@@ -33,6 +33,7 @@ import {
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
+  ThreadForkedPayload,
 } from "./Schemas.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
@@ -321,6 +322,59 @@ export function projectEvent(
           threads: existing
             ? nextBase.threads.map((entry) => (entry.id === thread.id ? thread : entry))
             : [...nextBase.threads, thread],
+        };
+      });
+
+    // Only lineage and summary state (fork origin, linked PR, latest turn,
+    // proposed plans) are projected here. Message, activity, and checkpoint
+    // bodies stay empty because the in-memory model mirrors post-boot
+    // hydration, which seeds those arrays empty; the SQL projections carry
+    // the full inherited copy.
+    case "thread.forked":
+      return Effect.gen(function* () {
+        const payload = yield* decodeForEvent(
+          ThreadForkedPayload,
+          event.payload,
+          event.type,
+          "payload",
+        );
+        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+        if (!thread) {
+          return nextBase;
+        }
+
+        const lastTurn = payload.history.turns.at(-1) ?? null;
+        const latestTurn =
+          lastTurn === null
+            ? null
+            : {
+                turnId: lastTurn.turnId,
+                state: lastTurn.state,
+                requestedAt: lastTurn.requestedAt,
+                startedAt: lastTurn.startedAt,
+                completedAt: lastTurn.completedAt,
+                assistantMessageId: lastTurn.assistantMessageId,
+                ...(lastTurn.sourceProposedPlan !== undefined
+                  ? { sourceProposedPlan: lastTurn.sourceProposedPlan }
+                  : {}),
+              };
+
+        const proposedPlans = [...payload.history.proposedPlans]
+          .toSorted(
+            (left, right) =>
+              left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+          )
+          .slice(-200);
+
+        return {
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            forkedFrom: payload.forkedFrom,
+            linkedPullRequest: payload.linkedPullRequest ?? null,
+            latestTurn,
+            proposedPlans,
+            updatedAt: event.occurredAt,
+          }),
         };
       });
 
