@@ -452,6 +452,24 @@ Path=Profiles/wxyz.empty
       }),
     ),
   );
+
+  it.effect("falls through to the legacy database when Network/Cookies is a directory", () =>
+    run(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const paths = yield* withSourceHome();
+        const root = helium.userDataDirectory(paths);
+        // A folder squatting on the preferred candidate path must not shadow
+        // the real legacy database behind it.
+        yield* fileSystem.makeDirectory(`${root}/Default/Network/Cookies`, { recursive: true });
+        yield* writeCookieDatabase(`${root}/Default/Cookies`, 2);
+
+        const [profile] = yield* listSourceProfiles(helium, paths);
+        assert.equal(profile?.directory, "Default");
+        assert.equal(profile?.cookieCount, 2);
+      }),
+    ),
+  );
 });
 
 describe("cookieDatabaseCandidatePaths", () => {

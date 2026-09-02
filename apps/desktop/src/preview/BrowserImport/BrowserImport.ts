@@ -234,7 +234,9 @@ export const make = Effect.gen(function* BrowserImportMake() {
     const fileSystem = Context.get(platformServices, FileSystem.FileSystem);
     const existing = yield* Effect.forEach(candidates, (candidate) =>
       fileSystem.stat(candidate).pipe(
-        Effect.as(true),
+        // A directory at a candidate path must not shadow a later real
+        // database, so only a regular file counts.
+        Effect.map((info) => info.type === "File"),
         Effect.orElseSucceed(() => false),
       ),
     );

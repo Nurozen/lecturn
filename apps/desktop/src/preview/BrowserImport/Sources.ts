@@ -340,11 +340,16 @@ const entryExists = Effect.fnUntraced(function* (path: string) {
   );
 });
 
-/** Whether a path resolves to an existing file or directory. */
+/**
+ * Whether a path resolves to a regular file. Every caller probes cookie
+ * database candidates, and candidates are tried in order — accepting a
+ * directory here (say, a folder named `Network/Cookies`) would shadow a valid
+ * legacy database behind it and fail the read instead of falling through.
+ */
 const targetExists = Effect.fnUntraced(function* (path: string) {
   const fileSystem = yield* FileSystem.FileSystem;
   return yield* fileSystem.stat(path).pipe(
-    Effect.as(true),
+    Effect.map((info) => info.type === "File"),
     Effect.orElseSucceed(() => false),
   );
 });
