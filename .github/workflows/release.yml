@@ -187,7 +187,7 @@ jobs:
     needs: [preflight]
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 30 # GitHub-hosted 4-vCPU runners need more than upstream's 10
     steps:
       - name: Checkout
         uses: actions/checkout@v6
