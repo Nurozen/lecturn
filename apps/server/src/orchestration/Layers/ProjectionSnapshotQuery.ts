@@ -3316,12 +3316,10 @@ pending_approval_requests AS (
         ),
       ),
       Effect.map(
-        Option.map(
-          (row): ProjectionThreadForkContext => ({
-            forkedFrom: row.forkedFrom,
-            forkSource: row.forkSource,
-          }),
-        ),
+        Option.map((row): ProjectionThreadForkContext => ({
+          forkedFrom: row.forkedFrom,
+          forkSource: row.forkSource,
+        })),
       ),
     );
 
