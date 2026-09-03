@@ -25,6 +25,7 @@ import {
   DESKTOP_FILE_EXCLUSIONS,
   DESKTOP_EXTRA_RESOURCES,
   MAC_FILE_EXCLUSIONS,
+  InvalidAppleTeamIdError,
   InvalidMacPasskeyRpDomainError,
   InvalidMacPasskeyPublishableKeyError,
   InvalidMockUpdateServerPortError,
@@ -34,6 +35,7 @@ import {
   LinuxDesktopBuildPrerequisitesMissingError,
   MacDesktopBuildPrerequisitesMissingError,
   MacPasskeySigningConfigurationResolutionError,
+  MissingMacPasskeyDomainConfigurationError,
   MissingMacPasskeyProvisioningProfileError,
   packWindowsServerAsar,
   preflightLinuxDesktopBuild,
@@ -42,6 +44,7 @@ import {
   renderMacPasskeyEntitlements,
   resolveClerkPasskeyNativeArtifacts,
   resolveMacPasskeySigningConfiguration,
+  resolveOptionalMacPasskeySigningConfiguration,
   resolveDesktopRuntimeDependencies,
   resolveMacStageDependencies,
   resolveFffNativeDependencies,
@@ -1567,6 +1570,70 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.notProperty(invalidPublishableKeyError, "publishableKey");
     assert.notInclude(invalidPublishableKeyError.message, "pk_test_%");
   });
+
+  it("disables macOS passkey signing when no passkey inputs are configured", () => {
+    assert.isUndefined(resolveOptionalMacPasskeySigningConfiguration({}));
+    assert.isUndefined(
+      resolveOptionalMacPasskeySigningConfiguration({
+        T3CODE_APPLE_TEAM_ID: "ABC1234567",
+        T3CODE_MACOS_PROVISIONING_PROFILE: "  ",
+        T3CODE_CLERK_PASSKEY_RP_DOMAINS: "",
+        T3CODE_CLERK_PUBLISHABLE_KEY: undefined,
+      }),
+    );
+  });
+
+  it("keeps strict validation when any macOS passkey input is configured", () => {
+    assert.throws(
+      () =>
+        resolveOptionalMacPasskeySigningConfiguration({
+          T3CODE_APPLE_TEAM_ID: "ABC1234567",
+          T3CODE_MACOS_PROVISIONING_PROFILE: "/tmp/t3code.provisionprofile",
+        }),
+      MissingMacPasskeyDomainConfigurationError,
+    );
+    assert.throws(
+      () =>
+        resolveOptionalMacPasskeySigningConfiguration({
+          T3CODE_CLERK_PASSKEY_RP_DOMAINS: "example.clerk.accounts.dev",
+        }),
+      InvalidAppleTeamIdError,
+    );
+    assert.deepStrictEqual(
+      resolveOptionalMacPasskeySigningConfiguration({
+        T3CODE_APPLE_TEAM_ID: "ABC1234567",
+        T3CODE_MACOS_PROVISIONING_PROFILE: "/tmp/t3code.provisionprofile",
+        T3CODE_CLERK_PASSKEY_RP_DOMAINS: "example.clerk.accounts.dev",
+      }),
+      {
+        appId: "com.t3tools.t3code",
+        teamId: "ABC1234567",
+        rpDomains: ["example.clerk.accounts.dev"],
+        provisioningProfilePath: "/tmp/t3code.provisionprofile",
+      },
+    );
+  });
+
+  it.effect(
+    "signs macOS builds without passkey entitlements when passkey signing is disabled",
+    () =>
+      Effect.gen(function* () {
+        const config = yield* createBuildConfig(
+          "mac",
+          "dmg",
+          "1.2.3",
+          true,
+          false,
+          undefined,
+          undefined,
+        );
+
+        const mac = config.mac as Record<string, unknown>;
+        assert.match(String(mac.sign), /\/scripts\/sign-macos\.ts$/);
+        assert.notProperty(mac, "entitlements");
+        assert.notProperty(mac, "provisioningProfile");
+      }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
 
   it("preserves known passkey signing configuration errors at the build boundary", () => {
     const decodingCause = new Error("publishable-key-decode-failed");

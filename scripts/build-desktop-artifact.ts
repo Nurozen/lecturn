@@ -1237,6 +1237,21 @@ export function resolveMacPasskeySigningConfiguration(
   };
 }
 
+// Passkey signing (associated-domains entitlements + provisioning profile) only
+// serves T3 Connect. With none of its inputs set, signed macOS builds use
+// electron-builder's default hardened-runtime entitlements; any partial
+// configuration still goes through the strict resolver so mistakes fail loudly.
+export function resolveOptionalMacPasskeySigningConfiguration(
+  env: Readonly<Record<string, string | undefined>>,
+): MacPasskeySigningConfiguration | undefined {
+  const hasPasskeyInputs = [
+    env.T3CODE_MACOS_PROVISIONING_PROFILE,
+    env.T3CODE_CLERK_PASSKEY_RP_DOMAINS,
+    env.T3CODE_CLERK_PUBLISHABLE_KEY,
+  ].some((value) => (value?.trim() ?? "").length > 0);
+  return hasPasskeyInputs ? resolveMacPasskeySigningConfiguration(env) : undefined;
+}
+
 function escapeXml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -3436,10 +3451,15 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const configuredMacPasskeySigning =
     options.platform === "mac" && options.signed
       ? yield* Effect.try({
-          try: () => resolveMacPasskeySigningConfiguration(loadRepoEnv({ repoRoot })),
+          try: () => resolveOptionalMacPasskeySigningConfiguration(loadRepoEnv({ repoRoot })),
           catch: MacPasskeySigningConfigurationResolutionError.fromCause,
         })
       : undefined;
+  if (options.platform === "mac" && options.signed && !configuredMacPasskeySigning) {
+    yield* Effect.log(
+      "[desktop-artifact] macOS passkey entitlements disabled (no provisioning profile or passkey RP domains configured); signing with default hardened-runtime entitlements.",
+    );
+  }
   const macPasskeySigning = configuredMacPasskeySigning
     ? {
         ...configuredMacPasskeySigning,

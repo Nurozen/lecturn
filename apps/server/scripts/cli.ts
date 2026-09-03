@@ -184,13 +184,16 @@ interface PublishCommandConfig {
   readonly tag: string;
   readonly provenance: boolean;
   readonly dryRun: boolean;
+  readonly packageName: Option.Option<string>;
 }
 
-const createVpPmPublishArgs = (config: PublishCommandConfig): ReadonlyArray<string> => {
+export const createVpPmPublishArgs = (config: PublishCommandConfig): ReadonlyArray<string> => {
   const args = [
     "publish",
     "--filter",
-    "t3",
+    // pnpm matches --filter against the manifest name, which has already been
+    // rewritten by the time publish runs, so follow the published name.
+    Option.getOrElse(config.packageName, () => "t3"),
     "--access",
     config.access,
     "--tag",
@@ -204,12 +207,47 @@ const createVpPmPublishArgs = (config: PublishCommandConfig): ReadonlyArray<stri
   return args;
 };
 
+export interface PublishManifestInput {
+  readonly version: string;
+  readonly workspaceConfig: WorkspaceConfig;
+  readonly packageName?: string | undefined;
+  readonly binName?: string | undefined;
+  readonly githubRepository?: string | undefined;
+}
+
+export const buildPublishManifest = (input: PublishManifestInput): PackageJson => {
+  const workspaceCatalog = input.workspaceConfig.catalog ?? {};
+  const workspaceOverrides = input.workspaceConfig.overrides ?? {};
+  return {
+    name: input.packageName ?? serverPackageJson.name,
+    repository: input.githubRepository
+      ? { ...serverPackageJson.repository, url: `https://github.com/${input.githubRepository}` }
+      : serverPackageJson.repository,
+    bin:
+      input.binName === undefined
+        ? serverPackageJson.bin
+        : { [input.binName]: serverPackageJson.bin.t3 },
+    type: serverPackageJson.type,
+    version: input.version,
+    engines: serverPackageJson.engines,
+    files: serverPackageJson.files,
+    dependencies: resolveCatalogDependencies(
+      serverPackageJson.dependencies,
+      workspaceCatalog,
+      "apps/server",
+    ),
+    overrides: resolveCatalogDependencies(workspaceOverrides, workspaceCatalog, "apps/server"),
+  };
+};
+
 const publishCmd = Command.make(
   "publish",
   {
     tag: Flag.string("tag").pipe(Flag.withDefault("latest")),
     access: Flag.string("access").pipe(Flag.withDefault("public")),
     appVersion: Flag.string("app-version").pipe(Flag.optional),
+    packageName: Flag.string("package-name").pipe(Flag.optional),
+    binName: Flag.string("bin-name").pipe(Flag.optional),
     provenance: Flag.boolean("provenance").pipe(Flag.withDefault(false)),
     dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)),
     verbose: Flag.boolean("verbose").pipe(Flag.withDefault(false)),
@@ -239,27 +277,13 @@ const publishCmd = Command.make(
         Effect.gen(function* () {
           const version = Option.getOrElse(config.appVersion, () => serverPackageJson.version);
           const workspaceConfig = yield* readWorkspaceConfig();
-          const workspaceCatalog = workspaceConfig.catalog ?? {};
-          const workspaceOverrides = workspaceConfig.overrides ?? {};
-          const pkg: PackageJson = {
-            name: serverPackageJson.name,
-            repository: serverPackageJson.repository,
-            bin: serverPackageJson.bin,
-            type: serverPackageJson.type,
+          const pkg = buildPublishManifest({
             version,
-            engines: serverPackageJson.engines,
-            files: serverPackageJson.files,
-            dependencies: resolveCatalogDependencies(
-              serverPackageJson.dependencies,
-              workspaceCatalog,
-              "apps/server",
-            ),
-            overrides: resolveCatalogDependencies(
-              workspaceOverrides,
-              workspaceCatalog,
-              "apps/server",
-            ),
-          };
+            workspaceConfig,
+            packageName: Option.getOrUndefined(config.packageName),
+            binName: Option.getOrUndefined(config.binName),
+            githubRepository: process.env.GITHUB_REPOSITORY,
+          });
 
           return {
             packageJsonString: yield* encodePackageJson(pkg),
@@ -312,8 +336,10 @@ const cli = Command.make("cli").pipe(
   Command.withSubcommands([buildCmd, publishCmd]),
 );
 
-Command.run(cli, { version: "0.0.0" }).pipe(
-  Effect.scoped,
-  Effect.provide([Logger.layer([Logger.consolePretty()]), NodeServices.layer]),
-  NodeRuntime.runMain,
-);
+if (import.meta.main) {
+  Command.run(cli, { version: "0.0.0" }).pipe(
+    Effect.scoped,
+    Effect.provide([Logger.layer([Logger.consolePretty()]), NodeServices.layer]),
+    NodeRuntime.runMain,
+  );
+}
