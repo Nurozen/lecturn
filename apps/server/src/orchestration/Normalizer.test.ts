@@ -6,6 +6,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
 } from "@t3tools/contracts";
 
 import { canonicalizeClientCommandTimestamps } from "./Normalizer.ts";
@@ -69,5 +70,23 @@ describe("canonicalizeClientCommandTimestamps", () => {
     }
     expect(result.createdAt).toBe(serverReceivedAt);
     expect(result.bootstrap?.createThread?.createdAt).toBe(serverReceivedAt);
+  });
+
+  it("replaces a future thread.fork timestamp with the server receipt timestamp", () => {
+    const command: ClientOrchestrationCommand = {
+      type: "thread.fork",
+      commandId: CommandId.make("command-3"),
+      threadId: ThreadId.make("thread-fork-child"),
+      sourceThreadId: ThreadId.make("thread-fork-source"),
+      throughTurnId: TurnId.make("turn-1"),
+      title: "Clock-safe fork",
+      workspace: "inherit",
+      createdAt: clientCreatedAt,
+    };
+
+    expect(canonicalizeClientCommandTimestamps(command, serverReceivedAt)).toEqual({
+      ...command,
+      createdAt: serverReceivedAt,
+    });
   });
 });

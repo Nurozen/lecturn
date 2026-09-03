@@ -54,6 +54,32 @@ list instead of persisting `error` over a working install. The built-in `grok-bu
 CLI's product name, not an ACP model id. `applyGrokAcpModelSelection` treats it as "keep the
 session's current model" and never sends it in `session/set_model`.
 
+## Adapter capabilities
+
+Each adapter declares a static `ProviderAdapterCapabilities` record, defined in
+[`ProviderAdapter.ts`][adapter] and exposed on the adapter shape as `capabilities`. Server code
+and clients gate per-provider features on it instead of switching on driver kinds:
+
+- `sessionModelSwitch` — whether the model of an existing session can change in place
+  (`in-session`) or not (`unsupported`).
+- `conversationFork` — whether the driver can natively fork a conversation at a turn boundary
+  when a session starts with a `fork` input (`native`), or must reject that start
+  (`unsupported`).
+
+| Driver kind   | `sessionModelSwitch` | `conversationFork` |
+| ------------- | -------------------- | ------------------ |
+| `codex`       | `in-session`         | `native`           |
+| `claudeAgent` | `in-session`         | `native`           |
+| `cursor`      | `in-session`         | `unsupported`      |
+| `grok`        | `in-session`         | `unsupported`      |
+| `opencode`    | `in-session`         | `native`           |
+
+The values live at the top of each adapter (`CodexAdapter.ts`, `ClaudeAdapter.ts`, and so on in
+`apps/server/src/provider/Layers/`). A driver with `conversationFork: "unsupported"` fails a
+session start that carries a `fork` input with a `ProviderAdapterValidationError` rather than
+silently starting a session that never saw the forked transcript. See
+[thread-forking.md](./thread-forking.md) for how the fork input is produced.
+
 ## OpenCode server ownership and catalog
 
 Each OpenCode provider instance owns one lazy local server for catalog discovery and

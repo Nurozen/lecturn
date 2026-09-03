@@ -28,6 +28,7 @@ import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -44,6 +45,10 @@ import {
   ProviderService,
   type ProviderServiceShape,
 } from "../../provider/Services/ProviderService.ts";
+import {
+  ProviderSessionDirectory,
+  type ProviderRuntimeBinding,
+} from "../../provider/Services/ProviderSessionDirectory.ts";
 import { makeProviderRegistryLayer } from "../../provider/testUtils/providerRegistryMock.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
@@ -59,7 +64,10 @@ import {
 } from "./ProviderCommandReactor.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
-import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
+import {
+  ProjectionSnapshotQuery,
+  type ProjectionThreadForkContext,
+} from "../Services/ProjectionSnapshotQuery.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Clock from "effect/Clock";
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -163,7 +171,10 @@ describe("ProviderCommandReactor", () => {
     readonly baseDir?: string;
     readonly threadModelSelection?: ModelSelection;
     readonly sessionModelSwitch?: "unsupported" | "in-session";
+    readonly conversationForkRequiresAnchor?: boolean;
     readonly requiresNewThreadForModelChange?: boolean;
+    readonly forkContextByThreadId?: Readonly<Record<string, ProjectionThreadForkContext>>;
+    readonly providerBindings?: ReadonlyArray<ProviderRuntimeBinding>;
     readonly titleRegenerationCompletionDispatchFailures?: number;
     readonly titleRegenerationBeforeStart?: "one" | "two";
     readonly serverActivation?: Effect.Effect<void>;
@@ -347,6 +358,8 @@ describe("ProviderCommandReactor", () => {
       getCapabilities: (_provider) =>
         Effect.succeed({
           sessionModelSwitch: input?.sessionModelSwitch ?? "in-session",
+          conversationFork: "native",
+          conversationForkRequiresAnchor: input?.conversationForkRequiresAnchor ?? false,
         }),
       getInstanceInfo: (instanceId) => {
         const raw = String(instanceId);
@@ -390,6 +403,54 @@ describe("ProviderCommandReactor", () => {
       Layer.provide(RepositoryIdentityResolver.layer),
       Layer.provide(SqlitePersistenceMemory),
     );
+    // Fork lineage is written by the thread.fork decider, which this harness
+    // does not drive; tests seed it per thread and everything else delegates
+    // to the real snapshot query.
+    const forkContexts = new Map(Object.entries(input?.forkContextByThreadId ?? {}));
+    const reactorSnapshotLayer = Layer.effect(
+      ProjectionSnapshotQuery,
+      Effect.gen(function* () {
+        const real = yield* ProjectionSnapshotQuery;
+        return {
+          ...real,
+          getThreadForkContextById: (threadId: ThreadId) => {
+            const seeded = forkContexts.get(String(threadId));
+            return seeded !== undefined
+              ? Effect.succeed(Option.some(seeded))
+              : real.getThreadForkContextById(threadId);
+          },
+        };
+      }),
+    ).pipe(Layer.provide(projectionSnapshotLayer));
+    const directoryBindings = new Map<string, ProviderRuntimeBinding>(
+      (input?.providerBindings ?? []).map((binding) => [String(binding.threadId), binding]),
+    );
+    const providerSessionDirectoryLayer = Layer.succeed(ProviderSessionDirectory, {
+      upsert: (binding) =>
+        Effect.sync(() => {
+          directoryBindings.set(String(binding.threadId), binding);
+        }),
+      getProvider: (threadId) => {
+        const binding = directoryBindings.get(String(threadId));
+        return binding !== undefined
+          ? Effect.succeed(binding.provider)
+          : Effect.die(new Error(`No binding for thread '${threadId}' in test directory stub.`));
+      },
+      getBinding: (threadId) =>
+        Effect.sync(() => {
+          const binding = directoryBindings.get(String(threadId));
+          return binding === undefined ? Option.none() : Option.some(binding);
+        }),
+      listThreadIds: () =>
+        Effect.sync(() => [...directoryBindings.values()].map((binding) => binding.threadId)),
+      listBindings: () =>
+        Effect.sync(() =>
+          [...directoryBindings.values()].map((binding) => ({
+            ...binding,
+            lastSeenAt: now,
+          })),
+        ),
+    });
     let titleRegenerationCompletionDispatchAttempts = 0;
     const reactorOrchestrationLayer = Layer.effect(
       OrchestrationEngineService,
@@ -419,7 +480,8 @@ describe("ProviderCommandReactor", () => {
     ).pipe(Layer.provide(orchestrationLayer));
     const layer = ProviderCommandReactorLive.pipe(
       Layer.provideMerge(reactorOrchestrationLayer),
-      Layer.provideMerge(projectionSnapshotLayer),
+      Layer.provideMerge(reactorSnapshotLayer),
+      Layer.provideMerge(providerSessionDirectoryLayer),
       Layer.provideMerge(Layer.succeed(ProviderService, service)),
       Layer.provideMerge(makeProviderRegistryLayer(providerSnapshots as never)),
       Layer.provideMerge(
@@ -804,6 +866,179 @@ describe("ProviderCommandReactor", () => {
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.title).toBe("Generated title");
     expect(attempts).toBe(2);
+  });
+
+  const forkChildThreadId = ThreadId.make("thread-fork-child");
+  const forkTurnId = asTurnId("turn-fork-1");
+  // Seeds a fork child of the harness's thread-1 through the real decider so
+  // the child carries forkedFrom and inherited messages whose timestamps
+  // predate its createdAt (the fork time).
+  const dispatchThreadFork = (harness: Awaited<ReturnType<typeof createHarness>>) =>
+    harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make("cmd-thread-fork-child"),
+        threadId: forkChildThreadId,
+        sourceThreadId: ThreadId.make("thread-1"),
+        throughTurnId: forkTurnId,
+        createdAt: "2026-01-01T01:00:00.000Z",
+        thread: {
+          projectId: asProjectId("project-1"),
+          title: "Thread (fork)",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          branch: null,
+          worktreePath: null,
+        },
+        forkedFrom: {
+          threadId: ThreadId.make("thread-1"),
+          turnId: forkTurnId,
+          turnCount: 1,
+          messageId: null,
+        },
+        forkSource: null,
+        history: {
+          messages: [
+            {
+              id: asMessageId("user-message-fork-inherited"),
+              role: "user",
+              text: "inherited ask",
+              attachments: [],
+              turnId: forkTurnId,
+              streaming: false,
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+            {
+              id: asMessageId("assistant-message-fork-inherited"),
+              role: "assistant",
+              text: "inherited answer",
+              attachments: [],
+              turnId: forkTurnId,
+              streaming: false,
+              createdAt: "2026-01-01T00:00:01.000Z",
+              updatedAt: "2026-01-01T00:00:01.000Z",
+            },
+          ],
+          activities: [],
+          proposedPlans: [],
+          turns: [
+            {
+              turnId: forkTurnId,
+              state: "completed",
+              requestedAt: "2026-01-01T00:00:00.000Z",
+              startedAt: "2026-01-01T00:00:00.000Z",
+              completedAt: "2026-01-01T00:00:01.000Z",
+              pendingMessageId: asMessageId("user-message-fork-inherited"),
+              assistantMessageId: asMessageId("assistant-message-fork-inherited"),
+              providerTurnRef: "prov-fork-1",
+            },
+          ],
+        },
+      }),
+    );
+
+  it("auto-titles a forked thread on its first post-fork turn", async () => {
+    const harness = await createHarness();
+    harness.generateThreadTitle.mockReturnValue(
+      Effect.succeed({ title: "Fix reconnect handling" }),
+    );
+
+    await dispatchThreadFork(harness);
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-fork-1"),
+        threadId: forkChildThreadId,
+        message: {
+          messageId: asMessageId("user-message-fork-1"),
+          role: "user",
+          text: "Continue from the fork point.",
+          attachments: [],
+        },
+        titleSeed: "Thread (fork)",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T02:00:00.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.generateThreadTitle.mock.calls.length === 1);
+    expect(harness.generateThreadTitle.mock.calls[0]?.[0]).toMatchObject({
+      message: "Continue from the fork point.",
+    });
+    await waitFor(async () => {
+      const readModel = await harness.readModel();
+      return (
+        readModel.threads.find((entry) => entry.id === forkChildThreadId)?.title ===
+        "Fix reconnect handling"
+      );
+    });
+  });
+
+  it("does not auto-title a forked thread on its second post-fork turn", async () => {
+    const harness = await createHarness();
+    harness.generateThreadTitle.mockReturnValue(
+      Effect.succeed({ title: "Fix reconnect handling" }),
+    );
+
+    await dispatchThreadFork(harness);
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-fork-1"),
+        threadId: forkChildThreadId,
+        message: {
+          messageId: asMessageId("user-message-fork-1"),
+          role: "user",
+          text: "Continue from the fork point.",
+          attachments: [],
+        },
+        titleSeed: "Thread (fork)",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T02:00:00.000Z",
+      }),
+    );
+    await waitFor(async () => {
+      const readModel = await harness.readModel();
+      return (
+        readModel.threads.find((entry) => entry.id === forkChildThreadId)?.title ===
+        "Fix reconnect handling"
+      );
+    });
+
+    // The seed matches the current title, so only the first-turn gate keeps
+    // this turn from regenerating the title again.
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-fork-2"),
+        threadId: forkChildThreadId,
+        message: {
+          messageId: asMessageId("user-message-fork-2"),
+          role: "user",
+          text: "Keep going.",
+          attachments: [],
+        },
+        titleSeed: "Fix reconnect handling",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T03:00:00.000Z",
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    await harness.drain();
+
+    expect(harness.generateThreadTitle).toHaveBeenCalledTimes(1);
+    const readModel = await harness.readModel();
+    expect(readModel.threads.find((entry) => entry.id === forkChildThreadId)?.title).toBe(
+      "Fix reconnect handling",
+    );
   });
 
   it("regenerates a thread title from the current conversation", async () => {
@@ -3382,4 +3617,221 @@ describe("ProviderCommandReactor", () => {
       expect(thread?.session?.providerInstanceId).toBe(ProviderInstanceId.make("codex_work"));
     }),
   );
+
+  describe("fork on first send", () => {
+    const makeForkContext = (overrides?: {
+      readonly providerInstanceId?: ProviderInstanceId;
+      readonly resumeCursor?: unknown;
+      readonly providerTurnRef?: string | null;
+    }): ProjectionThreadForkContext => ({
+      forkedFrom: {
+        threadId: ThreadId.make("thread-parent"),
+        turnId: asTurnId("turn-fork-point"),
+        turnCount: 1,
+        messageId: null,
+      },
+      forkSource: {
+        providerInstanceId:
+          overrides?.providerInstanceId ?? ProviderInstanceId.make("codex_personal"),
+        resumeCursor: overrides?.resumeCursor ?? { opaque: "parent-cursor-snapshot" },
+        providerTurnRef:
+          overrides?.providerTurnRef === undefined
+            ? "provider-turn-ref-1"
+            : overrides.providerTurnRef,
+        throughTurnOrdinal: 1,
+        atEnd: true,
+      },
+    });
+
+    const dispatchTurnStart = (
+      harness: Awaited<ReturnType<typeof createHarness>>,
+      suffix: string,
+      modelSelection?: ModelSelection,
+    ) =>
+      harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make(`cmd-turn-start-fork-${suffix}`),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId(`user-message-fork-${suffix}`),
+            role: "user",
+            text: "fork send",
+            attachments: [],
+          },
+          ...(modelSelection !== undefined ? { modelSelection } : {}),
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        }),
+      );
+
+    it("passes the fork input on the source instance when the child has no binding", async () => {
+      const harness = await createHarness({
+        forkContextByThreadId: { "thread-1": makeForkContext() },
+      });
+
+      await dispatchTurnStart(harness, "a");
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+
+      const startInput = harness.startSession.mock.calls[0]?.[1];
+      expect(startInput).toMatchObject({
+        providerInstanceId: ProviderInstanceId.make("codex_personal"),
+        fork: {
+          sourceResumeCursor: { opaque: "parent-cursor-snapshot" },
+          sourceProviderInstanceId: ProviderInstanceId.make("codex_personal"),
+          providerTurnRef: "provider-turn-ref-1",
+          throughTurnId: asTurnId("turn-fork-point"),
+          throughTurnOrdinal: 1,
+          atEnd: true,
+        },
+      });
+      expect(startInput).not.toHaveProperty("resumeCursor");
+    });
+
+    it("does not fork once the child has a binding of its own", async () => {
+      const harness = await createHarness({
+        forkContextByThreadId: { "thread-1": makeForkContext() },
+        providerBindings: [
+          {
+            threadId: ThreadId.make("thread-1"),
+            provider: ProviderDriverKind.make("codex"),
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            resumeCursor: { opaque: "child-cursor" },
+          },
+        ],
+      });
+
+      await dispatchTurnStart(harness, "b");
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+
+      const startInput = harness.startSession.mock.calls[0]?.[1];
+      expect(startInput).not.toHaveProperty("fork");
+      expect(startInput).toMatchObject({
+        providerInstanceId: ProviderInstanceId.make("codex"),
+      });
+    });
+
+    it("prefers the parent's live cursor when its binding matches the fork instance", async () => {
+      const harness = await createHarness({
+        forkContextByThreadId: { "thread-1": makeForkContext() },
+        providerBindings: [
+          {
+            threadId: ThreadId.make("thread-parent"),
+            provider: ProviderDriverKind.make("codex"),
+            providerInstanceId: ProviderInstanceId.make("codex_personal"),
+            resumeCursor: { opaque: "parent-cursor-live" },
+          },
+        ],
+      });
+
+      await dispatchTurnStart(harness, "c");
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+
+      expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+        fork: { sourceResumeCursor: { opaque: "parent-cursor-live" } },
+      });
+    });
+
+    it("falls back to the snapshot cursor when the parent binding moved instances", async () => {
+      const harness = await createHarness({
+        forkContextByThreadId: { "thread-1": makeForkContext() },
+        providerBindings: [
+          {
+            threadId: ThreadId.make("thread-parent"),
+            provider: ProviderDriverKind.make("codex"),
+            providerInstanceId: ProviderInstanceId.make("codex_work"),
+            resumeCursor: { opaque: "parent-cursor-live" },
+          },
+        ],
+      });
+
+      await dispatchTurnStart(harness, "d");
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+
+      expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+        fork: { sourceResumeCursor: { opaque: "parent-cursor-snapshot" } },
+      });
+    });
+
+    it("fails the turn when an anchor-less at-end fork's source advanced past the snapshot", async () => {
+      const harness = await createHarness({
+        conversationForkRequiresAnchor: true,
+        forkContextByThreadId: { "thread-1": makeForkContext({ providerTurnRef: null }) },
+        providerBindings: [
+          {
+            threadId: ThreadId.make("thread-parent"),
+            provider: ProviderDriverKind.make("codex"),
+            providerInstanceId: ProviderInstanceId.make("codex_personal"),
+            resumeCursor: { opaque: "parent-cursor-live" },
+          },
+        ],
+      });
+
+      await dispatchTurnStart(harness, "stale");
+      await waitFor(async () => {
+        const readModel = await harness.readModel();
+        return (
+          readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"))?.session
+            ?.status === "error"
+        );
+      });
+
+      const readModel = await harness.readModel();
+      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+      expect(thread?.session?.lastError).toContain("forked without a provider anchor");
+      expect(harness.startSession).not.toHaveBeenCalled();
+    });
+
+    it("forks anchor-less at the end when the parent still sits at the fork point", async () => {
+      const harness = await createHarness({
+        conversationForkRequiresAnchor: true,
+        forkContextByThreadId: { "thread-1": makeForkContext({ providerTurnRef: null }) },
+        providerBindings: [
+          {
+            threadId: ThreadId.make("thread-parent"),
+            provider: ProviderDriverKind.make("codex"),
+            providerInstanceId: ProviderInstanceId.make("codex_personal"),
+            // Structurally equal to the snapshot but a distinct object: the
+            // staleness check must compare cursor contents, not references.
+            resumeCursor: { opaque: "parent-cursor-snapshot" },
+          },
+        ],
+      });
+
+      await dispatchTurnStart(harness, "fresh");
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+
+      expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+        fork: {
+          sourceResumeCursor: { opaque: "parent-cursor-snapshot" },
+          providerTurnRef: null,
+          atEnd: true,
+        },
+      });
+    });
+
+    it("never passes fork on the restart path", async () => {
+      const harness = await createHarness({
+        forkContextByThreadId: { "thread-1": makeForkContext() },
+      });
+
+      await dispatchTurnStart(harness, "e1");
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+      await dispatchTurnStart(harness, "e2", {
+        instanceId: ProviderInstanceId.make("codex_work"),
+        model: "gpt-5-codex",
+      });
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+
+      expect(harness.startSession).toHaveBeenCalledTimes(2);
+      const restartInput = harness.startSession.mock.calls[1]?.[1];
+      expect(restartInput).not.toHaveProperty("fork");
+      expect(restartInput).toMatchObject({
+        providerInstanceId: ProviderInstanceId.make("codex_work"),
+        resumeCursor: { opaque: "resume-1" },
+      });
+    });
+  });
 });

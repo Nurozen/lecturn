@@ -80,6 +80,13 @@ import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogg
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 
 const PROVIDER = ProviderDriverKind.make("cursor");
+
+// Exported so capability/presentation parity is testable without a runtime.
+export const CURSOR_ADAPTER_CAPABILITIES = {
+  sessionModelSwitch: "in-session",
+  conversationFork: "unsupported",
+  conversationForkRequiresAnchor: false,
+} as const;
 const CURSOR_RESUME_VERSION = 1 as const;
 const ACP_PLAN_MODE_ALIASES = ["plan", "architect"];
 const ACP_IMPLEMENT_MODE_ALIASES = ["code", "agent", "default", "chat", "implement"];
@@ -492,6 +499,13 @@ export function makeCursorAdapter(
               provider: PROVIDER,
               operation: "startSession",
               issue: "cwd is required and must be non-empty.",
+            });
+          }
+          if (input.fork !== undefined) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "startSession",
+              issue: "Conversation fork is not supported by this provider.",
             });
           }
 
@@ -1175,7 +1189,7 @@ export function makeCursorAdapter(
 
     return {
       provider: PROVIDER,
-      capabilities: { sessionModelSwitch: "in-session" },
+      capabilities: CURSOR_ADAPTER_CAPABILITIES,
       startSession,
       sendTurn,
       interruptTurn,

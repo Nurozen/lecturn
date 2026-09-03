@@ -1155,12 +1155,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           aggregateId: command.threadId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
-          metadata: {},
+          metadata:
+            command.providerTurnId === undefined ? {} : { providerTurnId: command.providerTurnId },
         })),
         type: "thread.session-set",
         payload: {
           threadId: command.threadId,
           session: command.session,
+          ...(command.completedTurnId !== undefined
+            ? { completedTurnId: command.completedTurnId }
+            : {}),
         },
       };
       // Only a session coming alive is activity worth waking a settled thread
@@ -1369,6 +1373,87 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       };
       return [unsettledEvent, activityAppendedEvent];
+    }
+
+    case "thread.fork": {
+      // The ws dispatcher materializes forks (assembling the inherited
+      // history) before dispatch; a transport that skipped that step can
+      // still cast the raw client shape here, so reject anything without a
+      // history rather than create a partial thread.
+      if (!("history" in command) || command.history === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "thread.fork must be materialized by the server",
+        });
+      }
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: command.thread.projectId,
+      });
+      yield* requireThreadAbsent({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const sourceThread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.sourceThreadId,
+      });
+      if (sourceThread.projectId !== command.thread.projectId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Source thread '${command.sourceThreadId}' belongs to project '${sourceThread.projectId}', not '${command.thread.projectId}'.`,
+        });
+      }
+      if (!command.history.turns.some((turn) => turn.turnId === command.throughTurnId)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Turn '${command.throughTurnId}' is not part of the materialized history.`,
+        });
+      }
+      const threadCreatedEvent: Omit<OrchestrationEvent, "sequence"> = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.created",
+        payload: {
+          threadId: command.threadId,
+          projectId: command.thread.projectId,
+          title: command.thread.title,
+          modelSelection: command.thread.modelSelection,
+          runtimeMode: command.thread.runtimeMode,
+          interactionMode: command.thread.interactionMode,
+          branch: command.thread.branch,
+          worktreePath: command.thread.worktreePath,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+      const threadForkedEvent: Omit<OrchestrationEvent, "sequence"> = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        causationEventId: threadCreatedEvent.eventId,
+        type: "thread.forked",
+        payload: {
+          threadId: command.threadId,
+          forkedFrom: command.forkedFrom,
+          forkSource: command.forkSource,
+          history: command.history,
+          // Inherited from the read model's source thread; the materialized
+          // command carries no linked pull request of its own.
+          linkedPullRequest: sourceThread.linkedPullRequest ?? null,
+        },
+      };
+      return [threadCreatedEvent, threadForkedEvent];
     }
 
     default: {

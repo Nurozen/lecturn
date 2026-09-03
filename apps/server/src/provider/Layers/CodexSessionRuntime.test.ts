@@ -777,10 +777,10 @@ describe("isRecoverableThreadResumeError", () => {
 describe("openCodexThread", () => {
   it.effect("falls back to thread/start when resume fails recoverably", () =>
     Effect.gen(function* () {
-      const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
+      const calls: Array<{ method: string; payload: unknown }> = [];
       const started = makeThreadOpenResponse("fresh-thread");
       const client = {
-        request: <M extends "thread/start" | "thread/resume">(
+        request: <M extends "thread/start" | "thread/resume" | "thread/fork">(
           method: M,
           payload: CodexRpc.ClientRequestParamsByMethod[M],
         ) => {
@@ -818,7 +818,7 @@ describe("openCodexThread", () => {
   it.effect("propagates non-recoverable resume failures", () =>
     Effect.gen(function* () {
       const client = {
-        request: <M extends "thread/start" | "thread/resume">(
+        request: <M extends "thread/start" | "thread/resume" | "thread/fork">(
           method: M,
           _payload: CodexRpc.ClientRequestParamsByMethod[M],
         ) => {
@@ -848,6 +848,134 @@ describe("openCodexThread", () => {
 
       NodeAssert.ok(isCodexAppServerRequestError(error));
       NodeAssert.equal(error.errorMessage, "timed out waiting for server");
+    }),
+  );
+
+  it.effect("forks the source thread without reading the cloned turns", () =>
+    Effect.gen(function* () {
+      const calls: Array<{ method: string; payload: unknown }> = [];
+      const forked = makeThreadOpenResponse("forked-thread");
+      Object.defineProperty(forked.thread, "turns", {
+        get() {
+          throw new Error("cloned turns must stay unread while opening a fork");
+        },
+      });
+      const client = {
+        request: <M extends "thread/start" | "thread/resume" | "thread/fork">(
+          method: M,
+          payload: CodexRpc.ClientRequestParamsByMethod[M],
+        ) => {
+          calls.push({ method, payload });
+          return Effect.succeed(forked as CodexRpc.ClientRequestResponsesByMethod[M]);
+        },
+      };
+
+      const opened = yield* openCodexThread({
+        client,
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/project",
+        requestedModel: "gpt-5.3-codex",
+        serviceTier: undefined,
+        resumeThreadId: undefined,
+        fork: { sourceThreadId: "source-thread", lastTurnId: "provider-turn-3" },
+      });
+
+      NodeAssert.equal(opened.thread.id, "forked-thread");
+      NodeAssert.deepStrictEqual(calls, [
+        {
+          method: "thread/fork",
+          payload: {
+            threadId: "source-thread",
+            lastTurnId: "provider-turn-3",
+            cwd: "/tmp/project",
+            approvalPolicy: "never",
+            sandbox: "danger-full-access",
+            approvalsReviewer: "user",
+            model: "gpt-5.3-codex",
+          },
+        },
+      ]);
+    }),
+  );
+
+  it.effect("omits the fork boundary for legacy turns without a provider anchor", () =>
+    Effect.gen(function* () {
+      const payloads: Array<unknown> = [];
+      const client = {
+        request: <M extends "thread/start" | "thread/resume" | "thread/fork">(
+          _method: M,
+          payload: CodexRpc.ClientRequestParamsByMethod[M],
+        ) => {
+          payloads.push(payload);
+          return Effect.succeed(
+            makeThreadOpenResponse("forked-thread") as CodexRpc.ClientRequestResponsesByMethod[M],
+          );
+        },
+      };
+
+      yield* openCodexThread({
+        client,
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/project",
+        requestedModel: undefined,
+        serviceTier: undefined,
+        resumeThreadId: undefined,
+        fork: { sourceThreadId: "source-thread", lastTurnId: null },
+      });
+
+      NodeAssert.deepStrictEqual(payloads, [
+        {
+          threadId: "source-thread",
+          cwd: "/tmp/project",
+          approvalPolicy: "never",
+          sandbox: "danger-full-access",
+          approvalsReviewer: "user",
+        },
+      ]);
+    }),
+  );
+
+  it.effect("propagates fork failures without falling back to thread/start", () =>
+    Effect.gen(function* () {
+      const methods: Array<string> = [];
+      const client = {
+        request: <M extends "thread/start" | "thread/resume" | "thread/fork">(
+          method: M,
+          _payload: CodexRpc.ClientRequestParamsByMethod[M],
+        ) => {
+          methods.push(method);
+          if (method === "thread/fork") {
+            // A missing-thread message would qualify for the resume fallback;
+            // forks must fail hard instead of opening an empty thread.
+            return Effect.fail(
+              new CodexErrors.CodexAppServerRequestError({
+                code: -32603,
+                errorMessage: "thread not found",
+              }),
+            );
+          }
+          return Effect.succeed(
+            makeThreadOpenResponse("fresh-thread") as CodexRpc.ClientRequestResponsesByMethod[M],
+          );
+        },
+      };
+
+      const error = yield* openCodexThread({
+        client,
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/project",
+        requestedModel: "gpt-5.3-codex",
+        serviceTier: undefined,
+        resumeThreadId: undefined,
+        fork: { sourceThreadId: "source-thread", lastTurnId: "provider-turn-3" },
+      }).pipe(Effect.flip);
+
+      NodeAssert.ok(isCodexAppServerRequestError(error));
+      NodeAssert.equal(error.errorMessage, "thread not found");
+      NodeAssert.deepStrictEqual(methods, ["thread/fork"]);
     }),
   );
 });

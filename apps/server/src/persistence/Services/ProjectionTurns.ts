@@ -15,6 +15,7 @@ import {
   OrchestrationCheckpointFile,
   OrchestrationCheckpointStatus,
   ThreadId,
+  TrimmedNonEmptyString,
   TurnId,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
@@ -48,6 +49,9 @@ export const ProjectionTurn = Schema.Struct({
   checkpointRef: Schema.NullOr(CheckpointRef),
   checkpointStatus: Schema.NullOr(OrchestrationCheckpointStatus),
   checkpointFiles: Schema.Array(OrchestrationCheckpointFile),
+  // Provider-side anchor of the turn (e.g. a native response id); optional so
+  // rows written before migration 045 keep decoding.
+  providerTurnRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
 });
 export type ProjectionTurn = typeof ProjectionTurn.Type;
 
@@ -66,6 +70,8 @@ export const ProjectionTurnById = Schema.Struct({
   checkpointRef: Schema.NullOr(CheckpointRef),
   checkpointStatus: Schema.NullOr(OrchestrationCheckpointStatus),
   checkpointFiles: Schema.Array(OrchestrationCheckpointFile),
+  // See ProjectionTurn.providerTurnRef.
+  providerTurnRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
 });
 export type ProjectionTurnById = typeof ProjectionTurnById.Type;
 

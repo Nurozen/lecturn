@@ -19,6 +19,7 @@ import {
   ProviderRuntimeEvent,
   type RuntimeMode,
   ThreadId,
+  TurnId,
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -42,7 +43,11 @@ import {
   SYNTHETIC_CLAUDE_STANDARD_MODEL,
   SYNTHETIC_CLAUDE_THINKING_MODEL,
 } from "../ClaudeModelCatalog.testFixtures.ts";
-import { ProviderAdapterProcessError, ProviderAdapterValidationError } from "../Errors.ts";
+import {
+  ProviderAdapterProcessError,
+  ProviderAdapterSessionClosedError,
+  ProviderAdapterValidationError,
+} from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
@@ -275,6 +280,43 @@ async function readFirstPromptMessage(
 const THREAD_ID = ThreadId.make("thread-claude-1");
 const RESUME_THREAD_ID = ThreadId.make("thread-claude-resume");
 const SYNTHETIC_SUBAGENT_MODEL = "claude-synthetic-subagent[expanded]";
+const FORK_PARENT_SESSION_ID = "550e8400-e29b-41d4-a716-446655440000";
+const FORK_CHILD_SESSION_ID = "6ba7b810-9dad-41d1-80b4-00c04fd430c8";
+
+function makeForkInput(providerTurnRef: string | null) {
+  return {
+    sourceResumeCursor: {
+      threadId: "parent-thread-1",
+      resume: FORK_PARENT_SESSION_ID,
+      turnCount: 3,
+    },
+    sourceProviderInstanceId: ProviderInstanceId.make("claudeAgent"),
+    providerTurnRef,
+    throughTurnId: TurnId.make("turn-fork-1"),
+    throughTurnOrdinal: 2,
+    atEnd: false,
+  };
+}
+
+function makeInitSdkMessage(sessionId: string, uuid: string): SDKMessage {
+  return {
+    type: "system",
+    subtype: "init",
+    apiKeySource: "none",
+    claude_code_version: "test",
+    cwd: "/tmp/claude-adapter-test",
+    tools: [],
+    mcp_servers: [],
+    model: "claude-sonnet-4-5",
+    permissionMode: "bypassPermissions",
+    slash_commands: [],
+    output_style: "default",
+    skills: [],
+    plugins: [],
+    session_id: sessionId,
+    uuid,
+  } as unknown as SDKMessage;
+}
 
 describe("ClaudeAdapterLive", () => {
   it.effect("returns validation error for non-claude provider on startSession", () => {
@@ -1113,6 +1155,8 @@ describe("ClaudeAdapterLive", () => {
       if (turnCompleted?.type === "turn.completed") {
         assert.equal(String(turnCompleted.turnId), String(turn.turnId));
         assert.equal(turnCompleted.payload.state, "completed");
+        // The completed turn is anchored to the last assistant message uuid.
+        assert.equal(turnCompleted.providerRefs?.providerTurnId, "assistant-1");
       }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
@@ -1250,6 +1294,63 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(String(turnStartedEvents[0]?.turnId), String(turn.turnId));
       assert.equal(turnCompletedEvents.length, 1);
       assert.equal(String(turnCompletedEvents[0]?.turnId), String(turn.turnId));
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("anchors a synthetic turn without stamping the T3 turn id", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.takeUntil(
+        adapter.streamEvents,
+        (event) => event.type === "turn.completed",
+      ).pipe(Stream.runCollect, Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      // An assistant message with no active turn auto-starts a synthetic turn.
+      harness.query.emit({
+        type: "assistant",
+        session_id: "sdk-session-synthetic",
+        uuid: "assistant-synthetic-1",
+        parent_tool_use_id: null,
+        message: {
+          id: "assistant-message-synthetic-1",
+          content: [{ type: "text", text: "Background update." }],
+        },
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "sdk-session-synthetic",
+        uuid: "result-synthetic-1",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const turnStarted = runtimeEvents.find((event) => event.type === "turn.started");
+      assert.equal(turnStarted?.type, "turn.started");
+      if (turnStarted?.type === "turn.started") {
+        // providerTurnId means "provider-side anchor"; the synthetic start
+        // must not stamp the T3 turn id into it.
+        assert.equal(turnStarted.providerRefs?.providerTurnId, undefined);
+      }
+
+      const turnCompleted = runtimeEvents.find((event) => event.type === "turn.completed");
+      assert.equal(turnCompleted?.type, "turn.completed");
+      if (turnCompleted?.type === "turn.completed") {
+        assert.equal(turnCompleted.providerRefs?.providerTurnId, "assistant-synthetic-1");
+      }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -4363,6 +4464,171 @@ describe("ClaudeAdapterLive", () => {
       );
       assert.equal(createInput?.options.resume, undefined);
       assert.equal(createInput?.options.sessionId, sessionResumeCursor.resume);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("forks the parent Claude session natively and adopts the child session id", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      // Script the init handshake up-front: a fork start blocks until the
+      // SDK stream adopts the child session id.
+      harness.query.emit(makeInitSdkMessage(FORK_CHILD_SESSION_ID, "fork-init"));
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        fork: makeForkInput("assistant-anchor-7"),
+      });
+
+      const options = harness.getLastCreateQueryInput()?.options;
+      assert.equal(options?.resume, FORK_PARENT_SESSION_ID);
+      assert.equal(options?.forkSession, true);
+      assert.equal(options?.resumeSessionAt, "assistant-anchor-7");
+      assert.equal(options?.sessionId, undefined);
+
+      assert.deepEqual(session.resumeCursor, {
+        threadId: THREAD_ID,
+        resume: FORK_CHILD_SESSION_ID,
+        turnCount: 0,
+      });
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("keeps a forked child unbound from the parent until the SDK init arrives", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const startFiber = yield* adapter
+        .startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          fork: makeForkInput(null),
+        })
+        .pipe(Effect.forkChild);
+
+      // session.started / session.configured / session.state.changed land
+      // before the fork start blocks on child adoption.
+      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+
+      // A legacy fork turn carries no anchor: resumeSessionAt stays unset.
+      const options = harness.getLastCreateQueryInput()?.options;
+      assert.equal(options?.resume, FORK_PARENT_SESSION_ID);
+      assert.equal(options?.forkSession, true);
+      assert.equal(options?.resumeSessionAt, undefined);
+      assert.equal(options?.sessionId, undefined);
+
+      // Before init the child has no resume identity at all — a fork that
+      // dies here must not leave a cursor that would resume the parent.
+      const pendingSessions = yield* adapter.listSessions();
+      const pendingCursor = pendingSessions[0]?.resumeCursor as { resume?: string } | undefined;
+      assert.equal(pendingCursor?.resume, undefined);
+
+      harness.query.emit(makeInitSdkMessage(FORK_CHILD_SESSION_ID, "fork-init-late"));
+
+      const session = yield* Fiber.join(startFiber);
+      assert.deepEqual(session.resumeCursor, {
+        threadId: THREAD_ID,
+        resume: FORK_CHILD_SESSION_ID,
+        turnCount: 0,
+      });
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("tears down a fork start whose stream dies before init", () => {
+    const queries: FakeClaudeQuery[] = [];
+    const layer = Layer.effect(
+      ClaudeAdapter,
+      Effect.gen(function* () {
+        const claudeConfig = decodeClaudeSettings({});
+        return yield* makeClaudeAdapter(claudeConfig, {
+          createQuery: () => {
+            const query = new FakeClaudeQuery();
+            queries.push(query);
+            return query;
+          },
+        });
+      }),
+    ).pipe(
+      Layer.provideMerge(ServerConfig.layerTest("/tmp/claude-adapter-test", "/tmp")),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(NodeServices.layer),
+    );
+
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const startFiber = yield* adapter
+        .startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          fork: makeForkInput("assistant-anchor-7"),
+        })
+        .pipe(Effect.forkChild);
+
+      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+      queries[0]?.fail(new Error("stream died before init"));
+
+      const result = yield* Fiber.join(startFiber).pipe(Effect.result);
+      assert.equal(result._tag, "Failure");
+      if (result._tag === "Failure") {
+        assert.instanceOf(result.failure, ProviderAdapterSessionClosedError);
+      }
+
+      // The dead fork left nothing behind: the thread is free again and a
+      // fresh start binds a brand-new query cleanly.
+      assert.equal(yield* adapter.hasSession(THREAD_ID), false);
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      assert.equal(session.status, "ready");
+      assert.equal(yield* adapter.hasSession(THREAD_ID), true);
+      assert.equal(queries.length, 2);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(layer),
+    );
+  });
+
+  it.effect("rejects a fork whose source cursor lacks a native session id", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const error = yield* adapter
+        .startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          fork: {
+            ...makeForkInput(null),
+            sourceResumeCursor: { threadId: "parent-thread-1", turnCount: 3 },
+          },
+        })
+        .pipe(Effect.flip);
+
+      assert.instanceOf(error, ProviderAdapterValidationError);
+      assert.equal(
+        (error as ProviderAdapterValidationError).issue,
+        "Fork source resume cursor is missing a native Claude session id.",
+      );
+      // Validation rejects before any query is created.
+      assert.equal(harness.getLastCreateQueryInput(), undefined);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

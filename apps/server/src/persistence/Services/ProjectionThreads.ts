@@ -14,6 +14,8 @@ import {
   ProjectId,
   ProviderInteractionMode,
   RuntimeMode,
+  ThreadForkOrigin,
+  ThreadForkProviderSource,
   ThreadLinkedPullRequest,
   ThreadId,
   TurnId,
@@ -35,6 +37,12 @@ export const ProjectionThread = Schema.Struct({
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
+  // Lineage of a forked thread; optional so rows written before migration 045
+  // keep decoding.
+  forkedFrom: Schema.optional(Schema.NullOr(ThreadForkOrigin)),
+  // Server-only provider snapshot captured at fork time; never exposed on
+  // wire shapes.
+  forkSource: Schema.optional(Schema.NullOr(ThreadForkProviderSource)),
   latestTurnId: Schema.NullOr(TurnId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,

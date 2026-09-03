@@ -88,6 +88,12 @@ export class ServerConfig extends Context.Service<
     readonly logWebSocketEvents: boolean;
     readonly tailscaleServeEnabled: boolean;
     readonly tailscaleServePort: number;
+    /**
+     * Kill switch for thread forking (`T3CODE_THREAD_FORKING`, default on):
+     * drives the advertised `threadForking` capability and gates the
+     * WebSocket fork dispatch, so a modified client cannot bypass it.
+     */
+    readonly threadForkingEnabled: boolean;
   }
 >()("t3/config/ServerConfig") {
   /** @deprecated Import and use `layerTest` from this module. */
@@ -200,6 +206,7 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     logWebSocketEvents: false,
     tailscaleServeEnabled: false,
     tailscaleServePort: 443,
+    threadForkingEnabled: true,
     port: 0,
     host: undefined,
     desktopBootstrapToken: undefined,

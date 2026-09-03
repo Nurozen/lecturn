@@ -10,6 +10,7 @@ import * as Path from "effect/Path";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
+  type CheckpointRef,
   GitCommandError,
   VcsProcessExitError,
   type VcsSwitchRefInput,
@@ -903,6 +904,25 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
             }),
           { discard: true },
         );
+      },
+    ),
+
+    aliasCheckpointRefs: Effect.fn("GitVcsDriver.checkpoints.aliasCheckpointRefs")(
+      function* (input) {
+        const createdRefs: Array<CheckpointRef> = [];
+        for (const alias of input.refs) {
+          const commitOid = yield* resolveCheckpointCommit(input.cwd, alias.from);
+          if (!commitOid) {
+            continue;
+          }
+          yield* execute({
+            operation: "GitVcsDriver.checkpoints.aliasCheckpointRefs",
+            cwd: input.cwd,
+            args: ["update-ref", alias.to, commitOid],
+          });
+          createdRefs.push(alias.to);
+        }
+        return createdRefs;
       },
     ),
   };

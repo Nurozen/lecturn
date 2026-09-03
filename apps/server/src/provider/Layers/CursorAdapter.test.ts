@@ -23,6 +23,7 @@ import {
   type ProviderRuntimeEvent,
   ThreadId,
   ProviderInstanceId,
+  TurnId,
 } from "@t3tools/contracts";
 
 import { ServerConfig } from "../../config.ts";
@@ -423,6 +424,31 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
         .pipe(Effect.result);
 
       assert.equal(result._tag, "Failure");
+    }),
+  );
+
+  it.effect("rejects startSession with a fork input as unsupported", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const error = yield* Effect.flip(
+        adapter.startSession({
+          threadId: ThreadId.make("fork-unsupported"),
+          provider: ProviderDriverKind.make("cursor"),
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+          fork: {
+            sourceResumeCursor: { opaque: "parent-cursor" },
+            sourceProviderInstanceId: ProviderInstanceId.make("cursor"),
+            providerTurnRef: null,
+            throughTurnId: TurnId.make("turn-1"),
+            throughTurnOrdinal: 1,
+            atEnd: true,
+          },
+        }),
+      );
+
+      assert.equal(error._tag, "ProviderAdapterValidationError");
+      assert.include(String(error.message), "Conversation fork is not supported");
     }),
   );
 

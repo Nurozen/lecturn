@@ -27,6 +27,8 @@ import type * as Stream from "effect/Stream";
 
 export type ProviderSessionModelSwitchMode = "in-session" | "unsupported";
 
+export type ProviderConversationForkMode = "native" | "unsupported";
+
 export interface ProviderAdapterCapabilities {
   /**
    * Declares whether changing the model on an existing session is supported.
@@ -35,6 +37,19 @@ export interface ProviderAdapterCapabilities {
   /** Starts a resumed turn with no synthetic user prompt. Omitted means the
       adapter needs an explicit continuation instruction. */
   readonly promptlessTurnContinuation?: boolean;
+  /**
+   * Declares whether the provider can natively fork a conversation at a
+   * turn boundary when starting a session with `fork`.
+   */
+  readonly conversationFork: ProviderConversationForkMode;
+  /**
+   * Whether a mid-thread fork needs the provider-side turn ref recorded on
+   * the fork turn. Providers that can address a turn positionally (or by the
+   * T3 turn id) fork anchor-less history fine; Claude cannot, so its
+   * pre-anchor sessions only fork at the end. Server-internal: never
+   * surfaced on `ServerProvider` presentations.
+   */
+  readonly conversationForkRequiresAnchor: boolean;
 }
 
 export interface ProviderThreadTurnSnapshot {

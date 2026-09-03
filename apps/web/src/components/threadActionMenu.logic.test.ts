@@ -10,7 +10,8 @@ const baseState: ThreadActionMenuState = {
   canSnoozeNow: true,
   isRegeneratingTitle: false,
   isRunning: false,
-  supports: { settlement: true, snooze: true, pinning: true, titleRegeneration: true },
+  canForkNow: false,
+  supports: { settlement: true, snooze: true, pinning: true, titleRegeneration: true, fork: false },
   snoozePresets: [
     { id: "hour", label: "In 1 hour", whenLabel: "3:00 PM", snoozedUntil: "2026-08-07T15:00:00Z" },
   ],
@@ -31,7 +32,13 @@ describe("buildThreadActionMenuItems", () => {
     expect(
       ids({
         ...baseState,
-        supports: { settlement: false, snooze: false, pinning: false, titleRegeneration: false },
+        supports: {
+          settlement: false,
+          snooze: false,
+          pinning: false,
+          titleRegeneration: false,
+          fork: false,
+        },
       }),
     ).toEqual(["rename", "mark-unread", "copy", "project-settings", "archive", "delete"]);
   });
@@ -95,9 +102,34 @@ describe("buildThreadActionMenuItems", () => {
     expect(
       ids({
         ...baseState,
-        supports: { settlement: false, snooze: false, pinning: false, titleRegeneration: false },
+        supports: {
+          settlement: false,
+          snooze: false,
+          pinning: false,
+          titleRegeneration: false,
+          fork: false,
+        },
       }),
     ).toContain("archive");
+  });
+
+  it("gates fork on environment capability and a completed turn", () => {
+    const forkableState: ThreadActionMenuState = {
+      ...baseState,
+      canForkNow: true,
+      supports: { ...baseState.supports, fork: true },
+    };
+    const enabled = buildThreadActionMenuItems(forkableState).find((item) => item.id === "fork");
+    expect(enabled).toMatchObject({ label: "Fork thread", disabled: false });
+
+    const blocked = buildThreadActionMenuItems({ ...forkableState, canForkNow: false }).find(
+      (item) => item.id === "fork",
+    );
+    expect(blocked?.disabled).toBe(true);
+
+    expect(
+      ids({ ...forkableState, supports: { ...forkableState.supports, fork: false } }),
+    ).not.toContain("fork");
   });
 
   it("disables archive while the thread is running", () => {

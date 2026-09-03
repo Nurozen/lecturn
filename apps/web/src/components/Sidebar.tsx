@@ -106,7 +106,8 @@ import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import { useProjects, useThreadShells } from "../state/entities";
+import { readEnvironmentSupportsForking, useProjects, useThreadShells } from "../state/entities";
+import { readForkAtLatestTurn, useForkThread } from "../hooks/useForkThread";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
 import { vcsEnvironment } from "../state/vcs";
 import { threadEnvironment } from "../state/threads";
@@ -1767,6 +1768,7 @@ export default function Sidebar() {
     archiveThread,
     deleteThread,
   } = useThreadActions();
+  const { forkThreadAtLatestTurn } = useForkThread();
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -3127,11 +3129,13 @@ export default function Sidebar() {
               isRegeneratingTitle,
               isRunning:
                 thread.session?.status === "running" && thread.session.activeTurnId != null,
+              canForkNow: readForkAtLatestTurn(threadRef).blockReason === null,
               supports: {
                 settlement: supportsSettlement,
                 snooze: supportsSnooze,
                 pinning: supportsPinning,
                 titleRegeneration: supportsTitleRegeneration,
+                fork: readEnvironmentSupportsForking(thread.environmentId),
               },
               snoozePresets,
             }),
@@ -3181,6 +3185,10 @@ export default function Sidebar() {
             }
             return;
           }
+          case "fork":
+            // Toasts its own block reason / failure; nothing to report here.
+            await forkThreadAtLatestTurn(threadRef);
+            return;
           case "settle":
             attemptSettle(threadRef);
             return;
@@ -3315,6 +3323,7 @@ export default function Sidebar() {
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
+      forkThreadAtLatestTurn,
       handleMultiSelectContextMenu,
       markThreadUnread,
       openProjectSettings,

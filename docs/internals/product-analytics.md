@@ -17,6 +17,7 @@ time.
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `client.connected`      | The server accepted an authenticated WebSocket connection. Reconnects count again. Use this event for connection diagnostics, not active-use counts. |
 | `client.thread.started` | The server accepted a command that created a thread.                                                                                                 |
+| `client.thread.forked`  | The server materialized and accepted a thread fork. Recorded once per successful fork, after dispatch.                                               |
 | `client.turn.requested` | The server accepted a turn request. This is the standard active-use event.                                                                           |
 
 `provider.turn.sent` stays a provider execution event. It does not receive
@@ -25,7 +26,7 @@ client disconnects.
 
 ## Recommended properties
 
-Client properties appear on the three client events when the connected client
+Client properties appear on the client events when the connected client
 reports them. Older clients can omit every client property.
 
 | Property               | Values and meaning                                                                                                                                                                              |

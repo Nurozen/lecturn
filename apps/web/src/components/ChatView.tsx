@@ -218,6 +218,7 @@ import {
 } from "../hooks/useSettings";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { readForkAtLatestTurn, useForkThread } from "../hooks/useForkThread";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { confirmTerminalClose, isTerminalCloseConfirmPending } from "../lib/terminalCloseConfirm";
@@ -381,6 +382,8 @@ import {
   startNewThreadForProject,
   codexArtifactTemplatePromptToAppend,
   toolGroupConsumesUpwardNavigation,
+  buildForkTurnIdByMessageId,
+  resolveForkDisabledReason,
   waitForStartedServerThread,
 } from "./ChatView.logic";
 import type { ThreadSyncPhase } from "../threadSync";
@@ -2884,6 +2887,70 @@ function ChatViewContent(props: ChatViewProps) {
 
     return byUserMessageId;
   }, [inferredCheckpointTurnCountByTurnId, timelineEntries, turnDiffSummaryByAssistantMessageId]);
+  const environmentSupportsForking = serverConfig?.environment.capabilities.threadForking === true;
+  // Provider/server gate only — per-message turn availability is what the
+  // map below encodes, so `hasCompletedTurn` is not part of this check.
+  const forkUnavailableReason = useMemo(
+    () =>
+      resolveForkDisabledReason({
+        providers: providerStatuses,
+        modelSelection: activeThread?.modelSelection ?? null,
+        sessionProviderInstanceId: activeThread?.session?.providerInstanceId,
+        capability: environmentSupportsForking,
+        hasCompletedTurn: true,
+      }),
+    [
+      activeThread?.modelSelection,
+      activeThread?.session?.providerInstanceId,
+      environmentSupportsForking,
+      providerStatuses,
+    ],
+  );
+  // Fork points per hover row (ready checkpoints only), derived by
+  // `buildForkTurnIdByMessageId`. Empty when the provider/server cannot
+  // fork, which hides the buttons.
+  const forkTurnIdByMessageId = useMemo(() => {
+    if (forkUnavailableReason !== null || !isServerThread) {
+      return new Map<MessageId, TurnId>();
+    }
+    return buildForkTurnIdByMessageId({
+      timelineEntries,
+      turnDiffSummaryByAssistantMessageId,
+      activeRunningTurnId,
+    });
+  }, [
+    activeRunningTurnId,
+    forkUnavailableReason,
+    isServerThread,
+    timelineEntries,
+    turnDiffSummaryByAssistantMessageId,
+  ]);
+  // Anchor for the "forked here" divider: the last inherited message. Copied
+  // rows carry child-minted ids (`forkedFrom.messageId` stays parent-side) but
+  // keep timestamps that precede the child's creation, so the fork time
+  // separates inherited history from post-fork conversation.
+  const forkDividerAfterMessageId = useMemo(() => {
+    if (!activeThread || activeThread.forkedFrom == null) {
+      return null;
+    }
+    let lastInherited: MessageId | null = null;
+    for (const message of activeThread.messages) {
+      if (message.createdAt <= activeThread.createdAt) {
+        lastInherited = message.id;
+      }
+    }
+    return lastInherited;
+  }, [activeThread]);
+  const forkWarning =
+    activeThread?.session?.status === "running"
+      ? "Shares files with an agent that is still working"
+      : null;
+  // An unsent fork has no provider session yet, so revert has nothing to act
+  // on until the child's first send creates one.
+  const revertDisabledReason =
+    activeThread != null && activeThread.forkedFrom != null && activeThread.session == null
+      ? "Send a message first — revert becomes available once the fork has its own session"
+      : null;
 
   const gitCwd = activeProject
     ? projectScriptCwd({
@@ -5594,6 +5661,8 @@ function ChatViewContent(props: ChatViewProps) {
     ],
   );
 
+  const { forkThreadFrom, forkThreadAtLatestTurn } = useForkThread();
+
   const onSend = async (
     e?: { preventDefault: () => void },
     submissionIntent: ComposerSubmissionIntent = "foreground",
@@ -5833,19 +5902,37 @@ function ChatViewContent(props: ChatViewProps) {
       });
       return;
     }
-    // Legacy plan mode: /plan and /default only act when the beta flag is on;
-    // otherwise they send as plain text like any other message.
-    const standaloneSlashCommand =
-      settings.planModeEnabled &&
+    const composerHasOnlyText =
       composerImages.length === 0 &&
       composerFiles.length === 0 &&
       sendableComposerTerminalContexts.length === 0 &&
       composerElementContexts.length === 0 &&
       composerPreviewAnnotations.length === 0 &&
-      composerReviewComments.length === 0
-        ? parseStandaloneComposerSlashCommand(trimmed)
-        : null;
-    if (standaloneSlashCommand) {
+      composerReviewComments.length === 0;
+    const standaloneSlashCommand = composerHasOnlyText
+      ? parseStandaloneComposerSlashCommand(trimmed)
+      : null;
+    // `/fork` acts on any server thread regardless of the plan-mode beta flag;
+    // on drafts there is nothing to fork, so it falls through as plain text.
+    if (standaloneSlashCommand === "fork" && isServerThread && activeThreadRef) {
+      // Clear the composer only when the fork will actually dispatch — a
+      // blocked fork just toasts, and clearing first would drop typed text.
+      const { throughTurnId, blockReason } = readForkAtLatestTurn(activeThreadRef);
+      if (blockReason === null && throughTurnId !== null) {
+        promptRef.current = "";
+        clearComposerDraftContent(composerDraftTarget);
+        composerRef.current?.resetCursorState();
+      }
+      void forkThreadAtLatestTurn(activeThreadRef);
+      return;
+    }
+    // Legacy plan mode: /plan and /default only act when the beta flag is on;
+    // otherwise they send as plain text like any other message.
+    if (
+      settings.planModeEnabled &&
+      standaloneSlashCommand !== null &&
+      standaloneSlashCommand !== "fork"
+    ) {
       handleInteractionModeChange(standaloneSlashCommand);
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
@@ -6126,6 +6213,18 @@ function ChatViewContent(props: ChatViewProps) {
       }
     }
     const title = truncate(titleSeed);
+    // A fork's first send passes the child's minted "<parent> (fork)" title
+    // as the seed so the server's auto-retitle gate accepts a replacement; a
+    // user rename (which drops the suffix) keeps the title untouched.
+    // Inherited messages all predate the child thread's creation.
+    const isFirstPostForkSend =
+      isServerThread &&
+      activeThread.forkedFrom != null &&
+      activeThread.title.trim().endsWith("(fork)") &&
+      !activeThread.messages.some(
+        (message) => message.role === "user" && message.createdAt > activeThread.createdAt,
+      );
+    const turnTitleSeed = isFirstPostForkSend ? activeThread.title.trim() : title;
     const threadCreateModelSelection = createModelSelection(
       ctxSelectedModelSelection.instanceId,
       ctxSelectedModel || activeProject.defaultModelSelection?.model || DEFAULT_MODEL,
@@ -6225,7 +6324,7 @@ function ChatViewContent(props: ChatViewProps) {
             attachments: turnAttachmentsResult.value,
           },
           modelSelection: ctxSelectedModelSelection,
-          titleSeed: title,
+          titleSeed: turnTitleSeed,
           runtimeMode,
           interactionMode,
           ...(bootstrap ? { bootstrap } : {}),
@@ -7025,6 +7124,33 @@ function ChatViewContent(props: ChatViewProps) {
     }
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
+  const forkFromMessage = async (messageId: MessageId, throughTurnId: TurnId) => {
+    if (!activeThread || !activeThreadRef || !isServerThread) {
+      return;
+    }
+    const message = activeThread.messages.find((candidate) => candidate.id === messageId);
+    const seedPrompt = message?.role === "user" && message.text.trim() ? message.text : undefined;
+    await forkThreadFrom({
+      threadRef: activeThreadRef,
+      throughTurnId,
+      sourceMessageId: messageId,
+      parentTitle: activeThread.title,
+      ...(seedPrompt !== undefined ? { seedPrompt } : {}),
+    });
+  };
+  // Same ref-at-call-time pattern as the revert handler: the callback handed
+  // to the timeline stays identity-stable across renders.
+  const forkTurnIdByMessageIdRef = useRef(forkTurnIdByMessageId);
+  forkTurnIdByMessageIdRef.current = forkTurnIdByMessageId;
+  const forkFromMessageRef = useRef(forkFromMessage);
+  forkFromMessageRef.current = forkFromMessage;
+  const onForkFromMessage = useCallback((messageId: MessageId) => {
+    const throughTurnId = forkTurnIdByMessageIdRef.current.get(messageId);
+    if (throughTurnId === undefined) {
+      return;
+    }
+    void forkFromMessageRef.current(messageId, throughTurnId);
+  }, []);
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -7299,6 +7425,11 @@ function ChatViewContent(props: ChatViewProps) {
                 onOpenTurnDiff={onOpenTurnDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
+                forkTurnIdByMessageId={forkTurnIdByMessageId}
+                onForkFromMessage={onForkFromMessage}
+                forkWarning={forkWarning}
+                revertDisabledReason={revertDisabledReason}
+                forkDividerAfterMessageId={forkDividerAfterMessageId}
                 onUseArtifactTemplate={useArtifactTemplate}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}

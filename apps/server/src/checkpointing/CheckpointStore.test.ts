@@ -222,4 +222,129 @@ it.layer(TestLayer)("CheckpointStore.layer", (it) => {
       }),
     );
   });
+
+  describe("aliasCheckpointRefs", () => {
+    it.effect("creates aliases resolving to the source commit", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        const sourceThreadId = ThreadId.make("thread-alias-source");
+        const childThreadId = ThreadId.make("thread-alias-child");
+        const sourceRef0 = checkpointRefForThreadTurn(sourceThreadId, 0);
+        const sourceRef1 = checkpointRefForThreadTurn(sourceThreadId, 1);
+        const childRef0 = checkpointRefForThreadTurn(childThreadId, 0);
+        const childRef1 = checkpointRefForThreadTurn(childThreadId, 1);
+
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: sourceRef0 });
+        yield* writeTextFile(NodePath.join(tmp, "README.md"), "# test again\n");
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: sourceRef1 });
+
+        const created = yield* checkpointStore.aliasCheckpointRefs({
+          cwd: tmp,
+          refs: [
+            { from: sourceRef0, to: childRef0 },
+            { from: sourceRef1, to: childRef1 },
+          ],
+        });
+
+        expect(created).toEqual([childRef0, childRef1]);
+        expect(yield* git(tmp, ["rev-parse", childRef0])).toBe(
+          yield* git(tmp, ["rev-parse", sourceRef0]),
+        );
+        expect(yield* git(tmp, ["rev-parse", childRef1])).toBe(
+          yield* git(tmp, ["rev-parse", sourceRef1]),
+        );
+      }),
+    );
+
+    it.effect("skips pairs whose source ref does not resolve", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        const sourceThreadId = ThreadId.make("thread-alias-missing-source");
+        const childThreadId = ThreadId.make("thread-alias-missing-child");
+        const presentRef = checkpointRefForThreadTurn(sourceThreadId, 0);
+        const missingRef = checkpointRefForThreadTurn(sourceThreadId, 1);
+        const childRef0 = checkpointRefForThreadTurn(childThreadId, 0);
+        const childRef1 = checkpointRefForThreadTurn(childThreadId, 1);
+
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: presentRef });
+
+        const created = yield* checkpointStore.aliasCheckpointRefs({
+          cwd: tmp,
+          refs: [
+            { from: presentRef, to: childRef0 },
+            { from: missingRef, to: childRef1 },
+          ],
+        });
+
+        expect(created).toEqual([childRef0]);
+        expect(
+          yield* checkpointStore.hasCheckpointRef({ cwd: tmp, checkpointRef: childRef0 }),
+        ).toBe(true);
+        expect(
+          yield* checkpointStore.hasCheckpointRef({ cwd: tmp, checkpointRef: childRef1 }),
+        ).toBe(false);
+      }),
+    );
+
+    it.effect("is idempotent across repeated calls", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        const sourceThreadId = ThreadId.make("thread-alias-idempotent-source");
+        const childThreadId = ThreadId.make("thread-alias-idempotent-child");
+        const sourceRef = checkpointRefForThreadTurn(sourceThreadId, 0);
+        const childRef = checkpointRefForThreadTurn(childThreadId, 0);
+
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: sourceRef });
+        const sourceOid = yield* git(tmp, ["rev-parse", sourceRef]);
+
+        const first = yield* checkpointStore.aliasCheckpointRefs({
+          cwd: tmp,
+          refs: [{ from: sourceRef, to: childRef }],
+        });
+        const second = yield* checkpointStore.aliasCheckpointRefs({
+          cwd: tmp,
+          refs: [{ from: sourceRef, to: childRef }],
+        });
+
+        expect(first).toEqual([childRef]);
+        expect(second).toEqual([childRef]);
+        expect(yield* git(tmp, ["rev-parse", childRef])).toBe(sourceOid);
+      }),
+    );
+
+    it.effect("keeps aliases when the source refs are deleted", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        const sourceThreadId = ThreadId.make("thread-alias-delete-source");
+        const childThreadId = ThreadId.make("thread-alias-delete-child");
+        const sourceRef = checkpointRefForThreadTurn(sourceThreadId, 0);
+        const childRef = checkpointRefForThreadTurn(childThreadId, 0);
+
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: sourceRef });
+        const sourceOid = yield* git(tmp, ["rev-parse", sourceRef]);
+        yield* checkpointStore.aliasCheckpointRefs({
+          cwd: tmp,
+          refs: [{ from: sourceRef, to: childRef }],
+        });
+
+        yield* checkpointStore.deleteCheckpointRefs({ cwd: tmp, checkpointRefs: [sourceRef] });
+
+        expect(
+          yield* checkpointStore.hasCheckpointRef({ cwd: tmp, checkpointRef: sourceRef }),
+        ).toBe(false);
+        expect(yield* checkpointStore.hasCheckpointRef({ cwd: tmp, checkpointRef: childRef })).toBe(
+          true,
+        );
+        expect(yield* git(tmp, ["rev-parse", childRef])).toBe(sourceOid);
+      }),
+    );
+  });
 });

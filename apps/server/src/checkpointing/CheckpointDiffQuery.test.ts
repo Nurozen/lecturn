@@ -69,6 +69,7 @@ describe("CheckpointDiffQuery.layer", () => {
             return "full thread diff patch";
           }),
         deleteCheckpointRefs: () => Effect.void,
+        aliasCheckpointRefs: () => Effect.succeed([]),
       };
 
       const layer = CheckpointDiffQuery.layer.pipe(
@@ -109,6 +110,10 @@ describe("CheckpointDiffQuery.layer", () => {
             getThreadShellById: () => Effect.succeed(Option.none()),
             getThreadDetailById: () => Effect.succeed(Option.none()),
             getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
+            listThreadActivitiesById: () => Effect.succeed([]),
+            listThreadTurnsById: () => Effect.succeed([]),
+            getThreadForkContextById: () => Effect.succeed(Option.none()),
+            listThreadIdsByWorktreePath: () => Effect.succeed([]),
             searchThreads: () => Effect.succeed({ matches: [] }),
           }),
         ),
@@ -179,6 +184,7 @@ describe("CheckpointDiffQuery.layer", () => {
             return "diff patch";
           }),
         deleteCheckpointRefs: () => Effect.void,
+        aliasCheckpointRefs: () => Effect.succeed([]),
       };
 
       const layer = CheckpointDiffQuery.layer.pipe(
@@ -204,6 +210,10 @@ describe("CheckpointDiffQuery.layer", () => {
             getThreadShellById: () => Effect.succeed(Option.none()),
             getThreadDetailById: () => Effect.succeed(Option.none()),
             getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
+            listThreadActivitiesById: () => Effect.succeed([]),
+            listThreadTurnsById: () => Effect.succeed([]),
+            getThreadForkContextById: () => Effect.succeed(Option.none()),
+            listThreadIdsByWorktreePath: () => Effect.succeed([]),
             searchThreads: () => Effect.succeed({ matches: [] }),
           }),
         ),
@@ -264,6 +274,7 @@ describe("CheckpointDiffQuery.layer", () => {
             return "diff patch";
           }),
         deleteCheckpointRefs: () => Effect.void,
+        aliasCheckpointRefs: () => Effect.succeed([]),
       };
 
       const layer = CheckpointDiffQuery.layer.pipe(
@@ -289,6 +300,10 @@ describe("CheckpointDiffQuery.layer", () => {
             getThreadShellById: () => Effect.succeed(Option.none()),
             getThreadDetailById: () => Effect.succeed(Option.none()),
             getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
+            listThreadActivitiesById: () => Effect.succeed([]),
+            listThreadTurnsById: () => Effect.succeed([]),
+            getThreadForkContextById: () => Effect.succeed(Option.none()),
+            listThreadIdsByWorktreePath: () => Effect.succeed([]),
             searchThreads: () => Effect.succeed({ matches: [] }),
           }),
         ),
@@ -334,6 +349,7 @@ describe("CheckpointDiffQuery.layer", () => {
         restoreCheckpoint: () => Effect.succeed(true),
         diffCheckpoints: () => Effect.succeed("diff patch"),
         deleteCheckpointRefs: () => Effect.void,
+        aliasCheckpointRefs: () => Effect.succeed([]),
       };
 
       const layer = CheckpointDiffQuery.layer.pipe(
@@ -359,6 +375,10 @@ describe("CheckpointDiffQuery.layer", () => {
             getThreadShellById: () => Effect.succeed(Option.none()),
             getThreadDetailById: () => Effect.succeed(Option.none()),
             getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
+            listThreadActivitiesById: () => Effect.succeed([]),
+            listThreadTurnsById: () => Effect.succeed([]),
+            getThreadForkContextById: () => Effect.succeed(Option.none()),
+            listThreadIdsByWorktreePath: () => Effect.succeed([]),
             searchThreads: () => Effect.succeed({ matches: [] }),
           }),
         ),
@@ -389,6 +409,7 @@ describe("CheckpointDiffQuery.layer", () => {
         restoreCheckpoint: () => Effect.succeed(true),
         diffCheckpoints: () => Effect.succeed(""),
         deleteCheckpointRefs: () => Effect.void,
+        aliasCheckpointRefs: () => Effect.succeed([]),
       };
 
       const layer = CheckpointDiffQuery.layer.pipe(
@@ -414,6 +435,10 @@ describe("CheckpointDiffQuery.layer", () => {
             getThreadShellById: () => Effect.succeed(Option.none()),
             getThreadDetailById: () => Effect.succeed(Option.none()),
             getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
+            listThreadActivitiesById: () => Effect.succeed([]),
+            listThreadTurnsById: () => Effect.succeed([]),
+            getThreadForkContextById: () => Effect.succeed(Option.none()),
+            listThreadIdsByWorktreePath: () => Effect.succeed([]),
             searchThreads: () => Effect.succeed({ matches: [] }),
           }),
         ),

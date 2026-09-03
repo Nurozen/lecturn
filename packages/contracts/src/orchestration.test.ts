@@ -24,6 +24,7 @@ import {
   OrchestrationMessage,
   ThreadMessageSentPayload,
   ThreadMetaUpdatedPayload,
+  ThreadForkOrigin,
   ThreadTurnStartCommand,
   ThreadCreatedPayload,
   ThreadTurnDiff,
@@ -64,6 +65,7 @@ const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationComma
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
 const decodeDispatchCommandError = Schema.decodeUnknownEffect(OrchestrationDispatchCommandError);
+const decodeThreadForkOrigin = Schema.decodeUnknownEffect(ThreadForkOrigin);
 
 it.effect("decodes a dispatch error after its bootstrap thread was deleted", () =>
   Effect.gen(function* () {
@@ -569,6 +571,36 @@ it.effect("defaults settled fields when decoding historical thread data", () =>
     assert.strictEqual(thread.settledAt, null);
     assert.strictEqual(shell.settledOverride, null);
     assert.strictEqual(shell.settledAt, null);
+
+    // Pre-fork payloads omit forkedFrom entirely.
+    assert.strictEqual(thread.forkedFrom, undefined);
+    assert.strictEqual(shell.forkedFrom, undefined);
+
+    const forkedFrom = yield* decodeThreadForkOrigin({
+      threadId: "thread-0",
+      turnId: "turn-3",
+      turnCount: 3,
+      messageId: "assistant:msg-3",
+    });
+    const forkedThread = yield* decodeOrchestrationThread({
+      ...common,
+      forkedFrom,
+      deletedAt: null,
+      messages: [],
+      proposedPlans: [],
+      activities: [],
+      checkpoints: [],
+    });
+    const forkedShell = yield* decodeOrchestrationThreadShell({
+      ...common,
+      forkedFrom,
+      latestUserMessageAt: null,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      hasActionableProposedPlan: false,
+    });
+    assert.deepStrictEqual(forkedThread.forkedFrom, forkedFrom);
+    assert.deepStrictEqual(forkedShell.forkedFrom, forkedFrom);
   }),
 );
 
@@ -1110,3 +1142,151 @@ it("isProviderSendTurnSupportedImageMimeType accepts raster formats and rejects 
   assert.strictEqual(isProviderSendTurnSupportedImageMimeType("IMAGE/JPEG"), true);
   assert.strictEqual(isProviderSendTurnSupportedImageMimeType("image/svg+xml"), false);
 });
+
+it.effect("decodes a client thread.fork command and defaults workspace to inherit", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeClientOrchestrationCommand({
+      type: "thread.fork",
+      commandId: "cmd-fork-1",
+      threadId: "thread-child",
+      sourceThreadId: "thread-parent",
+      throughTurnId: "turn-2",
+      sourceMessageId: "assistant:msg-2",
+      title: "Parent (fork)",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(parsed.type, "thread.fork");
+    if (parsed.type === "thread.fork") {
+      assert.strictEqual(parsed.workspace, "inherit");
+      assert.strictEqual(parsed.sourceThreadId, "thread-parent");
+    }
+
+    // The raw client shape is not dispatchable: only the server-materialized
+    // fork command (carrying the inherited history) decodes as an
+    // OrchestrationCommand, so a client fork can never reach the decider.
+    const rejected = yield* Effect.exit(
+      decodeOrchestrationCommand({
+        type: "thread.fork",
+        commandId: "cmd-fork-1",
+        threadId: "thread-child",
+        sourceThreadId: "thread-parent",
+        throughTurnId: "turn-2",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    assert.strictEqual(rejected._tag, "Failure");
+  }),
+);
+
+it.effect("decodes a materialized thread.fork command with inherited history", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestrationCommand({
+      type: "thread.fork",
+      commandId: "cmd-fork-2",
+      threadId: "thread-child",
+      sourceThreadId: "thread-parent",
+      throughTurnId: "turn-2",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      thread: {
+        projectId: "project-1",
+        title: "Parent (fork)",
+        modelSelection: { provider: "codex", model: "gpt-5.4" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      },
+      forkedFrom: {
+        threadId: "thread-parent",
+        turnId: "turn-2",
+        turnCount: 2,
+        messageId: null,
+      },
+      forkSource: null,
+      history: {
+        messages: [],
+        activities: [],
+        proposedPlans: [],
+        turns: [],
+      },
+    });
+
+    assert.strictEqual(parsed.type, "thread.fork");
+    if (parsed.type === "thread.fork" && "history" in parsed) {
+      assert.deepStrictEqual(parsed.history.turns, []);
+      assert.strictEqual(parsed.forkedFrom.turnCount, 2);
+    }
+  }),
+);
+
+it.effect("decodes a thread.forked event", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestrationEvent({
+      sequence: 7,
+      eventId: "event-fork-1",
+      aggregateKind: "thread",
+      aggregateId: "thread-child",
+      type: "thread.forked",
+      occurredAt: "2026-01-02T00:00:00.000Z",
+      commandId: "cmd-fork-2",
+      causationEventId: "event-created-1",
+      correlationId: "cmd-fork-2",
+      metadata: {},
+      payload: {
+        threadId: "thread-child",
+        forkedFrom: {
+          threadId: "thread-parent",
+          turnId: "turn-1",
+          turnCount: 1,
+          messageId: "assistant:msg-1",
+        },
+        forkSource: {
+          providerInstanceId: "codex",
+          resumeCursor: { threadId: "native-parent" },
+          providerTurnRef: "native-turn-1",
+          throughTurnOrdinal: 1,
+          atEnd: true,
+        },
+        history: {
+          messages: [],
+          activities: [],
+          proposedPlans: [],
+          turns: [
+            {
+              turnId: "turn-1",
+              state: "completed",
+              requestedAt: "2026-01-01T00:00:00.000Z",
+              startedAt: "2026-01-01T00:00:01.000Z",
+              completedAt: "2026-01-01T00:00:02.000Z",
+              pendingMessageId: "msg-1",
+              assistantMessageId: "assistant:msg-1",
+              providerTurnRef: "native-turn-1",
+            },
+          ],
+        },
+      },
+    });
+
+    if (parsed.type !== "thread.forked") {
+      assert.fail(`Expected thread.forked event, received ${parsed.type}.`);
+    }
+    assert.strictEqual(parsed.payload.forkedFrom.threadId, "thread-parent");
+    assert.strictEqual(parsed.payload.forkSource?.atEnd, true);
+    assert.strictEqual(parsed.payload.history.turns[0]?.state, "completed");
+    assert.strictEqual(parsed.payload.linkedPullRequest, undefined);
+  }),
+);
+
+it.effect("rejects a fork origin missing its turn id", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeThreadForkOrigin({
+        threadId: "thread-parent",
+        turnCount: 1,
+        messageId: null,
+      }),
+    );
+    assert.strictEqual(result._tag, "Failure");
+  }),
+);

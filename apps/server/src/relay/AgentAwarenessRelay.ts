@@ -80,6 +80,11 @@ export function shouldPublishAgentAwarenessEvent(event: OrchestrationEvent): boo
     case "thread.runtime-mode-set":
     case "thread.interaction-mode-set":
       return false;
+    case "thread.forked":
+      // The forked child's shell inherits the parent's completed latestTurn,
+      // so publishing it would push a "done" alert for work the child never
+      // ran.
+      return false;
     case "thread.activity-appended":
       return (
         event.payload.activity.kind === "approval.requested" ||

@@ -1830,6 +1830,33 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
     }),
   );
 
+  it.effect("rejects startSession with a fork input as unsupported", () =>
+    Effect.gen(function* () {
+      const wrapperPath = yield* Effect.promise(() => makeMockGrokWrapper());
+      const adapter = yield* makeTestAdapter(wrapperPath);
+
+      const error = yield* Effect.flip(
+        adapter.startSession({
+          threadId: ThreadId.make("grok-fork-unsupported"),
+          provider: ProviderDriverKind.make("grok"),
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+          fork: {
+            sourceResumeCursor: { opaque: "parent-cursor" },
+            sourceProviderInstanceId: ProviderInstanceId.make("grok"),
+            providerTurnRef: null,
+            throughTurnId: TurnId.make("turn-1"),
+            throughTurnOrdinal: 1,
+            atEnd: true,
+          },
+        }),
+      );
+
+      assert.equal(error._tag, "ProviderAdapterValidationError");
+      assert.include(String(error.message), "Conversation fork is not supported");
+    }),
+  );
+
   it.effect("rejects sendTurn with empty input and no attachments", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("grok-empty-turn");

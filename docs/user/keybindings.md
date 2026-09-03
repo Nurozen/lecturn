@@ -63,6 +63,10 @@ shortcut is `mod+shift+s`, and it does not run while the terminal has focus.
 already pinned. Its default shortcut is `mod+shift+p`, and it does not run while the terminal has
 focus. See [Organizing threads](./thread-sidebar.md) for how pinned threads are ordered.
 
+`chat.fork` forks the active thread at its latest completed reply, like the thread menu's fork
+action. It has no default shortcut — assign one in **Settings** → **Keybindings**. See
+[Forking threads](./forking-threads.md).
+
 The command palette searches settings, active thread titles, projects, branches, user messages, and
 final agent responses across connected environments. A setting result opens its exact control or
 section. Message matches show one labeled excerpt while keeping the thread's project, branch, and
@@ -79,7 +83,11 @@ at. To keep a worktree, use the explicit "new thread in this worktree" action in
 toolbar. The only difference between the two commands: with the current sidebar and more than one
 project, `chat.new` opens a project chooser first.
 
-Background submission from a new thread is the exception. `mod+enter` starts that thread and opens
+Forking is the exception. A fork continues an existing conversation, so it keeps the branch,
+worktree, and environment mode of the thread it was forked from rather than your configured
+defaults. See [Forking threads](./forking-threads.md).
+
+Background submission from a new thread is another exception. `mod+enter` starts that thread and opens
 another new thread with the same workspace mode and base branch. **New worktree** remains selected,
 but the new thread does not reuse the worktree created for the thread that just started.
 

@@ -165,6 +165,14 @@ export interface CodexSessionRuntimeOptions {
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly resumeCursor?: CodexResumeCursor;
+  // Fork the source Codex thread instead of starting fresh: the app-server
+  // clones the source through `lastTurnId` (inclusive; null clones the whole
+  // thread) and emits `thread/started` for the clone, whose id becomes this
+  // session's resume cursor.
+  readonly fork?: {
+    readonly sourceThreadId: string;
+    readonly lastTurnId: string | null;
+  };
   readonly appServerArgs?: ReadonlyArray<string>;
 }
 
@@ -677,9 +685,10 @@ export function isRecoverableThreadResumeError(error: unknown): boolean {
 
 type CodexThreadOpenResponse =
   | CodexRpc.ClientRequestResponsesByMethod["thread/start"]
-  | CodexRpc.ClientRequestResponsesByMethod["thread/resume"];
+  | CodexRpc.ClientRequestResponsesByMethod["thread/resume"]
+  | CodexRpc.ClientRequestResponsesByMethod["thread/fork"];
 
-type CodexThreadOpenMethod = "thread/start" | "thread/resume";
+type CodexThreadOpenMethod = "thread/start" | "thread/resume" | "thread/fork";
 
 interface CodexThreadOpenClient {
   readonly request: <M extends CodexThreadOpenMethod>(
@@ -696,14 +705,30 @@ export const openCodexThread = (input: {
   readonly requestedModel: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
+  readonly fork?: CodexSessionRuntimeOptions["fork"];
 }): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
+  const fork = input.fork;
   const startParams = buildThreadStartParams({
     cwd: input.cwd,
     runtimeMode: input.runtimeMode,
     model: input.requestedModel,
     serviceTier: input.serviceTier,
   });
+
+  if (fork !== undefined) {
+    // `thread/fork` types `ephemeral` as a plain boolean while thread/start
+    // allows null; the start params never set it, so it is dropped here.
+    const { ephemeral: _ephemeral, ...forkStartParams } = startParams;
+    // Unlike resume there is no thread/start fallback here: a fork that
+    // silently degraded into a fresh thread would drop the source
+    // conversation while reporting success, so failures propagate.
+    return input.client.request("thread/fork", {
+      threadId: fork.sourceThreadId,
+      ...(fork.lastTurnId !== null ? { lastTurnId: fork.lastTurnId } : {}),
+      ...forkStartParams,
+    });
+  }
 
   if (resumeThreadId === undefined) {
     return input.client.request("thread/start", startParams);
@@ -2243,8 +2268,12 @@ export const makeCodexSessionRuntime = (
         requestedModel,
         serviceTier: options.serviceTier,
         resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
+        ...(options.fork ? { fork: options.fork } : {}),
       });
 
+      // Only the thread id, cwd, and model are read from the response; turn
+      // history arrives through notifications, so `opened.thread.turns` stays
+      // untouched.
       const providerThreadId = opened.thread.id;
       const session = {
         ...(yield* Ref.get(sessionRef)),

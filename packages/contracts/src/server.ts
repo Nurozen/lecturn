@@ -193,6 +193,10 @@ export const ServerProvider = Schema.Struct({
   continuation: Schema.optional(ServerProviderContinuation),
   showInteractionModeToggle: Schema.optional(Schema.Boolean),
   requiresNewThreadForModelChange: Schema.optional(Schema.Boolean),
+  // How this provider forks a conversation mid-history. Open string for
+  // forward compatibility: values today are "native" | "unsupported", and
+  // clients must treat unknown values (or absence) as unsupported.
+  conversationFork: Schema.optional(TrimmedNonEmptyString),
   enabled: Schema.Boolean,
   installed: Schema.Boolean,
   version: Schema.NullOr(TrimmedNonEmptyString),

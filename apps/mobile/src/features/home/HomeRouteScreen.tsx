@@ -1,7 +1,8 @@
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
 import { useNavigation } from "@react-navigation/native";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Platform, useWindowDimensions } from "react-native";
 
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
@@ -52,7 +53,20 @@ export function HomeRouteScreen() {
     movePinnedThread,
     regenerateThreadTitle,
     unsettleThread,
+    forkThread,
   } = useThreadListActions();
+  // Fork-then-open: the Thread route shows its loading state until the
+  // child's shell arrives over the socket.
+  const handleForkThread = useCallback(
+    async (thread: EnvironmentThreadShell) => {
+      const child = await forkThread(thread);
+      if (child === null) {
+        return;
+      }
+      handleSelectThread({ environmentId: child.environmentId, id: child.threadId });
+    },
+    [forkThread, handleSelectThread],
+  );
   const pendingTasks = usePendingNewTasks();
   const { openPendingTask, confirmDeletePendingTask } = usePendingTaskListActions();
   const environments = useMemo(() => {
@@ -201,6 +215,7 @@ export function HomeRouteScreen() {
           onUnpinThread={unpinThread}
           onMovePinnedThread={movePinnedThread}
           onRegenerateThreadTitle={regenerateThreadTitle}
+          onForkThread={handleForkThread}
           onEnvironmentChange={setSelectedEnvironmentId}
           onProjectChange={setSelectedProjectKey}
           onOpenSettings={() =>

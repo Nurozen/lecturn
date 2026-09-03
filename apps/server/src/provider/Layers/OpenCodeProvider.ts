@@ -27,9 +27,10 @@ import {
 import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
 import * as OpenCodeServerOwner from "../OpenCodeServerOwner.ts";
 
-const OPENCODE_PRESENTATION = {
+export const OPENCODE_PRESENTATION = {
   displayName: "OpenCode",
   showInteractionModeToggle: false,
+  conversationFork: "native",
 } as const;
 const OPENCODE_VERSION_PROBE_TIMEOUT = "4 seconds";
 

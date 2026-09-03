@@ -652,6 +652,25 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           });
           return;
 
+        case "thread.forked": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            forkedFrom: event.payload.forkedFrom,
+            forkSource: event.payload.forkSource,
+            linkedPullRequest: event.payload.linkedPullRequest ?? null,
+            latestTurnId: event.payload.forkedFrom.turnId,
+            updatedAt: event.occurredAt,
+          });
+          yield* refreshThreadShellSummary(event.payload.threadId);
+          return;
+        }
+
         case "thread.archived": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
@@ -1025,6 +1044,28 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           });
           return;
 
+        case "thread.forked":
+          yield* Effect.forEach(
+            event.payload.history.messages,
+            (message) =>
+              projectionThreadMessageRepository.upsert({
+                messageId: message.id,
+                threadId: event.payload.threadId,
+                turnId: message.turnId,
+                role: message.role,
+                text: message.text,
+                // Always pass an explicit attachments array (even []): the
+                // upsert SQL COALESCEs attachments_json, so an absent field
+                // would keep stale rows.
+                attachments: [...(message.attachments ?? [])],
+                isStreaming: message.streaming,
+                createdAt: message.createdAt,
+                updatedAt: message.updatedAt,
+              }),
+            { concurrency: 1 },
+          ).pipe(Effect.asVoid);
+          return;
+
         case "thread.message-sent": {
           if (event.payload.streaming) {
             const attachments =
@@ -1123,6 +1164,24 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           });
           return;
 
+        case "thread.forked":
+          yield* Effect.forEach(
+            event.payload.history.proposedPlans,
+            (plan) =>
+              projectionThreadProposedPlanRepository.upsert({
+                planId: plan.id,
+                threadId: event.payload.threadId,
+                turnId: plan.turnId,
+                planMarkdown: plan.planMarkdown,
+                implementedAt: plan.implementedAt,
+                implementationThreadId: plan.implementationThreadId,
+                createdAt: plan.createdAt,
+                updatedAt: plan.updatedAt,
+              }),
+            { concurrency: 1 },
+          ).pipe(Effect.asVoid);
+          return;
+
         case "thread.proposed-plan-upserted":
           yield* projectionThreadProposedPlanRepository.upsert({
             planId: event.payload.proposedPlan.id,
@@ -1178,6 +1237,25 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* projectionThreadActivityRepository.deleteByThreadId({
             threadId: event.payload.threadId,
           });
+          return;
+
+        case "thread.forked":
+          yield* Effect.forEach(
+            event.payload.history.activities,
+            (activity) =>
+              projectionThreadActivityRepository.upsert({
+                activityId: activity.id,
+                threadId: event.payload.threadId,
+                turnId: activity.turnId,
+                tone: activity.tone,
+                kind: activity.kind,
+                summary: activity.summary,
+                payload: activity.payload,
+                ...(activity.sequence !== undefined ? { sequence: activity.sequence } : {}),
+                createdAt: activity.createdAt,
+              }),
+            { concurrency: 1 },
+          ).pipe(Effect.asVoid);
           return;
 
         case "thread.activity-appended":
@@ -1262,6 +1340,31 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           });
           return;
 
+        case "thread.forked":
+          yield* Effect.forEach(
+            event.payload.history.turns,
+            (turn) =>
+              projectionTurnRepository.upsertByTurnId({
+                threadId: event.payload.threadId,
+                turnId: turn.turnId,
+                pendingMessageId: turn.pendingMessageId,
+                sourceProposedPlanThreadId: turn.sourceProposedPlan?.threadId ?? null,
+                sourceProposedPlanId: turn.sourceProposedPlan?.planId ?? null,
+                assistantMessageId: turn.assistantMessageId,
+                state: turn.state,
+                requestedAt: turn.requestedAt,
+                startedAt: turn.startedAt,
+                completedAt: turn.completedAt,
+                checkpointTurnCount: turn.checkpoint?.checkpointTurnCount ?? null,
+                checkpointRef: turn.checkpoint?.checkpointRef ?? null,
+                checkpointStatus: turn.checkpoint?.status ?? null,
+                checkpointFiles: turn.checkpoint ? [...turn.checkpoint.files] : [],
+                providerTurnRef: turn.providerTurnRef,
+              }),
+            { concurrency: 1 },
+          ).pipe(Effect.asVoid);
+          return;
+
         case "thread.turn-start-requested": {
           yield* projectionTurnRepository.replacePendingTurnStart({
             threadId: event.payload.threadId,
@@ -1274,6 +1377,24 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         }
 
         case "thread.session-set": {
+          // Provider anchor for the turn that just completed. Stamped
+          // regardless of the row's current state: thread.turn-diff-completed
+          // may have already settled it, and the settle loop below only
+          // touches running turns.
+          const anchorProviderTurnId = event.metadata.providerTurnId;
+          const anchorTurnId = event.payload.completedTurnId;
+          if (anchorProviderTurnId !== undefined && anchorTurnId !== undefined) {
+            const anchoredTurn = yield* projectionTurnRepository.getByTurnId({
+              threadId: event.payload.threadId,
+              turnId: anchorTurnId,
+            });
+            if (Option.isSome(anchoredTurn)) {
+              yield* projectionTurnRepository.upsertByTurnId({
+                ...anchoredTurn.value,
+                providerTurnRef: anchorProviderTurnId,
+              });
+            }
+          }
           const turnId = event.payload.session.activeTurnId;
           if (turnId === null || event.payload.session.status !== "running") {
             if (

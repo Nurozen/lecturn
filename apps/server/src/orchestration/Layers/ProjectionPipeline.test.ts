@@ -9,7 +9,10 @@ import {
   ThreadId,
   TurnId,
   ProviderInstanceId,
+  type OrchestrationEvent,
 } from "@t3tools/contracts";
+
+import { checkpointRefForThreadTurn } from "../../checkpointing/Utils.ts";
 import * as Option from "effect/Option";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -1836,6 +1839,213 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         WHERE thread_id = ${threadId}
       `;
       assert.deepEqual(threadRows, [{ latestTurnId: turnId }]);
+    }),
+  );
+
+  it.effect("stamps the provider turn anchor on the settling session-set", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const now = "2026-01-01T00:00:00.000Z";
+      const threadId = ThreadId.make("thread-turn-anchor");
+      const turnId = TurnId.make("turn-anchor-1");
+
+      yield* eventStore.append({
+        type: "thread.created",
+        eventId: EventId.make("evt-ta1"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: now,
+        commandId: CommandId.make("cmd-ta1"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-ta1"),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId: ProjectId.make("project-turn-anchor"),
+          title: "Turn anchor",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("claude"),
+            model: "claude-opus",
+          },
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      yield* eventStore.append({
+        type: "thread.session-set",
+        eventId: EventId.make("evt-ta2"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-01-01T00:00:01.000Z",
+        commandId: CommandId.make("cmd-ta2"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-ta2"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "running",
+            providerName: "claude",
+            runtimeMode: "full-access",
+            activeTurnId: turnId,
+            lastError: null,
+            updatedAt: "2026-01-01T00:00:01.000Z",
+          },
+        },
+      });
+
+      yield* eventStore.append({
+        type: "thread.session-set",
+        eventId: EventId.make("evt-ta3"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-01-01T00:01:00.000Z",
+        commandId: CommandId.make("cmd-ta3"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-ta3"),
+        metadata: { providerTurnId: "resp-native-anchor" },
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "ready",
+            providerName: "claude",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: "2026-01-01T00:01:00.000Z",
+          },
+          completedTurnId: turnId,
+        },
+      });
+
+      yield* projectionPipeline.bootstrap;
+
+      const rows = yield* sql<{
+        readonly state: string;
+        readonly providerTurnRef: string | null;
+      }>`
+        SELECT state, provider_turn_ref AS "providerTurnRef"
+        FROM projection_turns
+        WHERE thread_id = ${threadId} AND turn_id = ${turnId}
+      `;
+      assert.deepEqual(rows, [{ state: "completed", providerTurnRef: "resp-native-anchor" }]);
+    }),
+  );
+
+  it.effect("stamps the provider turn anchor on a turn already settled by a diff completion", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const now = "2026-01-01T00:00:00.000Z";
+      const threadId = ThreadId.make("thread-turn-anchor-settled");
+      const turnId = TurnId.make("turn-anchor-settled-1");
+
+      yield* eventStore.append({
+        type: "thread.created",
+        eventId: EventId.make("evt-tas1"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: now,
+        commandId: CommandId.make("cmd-tas1"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-tas1"),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId: ProjectId.make("project-turn-anchor-settled"),
+          title: "Turn anchor settled",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("claude"),
+            model: "claude-opus",
+          },
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      // No running session for this turn, so the diff completion settles the
+      // row before the session update carrying the anchor arrives.
+      yield* eventStore.append({
+        type: "thread.turn-diff-completed",
+        eventId: EventId.make("evt-tas2"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-01-01T00:00:30.000Z",
+        commandId: CommandId.make("cmd-tas2"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-tas2"),
+        metadata: {},
+        payload: {
+          threadId,
+          turnId,
+          checkpointTurnCount: 1,
+          checkpointRef: CheckpointRef.make(`refs/t3/checkpoints/${threadId}/turn/1`),
+          status: "ready",
+          files: [],
+          assistantMessageId: MessageId.make("message-anchor-settled"),
+          completedAt: "2026-01-01T00:00:30.000Z",
+        },
+      });
+
+      yield* eventStore.append({
+        type: "thread.session-set",
+        eventId: EventId.make("evt-tas3"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-01-01T00:00:31.000Z",
+        commandId: CommandId.make("cmd-tas3"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-tas3"),
+        metadata: { providerTurnId: "resp-native-settled" },
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "ready",
+            providerName: "claude",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: "2026-01-01T00:00:31.000Z",
+          },
+          completedTurnId: turnId,
+        },
+      });
+
+      yield* projectionPipeline.bootstrap;
+
+      const rows = yield* sql<{
+        readonly state: string;
+        readonly completedAt: string | null;
+        readonly providerTurnRef: string | null;
+      }>`
+        SELECT
+          state,
+          completed_at AS "completedAt",
+          provider_turn_ref AS "providerTurnRef"
+        FROM projection_turns
+        WHERE thread_id = ${threadId} AND turn_id = ${turnId}
+      `;
+      // The anchor lands without disturbing the diff completion's settle.
+      assert.deepEqual(rows, [
+        {
+          state: "completed",
+          completedAt: "2026-01-01T00:00:30.000Z",
+          providerTurnRef: "resp-native-settled",
+        },
+      ]);
     }),
   );
 
@@ -3695,6 +3905,599 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
         WHERE command_id = ${cleanupFailureCommandId}
       `;
       assert.deepEqual(cleanupFailureReceipts, [{ status: "accepted" }]);
+    }),
+  );
+});
+
+it.layer(
+  OrchestrationProjectionSnapshotQueryLive.pipe(
+    Layer.provide(ThreadBackgroundLiveness.layer),
+    Layer.provide(ThreadPlanProgress.layer),
+    Layer.provide(RepositoryIdentityResolver.layer),
+    Layer.provideMerge(
+      Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-pipeline-fork-")),
+    ),
+  ),
+)("OrchestrationProjectionPipeline thread.forked", (it) => {
+  const now = "2026-06-01T00:00:00.000Z";
+  const forkAt = "2026-06-01T01:00:00.000Z";
+  const projectId = ProjectId.make("project-fork-pipe");
+  const parentThreadId = ThreadId.make("thread-fork-parent");
+  const childThreadId = ThreadId.make("thread-fork-child");
+  const parentTurn1 = TurnId.make("pturn-1");
+  const parentTurn2 = TurnId.make("pturn-2");
+
+  const modelSelection = {
+    instanceId: ProviderInstanceId.make("codex"),
+    model: "gpt-5-codex",
+  };
+
+  const parentUserMessageId = MessageId.make("00000000-0000-4000-8000-00000000p101");
+  const parentAssistantMessageId = MessageId.make("assistant:00000000-0000-4000-8000-00000000p102");
+  const childUser1MessageId = MessageId.make("00000000-0000-4000-8000-000000000c01");
+  const childAssistant1MessageId = MessageId.make("assistant:00000000-0000-4000-8000-000000000c02");
+  const childUser2MessageId = MessageId.make("00000000-0000-4000-8000-000000000c03");
+  const childAssistant2MessageId = MessageId.make("assistant:00000000-0000-4000-8000-000000000c04");
+  const childActivityId = EventId.make("00000000-0000-4000-8000-000000000c05");
+  const childPlanId = "plan-child-1";
+
+  const childAttachment = {
+    type: "image" as const,
+    id: "thread-fork-child-00000000-0000-4000-8000-000000000c10-png",
+    name: "screenshot.png",
+    mimeType: "image/png",
+    sizeBytes: 1024,
+  };
+
+  const linkedPullRequest = {
+    projectId,
+    repository: "t3tools/t3code",
+    number: 9,
+    url: "https://github.com/t3tools/t3code/pull/9",
+  };
+
+  const forkedFrom = {
+    threadId: parentThreadId,
+    turnId: parentTurn2,
+    turnCount: 2,
+    messageId: null,
+  };
+
+  const forkSource = {
+    providerInstanceId: ProviderInstanceId.make("codex"),
+    resumeCursor: { threadId: "native-parent-thread" },
+    providerTurnRef: "prov-p2",
+    throughTurnOrdinal: 2,
+    atEnd: true,
+  };
+
+  const childCheckpointFiles = [{ path: "src/a.ts", kind: "modified", additions: 3, deletions: 1 }];
+
+  const forkedPayload = {
+    threadId: childThreadId,
+    forkedFrom,
+    forkSource,
+    history: {
+      messages: [
+        {
+          id: childUser1MessageId,
+          role: "user" as const,
+          text: "inherited first ask",
+          attachments: [childAttachment],
+          turnId: parentTurn1,
+          streaming: false,
+          createdAt: "2026-06-01T00:10:00.000Z",
+          updatedAt: "2026-06-01T00:10:00.000Z",
+        },
+        {
+          id: childAssistant1MessageId,
+          role: "assistant" as const,
+          text: "inherited first answer",
+          attachments: [],
+          turnId: parentTurn1,
+          streaming: false,
+          createdAt: "2026-06-01T00:10:30.000Z",
+          updatedAt: "2026-06-01T00:10:30.000Z",
+        },
+        {
+          id: childUser2MessageId,
+          role: "user" as const,
+          text: "inherited second ask",
+          attachments: [],
+          turnId: parentTurn2,
+          streaming: false,
+          createdAt: "2026-06-01T00:20:00.000Z",
+          updatedAt: "2026-06-01T00:20:00.000Z",
+        },
+        {
+          id: childAssistant2MessageId,
+          role: "assistant" as const,
+          text: "inherited second answer",
+          attachments: [],
+          turnId: parentTurn2,
+          streaming: false,
+          createdAt: "2026-06-01T00:20:30.000Z",
+          updatedAt: "2026-06-01T00:20:30.000Z",
+        },
+      ],
+      activities: [
+        {
+          id: childActivityId,
+          tone: "tool" as const,
+          kind: "tool.ran",
+          summary: "ran a tool",
+          payload: { tool: "bash" },
+          turnId: parentTurn1,
+          createdAt: "2026-06-01T00:10:20.000Z",
+        },
+      ],
+      proposedPlans: [
+        {
+          id: childPlanId,
+          turnId: parentTurn1,
+          planMarkdown: "# inherited plan",
+          implementedAt: null,
+          implementationThreadId: null,
+          createdAt: "2026-06-01T00:10:15.000Z",
+          updatedAt: "2026-06-01T00:10:15.000Z",
+        },
+      ],
+      turns: [
+        {
+          turnId: parentTurn1,
+          state: "completed" as const,
+          requestedAt: "2026-06-01T00:10:00.000Z",
+          startedAt: "2026-06-01T00:10:05.000Z",
+          completedAt: "2026-06-01T00:10:30.000Z",
+          pendingMessageId: childUser1MessageId,
+          assistantMessageId: childAssistant1MessageId,
+          sourceProposedPlan: { threadId: childThreadId, planId: childPlanId },
+          checkpoint: {
+            turnId: parentTurn1,
+            checkpointTurnCount: 1,
+            checkpointRef: checkpointRefForThreadTurn(childThreadId, 1),
+            status: "ready" as const,
+            files: childCheckpointFiles,
+            assistantMessageId: childAssistant1MessageId,
+            completedAt: "2026-06-01T00:10:30.000Z",
+          },
+          providerTurnRef: "prov-p1",
+        },
+        {
+          turnId: parentTurn2,
+          state: "completed" as const,
+          requestedAt: "2026-06-01T00:20:00.000Z",
+          startedAt: "2026-06-01T00:20:05.000Z",
+          completedAt: "2026-06-01T00:20:30.000Z",
+          pendingMessageId: childUser2MessageId,
+          assistantMessageId: childAssistant2MessageId,
+          checkpoint: {
+            turnId: parentTurn2,
+            checkpointTurnCount: 2,
+            checkpointRef: checkpointRefForThreadTurn(childThreadId, 2),
+            status: "ready" as const,
+            files: [],
+            assistantMessageId: childAssistant2MessageId,
+            completedAt: "2026-06-01T00:20:30.000Z",
+          },
+          providerTurnRef: "prov-p2",
+        },
+      ],
+    },
+    linkedPullRequest,
+  };
+
+  const appendEvent = (input: {
+    readonly eventId: string;
+    readonly type: OrchestrationEvent["type"];
+    readonly aggregateKind: "project" | "thread";
+    readonly aggregateId: string;
+    readonly occurredAt?: string;
+    readonly payload: unknown;
+  }) =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      yield* eventStore.append({
+        type: input.type,
+        eventId: EventId.make(input.eventId),
+        aggregateKind: input.aggregateKind,
+        aggregateId:
+          input.aggregateKind === "project"
+            ? ProjectId.make(input.aggregateId)
+            : ThreadId.make(input.aggregateId),
+        occurredAt: input.occurredAt ?? now,
+        commandId: CommandId.make(`cmd-${input.eventId}`),
+        causationEventId: null,
+        correlationId: CommandId.make(`cmd-${input.eventId}`),
+        metadata: {},
+        payload: input.payload,
+      } as never);
+    });
+
+  const readThreadRows = (threadId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const messages = yield* sql`
+        SELECT * FROM projection_thread_messages WHERE thread_id = ${threadId} ORDER BY rowid
+      `;
+      const plans = yield* sql`
+        SELECT * FROM projection_thread_proposed_plans WHERE thread_id = ${threadId} ORDER BY rowid
+      `;
+      const activities = yield* sql`
+        SELECT * FROM projection_thread_activities WHERE thread_id = ${threadId} ORDER BY rowid
+      `;
+      const turns = yield* sql`
+        SELECT * FROM projection_turns WHERE thread_id = ${threadId} ORDER BY rowid
+      `;
+      const threads = yield* sql`
+        SELECT * FROM projection_threads WHERE thread_id = ${threadId} ORDER BY rowid
+      `;
+      return { messages, plans, activities, turns, threads };
+    });
+
+  it.effect("projects inherited fork rows under the child and leaves the parent untouched", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* appendEvent({
+        eventId: "evt-fork-pipe-project",
+        type: "project.created",
+        aggregateKind: "project",
+        aggregateId: projectId,
+        payload: {
+          projectId,
+          title: "Fork Pipe Project",
+          workspaceRoot: "/tmp/project-fork-pipe",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      yield* appendEvent({
+        eventId: "evt-fork-pipe-parent",
+        type: "thread.created",
+        aggregateKind: "thread",
+        aggregateId: parentThreadId,
+        payload: {
+          threadId: parentThreadId,
+          projectId,
+          title: "Fork Pipe Parent",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      yield* appendEvent({
+        eventId: "evt-fork-pipe-parent-user",
+        type: "thread.message-sent",
+        aggregateKind: "thread",
+        aggregateId: parentThreadId,
+        payload: {
+          threadId: parentThreadId,
+          messageId: parentUserMessageId,
+          role: "user",
+          text: "parent ask",
+          attachments: [],
+          turnId: parentTurn1,
+          streaming: false,
+          createdAt: "2026-06-01T00:10:00.000Z",
+          updatedAt: "2026-06-01T00:10:00.000Z",
+        },
+      });
+      yield* appendEvent({
+        eventId: "evt-fork-pipe-parent-assistant",
+        type: "thread.message-sent",
+        aggregateKind: "thread",
+        aggregateId: parentThreadId,
+        payload: {
+          threadId: parentThreadId,
+          messageId: parentAssistantMessageId,
+          role: "assistant",
+          text: "parent answer",
+          attachments: [],
+          turnId: parentTurn1,
+          streaming: false,
+          createdAt: "2026-06-01T00:10:30.000Z",
+          updatedAt: "2026-06-01T00:10:30.000Z",
+        },
+      });
+      yield* appendEvent({
+        eventId: "evt-fork-pipe-parent-plan",
+        type: "thread.proposed-plan-upserted",
+        aggregateKind: "thread",
+        aggregateId: parentThreadId,
+        payload: {
+          threadId: parentThreadId,
+          proposedPlan: {
+            id: "plan-parent-1",
+            turnId: parentTurn1,
+            planMarkdown: "# parent plan",
+            implementedAt: null,
+            implementationThreadId: null,
+            createdAt: "2026-06-01T00:10:15.000Z",
+            updatedAt: "2026-06-01T00:10:15.000Z",
+          },
+        },
+      });
+      yield* appendEvent({
+        eventId: "evt-fork-pipe-parent-activity",
+        type: "thread.activity-appended",
+        aggregateKind: "thread",
+        aggregateId: parentThreadId,
+        payload: {
+          threadId: parentThreadId,
+          activity: {
+            id: EventId.make("00000000-0000-4000-8000-00000000p105"),
+            tone: "tool",
+            kind: "tool.ran",
+            summary: "parent tool",
+            payload: { tool: "bash" },
+            turnId: parentTurn1,
+            createdAt: "2026-06-01T00:10:20.000Z",
+          },
+        },
+      });
+      yield* appendEvent({
+        eventId: "evt-fork-pipe-parent-diff",
+        type: "thread.turn-diff-completed",
+        aggregateKind: "thread",
+        aggregateId: parentThreadId,
+        payload: {
+          threadId: parentThreadId,
+          turnId: parentTurn1,
+          checkpointTurnCount: 1,
+          checkpointRef: checkpointRefForThreadTurn(parentThreadId, 1),
+          status: "ready",
+          files: [],
+          assistantMessageId: parentAssistantMessageId,
+          completedAt: "2026-06-01T00:10:30.000Z",
+        },
+      });
+
+      yield* projectionPipeline.bootstrap;
+      const parentRowsBefore = yield* readThreadRows(parentThreadId);
+
+      yield* appendEvent({
+        eventId: "evt-fork-pipe-child-created",
+        type: "thread.created",
+        aggregateKind: "thread",
+        aggregateId: childThreadId,
+        occurredAt: forkAt,
+        payload: {
+          threadId: childThreadId,
+          projectId,
+          title: "Fork Pipe Parent (fork)",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: forkAt,
+          updatedAt: forkAt,
+        },
+      });
+      yield* appendEvent({
+        eventId: "evt-fork-pipe-child-forked",
+        type: "thread.forked",
+        aggregateKind: "thread",
+        aggregateId: childThreadId,
+        occurredAt: forkAt,
+        payload: forkedPayload,
+      });
+
+      yield* projectionPipeline.bootstrap;
+
+      // Child message rows land with explicit attachments — [] must persist
+      // as '[]' so the upsert COALESCE can never resurrect stale rows.
+      const childMessages = yield* sql<{
+        readonly messageId: string;
+        readonly turnId: string | null;
+        readonly attachmentsJson: string | null;
+      }>`
+        SELECT
+          message_id AS "messageId",
+          turn_id AS "turnId",
+          attachments_json AS "attachmentsJson"
+        FROM projection_thread_messages
+        WHERE thread_id = ${childThreadId}
+        ORDER BY created_at, message_id
+      `;
+      assert.deepEqual(
+        childMessages.map((row) => row.messageId),
+        [
+          childUser1MessageId,
+          childAssistant1MessageId,
+          childUser2MessageId,
+          childAssistant2MessageId,
+        ],
+      );
+      assert.strictEqual(childMessages[1]?.attachmentsJson, "[]");
+      const childDetail = Option.getOrThrow(
+        yield* snapshotQuery.getThreadDetailById(childThreadId),
+      );
+      assert.deepEqual(
+        childDetail.messages.find((message) => message.id === childUser1MessageId)?.attachments,
+        [childAttachment],
+      );
+
+      const childPlans = yield* sql<{ readonly planId: string; readonly turnId: string | null }>`
+        SELECT plan_id AS "planId", turn_id AS "turnId"
+        FROM projection_thread_proposed_plans
+        WHERE thread_id = ${childThreadId}
+      `;
+      assert.deepEqual(childPlans, [{ planId: childPlanId, turnId: parentTurn1 }]);
+
+      const childActivities = yield* sql<{ readonly activityId: string }>`
+        SELECT activity_id AS "activityId"
+        FROM projection_thread_activities
+        WHERE thread_id = ${childThreadId}
+      `;
+      assert.deepEqual(childActivities, [{ activityId: childActivityId }]);
+
+      const childTurns = yield* sql<{
+        readonly turnId: string;
+        readonly state: string;
+        readonly pendingMessageId: string | null;
+        readonly assistantMessageId: string | null;
+        readonly sourceProposedPlanThreadId: string | null;
+        readonly sourceProposedPlanId: string | null;
+        readonly checkpointTurnCount: number | null;
+        readonly checkpointRef: string | null;
+        readonly checkpointStatus: string | null;
+        readonly providerTurnRef: string | null;
+      }>`
+        SELECT
+          turn_id AS "turnId",
+          state,
+          pending_message_id AS "pendingMessageId",
+          assistant_message_id AS "assistantMessageId",
+          source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
+          source_proposed_plan_id AS "sourceProposedPlanId",
+          checkpoint_turn_count AS "checkpointTurnCount",
+          checkpoint_ref AS "checkpointRef",
+          checkpoint_status AS "checkpointStatus",
+          provider_turn_ref AS "providerTurnRef"
+        FROM projection_turns
+        WHERE thread_id = ${childThreadId}
+        ORDER BY requested_at
+      `;
+      assert.deepEqual(childTurns, [
+        {
+          turnId: parentTurn1,
+          state: "completed",
+          pendingMessageId: childUser1MessageId,
+          assistantMessageId: childAssistant1MessageId,
+          sourceProposedPlanThreadId: childThreadId,
+          sourceProposedPlanId: childPlanId,
+          checkpointTurnCount: 1,
+          checkpointRef: checkpointRefForThreadTurn(childThreadId, 1),
+          checkpointStatus: "ready",
+          providerTurnRef: "prov-p1",
+        },
+        {
+          turnId: parentTurn2,
+          state: "completed",
+          pendingMessageId: childUser2MessageId,
+          assistantMessageId: childAssistant2MessageId,
+          sourceProposedPlanThreadId: null,
+          sourceProposedPlanId: null,
+          checkpointTurnCount: 2,
+          checkpointRef: checkpointRefForThreadTurn(childThreadId, 2),
+          checkpointStatus: "ready",
+          providerTurnRef: "prov-p2",
+        },
+      ]);
+
+      // Threads arm runs last: lineage columns, inherited latest turn and a
+      // refreshed shell summary.
+      const forkContext = Option.getOrThrow(
+        yield* snapshotQuery.getThreadForkContextById(childThreadId),
+      );
+      assert.deepEqual(forkContext.forkedFrom, forkedFrom);
+      assert.deepEqual(forkContext.forkSource, forkSource);
+      const childShell = Option.getOrThrow(yield* snapshotQuery.getThreadShellById(childThreadId));
+      assert.deepEqual(childShell.linkedPullRequest, linkedPullRequest);
+      assert.deepEqual(childShell.forkedFrom, forkedFrom);
+      assert.strictEqual(childShell.latestUserMessageAt, "2026-06-01T00:20:00.000Z");
+      const childThreadRows = yield* sql<{ readonly latestTurnId: string | null }>`
+        SELECT latest_turn_id AS "latestTurnId"
+        FROM projection_threads
+        WHERE thread_id = ${childThreadId}
+      `;
+      assert.strictEqual(childThreadRows.length, 1);
+      assert.strictEqual(childThreadRows[0]?.latestTurnId, parentTurn2);
+
+      // Parent rows are byte-identical before and after the fork.
+      const parentRowsAfter = yield* readThreadRows(parentThreadId);
+      assert.deepEqual(parentRowsAfter, parentRowsBefore);
+
+      // Detail paging walks the inherited turns like any other history.
+      const firstPage = Option.getOrThrow(
+        yield* snapshotQuery.getThreadDetailSnapshot(childThreadId, { turnLimit: 1 }),
+      );
+      assert.isDefined(firstPage.page);
+      assert.deepEqual(
+        firstPage.thread.messages.map((message) => message.text),
+        ["inherited second ask", "inherited second answer"],
+      );
+      assert.isNotNull(firstPage.page?.beforeCursor);
+      const secondPage = Option.getOrThrow(
+        yield* snapshotQuery.getThreadDetailSnapshot(childThreadId, {
+          turnLimit: 1,
+          beforeCursor: firstPage.page?.beforeCursor ?? undefined,
+        }),
+      );
+      assert.deepEqual(
+        secondPage.thread.messages.map((message) => message.text),
+        ["inherited first ask", "inherited first answer"],
+      );
+
+      // Re-projecting from a cursor between thread.created and thread.forked
+      // (a crash mid-commit) replays only the fork event over already-written
+      // rows and must be idempotent.
+      const childRowsBeforeReplay = yield* readThreadRows(childThreadId);
+      const maxSequenceRows = yield* sql<{ readonly maxSequence: number }>`
+        SELECT MAX(last_applied_sequence) AS "maxSequence" FROM projection_state
+      `;
+      const forkSequence = maxSequenceRows[0]?.maxSequence ?? 0;
+      yield* sql`
+        UPDATE projection_state SET last_applied_sequence = ${forkSequence - 1}
+      `;
+      yield* projectionPipeline.bootstrap;
+      const childRowsReplayed = yield* readThreadRows(childThreadId);
+      const parentRowsReplayed = yield* readThreadRows(parentThreadId);
+      assert.deepEqual(parentRowsReplayed, parentRowsBefore);
+      assert.deepEqual(childRowsReplayed, childRowsBeforeReplay);
+    }),
+  );
+
+  it.effect("a child revert truncates only the child's inherited rows", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const sql = yield* SqlClient.SqlClient;
+
+      const parentRowsBefore = yield* readThreadRows(parentThreadId);
+
+      yield* appendEvent({
+        eventId: "evt-fork-pipe-child-reverted",
+        type: "thread.reverted",
+        aggregateKind: "thread",
+        aggregateId: childThreadId,
+        occurredAt: "2026-06-01T02:00:00.000Z",
+        payload: {
+          threadId: childThreadId,
+          turnCount: 1,
+        },
+      });
+      yield* projectionPipeline.bootstrap;
+
+      const childTurns = yield* sql<{ readonly turnId: string }>`
+        SELECT turn_id AS "turnId" FROM projection_turns
+        WHERE thread_id = ${childThreadId} AND turn_id IS NOT NULL
+      `;
+      assert.deepEqual(
+        childTurns.map((row) => row.turnId),
+        [parentTurn1],
+      );
+      const childMessages = yield* sql<{ readonly messageId: string }>`
+        SELECT message_id AS "messageId" FROM projection_thread_messages
+        WHERE thread_id = ${childThreadId}
+        ORDER BY created_at, message_id
+      `;
+      assert.deepEqual(
+        childMessages.map((row) => row.messageId),
+        [childUser1MessageId, childAssistant1MessageId],
+      );
+
+      const parentRowsAfter = yield* readThreadRows(parentThreadId);
+      assert.deepEqual(parentRowsAfter, parentRowsBefore);
     }),
   );
 });

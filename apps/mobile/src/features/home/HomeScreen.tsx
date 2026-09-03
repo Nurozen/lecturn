@@ -117,6 +117,8 @@ interface HomeScreenProps {
     direction: "up" | "down",
   ) => Promise<boolean>;
   readonly onRegenerateThreadTitle: (thread: EnvironmentThreadShell) => Promise<boolean>;
+  /** Forks the thread at its latest completed turn and opens the child. */
+  readonly onForkThread: (thread: EnvironmentThreadShell) => void;
   readonly onSelectPendingTask: (pendingTask: PendingNewTask) => void;
   readonly onDeletePendingTask: (pendingTask: PendingNewTask) => void;
   readonly onNewThreadInProject: (project: EnvironmentProject) => void;
@@ -526,6 +528,7 @@ export function HomeScreen(props: HomeScreenProps) {
     [props.onRegenerateThreadTitle],
   );
   const handleDeleteThread = props.onDeleteThread;
+  const handleForkThread = props.onForkThread;
   const handleUnsettleThread = props.onUnsettleThread;
   // The settled tail renders in pages; expansion resets when the filter
   // context changes so environment/search flips never inherit a deep page.
@@ -607,6 +610,15 @@ export function HomeScreen(props: HomeScreenProps) {
     const supported = new Set<EnvironmentId>();
     for (const [environmentId, config] of serverConfigs) {
       if (config.environment.capabilities.threadTitleRegeneration === true) {
+        supported.add(environmentId);
+      }
+    }
+    return supported;
+  }, [serverConfigs]);
+  const forkingEnvironmentIds = useMemo(() => {
+    const supported = new Set<EnvironmentId>();
+    for (const [environmentId, config] of serverConfigs) {
+      if (config.environment.capabilities.threadForking === true) {
         supported.add(environmentId);
       }
     }
@@ -768,6 +780,13 @@ export function HomeScreen(props: HomeScreenProps) {
         );
       }
       const thread = item.item.thread;
+      const provider = serverConfigs
+        .get(thread.environmentId)
+        ?.providers.find(
+          (candidate) =>
+            candidate.instanceId ===
+            (thread.session?.providerInstanceId ?? thread.modelSelection.instanceId),
+        );
       return (
         <ThreadListV2Row
           thread={thread}
@@ -783,15 +802,7 @@ export function HomeScreen(props: HomeScreenProps) {
           projectTitle={v2ProjectTitleByProjectKey.get(
             scopedProjectKey(thread.environmentId, thread.projectId),
           )}
-          providerDriver={
-            serverConfigs
-              .get(thread.environmentId)
-              ?.providers.find(
-                (provider) =>
-                  provider.instanceId ===
-                  (thread.session?.providerInstanceId ?? thread.modelSelection.instanceId),
-              )?.driver ?? null
-          }
+          providerDriver={provider?.driver ?? null}
           environmentLabel={
             Object.keys(props.savedConnectionsById).length > 1
               ? (props.savedConnectionsById[thread.environmentId]?.environmentLabel ?? null)
@@ -807,6 +818,11 @@ export function HomeScreen(props: HomeScreenProps) {
           onSelectThread={props.onSelectThread}
           onDeleteThread={handleDeleteThread}
           onArchiveThread={props.onArchiveThread}
+          onForkThread={handleForkThread}
+          forkSupported={
+            forkingEnvironmentIds.has(thread.environmentId) &&
+            provider?.conversationFork === "native"
+          }
           onRegenerateThreadTitle={handleRegenerateThreadTitle}
           titleRegenerationSupported={titleRegenerationEnvironmentIds.has(thread.environmentId)}
           settlementSupported={settlementEnvironmentIds.has(thread.environmentId)}
@@ -835,7 +851,9 @@ export function HomeScreen(props: HomeScreenProps) {
     },
     [
       handleDeleteThread,
+      handleForkThread,
       arrangedPinnedKeys,
+      forkingEnvironmentIds,
       handleMovePinnedThread,
       handlePinThread,
       handleRegenerateThreadTitle,
@@ -902,9 +920,16 @@ export function HomeScreen(props: HomeScreenProps) {
       projectCwdByKey,
       savedConnectionsById: props.savedConnectionsById,
       searchQuery: props.searchQuery,
+      serverConfigs,
       threadSearchMatchByKey,
     }),
-    [projectCwdByKey, props.savedConnectionsById, props.searchQuery, threadSearchMatchByKey],
+    [
+      projectCwdByKey,
+      props.savedConnectionsById,
+      props.searchQuery,
+      serverConfigs,
+      threadSearchMatchByKey,
+    ],
   );
 
   const renderItem = useCallback(
@@ -945,6 +970,13 @@ export function HomeScreen(props: HomeScreenProps) {
           );
         case "thread": {
           const thread = item.thread;
+          const provider = serverConfigs
+            .get(thread.environmentId)
+            ?.providers.find(
+              (candidate) =>
+                candidate.instanceId ===
+                (thread.session?.providerInstanceId ?? thread.modelSelection.instanceId),
+            );
           return (
             <ThreadListRow
               variant="compact"
@@ -966,6 +998,11 @@ export function HomeScreen(props: HomeScreenProps) {
               searchQuery={props.searchQuery}
               onArchiveThread={props.onArchiveThread}
               onDeleteThread={props.onDeleteThread}
+              onForkThread={handleForkThread}
+              forkSupported={
+                forkingEnvironmentIds.has(thread.environmentId) &&
+                provider?.conversationFork === "native"
+              }
               onRegenerateThreadTitle={handleRegenerateThreadTitle}
               titleRegenerationSupported={titleRegenerationEnvironmentIds.has(thread.environmentId)}
               onSelectThread={props.onSelectThread}
@@ -987,6 +1024,8 @@ export function HomeScreen(props: HomeScreenProps) {
       }
     },
     [
+      forkingEnvironmentIds,
+      handleForkThread,
       handleSwipeableClose,
       handleSwipeableWillOpen,
       handleRegenerateThreadTitle,
@@ -999,6 +1038,7 @@ export function HomeScreen(props: HomeScreenProps) {
       props.onSelectThread,
       props.searchQuery,
       props.savedConnectionsById,
+      serverConfigs,
       threadSearchMatchByKey,
       titleRegenerationEnvironmentIds,
       updateGroupDisplay,

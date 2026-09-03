@@ -246,6 +246,10 @@
     "./claudeCompaction": {
       "types": "./src/claudeCompaction.ts",
       "import": "./src/claudeCompaction.ts"
+    },
+    "./uuid": {
+      "types": "./src/uuid.ts",
+      "import": "./src/uuid.ts"
     }
   },
   "scripts": {

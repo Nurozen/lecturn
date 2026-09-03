@@ -74,6 +74,16 @@ const isCodexResumeCursorSchema = Schema.is(CodexResumeCursorSchema);
 
 const PROVIDER = ProviderDriverKind.make("codex");
 
+// Exported so capability/presentation parity is testable without a runtime.
+export const CODEX_ADAPTER_CAPABILITIES = {
+  sessionModelSwitch: "in-session",
+  promptlessTurnContinuation: true,
+  conversationFork: "native",
+  // Codex turn ids are T3 turn ids, so an anchor-less fork falls back to
+  // the through-turn id itself.
+  conversationForkRequiresAnchor: false,
+} as const;
+
 export interface CodexAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
   readonly environment?: NodeJS.ProcessEnv;
@@ -1683,6 +1693,23 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           input.modelSelection?.instanceId === boundInstanceId
             ? getCodexServiceTierOptionValue(input.modelSelection)
             : undefined;
+        let fork: CodexSessionRuntimeOptions["fork"];
+        if (input.fork !== undefined) {
+          const sourceCursor = input.fork.sourceResumeCursor;
+          if (!isCodexResumeCursorSchema(sourceCursor)) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "startSession",
+              issue: "Fork requires a Codex resume cursor for the source session.",
+            });
+          }
+          fork = {
+            sourceThreadId: sourceCursor.threadId,
+            // Legacy turns recorded before provider anchors were captured
+            // carry a null ref; the recorded turn id is the boundary then.
+            lastTurnId: input.fork.providerTurnRef ?? input.fork.throughTurnId,
+          };
+        }
         const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
@@ -1692,9 +1719,15 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           launchArgs: resolveCodexLaunchArgs(codexConfig.launchArgs, options?.environment),
           ...(options?.environment ? { environment: options.environment } : {}),
           ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
-          ...(isCodexResumeCursorSchema(input.resumeCursor)
-            ? { resumeCursor: input.resumeCursor }
-            : {}),
+          // A forked child never inherits the source's cursor: installing it
+          // would make the runtime ignore the `thread/started` notification
+          // for the forked thread id, which is where the child's own cursor
+          // comes from.
+          ...(fork
+            ? { fork }
+            : isCodexResumeCursorSchema(input.resumeCursor)
+              ? { resumeCursor: input.resumeCursor }
+              : {}),
           runtimeMode: input.runtimeMode,
           ...(input.modelSelection?.instanceId === boundInstanceId
             ? { model: input.modelSelection.model }
@@ -2008,10 +2041,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
   return {
     provider: PROVIDER,
-    capabilities: {
-      sessionModelSwitch: "in-session",
-      promptlessTurnContinuation: true,
-    },
+    capabilities: CODEX_ADAPTER_CAPABILITIES,
     startSession,
     sendTurn,
     interruptTurn,

@@ -10,7 +10,8 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, GitForkIcon } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
 import {
   memo,
   useCallback,
@@ -24,6 +25,7 @@ import {
 import GitActionsControl from "../GitActionsControl";
 import { isTrailingDoubleClick } from "../Sidebar.logic";
 import { type DraftId } from "~/composerDraftStore";
+import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import ProjectScriptsControl, {
@@ -32,6 +34,7 @@ import ProjectScriptsControl, {
 } from "../ProjectScriptsControl";
 import { OpenInPicker } from "./OpenInPicker";
 import { useRemoteOpenState, type RemoteOpenMode } from "../../remoteOpen";
+import { useThreadShell } from "../../state/entities";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useT3ProjectFileScripts } from "~/hooks/useT3ProjectFileScripts";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
@@ -156,6 +159,37 @@ export const ChatHeader = memo(function ChatHeader({
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
+  // Fork lineage chip: subscribed (not a snapshot read) so the label follows
+  // a parent rename, and so the chip appears once the shell row lands.
+  const threadShell = useThreadShell(isServerThread ? activeThreadRef : null);
+  const forkedFrom = threadShell?.forkedFrom ?? null;
+  const parentThreadRef = useMemo(
+    () => (forkedFrom ? scopeThreadRef(activeThreadEnvironmentId, forkedFrom.threadId) : null),
+    [activeThreadEnvironmentId, forkedFrom],
+  );
+  // Null when the parent thread was deleted or archived (the shell list
+  // excludes both); the chip label goes neutral but stays navigable — the
+  // thread route renders archived parents and shows its own missing state.
+  const parentShell = useThreadShell(parentThreadRef);
+  const forkChipLabel = useMemo(() => {
+    if (forkedFrom === null) {
+      return null;
+    }
+    const origin = parentShell !== null ? parentShell.title : "another thread";
+    const turnSuffix = forkedFrom.turnCount > 0 ? ` · after turn ${forkedFrom.turnCount}` : "";
+    return `Forked from ${origin}${turnSuffix}`;
+  }, [forkedFrom, parentShell]);
+  const navigate = useNavigate();
+  const openParentThread = useCallback(() => {
+    if (parentThreadRef === null) return;
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: {
+        environmentId: parentThreadRef.environmentId,
+        threadId: parentThreadRef.threadId,
+      },
+    });
+  }, [navigate, parentThreadRef]);
   // Inline rename, keyed by thread: navigating away drops an in-progress
   // rename instead of committing stale text. Cleared on thread change (not
   // just hidden) so returning to the thread doesn't revive the old draft.
@@ -369,6 +403,26 @@ export const ChatHeader = memo(function ChatHeader({
               <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
             </Tooltip>
           )}
+          {forkChipLabel !== null ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="micro"
+                    variant="ghost"
+                    aria-label={forkChipLabel}
+                    onClick={openParentThread}
+                    className="ml-2 max-w-48 shrink-0 gap-1 rounded-full border border-border/70 font-normal text-muted-foreground"
+                  />
+                }
+              >
+                <GitForkIcon aria-hidden className="size-3 shrink-0" />
+                <span className="min-w-0 truncate">{forkChipLabel}</span>
+              </TooltipTrigger>
+              <TooltipPopup side="top">{forkChipLabel}</TooltipPopup>
+            </Tooltip>
+          ) : null}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
       <div

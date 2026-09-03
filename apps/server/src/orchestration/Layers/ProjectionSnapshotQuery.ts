@@ -24,6 +24,8 @@ import {
   type OrchestrationThreadShell,
   ModelSelection,
   ProjectId,
+  ThreadForkOrigin,
+  ThreadForkProviderSource,
   ThreadLinkedPullRequest,
   ThreadId,
 } from "@t3tools/contracts";
@@ -53,6 +55,7 @@ import { ProjectionThreadMessage } from "../../persistence/Services/ProjectionTh
 import { ProjectionThreadProposedPlan } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
+import { ProjectionTurn } from "../../persistence/Services/ProjectionTurns.ts";
 import {
   decodeThreadDetailPageCursor,
   encodeThreadDetailPageCursor,
@@ -67,6 +70,7 @@ import {
   type ProjectionSnapshotCounts,
   type ProjectionThreadCheckpointContext,
   type ProjectionThreadDetailQuery,
+  type ProjectionThreadForkContext,
   type ProjectionSnapshotQueryShape,
 } from "../Services/ProjectionSnapshotQuery.ts";
 
@@ -97,6 +101,8 @@ const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
     linkedPullRequest: Schema.NullOr(Schema.fromJsonString(ThreadLinkedPullRequest)),
+    forkedFrom: Schema.NullOr(Schema.fromJsonString(ThreadForkOrigin)),
+    forkSource: Schema.NullOr(Schema.fromJsonString(ThreadForkProviderSource)),
   }),
 );
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
@@ -114,6 +120,18 @@ const ProjectionCheckpointDbRowSchema = ProjectionCheckpoint.mapFields(
     files: Schema.fromJsonString(Schema.Array(OrchestrationCheckpointFile)),
   }),
 );
+const ProjectionTurnDbRowSchema = ProjectionTurn.mapFields(
+  Struct.assign({
+    checkpointFiles: Schema.fromJsonString(Schema.Array(OrchestrationCheckpointFile)),
+  }),
+);
+const ProjectionThreadForkContextRowSchema = Schema.Struct({
+  forkedFrom: Schema.NullOr(Schema.fromJsonString(ThreadForkOrigin)),
+  forkSource: Schema.NullOr(Schema.fromJsonString(ThreadForkProviderSource)),
+});
+const WorktreePathLookupInput = Schema.Struct({
+  worktreePath: Schema.String,
+});
 const ProjectionLatestTurnDbRowSchema = Schema.Struct({
   threadId: ProjectionThread.fields.threadId,
   turnId: TurnId,
@@ -464,6 +482,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
+          forked_from_json AS "forkedFrom",
+          fork_source_json AS "forkSource",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -502,6 +522,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
+          forked_from_json AS "forkedFrom",
+          fork_source_json AS "forkSource",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -542,6 +564,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
+          forked_from_json AS "forkedFrom",
+          fork_source_json AS "forkSource",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -1000,6 +1024,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
+          forked_from_json AS "forkedFrom",
+          fork_source_json AS "forkSource",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -1252,6 +1278,90 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         WHERE thread_id = ${threadId}
           AND checkpoint_turn_count IS NOT NULL
         ORDER BY checkpoint_turn_count ASC
+      `,
+  });
+
+  // Unbounded variant of the detail activity read: fork history copies must
+  // see every activity, not just the projector's retained window.
+  const listAllThreadActivityRowsByThread = SqlSchema.findAll({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionThreadActivityDbRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          activity_id AS "activityId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          tone,
+          kind,
+          summary,
+          payload_json AS "payload",
+          sequence,
+          created_at AS "createdAt"
+        FROM projection_thread_activities
+        WHERE thread_id = ${threadId}
+        ORDER BY
+          sequence ASC,
+          created_at ASC,
+          activity_id ASC
+      `,
+  });
+
+  const listThreadTurnRowsByThread = SqlSchema.findAll({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionTurnDbRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          pending_message_id AS "pendingMessageId",
+          source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
+          source_proposed_plan_id AS "sourceProposedPlanId",
+          assistant_message_id AS "assistantMessageId",
+          state,
+          requested_at AS "requestedAt",
+          started_at AS "startedAt",
+          completed_at AS "completedAt",
+          checkpoint_turn_count AS "checkpointTurnCount",
+          checkpoint_ref AS "checkpointRef",
+          checkpoint_status AS "checkpointStatus",
+          checkpoint_files_json AS "checkpointFiles",
+          provider_turn_ref AS "providerTurnRef"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+          AND turn_id IS NOT NULL
+        ORDER BY requested_at ASC, turn_id ASC
+      `,
+  });
+
+  const getThreadForkContextRow = SqlSchema.findOneOption({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionThreadForkContextRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          forked_from_json AS "forkedFrom",
+          fork_source_json AS "forkSource"
+        FROM projection_threads
+        WHERE thread_id = ${threadId}
+          AND deleted_at IS NULL
+        LIMIT 1
+      `,
+  });
+
+  // Includes archived threads: any non-deleted row keeps its worktree alive.
+  const listThreadIdRowsByWorktreePath = SqlSchema.findAll({
+    Request: WorktreePathLookupInput,
+    Result: ProjectionThreadIdLookupRowSchema,
+    execute: ({ worktreePath }) =>
+      sql`
+        SELECT
+          thread_id AS "threadId"
+        FROM projection_threads
+        WHERE worktree_path = ${worktreePath}
+          AND deleted_at IS NULL
+        ORDER BY created_at ASC, thread_id ASC
       `,
   });
 
@@ -1897,6 +2007,7 @@ pending_approval_requests AS (
                 ...(row.linkedPullRequest === null
                   ? {}
                   : { linkedPullRequest: row.linkedPullRequest }),
+                ...(row.forkedFrom === null ? {} : { forkedFrom: row.forkedFrom }),
                 latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
@@ -2108,6 +2219,7 @@ pending_approval_requests AS (
                   ...(row.linkedPullRequest === null
                     ? {}
                     : { linkedPullRequest: row.linkedPullRequest }),
+                  ...(row.forkedFrom === null ? {} : { forkedFrom: row.forkedFrom }),
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
@@ -2248,6 +2360,7 @@ pending_approval_requests AS (
                       ...(row.linkedPullRequest === null
                         ? {}
                         : { linkedPullRequest: row.linkedPullRequest }),
+                      ...(row.forkedFrom === null ? {} : { forkedFrom: row.forkedFrom }),
                       latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                       createdAt: row.createdAt,
                       updatedAt: row.updatedAt,
@@ -2397,6 +2510,7 @@ pending_approval_requests AS (
                   ...(row.linkedPullRequest === null
                     ? {}
                     : { linkedPullRequest: row.linkedPullRequest }),
+                  ...(row.forkedFrom === null ? {} : { forkedFrom: row.forkedFrom }),
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
@@ -2696,6 +2810,7 @@ pending_approval_requests AS (
         ...(threadRow.value.linkedPullRequest === null
           ? {}
           : { linkedPullRequest: threadRow.value.linkedPullRequest }),
+        ...(threadRow.value.forkedFrom === null ? {} : { forkedFrom: threadRow.value.forkedFrom }),
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
@@ -2934,6 +3049,7 @@ pending_approval_requests AS (
         ...(threadRow.value.linkedPullRequest === null
           ? {}
           : { linkedPullRequest: threadRow.value.linkedPullRequest }),
+        ...(threadRow.value.forkedFrom === null ? {} : { forkedFrom: threadRow.value.forkedFrom }),
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
@@ -3140,6 +3256,79 @@ pending_approval_requests AS (
         ),
       );
 
+  const listThreadActivitiesById: ProjectionSnapshotQueryShape["listThreadActivitiesById"] = (
+    threadId,
+  ) =>
+    listAllThreadActivityRowsByThread({ threadId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.listThreadActivitiesById:query",
+          "ProjectionSnapshotQuery.listThreadActivitiesById:decodeRows",
+        ),
+      ),
+      Effect.map((rows) =>
+        rows.map((row): OrchestrationThreadActivity => {
+          const activity = {
+            id: row.activityId,
+            tone: row.tone,
+            kind: row.kind,
+            summary: row.summary,
+            payload: row.payload,
+            turnId: row.turnId,
+            createdAt: row.createdAt,
+          };
+          if (row.sequence !== null) {
+            return Object.assign(activity, { sequence: row.sequence });
+          }
+          return activity;
+        }),
+      ),
+    );
+
+  const listThreadTurnsById: ProjectionSnapshotQueryShape["listThreadTurnsById"] = (threadId) =>
+    listThreadTurnRowsByThread({ threadId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.listThreadTurnsById:query",
+          "ProjectionSnapshotQuery.listThreadTurnsById:decodeRows",
+        ),
+      ),
+      Effect.map((rows) => rows as ReadonlyArray<Schema.Schema.Type<typeof ProjectionTurn>>),
+    );
+
+  const getThreadForkContextById: ProjectionSnapshotQueryShape["getThreadForkContextById"] = (
+    threadId,
+  ) =>
+    getThreadForkContextRow({ threadId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getThreadForkContextById:query",
+          "ProjectionSnapshotQuery.getThreadForkContextById:decodeRow",
+        ),
+      ),
+      Effect.map(
+        Option.map(
+          (row): ProjectionThreadForkContext => ({
+            forkedFrom: row.forkedFrom,
+            forkSource: row.forkSource,
+          }),
+        ),
+      ),
+    );
+
+  const listThreadIdsByWorktreePath: ProjectionSnapshotQueryShape["listThreadIdsByWorktreePath"] = (
+    worktreePath,
+  ) =>
+    listThreadIdRowsByWorktreePath({ worktreePath }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.listThreadIdsByWorktreePath:query",
+          "ProjectionSnapshotQuery.listThreadIdsByWorktreePath:decodeRows",
+        ),
+      ),
+      Effect.map((rows) => rows.map((row) => row.threadId)),
+    );
+
   return {
     getCommandReadModel,
     getSnapshot,
@@ -3157,6 +3346,10 @@ pending_approval_requests AS (
     getThreadShellById,
     getThreadDetailById,
     getThreadDetailSnapshot,
+    listThreadActivitiesById,
+    listThreadTurnsById,
+    getThreadForkContextById,
+    listThreadIdsByWorktreePath,
   } satisfies ProjectionSnapshotQueryShape;
 });
 

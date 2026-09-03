@@ -1256,5 +1256,20 @@ describe("applyThreadDetailEvent", () => {
       } as any);
       expect(result.kind).toBe("unchanged");
     });
+
+    it("returns unchanged for thread.forked via the forward-compatible fall-through", () => {
+      const result = applyThreadDetailEvent(baseThread, {
+        ...baseEventFields,
+        sequence: 16,
+        occurredAt: "2026-04-01T13:30:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.forked",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+        },
+      } as any);
+      expect(result.kind).toBe("unchanged");
+    });
   });
 });

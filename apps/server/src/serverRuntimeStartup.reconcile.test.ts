@@ -187,6 +187,8 @@ it.effect("continues marked sessions after activation with provider-specific inp
       getCapabilities: (instanceId) =>
         Effect.succeed({
           sessionModelSwitch: "in-session",
+          conversationFork: "unsupported",
+          conversationForkRequiresAnchor: false,
           ...(instanceId === providerInstanceId ? { promptlessTurnContinuation: true } : {}),
         }),
       sendTurn: (input) =>

@@ -43,9 +43,10 @@ const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabili
   optionDescriptors: [],
 });
 
-const CLAUDE_PRESENTATION = {
+export const CLAUDE_PRESENTATION = {
   displayName: "Claude",
   showInteractionModeToggle: true,
+  conversationFork: "native",
 } as const;
 function toTitleCaseWords(value: string): string {
   const parts: Array<string> = [];

@@ -3,10 +3,13 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
+import type { ChatAttachment } from "@t3tools/contracts";
+import { uuidV5, UUID_NAMESPACE_DNS } from "@t3tools/shared/uuid";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   attachmentFileExtension,
+  copyClaimedAttachment,
   createAttachmentId,
   createPendingAttachmentId,
   parseAttachmentUuid,
@@ -165,6 +168,128 @@ describe("attachmentStore", () => {
         ok: false,
         reason: "attachment must be a pending upload",
       });
+    } finally {
+      NodeFS.rmSync(attachmentsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("plans deterministic child-thread copies of claimed attachments", () => {
+    const attachmentsDir = NodeFS.mkdtempSync(
+      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-copy-"),
+    );
+    try {
+      const sourceId = "parent-thread-00000000-0000-4000-8000-000000000004-pdf";
+      const sourcePath = NodePath.join(attachmentsDir, `${sourceId}.pdf`);
+      NodeFS.writeFileSync(sourcePath, Buffer.from("document"));
+      const attachment: ChatAttachment = {
+        type: "file",
+        id: sourceId,
+        name: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 8,
+      };
+      const uuid = uuidV5(UUID_NAMESPACE_DNS, `${sourceId}:child-thread`);
+
+      const plan = copyClaimedAttachment({
+        attachmentsDir,
+        attachment,
+        childThreadId: "child-thread",
+        uuid,
+      });
+      expect(plan).toEqual({
+        ok: true,
+        finalId: `child-thread-${uuid}-pdf`,
+        currentPath: sourcePath,
+        finalPath: NodePath.join(attachmentsDir, `child-thread-${uuid}-pdf.pdf`),
+      });
+      if (!plan.ok) {
+        return;
+      }
+      expect(parseThreadSegmentFromAttachmentId(plan.finalId)).toBe("child-thread");
+      expect(parseThreadSegmentFromAttachmentId(plan.finalId)).not.toBe(
+        parseThreadSegmentFromAttachmentId(sourceId),
+      );
+      expect(parseAttachmentUuid(plan.finalId)).toBe(uuid);
+      expect(parseAttachmentFileExtension(plan.finalId)).toBe("pdf");
+
+      const again = copyClaimedAttachment({
+        attachmentsDir,
+        attachment,
+        childThreadId: "child-thread",
+        uuid,
+      });
+      expect(again).toEqual(plan);
+    } finally {
+      NodeFS.rmSync(attachmentsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves legacy ids without an embedded extension from the full attachment", () => {
+    const attachmentsDir = NodeFS.mkdtempSync(
+      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-legacy-"),
+    );
+    try {
+      const legacyId = "parent-thread-00000000-0000-4000-8000-000000000005";
+      const sourcePath = NodePath.join(attachmentsDir, `${legacyId}.pdf`);
+      NodeFS.writeFileSync(sourcePath, Buffer.from("document"));
+      const attachment: ChatAttachment = {
+        type: "file",
+        id: legacyId,
+        name: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 8,
+      };
+
+      // The id-only lookup scans image extensions and ".bin" and misses this file.
+      expect(resolveAttachmentPathById({ attachmentsDir, attachmentId: legacyId })).toBeNull();
+
+      const uuid = "00000000-0000-4000-8000-000000000006";
+      const plan = copyClaimedAttachment({
+        attachmentsDir,
+        attachment,
+        childThreadId: "child-thread",
+        uuid,
+      });
+      expect(plan).toEqual({
+        ok: true,
+        finalId: `child-thread-${uuid}`,
+        currentPath: sourcePath,
+        finalPath: NodePath.join(attachmentsDir, `child-thread-${uuid}.pdf`),
+      });
+    } finally {
+      NodeFS.rmSync(attachmentsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects copy plans whose uuid does not match the store pattern", () => {
+    const attachmentsDir = NodeFS.mkdtempSync(
+      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-bad-uuid-"),
+    );
+    try {
+      const attachment: ChatAttachment = {
+        type: "file",
+        id: "parent-thread-00000000-0000-4000-8000-000000000007-pdf",
+        name: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 8,
+      };
+
+      expect(
+        copyClaimedAttachment({
+          attachmentsDir,
+          attachment,
+          childThreadId: "child-thread",
+          uuid: "not-a-uuid",
+        }),
+      ).toEqual({ ok: false, reason: "invalid attachment uuid" });
+      expect(
+        copyClaimedAttachment({
+          attachmentsDir,
+          attachment,
+          childThreadId: "child-thread",
+          uuid: "00000000-0000-4000-8000-00000000000A",
+        }),
+      ).toEqual({ ok: false, reason: "invalid attachment uuid" });
     } finally {
       NodeFS.rmSync(attachmentsDir, { recursive: true, force: true });
     }

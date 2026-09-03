@@ -16,10 +16,13 @@ import type {
   OrchestrationSearchThreadsResult,
   OrchestrationShellSnapshot,
   OrchestrationThread,
+  OrchestrationThreadActivity,
   OrchestrationThreadDetailSnapshot,
   OrchestrationThreadDetailWindow,
   OrchestrationThreadShell,
   ProjectId,
+  ThreadForkOrigin,
+  ThreadForkProviderSource,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -27,6 +30,7 @@ import type * as Option from "effect/Option";
 import type * as Effect from "effect/Effect";
 
 import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
+import type { ProjectionTurn } from "../../persistence/Services/ProjectionTurns.ts";
 
 export interface ProjectionSnapshotCounts {
   readonly projectCount: number;
@@ -57,6 +61,15 @@ export interface ProjectionFullThreadDiffContext {
   readonly worktreePath: string | null;
   readonly latestCheckpointTurnCount: number;
   readonly toCheckpointRef: CheckpointRef | null;
+}
+
+/**
+ * Server-only fork lineage for a thread. `forkSource` carries the provider
+ * snapshot captured at fork time and must never reach a wire shape.
+ */
+export interface ProjectionThreadForkContext {
+  readonly forkedFrom: ThreadForkOrigin | null;
+  readonly forkSource: ThreadForkProviderSource | null;
 }
 
 export interface ProjectionThreadDetailQuery {
@@ -213,6 +226,41 @@ export interface ProjectionSnapshotQueryShape {
     threadId: ThreadId,
     window?: OrchestrationThreadDetailWindow,
   ) => Effect.Effect<Option.Option<OrchestrationThreadDetailSnapshot>, ProjectionRepositoryError>;
+
+  /**
+   * Read every activity for a thread with no row cap, unlike detail reads
+   * which stop at the projector's retained window. Server-only: used to copy
+   * full history into a fork child.
+   */
+  readonly listThreadActivitiesById: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<OrchestrationThreadActivity>, ProjectionRepositoryError>;
+
+  /**
+   * Read every concrete turn row for a thread (pending placeholders with a
+   * null turn id are excluded), including the provider turn anchor.
+   * Server-only.
+   */
+  readonly listThreadTurnsById: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<ProjectionTurn>, ProjectionRepositoryError>;
+
+  /**
+   * Read the fork lineage columns for a non-deleted thread. Server-only:
+   * `forkSource` never reaches shells or details.
+   */
+  readonly getThreadForkContextById: (
+    threadId: ThreadId,
+  ) => Effect.Effect<Option.Option<ProjectionThreadForkContext>, ProjectionRepositoryError>;
+
+  /**
+   * Read the ids of all non-deleted threads (archived included) whose
+   * worktree path matches exactly. Guards worktree removal while any thread
+   * still references the path.
+   */
+  readonly listThreadIdsByWorktreePath: (
+    worktreePath: string,
+  ) => Effect.Effect<ReadonlyArray<ThreadId>, ProjectionRepositoryError>;
 }
 
 /**

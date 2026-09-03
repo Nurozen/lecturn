@@ -40,6 +40,19 @@ describe("ExecutionEnvironmentDescriptor", () => {
     ).toBe(true);
   });
 
+  it("treats a missing thread forking capability as unsupported under version skew", () => {
+    expect(decodeDescriptor(descriptor).capabilities.threadForking).toBeUndefined();
+  });
+
+  it("preserves an advertised thread forking capability", () => {
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, threadForking: true },
+      }).capabilities.threadForking,
+    ).toBe(true);
+  });
+
   it("preserves the server's generic attachment upload limit", () => {
     expect(
       decodeDescriptor({

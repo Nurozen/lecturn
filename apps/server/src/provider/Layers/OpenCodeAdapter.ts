@@ -59,6 +59,15 @@ import * as Option from "effect/Option";
 
 const PROVIDER = ProviderDriverKind.make("opencode");
 
+// Exported so capability/presentation parity is testable without a runtime.
+export const OPENCODE_ADAPTER_CAPABILITIES = {
+  sessionModelSwitch: "in-session",
+  conversationFork: "native",
+  // OpenCode forks by message position, so an anchor-less fork falls back
+  // to the through-turn ordinal.
+  conversationForkRequiresAnchor: false,
+} as const;
+
 /**
  * Version tag stamped into the OpenCode resume cursor. Bump if the cursor
  * shape changes so stale-shaped cursors written by older builds are ignored
@@ -84,6 +93,40 @@ function parseOpenCodeResume(raw: unknown): { readonly sessionId: string } | und
     return undefined;
   }
   return { sessionId: record.sessionId.trim() };
+}
+
+/**
+ * The first message a forked child must NOT contain: the message that follows
+ * the fork turn's assistant anchor in a live message list. `session.fork`'s
+ * `messageID` is exclusive — the child copies messages strictly before it —
+ * so the returned id is passed through verbatim. Returns undefined when the
+ * fork turn is currently the end of the list (fork copies everything).
+ */
+function openCodeForkBoundaryMessageId(
+  entries: ReadonlyArray<{ readonly info: { readonly id: string; readonly role: string } }>,
+  fork: { readonly providerTurnRef: string | null; readonly throughTurnOrdinal: number },
+): string | undefined {
+  let anchorIndex = -1;
+  if (fork.providerTurnRef !== null) {
+    anchorIndex = entries.findIndex((entry) => entry.info.id === fork.providerTurnRef);
+  }
+  if (anchorIndex < 0) {
+    // Legacy fork turns carry no provider anchor (and a stale anchor may have
+    // been reverted away upstream): fall back to the fork turn's 1-based
+    // position among the assistant messages, mirroring `rollbackThread`'s
+    // positional arithmetic over the same chronological list.
+    let assistantOrdinal = 0;
+    for (let index = 0; index < entries.length; index += 1) {
+      if (entries[index]?.info.role === "assistant") {
+        assistantOrdinal += 1;
+        if (assistantOrdinal === fork.throughTurnOrdinal) {
+          anchorIndex = index;
+          break;
+        }
+      }
+    }
+  }
+  return anchorIndex >= 0 ? entries[anchorIndex + 1]?.info.id : undefined;
 }
 
 /**
@@ -333,6 +376,9 @@ interface OpenCodeSessionContext {
   readonly pendingPermissions: Map<string, PermissionRequest>;
   readonly pendingQuestions: Map<string, QuestionRequest>;
   readonly messageRoleById: Map<string, "user" | "assistant">;
+  // Last assistant message observed per turn; emitted as the turn's provider
+  // anchor (providerRefs.providerTurnId) on turn.completed.
+  readonly lastAssistantMessageIdByTurn: Map<TurnId, string>;
   readonly partById: Map<string, Part>;
   readonly emittedTextByPartId: Map<string, string>;
   readonly completedAssistantPartIds: Set<string>;
@@ -1063,6 +1109,7 @@ export function makeOpenCodeAdapter(
       if (pendingIdleReconciliation?.fiber) {
         yield* Fiber.interrupt(pendingIdleReconciliation.fiber);
       }
+      const providerTurnId = context.lastAssistantMessageIdByTurn.get(turnId);
       yield* emit({
         ...(yield* buildEventBase({
           threadId: context.session.threadId,
@@ -1070,6 +1117,7 @@ export function makeOpenCodeAdapter(
           raw,
         })),
         type: "turn.completed",
+        ...(providerTurnId !== undefined ? { providerRefs: { providerTurnId } } : {}),
         payload: {
           state: "completed",
         },
@@ -1220,6 +1268,9 @@ export function makeOpenCodeAdapter(
         { status: "error", lastError: detail },
         { clearActiveTurnId: true },
       );
+      const failedTurnProviderTurnId = context.lastAssistantMessageIdByTurn.get(
+        promptAdmission.turnId,
+      );
       yield* emit({
         ...(yield* buildEventBase({
           threadId: context.session.threadId,
@@ -1227,6 +1278,9 @@ export function makeOpenCodeAdapter(
           raw: promptAdmission.recoveryRaw,
         })),
         type: "turn.completed",
+        ...(failedTurnProviderTurnId !== undefined
+          ? { providerRefs: { providerTurnId: failedTurnProviderTurnId } }
+          : {}),
         payload: {
           state: "failed",
           errorMessage: detail,
@@ -2035,6 +2089,12 @@ export function makeOpenCodeAdapter(
             }
           }
           context.messageRoleById.set(event.properties.info.id, event.properties.info.role);
+          if (event.properties.info.role === "assistant" && context.activeTurnId !== undefined) {
+            context.lastAssistantMessageIdByTurn.set(
+              context.activeTurnId,
+              event.properties.info.id,
+            );
+          }
           if (event.properties.info.role === "assistant") {
             for (const part of context.partById.values()) {
               if (part.messageID !== event.properties.info.id) {
@@ -2272,6 +2332,7 @@ export function makeOpenCodeAdapter(
             { clearActiveTurnId: true },
           );
           if (activeTurnId) {
+            const failedTurnProviderTurnId = context.lastAssistantMessageIdByTurn.get(activeTurnId);
             yield* emit({
               ...(yield* buildEventBase({
                 threadId: context.session.threadId,
@@ -2279,6 +2340,9 @@ export function makeOpenCodeAdapter(
                 raw: event,
               })),
               type: "turn.completed",
+              ...(failedTurnProviderTurnId !== undefined
+                ? { providerRefs: { providerTurnId: failedTurnProviderTurnId } }
+                : {}),
               payload: {
                 state: "failed",
                 errorMessage: message,
@@ -2381,6 +2445,17 @@ export function makeOpenCodeAdapter(
         const serverPassword = openCodeSettings.serverPassword;
         const directory = input.cwd ?? serverConfig.cwd;
         const resumeSessionId = parseOpenCodeResume(input.resumeCursor)?.sessionId;
+        const fork = input.fork;
+        const forkSourceSessionId = fork
+          ? parseOpenCodeResume(fork.sourceResumeCursor)?.sessionId
+          : undefined;
+        if (fork && forkSourceSessionId === undefined) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "startSession",
+            issue: "OpenCode fork requires a source resume cursor naming the source session.",
+          });
+        }
         const existing = sessions.get(input.threadId);
         if (existing) {
           if (existing.session.status === "connecting" && !(yield* Ref.get(existing.stopped))) {
@@ -2430,6 +2505,67 @@ export function makeOpenCodeAdapter(
               // a confirmed not-found (start fresh); transport/auth/server
               // errors propagate instead of masking as a new empty session.
               const resolved = yield* Effect.gen(function* () {
+                // Native conversation fork: seed this thread from the source
+                // session's history up to (and including) the fork turn. The
+                // boundary is recomputed from a live message read — the
+                // caller's `atEnd` snapshot may be stale when the source kept
+                // running after the fork point was captured.
+                if (fork && forkSourceSessionId !== undefined) {
+                  const sourceMessages = yield* runOpenCodeSdk("session.messages", () =>
+                    client.session.messages({ sessionID: forkSourceSessionId }),
+                  );
+                  const boundaryMessageId = openCodeForkBoundaryMessageId(
+                    sourceMessages.data ?? [],
+                    fork,
+                  );
+                  const forkedSession = yield* runOpenCodeSdk("session.fork", () =>
+                    client.session.fork({
+                      sessionID: forkSourceSessionId,
+                      directory,
+                      ...(boundaryMessageId !== undefined ? { messageID: boundaryMessageId } : {}),
+                    }),
+                  );
+                  const forked = forkedSession.data;
+                  if (!forked) {
+                    return yield* new OpenCodeRuntimeError({
+                      operation: "session.fork",
+                      detail: "OpenCode session.fork returned no session payload.",
+                    });
+                  }
+                  if (boundaryMessageId === undefined) {
+                    // The fork turn was the live end of the source, so the
+                    // unbounded fork copied everything — including messages
+                    // the source appended between the read and the fork. Trim
+                    // the child back to the fork turn; the child is freshly
+                    // created and idle, so revert cannot race an active turn.
+                    const childMessages = yield* runOpenCodeSdk("session.messages", () =>
+                      client.session.messages({ sessionID: forked.id }),
+                    );
+                    const childBoundaryMessageId = openCodeForkBoundaryMessageId(
+                      childMessages.data ?? [],
+                      fork,
+                    );
+                    if (childBoundaryMessageId !== undefined) {
+                      yield* runOpenCodeSdk("session.revert", () =>
+                        client.session.revert({
+                          sessionID: forked.id,
+                          messageID: childBoundaryMessageId,
+                        }),
+                      );
+                    }
+                  }
+                  // Fork copies history but not the permission ruleset —
+                  // assert the requested runtimeMode on the child exactly
+                  // like the cwd-change fork below.
+                  yield* runOpenCodeSdk("session.update", () =>
+                    client.session.update({
+                      sessionID: forked.id,
+                      permission: buildOpenCodePermissionRules(input.runtimeMode),
+                    }),
+                  );
+                  return { openCodeSession: forked, created: true };
+                }
+
                 const adopted = resumeSessionId
                   ? yield* runOpenCodeSdk("session.get", () =>
                       client.session.get({ sessionID: resumeSessionId }),
@@ -2561,6 +2697,7 @@ export function makeOpenCodeAdapter(
           partById: new Map(),
           emittedTextByPartId: new Map(),
           messageRoleById: new Map(),
+          lastAssistantMessageIdByTurn: new Map(),
           completedAssistantPartIds: new Set(),
           turns: [],
           activeTurnId: undefined,
@@ -3263,9 +3400,7 @@ export function makeOpenCodeAdapter(
 
     return {
       provider: PROVIDER,
-      capabilities: {
-        sessionModelSwitch: "in-session",
-      },
+      capabilities: OPENCODE_ADAPTER_CAPABILITIES,
       startSession,
       sendTurn,
       interruptTurn,

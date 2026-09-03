@@ -490,7 +490,9 @@ function AdaptiveWorkspaceLayoutContent(
     : null;
 
   const handleSelectThread = useCallback(
-    (thread: EnvironmentThreadShell) => {
+    // Only the scoping fields matter: forking selects a freshly minted child
+    // thread whose full shell has not arrived yet.
+    (thread: Pick<EnvironmentThreadShell, "environmentId" | "id">) => {
       const params = {
         environmentId: String(thread.environmentId),
         threadId: String(thread.id),
