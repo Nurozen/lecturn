@@ -336,6 +336,9 @@ export const ClientSettingsSchema = Schema.Struct({
   sidebarProjectSortOrder: SidebarProjectSortOrder.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_SORT_ORDER)),
   ),
+  // Nest Stave saga member projects under their saga in the sidebar. Client
+  // scoped like the other grouping preferences; off shows members as peers.
+  sidebarNestSagas: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   sidebarThreadSortOrder: SidebarThreadSortOrder.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_THREAD_SORT_ORDER)),
   ),
@@ -703,6 +706,63 @@ export const BackgroundActivitySettings = Schema.Struct({
 }).pipe(Schema.withDecodingDefault(Effect.succeed({})));
 export type BackgroundActivitySettings = typeof BackgroundActivitySettings.Type;
 
+// ── Stave integration ──────────────────────────────────────────
+
+/** What happens to a project's Stave space when the project is deleted. */
+export const StaveOnProjectDelete = Schema.Literals(["destroy", "archive", "keep"]);
+export type StaveOnProjectDelete = typeof StaveOnProjectDelete.Type;
+export const DEFAULT_STAVE_ON_PROJECT_DELETE: StaveOnProjectDelete = "destroy";
+
+/** What happens to a Stave space once every thread in its project settles. */
+export const StaveOnAllThreadsSettled = Schema.Literals([
+  "archive-after-grace",
+  "archive",
+  "suggest",
+  "nothing",
+]);
+export type StaveOnAllThreadsSettled = typeof StaveOnAllThreadsSettled.Type;
+export const DEFAULT_STAVE_ON_ALL_THREADS_SETTLED: StaveOnAllThreadsSettled = "archive-after-grace";
+
+/** Fate of space-owned memories when the space is destroyed. */
+export const StaveMemoryFateOnDestroy = Schema.Literals(["keep", "contribute", "destroy"]);
+export type StaveMemoryFateOnDestroy = typeof StaveMemoryFateOnDestroy.Type;
+export const DEFAULT_STAVE_MEMORY_FATE_ON_DESTROY: StaveMemoryFateOnDestroy = "keep";
+
+export const DEFAULT_STAVE_ARCHIVE_GRACE_DAYS = 7;
+export const StaveArchiveGraceDays = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+
+export const StaveLifecycleSettings = Schema.Struct({
+  onProjectDelete: StaveOnProjectDelete.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_STAVE_ON_PROJECT_DELETE)),
+  ),
+  onAllThreadsSettled: StaveOnAllThreadsSettled.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_STAVE_ON_ALL_THREADS_SETTLED)),
+  ),
+  archiveGraceDays: StaveArchiveGraceDays.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_STAVE_ARCHIVE_GRACE_DAYS)),
+  ),
+  memoryFateOnDestroy: StaveMemoryFateOnDestroy.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_STAVE_MEMORY_FATE_ON_DESTROY)),
+  ),
+  // Whether merging a saga's pull requests settles its member projects' threads.
+  settleOnSagaMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+}).pipe(Schema.withDecodingDefault(Effect.succeed({})));
+export type StaveLifecycleSettings = typeof StaveLifecycleSettings.Type;
+
+// Defaulted as a whole (like BackgroundActivitySettings): per-field defaults
+// alone would leave `stave` undefined on settings files written before it
+// existed.
+export const StaveSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Explicit Stave CLI to run; empty (like observability URLs) means unset,
+  // so the server falls back to the bundled binary, then PATH.
+  binaryPath: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  // Stave config file to pass through; empty means Stave's own default.
+  configPath: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  lifecycle: StaveLifecycleSettings,
+}).pipe(Schema.withDecodingDefault(Effect.succeed({})));
+export type StaveSettings = typeof StaveSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   // Legacy token-by-token assistant output. Deliberately a fresh key (was
   // `enableAssistantStreaming`): decoding drops the old key, so everyone,
@@ -814,6 +874,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  stave: StaveSettings,
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -994,6 +1055,25 @@ export const ServerSettingsPatch = Schema.Struct({
       otlpMetricsUrl: Schema.optionalKey(TrimmedString),
     }),
   ),
+  // Deep-merged into the current `stave` block (see applyServerSettingsPatch
+  // in @t3tools/shared), so a client can flip one lifecycle knob without
+  // resending the rest. An empty-string path clears it.
+  stave: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
+      binaryPath: Schema.optionalKey(TrimmedString),
+      configPath: Schema.optionalKey(TrimmedString),
+      lifecycle: Schema.optionalKey(
+        Schema.Struct({
+          onProjectDelete: Schema.optionalKey(StaveOnProjectDelete),
+          onAllThreadsSettled: Schema.optionalKey(StaveOnAllThreadsSettled),
+          archiveGraceDays: Schema.optionalKey(StaveArchiveGraceDays),
+          memoryFateOnDestroy: Schema.optionalKey(StaveMemoryFateOnDestroy),
+          settleOnSagaMerge: Schema.optionalKey(Schema.Boolean),
+        }),
+      ),
+    }),
+  ),
   providers: Schema.optionalKey(
     Schema.Struct({
       codex: Schema.optionalKey(CodexSettingsPatch),
@@ -1071,6 +1151,7 @@ export const ClientSettingsPatch = Schema.Struct({
     Schema.Record(TrimmedNonEmptyString, SidebarProjectGroupingMode),
   ),
   sidebarProjectSortOrder: Schema.optionalKey(SidebarProjectSortOrder),
+  sidebarNestSagas: Schema.optionalKey(Schema.Boolean),
   sidebarThreadSortOrder: Schema.optionalKey(SidebarThreadSortOrder),
   sidebarThreadPreviewCount: Schema.optionalKey(SidebarThreadPreviewCount),
   timestampFormat: Schema.optionalKey(TimestampFormat),

@@ -141,6 +141,12 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Server understands the thread.fork command. Absent on pre-fork servers,
       so clients hide the action instead of sending it. */
   threadForking: Schema.optionalKey(Schema.Boolean),
+  /** This server build ships the Stave integration and speaks the given
+      Stave CLI protocol version. A static build fact: whether a binary is
+      runnable and whether the user enabled it are served live elsewhere.
+      Absent on pre-Stave servers (and builds started with T3CODE_STAVE=false),
+      so clients hide every Stave control instead of probing the RPCs. */
+  stave: Schema.optionalKey(Schema.Struct({ protocolVersion: Schema.Number })),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

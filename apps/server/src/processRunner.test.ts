@@ -19,8 +19,17 @@ type ChildProcessCommand = {
   readonly args: ReadonlyArray<string>;
   readonly options: {
     readonly shell?: boolean | string;
+    readonly env?: NodeJS.ProcessEnv;
+    readonly extendEnv?: boolean;
   };
 };
+
+const encodeChunks = (...chunks: ReadonlyArray<string>) =>
+  Stream.fromIterable(chunks.map((chunk) => new TextEncoder().encode(chunk)));
+
+// Completes `ended` only when the sink is run and its upstream finishes (EOF).
+const eofTrackingStdin = (ended: Deferred.Deferred<void>) =>
+  Sink.drain.pipe(Sink.mapEffect(() => Deferred.succeed(ended, undefined).pipe(Effect.asVoid)));
 
 // Accesses private properties of ChildProcessCommand for testing purposes
 function asChildProcessCommand(command: unknown): ChildProcessCommand {
@@ -319,6 +328,41 @@ describe("runProcess", () => {
     }),
   );
 
+  it.effect("ends the stdin pipe for an empty string", () =>
+    Effect.gen(function* () {
+      const ended = yield* Deferred.make<void>();
+      const spawner = makeSpawner(() =>
+        Effect.succeed(makeHandle({ stdout: "ok", stdin: eofTrackingStdin(ended) })),
+      );
+
+      const result = yield* runWith(spawner)({
+        command: "fake",
+        args: ["stdin-eof"],
+        stdin: "",
+      });
+
+      expect(result.stdout).toBe("ok");
+      expect(yield* Deferred.isDone(ended)).toBe(true);
+    }),
+  );
+
+  it.effect("leaves the stdin pipe open when stdin is undefined", () =>
+    Effect.gen(function* () {
+      const ended = yield* Deferred.make<void>();
+      const spawner = makeSpawner(() =>
+        Effect.succeed(makeHandle({ stdout: "ok", stdin: eofTrackingStdin(ended) })),
+      );
+
+      const result = yield* runWith(spawner)({
+        command: "fake",
+        args: ["stdin-open"],
+      });
+
+      expect(result.stdout).toBe("ok");
+      expect(yield* Deferred.isDone(ended)).toBe(false);
+    }),
+  );
+
   it.effect("returns output for non-zero exit codes", () =>
     Effect.gen(function* () {
       const spawner = makeSpawner(() => Effect.succeed(makeHandle({ stderr: "boom", code: 2 })));
@@ -397,6 +441,138 @@ describe("runProcess", () => {
         stdoutTruncated: false,
         stderrTruncated: false,
       });
+    }),
+  );
+});
+
+describe("runProcess line callbacks", () => {
+  it.effect("delivers complete lines across chunk boundaries and strips CRLF", () =>
+    Effect.gen(function* () {
+      const stdoutLines: string[] = [];
+      const stderrLines: string[] = [];
+      const spawner = makeSpawner(() =>
+        Effect.succeed(
+          makeHandle({
+            stdout: encodeChunks("alpha\nbe", "ta\r\n\ngam", "ma"),
+            stderr: encodeChunks("warn: one\r\nwarn: tw", "o\n"),
+          }),
+        ),
+      );
+
+      const result = yield* runWith(spawner)({
+        command: "fake",
+        args: ["lines"],
+        onStdoutLine: (line) => Effect.sync(() => void stdoutLines.push(line)),
+        onStderrLine: (line) => Effect.sync(() => void stderrLines.push(line)),
+      });
+
+      expect(stdoutLines).toEqual(["alpha", "beta", "gamma"]);
+      expect(stderrLines).toEqual(["warn: one", "warn: two"]);
+      expect(result.stdout).toBe("alpha\nbeta\r\n\ngamma");
+      expect(result.stderr).toBe("warn: one\r\nwarn: two\n");
+    }),
+  );
+
+  it.effect("flushes a trailing partial line split mid-UTF-8 at end of stream", () =>
+    Effect.gen(function* () {
+      const bytes = new TextEncoder().encode("done ✓");
+      const lines: string[] = [];
+      const spawner = makeSpawner(() =>
+        Effect.succeed(
+          makeHandle({
+            stdout: Stream.make(bytes.subarray(0, 6), bytes.subarray(6)),
+          }),
+        ),
+      );
+
+      const result = yield* runWith(spawner)({
+        command: "fake",
+        args: ["partial"],
+        onStdoutLine: (line) => Effect.sync(() => void lines.push(line)),
+      });
+
+      expect(lines).toEqual(["done ✓"]);
+      expect(result.stdout).toBe("done ✓");
+    }),
+  );
+
+  it.effect("produces identical buffered output with and without callbacks", () =>
+    Effect.gen(function* () {
+      const makeChunkedSpawner = () =>
+        makeSpawner(() =>
+          Effect.succeed(
+            makeHandle({
+              stdout: encodeChunks("x".repeat(100), "\r\n", "y".repeat(100), "\ntail"),
+              stderr: encodeChunks("err\n", "more"),
+            }),
+          ),
+        );
+      const input = {
+        command: "fake",
+        args: ["compare"],
+        maxOutputBytes: 128,
+        outputMode: "truncate",
+        truncatedMarker: "[truncated]",
+      } satisfies ProcessRunner.ProcessRunInput;
+
+      const plain = yield* runWith(makeChunkedSpawner())(input);
+      const withCallbacks = yield* runWith(makeChunkedSpawner())({
+        ...input,
+        onStdoutLine: () => Effect.void,
+        onStderrLine: () => Effect.void,
+      });
+
+      expect(withCallbacks).toEqual(plain);
+      expect(plain.stdoutTruncated).toBe(true);
+    }),
+  );
+});
+
+describe("runProcess unsetEnv", () => {
+  it.effect("removes merged-in variables and passes a fully resolved environment", () =>
+    Effect.gen(function* () {
+      const spawner = makeSpawner((command) =>
+        Effect.sync(() => {
+          expect(command.options.extendEnv).toBe(false);
+          expect(command.options.env).toEqual({ PATH: "/usr/bin", FOO: "from-input" });
+          return makeHandle({ stdout: "ok" });
+        }),
+      );
+
+      const result = yield* runWith(spawner)({
+        command: "fake",
+        args: ["env"],
+        env: { FOO: "from-input", STAVE_CD_FD: "3" },
+        unsetEnv: ["STAVE_CD_FD", "INHERITED_SECRET"],
+      }).pipe(
+        Effect.provideService(HostProcessEnvironment, {
+          PATH: "/usr/bin",
+          INHERITED_SECRET: "host-only",
+          FOO: "from-host",
+        }),
+      );
+
+      expect(result.stdout).toBe("ok");
+    }),
+  );
+
+  it.effect("leaves env passthrough untouched when unsetEnv is absent", () =>
+    Effect.gen(function* () {
+      const spawner = makeSpawner((command) =>
+        Effect.sync(() => {
+          expect(command.options.extendEnv).toBe(true);
+          expect(command.options.env).toEqual({ FOO: "1" });
+          return makeHandle({ stdout: "ok" });
+        }),
+      );
+
+      const result = yield* runWith(spawner)({
+        command: "fake",
+        args: ["env"],
+        env: { FOO: "1" },
+      });
+
+      expect(result.stdout).toBe("ok");
     }),
   );
 });
