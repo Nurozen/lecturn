@@ -79,3 +79,168 @@ export const StaveProjectNotice = Schema.Struct({
   message: Schema.optionalKey(TrimmedNonEmptyString),
 });
 export type StaveProjectNotice = typeof StaveProjectNotice.Type;
+
+// ── Stave live status ──────────────────────────────────────────
+// Served by `stave.getStatus`. `capabilities.stave` on the environment
+// descriptor is a static build fact (the T3CODE_STAVE kill switch is on);
+// this is the live answer to "is a binary runnable, is it configured, is
+// marmot reachable", re-probed on every call so the settings page and the
+// project sidebar can react to installs and config edits without a restart.
+
+/** Where the server found the binary it runs: an explicit settings path, the
+    environment override, the bootstrap installer, the bundled copy, or PATH. */
+export const StaveBinarySource = Schema.Literals([
+  "settings",
+  "env",
+  "bootstrap",
+  "bundled",
+  "path",
+]);
+export type StaveBinarySource = typeof StaveBinarySource.Type;
+
+export const StaveBinaryStatus = Schema.Struct({
+  path: Schema.String,
+  source: StaveBinarySource,
+  version: Schema.NullOr(Schema.String),
+  commit: Schema.NullOr(Schema.String),
+});
+export type StaveBinaryStatus = typeof StaveBinaryStatus.Type;
+
+export const StaveStatusFailure = Schema.Struct({
+  code: Schema.String,
+  message: Schema.String,
+});
+export type StaveStatusFailure = typeof StaveStatusFailure.Type;
+
+/** Directories from Stave's resolved config; null on `StaveStatus` when the
+    config could not be read. */
+export const StaveRootsStatus = Schema.Struct({
+  root: Schema.String,
+  bareReposDir: Schema.String,
+  agentWorkDir: Schema.String,
+});
+export type StaveRootsStatus = typeof StaveRootsStatus.Type;
+
+export const StaveMarmotStatus = Schema.Struct({
+  available: Schema.Boolean,
+  version: Schema.NullOr(Schema.String),
+});
+export type StaveMarmotStatus = typeof StaveMarmotStatus.Type;
+
+/** The most recent Stave verb the server ran that failed, kept so the UI can
+    show why a project row is stale without replaying the command. */
+export const StaveLastFailure = Schema.Struct({
+  at: IsoDateTime,
+  verb: Schema.String,
+  code: Schema.String,
+  message: Schema.String,
+});
+export type StaveLastFailure = typeof StaveLastFailure.Type;
+
+export const StaveStatus = Schema.Struct({
+  /** The binary the server would run, or null with `runnableError` set. */
+  runnable: Schema.NullOr(StaveBinaryStatus),
+  runnableError: Schema.NullOr(StaveStatusFailure),
+  configPath: Schema.String,
+  configExists: Schema.Boolean,
+  roots: Schema.NullOr(StaveRootsStatus),
+  marmot: StaveMarmotStatus,
+  lastFailure: Schema.NullOr(StaveLastFailure),
+  /** Placeholder until the lifecycle table lands (Phase 3); always empty today. */
+  pendingCleanups: Schema.Array(Schema.Unknown),
+});
+export type StaveStatus = typeof StaveStatus.Type;
+
+// ── Stave space status ─────────────────────────────────────────
+// Mirrors Stave's `spaceStatusJSON` (root.go) in camelCase, minus the manifest
+// itself: clients already hold `StaveProjectInfo` for that.
+
+/** `unknown` covers repo modes a newer Stave reports that this build does not
+    know; clients treat them as read-only. */
+export const StaveSpaceStatusRepoMode = Schema.Literals(["edit", "reference", "unknown"]);
+export type StaveSpaceStatusRepoMode = typeof StaveSpaceStatusRepoMode.Type;
+
+export const StaveSpaceStatusRepo = Schema.Struct({
+  name: Schema.String,
+  mode: StaveSpaceStatusRepoMode,
+  path: Schema.String,
+  branch: Schema.optionalKey(Schema.String),
+  base: Schema.optionalKey(Schema.String),
+  ref: Schema.optionalKey(Schema.String),
+  exists: Schema.Boolean,
+  dirty: Schema.Boolean,
+  /** Raw `git status --porcelain` output when `dirty` is set. */
+  dirtyOutput: Schema.optionalKey(Schema.String),
+  ahead: Schema.Number,
+  behind: Schema.Number,
+  /** Why ahead/behind could not be computed (missing upstream, git failure). */
+  driftError: Schema.optionalKey(Schema.String),
+  /** Set when a `reference` checkout has local edits it should not have. */
+  referenceWarn: Schema.optionalKey(Schema.String),
+});
+export type StaveSpaceStatusRepo = typeof StaveSpaceStatusRepo.Type;
+
+export const StaveSpaceStatusMemory = Schema.Struct({
+  name: Schema.String,
+  provider: Schema.String,
+  id: Schema.String,
+  owned: Schema.Boolean,
+  /** Compact freshness text ("2 unpushed", "stale"); absent when the probe failed. */
+  state: Schema.optionalKey(Schema.String),
+});
+export type StaveSpaceStatusMemory = typeof StaveSpaceStatusMemory.Type;
+
+export const StaveSpaceStatus = Schema.Struct({
+  spaceId: Schema.String,
+  spacePath: Schema.String,
+  kind: Schema.optionalKey(Schema.String),
+  createdAt: Schema.optionalKey(Schema.String),
+  repos: Schema.Array(StaveSpaceStatusRepo),
+  memories: Schema.Array(StaveSpaceStatusMemory),
+});
+export type StaveSpaceStatus = typeof StaveSpaceStatus.Type;
+
+export const StaveSpaceStatusInput = Schema.Struct({
+  workspaceRoot: TrimmedNonEmptyString,
+});
+export type StaveSpaceStatusInput = typeof StaveSpaceStatusInput.Type;
+
+// ── Stave RPC errors ───────────────────────────────────────────
+
+/** Why a Stave RPC cannot run: `disabled_by_server` is the `T3CODE_STAVE=false`
+    kill switch, `disabled_in_settings` is `settings.stave.enabled` turned off,
+    `binary_missing` means no runnable binary was found. */
+export const StaveUnavailableReason = Schema.Literals([
+  "disabled_by_server",
+  "disabled_in_settings",
+  "binary_missing",
+]);
+export type StaveUnavailableReason = typeof StaveUnavailableReason.Type;
+
+export class StaveUnavailableError extends Schema.TaggedErrorClass<StaveUnavailableError>()(
+  "StaveUnavailableError",
+  {
+    reason: StaveUnavailableReason,
+    message: Schema.String,
+  },
+) {}
+
+/** The workspace root has no `.stave.yaml`, so space-scoped verbs do not apply. */
+export class StaveNotSpaceError extends Schema.TaggedErrorClass<StaveNotSpaceError>()(
+  "StaveNotSpaceError",
+  {
+    workspaceRoot: Schema.String,
+    message: Schema.String,
+  },
+) {}
+
+/** A Stave verb exited non-zero; `code` and `message` come from its `--json`
+    error envelope. */
+export class StaveCommandError extends Schema.TaggedErrorClass<StaveCommandError>()(
+  "StaveCommandError",
+  {
+    verb: Schema.String,
+    code: Schema.String,
+    message: Schema.String,
+  },
+) {}

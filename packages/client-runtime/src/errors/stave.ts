@@ -81,3 +81,78 @@ export function staveAdmissionErrorMessage(error: unknown): string | null {
   const tag = staveAdmissionErrorTag(error);
   return tag === null ? null : MESSAGE_BY_TAG[tag];
 }
+
+/**
+ * Readable messages for the failures the Stave RPCs themselves raise
+ * (feature gate, not-a-space, non-zero verb exit). These never come back as
+ * wire `code` envelopes, so matching is by `_tag` only, with the same nested
+ * `error`/`cause` lookup the admission mapping uses.
+ */
+
+export const STAVE_RPC_ERROR_TAGS = [
+  "StaveUnavailableError",
+  "StaveNotSpaceError",
+  "StaveCommandError",
+] as const;
+export type StaveRpcErrorTag = (typeof STAVE_RPC_ERROR_TAGS)[number];
+
+const UNAVAILABLE_MESSAGE_BY_REASON: Record<string, string> = {
+  disabled_by_server: "Stave is turned off on this server (T3CODE_STAVE=false).",
+  disabled_in_settings:
+    "Stave is disabled in settings. Turn it on under Settings → General → Stave.",
+  binary_missing:
+    "No runnable Stave binary was found. Set a binary path under Settings → General → Stave.",
+};
+
+function isStaveRpcTag(value: unknown): value is StaveRpcErrorTag {
+  return typeof value === "string" && (STAVE_RPC_ERROR_TAGS as readonly string[]).includes(value);
+}
+
+function readString(error: unknown, field: string): string | null {
+  const value = readField(error, field);
+  return typeof value === "string" ? value : null;
+}
+
+/** Resolve the typed RPC failure an arbitrary error wraps, or `null`. */
+function findStaveRpcError(error: unknown): { tag: StaveRpcErrorTag; error: unknown } | null {
+  const tag = readField(error, "_tag");
+  if (isStaveRpcTag(tag)) return { tag, error };
+  for (const nested of [readField(error, "error"), readField(error, "cause")]) {
+    if (nested !== undefined && nested !== error) {
+      const found = findStaveRpcError(nested);
+      if (found !== null) return found;
+    }
+  }
+  return null;
+}
+
+export function isStaveRpcError(error: unknown): boolean {
+  return findStaveRpcError(error) !== null;
+}
+
+/**
+ * Human-readable description for a Stave RPC failure, or `null` when the
+ * failure is something else and the caller's usual message applies.
+ */
+export function staveRpcErrorMessage(error: unknown): string | null {
+  const found = findStaveRpcError(error);
+  if (found === null) return null;
+  switch (found.tag) {
+    case "StaveUnavailableError": {
+      const reason = readString(found.error, "reason");
+      return (
+        (reason === null ? undefined : UNAVAILABLE_MESSAGE_BY_REASON[reason]) ??
+        readString(found.error, "message") ??
+        "Stave is unavailable."
+      );
+    }
+    case "StaveNotSpaceError":
+      return "This project is not a Stave space (no .stave.yaml at its root).";
+    case "StaveCommandError": {
+      const verb = readString(found.error, "verb") ?? "?";
+      const code = readString(found.error, "code") ?? "unknown";
+      const message = readString(found.error, "message") ?? "";
+      return `\`stave ${verb}\` failed (${code}): ${message}`;
+    }
+  }
+}

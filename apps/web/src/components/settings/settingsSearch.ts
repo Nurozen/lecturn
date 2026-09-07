@@ -31,6 +31,8 @@ export interface SettingsSearchItem {
   readonly localBackendManagementOnly?: boolean;
   readonly wslAvailableOnly?: boolean;
   readonly requiresThreadAutoSettlement?: boolean;
+  // Its row only renders when the server build advertises `capabilities.stave`.
+  readonly requiresStave?: boolean;
 }
 
 export interface SettingsSearchAvailability {
@@ -40,6 +42,7 @@ export interface SettingsSearchAvailability {
   readonly canManageLocalBackend: boolean;
   readonly isWslSettingsRowVisible: boolean;
   readonly hasThreadAutoSettlement: boolean;
+  readonly hasStave: boolean;
 }
 
 /**
@@ -171,6 +174,34 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "auto-settle-inactive-threads",
     searchTerms: ["thread timeout activity sidebar"],
     requiresThreadAutoSettlement: true,
+  },
+  {
+    id: "stave-enabled",
+    title: "Enable Stave",
+    to: "/settings/general",
+    searchTerms: ["stave spaces worktrees memories saga integration"],
+    requiresStave: true,
+  },
+  {
+    id: "stave-status",
+    title: "Stave status",
+    to: "/settings/general",
+    searchTerms: ["stave binary version set up install"],
+    requiresStave: true,
+  },
+  {
+    id: "stave-binary-path",
+    title: "Stave binary path",
+    to: "/settings/general",
+    searchTerms: ["stave executable path override T3CODE_STAVE_PATH"],
+    requiresStave: true,
+  },
+  {
+    id: "stave-config-path",
+    title: "Stave config path",
+    to: "/settings/general",
+    searchTerms: ["stave config yaml"],
+    requiresStave: true,
   },
   {
     id: "time-format",
@@ -522,7 +553,8 @@ export function filterAvailableSettingsSearchItems(
       (!item.providerSettingsOnly || availability.hasProviderSettingsEnvironment) &&
       (!item.localBackendManagementOnly || availability.canManageLocalBackend) &&
       (!item.wslAvailableOnly || availability.isWslSettingsRowVisible) &&
-      (!item.requiresThreadAutoSettlement || availability.hasThreadAutoSettlement),
+      (!item.requiresThreadAutoSettlement || availability.hasThreadAutoSettlement) &&
+      (!item.requiresStave || availability.hasStave),
   );
 }
 

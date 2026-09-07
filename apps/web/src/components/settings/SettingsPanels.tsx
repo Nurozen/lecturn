@@ -129,6 +129,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { StaveSettingsSection } from "./StaveSettings";
 import { ThemeLibrary } from "./ThemeSettings";
 import {
   backgroundActivityOverrideSettings,
@@ -2770,6 +2771,8 @@ export function GeneralSettingsPanel() {
           }
         />
       </SettingsSection>
+
+      <StaveSettingsSection />
 
       <SettingsSection title="About">
         <details className="px-4 py-3">

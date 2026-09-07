@@ -17,6 +17,7 @@ import type {
   ServerProcessDiagnosticsEntry,
   ServerProcessResourceHistorySummary,
   ServerProcessSignal,
+  StaveBinarySource,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
@@ -33,6 +34,7 @@ import {
 } from "../../state/server";
 import { shellEnvironment } from "../../state/shell";
 import { usePrimaryEnvironment } from "../../state/environments";
+import { useStaveStatus, type StaveStatusView } from "../../state/stave";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
@@ -81,6 +83,168 @@ function shortenTraceId(traceId: string): string {
 
 function isStaleProcessSignalMessage(message: string | undefined): boolean {
   return message?.includes("not a live descendant") ?? false;
+}
+
+const STAVE_SOURCE_LABELS: Record<StaveBinarySource, string> = {
+  settings: "Settings override",
+  env: "T3CODE_STAVE_PATH",
+  bootstrap: "Desktop bootstrap",
+  bundled: "Bundled with server",
+  path: "Found on PATH",
+};
+
+function pathBasename(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const index = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return index === -1 ? trimmed : trimmed.slice(index + 1);
+}
+
+function StaveSettingRow({ label, value }: { label: string; value: string }) {
+  return (
+    <tr>
+      <td className="whitespace-nowrap px-4 py-2.5 align-top text-xs font-medium text-foreground first:sm:pl-5">
+        {label}
+      </td>
+      <td className="px-4 py-2.5 align-top font-mono text-muted-foreground break-all last:sm:pr-5">
+        {value}
+      </td>
+    </tr>
+  );
+}
+
+function DiagnosticsErrorStrip({ messages }: { messages: ReadonlyArray<string | null> }) {
+  const visible = [...new Set(messages.filter((message) => message !== null))];
+  if (visible.length === 0) return null;
+  return (
+    <div className="space-y-2 border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
+      {visible.map((message) => (
+        <div key={message} className="flex items-start gap-2 text-destructive">
+          <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+          <span>{message}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Binary, config, marmot and last-failure probe for servers that advertise
+    `capabilities.stave`; renders nothing on older servers. */
+function StaveDiagnosticsSection({ status }: { status: StaveStatusView }) {
+  const { data, error, isPending, refresh, supported } = status;
+  if (!supported) return null;
+
+  const isInitialLoading = data === null && isPending;
+  const runnable = data?.runnable ?? null;
+  const roots = data?.roots ?? null;
+  const rootsFallback = data === null ? "—" : "Config not readable";
+  const marmotValue =
+    data === null
+      ? "..."
+      : !data.marmot.available
+        ? "Unavailable"
+        : data.marmot.version
+          ? `v${data.marmot.version}`
+          : "Available";
+
+  return (
+    <SettingsSection
+      title="Stave"
+      headerAction={
+        <DiagnosticsRefreshButton
+          isPending={isPending}
+          label="Refresh Stave diagnostics"
+          onClick={refresh}
+        />
+      }
+    >
+      <StatsGrid>
+        <StatBlock
+          label="Binary"
+          value={isInitialLoading ? "..." : runnable ? pathBasename(runnable.path) : "Not found"}
+          tone={!isInitialLoading && runnable === null ? "danger" : "default"}
+          tooltip={
+            runnable ? (
+              <>
+                <div className="break-all font-mono">{runnable.path}</div>
+                <div className="mt-1">{STAVE_SOURCE_LABELS[runnable.source]}</div>
+              </>
+            ) : undefined
+          }
+        />
+        <StatBlock
+          label="Version"
+          value={isInitialLoading ? "..." : (runnable?.version ?? "unknown")}
+          tooltip={
+            runnable?.commit ? (
+              <span className="font-mono">{runnable.commit.slice(0, 12)}</span>
+            ) : undefined
+          }
+        />
+        <StatBlock
+          label="Config"
+          value={data === null ? "..." : data.configExists ? "Present" : "Missing"}
+          tone={data !== null && !data.configExists ? "warning" : "default"}
+          tooltip={
+            data ? <span className="break-all font-mono">{data.configPath}</span> : undefined
+          }
+        />
+        <StatBlock
+          label="Marmot"
+          value={marmotValue}
+          tone={data !== null && !data.marmot.available ? "warning" : "default"}
+        />
+      </StatsGrid>
+      <DiagnosticsErrorStrip messages={[data?.runnableError?.message ?? null, error]} />
+      <DiagnosticsTable
+        headers={["Setting", "Value"]}
+        minTableWidth="min-w-[480px]"
+        columnWidths={["w-[176px]", "w-auto"]}
+      >
+        <StaveSettingRow label="Resolved path" value={runnable?.path ?? "—"} />
+        <StaveSettingRow
+          label="Source"
+          value={runnable ? STAVE_SOURCE_LABELS[runnable.source] : "—"}
+        />
+        <StaveSettingRow label="Config path" value={data?.configPath ?? "—"} />
+        <StaveSettingRow
+          label="Config exists"
+          value={data === null ? "—" : data.configExists ? "Yes" : "No"}
+        />
+        <StaveSettingRow label="Root" value={roots?.root ?? rootsFallback} />
+        <StaveSettingRow label="Bare repos dir" value={roots?.bareReposDir ?? rootsFallback} />
+        <StaveSettingRow label="Agent work dir" value={roots?.agentWorkDir ?? rootsFallback} />
+      </DiagnosticsTable>
+      <div className="border-t border-border/60 px-4 pt-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/70 sm:px-5">
+        Last Stave failure
+      </div>
+      {data?.lastFailure ? (
+        <DiagnosticsTable headers={["Verb", "Code", "Message", "When"]}>
+          <tr>
+            <td className="px-4 py-3 align-top font-mono text-foreground first:sm:pl-5">
+              {data.lastFailure.verb}
+            </td>
+            <td className="px-4 py-3 align-top font-mono text-muted-foreground">
+              {data.lastFailure.code}
+            </td>
+            <td className="max-w-[360px] px-4 py-3 align-top text-muted-foreground">
+              <ExpandableText text={data.lastFailure.message} />
+            </td>
+            <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground last:sm:pr-5">
+              {formatRelativeTimeLabel(data.lastFailure.at).replaceAll(" ", "\u00a0")}
+            </td>
+          </tr>
+        </DiagnosticsTable>
+      ) : (
+        <EmptyRows
+          label={
+            isInitialLoading
+              ? "Loading Stave diagnostics..."
+              : "No Stave command has failed since the server started."
+          }
+        />
+      )}
+    </SettingsSection>
+  );
 }
 
 function StatBlock({
@@ -854,6 +1018,7 @@ export function DiagnosticsSettingsPanel() {
           },
         }),
   );
+  const staveStatus = useStaveStatus(environmentId);
   const [isOpeningLogsDirectory, setIsOpeningLogsDirectory] = useState(false);
   const [openLogsDirectoryError, setOpenLogsDirectoryError] = useState<string | null>(null);
   const [signalingPid, setSignalingPid] = useState<number | null>(null);
@@ -1119,6 +1284,8 @@ export function DiagnosticsSettingsPanel() {
           }
         />
       </SettingsSection>
+
+      <StaveDiagnosticsSection status={staveStatus} />
 
       <SettingsSection
         title="Trace Diagnostics"

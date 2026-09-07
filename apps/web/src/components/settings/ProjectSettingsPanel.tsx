@@ -1243,7 +1243,13 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
           ) : null}
         </SettingsSection>
 
-        {staveInfo ? <StaveProjectSection stave={staveInfo} /> : null}
+        {staveInfo ? (
+          <StaveProjectSection
+            stave={staveInfo}
+            environmentId={selectedCheckout.environmentId}
+            workspaceRoot={selectedCheckout.workspaceRoot}
+          />
+        ) : null}
 
         <SettingsSection title="Danger">
           <SettingsRow

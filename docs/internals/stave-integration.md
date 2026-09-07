@@ -5,7 +5,7 @@
 > Fork framing and release differences live in
 > [docs/operations/lecturn-release.md](../operations/lecturn-release.md).
 
-Status: in progress — Phase 1 (recognise existing spaces)
+Status: in progress — Phase 2 (binary, settings, status)
 
 ## What a Stave space is to Lecturn
 
@@ -52,7 +52,7 @@ with the on-disk schema in `apps/server/src/stave/staveManifest.ts`.
   manifest, 60s for a negative result (both overridable via `StaveWorkspaceReaderOptions`).
   `invalidate(root)` drops one entry so the next `load` re-reads disk; `invalidateAll()` drops
   everything. Lifecycle operations that mutate a space are expected to call `invalidate` — none
-  exist yet (planned, Phase 2+).
+  exist yet (planned, Phase 3+).
 - `layer` is the live reader (needs `FileSystem`, `Path`, `RepositoryIdentityResolver`; wired in
   `apps/server/src/server.ts` as `StaveWorkspaceReaderLayerLive`). `layerNoop` finds no manifest
   anywhere, for tests whose roots are never spaces.
@@ -111,7 +111,7 @@ Defined in `packages/contracts/src/orchestration.ts`. `project.refresh` is a mem
   `projectUpsertOrRemove`, so shell subscribers receive a project upsert whose `stave`/`notice`
   were freshly derived (after an `invalidate`, from disk). This is the mechanism for pushing
   derived-state changes without a projection write.
-- No production caller dispatches it yet; Stave lifecycle operations will — planned (Phase 2+).
+- No production caller dispatches it yet; Stave lifecycle operations will — planned (Phase 3+).
 
 ## `StaveAdmission`
 
@@ -166,6 +166,213 @@ recurses one level into `error`/`cause` because dispatch errors nest the typed r
 usual message. Web consumers: `useThreadActions`, `useThreadActionMenu`, `useForkThread`,
 `BranchToolbarBranchSelector`, `PullRequestThreadDialog`. Mobile:
 `apps/mobile/src/state/use-selected-thread-git-actions.ts`.
+
+## Talking to the `stave` binary
+
+Everything below `apps/server/src/stave/` that touches the CLI is built once per server process
+in `apps/server/src/server.ts` (`StaveBinaryLayerLive` → `StaveCliLayerLive` →
+`StaveConfigReaderLayerLive` → `StaveRootsLayerLive`, merged into `StaveLayerLive`). Nothing here
+runs a mutating verb yet; operations (create, add, archive, destroy, setup, memory, saga) are
+planned (Phase 3+).
+
+### `StaveBinary`
+
+`apps/server/src/stave/StaveBinary.ts` (service `t3/stave/StaveBinary`) locates the executable
+and reports which source supplied it: `{ path, source, version, commit }` with `source` one of
+`settings | env | bootstrap | bundled | path`.
+
+- **Resolution order.** `settings.stave.binaryPath` → `T3CODE_STAVE_PATH` → the desktop
+  bootstrap envelope's `stavePath` (`ServerConfig.stavePath`; it never arrives as a CLI flag) →
+  bundled candidates relative to the server module (`stave/<platformKey>/stave[.exe]`,
+  `../stave/...`, and the dev fallback `../../dist/stave/...` where `fetch-stave` extracts) →
+  `stave` on PATH via `resolveCommandPath`. Platform keys come from
+  `packages/shared/src/stave.ts` (`STAVE_PLATFORM_KEYS`).
+- **Settings are authoritative.** When `binaryPath` is set (after `~` expansion) it is the only
+  candidate for `resolve`: a missing file fails `StaveBinaryNotFound { candidates: [path] }` and
+  an existing file without the executable bit fails `StaveBinaryNotExecutable { path }`. There is
+  no silent fallback to a different binary than the one the user named. The same executable-bit
+  rule applies to every candidate except on Windows.
+- **`resolve` vs `resolveRunnable`.** `resolve` is what `StaveCli` uses and includes the settings
+  path. `resolveRunnable` walks the same list _without_ settings and answers "could Stave run on
+  this machine at all" for `stave.getStatus` (deviation 5), so a bad user override never hides
+  the bundled or PATH binary from the status line. Both fail with `StaveBinaryError`.
+- **Version probe.** Each hit runs `stave version` (`STAVE_VERSION_PROBE_TIMEOUT` = 10s,
+  `timeoutBehavior: "timedOutResult"`) and parses the three-line output
+  (`stave v<semver>` / `commit:` / `date:`) with `parseStaveVersionOutput`; the `v` is stripped. A
+  failed, timed-out, or unrecognised probe leaves `version`/`commit` null and does **not** fail
+  resolution — a binary that cannot report its version is still runnable.
+- **Memoisation.** Two `Ref`s: the runnable resolution, and the configured resolution keyed by
+  the `binaryPath` string. Both are dropped by `invalidate` and on _every_ settings change
+  (`settings.streamChanges`), because a settings save is also the natural "I installed it, look
+  again" signal. `layerFixed(resolution)` answers without touching disk, for tests.
+
+### `StaveCli`
+
+`apps/server/src/stave/StaveCli.ts` (service `t3/stave/StaveCli`) is the **only** place the
+server spawns `stave`. Every verb is a typed method (`version`, `configShow`, `reposList`,
+`spaceList`, `spaceStatus`, `sagaList`, `sagaStatus`, `memoryProviders`, `memoryList`, and the
+mutation methods `setup`, `reposAdd`, `spaceInit/Create/Add/Remove/Sync/Retarget/Archive/Restore/Destroy`,
+`sagaCreate/Add/Remove/Sync/Archive/Destroy`, `memoryAttach/Detach`); there is no argv
+passthrough.
+
+- **Argv is built, never concatenated.** `buildStaveArgv.<verb>` is a pure `Result`: space,
+  saga and repo names must satisfy `isValidStaveSpaceId` (Stave's own name rule); free-form
+  values (URLs, refs, paths, provider options) must be non-empty, must not start with `-`, and
+  must not contain control characters. A builder failure becomes
+  `StaveError { code: "invalid_arguments" }` and nothing is spawned. Flags precede positionals
+  because `space create` / `saga create` parse with interspersed flags off.
+- **`--json` everywhere.** `STAVE_VERB_POLICY` records `kind: read | mutation` and
+  `output: json | prose` per verb. On the shipped Stave every verb except `version` is `json`.
+  Ordinary read verbs go straight to their `staveJson.ts` decoder; verbs that accept
+  `--dry-run` decode either the real result or a `StaveDryRunPlan`, and a plan answered by a
+  verb without `--dry-run` (`space init`) is a contract breach (`unreadable`). The plan's
+  earlier `mixed` class (prose followed by a trailing JSON object) is gone: the current binary
+  emits clean JSON on `memory attach --json`, so `mixed` handling was not built.
+- **`--config`.** `staveGlobalArgs(settings.stave.configPath)` prefixes every call with
+  `--config <path>` when the setting is non-empty, and nothing otherwise, so Stave's own default
+  config location applies.
+- **Spawn discipline** (deviation 7), all through `ProcessRunner`: `stdin: ""` (the pipe is
+  written empty and closed at once, so an interactive prompt can never hang the server; an
+  undefined stdin would stay an open pipe), `unsetEnv: ["STAVE_CD_FD"]` (Stave must never treat
+  the server as its shell wrapper and write a chdir handoff to fd 3), `MARMOT_HOME` forwarded
+  verbatim when the host process has it (`STAVE_PASSTHROUGH_ENV`), `timeout` of
+  `STAVE_READ_TIMEOUT` (60s) for reads and `STAVE_MUTATION_TIMEOUT` (15 min) for mutations,
+  `maxOutputBytes` 8 MiB with `outputMode: "truncate"` (never a failure). An optional
+  `StaveStreamOptions.onLine` receives each stdout/stderr line for progress on long mutations.
+- **Output policy → `StaveError`.** The exit status decides how stdout is read:
+  - exit 0 → run the decoder. `not_json` → `non_json_output` (with `stdoutHead` in details);
+    JSON that misses the contract → `unreadable`.
+  - non-zero exit → `parseStaveErrorEnvelope(stdout)` looks for exactly one
+    `{"error": {code, message, details?}}` object. Found → `StaveError` with that code
+    (unknown codes normalise to `unknown`, the raw code kept in `details.rawCode`). Not found
+    (cobra argument errors and the read verbs' service errors bypass Stave's envelope) →
+    `non_json_output` whose message is the stderr tail.
+  - spawn failures map before any output exists: `StaveBinary` failure or ENOENT →
+    `binary_missing` (details carry the candidates or the path), `ProcessTimeoutError` →
+    `timeout`, anything else → `spawn_failed`.
+
+  Every `StaveError` carries `verb`, `exitCode` (null when the process never completed) and a
+  2,000-char `stderrTail` for diagnostics.
+
+- **Never round-trip URLs.** Stave redacts secret-looking values in its JSON (`repos list`,
+  `config show`). Values read back from JSON are never turned into argv again; callers pass the
+  original inputs.
+
+`StaveError` (`apps/server/src/stave/StaveError.ts`) is the single failure type. `code` is a
+closed literal union: the codes Stave emits (`STAVE_CLI_ERROR_CODES`, from
+`references/stave/internal/space/errcode.go` and `errcode_repos.go`) plus the codes the server
+synthesises (`STAVE_HOST_ERROR_CODES`: `binary_missing`, `not_setup`, `disabled`,
+`non_json_output`, `spawn_failed`, `timeout`, `nested_project`, `archived_project`,
+`incarnation_mismatch`, `membership_unknown`, `unreadable`, `operation_expired`). Several host
+codes are reserved for lifecycle work — planned (Phase 3+).
+
+### `StaveConfigReader` and `StaveRootsProvider`
+
+`apps/server/src/stave/StaveConfigReader.ts` (service `t3/stave/StaveConfigReader`) answers
+"where does Stave keep its things": `{ configPath, exists, root?, bareReposDir?, agentWorkDir?,
+defaultBase?, repos[], memory?, source }`.
+
+- **`config show` first.** When `StaveBinary.resolve` succeeds, `stave config show --json` is the
+  source of truth because it applies the same defaulting every other verb does (deviation 21:
+  Stave alone defines what "set up" means). `source` is `stave-config-show`.
+- **Filesystem fallback.** When there is no binary or `config show` fails (older Stave, broken
+  install), the reader parses the YAML itself and mirrors Stave's `ApplyDefaults`: root defaults
+  to `~/stave`, `bareReposDir`/`agentWorkDir` derive from the root, `~` expands against the home
+  directory, repo `name`/`bareRepoPath` default from the map key. Fields of the wrong type are
+  ignored rather than failing. A missing or unreadable file reports `exists: false` with the
+  defaults Stave would use. `source` is `fs-fallback`.
+- The config path is `settings.stave.configPath` (`~`-expanded) or Stave's default
+  `<home>/.config/stave/config.yaml`.
+- **Never fails, never mutates.** `load` has no error channel and never runs `stave setup`.
+- **Cache.** One snapshot, 15s TTL (`STAVE_CONFIG_CACHE_TTL`, overridable), dropped by
+  `invalidate` and on every settings change (either `configPath` or `binaryPath` changes the
+  answer). `layerFixed(snapshot)` for tests.
+
+`StaveRootsProvider` (`apps/server/src/stave/StaveRoots.ts`) is the narrow view git needs:
+`agentWorkDir` as `Option<string>`, `some` only when the config **exists** — a config that does
+not exist yet has only defaults, and nothing lives under that directory. `layer` is built on the
+reader; `layerNoop` answers none for hosts and tests without Stave; `layerFixed(dir)` pins one.
+
+## Capability semantics
+
+Three independent facts, not one (deviation 5):
+
+| Fact      | Where                                          | Nature                                                   |
+| --------- | ---------------------------------------------- | -------------------------------------------------------- |
+| supported | `capabilities.stave: { protocolVersion }`      | static build fact; absent only when `T3CODE_STAVE=false` |
+| runnable  | `stave.getStatus.runnable` (`resolveRunnable`) | live; re-probed per call, memoised until a settings save |
+| enabled   | `settings.stave.enabled`                       | user choice; pushed live via `settingsUpdated`           |
+
+- **supported.** `apps/server/src/environment/ServerEnvironment.ts` spreads
+  `{ stave: { protocolVersion: STAVE_PROTOCOL_VERSION } }` into the descriptor's capabilities
+  when `ServerConfig.staveEnabled` is true (`T3CODE_STAVE`, default on; also carried in the
+  desktop/WSL bootstrap envelope). Nothing about binaries or settings feeds it, because there is
+  no `environmentUpdated` push: a capability that depended on either would go stale across
+  clients. Bump `STAVE_PROTOCOL_VERSION` when the CLI contract the server speaks changes.
+- **Clients.** Configuration rows (Enable, status, Binary path, Config path, Set up) render
+  whenever `capabilities.stave` is present, so a user can recover from "no binary". Feature UI
+  (space actions, wizard, badges) renders only when
+  `staveFeatureAvailable(config, status) = capability && settings.stave.enabled && status.runnable`
+  (pure, in `client-runtime`).
+- **Handlers enforce all three.** `T3CODE_STAVE=false` is the unbypassable kill switch: every
+  `stave.*` RPC fails `StaveUnavailableError { reason: "disabled_by_server" }`, like thread
+  forking. Space-scoped RPCs additionally require `settings.stave.enabled`
+  (`disabled_in_settings`) and a runnable binary (`binary_missing`). `stave.getStatus` checks
+  only the kill switch, deliberately, so clients can show what is missing. Errors are defined in
+  `packages/contracts/src/stave.ts` (`StaveUnavailableReason`).
+
+## `stave.getStatus` / `stave.spaceStatus`
+
+Both are read RPCs (`AuthOrchestrationReadScope` in `apps/server/src/auth/RpcAuthorization.ts`)
+served by `makeStaveRpcHandlers` in `apps/server/src/stave/staveRpcHandlers.ts`, built per
+connection in `ws.ts` around the same auth/tracing wrapper as every other unary handler
+(`rpc.aggregate: "stave"`). `StaveRpcRuntime` (server-lifetime, `runtimeLayer`) holds the
+pieces that must outlive a connection: the last CLI failure and the space-status cache. DTOs
+live in `packages/contracts/src/stave.ts`.
+
+- **`stave.getStatus` → `StaveStatus`** (no input; never runs a mutating verb, deviation 21):
+  - `runnable: { path, source, version, commit } | null` from `resolveRunnable`, with
+    `runnableError: { code: "binary_missing" | "binary_not_executable", message } | null`.
+  - `configPath`, `configExists`, `roots: { root, bareReposDir, agentWorkDir } | null` from the
+    config reader (`roots` is null when the snapshot lacks any of the three).
+  - `marmot: { available, version }` from `stave memory providers --json` — the row for the
+    configured provider (default `marmot`), else the provider Stave marks default — probed only
+    when a binary is runnable _and_ the config exists, because read verbs construct Stave's
+    service, which needs the config on disk. Otherwise `{ available: false, version: null }`.
+  - `lastFailure: { at, verb, code, message } | null` — the most recent failed `StaveCli` call
+    (every handler taps its CLI errors through `recordFailure`).
+  - `pendingCleanups: []` — placeholder until the lifecycle table exists (planned, Phase 4).
+- **`stave.spaceStatus { workspaceRoot }` → `StaveSpaceStatus`**: the workspace root is resolved
+  to a space id through `StaveWorkspaceReader.load` (no manifest → `StaveNotSpaceError`), then
+  `stave space status <id> --json` is mapped by `toSpaceStatusDto` to camelCase minus the
+  manifest clients already hold: `spaceId`, `spacePath`, `kind?`, `createdAt?`, `repos[]`
+  (`name`, `mode` incl. forward-compatible `unknown`, `path`, `branch?`, `base?`, `ref?`,
+  `exists`, `dirty`, `dirtyOutput?`, `ahead`, `behind`, `driftError?`, `referenceWarn?`) and
+  `memories[]` (`name`, `provider`, `id`, `owned`, `state?` — Stave's compact freshness text).
+  CLI failures surface as `StaveCommandError { verb, code, message }`. Answers are cached per
+  root for 15s (`STAVE_SPACE_STATUS_CACHE_TTL`, capacity 256); failures are not cached, so the
+  next call asks Stave again.
+
+## Git ceiling
+
+Git discovers its repository by walking up from cwd. Inside Stave's agent-work directory that
+walk would adopt whatever repository contains agent-work (a dotfiles-managed `$HOME`, for
+instance), so a space root that is not a repo would masquerade as a worktree of its ancestor.
+`makeGitVcsDriverCore` (`apps/server/src/vcs/GitVcsDriverCore.ts`) takes `StaveRootsProvider`
+as an optional service and, for every git spawn whose cwd is a path-segment descendant of
+`agentWorkDir`, sets `GIT_CEILING_DIRECTORIES=<agentWorkDir>` (prepended to any existing value
+with the platform list delimiter). No provider, no config, or a cwd elsewhere → the environment
+is untouched. `server.ts` provides `StaveRootsLayerLive` to `GitVcsDriverLayerLive`.
+
+## Diagnostics
+
+The Diagnostics page (`apps/web/src/components/settings/DiagnosticsSettings.tsx`) gains a Stave
+block fed entirely by `stave.getStatus`: the runnable binary (path, source, version) or the
+`runnableError`, the config path and whether it exists, the three roots, marmot availability and
+version, and the last failed verb (`lastFailure`). It is rendered whenever `capabilities.stave`
+is present, independent of `settings.stave.enabled`, so a disabled or broken install is still
+inspectable. Server-side there is nothing to reset: `lastFailure` lives in `StaveRpcRuntime`
+for the life of the process.
 
 ## Client rules
 
@@ -227,9 +434,25 @@ Rules built on them:
   refusal and the `vcs.createWorktree`/PR-preparation RPCs.
 - Tests whose roots are never spaces provide `StaveWorkspaceReader.layerNoop` and
   `StaveAdmission.layerNoop` (see the Normalizer attachment/fork tests).
+- **Binary candidates** (`apps/server/src/stave/StaveBinary.test.ts`): executables are written
+  into a scoped temp dir and `make({ bundledBaseDir })` is pointed at it, so every candidate
+  source (settings, env, bootstrap, bundled, PATH) is exercised against real files; the version
+  probe runs a fake `stave`.
+- **CLI fixtures** (`apps/server/src/stave/StaveCli.test.ts`, `testing/fake-stave.sh`,
+  `testing/staveJsonSamples.ts`): the samples are exact stdout/stderr captured from the real
+  binary in a throwaway root, one constant per verb and failure shape; the fake script replays
+  them by verb. Argv tests assert token order without spawning; the spawn-discipline test
+  inspects the `ProcessRunInput` (stdin, `unsetEnv`, `MARMOT_HOME`); timeouts are driven with
+  `TestClock.adjust(STAVE_READ_TIMEOUT)`.
+- **Config reader** (`StaveConfigReader.test.ts`): `StaveCli` is mocked for the `config show`
+  path; the fs fallback writes YAML into a temp home; the TTL is asserted with
+  `TestClock.adjust` on either side of 15s. `StaveRoots.layer` is covered in the same file.
+- Hosts without Stave provide `StaveBinary.layerFixed`, `StaveConfigReader.layerFixed`, and
+  `StaveRootsProvider.layerNoop`.
 
 ## Related
 
 - [Glossary](./glossary.md) — Stave space, Saga, Den
+- [Stave spaces (user guide)](../user/stave.md)
 - [Workspace layout](./workspace-layout.md)
 - [Lecturn releases (fork)](../operations/lecturn-release.md)

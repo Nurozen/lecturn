@@ -1,0 +1,320 @@
+/**
+ * staveRpcHandlers - the `stave.*` read RPCs served over the WebSocket group.
+ *
+ * `stave.getStatus` is the LIVE counterpart of the static `capabilities.stave`
+ * descriptor (deviation 5): it answers "is a binary runnable, does the config
+ * exist, where are the roots, is marmot around, what failed last" without
+ * ever running a mutating Stave verb (deviation 21). `stave.spaceStatus` runs
+ * `stave space status <id>` for the space whose manifest sits at a workspace
+ * root, cached server-wide for 15 seconds per root.
+ *
+ * Gating: both RPCs refuse with `StaveUnavailableError{reason:
+ * "disabled_by_server"}` when `T3CODE_STAVE` is off; `spaceStatus` further
+ * requires `settings.stave.enabled` and a runnable binary. The status RPC
+ * deliberately works without those so clients can show what is missing.
+ *
+ * `StaveRpcRuntime` holds the server-lifetime pieces (last failure, the
+ * space-status cache); `makeStaveRpcHandlers` builds one handler record per
+ * connection around the auth/tracing wrappers `ws.ts` already uses.
+ *
+ * @module staveRpcHandlers
+ */
+import {
+  type EnvironmentAuthorizationError,
+  type StaveLastFailure,
+  type StaveMarmotStatus,
+  type StaveSpaceStatus,
+  type StaveStatus,
+  StaveCommandError,
+  StaveNotSpaceError,
+  StaveUnavailableError,
+  WS_METHODS,
+} from "@t3tools/contracts";
+import * as Cache from "effect/Cache";
+import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
+
+import { ServerConfig } from "../config.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
+import { StaveBinary, type StaveBinaryError } from "./StaveBinary.ts";
+import { StaveCli } from "./StaveCli.ts";
+import { StaveConfigReader, type StaveConfigSnapshot } from "./StaveConfigReader.ts";
+import type { StaveError } from "./StaveError.ts";
+import type {
+  StaveMemoryProviders,
+  StaveSpaceStatus as StaveSpaceStatusJson,
+} from "./staveJson.ts";
+import { StaveWorkspaceReader } from "./StaveWorkspaceReader.ts";
+
+/** How long one `space status` answer is reused for a root before Stave is asked again. */
+export const STAVE_SPACE_STATUS_CACHE_TTL = Duration.seconds(15);
+const STAVE_SPACE_STATUS_CACHE_CAPACITY = 256;
+
+/** Provider row consulted when the config names no memory provider. */
+const DEFAULT_MEMORY_PROVIDER = "marmot";
+
+const NO_MARMOT: StaveMarmotStatus = { available: false, version: null };
+
+// ── Pure mappings ──────────────────────────────────────────────
+
+/** `runnableError.code` for the two ways the settings-independent walk can fail. */
+export function runnableErrorCode(error: StaveBinaryError): string {
+  switch (error._tag) {
+    case "StaveBinaryNotFound":
+      return "binary_missing";
+    case "StaveBinaryNotExecutable":
+      return "binary_not_executable";
+  }
+}
+
+export function toStaveCommandError(error: StaveError): StaveCommandError {
+  return new StaveCommandError({ verb: error.verb, code: error.code, message: error.message });
+}
+
+/**
+ * Marmot availability from `memory providers`: the row for the configured
+ * provider (default `marmot`), else the provider Stave marks as default.
+ */
+export function marmotStatusFromProviders(
+  rows: StaveMemoryProviders,
+  configuredProvider: string | undefined,
+): StaveMarmotStatus {
+  const wanted = configuredProvider ?? DEFAULT_MEMORY_PROVIDER;
+  const row = rows.find((candidate) => candidate.name === wanted) ?? rows.find((c) => c.default);
+  if (row === undefined) {
+    return NO_MARMOT;
+  }
+  return { available: row.available, version: row.version ?? null };
+}
+
+export function rootsFromSnapshot(snapshot: StaveConfigSnapshot): StaveStatus["roots"] {
+  if (
+    snapshot.root === undefined ||
+    snapshot.bareReposDir === undefined ||
+    snapshot.agentWorkDir === undefined
+  ) {
+    return null;
+  }
+  return {
+    root: snapshot.root,
+    bareReposDir: snapshot.bareReposDir,
+    agentWorkDir: snapshot.agentWorkDir,
+  };
+}
+
+const optionalString = <K extends string>(key: K, value: string | undefined) =>
+  value === undefined ? {} : ({ [key]: value } as { readonly [P in K]: string });
+
+/** camelCase wire shape of `space status --json`, minus the manifest clients already hold. */
+export function toSpaceStatusDto(json: StaveSpaceStatusJson): StaveSpaceStatus {
+  return {
+    spaceId: json.spaceId,
+    spacePath: json.spacePath,
+    ...optionalString("kind", json.manifest.kind),
+    createdAt: json.manifest.createdAt,
+    repos: json.repos.map((repo) => ({
+      name: repo.name,
+      mode: repo.mode,
+      path: repo.path,
+      ...optionalString("branch", repo.branch),
+      ...optionalString("base", repo.base),
+      ...optionalString("ref", repo.ref),
+      exists: repo.exists,
+      dirty: repo.dirty,
+      ...optionalString("dirtyOutput", repo.dirtyOutput),
+      ahead: repo.ahead,
+      behind: repo.behind,
+      ...optionalString("driftError", repo.driftError),
+      ...optionalString("referenceWarn", repo.referenceWarn),
+    })),
+    memories: json.memories.map((memory) => ({
+      name: memory.name,
+      provider: memory.provider,
+      id: memory.id,
+      owned: memory.owned,
+      ...optionalString("state", memory.state),
+    })),
+  };
+}
+
+// ── Server-lifetime runtime ───────────────────────────────────
+
+export interface StaveRpcRuntimeShape {
+  /** Most recent failed `StaveCli` call, for the diagnostics block. */
+  readonly lastFailure: Effect.Effect<Option.Option<StaveLastFailure>>;
+  /** Remember a failed `StaveCli` call; every handler taps its CLI errors through here. */
+  readonly recordFailure: (error: StaveError) => Effect.Effect<void>;
+  /** `space status` for the space rooted at `workspaceRoot`, cached per root for the TTL. */
+  readonly spaceStatus: (
+    workspaceRoot: string,
+  ) => Effect.Effect<StaveSpaceStatus, StaveNotSpaceError | StaveCommandError>;
+}
+
+export class StaveRpcRuntime extends Context.Service<StaveRpcRuntime, StaveRpcRuntimeShape>()(
+  "t3/stave/staveRpcHandlers/StaveRpcRuntime",
+) {}
+
+export interface StaveRpcRuntimeOptions {
+  readonly spaceStatusTtl?: Duration.Input;
+}
+
+export const makeRuntime = Effect.fn("StaveRpcRuntime.make")(function* (
+  options: StaveRpcRuntimeOptions = {},
+) {
+  const cli = yield* StaveCli;
+  const reader = yield* StaveWorkspaceReader;
+  const lastFailureRef = yield* Ref.make(Option.none<StaveLastFailure>());
+
+  const recordFailure = (error: StaveError) =>
+    DateTime.now.pipe(
+      Effect.flatMap((now) =>
+        Ref.set(
+          lastFailureRef,
+          Option.some({
+            at: DateTime.formatIso(now),
+            verb: error.verb,
+            code: error.code,
+            message: error.message,
+          }),
+        ),
+      ),
+    );
+
+  const lookupSpaceStatus = Effect.fn("StaveRpcRuntime.lookupSpaceStatus")(function* (
+    workspaceRoot: string,
+  ) {
+    const info = yield* reader.load(workspaceRoot);
+    if (Option.isNone(info)) {
+      return yield* new StaveNotSpaceError({
+        workspaceRoot,
+        message: `No Stave space manifest was found at '${workspaceRoot}'.`,
+      });
+    }
+    const json = yield* cli
+      .spaceStatus(info.value.spaceId)
+      .pipe(Effect.tapError(recordFailure), Effect.mapError(toStaveCommandError));
+    return toSpaceStatusDto(json);
+  });
+
+  const ttl = options.spaceStatusTtl ?? STAVE_SPACE_STATUS_CACHE_TTL;
+  const cache = yield* Cache.makeWith(lookupSpaceStatus, {
+    capacity: STAVE_SPACE_STATUS_CACHE_CAPACITY,
+    // Failures are not remembered: the next call asks Stave again.
+    timeToLive: Exit.match({ onSuccess: () => ttl, onFailure: () => Duration.zero }),
+  });
+
+  return StaveRpcRuntime.of({
+    lastFailure: Ref.get(lastFailureRef),
+    recordFailure,
+    spaceStatus: (workspaceRoot) => Cache.get(cache, workspaceRoot),
+  });
+});
+
+export const runtimeLayer = Layer.effect(StaveRpcRuntime, makeRuntime());
+
+// ── Per-connection handlers ───────────────────────────────────
+
+/** The auth + tracing closures `makeWsRpcLayer` wraps every unary handler in. */
+export interface StaveRpcWrappers {
+  readonly observeRpcEffect: <A, E, R>(
+    method: string,
+    effect: Effect.Effect<A, E, R>,
+    traceAttributes?: Readonly<Record<string, unknown>>,
+  ) => Effect.Effect<A, E | EnvironmentAuthorizationError, R>;
+}
+
+const TRACE_ATTRIBUTES = { "rpc.aggregate": "stave" } as const;
+
+export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* (
+  wrappers: StaveRpcWrappers,
+) {
+  const config = yield* ServerConfig;
+  const serverSettings = yield* ServerSettingsService;
+  const binary = yield* StaveBinary;
+  const cli = yield* StaveCli;
+  const configReader = yield* StaveConfigReader;
+  const runtime = yield* StaveRpcRuntime;
+
+  // `T3CODE_STAVE=false` is the unbypassable kill switch: the capability is
+  // absent AND every stave RPC refuses, like thread forking.
+  const requireKillSwitchOn = config.staveEnabled
+    ? Effect.void
+    : Effect.fail(
+        new StaveUnavailableError({
+          reason: "disabled_by_server",
+          message: "The Stave integration is disabled on this server.",
+        }),
+      );
+
+  const probeMarmot = (snapshot: StaveConfigSnapshot) =>
+    Effect.suspend(() => cli.memoryProviders).pipe(
+      Effect.tapError(runtime.recordFailure),
+      Effect.map((rows) => marmotStatusFromProviders(rows, snapshot.memory?.provider)),
+      Effect.orElseSucceed(() => NO_MARMOT),
+    );
+
+  const getStatus = Effect.gen(function* () {
+    yield* requireKillSwitchOn;
+    const probe = yield* binary.resolveRunnable.pipe(
+      Effect.match({
+        onFailure: (error) => ({
+          runnable: null,
+          runnableError: { code: runnableErrorCode(error), message: error.message },
+        }),
+        onSuccess: (resolution) => ({ runnable: resolution, runnableError: null }),
+      }),
+    );
+    const snapshot = yield* configReader.load;
+    // Read verbs construct Stave's service, which needs the config on disk;
+    // without a runnable binary or a config there is nothing to ask.
+    const marmot =
+      probe.runnable !== null && snapshot.exists ? yield* probeMarmot(snapshot) : NO_MARMOT;
+    const lastFailure = yield* runtime.lastFailure;
+    return {
+      runnable: probe.runnable,
+      runnableError: probe.runnableError,
+      configPath: snapshot.configPath,
+      configExists: snapshot.exists,
+      roots: rootsFromSnapshot(snapshot),
+      marmot,
+      lastFailure: Option.getOrNull(lastFailure),
+      pendingCleanups: [],
+    } satisfies StaveStatus;
+  });
+
+  const spaceStatus = (workspaceRoot: string) =>
+    Effect.gen(function* () {
+      yield* requireKillSwitchOn;
+      const settings = yield* serverSettings.getSettings;
+      if (!settings.stave.enabled) {
+        return yield* new StaveUnavailableError({
+          reason: "disabled_in_settings",
+          message: "The Stave integration is turned off in server settings.",
+        });
+      }
+      yield* binary.resolveRunnable.pipe(
+        Effect.mapError(
+          (error) =>
+            new StaveUnavailableError({ reason: "binary_missing", message: error.message }),
+        ),
+      );
+      return yield* runtime.spaceStatus(workspaceRoot);
+    });
+
+  return {
+    [WS_METHODS.staveGetStatus]: (_input: Record<string, never>) =>
+      wrappers.observeRpcEffect(WS_METHODS.staveGetStatus, getStatus, TRACE_ATTRIBUTES),
+    [WS_METHODS.staveSpaceStatus]: (input: { readonly workspaceRoot: string }) =>
+      wrappers.observeRpcEffect(
+        WS_METHODS.staveSpaceStatus,
+        spaceStatus(input.workspaceRoot),
+        TRACE_ATTRIBUTES,
+      ),
+  };
+});

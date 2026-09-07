@@ -119,6 +119,7 @@ const makeCliTestServerConfig = (baseDir: string) =>
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,
       threadForkingEnabled: true,
+      staveEnabled: true,
     } satisfies ServerConfig.ServerConfig["Service"];
   });
 

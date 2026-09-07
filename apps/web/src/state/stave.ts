@@ -1,0 +1,134 @@
+import { useEffect, useRef } from "react";
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
+import { createEnvironmentRpcQueryAtomFamily } from "@t3tools/client-runtime/state/runtime";
+import {
+  environmentSupportsStave,
+  staveFeatureAvailable,
+} from "@t3tools/client-runtime/state/stave";
+import { type EnvironmentId, type StaveSpaceStatus, WS_METHODS } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
+import * as Option from "effect/Option";
+import { AsyncResult, Atom } from "effect/unstable/reactivity";
+
+import { connectionAtomRuntime } from "../connection/runtime";
+import { type EnvironmentQueryView, useEnvironmentQuery } from "./query";
+import { serverEnvironment } from "./server";
+
+/**
+ * Web-only Stave reads. Mobile v1 shows a badge from the project shell and
+ * never calls these RPCs, so the atom families live here rather than in the
+ * shared client-runtime server atoms.
+ */
+
+/** Live binary/config/marmot probe. 15s stale window matches the server-side
+    memo so a settings-page refresh is never answered from a stale cache. */
+export const staveStatus = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+  label: "environment-data:stave:status",
+  tag: WS_METHODS.staveGetStatus,
+  staleTimeMs: 15_000,
+});
+
+/** Per-space drift (ahead/behind/dirty) and memory freshness. */
+export const staveSpaceStatus = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+  label: "environment-data:stave:space-status",
+  tag: WS_METHODS.staveSpaceStatus,
+  staleTimeMs: 15_000,
+});
+
+const EMPTY_SPACE_STATUS_ATOM = Atom.make(AsyncResult.initial<StaveSpaceStatus, never>(false)).pipe(
+  Atom.withLabel("web-stave-space-status:empty"),
+);
+
+export interface StaveStatusView extends EnvironmentQueryView<
+  NonNullable<ReturnType<typeof useStaveStatusQuery>["data"]>
+> {
+  /** `capabilities.stave` is present: configuration rows may render. */
+  readonly supported: boolean;
+}
+
+function useStaveStatusQuery(environmentId: EnvironmentId | null, supported: boolean) {
+  return useEnvironmentQuery(
+    environmentId !== null && supported ? staveStatus({ environmentId, input: {} }) : null,
+  );
+}
+
+/**
+ * `stave.getStatus` for an environment, fetched only when the server build
+ * supports Stave. Re-probes when the user changes any `stave.*` setting
+ * (binary path, config path, enabled), since the server memo is invalidated
+ * on the same edit.
+ */
+export function useStaveStatus(environmentId: EnvironmentId | null): StaveStatusView {
+  const config = useAtomValue(
+    environmentId === null ? NULL_CONFIG_ATOM : serverEnvironment.configValueAtom(environmentId),
+  );
+  const supported = environmentSupportsStave(config);
+  const query = useStaveStatusQuery(environmentId, supported);
+  const stave = config?.settings.stave;
+  const settingsKey =
+    stave === undefined ? null : `${stave.enabled}\0${stave.binaryPath}\0${stave.configPath}`;
+  const lastSettingsKey = useRef(settingsKey);
+  const refresh = query.refresh;
+  useEffect(() => {
+    if (lastSettingsKey.current === settingsKey) return;
+    lastSettingsKey.current = settingsKey;
+    if (settingsKey !== null && supported) refresh();
+  }, [refresh, settingsKey, supported]);
+  return { ...query, supported };
+}
+
+const NULL_CONFIG_ATOM = Atom.make(null).pipe(Atom.withLabel("web-stave-config:null"));
+
+export interface StaveFeatureView {
+  readonly supported: boolean;
+  /** Supported, enabled in settings, and a binary is runnable. */
+  readonly available: boolean;
+  readonly status: StaveStatusView;
+}
+
+export function useStaveFeatureAvailable(environmentId: EnvironmentId | null): StaveFeatureView {
+  const config = useAtomValue(
+    environmentId === null ? NULL_CONFIG_ATOM : serverEnvironment.configValueAtom(environmentId),
+  );
+  const status = useStaveStatus(environmentId);
+  return {
+    supported: status.supported,
+    available: staveFeatureAvailable({ config, settings: config?.settings, status: status.data }),
+    status,
+  };
+}
+
+export interface StaveSpaceStatusView {
+  readonly data: StaveSpaceStatus | null;
+  /** The squashed failure, kept typed so callers can match `_tag`. */
+  readonly error: unknown;
+  readonly isPending: boolean;
+  readonly refresh: () => void;
+}
+
+/**
+ * `stave.spaceStatus` for a project's workspace root. Only fetched when the
+ * feature gate passes, so a disabled or binary-less server never sees the
+ * call; callers render the typed error inline instead of throwing.
+ */
+export function useStaveSpaceStatus(target: {
+  readonly environmentId: EnvironmentId | null;
+  readonly workspaceRoot: string | null;
+  readonly enabled: boolean;
+}): StaveSpaceStatusView {
+  const atom =
+    target.enabled && target.environmentId !== null && target.workspaceRoot !== null
+      ? staveSpaceStatus({
+          environmentId: target.environmentId,
+          input: { workspaceRoot: target.workspaceRoot },
+        })
+      : EMPTY_SPACE_STATUS_ATOM;
+  const result = useAtomValue(atom);
+  const refresh = useAtomRefresh(atom);
+  return {
+    data: Option.getOrNull(AsyncResult.value(result)),
+    error: result._tag === "Failure" ? Cause.squash(result.cause) : null,
+    isPending: atom !== EMPTY_SPACE_STATUS_ATOM && result.waiting,
+    refresh,
+  };
+}

@@ -337,11 +337,13 @@ const makePairServerConfig = Effect.fn(function* (input: {
     desktopTelemetryFd: undefined,
     desktopTelemetryControlFd: undefined,
     resourceMonitorPath: undefined,
+    stavePath: undefined,
     autoBootstrapProjectFromCwd: false,
     logWebSocketEvents: false,
     tailscaleServeEnabled: false,
     tailscaleServePort: DEFAULT_TAILSCALE_SERVE_PORT,
     threadForkingEnabled: true,
+    staveEnabled: true,
   });
 });
 

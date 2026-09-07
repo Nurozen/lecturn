@@ -29,6 +29,7 @@ import {
 import { dedupeRemoteBranchesWithLocalMatches, normalizeGitRemoteUrl } from "@t3tools/shared/git";
 import { compactTraceAttributes } from "@t3tools/shared/observability";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
+import { isPathSegmentDescendant } from "@t3tools/shared/stave";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 import {
@@ -37,6 +38,7 @@ import {
   parseRemoteRefWithRemoteNames,
 } from "../git/remoteRefs.ts";
 import { ServerConfig } from "../config.ts";
+import { StaveRootsProvider } from "../stave/StaveRoots.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 // `git worktree add` checks out the full tree, so on large repositories it can
@@ -722,6 +724,31 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const { worktreesDir } = yield* ServerConfig;
   const crypto = yield* Crypto.Crypto;
+  const staveRoots = yield* Effect.serviceOption(StaveRootsProvider);
+  // Separator for PATH-style lists such as GIT_CEILING_DIRECTORIES.
+  const pathListDelimiter = path.sep === "\\" ? ";" : ":";
+
+  // Git discovers its repository by walking up from cwd. Inside the Stave
+  // agent-work dir that walk would adopt whatever repository contains
+  // agent-work, so a space directory that is not a repo would masquerade as a
+  // worktree of its ancestor. A ceiling at agent-work stops the walk there.
+  const staveCeilingEnv = Effect.fn("staveCeilingEnv")(function* (cwd: string) {
+    if (Option.isNone(staveRoots)) {
+      return {};
+    }
+    const agentWorkDir = yield* staveRoots.value.agentWorkDir;
+    if (Option.isNone(agentWorkDir)) {
+      return {};
+    }
+    const ceiling = path.resolve(agentWorkDir.value);
+    if (!isPathSegmentDescendant(ceiling, path.resolve(cwd))) {
+      return {};
+    }
+    const existing = process.env.GIT_CEILING_DIRECTORIES;
+    return {
+      GIT_CEILING_DIRECTORIES: existing ? `${ceiling}${pathListDelimiter}${existing}` : ceiling,
+    };
+  });
 
   const executeRaw: GitVcsDriver.GitVcsDriver["Service"]["execute"] = Effect.fnUntraced(
     function* (input) {
@@ -746,6 +773,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
               }),
           ),
         );
+        const ceilingEnv = yield* staveCeilingEnv(commandInput.cwd);
         const child = yield* commandSpawner
           .spawn(
             ChildProcess.make("git", commandInput.args, {
@@ -753,6 +781,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
               env: {
                 ...process.env,
                 ...input.env,
+                ...ceilingEnv,
                 ...trace2Monitor.env,
               },
             }),

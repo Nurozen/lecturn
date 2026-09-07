@@ -200,6 +200,14 @@ import {
 import { UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
+  StaveCommandError,
+  StaveNotSpaceError,
+  StaveSpaceStatus,
+  StaveSpaceStatusInput,
+  StaveStatus,
+  StaveUnavailableError,
+} from "./stave.ts";
+import {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
   SourceControlDiscoveryResult,
@@ -301,6 +309,10 @@ export const WS_METHODS = {
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
+
+  // Stave methods
+  staveGetStatus: "stave.getStatus",
+  staveSpaceStatus: "stave.spaceStatus",
 
   // Pull request methods
   pullRequestsList: "pullRequests.list",
@@ -502,6 +514,24 @@ export const WsServerGetBackgroundPolicyRpc = Rpc.make(WS_METHODS.serverGetBackg
   payload: Schema.Struct({}),
   success: BackgroundPolicySnapshot,
   error: EnvironmentAuthorizationError,
+});
+
+export const WsStaveGetStatusRpc = Rpc.make(WS_METHODS.staveGetStatus, {
+  payload: Schema.Struct({}),
+  success: StaveStatus,
+  error: Schema.Union([StaveUnavailableError, EnvironmentAuthorizationError]),
+});
+
+export const WsStaveSpaceStatusRpc = Rpc.make(WS_METHODS.staveSpaceStatus, {
+  payload: StaveSpaceStatusInput,
+  success: StaveSpaceStatus,
+  error: Schema.Union([
+    StaveUnavailableError,
+    StaveNotSpaceError,
+    StaveCommandError,
+    ServerSettingsError,
+    EnvironmentAuthorizationError,
+  ]),
 });
 
 const PullRequestRpcError = Schema.Union([
@@ -1084,6 +1114,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,
   WsServerGetBackgroundPolicyRpc,
+  WsStaveGetStatusRpc,
+  WsStaveSpaceStatusRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsPullRequestsListRpc,

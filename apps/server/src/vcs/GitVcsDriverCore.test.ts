@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
@@ -16,6 +17,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { GitCommandError, type ReviewDiffFileContentsInput } from "@t3tools/contracts";
 import { ServerConfig } from "../config.ts";
+import * as StaveRoots from "../stave/StaveRoots.ts";
 import { makeGitVcsDriverCore, splitNullSeparatedGitStdoutPaths } from "./GitVcsDriverCore.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 
@@ -1980,6 +1982,119 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           timeoutMs: 10_000,
         });
         assert.notEqual(originMain.exitCode, 0);
+      }),
+    );
+  });
+  describe("GIT_CEILING_DIRECTORIES inside the Stave agent-work dir", () => {
+    const agentWorkDir = "/work/agent-work";
+
+    // Runs one git command through a fake spawner and returns the
+    // GIT_CEILING_DIRECTORIES value the spawn would have received.
+    const capturedCeilingFor = (
+      cwd: string,
+      provider?: Layer.Layer<StaveRoots.StaveRootsProvider>,
+    ) =>
+      Effect.gen(function* () {
+        const captured = yield* Ref.make(Option.none<string>());
+        const spawner = ChildProcessSpawner.make((command) =>
+          Effect.gen(function* () {
+            if (!ChildProcess.isStandardCommand(command)) {
+              return assert.fail("expected a standard Git command");
+            }
+            yield* Ref.set(
+              captured,
+              Option.fromUndefinedOr(command.options.env?.GIT_CEILING_DIRECTORIES),
+            );
+            return makeSuccessfulHandle("");
+          }),
+        );
+        const driver = yield* makeGitVcsDriverCore().pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provide(provider ? Layer.merge(provider, ServerConfigLayer) : ServerConfigLayer),
+        );
+        yield* driver.execute({
+          operation: "GitVcsDriver.test.ceiling",
+          cwd,
+          args: ["status", "--porcelain=2", "--branch"],
+          timeoutMs: 10_000,
+        });
+        return Option.getOrUndefined(yield* Ref.get(captured));
+      });
+
+    // Whatever the host shell already exports is passed through untouched.
+    const hostCeiling = process.env.GIT_CEILING_DIRECTORIES;
+
+    it.effect("sets the ceiling for a cwd strictly inside the agent-work dir", () =>
+      Effect.gen(function* () {
+        assert.equal(
+          yield* capturedCeilingFor(
+            `${agentWorkDir}/space-a/repo`,
+            StaveRoots.layerFixed(agentWorkDir),
+          ),
+          agentWorkDir,
+        );
+      }),
+    );
+
+    it.effect("leaves the env alone for the agent-work dir itself and unrelated paths", () =>
+      Effect.gen(function* () {
+        for (const cwd of [agentWorkDir, "/work/agent-work-other/x", "/elsewhere"]) {
+          assert.equal(
+            yield* capturedCeilingFor(cwd, StaveRoots.layerFixed(agentWorkDir)),
+            hostCeiling,
+            cwd,
+          );
+        }
+      }),
+    );
+
+    it.effect("leaves the env alone without a provider or with the noop provider", () =>
+      Effect.gen(function* () {
+        const cwd = `${agentWorkDir}/space-a/repo`;
+        assert.equal(yield* capturedCeilingFor(cwd), hostCeiling);
+        assert.equal(yield* capturedCeilingFor(cwd, StaveRoots.layerNoop), hostCeiling);
+      }),
+    );
+
+    it.effect("stops real git at the agent-work dir instead of adopting an ancestor repo", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+        // git prints real paths, so compare against the resolved temp dir.
+        const parent = yield* fileSystem.realPath(yield* makeTmpDir("git-vcs-driver-stave-"));
+        const agentWork = pathService.join(parent, "agent-work");
+        const spaceA = pathService.join(agentWork, "space-a");
+        const spaceB = pathService.join(agentWork, "space-b");
+        yield* fileSystem.makeDirectory(spaceA, { recursive: true });
+        yield* fileSystem.makeDirectory(spaceB, { recursive: true });
+        yield* initRepoWithCommit(parent);
+
+        const showToplevel = (driver: GitVcsDriver.GitVcsDriver["Service"], cwd: string) =>
+          driver.execute({
+            operation: "GitVcsDriver.test.ceiling",
+            cwd,
+            args: ["rev-parse", "--show-toplevel"],
+            allowNonZeroExit: true,
+            timeoutMs: 10_000,
+          });
+
+        const adopted = yield* showToplevel(yield* GitVcsDriver.GitVcsDriver, spaceA);
+        assert.equal(adopted.exitCode, 0);
+        assert.equal(adopted.stdout.trim(), parent);
+
+        const ceilingDriver = yield* makeGitVcsDriverCore().pipe(
+          Effect.provide(Layer.merge(StaveRoots.layerFixed(agentWork), ServerConfigLayer)),
+        );
+        const blocked = yield* showToplevel(ceilingDriver, spaceA);
+        assert.notEqual(blocked.exitCode, 0);
+        assert.include(blocked.stderr, "not a git repository");
+
+        yield* initRepoWithCommit(spaceB).pipe(
+          Effect.provideService(GitVcsDriver.GitVcsDriver, ceilingDriver),
+        );
+        const inside = yield* showToplevel(ceilingDriver, spaceB);
+        assert.equal(inside.exitCode, 0);
+        assert.equal(inside.stdout.trim(), spaceB);
       }),
     );
   });

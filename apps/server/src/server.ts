@@ -72,6 +72,11 @@ import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
 import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as StaveAdmission from "./stave/StaveAdmission.ts";
+import * as StaveBinary from "./stave/StaveBinary.ts";
+import * as StaveCli from "./stave/StaveCli.ts";
+import * as StaveConfigReader from "./stave/StaveConfigReader.ts";
+import * as StaveRoots from "./stave/StaveRoots.ts";
+import * as StaveRpcHandlers from "./stave/staveRpcHandlers.ts";
 import * as StaveWorkspaceReader from "./stave/StaveWorkspaceReader.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
@@ -290,6 +295,25 @@ const ProviderLayerLive = ProviderServiceLive.pipe(
 
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
 
+// The Stave CLI stack: one binary resolution and one config reader per server
+// (layer memoisation), settings-aware through the shared settings layer.
+const StaveBinaryLayerLive = StaveBinary.layer.pipe(
+  Layer.provide(ServerSettingsLayerLive),
+  Layer.provide(ProcessRunner.layer),
+);
+const StaveCliLayerLive = StaveCli.layer.pipe(
+  Layer.provide(StaveBinaryLayerLive),
+  Layer.provide(ServerSettingsLayerLive),
+  Layer.provide(ProcessRunner.layer),
+);
+const StaveConfigReaderLayerLive = StaveConfigReader.layer.pipe(
+  Layer.provide(Layer.mergeAll(StaveBinaryLayerLive, StaveCliLayerLive, ServerSettingsLayerLive)),
+);
+const StaveRootsLayerLive = StaveRoots.layer.pipe(Layer.provide(StaveConfigReaderLayerLive));
+// Git spawns learn the agent-work ceiling from Stave's config so a space
+// directory never adopts an ancestor repository.
+const GitVcsDriverLayerLive = GitVcsDriver.layer.pipe(Layer.provide(StaveRootsLayerLive));
+
 const VcsDriverRegistryLayerLive = VcsDriverRegistry.layer.pipe(
   Layer.provide(VcsProjectConfig.layer),
 );
@@ -298,7 +322,7 @@ const SourceControlProviderRegistryLayerLive = SourceControlProviderRegistry.lay
   Layer.provide(
     Layer.mergeAll(AzureDevOpsCli.layer, BitbucketApi.layer, GitHubCli.layer, GitLabCli.layer),
   ),
-  Layer.provideMerge(GitVcsDriver.layer),
+  Layer.provideMerge(GitVcsDriverLayerLive),
   Layer.provideMerge(VcsDriverRegistryLayerLive),
 );
 
@@ -310,14 +334,14 @@ const PullRequestServiceLive = PullRequestService.layer.pipe(
 
 const GitManagerLayerLive = GitManager.layer.pipe(
   Layer.provideMerge(ProjectSetupScriptRunner.layer),
-  Layer.provideMerge(GitVcsDriver.layer),
+  Layer.provideMerge(GitVcsDriverLayerLive),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
   Layer.provideMerge(TextGeneration.layer),
 );
 
 const GitLayerLive = Layer.empty.pipe(
   Layer.provideMerge(GitManagerLayerLive),
-  Layer.provideMerge(GitVcsDriver.layer),
+  Layer.provideMerge(GitVcsDriverLayerLive),
 );
 
 const GitWorkflowLayerLive = GitWorkflowService.layer.pipe(
@@ -326,12 +350,12 @@ const GitWorkflowLayerLive = GitWorkflowService.layer.pipe(
 );
 
 const SourceControlRepositoryServiceLayerLive = SourceControlRepositoryService.layer.pipe(
-  Layer.provideMerge(GitVcsDriver.layer),
+  Layer.provideMerge(GitVcsDriverLayerLive),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
 );
 
 const ReviewLayerLive = ReviewService.layer.pipe(
-  Layer.provideMerge(GitVcsDriver.layer),
+  Layer.provideMerge(GitVcsDriverLayerLive),
   Layer.provideMerge(VcsDriverRegistryLayerLive),
 );
 
@@ -398,6 +422,13 @@ const StaveLayerLive = Layer.mergeAll(
   StaveWorkspaceReaderLayerLive,
   StaveAdmission.layer.pipe(Layer.provide(StaveWorkspaceReaderLayerLive)),
   RepositoryIdentityResolver.layer,
+  StaveBinaryLayerLive,
+  StaveCliLayerLive,
+  StaveConfigReaderLayerLive,
+  StaveRootsLayerLive,
+  StaveRpcHandlers.runtimeLayer.pipe(
+    Layer.provide(Layer.mergeAll(StaveCliLayerLive, StaveWorkspaceReaderLayerLive)),
+  ),
 );
 
 const AuthLayerLive = EnvironmentAuth.layer.pipe(

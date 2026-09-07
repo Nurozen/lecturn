@@ -22,6 +22,12 @@ import * as ProcessRunner from "../processRunner.ts";
 import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
 import { detectServerEnvironmentMachineKind } from "./ServerEnvironmentMachine.ts";
 
+// Static build fact: advertised iff the T3CODE_STAVE kill switch is on,
+// independent of whether a binary is runnable or settings enable it (those
+// are served live by `stave.getStatus`). Bump when the Stave CLI contract
+// the server speaks changes.
+export const STAVE_PROTOCOL_VERSION = 1;
+
 export class ServerEnvironmentIdPersistenceError extends Schema.TaggedErrorClass<ServerEnvironmentIdPersistenceError>()(
   "ServerEnvironmentIdPersistenceError",
   {
@@ -228,6 +234,7 @@ export const make = Effect.gen(function* () {
       // Config-driven kill switch: clients hide every fork entry point when
       // the capability is absent, and the ws dispatcher enforces it besides.
       ...(serverConfig.threadForkingEnabled ? { threadForking: true } : {}),
+      ...(serverConfig.staveEnabled ? { stave: { protocolVersion: STAVE_PROTOCOL_VERSION } } : {}),
       environmentIcon: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
       ...(serverSelfUpdate === "boot-service" || desktopAppUpdate

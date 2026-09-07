@@ -118,6 +118,7 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import { makeStaveRpcHandlers } from "./stave/staveRpcHandlers.ts";
 import * as StaveAdmission from "./stave/StaveAdmission.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
@@ -1678,7 +1679,12 @@ const makeWsRpcLayer = (
           ),
         );
 
+      // Stave reads live in their own module; they share this connection's
+      // auth/tracing wrapper so scope enforcement stays in one place.
+      const staveRpcHandlers = yield* makeStaveRpcHandlers({ observeRpcEffect });
+
       return WsRpcGroup.of({
+        ...staveRpcHandlers,
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,

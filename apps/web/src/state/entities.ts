@@ -8,6 +8,7 @@ import {
   type EnvironmentThreadStatus,
   mergeEnvironmentThread,
 } from "@t3tools/client-runtime/state/threads";
+import { environmentSupportsStave } from "@t3tools/client-runtime/state/stave";
 import type { ScopedProjectRef, ScopedThreadRef, ServerConfig } from "@t3tools/contracts";
 import type { EnvironmentId, ServerProvider } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
@@ -228,6 +229,16 @@ export function readEnvironmentSupportsForking(environmentId: EnvironmentId): bo
   return (
     appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
       .threadForking === true
+  );
+}
+
+/** Whether the environment's server build ships the Stave integration
+    (`capabilities.stave`). A static build fact: configuration rows render on
+    it alone; feature UI additionally needs the enabled setting and a runnable
+    binary (see `staveFeatureAvailable`). */
+export function readEnvironmentSupportsStave(environmentId: EnvironmentId): boolean {
+  return environmentSupportsStave(
+    appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId),
   );
 }
 

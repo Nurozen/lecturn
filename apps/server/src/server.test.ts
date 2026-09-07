@@ -135,7 +135,12 @@ import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as StaveAdmission from "./stave/StaveAdmission.ts";
+import * as StaveBinary from "./stave/StaveBinary.ts";
+import * as StaveCli from "./stave/StaveCli.ts";
+import * as StaveConfigReader from "./stave/StaveConfigReader.ts";
+import type { StaveSpaceStatus as StaveSpaceStatusJson } from "./stave/staveJson.ts";
 import { STAVE_MANIFEST_FILE_NAME } from "./stave/staveManifest.ts";
+import * as StaveRpcHandlers from "./stave/staveRpcHandlers.ts";
 import * as StaveWorkspaceReader from "./stave/StaveWorkspaceReader.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -490,6 +495,9 @@ const buildAppUnderTest = (options?: {
       DesktopTelemetryReceiver.DesktopTelemetryReceiver["Service"]
     >;
     staveWorkspaceReader?: Partial<StaveWorkspaceReader.StaveWorkspaceReader["Service"]>;
+    staveBinary?: Partial<StaveBinary.StaveBinary["Service"]>;
+    staveCli?: Partial<StaveCli.StaveCli["Service"]>;
+    staveConfigReader?: Partial<StaveConfigReader.StaveConfigReader["Service"]>;
   };
 }) =>
   Effect.gen(function* () {
@@ -526,6 +534,7 @@ const buildAppUnderTest = (options?: {
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,
       threadForkingEnabled: true,
+      staveEnabled: true,
       ...options?.config,
     };
     const layerConfig = ServerConfig.layer(config);
@@ -694,6 +703,36 @@ const buildAppUnderTest = (options?: {
         })
       : StaveWorkspaceReader.layer.pipe(Layer.provide(repositoryIdentityResolverLayer));
     const staveLayer = StaveAdmission.layer.pipe(Layer.provideMerge(staveWorkspaceReaderLayer));
+    // No binary, no config by default: `stave.getStatus` then reports both as
+    // missing without touching disk, and `stave.spaceStatus` refuses.
+    const staveBinaryMissing = Effect.fail(
+      new StaveBinary.StaveBinaryNotFound({ candidates: [StaveBinary.STAVE_COMMAND_NAME] }),
+    );
+    const staveBinaryLayer = Layer.mock(StaveBinary.StaveBinary)({
+      resolve: staveBinaryMissing,
+      resolveRunnable: staveBinaryMissing,
+      invalidate: Effect.void,
+      ...options?.layers?.staveBinary,
+    });
+    const staveCliLayer = Layer.mock(StaveCli.StaveCli)({ ...options?.layers?.staveCli });
+    const staveConfigReaderLayer = Layer.mock(StaveConfigReader.StaveConfigReader)({
+      load: Effect.succeed({
+        configPath: "/tmp/stave-test/config.yaml",
+        exists: false,
+        repos: [],
+        source: "fs-fallback",
+      }),
+      invalidate: Effect.void,
+      ...options?.layers?.staveConfigReader,
+    });
+    const staveRpcLayer = Layer.mergeAll(
+      staveBinaryLayer,
+      staveCliLayer,
+      staveConfigReaderLayer,
+      StaveRpcHandlers.runtimeLayer.pipe(
+        Layer.provide(Layer.mergeAll(staveCliLayer, staveWorkspaceReaderLayer)),
+      ),
+    );
 
     const servedRoutesLayer = HttpRouter.serve(
       makeRoutesLayer.pipe(Layer.provide(serviceLauncherClientLayer)),
@@ -1052,6 +1091,7 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(staveLayer),
+      Layer.provide(staveRpcLayer),
       Layer.provide(repositoryIdentityResolverLayer),
       Layer.provide(
         Layer.succeed(
@@ -4371,6 +4411,227 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(response.environment.environmentId, testEnvironmentDescriptor.environmentId);
         assert.equal(response.auth.policy, "desktop-managed-local");
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("stave.getStatus refuses when the server kill switch is off", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({ config: { staveEnabled: false } });
+      const wsUrl = yield* getWsServerUrl("/ws");
+
+      const error = yield* Effect.flip(
+        Effect.scoped(withWsRpcClient(wsUrl, (client) => client[WS_METHODS.staveGetStatus]({}))),
+      );
+
+      assert.equal(error._tag, "StaveUnavailableError");
+      if (error._tag === "StaveUnavailableError") {
+        assert.equal(error.reason, "disabled_by_server");
+      }
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("stave.getStatus reports a missing binary and config instead of failing", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const wsUrl = yield* getWsServerUrl("/ws");
+
+      const status = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.staveGetStatus]({})),
+      );
+
+      assert.isNull(status.runnable);
+      assert.equal(status.runnableError?.code, "binary_missing");
+      assert.equal(status.configPath, "/tmp/stave-test/config.yaml");
+      assert.equal(status.configExists, false);
+      assert.isNull(status.roots);
+      assert.deepEqual(status.marmot, { available: false, version: null });
+      assert.isNull(status.lastFailure);
+      assert.deepEqual(status.pendingCleanups, []);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("stave.getStatus reports the runnable binary, roots and marmot", () =>
+    Effect.gen(function* () {
+      const resolution = {
+        path: "/opt/stave/bin/stave",
+        source: "bundled" as const,
+        version: "0.4.0",
+        commit: "1a2b3c4",
+      };
+      yield* buildAppUnderTest({
+        layers: {
+          staveBinary: { resolveRunnable: Effect.succeed(resolution) },
+          staveConfigReader: {
+            load: Effect.succeed({
+              configPath: "/home/tester/.config/stave/config.yaml",
+              exists: true,
+              root: "/home/tester/stave",
+              bareReposDir: "/home/tester/stave/bare-repos",
+              agentWorkDir: "/home/tester/stave/agent-work",
+              defaultBase: "main",
+              repos: [],
+              memory: { provider: "marmot", binary: "marmot", default: false },
+              source: "stave-config-show",
+            }),
+          },
+          staveCli: {
+            memoryProviders: Effect.succeed([
+              {
+                name: "marmot",
+                binary: "marmot",
+                default: true,
+                available: true,
+                version: "marmot v0.1.12",
+                capabilities: ["dens"],
+              },
+            ]),
+          },
+        },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+
+      const status = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.staveGetStatus]({})),
+      );
+
+      assert.deepEqual(status.runnable, resolution);
+      assert.isNull(status.runnableError);
+      assert.equal(status.configExists, true);
+      assert.deepEqual(status.roots, {
+        root: "/home/tester/stave",
+        bareReposDir: "/home/tester/stave/bare-repos",
+        agentWorkDir: "/home/tester/stave/agent-work",
+      });
+      assert.deepEqual(status.marmot, { available: true, version: "marmot v0.1.12" });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("stave.spaceStatus requires the setting and a runnable binary", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const call = () =>
+        Effect.flip(
+          Effect.scoped(
+            withWsRpcClient(wsUrl, (client) =>
+              client[WS_METHODS.staveSpaceStatus]({ workspaceRoot: "/tmp/space" }),
+            ),
+          ),
+        );
+
+      const disabled = yield* call();
+      assert.equal(disabled._tag, "StaveUnavailableError");
+      if (disabled._tag === "StaveUnavailableError") {
+        assert.equal(disabled.reason, "disabled_in_settings");
+      }
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("stave.spaceStatus runs space status once per root within the TTL", () =>
+    Effect.gen(function* () {
+      const spaceStatusCalls = yield* Ref.make<Array<string>>([]);
+      const spaceStatusJson: StaveSpaceStatusJson = {
+        spaceId: "demo",
+        spacePath: "/home/tester/stave/agent-work/demo",
+        manifest: {
+          id: "demo",
+          createdAt: "2026-09-01T07:32:05.38559Z",
+          repos: [],
+          memories: [],
+        },
+        repos: [
+          {
+            name: "api",
+            mode: "edit",
+            path: "/home/tester/stave/agent-work/demo/api",
+            branch: "stave/demo/api",
+            base: "origin/main",
+            exists: true,
+            dirty: true,
+            ahead: 2,
+            behind: 1,
+          },
+        ],
+        memories: [
+          { name: "notes", provider: "marmot", id: "den-1", owned: true, state: "2 unpushed" },
+        ],
+      };
+      yield* buildAppUnderTest({
+        layers: {
+          serverSettings: {
+            getSettings: Effect.succeed({
+              ...DEFAULT_SERVER_SETTINGS,
+              stave: { ...DEFAULT_SERVER_SETTINGS.stave, enabled: true },
+            }),
+          },
+          staveBinary: {
+            resolveRunnable: Effect.succeed({
+              path: "/usr/local/bin/stave",
+              source: "path" as const,
+              version: "0.4.0",
+              commit: null,
+            }),
+          },
+          staveWorkspaceReader: {
+            load: (workspaceRoot) =>
+              Effect.succeed(
+                workspaceRoot === "/tmp/space"
+                  ? Option.some({
+                      spaceId: "demo",
+                      isSaga: false,
+                      repos: [],
+                      memories: [],
+                      state: "live" as const,
+                    })
+                  : Option.none(),
+              ),
+          },
+          staveCli: {
+            spaceStatus: (spaceId) =>
+              Ref.update(spaceStatusCalls, (calls) => [...calls, spaceId]).pipe(
+                Effect.as(spaceStatusJson),
+              ),
+          },
+        },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const call = (workspaceRoot: string) =>
+        Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.staveSpaceStatus]({ workspaceRoot }),
+          ),
+        );
+
+      const first = yield* call("/tmp/space");
+      const second = yield* call("/tmp/space");
+      assert.deepEqual(yield* Ref.get(spaceStatusCalls), ["demo"]);
+      assert.deepEqual(second, first);
+      assert.equal(first.spaceId, "demo");
+      assert.equal(first.createdAt, "2026-09-01T07:32:05.38559Z");
+      assert.isUndefined(first.kind);
+      assert.deepEqual(first.repos, [
+        {
+          name: "api",
+          mode: "edit",
+          path: "/home/tester/stave/agent-work/demo/api",
+          branch: "stave/demo/api",
+          base: "origin/main",
+          exists: true,
+          dirty: true,
+          ahead: 2,
+          behind: 1,
+        },
+      ]);
+      assert.deepEqual(first.memories, [
+        { name: "notes", provider: "marmot", id: "den-1", owned: true, state: "2 unpushed" },
+      ]);
+
+      yield* TestClock.adjust(Duration.seconds(16));
+      yield* call("/tmp/space");
+      assert.deepEqual(yield* Ref.get(spaceStatusCalls), ["demo", "demo"]);
+
+      const notSpace = yield* Effect.flip(call("/tmp/not-a-space"));
+      assert.equal(notSpace._tag, "StaveNotSpaceError");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("proxies browser OTLP trace exports through the server", () =>
