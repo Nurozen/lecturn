@@ -536,6 +536,24 @@ it.effect("decodes thread settle and unsettle commands", () =>
   }),
 );
 
+it.effect("decodes project.refresh only as an internal command", () =>
+  Effect.gen(function* () {
+    const command = {
+      type: "project.refresh",
+      commandId: "server:stave:refresh:project-1:1",
+      projectId: "project-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    const internal = yield* decodeOrchestrationCommand(command);
+    assert.strictEqual(internal.type, "project.refresh");
+
+    // Clients cannot force a shell re-broadcast; only the server dispatches it.
+    const rejected = yield* decodeClientOrchestrationCommand(command).pipe(Effect.flip);
+    assert.ok(rejected);
+  }),
+);
+
 it.effect("defaults settled fields when decoding historical thread data", () =>
   Effect.gen(function* () {
     const common = {

@@ -151,6 +151,7 @@ function reduceThreadDetailEvent(
     case "project.created":
     case "project.meta-updated":
     case "project.deleted":
+    case "project.refreshed":
       return { kind: "unchanged" };
 
     // ── Thread lifecycle ────────────────────────────────────────────

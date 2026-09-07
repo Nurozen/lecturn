@@ -1,4 +1,6 @@
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { staveAdmissionErrorMessage } from "@t3tools/client-runtime/errors";
+import { resolveProjectGitCwd, staveForcedEnvMode } from "@t3tools/client-runtime/state/projectGit";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -82,7 +84,10 @@ interface BranchToolbarBranchSelectorProps {
 }
 
 function toBranchActionErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "An error occurred.";
+  return (
+    staveAdmissionErrorMessage(error) ??
+    (error instanceof Error ? error.message : "An error occurred.")
+  );
 }
 
 export function BranchToolbarBranchSelector({
@@ -138,16 +143,22 @@ export function BranchToolbarBranchSelector({
       ? activeThreadBranchOverride
       : (serverThread?.branch ?? draftThread?.branch ?? null);
   const activeWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
-  const activeProjectCwd = activeProject?.workspaceRoot ?? null;
-  const branchCwd = activeWorktreePath ?? activeProjectCwd;
+  // Git targets the project's primary repo for a Stave space (the space root
+  // is not a repository); otherwise these are the workspace root and the
+  // thread's worktree, exactly as before.
+  const activeProjectCwd = resolveProjectGitCwd({ project: activeProject, thread: null });
+  const branchCwd = resolveProjectGitCwd({
+    project: activeProject,
+    thread: { worktreePath: activeWorktreePath },
+  });
   const hasServerThread = serverThread !== null;
-  const effectiveEnvMode =
-    effectiveEnvModeOverride ??
-    resolveEffectiveEnvMode({
-      activeWorktreePath,
-      hasServerThread,
-      draftThreadEnvMode: draftThread?.envMode,
-    });
+  const effectiveEnvMode = resolveEffectiveEnvMode({
+    activeWorktreePath,
+    hasServerThread,
+    draftThreadEnvMode: draftThread?.envMode,
+    forcedEnvMode: staveForcedEnvMode(activeProject),
+    overrideEnvMode: effectiveEnvModeOverride,
+  });
 
   // ---------------------------------------------------------------------------
   // Thread branch mutation (colocated — only this component calls it)

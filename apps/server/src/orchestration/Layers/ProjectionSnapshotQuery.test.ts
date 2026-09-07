@@ -6,15 +6,18 @@ import {
   ThreadId,
   TurnId,
   ProviderInstanceId,
+  type StaveProjectInfo,
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
+import * as StaveWorkspaceReader from "../../stave/StaveWorkspaceReader.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import * as ThreadBackgroundLiveness from "../ThreadBackgroundLiveness.ts";
@@ -29,10 +32,24 @@ const asMessageId = (value: string): MessageId => MessageId.make(value);
 const asEventId = (value: string): EventId => EventId.make(value);
 const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.make(value);
 
+/** Reader stub for standalone tests; `load` decides per root and may record calls. */
+const fakeStaveWorkspaceReader = (
+  load: (workspaceRoot: string) => Effect.Effect<Option.Option<StaveProjectInfo>>,
+) =>
+  Layer.succeed(
+    StaveWorkspaceReader.StaveWorkspaceReader,
+    StaveWorkspaceReader.StaveWorkspaceReader.of({
+      load,
+      invalidate: () => Effect.void,
+      invalidateAll: () => Effect.void,
+    }),
+  );
+
 const projectionSnapshotLayer = it.layer(
   OrchestrationProjectionSnapshotQueryLive.pipe(
     Layer.provide(ThreadBackgroundLiveness.layer),
     Layer.provide(ThreadPlanProgress.layer),
+    Layer.provideMerge(StaveWorkspaceReader.layer),
     Layer.provideMerge(RepositoryIdentityResolver.layer),
     Layer.provideMerge(SqlitePersistenceMemory),
     Layer.provideMerge(NodeServices.layer),
@@ -274,6 +291,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           title: "Project 1",
           workspaceRoot: "/tmp/project-1",
           repositoryIdentity: null,
+          stave: null,
+          notice: null,
           defaultModelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",
@@ -403,6 +422,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           title: "Project 1",
           workspaceRoot: "/tmp/project-1",
           repositoryIdentity: null,
+          stave: null,
+          notice: null,
           defaultModelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",
@@ -2011,6 +2032,7 @@ it.effect(
             }),
         }),
       ),
+      Layer.provideMerge(fakeStaveWorkspaceReader(() => Effect.succeed(Option.none()))),
       Layer.provideMerge(SqlitePersistenceMemory),
     );
 
@@ -2082,6 +2104,120 @@ it.effect(
     }).pipe(Effect.provide(layer));
   },
 );
+
+it.effect("ProjectionSnapshotQuery attaches stave info per workspace root", () => {
+  const staveInfo = {
+    spaceId: "space-1",
+    isSaga: false,
+    repos: [{ name: "app", mode: "edit", path: "app", branch: "stave/space-1/app" }],
+    memories: [],
+    primaryRepoPath: "/tmp/stave-root/app",
+    primaryBranch: "stave/space-1/app",
+    state: "live",
+  } satisfies StaveProjectInfo;
+  const loadCalls: string[] = [];
+  const layer = OrchestrationProjectionSnapshotQueryLive.pipe(
+    Layer.provide(ThreadBackgroundLiveness.layer),
+    Layer.provide(ThreadPlanProgress.layer),
+    Layer.provideMerge(
+      Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+        resolve: () => Effect.succeed(null),
+      }),
+    ),
+    Layer.provideMerge(
+      fakeStaveWorkspaceReader((workspaceRoot) =>
+        Effect.sync(() => {
+          loadCalls.push(workspaceRoot);
+          return workspaceRoot === "/tmp/stave-root" ? Option.some(staveInfo) : Option.none();
+        }),
+      ),
+    ),
+    Layer.provideMerge(SqlitePersistenceMemory),
+  );
+
+  return Effect.gen(function* () {
+    const snapshotQuery = yield* ProjectionSnapshotQuery;
+    const sql = yield* SqlClient.SqlClient;
+
+    yield* sql`DELETE FROM projection_projects`;
+    yield* sql`DELETE FROM projection_threads`;
+    yield* sql`DELETE FROM projection_turns`;
+    yield* sql`DELETE FROM projection_state`;
+
+    yield* sql`
+      INSERT INTO projection_projects (
+        project_id,
+        title,
+        workspace_root,
+        default_model_selection_json,
+        scripts_json,
+        created_at,
+        updated_at,
+        deleted_at
+      )
+      VALUES
+        (
+          'project-1',
+          'Stave Project',
+          '/tmp/stave-root',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-04-04T00:00:00.000Z',
+          '2026-04-04T00:00:01.000Z',
+          NULL
+        ),
+        (
+          'project-2',
+          'Plain Project',
+          '/tmp/plain-root',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-04-04T00:00:02.000Z',
+          '2026-04-04T00:00:03.000Z',
+          NULL
+        ),
+        (
+          'project-3',
+          'Deleted Stave Project',
+          '/tmp/stave-root',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-04-04T00:00:04.000Z',
+          '2026-04-04T00:00:05.000Z',
+          '2026-04-04T00:00:06.000Z'
+        )
+    `;
+
+    const shellSnapshot = yield* snapshotQuery.getShellSnapshot();
+    assert.equal(shellSnapshot.projects.length, 2);
+    assert.deepStrictEqual(shellSnapshot.projects[0]?.stave, staveInfo);
+    assert.strictEqual(shellSnapshot.projects[0]?.notice, null);
+    assert.strictEqual(shellSnapshot.projects[1]?.stave, null);
+    assert.deepStrictEqual(loadCalls.toSorted(), ["/tmp/plain-root", "/tmp/stave-root"]);
+
+    loadCalls.length = 0;
+
+    const fullSnapshot = yield* snapshotQuery.getSnapshot();
+    assert.equal(fullSnapshot.projects.length, 3);
+    assert.deepStrictEqual(fullSnapshot.projects[2]?.stave, staveInfo);
+    assert.deepStrictEqual(loadCalls.toSorted(), ["/tmp/plain-root", "/tmp/stave-root"]);
+
+    const staveShell = yield* snapshotQuery.getProjectShellById(ProjectId.make("project-1"));
+    assert.isTrue(Option.isSome(staveShell));
+    assert.equal(Option.getOrThrow(staveShell).stave?.spaceId, "space-1");
+    const plainShell = yield* snapshotQuery.getProjectShellById(ProjectId.make("project-2"));
+    assert.isTrue(Option.isSome(plainShell));
+    assert.strictEqual(Option.getOrThrow(plainShell).stave, null);
+
+    const staveProject = yield* snapshotQuery.getActiveProjectByWorkspaceRoot("/tmp/stave-root");
+    assert.isTrue(Option.isSome(staveProject));
+    assert.equal(Option.getOrThrow(staveProject).stave?.spaceId, "space-1");
+    assert.strictEqual(Option.getOrThrow(staveProject).notice, null);
+    const plainProject = yield* snapshotQuery.getActiveProjectByWorkspaceRoot("/tmp/plain-root");
+    assert.isTrue(Option.isSome(plainProject));
+    assert.strictEqual(Option.getOrThrow(plainProject).stave, null);
+  }).pipe(Effect.provide(layer));
+});
 
 projectionSnapshotLayer("ProjectionSnapshotQuery windowed thread detail", (it) => {
   // A thread shaped like real fan-out usage: user turns interleaved with

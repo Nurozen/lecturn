@@ -9,6 +9,7 @@ import {
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
   resolveEnvModeLabel,
+  resolveEnvModeLocked,
   resolveBranchTriggerLabel,
   resolveBranchToolbarPrBranch,
   resolveBranchToolbarValue,
@@ -832,5 +833,82 @@ describe("sanitizeNewRefName", () => {
   it("does not collapse dashes the user typed", () => {
     expect(sanitizeNewRefName("new - branch")).toBe("new---branch");
     expect(sanitizeNewRefName("foo--bar")).toBe("foo--bar");
+  });
+});
+
+describe("resolveEffectiveEnvMode", () => {
+  it("lets a parent override win over the draft's env mode", () => {
+    expect(
+      resolveEffectiveEnvMode({
+        activeWorktreePath: null,
+        hasServerThread: false,
+        draftThreadEnvMode: "local",
+        overrideEnvMode: "worktree",
+      }),
+    ).toBe("worktree");
+  });
+
+  it("forces local for a Stave space even when the override or draft asks for a worktree", () => {
+    expect(
+      resolveEffectiveEnvMode({
+        activeWorktreePath: null,
+        hasServerThread: false,
+        draftThreadEnvMode: "worktree",
+        forcedEnvMode: "local",
+        overrideEnvMode: "worktree",
+      }),
+    ).toBe("local");
+  });
+
+  it("keeps the pre-Stave resolution when nothing is forced", () => {
+    expect(
+      resolveEffectiveEnvMode({
+        activeWorktreePath: null,
+        hasServerThread: false,
+        draftThreadEnvMode: "worktree",
+      }),
+    ).toBe("worktree");
+    expect(
+      resolveEffectiveEnvMode({
+        activeWorktreePath: "/repo/.worktrees/a",
+        hasServerThread: true,
+        draftThreadEnvMode: undefined,
+      }),
+    ).toBe("worktree");
+  });
+});
+
+describe("resolveEnvModeLocked", () => {
+  it("locks the picker for a Stave space regardless of thread state", () => {
+    expect(
+      resolveEnvModeLocked({
+        envLocked: false,
+        forcedEnvMode: "local",
+        hasServerThread: false,
+        activeWorktreePath: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("locks a started thread that already has a worktree", () => {
+    expect(
+      resolveEnvModeLocked({
+        envLocked: false,
+        forcedEnvMode: undefined,
+        hasServerThread: true,
+        activeWorktreePath: "/repo/.worktrees/a",
+      }),
+    ).toBe(true);
+  });
+
+  it("leaves a plain draft unlocked", () => {
+    expect(
+      resolveEnvModeLocked({
+        envLocked: false,
+        forcedEnvMode: undefined,
+        hasServerThread: false,
+        activeWorktreePath: null,
+      }),
+    ).toBe(false);
   });
 });

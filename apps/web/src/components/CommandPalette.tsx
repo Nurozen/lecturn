@@ -82,6 +82,7 @@ import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { vcsEnvironment } from "../state/vcs";
+import { resolveThreadGitTarget } from "../lib/threadGitTarget";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
@@ -613,11 +614,15 @@ function OpenCommandPaletteDialog(props: {
       ? null
       : scopeProjectRef(activeThread.environmentId, activeThread.projectId),
   );
-  const activeThreadCwd = activeThread?.worktreePath ?? activeThreadProject?.workspaceRoot ?? null;
+  const activeThreadGitTarget = resolveThreadGitTarget({
+    project: activeThreadProject,
+    thread: activeThread,
+  });
+  const activeThreadCwd = activeThreadGitTarget.cwd;
   const activeThreadGitStatus = useEnvironmentQuery(
     activeThread != null &&
       activeThread.linkedPullRequest == null &&
-      activeThread.branch !== null &&
+      activeThreadGitTarget.statusEnabled &&
       activeThreadCwd !== null
       ? vcsEnvironment.status({
           environmentId: activeThread.environmentId,
@@ -629,7 +634,7 @@ function OpenCommandPaletteDialog(props: {
     activeThread == null || activeThread.linkedPullRequest != null
       ? null
       : (ThreadPr.resolveDisplayedThreadPr({
-          threadBranch: activeThread.branch,
+          threadBranch: activeThreadGitTarget.branch,
           gitStatus: activeThreadGitStatus ?? null,
           snapshot: changeRequestSnapshotByKey.get(
             scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id)),

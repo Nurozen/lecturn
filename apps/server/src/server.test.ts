@@ -22,6 +22,7 @@ import {
   OrchestrationThreadDetailSnapshot,
   type OrchestrationThreadStreamItem,
   type OrchestrationThreadActivity,
+  type OrchestrationProjectShell,
   type OrchestrationThreadShell,
   TerminalNotRunningError,
   type OrchestrationCommand,
@@ -133,6 +134,9 @@ import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolve
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
+import * as StaveAdmission from "./stave/StaveAdmission.ts";
+import { STAVE_MANIFEST_FILE_NAME } from "./stave/staveManifest.ts";
+import * as StaveWorkspaceReader from "./stave/StaveWorkspaceReader.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriver from "./vcs/VcsDriver.ts";
@@ -485,6 +489,7 @@ const buildAppUnderTest = (options?: {
     desktopTelemetryReceiver?: Partial<
       DesktopTelemetryReceiver.DesktopTelemetryReceiver["Service"]
     >;
+    staveWorkspaceReader?: Partial<StaveWorkspaceReader.StaveWorkspaceReader["Service"]>;
   };
 }) =>
   Effect.gen(function* () {
@@ -675,6 +680,20 @@ const buildAppUnderTest = (options?: {
     const serviceLauncherClientLayer = ServiceLauncherClient.layer.pipe(
       Layer.provide(Layer.succeed(HostProcessEnvironment, {})),
     );
+    const repositoryIdentityResolverLayer = Layer.mock(
+      RepositoryIdentityResolver.RepositoryIdentityResolver,
+    )({
+      resolve: () => Effect.succeed(null),
+      ...options?.layers?.repositoryIdentityResolver,
+    });
+    // The real reader by default, so a test can turn a temp root into a Stave
+    // space by writing its manifest; `layers.staveWorkspaceReader` stubs it.
+    const staveWorkspaceReaderLayer = options?.layers?.staveWorkspaceReader
+      ? Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
+          ...options.layers.staveWorkspaceReader,
+        })
+      : StaveWorkspaceReader.layer.pipe(Layer.provide(repositoryIdentityResolverLayer));
+    const staveLayer = StaveAdmission.layer.pipe(Layer.provideMerge(staveWorkspaceReaderLayer));
 
     const servedRoutesLayer = HttpRouter.serve(
       makeRoutesLayer.pipe(Layer.provide(serviceLauncherClientLayer)),
@@ -1032,12 +1051,8 @@ const buildAppUnderTest = (options?: {
           ...options?.layers?.serverEnvironment,
         }),
       ),
-      Layer.provide(
-        Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({
-          resolve: () => Effect.succeed(null),
-          ...options?.layers?.repositoryIdentityResolver,
-        }),
-      ),
+      Layer.provide(staveLayer),
+      Layer.provide(repositoryIdentityResolverLayer),
       Layer.provide(
         Layer.succeed(
           CloudManagedEndpointRuntime.CloudManagedEndpointRuntime,
@@ -7905,6 +7920,72 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("subscribeShell re-sends the current project shell for project.refreshed", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.make("project-refreshed");
+      const now = "2026-01-01T00:00:00.000Z";
+      const shellReads: Array<ProjectId> = [];
+      // The event carries only the id; the shell (including derived Stave
+      // state) is re-read from the projection at delivery time.
+      const projectShell = {
+        id: projectId,
+        title: "Refreshed Project",
+        workspaceRoot: "/tmp/project-refreshed",
+        defaultModelSelection: null,
+        scripts: [],
+        stave: { spaceId: "feature-x", isSaga: false, repos: [], memories: [] },
+        createdAt: now,
+        updatedAt: now,
+      };
+      const refreshedEvent: OrchestrationEvent = {
+        sequence: 7,
+        eventId: EventId.make("event-project-refreshed"),
+        aggregateKind: "project",
+        aggregateId: projectId,
+        occurredAt: now,
+        commandId: CommandId.make("server:stave:refresh:project-refreshed:1"),
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        type: "project.refreshed",
+        payload: { projectId },
+      };
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            latestSequence: Effect.succeed(7),
+            readEvents: () => Stream.fromIterable([refreshedEvent]),
+          },
+          projectionSnapshotQuery: {
+            getProjectShellById: (id) =>
+              Effect.sync(() => {
+                shellReads.push(id);
+                return Option.some(projectShell);
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const items = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeShell]({ afterSequence: 6 }).pipe(
+            Stream.take(1),
+            Stream.runCollect,
+          ),
+        ),
+      );
+
+      const [first] = Array.from(items);
+      assert.equal(first?.kind, "project-upserted");
+      if (first?.kind !== "project-upserted") return;
+      assert.equal(first.sequence, 7);
+      assert.deepEqual(first.project, projectShell);
+      assert.deepEqual(shellReads, [projectId]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("stops the provider session and closes thread terminals after archive", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("thread-archive");
@@ -10129,3 +10210,290 @@ it.live(
     }).pipe(Effect.provide(NodeServices.layer)),
   120_000,
 );
+
+// Stave admission: every worktree-producing path refuses a project whose root
+// carries a `.stave.yaml` manifest. The manifest is real (temp dir), so these
+// exercise the reader, the admission service and each transport hook together.
+it.layer(NodeServices.layer)("Stave admission over the server transports", (it) => {
+  const staveProjectId = ProjectId.make("project-stave");
+  const now = "2026-08-01T00:00:00.000Z";
+
+  const makeStaveRoot = Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const staveRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-stave-space-" });
+    yield* fileSystem.writeFileString(
+      path.join(staveRoot, STAVE_MANIFEST_FILE_NAME),
+      "version: 1\nid: server-test-space\n",
+    );
+    return staveRoot;
+  });
+
+  const makeStaveProjectShell = (workspaceRoot: string): OrchestrationProjectShell => ({
+    id: staveProjectId,
+    title: "Stave Space",
+    workspaceRoot,
+    defaultModelSelection: null,
+    scripts: [],
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  it.effect("rejects a WebSocket bootstrap turn start that prepares a worktree", () =>
+    Effect.gen(function* () {
+      const staveRoot = yield* makeStaveRoot;
+      let engineDispatches = 0;
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getProjectShellById: (projectId) =>
+              Effect.succeed(
+                projectId === staveProjectId
+                  ? Option.some(makeStaveProjectShell(staveRoot))
+                  : Option.none(),
+              ),
+          },
+          orchestrationEngine: {
+            dispatch: () =>
+              Effect.sync(() => {
+                engineDispatches += 1;
+                return { sequence: 1 };
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const error = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-stave-bootstrap"),
+            threadId: ThreadId.make("thread-stave-bootstrap"),
+            message: {
+              messageId: MessageId.make("message-stave-bootstrap"),
+              role: "user",
+              text: "start in a worktree",
+              attachments: [],
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            createdAt: now,
+            bootstrap: {
+              createThread: {
+                projectId: staveProjectId,
+                title: "Bootstrapped",
+                modelSelection: defaultModelSelection,
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                branch: null,
+                worktreePath: null,
+                createdAt: now,
+              },
+              prepareWorktree: { projectCwd: staveRoot, baseBranch: "main" },
+            },
+          }).pipe(Effect.flip),
+        ),
+      );
+
+      assert.equal(error._tag, "OrchestrationDispatchCommandError");
+      assertInclude(error.message, "space root");
+      assert.equal(engineDispatches, 0);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects an HTTP thread.create that names a worktree, admits one in the root", () =>
+    Effect.gen(function* () {
+      const staveRoot = yield* makeStaveRoot;
+      let engineDispatches = 0;
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getProjectShellById: (projectId) =>
+              Effect.succeed(
+                projectId === staveProjectId
+                  ? Option.some(makeStaveProjectShell(staveRoot))
+                  : Option.none(),
+              ),
+          },
+          orchestrationEngine: {
+            dispatch: () =>
+              Effect.sync(() => {
+                engineDispatches += 1;
+                return { sequence: 1 };
+              }),
+          },
+        },
+      });
+
+      const dispatchUrl = yield* getHttpServerUrl("/api/orchestration/dispatch");
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      const createThread = (commandId: string, worktreePath: string | null) =>
+        fetchEffect(dispatchUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json", cookie },
+          body: jsonRequestBody({
+            type: "thread.create",
+            commandId,
+            threadId: `thread-${commandId}`,
+            projectId: staveProjectId,
+            title: "Stave thread",
+            modelSelection: defaultModelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath,
+            createdAt: now,
+          }),
+        });
+
+      const refused = yield* createThread("cmd-stave-http-worktree", "/tmp/stave-worktree");
+      const refusedBody = yield* responseJsonEffect<{
+        readonly code: string;
+        readonly reason: string;
+      }>(refused);
+      assert.equal(refused.status, 400);
+      assert.equal(refusedBody.code, "invalid_request");
+      assert.equal(refusedBody.reason, "invalid_command");
+      assert.equal(engineDispatches, 0);
+
+      const admitted = yield* createThread("cmd-stave-http-root", null);
+      assert.equal(admitted.status, 200);
+      assert.equal(engineDispatches, 1);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects forking a worktree-backed thread that belongs to a Stave project", () =>
+    Effect.gen(function* () {
+      const staveRoot = yield* makeStaveRoot;
+      const sourceThreadId = ThreadId.make("thread-stave-fork-source");
+      const throughTurnId = TurnId.make("turn-stave-fork");
+      const sourceDetail = {
+        ...makeDefaultOrchestrationReadModel().threads[0]!,
+        id: sourceThreadId,
+        projectId: staveProjectId,
+        worktreePath: "/tmp/stave-legacy-worktree",
+      };
+      let engineDispatches = 0;
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getThreadShellById: () => Effect.succeed(Option.none()),
+            getThreadDetailById: (threadId) =>
+              Effect.succeed(
+                threadId === sourceThreadId ? Option.some(sourceDetail) : Option.none(),
+              ),
+            listThreadTurnsById: () =>
+              Effect.succeed([
+                {
+                  threadId: sourceThreadId,
+                  turnId: throughTurnId,
+                  pendingMessageId: null,
+                  sourceProposedPlanThreadId: null,
+                  sourceProposedPlanId: null,
+                  assistantMessageId: null,
+                  state: "completed" as const,
+                  requestedAt: now,
+                  startedAt: now,
+                  completedAt: now,
+                  checkpointTurnCount: null,
+                  checkpointRef: null,
+                  checkpointStatus: null,
+                  checkpointFiles: [],
+                },
+              ]),
+            listThreadActivitiesById: () => Effect.succeed([]),
+            getThreadForkContextById: () => Effect.succeed(Option.none()),
+            getProjectShellById: (projectId) =>
+              Effect.succeed(
+                projectId === staveProjectId
+                  ? Option.some(makeStaveProjectShell(staveRoot))
+                  : Option.none(),
+              ),
+          },
+          providerService: {
+            getCapabilities: () =>
+              Effect.succeed({
+                sessionModelSwitch: "in-session" as const,
+                conversationFork: "native" as const,
+                conversationForkRequiresAnchor: false,
+              }),
+          },
+          orchestrationEngine: {
+            dispatch: () =>
+              Effect.sync(() => {
+                engineDispatches += 1;
+                return { sequence: 1 };
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const error = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.fork",
+            commandId: CommandId.make("cmd-stave-fork"),
+            threadId: ThreadId.make("thread-stave-fork-child"),
+            sourceThreadId,
+            throughTurnId,
+            workspace: "inherit",
+            createdAt: now,
+          }).pipe(Effect.flip),
+        ),
+      );
+
+      assert.equal(error._tag, "OrchestrationDispatchCommandError");
+      assertInclude(error.message, "space root");
+      assert.equal(engineDispatches, 0);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects vcs.createWorktree and PR-thread preparation for a Stave root cwd", () =>
+    Effect.gen(function* () {
+      const staveRoot = yield* makeStaveRoot;
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getActiveProjectByWorkspaceRoot: (workspaceRoot) =>
+              Effect.succeed(
+                workspaceRoot === staveRoot
+                  ? Option.some({
+                      ...makeDefaultOrchestrationReadModel().projects[0]!,
+                      id: staveProjectId,
+                      workspaceRoot,
+                    })
+                  : Option.none(),
+              ),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const worktreeError = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.vcsCreateWorktree]({
+            cwd: staveRoot,
+            refName: "main",
+            path: null,
+          }).pipe(Effect.flip),
+        ),
+      );
+      assert.equal(worktreeError._tag, "GitCommandError");
+      assertInclude(worktreeError.message, "space root");
+
+      const prepareError = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.gitPreparePullRequestThread]({
+            cwd: staveRoot,
+            reference: "1",
+            mode: "local",
+          }).pipe(Effect.flip),
+        ),
+      );
+      assert.equal(prepareError._tag, "GitCommandError");
+      assertInclude(prepareError.message, "space root");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+});

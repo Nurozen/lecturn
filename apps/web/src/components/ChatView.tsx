@@ -196,6 +196,7 @@ import {
 import { cn, randomHex } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
+import { resolveCheckpointsUnavailableReason, resolveThreadGitTarget } from "~/lib/threadGitTarget";
 import { type NewProjectScriptInput } from "./ProjectScriptsControl";
 import {
   buildProjectScript,
@@ -2972,10 +2973,12 @@ function ChatViewContent(props: ChatViewProps) {
       : null;
   // An unsent fork has no provider session yet, so revert has nothing to act
   // on until the child's first send creates one.
+  // A Stave space never records checkpoints (its root is not a repo), so revert
+  // stays blocked there with the reason surfaced in the button tooltip.
   const revertDisabledReason =
     activeThread != null && activeThread.forkedFrom != null && activeThread.session == null
       ? "Send a message first — revert becomes available once the fork has its own session"
-      : null;
+      : resolveCheckpointsUnavailableReason(activeProject);
 
   const gitCwd = activeProject
     ? projectScriptCwd({
@@ -2983,7 +2986,10 @@ function ChatViewContent(props: ChatViewProps) {
         worktreePath: activeThread?.worktreePath ?? null,
       })
     : null;
-  const gitStatusCwd = activeThread?.worktreePath ?? gitCwd;
+  // `gitCwd` is where scripts, terminals and provider sessions run (the space
+  // root for Stave); git status and the header's git actions target the
+  // thread's repo instead, which for a Stave space is its primary repo.
+  const gitStatusCwd = resolveThreadGitTarget({ project: activeProject, thread: activeThread }).cwd;
   const gitStatusQuery = useEnvironmentQuery(
     gitStatusCwd === null
       ? null
@@ -7715,7 +7721,7 @@ function ChatViewContent(props: ChatViewProps) {
             keybindings={keybindings}
             availableEditors={availableEditors}
             rightPanelOpen={rightPanelOpen}
-            gitCwd={gitCwd}
+            gitCwd={gitStatusCwd}
             onNewThreadInProject={handleNewThreadInActiveProject}
             onRunProjectScript={runProjectScript}
             onAddProjectScript={saveProjectScript}

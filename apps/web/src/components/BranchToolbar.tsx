@@ -1,4 +1,5 @@
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { staveForcedEnvMode } from "@t3tools/client-runtime/state/projectGit";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import {
   ChevronDownIcon,
@@ -18,6 +19,7 @@ import {
   resolveCurrentWorkspaceLabel,
   resolveEnvModeLabel,
   resolveEffectiveEnvMode,
+  resolveEnvModeLocked,
   resolveLockedWorkspaceLabel,
   resolvePreviousWorktreeLabel,
   resolvePreviousWorktreeSeed,
@@ -64,6 +66,9 @@ interface BranchToolbarProps {
 interface MobileRunContextSelectorProps {
   envLocked: boolean;
   envModeLocked: boolean;
+  /** False for Stave spaces: their repos are already worktrees, so the
+      worktree options are not offered at all rather than shown disabled. */
+  worktreeModeAvailable: boolean;
   environmentId: EnvironmentId;
   availableEnvironments: readonly EnvironmentOption[] | undefined;
   showEnvironmentPicker: boolean;
@@ -79,6 +84,7 @@ interface MobileRunContextSelectorProps {
 const MobileRunContextSelector = memo(function MobileRunContextSelector({
   envLocked,
   envModeLocked,
+  worktreeModeAvailable,
   environmentId,
   availableEnvironments,
   showEnvironmentPicker,
@@ -207,13 +213,15 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
                 </span>
               </span>
             </MenuRadioItem>
-            <MenuRadioItem disabled={envModeLocked} value="worktree">
-              <span className="flex min-w-0 items-center gap-1.5">
-                <FolderGit2Icon className="size-3" />
-                <span className="min-w-0 truncate">{resolveEnvModeLabel("worktree")}</span>
-              </span>
-            </MenuRadioItem>
-            {previousWorktreeLabel ? (
+            {worktreeModeAvailable ? (
+              <MenuRadioItem disabled={envModeLocked} value="worktree">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <FolderGit2Icon className="size-3" />
+                  <span className="min-w-0 truncate">{resolveEnvModeLabel("worktree")}</span>
+                </span>
+              </MenuRadioItem>
+            ) : null}
+            {worktreeModeAvailable && previousWorktreeLabel ? (
               <MenuRadioItem disabled={envModeLocked} value="previous-worktree">
                 <span className="flex min-w-0 items-center gap-1.5">
                   <HistoryIcon className="size-3" />
@@ -433,14 +441,22 @@ export const BranchToolbar = memo(function BranchToolbar({
   const activeProject = useProject(activeProjectRef);
   const hasActiveThread = serverThread !== null || draftThread !== null;
   const activeWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
-  const effectiveEnvMode =
-    effectiveEnvModeOverride ??
-    resolveEffectiveEnvMode({
-      activeWorktreePath,
-      hasServerThread: serverThread !== null,
-      draftThreadEnvMode: draftThread?.envMode,
-    });
-  const envModeLocked = envLocked || (serverThread !== null && activeWorktreePath !== null);
+  // A Stave space's repos are already worktrees: the mode is pinned to local
+  // and the picker is read-only so nothing can offer to create another one.
+  const forcedEnvMode = staveForcedEnvMode(activeProject);
+  const effectiveEnvMode = resolveEffectiveEnvMode({
+    activeWorktreePath,
+    hasServerThread: serverThread !== null,
+    draftThreadEnvMode: draftThread?.envMode,
+    forcedEnvMode,
+    overrideEnvMode: effectiveEnvModeOverride,
+  });
+  const envModeLocked = resolveEnvModeLocked({
+    envLocked,
+    forcedEnvMode,
+    hasServerThread: serverThread !== null,
+    activeWorktreePath,
+  });
 
   // "Previous worktree" hops a draft into the most recently active worktree
   // of this project — the "keep going where I just was" follow-up flow. Only
@@ -507,6 +523,7 @@ export const BranchToolbar = memo(function BranchToolbar({
           <MobileRunContextSelector
             envLocked={envLocked}
             envModeLocked={envModeLocked}
+            worktreeModeAvailable={forcedEnvMode === undefined}
             environmentId={environmentId}
             availableEnvironments={availableEnvironments}
             showEnvironmentPicker={showEnvironmentPicker}

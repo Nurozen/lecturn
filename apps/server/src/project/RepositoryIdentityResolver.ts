@@ -8,9 +8,12 @@ import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 
 import * as ProcessRunner from "../processRunner.ts";
+import { STAVE_MANIFEST_FILE_NAME } from "../stave/staveManifest.ts";
 
 const DEFAULT_REPOSITORY_IDENTITY_CACHE_CAPACITY = 512;
 const DEFAULT_POSITIVE_CACHE_TTL = Duration.minutes(1);
@@ -134,6 +137,8 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
   options: RepositoryIdentityResolverOptions = {},
 ) {
   const processRunner = yield* ProcessRunner.ProcessRunner;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const cacheCapacity = options.cacheCapacity ?? DEFAULT_REPOSITORY_IDENTITY_CACHE_CAPACITY;
 
   const repositoryRootCache = yield* Cache.makeWith<string, string | null>(
@@ -168,9 +173,18 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
     },
   );
 
+  const hasStaveManifest = (cwd: string) =>
+    fileSystem
+      .exists(path.join(cwd, STAVE_MANIFEST_FILE_NAME))
+      .pipe(Effect.orElseSucceed(() => false));
+
   const resolve: RepositoryIdentityResolver["Service"]["resolve"] = Effect.fn(
     "RepositoryIdentityResolver.resolve",
   )(function* (cwd) {
+    // A Stave space root is a directory of checkouts, not a checkout: it must
+    // never take its primary repo's (or an ancestor repo's) identity, or the
+    // space would collapse into that repository's project group.
+    if (yield* hasStaveManifest(cwd)) return null;
     const cacheKey = yield* Cache.get(repositoryRootCache, cwd);
     if (cacheKey === null) return null;
     return yield* Cache.get(repositoryIdentityCache, cacheKey);

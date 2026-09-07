@@ -71,6 +71,8 @@ import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
 import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
+import * as StaveAdmission from "./stave/StaveAdmission.ts";
+import * as StaveWorkspaceReader from "./stave/StaveWorkspaceReader.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
@@ -387,6 +389,17 @@ const ServerEnvironmentLayerLive = ServerEnvironment.layer.pipe(
   Layer.provide(ServerSecretStore.layer),
 );
 
+// Reader, admission and identity resolver share one resolver instance
+// through layer memoisation.
+const StaveWorkspaceReaderLayerLive = StaveWorkspaceReader.layer.pipe(
+  Layer.provide(RepositoryIdentityResolver.layer),
+);
+const StaveLayerLive = Layer.mergeAll(
+  StaveWorkspaceReaderLayerLive,
+  StaveAdmission.layer.pipe(Layer.provide(StaveWorkspaceReaderLayerLive)),
+  RepositoryIdentityResolver.layer,
+);
+
 const AuthLayerLive = EnvironmentAuth.layer.pipe(
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provide(ServerEnvironmentLayerLive),
@@ -445,7 +458,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(OpenCodeRuntime.OpenCodeRuntimeLive),
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(Layer.mergeAll(NativeAppIconResolver.layer, ProjectFaviconResolverLayerLive)),
-  Layer.provideMerge(RepositoryIdentityResolver.layer),
+  // Folded into one step: this pipe is at Effect's 20-argument ceiling. Layer
+  // memoisation keeps a single resolver instance for the reader and the rest.
+  Layer.provideMerge(StaveLayerLive),
   Layer.provideMerge(ServerEnvironmentLayerLive),
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(ServerSecretStore.layer),

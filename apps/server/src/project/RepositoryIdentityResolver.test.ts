@@ -119,6 +119,58 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     }).pipe(Effect.provide(resolverLayer));
   });
 
+  it.effect("returns null without spawning git when the workspace root is a Stave space", () => {
+    const calls: Array<ReadonlyArray<string>> = [];
+    const processRunner = Layer.succeed(ProcessRunner.ProcessRunner, {
+      run: (input) =>
+        Effect.sync(() => {
+          calls.push(input.args);
+          return {
+            stdout: input.args.includes("rev-parse")
+              ? "/space/t3code\n"
+              : "origin\tgit@github.com:T3Tools/t3code.git (fetch)\n",
+            stderr: "",
+            code: ChildProcessSpawner.ExitCode(0),
+            timedOut: false,
+            stdoutTruncated: false,
+            stderrTruncated: false,
+            stdoutInvalidUtf8: false,
+            stderrInvalidUtf8: false,
+          };
+        }),
+    });
+    const resolverLayer = Layer.effect(
+      RepositoryIdentityResolver.RepositoryIdentityResolver,
+      RepositoryIdentityResolver.make(),
+    ).pipe(Layer.provide(processRunner));
+
+    return Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const spaceRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-repository-identity-stave-root-",
+      });
+      yield* fileSystem.writeFileString(
+        path.join(spaceRoot, ".stave.yaml"),
+        "version: 1\nid: space\nrepos: []\n",
+      );
+      const checkout = path.join(spaceRoot, "t3code");
+      yield* fileSystem.makeDirectory(checkout);
+
+      const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+      expect(yield* resolver.resolve(spaceRoot)).toBeNull();
+      expect(calls).toEqual([]);
+
+      // Checkouts inside the space carry no manifest and resolve as usual.
+      const nested = yield* resolver.resolve(checkout);
+      expect(nested?.canonicalKey).toBe("github.com/t3tools/t3code");
+      expect(calls).toEqual([
+        ["-C", checkout, "rev-parse", "--show-toplevel"],
+        ["-C", "/space/t3code", "remote", "-v"],
+      ]);
+    }).pipe(Effect.provide(resolverLayer));
+  });
+
   it.effect("normalizes equivalent GitHub remotes into a stable repository identity", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

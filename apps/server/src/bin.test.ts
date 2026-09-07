@@ -40,6 +40,8 @@ import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
+import * as StaveAdmission from "./stave/StaveAdmission.ts";
+import * as StaveWorkspaceReader from "./stave/StaveWorkspaceReader.ts";
 import {
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
@@ -123,6 +125,8 @@ const makeCliTestServerConfig = (baseDir: string) =>
 const makeProjectPersistenceLayer = (config: ServerConfig.ServerConfig["Service"]) =>
   Layer.mergeAll(
     OrchestrationLayerLive.pipe(
+      Layer.provideMerge(StaveAdmission.layer),
+      Layer.provideMerge(StaveWorkspaceReader.layer),
       Layer.provideMerge(RepositoryIdentityResolver.layer),
       Layer.provideMerge(SqlitePersistenceLayerLive),
     ),

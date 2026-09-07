@@ -31,6 +31,7 @@ import {
   type OrchestrationEventStoreShape,
 } from "../../persistence/Services/OrchestrationEventStore.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
+import * as StaveWorkspaceReader from "../../stave/StaveWorkspaceReader.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
@@ -64,6 +65,7 @@ function makeOrchestrationLayer() {
     Layer.provide(ThreadPlanProgress.layer),
     Layer.provide(OrchestrationEventStoreLive),
     Layer.provideMerge(OrchestrationCommandReceiptRepositoryLive),
+    Layer.provide(StaveWorkspaceReader.layer),
     Layer.provide(RepositoryIdentityResolver.layer),
     Layer.provide(SqlitePersistenceMemory),
     Layer.provideMerge(ServerConfigLayer),
@@ -1046,6 +1048,7 @@ describe("OrchestrationEngine", () => {
         Layer.provide(OrchestrationProjectionPipelineLive),
         Layer.provide(Layer.succeed(OrchestrationEventStore, flakyStore)),
         Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+        Layer.provide(StaveWorkspaceReader.layer),
         Layer.provide(RepositoryIdentityResolver.layer),
         Layer.provide(SqlitePersistenceMemory),
         Layer.provideMerge(ServerConfigLayer),
@@ -1154,6 +1157,7 @@ describe("OrchestrationEngine", () => {
         Layer.provide(Layer.succeed(OrchestrationProjectionPipeline, flakyProjectionPipeline)),
         Layer.provide(OrchestrationEventStoreLive),
         Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+        Layer.provide(StaveWorkspaceReader.layer),
         Layer.provide(RepositoryIdentityResolver.layer),
         Layer.provide(SqlitePersistenceMemory),
         Layer.provide(NodeServices.layer),
@@ -1301,6 +1305,7 @@ describe("OrchestrationEngine", () => {
         Layer.provide(Layer.succeed(OrchestrationProjectionPipeline, flakyProjectionPipeline)),
         Layer.provide(Layer.succeed(OrchestrationEventStore, nonTransactionalStore)),
         Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+        Layer.provide(StaveWorkspaceReader.layer),
         Layer.provide(RepositoryIdentityResolver.layer),
         Layer.provide(SqlitePersistenceMemory),
         Layer.provide(NodeServices.layer),
@@ -1653,4 +1658,47 @@ describe("OrchestrationEngine", () => {
 
     await system.dispose();
   });
+
+  effectIt.effect("records project.refresh against the project aggregate", () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const receipts = yield* OrchestrationCommandReceipts.OrchestrationCommandReceiptRepository;
+      const projectId = ProjectId.make("project-refresh");
+      const createdAt = now();
+
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-refresh-project-create"),
+        projectId,
+        title: "Project",
+        workspaceRoot: "/tmp/project-refresh",
+        createdAt,
+      });
+
+      const commandId = CommandId.make("server:stave:refresh:project-refresh:1");
+      const { sequence } = yield* engine.dispatch({
+        type: "project.refresh",
+        commandId,
+        projectId,
+        createdAt,
+      });
+
+      expect(Option.getOrNull(yield* receipts.getByCommandId({ commandId }))).toMatchObject({
+        commandId,
+        aggregateKind: "project",
+        aggregateId: projectId,
+        status: "accepted",
+        resultSequence: sequence,
+      });
+      const events = yield* Stream.runCollect(engine.readEvents(0)).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      );
+      expect(events.find((event) => event.type === "project.refreshed")).toMatchObject({
+        sequence,
+        aggregateKind: "project",
+        aggregateId: projectId,
+        payload: { projectId },
+      });
+    }).pipe(Effect.provide(makeOrchestrationLayer())),
+  );
 });

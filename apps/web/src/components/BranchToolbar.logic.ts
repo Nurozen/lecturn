@@ -127,12 +127,23 @@ export function resolvePreviousWorktreeLabel(seed: PreviousWorktreeSeed): string
   return seed.branch ? `Previous worktree (${seed.branch})` : "Previous worktree";
 }
 
+// Mode the composer toolbar treats as active. A forced mode (a Stave space,
+// whose repos are already worktrees) beats everything, including the parent's
+// live override, so no surface can offer to create a worktree there.
 export function resolveEffectiveEnvMode(input: {
   activeWorktreePath: string | null;
   hasServerThread: boolean;
   draftThreadEnvMode: EnvMode | undefined;
+  forcedEnvMode?: EnvMode | undefined;
+  overrideEnvMode?: EnvMode | undefined;
 }): EnvMode {
   const { activeWorktreePath, hasServerThread, draftThreadEnvMode } = input;
+  if (input.forcedEnvMode !== undefined) {
+    return input.forcedEnvMode;
+  }
+  if (input.overrideEnvMode !== undefined) {
+    return input.overrideEnvMode;
+  }
   if (!hasServerThread) {
     if (activeWorktreePath) {
       return "local";
@@ -140,6 +151,22 @@ export function resolveEffectiveEnvMode(input: {
     return draftThreadEnvMode === "worktree" ? "worktree" : "local";
   }
   return activeWorktreePath ? "worktree" : "local";
+}
+
+// The workspace picker is read-only once the mode can no longer change: the
+// caller locked it, the project forces it, or a started thread already has a
+// dedicated worktree.
+export function resolveEnvModeLocked(input: {
+  envLocked: boolean;
+  forcedEnvMode: EnvMode | undefined;
+  hasServerThread: boolean;
+  activeWorktreePath: string | null;
+}): boolean {
+  return (
+    input.envLocked ||
+    input.forcedEnvMode !== undefined ||
+    (input.hasServerThread && input.activeWorktreePath !== null)
+  );
 }
 
 export function resolveDraftEnvModeAfterBranchChange(input: {

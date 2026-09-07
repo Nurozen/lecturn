@@ -1,3 +1,5 @@
+import { staveAdmissionErrorMessage } from "@t3tools/client-runtime/errors";
+import { resolveProjectGitCwd } from "@t3tools/client-runtime/state/projectGit";
 import type { VcsRef } from "@t3tools/client-runtime/state/vcs";
 import { resolveEnvironmentMachineKind } from "@t3tools/contracts";
 import { LegendList } from "@legendapp/list/react-native";
@@ -263,12 +265,15 @@ export function NewTaskBranchPickerRouteScreen() {
           branchWorktreePath: branch.worktreePath,
           workspaceMode: flow.workspaceMode,
         });
-        if (needsCheckout && flow.selectedProject) {
+        // Checkouts run where the branches were listed: the primary repo for
+        // a Stave space, the workspace root otherwise.
+        const checkoutCwd = resolveProjectGitCwd({ project: flow.selectedProject });
+        if (needsCheckout && flow.selectedProject && checkoutCwd) {
           setSwitchingBranchName(branch.name);
           const result = await switchRef({
             environmentId: flow.selectedProject.environmentId,
             input: {
-              cwd: flow.selectedProject.workspaceRoot,
+              cwd: checkoutCwd,
               refName: branch.name,
             },
           });
@@ -277,7 +282,8 @@ export function NewTaskBranchPickerRouteScreen() {
               const error = squashAtomCommandFailure(result);
               Alert.alert(
                 "Could not switch branch",
-                error instanceof Error ? error.message : "The branch could not be checked out.",
+                staveAdmissionErrorMessage(error) ??
+                  (error instanceof Error ? error.message : "The branch could not be checked out."),
               );
             }
             return;

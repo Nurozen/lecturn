@@ -285,6 +285,10 @@ export function projectEvent(
         })),
       );
 
+    // Carries no state; it only makes shell subscribers re-read the project.
+    case "project.refreshed":
+      return Effect.succeed(nextBase);
+
     case "thread.created":
       return Effect.gen(function* () {
         const payload = yield* decodeForEvent(

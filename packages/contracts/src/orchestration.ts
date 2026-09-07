@@ -1320,7 +1320,17 @@ const ThreadTitleRegenerationCompleteCommand = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
 });
 
+// Server-only: pushes a project's current shell to connected clients when
+// derived state (Stave space info, notices) changes without a projection write.
+const ProjectRefreshCommand = Schema.Struct({
+  type: Schema.Literal("project.refresh"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
+  ProjectRefreshCommand,
   ThreadAutoSettleCommand,
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
@@ -1343,6 +1353,7 @@ export const OrchestrationEventType = Schema.Literals([
   "project.created",
   "project.meta-updated",
   "project.deleted",
+  "project.refreshed",
   "thread.created",
   "thread.deleted",
   "thread.archived",
@@ -1408,6 +1419,10 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
 export const ProjectDeletedPayload = Schema.Struct({
   projectId: ProjectId,
   deletedAt: IsoDateTime,
+});
+
+export const ProjectRefreshedPayload = Schema.Struct({
+  projectId: ProjectId,
 });
 
 export const ThreadCreatedPayload = Schema.Struct({
@@ -1674,6 +1689,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("project.deleted"),
     payload: ProjectDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.refreshed"),
+    payload: ProjectRefreshedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo } from "react";
 
+import { staveAdmissionErrorMessage } from "@t3tools/client-runtime/errors";
+import { isStaveProject } from "@t3tools/client-runtime/state/projectGit";
 import { EnvironmentProject, EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
 import {
@@ -26,6 +28,9 @@ import { showGitActionResult } from "./use-vcs-action-state";
 import { useThreadSelection } from "./use-thread-selection";
 import { useSelectedThreadWorktree } from "./use-selected-thread-worktree";
 
+const STAVE_WORKTREE_UNAVAILABLE_MESSAGE =
+  "Stave spaces always run in the space root. Threads cannot use a separate worktree here.";
+
 export function useSelectedThreadGitActions() {
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
@@ -36,11 +41,11 @@ export function useSelectedThreadGitActions() {
   const createWorktree = useAtomCommand(vcsEnvironment.createWorktree, { reportFailure: false });
   const pull = useAtomCommand(vcsEnvironment.pull, { reportFailure: false });
   const { selectedThread, selectedThreadProject } = useThreadSelection();
-  const { selectedThreadCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
+  const { selectedThreadGitCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
   const runStackedAction = useAtomCommand(
     vcsActionManager.runStackedAction({
       environmentId: selectedThread?.environmentId ?? null,
-      cwd: selectedThreadCwd,
+      cwd: selectedThreadGitCwd,
     }),
     { reportFailure: false },
   );
@@ -81,7 +86,7 @@ export function useSelectedThreadGitActions() {
         return null;
       }
 
-      const cwd = options?.cwd ?? selectedThreadCwd;
+      const cwd = options?.cwd ?? selectedThreadGitCwd;
       if (!cwd) {
         return null;
       }
@@ -105,14 +110,16 @@ export function useSelectedThreadGitActions() {
           );
       if (AsyncResult.isFailure(result)) {
         const error = Cause.squash(result.cause);
-        const message = error instanceof Error ? error.message : "Failed to refresh git status.";
+        const message =
+          staveAdmissionErrorMessage(error) ??
+          (error instanceof Error ? error.message : "Failed to refresh git status.");
         setPendingConnectionError(message);
         return null;
       }
       setPendingConnectionError(null);
       return result.value;
     },
-    [refreshStatus, selectedThread, selectedThreadCwd, selectedThreadProject],
+    [refreshStatus, selectedThread, selectedThreadGitCwd, selectedThreadProject],
   );
 
   useEffect(() => {
@@ -133,20 +140,20 @@ export function useSelectedThreadGitActions() {
       }) => Promise<AtomCommandResult<T, E>>,
       options?: { readonly managedExternally?: boolean },
     ): Promise<T | null> => {
-      if (!selectedThread || !selectedThreadProject || !selectedThreadCwd) {
+      if (!selectedThread || !selectedThreadProject || !selectedThreadGitCwd) {
         return null;
       }
 
       const target = {
         environmentId: selectedThread.environmentId,
-        cwd: selectedThreadCwd,
+        cwd: selectedThreadGitCwd,
       };
       setPendingConnectionError(null);
       const run = () =>
         execute({
           thread: selectedThread,
           project: selectedThreadProject,
-          cwd: selectedThreadCwd,
+          cwd: selectedThreadGitCwd,
         });
       const result =
         options?.managedExternally === true
@@ -154,14 +161,16 @@ export function useSelectedThreadGitActions() {
           : await vcsActionManager.track(appAtomRegistry, target, { operation, label }, run);
       if (AsyncResult.isFailure(result)) {
         const error = Cause.squash(result.cause);
-        const message = error instanceof Error ? error.message : "Git action failed.";
+        const message =
+          staveAdmissionErrorMessage(error) ??
+          (error instanceof Error ? error.message : "Git action failed.");
         setPendingConnectionError(message);
         showGitActionResult({ type: "error", title: "Git action failed", description: message });
         return null;
       }
       return result.value;
     },
-    [selectedThread, selectedThreadCwd, selectedThreadProject],
+    [selectedThread, selectedThreadGitCwd, selectedThreadProject],
   );
 
   const refreshSelectedThreadBranches = useCallback(async (): Promise<ReadonlyArray<VcsRef>> => {
@@ -261,6 +270,16 @@ export function useSelectedThreadGitActions() {
 
   const onCreateSelectedThreadWorktree = useCallback(
     async (nextWorktree: { readonly baseBranch: string; readonly newBranch: string }) => {
+      // Stave threads always run in the space root; the server would reject
+      // the worktree anyway, so surface the same message without a round trip.
+      if (isStaveProject(selectedThreadProject)) {
+        showGitActionResult({
+          type: "error",
+          title: "Worktrees unavailable",
+          description: STAVE_WORKTREE_UNAVAILABLE_MESSAGE,
+        });
+        return;
+      }
       await runSelectedThreadGitMutation(
         "create_worktree",
         "Creating worktree",
@@ -289,7 +308,12 @@ export function useSelectedThreadGitActions() {
         },
       );
     },
-    [createWorktree, runSelectedThreadGitMutation, syncSelectedThreadBranchState],
+    [
+      createWorktree,
+      runSelectedThreadGitMutation,
+      selectedThreadProject,
+      syncSelectedThreadBranchState,
+    ],
   );
 
   const onPullSelectedThreadBranch = useCallback(async () => {

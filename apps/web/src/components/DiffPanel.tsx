@@ -28,6 +28,11 @@ import { useOpenInPreferredEditor } from "../editorPreferences";
 import { type DraftId } from "../composerDraftStore";
 import { openDiffFilePrimaryAction } from "../diffFileActions";
 import { useCheckpointDiff } from "~/lib/checkpointDiffState";
+import {
+  resolveCheckpointsUnavailableReason,
+  resolveThreadGitRepositoryRoot,
+  resolveThreadGitTarget,
+} from "~/lib/threadGitTarget";
 import { cn } from "~/lib/utils";
 import { selectThreadDiffPanelSelection, useDiffPanelStore } from "../diffPanelStore";
 import { useLocalStorage } from "../hooks/useLocalStorage";
@@ -146,10 +151,17 @@ export default function DiffPanel({
         }
       : null,
   );
-  const activeCwd = activeThread?.worktreePath ?? activeProject?.workspaceRoot;
-  const activeRepositoryRoot = activeThread?.worktreePath
-    ? undefined
-    : activeProject?.repositoryIdentity?.rootPath;
+  // Git surfaces follow the thread's git target: a Stave space diffs its
+  // primary repo, so editor links resolve against that repo's identity rather
+  // than the space root's. Stave never records checkpoints, so turn diffs are
+  // replaced by the reason text instead.
+  const activeCwd =
+    resolveThreadGitTarget({ project: activeProject, thread: activeThread }).cwd ?? undefined;
+  const activeRepositoryRoot = resolveThreadGitRepositoryRoot({
+    project: activeProject,
+    thread: activeThread,
+  });
+  const checkpointsUnavailableReason = resolveCheckpointsUnavailableReason(activeProject);
   const serverConfig = useAtomValue(
     serverEnvironment.configValueAtom(activeThread?.environmentId ?? null),
   );
@@ -255,7 +267,7 @@ export default function DiffPanel({
       ignoreWhitespace: diffIgnoreWhitespace,
       cacheScope: selectedTurn ? `turn:${selectedTurn.turnId}` : null,
     },
-    { enabled: isGitRepo && selectedTurn !== undefined },
+    { enabled: isGitRepo && checkpointsUnavailableReason === null && selectedTurn !== undefined },
   );
   const primaryBranchDiffPreview = useEnvironmentQuery(
     selectedTurnId === null && activeThread && activeCwd
@@ -576,43 +588,49 @@ export default function DiffPanel({
             >
               <span>Branch changes</span>
             </DropdownMenuItem>
-            <DropdownMenuItem
-              className={
-                selectedTurnId !== null && selectedTurn?.turnId === latestTurn?.turnId
-                  ? "bg-foreground/[0.08]"
-                  : undefined
-              }
-              onClick={() => {
-                if (latestTurn) selectTurn(latestTurn.turnId);
-              }}
-            >
-              <span>Latest turn</span>
-            </DropdownMenuItem>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>Turn</DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-64">
-                {orderedTurnDiffSummaries.map((summary) => {
-                  const turnCount =
-                    summary.checkpointTurnCount ??
-                    inferredCheckpointTurnCountByTurnId[summary.turnId] ??
-                    "?";
-                  return (
-                    <DropdownMenuItem
-                      key={summary.turnId}
-                      className={
-                        summary.turnId === selectedTurn?.turnId ? "bg-foreground/[0.08]" : undefined
-                      }
-                      onClick={() => selectTurn(summary.turnId)}
-                    >
-                      <span>Turn {turnCount}</span>
-                      <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                        {formatShortTimestamp(summary.completedAt, settings.timestampFormat)}
-                      </span>
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
+            {checkpointsUnavailableReason === null && (
+              <>
+                <DropdownMenuItem
+                  className={
+                    selectedTurnId !== null && selectedTurn?.turnId === latestTurn?.turnId
+                      ? "bg-foreground/[0.08]"
+                      : undefined
+                  }
+                  onClick={() => {
+                    if (latestTurn) selectTurn(latestTurn.turnId);
+                  }}
+                >
+                  <span>Latest turn</span>
+                </DropdownMenuItem>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>Turn</DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="w-64">
+                    {orderedTurnDiffSummaries.map((summary) => {
+                      const turnCount =
+                        summary.checkpointTurnCount ??
+                        inferredCheckpointTurnCountByTurnId[summary.turnId] ??
+                        "?";
+                      return (
+                        <DropdownMenuItem
+                          key={summary.turnId}
+                          className={
+                            summary.turnId === selectedTurn?.turnId
+                              ? "bg-foreground/[0.08]"
+                              : undefined
+                          }
+                          onClick={() => selectTurn(summary.turnId)}
+                        >
+                          <span>Turn {turnCount}</span>
+                          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                            {formatShortTimestamp(summary.completedAt, settings.timestampFormat)}
+                          </span>
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
         {selectedTurnId === null && selectedGitScope === "branch" && selectedGitSource?.baseRef && (
@@ -893,6 +911,10 @@ export default function DiffPanel({
       ) : !isGitRepo ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           Turn diffs are unavailable because this project is not a git repository.
+        </div>
+      ) : selectedTurnId !== null && checkpointsUnavailableReason !== null ? (
+        <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+          {checkpointsUnavailableReason}
         </div>
       ) : selectedTurnId !== null && orderedTurnDiffSummaries.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">

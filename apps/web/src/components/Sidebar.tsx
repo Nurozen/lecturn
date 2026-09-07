@@ -112,7 +112,13 @@ import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import { readEnvironmentSupportsForking, useProjects, useThreadShells } from "../state/entities";
+import {
+  readEnvironmentSupportsForking,
+  useProject,
+  useProjects,
+  useThreadShells,
+} from "../state/entities";
+import { resolveThreadGitTarget } from "../lib/threadGitTarget";
 import { readForkAtLatestTurn, useForkThread } from "../hooks/useForkThread";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
 import { vcsEnvironment } from "../state/vcs";
@@ -827,13 +833,27 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
   const terminalProcessCount = runningTerminalIds.length;
 
-  const gitCwd = thread.worktreePath ?? props.projectCwd;
+  // The row's own project decides where git looks (a Stave space targets its
+  // primary repo, not the space root); `projectCwd` only covers a project that
+  // has not loaded yet.
+  const threadProject = useProject(
+    useMemo(
+      () => scopeProjectRef(thread.environmentId, thread.projectId),
+      [thread.environmentId, thread.projectId],
+    ),
+  );
+  const gitTarget = resolveThreadGitTarget({
+    project: threadProject,
+    thread,
+    fallbackCwd: props.projectCwd,
+  });
+  const gitCwd = gitTarget.cwd;
   const linkedPullRequestStatus = useLinkedThreadPullRequest(
     leaseLiveStatus ? thread.environmentId : null,
     leaseLiveStatus ? thread.linkedPullRequest : null,
   );
   const gitStatus = useEnvironmentQuery(
-    leaseLiveStatus && (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
+    leaseLiveStatus && gitTarget.statusEnabled && gitCwd !== null
       ? vcsEnvironment.status({
           environmentId: thread.environmentId,
           input: { cwd: gitCwd },
@@ -845,8 +865,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     gitStatus.data,
   );
   const retainTerminalOnBranchMismatch = thread.worktreePath === null;
+  const threadBranch = gitTarget.branch;
   const pr = resolveDisplayedThreadPr({
-    threadBranch: thread.branch,
+    threadBranch,
     gitStatus: visibleGitStatus,
     snapshot: changeRequestSnapshot,
     retainTerminalOnBranchMismatch,
@@ -945,7 +966,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     currentGitBranch: visibleGitStatus?.refName ?? null,
   });
   const prProvider = resolveDisplayedThreadPrProvider({
-    threadBranch: thread.branch,
+    threadBranch,
     gitStatus: visibleGitStatus,
     snapshot: changeRequestSnapshot,
     retainTerminalOnBranchMismatch,
@@ -956,7 +977,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const settledPrHoverClass = pr ? settledPrHoverColorClass(pr.state) : undefined;
   useEffect(() => {
     const nextSnapshot = nextThreadChangeRequestSnapshot({
-      threadBranch: thread.branch,
+      threadBranch,
       gitStatus: visibleGitStatus,
       snapshot: changeRequestSnapshot,
       retainTerminalOnBranchMismatch,
@@ -971,7 +992,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     linkedPullRequestStatus,
     onChangeRequestSnapshot,
     retainTerminalOnBranchMismatch,
-    thread.branch,
+    threadBranch,
     thread.linkedPullRequest,
     threadKey,
   ]);
@@ -1733,9 +1754,20 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   );
   // Same details tooltip as the regular rows: a search hit is still a thread,
   // and the hover card is how you disambiguate identically-titled results.
-  const gitCwd = thread.worktreePath ?? props.projectCwd;
+  const threadProject = useProject(
+    useMemo(
+      () => scopeProjectRef(thread.environmentId, thread.projectId),
+      [thread.environmentId, thread.projectId],
+    ),
+  );
+  const gitTarget = resolveThreadGitTarget({
+    project: threadProject,
+    thread,
+    fallbackCwd: props.projectCwd,
+  });
+  const gitCwd = gitTarget.cwd;
   const gitStatus = useEnvironmentQuery(
-    leaseLiveStatus && (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
+    leaseLiveStatus && gitTarget.statusEnabled && gitCwd !== null
       ? vcsEnvironment.status({
           environmentId: thread.environmentId,
           input: { cwd: gitCwd },

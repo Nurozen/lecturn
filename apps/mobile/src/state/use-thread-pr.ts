@@ -5,12 +5,14 @@ import {
   createLinkedPullRequestSummaryAtomFamily,
   pullRequestDetailToVcsStatus,
 } from "@t3tools/client-runtime/state/pull-requests";
+import type { OrchestrationProjectShell } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useMemo } from "react";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "./atom-registry";
 import { useEnvironmentQuery } from "./query";
+import { resolveThreadGitTarget } from "./thread-git-target";
 import { presentThreadPr, type ThreadPrPresentation } from "./thread-pr-presentation";
 import { vcsEnvironment } from "./vcs";
 
@@ -35,21 +37,23 @@ export {
   type ThreadPrPresentation,
 } from "./thread-pr-presentation";
 
+export type ThreadPrProject = Pick<OrchestrationProjectShell, "workspaceRoot" | "stave">;
+
 /**
  * Live PR status for a thread's branch. Subscriptions are deduplicated per
  * (environmentId, cwd) by the atom family, so many rows on the same worktree
  * or project root share one stream — and virtualization means only visible
- * rows subscribe at all.
+ * rows subscribe at all. The project decides where git runs: a Stave space
+ * redirects to its primary repo and supplies the branch for `branch: null`
+ * threads.
  */
 export function useThreadPr(
   thread: EnvironmentThreadShell,
-  projectCwd: string | null,
+  project: ThreadPrProject | null,
 ): ThreadPrPresentation | null {
-  const cwd = thread.worktreePath ?? projectCwd;
+  const { cwd, branch } = resolveThreadGitTarget({ project, thread });
   const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-  const snapshotIdentity = JSON.stringify(
-    thread.linkedPullRequest ?? { branch: thread.branch, cwd },
-  );
+  const snapshotIdentity = JSON.stringify(thread.linkedPullRequest ?? { branch, cwd });
   // Select this row's entry so writes for other rows do not re-render it.
   const snapshotEntry = useAtomValue(
     threadPrSnapshotsAtom,
@@ -60,7 +64,7 @@ export function useThreadPr(
   );
   const snapshot = snapshotEntry?.identity === snapshotIdentity ? snapshotEntry.presentation : null;
   const gitStatus = useEnvironmentQuery(
-    thread.linkedPullRequest == null && thread.branch !== null && cwd !== null
+    thread.linkedPullRequest == null && branch !== null && cwd !== null
       ? vcsEnvironment.status({
           environmentId: thread.environmentId,
           input: { cwd },
@@ -93,11 +97,11 @@ export function useThreadPr(
     }
 
     const status = gitStatus.data;
-    if (thread.branch === null) return null;
+    if (branch === null) return null;
     if (status === null) return undefined;
-    if (status.refName !== thread.branch || !status.pr) return null;
+    if (status.refName !== branch || !status.pr) return null;
     return presentThreadPr(status.pr, status.sourceControlProvider);
-  }, [gitStatus.data, linkedPullRequest.data, thread.branch, thread.linkedPullRequest]);
+  }, [branch, gitStatus.data, linkedPullRequest.data, thread.linkedPullRequest]);
 
   useEffect(() => {
     if (live === undefined) return;

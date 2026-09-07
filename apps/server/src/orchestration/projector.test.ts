@@ -6,6 +6,7 @@ import {
   ThreadId,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
+import { it as effectIt } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -103,6 +104,48 @@ describe("orchestration projector", () => {
       },
     ]);
   });
+
+  effectIt.effect("leaves projects unchanged for project.refreshed", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+      const withProject = yield* projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: "project.created",
+          aggregateKind: "project",
+          aggregateId: "project-1",
+          occurredAt: now,
+          commandId: "cmd-project-create",
+          payload: {
+            projectId: "project-1",
+            title: "Project",
+            workspaceRoot: "/tmp/project-1",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      );
+
+      const refreshed = yield* projectEvent(
+        withProject,
+        makeEvent({
+          sequence: 2,
+          type: "project.refreshed",
+          aggregateKind: "project",
+          aggregateId: "project-1",
+          occurredAt: "2026-01-02T00:00:00.000Z",
+          commandId: "server:stave:refresh:project-1:1",
+          payload: { projectId: "project-1" },
+        }),
+      );
+
+      expect(refreshed.snapshotSequence).toBe(2);
+      expect(refreshed.projects).toEqual(withProject.projects);
+    }),
+  );
 
   it("fails when event payload cannot be decoded by runtime schema", async () => {
     const now = "2026-01-01T00:00:00.000Z";

@@ -1,3 +1,4 @@
+import { isStaveProject } from "@t3tools/client-runtime/state/projectGit";
 import { sanitizeFeatureBranchName } from "@t3tools/shared/git";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useState } from "react";
@@ -23,16 +24,19 @@ type GitBranchesSheetProps = StaticScreenProps<{
 export function GitBranchesSheet(_props: GitBranchesSheetProps) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { selectedThread } = useThreadSelection();
-  const { selectedThreadCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
+  const { selectedThread, selectedThreadProject } = useThreadSelection();
+  const { selectedThreadGitCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
+  // Stave threads always run in the space root, so there is no worktree to
+  // create or move to; the sheet only offers branch switching there.
+  const worktreesSupported = !isStaveProject(selectedThreadProject);
 
   const gitStatus = useEnvironmentQuery(
-    selectedThread !== null && selectedThreadCwd !== null
+    selectedThread !== null && selectedThreadGitCwd !== null
       ? vcsEnvironment.status({
           environmentId: selectedThread.environmentId,
-          input: { cwd: selectedThreadCwd },
+          input: { cwd: selectedThreadGitCwd },
         })
       : null,
   );
@@ -60,7 +64,10 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
       {Platform.OS === "android" ? (
-        <AndroidSheetHeader title="Branches & worktrees" onBack={() => navigation.goBack()} />
+        <AndroidSheetHeader
+          title={worktreesSupported ? "Branches & worktrees" : "Branches"}
+          onBack={() => navigation.goBack()}
+        />
       ) : null}
       <ScrollView
         className="flex-1"
@@ -94,42 +101,46 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
           />
         </View>
 
-        <View className="gap-2 rounded-[18px] border border-border bg-card px-4 py-4">
-          <Text className="text-foreground-secondary text-2xs font-t3-bold tracking-[1px] uppercase">
-            New worktree
-          </Text>
-          <TextInput
-            value={worktreeBaseBranch}
-            onChangeText={setWorktreeBaseBranch}
-            placeholder="main"
-            className="rounded-[18px]"
-          />
-          <TextInput
-            value={worktreeBranchName}
-            onChangeText={setWorktreeBranchName}
-            placeholder="feature/mobile-thread"
-            className="rounded-[18px]"
-          />
-          <SheetActionButton
-            icon="square.split.2x1"
-            label="Create worktree"
-            tone="primary"
-            disabled={
-              busy ||
-              worktreeBaseBranch.trim().length === 0 ||
-              worktreeBranchName.trim().length === 0
-            }
-            onPress={() => {
-              const baseBranch = worktreeBaseBranch.trim();
-              const newBranch = worktreeBranchName.trim();
-              if (baseBranch.length === 0 || newBranch.length === 0) return;
-              void gitActions.onCreateSelectedThreadWorktree({ baseBranch, newBranch }).then(() => {
-                setWorktreeBranchName("");
-                navigation.goBack();
-              });
-            }}
-          />
-        </View>
+        {worktreesSupported ? (
+          <View className="gap-2 rounded-[18px] border border-border bg-card px-4 py-4">
+            <Text className="text-foreground-secondary text-2xs font-t3-bold tracking-[1px] uppercase">
+              New worktree
+            </Text>
+            <TextInput
+              value={worktreeBaseBranch}
+              onChangeText={setWorktreeBaseBranch}
+              placeholder="main"
+              className="rounded-[18px]"
+            />
+            <TextInput
+              value={worktreeBranchName}
+              onChangeText={setWorktreeBranchName}
+              placeholder="feature/mobile-thread"
+              className="rounded-[18px]"
+            />
+            <SheetActionButton
+              icon="square.split.2x1"
+              label="Create worktree"
+              tone="primary"
+              disabled={
+                busy ||
+                worktreeBaseBranch.trim().length === 0 ||
+                worktreeBranchName.trim().length === 0
+              }
+              onPress={() => {
+                const baseBranch = worktreeBaseBranch.trim();
+                const newBranch = worktreeBranchName.trim();
+                if (baseBranch.length === 0 || newBranch.length === 0) return;
+                void gitActions
+                  .onCreateSelectedThreadWorktree({ baseBranch, newBranch })
+                  .then(() => {
+                    setWorktreeBranchName("");
+                    navigation.goBack();
+                  });
+              }}
+            />
+          </View>
+        ) : null}
 
         <View className="gap-2">
           <Text className="text-foreground-secondary text-2xs font-t3-bold tracking-[1px] uppercase">

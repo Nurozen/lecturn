@@ -640,16 +640,23 @@ export const autoPullProjects = Effect.fn("autoPullProjects")(function* (
   projects: ReadonlyArray<OrchestrationProjectShell>,
 ) {
   const git = yield* GitVcsDriver.GitVcsDriver;
-  const workspaceRoots = [
-    ...new Set(
-      projects
-        .filter((project) => project.autoPull === true)
-        .map((project) => project.workspaceRoot),
-    ),
-  ];
+  const workspaceRoots = new Set<string>();
+  for (const project of projects) {
+    if (project.autoPull !== true) continue;
+    // A Stave space root is a directory of worktrees, not a repo, and its edit
+    // branches have no upstream to pull from.
+    if (project.stave != null) {
+      yield* Effect.logDebug("Skipped automatic project pull", {
+        cwd: project.workspaceRoot,
+        reason: "stave-space",
+      });
+      continue;
+    }
+    workspaceRoots.add(project.workspaceRoot);
+  }
 
   yield* Effect.forEach(
-    workspaceRoots,
+    [...workspaceRoots],
     (cwd) =>
       Effect.gen(function* () {
         const status = yield* git.statusDetails(cwd);

@@ -360,14 +360,14 @@ export function ReviewSheet(props: ReviewSheetProps) {
   const reviewCache = useReviewCacheForThread({ environmentId, threadId });
   /* ─── Git actions for the toolbar menu (commit/push without leaving review) ── */
   const { selectedThread } = useThreadSelection();
-  const { selectedThreadCwd } = useSelectedThreadWorktree();
+  const { selectedThreadGitCwd } = useSelectedThreadWorktree();
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
   const gitStatusQuery = useEnvironmentQuery(
-    selectedThread !== null && selectedThreadCwd !== null
+    selectedThread !== null && selectedThreadGitCwd !== null
       ? vcsEnvironment.status({
           environmentId: selectedThread.environmentId,
-          input: { cwd: selectedThreadCwd },
+          input: { cwd: selectedThreadGitCwd },
         })
       : null,
   );

@@ -572,6 +572,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        // Carries no state; the shell stream re-reads the row as-is.
+        case "project.refreshed":
+          return;
+
         default:
           return;
       }

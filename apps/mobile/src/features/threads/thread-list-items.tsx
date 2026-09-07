@@ -22,6 +22,7 @@ import { HOME_HORIZONTAL_INSET } from "../../lib/layoutMetrics";
 import { relativeTime } from "../../lib/time";
 import { themeColorWithAlpha } from "../../lib/mobileTheme";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
+import { useProject } from "../../state/entities";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import { useThreadPr, type ThreadPr } from "../../state/use-thread-pr";
 import type { HomeGroupDisplayAction } from "../home/homeListItems";
@@ -458,7 +459,20 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
     onRegenerateThreadTitle,
   } = props;
   const status = resolveThreadStatus(thread);
-  const pr = useThreadPr(thread, props.projectCwd);
+  // The row only receives the project cwd; the shell is needed so Stave
+  // spaces look up PRs on their primary repo rather than the space root.
+  const projectRef = useMemo(
+    () => ({ environmentId: thread.environmentId, projectId: thread.projectId }),
+    [thread.environmentId, thread.projectId],
+  );
+  const project = useProject(projectRef);
+  const prProject = useMemo(
+    () =>
+      project ??
+      (props.projectCwd !== null ? { workspaceRoot: props.projectCwd, stave: null } : null),
+    [project, props.projectCwd],
+  );
+  const pr = useThreadPr(thread, prProject);
   const timestamp = relativeTime(
     thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
   );

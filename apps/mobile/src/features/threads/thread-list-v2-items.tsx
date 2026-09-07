@@ -414,7 +414,16 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const snoozedRow = props.snoozed === true;
   const pinnedRow = props.pinned === true;
 
-  const pr = useThreadPr(thread, props.projectCwd ?? props.project?.workspaceRoot ?? null);
+  // Rows without a loaded project shell (pending tasks) still know the
+  // project cwd, which is enough for ordinary repos; Stave redirection needs
+  // the shell itself.
+  const prProject = useMemo(
+    () =>
+      props.project ??
+      (props.projectCwd != null ? { workspaceRoot: props.projectCwd, stave: null } : null),
+    [props.project, props.projectCwd],
+  );
+  const pr = useThreadPr(thread, prProject);
 
   const theme = useUniwindTheme();
   const screenColor = theme["--color-screen"];

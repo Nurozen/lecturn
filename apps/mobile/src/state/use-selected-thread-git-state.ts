@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 
+import { resolveProjectGitCwd } from "@t3tools/client-runtime/state/projectGit";
 import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
 
 import { useBranches } from "./queries";
@@ -11,14 +12,14 @@ import { useSelectedThreadWorktree } from "./use-selected-thread-worktree";
 
 export function useSelectedThreadGitState() {
   const { selectedThread, selectedThreadProject } = useThreadSelection();
-  const { selectedThreadCwd } = useSelectedThreadWorktree();
+  const { selectedThreadGitCwd } = useSelectedThreadWorktree();
 
   const selectedThreadGitTarget = useMemo(
     () => ({
       environmentId: selectedThread?.environmentId ?? null,
-      cwd: selectedThreadCwd,
+      cwd: selectedThreadGitCwd,
     }),
-    [selectedThread?.environmentId, selectedThreadCwd],
+    [selectedThread?.environmentId, selectedThreadGitCwd],
   );
   const gitActionState = useVcsActionState(selectedThreadGitTarget);
   const sourceControlDiscovery = useEnvironmentQuery(
@@ -30,13 +31,16 @@ export function useSelectedThreadGitState() {
         }),
   );
 
+  // Branches are listed from the project's repository root (the primary repo
+  // for a Stave space), not the thread's worktree.
+  const selectedThreadGitRootCwd = resolveProjectGitCwd({ project: selectedThreadProject });
   const selectedThreadBranchTarget = useMemo(
     () => ({
       environmentId: selectedThread?.environmentId ?? null,
-      cwd: selectedThreadProject?.workspaceRoot ?? null,
+      cwd: selectedThreadGitRootCwd,
       query: null,
     }),
-    [selectedThread?.environmentId, selectedThreadProject?.workspaceRoot],
+    [selectedThread?.environmentId, selectedThreadGitRootCwd],
   );
   const selectedThreadBranchState = useBranches(selectedThreadBranchTarget);
   const selectedThreadBranches = useMemo(

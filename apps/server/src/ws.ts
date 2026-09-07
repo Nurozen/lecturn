@@ -118,6 +118,7 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as StaveAdmission from "./stave/StaveAdmission.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -557,6 +558,7 @@ const makeWsRpcLayer = (
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+      const staveAdmission = yield* StaveAdmission.StaveAdmission;
       const canReplayPersistedRange = Effect.fnUntraced(function* (
         afterSequence: number,
         headSequence: number,
@@ -763,6 +765,7 @@ const makeWsRpcLayer = (
         switch (event.type) {
           case "project.created":
           case "project.meta-updated":
+          case "project.refreshed":
             return projectUpsertOrRemove(event.payload.projectId, event.sequence);
           case "project.deleted":
             return Effect.succeed(
@@ -1366,6 +1369,25 @@ const makeWsRpcLayer = (
             });
           }
 
+          // Forks skip the normalizer, and the materialized command inherits
+          // the source's worktreePath (threadFork.ts): a Stave-owned source
+          // that still runs in a worktree cannot be forked, since the child
+          // would carry the worktree into the space.
+          if (Option.isSome(project)) {
+            yield* staveAdmission
+              .check({
+                projectRoot: project.value.workspaceRoot,
+                intent: "thread.fork",
+                worktreePath: assembly.command.thread.worktreePath,
+              })
+              .pipe(
+                Effect.mapError(
+                  (error) =>
+                    new OrchestrationDispatchCommandError({ message: error.message, cause: error }),
+                ),
+              );
+          }
+
           const workspaceCwd = resolveThreadWorkspaceCwd({
             thread: source,
             projects: Option.match(project, {
@@ -1615,6 +1637,46 @@ const makeWsRpcLayer = (
         vcsStatusBroadcaster
           .refreshStatus(cwd)
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
+
+      // Git RPCs carry only a cwd, so the owning project is the active project
+      // at exactly that root (a primary-repo reverse lookup is a later phase).
+      // A refusal is reported as GitCommandError, the failure these handlers
+      // already return, so clients render its message as-is.
+      const admitStaveWorktreeRpc = (
+        operation: string,
+        intent: Extract<StaveAdmission.StaveAdmissionIntent, "vcs.createWorktree" | "pr.prepare">,
+        cwd: string,
+      ) =>
+        projectionSnapshotQuery.getActiveProjectByWorkspaceRoot(cwd).pipe(
+          Effect.mapError(
+            (cause) =>
+              new GitCommandError({
+                operation,
+                command: "git",
+                cwd,
+                detail: `failed to resolve the project owning ${cwd}`,
+                cause,
+              }),
+          ),
+          Effect.flatMap(
+            Option.match({
+              onNone: () => Effect.void,
+              onSome: (project) =>
+                staveAdmission.check({ projectRoot: project.workspaceRoot, intent }).pipe(
+                  Effect.mapError(
+                    (error) =>
+                      new GitCommandError({
+                        operation,
+                        command: "git",
+                        cwd,
+                        detail: error.message,
+                        cause: error,
+                      }),
+                  ),
+                ),
+            }),
+          ),
+        );
 
       return WsRpcGroup.of({
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
@@ -2619,9 +2681,10 @@ const makeWsRpcLayer = (
         [WS_METHODS.gitPreparePullRequestThread]: (input) =>
           observeRpcEffect(
             WS_METHODS.gitPreparePullRequestThread,
-            gitWorkflow
-              .preparePullRequestThread(input)
-              .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            admitStaveWorktreeRpc("ws.gitPreparePullRequestThread", "pr.prepare", input.cwd).pipe(
+              Effect.andThen(gitWorkflow.preparePullRequestThread(input)),
+              Effect.tap(() => refreshGitStatus(input.cwd)),
+            ),
             { "rpc.aggregate": "git" },
           ),
         [WS_METHODS.vcsListRefs]: (input) =>
@@ -2631,7 +2694,10 @@ const makeWsRpcLayer = (
         [WS_METHODS.vcsCreateWorktree]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsCreateWorktree,
-            gitWorkflow.createWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            admitStaveWorktreeRpc("ws.vcsCreateWorktree", "vcs.createWorktree", input.cwd).pipe(
+              Effect.andThen(gitWorkflow.createWorktree(input)),
+              Effect.tap(() => refreshGitStatus(input.cwd)),
+            ),
             { "rpc.aggregate": "vcs" },
           ),
         [WS_METHODS.vcsRemoveWorktree]: (input) =>

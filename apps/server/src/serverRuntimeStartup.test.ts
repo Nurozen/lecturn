@@ -27,16 +27,20 @@ it("uses the canonical Codex default for the auto-bootstrapped welcome thread", 
 it.effect("automatic pull only updates enabled, behind, clean default-branch checkouts", () =>
   Effect.gen(function* () {
     const pulled: string[] = [];
+    const statusChecked: string[] = [];
     const git = {
       statusDetails: (cwd: string) =>
-        Effect.succeed({
-          isRepo: true,
-          isDefaultBranch: cwd !== "/feature",
-          hasUpstream: true,
-          hasWorkingTreeChanges: cwd === "/dirty",
-          aheadCount: cwd === "/ahead" ? 1 : 0,
-          behindCount: cwd === "/current" ? 0 : 1,
-        } as never),
+        Effect.sync(() => {
+          statusChecked.push(cwd);
+          return {
+            isRepo: true,
+            isDefaultBranch: cwd !== "/feature",
+            hasUpstream: true,
+            hasWorkingTreeChanges: cwd === "/dirty",
+            aheadCount: cwd === "/ahead" ? 1 : 0,
+            behindCount: cwd === "/current" ? 0 : 1,
+          } as never;
+        }),
       pullCurrentBranch: (cwd: string) =>
         Effect.sync(() => {
           pulled.push(cwd);
@@ -47,8 +51,8 @@ it.effect("automatic pull only updates enabled, behind, clean default-branch che
           };
         }),
     } as unknown as GitVcsDriver.GitVcsDriver["Service"];
-    const project = (workspaceRoot: string, autoPull = true) =>
-      ({ workspaceRoot, autoPull }) as never;
+    const project = (workspaceRoot: string, autoPull = true, stave: unknown = undefined) =>
+      ({ workspaceRoot, autoPull, stave }) as never;
 
     yield* ServerRuntimeStartup.autoPullProjects([
       project("/clean"),
@@ -57,9 +61,13 @@ it.effect("automatic pull only updates enabled, behind, clean default-branch che
       project("/ahead"),
       project("/feature"),
       project("/disabled", false),
+      // A Stave space root is not a repo; it is refused before any git call.
+      project("/stave", true, { spaceId: "s", isSaga: false, repos: [], memories: [] }),
     ]).pipe(Effect.provideService(GitVcsDriver.GitVcsDriver, git));
 
     assert.deepStrictEqual(pulled, ["/clean"]);
+    assert.isFalse(statusChecked.includes("/stave"));
+    assert.isFalse(statusChecked.includes("/disabled"));
   }),
 );
 

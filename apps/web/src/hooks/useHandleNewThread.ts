@@ -27,6 +27,7 @@ import { readProjects, readThreadShell, useProjects, useThread } from "../state/
 import {
   hasExplicitComposerModelSelection,
   resolveNewDraftStartFromOrigin,
+  resolveNewThreadEnvModeSources,
   resolveNewThreadModelSelectionOverride,
 } from "../lib/chatThreadActions";
 import { readT3ProjectFileDefaultThreadEnvMode } from "../lib/t3ProjectFileDefaults";
@@ -143,18 +144,22 @@ export function useNewThreadHandler() {
           destinationDraftId,
         });
       // The shared resolver owns the priority order. The t3.json read is
-      // skipped entirely when a higher-priority source decides, and its
-      // query atom caches per project after the first call.
+      // skipped entirely when a higher-priority source decides (a Stave
+      // space forces local, then the per-project setting), and its query
+      // atom caches per project after the first call.
       const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
-        const consultProjectFile = project !== undefined && project.defaultThreadEnvMode == null;
+        const { forcedMode, projectSetting, consultProjectFile } =
+          resolveNewThreadEnvModeSources(project);
         return resolveDefaultThreadEnvMode({
-          projectSetting: project?.defaultThreadEnvMode,
-          projectFile: consultProjectFile
-            ? await readT3ProjectFileDefaultThreadEnvMode(
-                project.environmentId,
-                project.workspaceRoot,
-              )
-            : null,
+          forcedMode,
+          projectSetting,
+          projectFile:
+            consultProjectFile && project !== undefined
+              ? await readT3ProjectFileDefaultThreadEnvMode(
+                  project.environmentId,
+                  project.workspaceRoot,
+                )
+              : null,
           globalDefault: primaryServerSettings.defaultThreadEnvMode,
         });
       };

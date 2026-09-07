@@ -16,16 +16,20 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import type {
   BackgroundScope,
+  OrchestrationProject,
+  OrchestrationProjectShell,
   VcsStatusLocalResult,
   VcsStatusRemoteResult,
   VcsStatusResult,
   VcsStatusStreamEvent,
 } from "@t3tools/contracts";
-import { GitManagerError } from "@t3tools/contracts";
+import { GitManagerError, ProjectId } from "@t3tools/contracts";
 
 import * as VcsStatusBroadcaster from "./VcsStatusBroadcaster.ts";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
+import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { PersistenceSqlError } from "../persistence/Errors.ts";
 
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
@@ -876,6 +880,199 @@ describe("VcsStatusBroadcaster", () => {
       yield* Scope.close(secondScope, Exit.void).pipe(Effect.forkScoped);
       yield* Deferred.await(remoteInterrupted);
       assert.isTrue(Option.isSome(yield* Deferred.poll(remoteInterrupted)));
+    }).pipe(Effect.provide(testLayer));
+  });
+});
+
+describe("autoPullPolicyLayer", () => {
+  const projectBase = {
+    defaultModelSelection: null,
+    scripts: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+  const plainProject: OrchestrationProject = {
+    ...projectBase,
+    id: ProjectId.make("project-plain"),
+    title: "Plain",
+    workspaceRoot: "/plain",
+    autoPull: true,
+    deletedAt: null,
+  };
+  const staveRoot = "/spaces/lecturn";
+  const stavePrimaryRepo = "/spaces/lecturn/lecturn";
+  const staveProject: OrchestrationProject = {
+    ...projectBase,
+    id: ProjectId.make("project-stave"),
+    title: "Stave",
+    workspaceRoot: staveRoot,
+    autoPull: true,
+    stave: {
+      spaceId: "lecturn",
+      isSaga: false,
+      repos: [],
+      memories: [],
+      primaryRepoPath: stavePrimaryRepo,
+    },
+    deletedAt: null,
+  };
+  const toShell = ({ deletedAt: _deletedAt, ...project }: OrchestrationProject) =>
+    project satisfies OrchestrationProjectShell;
+  const shellSnapshot = (projects: ReadonlyArray<OrchestrationProjectShell>) => ({
+    snapshotSequence: 1,
+    projects,
+    threads: [],
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const queryFailure = new PersistenceSqlError({ operation: "test", detail: "unavailable" });
+
+  const makePolicyLayer = (
+    query: Partial<ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"]>,
+  ) =>
+    VcsStatusBroadcaster.autoPullPolicyLayer.pipe(
+      Layer.provide(Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)(query)),
+    );
+
+  it.effect("enables auto-pull for an exact workspace-root match without scanning", () =>
+    Effect.gen(function* () {
+      const policy = yield* VcsStatusBroadcaster.VcsAutoPullPolicy;
+      assert.isTrue(yield* policy.isEnabled("/plain"));
+      assert.isFalse(yield* policy.isEnabled("/plain-disabled"));
+    }).pipe(
+      Effect.provide(
+        makePolicyLayer({
+          getActiveProjectByWorkspaceRoot: (cwd) =>
+            Effect.succeed(
+              cwd === "/plain"
+                ? Option.some(plainProject)
+                : cwd === "/plain-disabled"
+                  ? Option.some({ ...plainProject, workspaceRoot: cwd, autoPull: false })
+                  : Option.none(),
+            ),
+          getShellSnapshot: () => Effect.die("exact match must not scan the shell snapshot"),
+        }),
+      ),
+    ),
+  );
+
+  it.effect("resolves a Stave project's primary repo path to its autoPull setting", () =>
+    Effect.gen(function* () {
+      const policy = yield* VcsStatusBroadcaster.VcsAutoPullPolicy;
+      assert.isTrue(yield* policy.isEnabled(stavePrimaryRepo));
+      assert.isFalse(yield* policy.isEnabled("/spaces/other/other"));
+    }).pipe(
+      Effect.provide(
+        makePolicyLayer({
+          getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+          getShellSnapshot: () =>
+            Effect.succeed(
+              shellSnapshot([
+                toShell(plainProject),
+                toShell(staveProject),
+                toShell({
+                  ...staveProject,
+                  id: ProjectId.make("project-stave-disabled"),
+                  workspaceRoot: "/spaces/other",
+                  autoPull: false,
+                  stave: { ...staveProject.stave!, primaryRepoPath: "/spaces/other/other" },
+                }),
+              ]),
+            ),
+        }),
+      ),
+    ),
+  );
+
+  it.effect("never enables auto-pull for the Stave space root itself", () =>
+    Effect.gen(function* () {
+      const policy = yield* VcsStatusBroadcaster.VcsAutoPullPolicy;
+      assert.isFalse(yield* policy.isEnabled(staveRoot));
+    }).pipe(
+      Effect.provide(
+        makePolicyLayer({
+          getActiveProjectByWorkspaceRoot: (cwd) =>
+            Effect.succeed(cwd === staveRoot ? Option.some(staveProject) : Option.none()),
+          getShellSnapshot: () => Effect.succeed(shellSnapshot([toShell(staveProject)])),
+        }),
+      ),
+    ),
+  );
+
+  it.effect("disables auto-pull for unrelated paths", () =>
+    Effect.gen(function* () {
+      const policy = yield* VcsStatusBroadcaster.VcsAutoPullPolicy;
+      assert.isFalse(yield* policy.isEnabled("/elsewhere"));
+    }).pipe(
+      Effect.provide(
+        makePolicyLayer({
+          getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+          getShellSnapshot: () =>
+            Effect.succeed(shellSnapshot([toShell(plainProject), toShell(staveProject)])),
+        }),
+      ),
+    ),
+  );
+
+  it.effect("disables auto-pull when either projection query fails", () =>
+    Effect.gen(function* () {
+      const rootLookupFails = yield* VcsStatusBroadcaster.VcsAutoPullPolicy.pipe(
+        Effect.flatMap((policy) => policy.isEnabled("/plain")),
+        Effect.provide(
+          makePolicyLayer({
+            getActiveProjectByWorkspaceRoot: () => Effect.fail(queryFailure),
+            getShellSnapshot: () => Effect.succeed(shellSnapshot([toShell(staveProject)])),
+          }),
+        ),
+      );
+      const scanFails = yield* VcsStatusBroadcaster.VcsAutoPullPolicy.pipe(
+        Effect.flatMap((policy) => policy.isEnabled(stavePrimaryRepo)),
+        Effect.provide(
+          makePolicyLayer({
+            getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+            getShellSnapshot: () => Effect.fail(queryFailure),
+          }),
+        ),
+      );
+      assert.isFalse(rootLookupFails);
+      assert.isFalse(scanFails);
+    }),
+  );
+
+  it.effect("pulls a behind Stave primary repo when status is refreshed for its path", () => {
+    let remoteStatus: VcsStatusRemoteResult = { ...baseRemoteStatus, behindCount: 1 };
+    let pullCalls = 0;
+    const testLayer = VcsStatusBroadcaster.layer.pipe(
+      Layer.provideMerge(NodeServices.layer),
+      Layer.provide(makeBackgroundPolicyLayer(() => true)),
+      Layer.provide(
+        makePolicyLayer({
+          getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+          getShellSnapshot: () => Effect.succeed(shellSnapshot([toShell(staveProject)])),
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(GitWorkflowService.GitWorkflowService)({
+          localStatus: () =>
+            Effect.succeed({ ...baseLocalStatus, isDefaultRef: true, refName: "main" }),
+          remoteStatus: () => Effect.succeed(remoteStatus),
+          invalidateLocalStatus: () => Effect.void,
+          invalidateRemoteStatus: () => Effect.void,
+          invalidateStatus: () => Effect.void,
+          pullCurrentBranch: () =>
+            Effect.sync(() => {
+              pullCalls += 1;
+              remoteStatus = { ...remoteStatus, behindCount: 0 };
+              return { status: "pulled" as const, refName: "main", upstreamRef: "origin/main" };
+            }),
+        }),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
+      const status = yield* broadcaster.refreshStatus(stavePrimaryRepo);
+      assert.equal(pullCalls, 1);
+      assert.equal(status.behindCount, 0);
     }).pipe(Effect.provide(testLayer));
   });
 });

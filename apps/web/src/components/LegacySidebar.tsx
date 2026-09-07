@@ -121,6 +121,7 @@ import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
+import { resolveThreadGitTarget } from "../lib/threadGitTarget";
 import { useEnvironment, useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import {
   buildThreadRouteParams,
@@ -415,18 +416,26 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     ? (remoteEnvLabel ?? (isDesktopLocalThread ? "Local" : "Remote"))
     : null;
   // For grouped projects, the thread may belong to a different environment
-  // than the representative project.  Look up the thread's own project cwd
-  // so git status (and thus PR detection) queries the correct path.
+  // than the representative project.  Resolve git targeting from the thread's
+  // own project so status (and thus PR detection) queries the correct path —
+  // a Stave space's primary repo rather than its root.
   const threadProject = useProject(
     useMemo(
       () => scopeProjectRef(thread.environmentId, thread.projectId),
       [thread.environmentId, thread.projectId],
     ),
   );
-  const threadProjectCwd = threadProject?.workspaceRoot ?? null;
-  const gitCwd = thread.worktreePath ?? threadProjectCwd ?? props.projectCwd;
+  const gitTarget = resolveThreadGitTarget({
+    project: threadProject,
+    thread,
+    fallbackCwd: props.projectCwd,
+  });
+  const gitCwd = gitTarget.cwd;
   const gitStatus = useEnvironmentQuery(
-    leaseLiveStatus && thread.linkedPullRequest == null && thread.branch != null && gitCwd !== null
+    leaseLiveStatus &&
+      thread.linkedPullRequest == null &&
+      gitTarget.statusEnabled &&
+      gitCwd !== null
       ? vcsEnvironment.status({
           environmentId: thread.environmentId,
           input: { cwd: gitCwd },
@@ -483,7 +492,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   );
   const pr =
     thread.linkedPullRequest == null
-      ? resolveThreadPr({ threadBranch: thread.branch, gitStatus: visibleGitStatus })
+      ? resolveThreadPr({ threadBranch: gitTarget.branch, gitStatus: visibleGitStatus })
       : (visibleLinkedPullRequestStatus?.pr ?? null);
   const prStatus = prStatusIndicator(
     pr,

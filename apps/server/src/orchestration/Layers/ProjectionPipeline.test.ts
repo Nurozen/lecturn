@@ -30,6 +30,7 @@ import {
 } from "../../persistence/Layers/Sqlite.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
+import * as StaveWorkspaceReader from "../../stave/StaveWorkspaceReader.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import {
   ORCHESTRATION_PROJECTOR_NAMES,
@@ -3546,6 +3547,7 @@ const engineLayer = it.layer(
     Layer.provide(OrchestrationProjectionPipelineLive),
     Layer.provide(OrchestrationEventStoreLive),
     Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+    Layer.provide(StaveWorkspaceReader.layer),
     Layer.provide(RepositoryIdentityResolver.layer),
     Layer.provideMerge(SqlitePersistenceMemory),
     Layer.provideMerge(
@@ -3917,6 +3919,7 @@ it.layer(
   OrchestrationProjectionSnapshotQueryLive.pipe(
     Layer.provide(ThreadBackgroundLiveness.layer),
     Layer.provide(ThreadPlanProgress.layer),
+    Layer.provide(StaveWorkspaceReader.layer),
     Layer.provide(RepositoryIdentityResolver.layer),
     Layer.provideMerge(
       Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-pipeline-fork-")),
@@ -4505,3 +4508,69 @@ it.layer(
     }),
   );
 });
+
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-refresh-")))(
+  "OrchestrationProjectionPipeline project.refreshed",
+  (it) => {
+    it.effect("advances projector state without touching the project row", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const now = "2026-01-01T00:00:00.000Z";
+        const projectId = ProjectId.make("project-refresh");
+        const readProjectRows = sql<Record<string, unknown>>`
+          SELECT * FROM projection_projects
+        `;
+
+        yield* eventStore.append({
+          type: "project.created",
+          eventId: EventId.make("evt-refresh-1"),
+          aggregateKind: "project",
+          aggregateId: projectId,
+          occurredAt: now,
+          commandId: CommandId.make("cmd-refresh-1"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-refresh-1"),
+          metadata: {},
+          payload: {
+            projectId,
+            title: "Project",
+            workspaceRoot: "/tmp/project-refresh",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        yield* projectionPipeline.bootstrap;
+        const before = yield* readProjectRows;
+        assert.equal(before.length, 1);
+
+        const refreshCommandId = CommandId.make("server:stave:refresh:project-refresh:1");
+        yield* eventStore.append({
+          type: "project.refreshed",
+          eventId: EventId.make("evt-refresh-2"),
+          aggregateKind: "project",
+          aggregateId: projectId,
+          occurredAt: "2026-01-02T00:00:00.000Z",
+          commandId: refreshCommandId,
+          causationEventId: null,
+          correlationId: refreshCommandId,
+          metadata: {},
+          payload: { projectId },
+        });
+        yield* projectionPipeline.bootstrap;
+
+        assert.deepEqual(yield* readProjectRows, before);
+        const stateRows = yield* sql<{ readonly lastAppliedSequence: number }>`
+          SELECT last_applied_sequence AS "lastAppliedSequence" FROM projection_state
+        `;
+        assert.equal(stateRows.length, Object.keys(ORCHESTRATION_PROJECTOR_NAMES).length);
+        for (const row of stateRows) {
+          assert.equal(row.lastAppliedSequence, 2);
+        }
+      }),
+    );
+  },
+);

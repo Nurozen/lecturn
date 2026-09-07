@@ -1,6 +1,7 @@
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import {
   type ClientOrchestrationCommand,
@@ -8,6 +9,8 @@ import {
   type OrchestrationCommand,
   OrchestrationDispatchCommandError,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  type ProjectId,
+  type ThreadId,
 } from "@t3tools/contracts";
 
 import {
@@ -19,7 +22,9 @@ import {
 } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
 import { parseBase64DataUrl } from "../imageMime.ts";
+import { StaveAdmission, type StaveAdmissionInput } from "../stave/StaveAdmission.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
+import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
 
 export const canonicalizeClientCommandTimestamps = (
   command: ClientOrchestrationCommand,
@@ -48,6 +53,123 @@ export const canonicalizeClientCommandTimestamps = (
     },
   };
 };
+
+interface WorktreeIntent extends Omit<StaveAdmissionInput, "projectRoot"> {
+  /** Project carried by the command, when it has one. */
+  readonly projectId?: ProjectId;
+  /** Thread whose project owns the command, for thread-scoped shapes. */
+  readonly threadId?: ThreadId;
+  /** Root the command names directly, used when neither lookup resolves. */
+  readonly fallbackProjectRoot?: string;
+}
+
+/**
+ * Which client commands can bind a thread to a per-thread worktree, and how
+ * to find the project each one targets. `null` means the command never
+ * touches worktrees, so admission (and the projection read it needs) is
+ * skipped entirely.
+ */
+export const describeWorktreeIntent = (
+  command: ClientOrchestrationCommand,
+): WorktreeIntent | null => {
+  switch (command.type) {
+    case "thread.create":
+      return command.worktreePath === null
+        ? null
+        : {
+            intent: "thread.create",
+            worktreePath: command.worktreePath,
+            projectId: command.projectId,
+          };
+    case "thread.meta.update":
+      return command.worktreePath === undefined || command.worktreePath === null
+        ? null
+        : {
+            intent: "thread.meta.update",
+            worktreePath: command.worktreePath,
+            threadId: command.threadId,
+          };
+    case "thread.turn.start": {
+      const bootstrap = command.bootstrap;
+      const worktreePath = bootstrap?.createThread?.worktreePath ?? null;
+      const prepareWorktree = bootstrap?.prepareWorktree !== undefined;
+      if (worktreePath === null && !prepareWorktree) {
+        return null;
+      }
+      return {
+        intent: "thread.turn.start",
+        worktreePath,
+        prepareWorktree,
+        threadId: command.threadId,
+        ...(bootstrap?.createThread ? { projectId: bootstrap.createThread.projectId } : {}),
+        ...(bootstrap?.prepareWorktree
+          ? { fallbackProjectRoot: bootstrap.prepareWorktree.projectCwd }
+          : {}),
+      };
+    }
+    default:
+      return null;
+  }
+};
+
+/**
+ * Stave worktree rule on the normalization path (WebSocket, HTTP, mobile).
+ * Resolves the project root from the command's project id, or through the
+ * thread's project when the command carries only a thread id, then asks
+ * `StaveAdmission`. A project or thread the projection does not know is left
+ * to the decider, which rejects it with its own error.
+ */
+const enforceStaveWorktreeRule = Effect.fn("Normalizer.enforceStaveWorktreeRule")(function* (
+  command: ClientOrchestrationCommand,
+) {
+  const request = describeWorktreeIntent(command);
+  if (request === null) {
+    return;
+  }
+  const admission = yield* StaveAdmission;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const readError = (cause: unknown) =>
+    new OrchestrationDispatchCommandError({
+      message: "Failed to resolve the command's project for Stave admission.",
+      cause,
+    });
+
+  const projectId =
+    request.projectId ??
+    (request.threadId === undefined
+      ? undefined
+      : Option.getOrUndefined(
+          yield* projectionSnapshotQuery
+            .getThreadShellById(request.threadId)
+            .pipe(Effect.mapError(readError)),
+        )?.projectId);
+  const project =
+    projectId === undefined
+      ? undefined
+      : Option.getOrUndefined(
+          yield* projectionSnapshotQuery
+            .getProjectShellById(projectId)
+            .pipe(Effect.mapError(readError)),
+        );
+  const projectRoot = project?.workspaceRoot ?? request.fallbackProjectRoot;
+  if (projectRoot === undefined) {
+    return;
+  }
+
+  const {
+    projectId: _projectId,
+    threadId: _threadId,
+    fallbackProjectRoot: _root,
+    ...input
+  } = request;
+  yield* admission
+    .check({ ...input, projectRoot })
+    .pipe(
+      Effect.mapError(
+        (error) => new OrchestrationDispatchCommandError({ message: error.message, cause: error }),
+      ),
+    );
+});
 
 const removeClaimedAttachmentPaths = Effect.fn("Normalizer.removeClaimedAttachmentPaths")(
   function* (attachmentPaths: ReadonlyArray<string>) {
@@ -138,6 +260,10 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
         message: "thread.fork is materialized only by the WebSocket dispatcher.",
       });
     }
+
+    // Before any attachment side effect: a refused command must leave no
+    // claimed copies behind.
+    yield* enforceStaveWorktreeRule(canonicalCommand);
 
     if (canonicalCommand.type !== "thread.turn.start") {
       return canonicalCommand as OrchestrationCommand;

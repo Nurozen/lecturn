@@ -4,6 +4,7 @@ import {
   getGitActionDisabledReason,
   requiresDefaultBranchConfirmation,
 } from "@t3tools/client-runtime/state/vcs";
+import { isStaveProject } from "@t3tools/client-runtime/state/projectGit";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import {
   CommonActions,
@@ -49,19 +50,20 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
   const isInspector = presentation === "inspector";
   const environmentId = EnvironmentId.make(props.route.params.environmentId);
   const threadId = ThreadId.make(props.route.params.threadId);
-  const { selectedThread } = useThreadSelection();
-  const { selectedThreadCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
+  const { selectedThread, selectedThreadProject } = useThreadSelection();
+  const { selectedThreadGitCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
   const theme = useUniwindTheme();
   const foregroundColor = theme["--color-foreground"];
   const sheetColor = theme["--color-sheet"];
+  const worktreesSupported = !isStaveProject(selectedThreadProject);
 
   const gitStatus = useEnvironmentQuery(
-    selectedThread !== null && selectedThreadCwd !== null
+    selectedThread !== null && selectedThreadGitCwd !== null
       ? vcsEnvironment.status({
           environmentId: selectedThread.environmentId,
-          input: { cwd: selectedThreadCwd },
+          input: { cwd: selectedThreadGitCwd },
         })
       : null,
   );
@@ -259,7 +261,11 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
         <SheetListRow
           icon="text.bubble"
           title="Review changes"
-          subtitle="Inspect turn diffs, worktree changes, and base branch diff"
+          subtitle={
+            worktreesSupported
+              ? "Inspect turn diffs, worktree changes, and base branch diff"
+              : "Inspect working tree changes and base branch diff"
+          }
           disabled={busy || !isRepo}
           onPress={() => {
             const params = { environmentId, threadId };
@@ -273,8 +279,12 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
         <View className="ml-12 h-px bg-border" />
         <SheetListRow
           icon="point.topleft.down.curvedto.point.bottomright.up"
-          title="Branches & worktrees"
-          subtitle="Switch branch, create branch, or move to a worktree"
+          title={worktreesSupported ? "Branches & worktrees" : "Branches"}
+          subtitle={
+            worktreesSupported
+              ? "Switch branch, create branch, or move to a worktree"
+              : "Switch branch or create branch"
+          }
           disabled={busy || !isRepo}
           onPress={() =>
             navigation.navigate("GitBranches", {
