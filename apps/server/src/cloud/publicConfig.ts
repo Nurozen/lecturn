@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 
+declare const __T3CODE_BUILD_HOSTED_APP_URL__: string | undefined;
 declare const __T3CODE_BUILD_RELAY_URL__: string | undefined;
 declare const __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
 declare const __T3CODE_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__: string | undefined;
@@ -48,6 +49,12 @@ function normalizeSecureUrl(value: string): string | null {
     return null;
   }
 }
+
+export const buildTimeHostedAppUrl = readBuildTimeValue(
+  typeof __T3CODE_BUILD_HOSTED_APP_URL__ === "undefined"
+    ? undefined
+    : __T3CODE_BUILD_HOSTED_APP_URL__,
+);
 
 export const buildTimeRelayUrl =
   typeof __T3CODE_BUILD_RELAY_URL__ === "undefined"
@@ -109,10 +116,13 @@ export const relayUrlConfig = makeRelayUrlConfig();
  * machines. Overridable so staging/nightly builds can point their CLIs at a
  * matching hosted deployment.
  */
-export const hostedAppUrlConfig = makePublicValueConfig(
-  "T3CODE_HOSTED_APP_URL",
-  DEFAULT_HOSTED_APP_URL,
-).pipe(Config.mapOrFail(validateHostedAppUrl));
+export function makeHostedAppUrlConfig(fallback = buildTimeHostedAppUrl || DEFAULT_HOSTED_APP_URL) {
+  return makePublicValueConfig("T3CODE_HOSTED_APP_URL", fallback).pipe(
+    Config.mapOrFail(validateHostedAppUrl),
+  );
+}
+
+export const hostedAppUrlConfig = makeHostedAppUrlConfig();
 
 function validateHostedAppUrl(value: string) {
   try {

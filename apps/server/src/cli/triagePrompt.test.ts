@@ -45,27 +45,27 @@ it("context file carries every path the playbook depends on", () => {
     releaseTag: "v0.0.33",
     os: "linux x64 (7.0.0)",
     nodeVersion: "v24.0.0",
-    launchedAs: "npx t3 triage",
+    launchedAs: "lecturn triage",
     server: "running (pid 42, http://127.0.0.1:4501)",
     paths: {
-      stateDir: "/home/u/.t3/userdata",
-      dbPath: "/home/u/.t3/userdata/state.sqlite",
-      settingsPath: "/home/u/.t3/userdata/settings.json",
-      logsDir: "/home/u/.t3/userdata/logs",
-      serverLogPath: "/home/u/.t3/userdata/logs/server.log",
-      serverTracePath: "/home/u/.t3/userdata/logs/server.trace.ndjson",
-      providerEventLogPath: "/home/u/.t3/userdata/logs/provider/events.log",
-      terminalLogsDir: "/home/u/.t3/userdata/logs/terminals",
-      providerStatusCacheDir: "/home/u/.t3/caches",
-      secretsDir: "/home/u/.t3/userdata/secrets",
-      sourceCacheDir: "/home/u/.t3/source",
+      stateDir: "/home/u/.lecturn/userdata",
+      dbPath: "/home/u/.lecturn/userdata/state.sqlite",
+      settingsPath: "/home/u/.lecturn/userdata/settings.json",
+      logsDir: "/home/u/.lecturn/userdata/logs",
+      serverLogPath: "/home/u/.lecturn/userdata/logs/server.log",
+      serverTracePath: "/home/u/.lecturn/userdata/logs/server.trace.ndjson",
+      providerEventLogPath: "/home/u/.lecturn/userdata/logs/provider/events.log",
+      terminalLogsDir: "/home/u/.lecturn/userdata/logs/terminals",
+      providerStatusCacheDir: "/home/u/.lecturn/caches",
+      secretsDir: "/home/u/.lecturn/userdata/secrets",
+      sourceCacheDir: "/home/u/.lecturn/source",
     },
   });
-  assert.include(context, "/home/u/.t3/userdata/state.sqlite");
-  assert.include(context, "/home/u/.t3/userdata/logs/server.trace.ndjson");
-  assert.include(context, "/home/u/.t3/userdata/logs/provider/events.log");
-  assert.include(context, "/home/u/.t3/userdata/secrets");
-  assert.include(context, "/home/u/.t3/source");
-  assert.include(context, "npx t3 triage");
+  assert.include(context, "/home/u/.lecturn/userdata/state.sqlite");
+  assert.include(context, "/home/u/.lecturn/userdata/logs/server.trace.ndjson");
+  assert.include(context, "/home/u/.lecturn/userdata/logs/provider/events.log");
+  assert.include(context, "/home/u/.lecturn/userdata/secrets");
+  assert.include(context, "/home/u/.lecturn/source");
+  assert.include(context, "lecturn triage");
   assert.include(context, "v0.0.33");
 });

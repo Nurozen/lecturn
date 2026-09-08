@@ -24,11 +24,17 @@ it("detects package runners from their cache entry paths", () => {
     ),
     "pnpm dlx",
   );
-  assert.equal(detectCliRunner("/home/theo/.bun/install/cache/t3@0.0.31/dist/bin.mjs"), "bunx");
-  assert.equal(detectCliRunner("/tmp/bunx-1000-t3@latest/node_modules/t3/dist/bin.mjs"), "bunx");
+  assert.equal(
+    detectCliRunner("/home/theo/.bun/install/cache/lecturn@0.0.31/dist/bin.mjs"),
+    "bunx",
+  );
+  assert.equal(
+    detectCliRunner("/tmp/bunx-1000-lecturn@latest/node_modules/t3/dist/bin.mjs"),
+    "bunx",
+  );
   assert.equal(
     detectCliRunner(
-      "C:\\Users\\theo\\AppData\\Local\\Temp\\bunx-0-t3@latest\\node_modules\\t3\\dist\\bin.mjs",
+      "C:\\Users\\theo\\AppData\\Local\\Temp\\bunx-0-lecturn@latest\\node_modules\\t3\\dist\\bin.mjs",
     ),
     "bunx",
   );
@@ -37,13 +43,13 @@ it("detects package runners from their cache entry paths", () => {
 it("treats stable installs as direct invocations", () => {
   assert.isNull(detectCliRunner("/usr/local/lib/node_modules/t3/dist/bin.mjs"));
   assert.isNull(detectCliRunner("/home/theo/Code/work/t3code/apps/server/dist/bin.mjs"));
-  assert.isNull(detectCliRunner("/home/theo/.t3/runtime/0.0.31/node_modules/t3/dist/bin.mjs"));
+  assert.isNull(detectCliRunner("/home/theo/.lecturn/runtime/0.0.31/node_modules/t3/dist/bin.mjs"));
   assert.isNull(detectCliRunner(""));
 });
 
 it("re-suggests the nightly channel only for nightly builds", () => {
-  assert.equal(suggestedPackageSpec("0.0.31-nightly.20260729"), "t3@nightly");
-  assert.equal(suggestedPackageSpec("0.0.31"), "t3");
+  assert.equal(suggestedPackageSpec("0.0.31-nightly.20260729"), "@cloudgatherer/lecturn@nightly");
+  assert.equal(suggestedPackageSpec("0.0.31"), "@cloudgatherer/lecturn");
 });
 
 it("formats serve suggestions to match the launching command", () => {
@@ -53,15 +59,15 @@ it("formats serve suggestions to match the launching command", () => {
       entryPath: "/home/theo/.npm/_npx/abc/node_modules/t3/dist/bin.mjs",
       version: "0.0.31-nightly.20260729",
     }),
-    "npx t3@nightly serve",
+    "lecturn serve",
   );
   assert.equal(
     formatCliCommand({
       subcommand: "serve",
-      entryPath: "/tmp/bunx-1000-t3@latest/node_modules/t3/dist/bin.mjs",
+      entryPath: "/tmp/bunx-1000-lecturn@latest/node_modules/t3/dist/bin.mjs",
       version: "0.0.31",
     }),
-    "bunx t3 serve",
+    "lecturn serve",
   );
   assert.equal(
     formatCliCommand({
@@ -69,6 +75,6 @@ it("formats serve suggestions to match the launching command", () => {
       entryPath: "/usr/local/lib/node_modules/t3/dist/bin.mjs",
       version: "0.0.31-nightly.20260729",
     }),
-    "t3 serve",
+    "lecturn serve",
   );
 });

@@ -1,0 +1,1032 @@
+diff --git a/src/Output.ts b/src/Output.ts
+--- a/src/Output.ts
++++ b/src/Output.ts
+@@ -1,10 +1,8 @@
+ import * as Config from "effect/Config";
+ import * as Data from "effect/Data";
+-import * as Duration from "effect/Duration";
+ import * as Effect from "effect/Effect";
+ import { pipe } from "effect/Function";
+ import type { Pipeable } from "effect/Pipeable";
+-import * as Redacted from "effect/Redacted";
+ import { SingleShotGen } from "effect/Utils";
+ import { getRefMetadata, isRef, type Ref } from "./Ref.ts";
+ import { isResource, type Resource, type ResourceLike } from "./Resource.ts";
+@@ -12,7 +10,7 @@
+ import { Stack } from "./Stack.ts";
+ import { Stage } from "./Stage.ts";
+ import * as State from "./State/State.ts";
+-import { isPrimitive, type Primitive } from "./Util/data.ts";
++import { isPlainData, isPrimitive, type Primitive } from "./Util/data.ts";
+ 
+ const inspect = Symbol.for("nodejs.util.inspect.custom");
+ 
+@@ -591,11 +589,16 @@
+   upstream: {
+     [Id in string]: any;
+   },
++  // Ancestor-path cycle guard — a plain-data value that appears on its own
++  // ancestor chain is cut to `undefined` (it could never serialize anyway).
++  // Immutable per-level so legitimately-shared diamond references survive
++  // (#1082).
++  ancestors?: ReadonlySet<object>,
+ ) => Effect.Effect<
+   A,
+   InvalidReferenceError | MissingSourceError | Config.ConfigError,
+   State.State | Req
+-> = (expr, upstream) =>
++> = (expr, upstream, ancestors = new Set()) =>
+   Effect.gen(function* () {
+     if (isResource(expr)) {
+       const srcId = expr.FQN;
+@@ -681,56 +684,90 @@
+         return output;
+       }
+     }
+-    if (Array.isArray(expr)) {
+-      return yield* Effect.all(expr.map((item) => evaluate(item, upstream)));
+-    } else if (Config.isConfig(expr)) {
++    if (Config.isConfig(expr)) {
+       // Resolve Config against the deploy environment — see resolveInput in
+       // Plan.ts for rationale. `Config.redacted` resolves to a `Redacted`,
+-      // which stays opaque via the branch below.
+-      return yield* evaluate(yield* expr, upstream);
+-    } else if (Duration.isDuration(expr) || Redacted.isRedacted(expr)) {
+-      // Opaque value — see resolveInput in Plan.ts for rationale.
+-      return expr;
+-    } else if (typeof expr === "object" && expr !== null) {
++      // which stays opaque via the leaf fallthrough below.
++      return yield* evaluate(yield* expr, upstream, ancestors);
++    } else if (isPlainData(expr)) {
++      if (ancestors.has(expr)) {
++        return undefined;
++      }
++      const nested = new Set(ancestors).add(expr);
++      if (Array.isArray(expr)) {
++        return yield* Effect.all(
++          expr.map((item) => evaluate(item, upstream, nested)),
++        );
++      }
+       return Object.fromEntries(
+         yield* Effect.all(
+           Object.entries(expr).map(([key, value]) =>
+-            evaluate(value, upstream).pipe(Effect.map((value) => [key, value])),
++            evaluate(value, upstream, nested).pipe(
++              Effect.map((value) => [key, value]),
++            ),
+           ),
+         ),
+       );
+     }
++    // Everything else is a leaf returned by identity: Duration, Redacted,
++    // Date, and effect runtime values (a Worker's `exports` carries each
++    // DO's `constructor` Effect and captured `services` Context). Rebuilding
++    // a class instance entry-by-entry strips its prototype, and effect
++    // ≥4.0.0-beta.103's Context is cyclic (#1082). This sits after
++    // `Config.isConfig` on purpose — Configs are Effects but must resolve.
+     return expr;
+   }) as Effect.Effect<any>;
+ 
+ export const hasOutputs = (value: any): value is Output<any, any> =>
+   Object.keys(upstreamAny(value)).length > 0;
+ 
++/**
++ * Cycle guard shared by the upstream walkers. Marks `value` as visited in
++ * `seen`; returns true when it was already visited (the caller returns `{}`
++ * — the first visit already contributed the subtree's resources to the
++ * FQN-keyed union, so skipping repeats is lossless).
++ */
++const alreadySeen = (value: object, seen: WeakSet<object>): boolean => {
++  if (seen.has(value)) {
++    return true;
++  }
++  seen.add(value);
++  return false;
++};
++
++// The dependency rule (#1082): a Resource or Output IS a dependency; plain
++// data (arrays, plain objects) is traversed to find them; every other value
++// — class instances like effect's Effect/Layer/Context, Dates, SDK objects,
++// functions — is a leaf. See `isPlainData` in Util/data.ts for why leaves
++// must never be walked.
++
+ export const upstreamAny = (
+   value: any,
++  seen: WeakSet<object> = new WeakSet(),
+ ): {
+   [ID in string]: Resource;
+ } => {
+   if (isResource(value)) {
+     return { [value.FQN]: value as Resource };
+   } else if (isExpr(value)) {
+-    return upstream(value);
+-  } else if (Array.isArray(value)) {
+-    return Object.assign({}, ...value.map(resolveUpstream));
+-  } else if (
+-    value &&
+-    (typeof value === "object" || typeof value === "function")
+-  ) {
++    return upstream(value, seen);
++  } else if (isPlainData(value)) {
++    if (alreadySeen(value, seen)) {
++      return {};
++    }
+     return Object.assign(
+       {},
+-      ...Object.values(value).map((value) => resolveUpstream(value)),
++      ...Object.values(value).map((value) => resolveUpstream(value, seen)),
+     );
+   }
+   return {};
+ };
+ 
+ // TODO(sam): add a type
+-export const upstream = <E extends Output<any, any>>(expr: E): any => {
++export const upstream = <E extends Output<any, any>>(
++  expr: E,
++  seen: WeakSet<object> = new WeakSet(),
++): any => {
+   if (isResource(expr)) {
+     return {
+       [(expr as unknown as Resource).FQN]: expr,
+@@ -740,42 +777,45 @@
+       [expr.src.FQN]: expr.src,
+     };
+   } else if (isPropExpr(expr)) {
+-    return upstream(expr.expr);
++    return upstream(expr.expr, seen);
+   } else if (isAllExpr(expr)) {
+-    return Object.assign({}, ...expr.outs.map((out) => upstream(out)));
++    return Object.assign({}, ...expr.outs.map((out) => upstream(out, seen)));
+   } else if (
+     isEffectExpr(expr) ||
+     isApplyExpr(expr) ||
+     isFlatMapExpr(expr) ||
+     isNamedExpr(expr)
+   ) {
+-    return upstream(expr.expr);
+-  } else if (Array.isArray(expr)) {
+-    return expr.map(upstream).reduce(toObject, {});
+-  } else if (typeof expr === "object" && expr !== null) {
++    return upstream(expr.expr, seen);
++  } else if (isPlainData(expr)) {
++    if (alreadySeen(expr, seen)) {
++      return {};
++    }
+     return Object.values(expr)
+-      .map((v) => upstream(v))
++      .map((v) => upstream(v as any, seen))
+       .reduce(toObject, {});
+   }
+   return {};
+ };
+ 
+ // TODO(sam): add a type
+-export const resolveUpstream = <const A>(value: A): any => {
++export const resolveUpstream = <const A>(
++  value: A,
++  seen: WeakSet<object> = new WeakSet(),
++): any => {
+   if (isPrimitive(value)) {
+     return {} as any;
+   } else if (isResource(value)) {
+     return { [(value as unknown as Resource).FQN]: value } as any;
+   } else if (isOutput(value)) {
+-    return upstream(value) as any;
+-  } else if (Array.isArray(value)) {
++    return upstream(value, seen) as any;
++  } else if (isPlainData(value)) {
++    if (alreadySeen(value, seen)) {
++      return {} as any;
++    }
+     return Object.fromEntries(
+-      value.map((v) => resolveUpstream(v)).flatMap(Object.entries),
+-    ) as any;
+-  } else if (typeof value === "object" || typeof value === "function") {
+-    return Object.fromEntries(
+-      Object.values(value as any)
+-        .map(resolveUpstream)
++      Object.values(value)
++        .map((v) => resolveUpstream(v, seen))
+         .flatMap(Object.entries),
+     ) as any;
+   }
+diff --git a/lib/Output.js b/lib/Output.js
+--- a/lib/Output.js
++++ b/lib/Output.js
+@@ -1,9 +1,7 @@
+ import * as Config from "effect/Config";
+ import * as Data from "effect/Data";
+-import * as Duration from "effect/Duration";
+ import * as Effect from "effect/Effect";
+ import { pipe } from "effect/Function";
+-import * as Redacted from "effect/Redacted";
+ import { SingleShotGen } from "effect/Utils";
+ import { getRefMetadata, isRef } from "./Ref.js";
+ import { isResource } from "./Resource.js";
+@@ -11,7 +9,7 @@
+ import { Stack } from "./Stack.js";
+ import { Stage } from "./Stage.js";
+ import * as State from "./State/State.js";
+-import { isPrimitive } from "./Util/data.js";
++import { isPlainData, isPrimitive } from "./Util/data.js";
+ const inspect = Symbol.for("nodejs.util.inspect.custom");
+ export const of = (resource) => {
+     if (isRef(resource)) {
+@@ -349,7 +347,7 @@
+ }
+ export class InvalidReferenceError extends Data.TaggedError("InvalidReferenceError") {
+ }
+-export const evaluate = (expr, upstream) => Effect.gen(function* () {
++export const evaluate = (expr, upstream, ancestors = new Set()) => Effect.gen(function* () {
+     if (isResource(expr)) {
+         const srcId = expr.FQN;
+         const src = upstream[srcId];
+@@ -438,43 +436,66 @@
+             return output;
+         }
+     }
+-    if (Array.isArray(expr)) {
+-        return yield* Effect.all(expr.map((item) => evaluate(item, upstream)));
+-    }
+-    else if (Config.isConfig(expr)) {
++    if (Config.isConfig(expr)) {
+         // Resolve Config against the deploy environment — see resolveInput in
+         // Plan.ts for rationale. `Config.redacted` resolves to a `Redacted`,
+-        // which stays opaque via the branch below.
+-        return yield* evaluate(yield* expr, upstream);
+-    }
+-    else if (Duration.isDuration(expr) || Redacted.isRedacted(expr)) {
+-        // Opaque value — see resolveInput in Plan.ts for rationale.
+-        return expr;
+-    }
+-    else if (typeof expr === "object" && expr !== null) {
+-        return Object.fromEntries(yield* Effect.all(Object.entries(expr).map(([key, value]) => evaluate(value, upstream).pipe(Effect.map((value) => [key, value])))));
+-    }
++        // which stays opaque via the leaf fallthrough below.
++        return yield* evaluate(yield* expr, upstream, ancestors);
++    }
++    else if (isPlainData(expr)) {
++        if (ancestors.has(expr)) {
++            return undefined;
++        }
++        const nested = new Set(ancestors).add(expr);
++        if (Array.isArray(expr)) {
++            return yield* Effect.all(expr.map((item) => evaluate(item, upstream, nested)));
++        }
++        return Object.fromEntries(yield* Effect.all(Object.entries(expr).map(([key, value]) => evaluate(value, upstream, nested).pipe(Effect.map((value) => [key, value])))));
++    }
++    // Everything else is a leaf returned by identity: Duration, Redacted,
++    // Date, and effect runtime values (a Worker's `exports` carries each
++    // DO's `constructor` Effect and captured `services` Context). Rebuilding
++    // a class instance entry-by-entry strips its prototype, and effect
++    // ≥4.0.0-beta.103's Context is cyclic (#1082). This sits after
++    // `Config.isConfig` on purpose — Configs are Effects but must resolve.
+     return expr;
+ });
+ export const hasOutputs = (value) => Object.keys(upstreamAny(value)).length > 0;
+-export const upstreamAny = (value) => {
++/**
++ * Cycle guard shared by the upstream walkers. Marks `value` as visited in
++ * `seen`; returns true when it was already visited (the caller returns `{}`
++ * — the first visit already contributed the subtree's resources to the
++ * FQN-keyed union, so skipping repeats is lossless).
++ */
++const alreadySeen = (value, seen) => {
++    if (seen.has(value)) {
++        return true;
++    }
++    seen.add(value);
++    return false;
++};
++// The dependency rule (#1082): a Resource or Output IS a dependency; plain
++// data (arrays, plain objects) is traversed to find them; every other value
++// — class instances like effect's Effect/Layer/Context, Dates, SDK objects,
++// functions — is a leaf. See `isPlainData` in Util/data.ts for why leaves
++// must never be walked.
++export const upstreamAny = (value, seen = new WeakSet()) => {
+     if (isResource(value)) {
+         return { [value.FQN]: value };
+     }
+     else if (isExpr(value)) {
+-        return upstream(value);
+-    }
+-    else if (Array.isArray(value)) {
+-        return Object.assign({}, ...value.map(resolveUpstream));
+-    }
+-    else if (value &&
+-        (typeof value === "object" || typeof value === "function")) {
+-        return Object.assign({}, ...Object.values(value).map((value) => resolveUpstream(value)));
++        return upstream(value, seen);
++    }
++    else if (isPlainData(value)) {
++        if (alreadySeen(value, seen)) {
++            return {};
++        }
++        return Object.assign({}, ...Object.values(value).map((value) => resolveUpstream(value, seen)));
+     }
+     return {};
+ };
+ // TODO(sam): add a type
+-export const upstream = (expr) => {
++export const upstream = (expr, seen = new WeakSet()) => {
+     if (isResource(expr)) {
+         return {
+             [expr.FQN]: expr,
+@@ -486,29 +507,29 @@
+         };
+     }
+     else if (isPropExpr(expr)) {
+-        return upstream(expr.expr);
++        return upstream(expr.expr, seen);
+     }
+     else if (isAllExpr(expr)) {
+-        return Object.assign({}, ...expr.outs.map((out) => upstream(out)));
++        return Object.assign({}, ...expr.outs.map((out) => upstream(out, seen)));
+     }
+     else if (isEffectExpr(expr) ||
+         isApplyExpr(expr) ||
+         isFlatMapExpr(expr) ||
+         isNamedExpr(expr)) {
+-        return upstream(expr.expr);
+-    }
+-    else if (Array.isArray(expr)) {
+-        return expr.map(upstream).reduce(toObject, {});
+-    }
+-    else if (typeof expr === "object" && expr !== null) {
++        return upstream(expr.expr, seen);
++    }
++    else if (isPlainData(expr)) {
++        if (alreadySeen(expr, seen)) {
++            return {};
++        }
+         return Object.values(expr)
+-            .map((v) => upstream(v))
++            .map((v) => upstream(v, seen))
+             .reduce(toObject, {});
+     }
+     return {};
+ };
+ // TODO(sam): add a type
+-export const resolveUpstream = (value) => {
++export const resolveUpstream = (value, seen = new WeakSet()) => {
+     if (isPrimitive(value)) {
+         return {};
+     }
+@@ -516,14 +537,14 @@
+         return { [value.FQN]: value };
+     }
+     else if (isOutput(value)) {
+-        return upstream(value);
+-    }
+-    else if (Array.isArray(value)) {
+-        return Object.fromEntries(value.map((v) => resolveUpstream(v)).flatMap(Object.entries));
+-    }
+-    else if (typeof value === "object" || typeof value === "function") {
++        return upstream(value, seen);
++    }
++    else if (isPlainData(value)) {
++        if (alreadySeen(value, seen)) {
++            return {};
++        }
+         return Object.fromEntries(Object.values(value)
+-            .map(resolveUpstream)
++            .map((v) => resolveUpstream(v, seen))
+             .flatMap(Object.entries));
+     }
+     return {};
+diff --git a/src/Plan.ts b/src/Plan.ts
+--- a/src/Plan.ts
++++ b/src/Plan.ts
+@@ -2,10 +2,8 @@
+ /** @effect-diagnostics missingEffectError:off */
+ import * as Config from "effect/Config";
+ import * as Data from "effect/Data";
+-import * as Duration from "effect/Duration";
+ import * as Effect from "effect/Effect";
+ import * as Option from "effect/Option";
+-import * as Redacted from "effect/Redacted";
+ import { asEffect } from ".//Util/types.ts";
+ import { isAction, type ActionLike } from "./Action.ts";
+ import {
+@@ -59,6 +57,7 @@
+   type UpdatedResourceState,
+   type UpdatingReourceState,
+ } from "./State/index.ts";
++import { isPlainData } from "./Util/data.ts";
+ import { findCycleMembers } from "./Util/scc.ts";
+ import { hashInput } from "./Util/sha256.ts";
+ 
+@@ -395,7 +394,7 @@
+           ));
+       });
+ 
+-    const resolveInput = (input: any): Effect.Effect<any, Config.ConfigError> =>
++    const resolveInput = (input: any, ancestors: ReadonlySet<object> = new Set()): Effect.Effect<any, Config.ConfigError> =>
+       Effect.gen(function* () {
+         if (!input) {
+           return input;
+@@ -408,17 +407,7 @@
+           // providers receive a resolved value instead of a Config object.
+           // `Config.redacted` resolves to a `Redacted`, which stays opaque via
+           // the branch below.
+-          return yield* resolveInput(yield* input);
+-        } else if (Duration.isDuration(input) || Redacted.isRedacted(input)) {
+-          // Opaque values that are resolved downstream. We don't walk them
+-          // because it would strip their prototype, resulting in a plain object
+-          // that downstream consumers can't interpret. Redacted additionally
+-          // stays wrapped to preserve the secrecy boundary.
+-          return input;
+-        } else if (Array.isArray(input)) {
+-          return yield* Effect.all(input.map(resolveInput), {
+-            concurrency: "unbounded",
+-          });
++          return yield* resolveInput(yield* input, ancestors);
+         } else if (isResource(input)) {
+           // Resource objects have dynamic properties (path, hash, etc.) that are
+           // created on-demand by a Proxy getter and aren't enumerable via Object.entries.
+@@ -436,19 +425,39 @@
+           // short-circuits, and a stable identifier that should have been
+           // available is missing — forcing consumers to hand-extract it.
+           if (Output.isResourceExpr(resolved) && resolved.stables) {
+-            return yield* resolveInput(resolved.stables);
++            return yield* resolveInput(resolved.stables, ancestors);
+           }
+-          return yield* resolveInput(resolved);
+-        } else if (typeof input === "object") {
++          return yield* resolveInput(resolved, ancestors);
++        } else if (isPlainData(input)) {
++          if (ancestors.has(input)) {
++            return undefined;
++          }
++          const nested = new Set(ancestors).add(input);
++          if (Array.isArray(input)) {
++            return yield* Effect.all(
++              input.map((item) => resolveInput(item, nested)),
++              { concurrency: "unbounded" },
++            );
++          }
+           return Object.fromEntries(
+             yield* Effect.all(
+               Object.entries(input).map(([key, value]) =>
+-                resolveInput(value).pipe(Effect.map((value) => [key, value])),
++                resolveInput(value, nested).pipe(
++                  Effect.map((value) => [key, value]),
++                ),
+               ),
+               { concurrency: "unbounded" },
+             ),
+           );
+         }
++        // Everything else is an opaque leaf returned by identity: Duration,
++        // Redacted, Date, and effect runtime values (a Worker's `exports`
++        // carries each DO's `constructor` Effect and captured `services`
++        // Context). Rebuilding a class instance entry-by-entry would strip
++        // its prototype, and effect ≥4.0.0-beta.103's Context is cyclic
++        // (#1082). Redacted additionally stays wrapped to preserve the
++        // secrecy boundary. This sits after `Config.isConfig` on purpose —
++        // Configs are Effects but must still resolve.
+         return input;
+       });
+ 
+diff --git a/lib/Plan.js b/lib/Plan.js
+--- a/lib/Plan.js
++++ b/lib/Plan.js
+@@ -2,10 +2,8 @@
+ /** @effect-diagnostics missingEffectError:off */
+ import * as Config from "effect/Config";
+ import * as Data from "effect/Data";
+-import * as Duration from "effect/Duration";
+ import * as Effect from "effect/Effect";
+ import * as Option from "effect/Option";
+-import * as Redacted from "effect/Redacted";
+ import { asEffect } from ".//Util/types.js";
+ import { isAction } from "./Action.js";
+ import { AdoptPolicy, OwnedBySomeoneElse, stripUnowned, Unowned, } from "./AdoptPolicy.js";
+@@ -17,8 +15,8 @@
+ import * as Output from "./Output.js";
+ import { findProviderByType, missingProviderError, Provider, tryFindProviderByType, } from "./Provider.js";
+ import { isResource, } from "./Resource.js";
+-import {} from "./Stack.js";
+ import { isActionState, State, } from "./State/index.js";
++import { isPlainData } from "./Util/data.js";
+ import { findCycleMembers } from "./Util/scc.js";
+ import { hashInput } from "./Util/sha256.js";
+ export const isCRUD = (node) => {
+@@ -152,7 +150,7 @@
+                 }
+             })));
+     });
+-    const resolveInput = (input) => Effect.gen(function* () {
++    const resolveInput = (input, ancestors = new Set()) => Effect.gen(function* () {
+         if (!input) {
+             return input;
+         }
+@@ -166,19 +164,7 @@
+             // providers receive a resolved value instead of a Config object.
+             // `Config.redacted` resolves to a `Redacted`, which stays opaque via
+             // the branch below.
+-            return yield* resolveInput(yield* input);
+-        }
+-        else if (Duration.isDuration(input) || Redacted.isRedacted(input)) {
+-            // Opaque values that are resolved downstream. We don't walk them
+-            // because it would strip their prototype, resulting in a plain object
+-            // that downstream consumers can't interpret. Redacted additionally
+-            // stays wrapped to preserve the secrecy boundary.
+-            return input;
+-        }
+-        else if (Array.isArray(input)) {
+-            return yield* Effect.all(input.map(resolveInput), {
+-                concurrency: "unbounded",
+-            });
++            return yield* resolveInput(yield* input, ancestors);
+         }
+         else if (isResource(input)) {
+             // Resource objects have dynamic properties (path, hash, etc.) that are
+@@ -197,13 +183,28 @@
+             // short-circuits, and a stable identifier that should have been
+             // available is missing — forcing consumers to hand-extract it.
+             if (Output.isResourceExpr(resolved) && resolved.stables) {
+-                return yield* resolveInput(resolved.stables);
+-            }
+-            return yield* resolveInput(resolved);
+-        }
+-        else if (typeof input === "object") {
+-            return Object.fromEntries(yield* Effect.all(Object.entries(input).map(([key, value]) => resolveInput(value).pipe(Effect.map((value) => [key, value]))), { concurrency: "unbounded" }));
+-        }
++                return yield* resolveInput(resolved.stables, ancestors);
++            }
++            return yield* resolveInput(resolved, ancestors);
++        }
++        else if (isPlainData(input)) {
++            if (ancestors.has(input)) {
++                return undefined;
++            }
++            const nested = new Set(ancestors).add(input);
++            if (Array.isArray(input)) {
++                return yield* Effect.all(input.map((item) => resolveInput(item, nested)), { concurrency: "unbounded" });
++            }
++            return Object.fromEntries(yield* Effect.all(Object.entries(input).map(([key, value]) => resolveInput(value, nested).pipe(Effect.map((value) => [key, value]))), { concurrency: "unbounded" }));
++        }
++        // Everything else is an opaque leaf returned by identity: Duration,
++        // Redacted, Date, and effect runtime values (a Worker's `exports`
++        // carries each DO's `constructor` Effect and captured `services`
++        // Context). Rebuilding a class instance entry-by-entry would strip
++        // its prototype, and effect ≥4.0.0-beta.103's Context is cyclic
++        // (#1082). Redacted additionally stays wrapped to preserve the
++        // secrecy boundary. This sits after `Config.isConfig` on purpose —
++        // Configs are Effects but must still resolve.
+         return input;
+     });
+     const resolveOutput = (expr) => Effect.gen(function* () {
+diff --git a/src/Diff.ts b/src/Diff.ts
+--- a/src/Diff.ts
++++ b/src/Diff.ts
+@@ -5,7 +5,7 @@
+ import * as Output from "./Output.ts";
+ import type { BindingNode } from "./Plan.ts";
+ import type { ResourceBinding } from "./Resource.ts";
+-import { isPrimitive } from "./Util/data.ts";
++import { isPlainData, isPrimitive, mapPlainData } from "./Util/data.ts";
+ 
+ export type Diff = NoopDiff | UpdateDiff | ReplaceDiff;
+ 
+@@ -44,12 +44,18 @@
+ export const isResolved = <T>(value: Input<T>): value is T =>
+   !_hasUnresolved(value);
+ 
+-const _hasUnresolved = (value: unknown): boolean => {
++const _hasUnresolved = (
++  value: unknown,
++  seen: WeakSet<object> = new WeakSet(),
++): boolean => {
+   if (value == null || isPrimitive(value)) return false;
+   if (Output.isExpr(value) || Effect.isEffect(value)) return true;
+-  if (Array.isArray(value)) return value.some(_hasUnresolved);
+-  if (typeof value === "object") {
+-    return Object.values(value as Record<string, unknown>).some(_hasUnresolved);
++  // Only plain data is traversed; any other class instance (Layer, Context,
++  // Date, SDK objects) is a resolved leaf — see isPlainData (#1082).
++  if (isPlainData(value)) {
++    if (seen.has(value)) return false;
++    seen.add(value);
++    return Object.values(value).some((v) => _hasUnresolved(v, seen));
+   }
+   return false;
+ };
+@@ -71,19 +77,35 @@
+  */
+ export const stripUnresolved = <T>(value: T): T => _stripUnresolved(value) as T;
+ 
+-const _stripUnresolved = (value: unknown): unknown => {
++const _stripUnresolved = (
++  value: unknown,
++  // Ancestor-path cycle guard: a value on its own ancestor chain is cut to
++  // `undefined` (a cycle can never persist). Sync DFS, so add/delete around
++  // the recursion is race-free and keeps shared diamond references intact
++  // (#1082).
++  ancestors: WeakSet<object> = new WeakSet(),
++): unknown => {
+   if (value == null || isPrimitive(value)) return value;
+   if (Output.isExpr(value) || Effect.isEffect(value)) return undefined;
+-  // Opaque resolved values — rebuilding them structurally would strip
+-  // their prototype (see resolveInput in Plan.ts for the same rule).
+-  if (Redacted.isRedacted(value) || Duration.isDuration(value)) return value;
+-  if (Array.isArray(value)) return value.map(_stripUnresolved);
+-  if (typeof value === "object") {
+-    return Object.fromEntries(
+-      Object.entries(value).map(([key, item]) => [key, _stripUnresolved(item)]),
++  // Serializable leaves — the only class instances persisted state may
++  // carry (StateEncoding knows Redacted/Duration; Date JSON-encodes).
++  // Rebuilding them structurally would strip their prototype.
++  if (
++    Redacted.isRedacted(value) ||
++    Duration.isDuration(value) ||
++    value instanceof Date
++  ) {
++    return value;
++  }
++  if (isPlainData(value)) {
++    return mapPlainData(value, ancestors, (child) =>
++      _stripUnresolved(child, ancestors),
+     );
+   }
+-  return value;
++  // Any other class instance (Layer, Context, SDK objects) is runtime-only
++  // wiring that can't round-trip through JSON — a beta.103 Context is even
++  // cyclic (#1082). Persisted state holds plain data only.
++  return undefined;
+ };
+ 
+ /**
+@@ -100,21 +122,33 @@
+  */
+ export const stripEffects = <T>(value: T): T => _stripEffects(value) as T;
+ 
+-const _stripEffects = (value: unknown): unknown => {
++const _stripEffects = (
++  value: unknown,
++  // Ancestor-path cycle guard — see _stripUnresolved (#1082).
++  ancestors: WeakSet<object> = new WeakSet(),
++): unknown => {
+   if (value == null || isPrimitive(value)) return value;
+   // Output proxies are left intact (so `isResolved` still sees them); they
+   // must be tested BEFORE `Effect.isEffect` because Output exprs are
+   // yieldable and would otherwise be misclassified as plain Effects.
+   if (Output.isExpr(value)) return value;
+   if (Effect.isEffect(value)) return undefined;
+-  if (Redacted.isRedacted(value) || Duration.isDuration(value)) return value;
+-  if (Array.isArray(value)) return value.map(_stripEffects);
+-  if (typeof value === "object") {
+-    return Object.fromEntries(
+-      Object.entries(value).map(([key, item]) => [key, _stripEffects(item)]),
++  if (
++    Redacted.isRedacted(value) ||
++    Duration.isDuration(value) ||
++    value instanceof Date
++  ) {
++    return value;
++  }
++  if (isPlainData(value)) {
++    return mapPlainData(value, ancestors, (child) =>
++      _stripEffects(child, ancestors),
+     );
+   }
+-  return value;
++  // Non-plain instances (Layer, Context, SDK objects) are dropped with
++  // Effects — same runtime-only rationale, and their internals may be
++  // cyclic (effect ≥4.0.0-beta.103's Context — #1082).
++  return undefined;
+ };
+ 
+ export const somePropsAreDifferent = <Props extends Record<string, any>>(
+@@ -191,7 +225,12 @@
+   JSON.stringify(canonicalize(a, options?.stripNullish ?? false)) ===
+   JSON.stringify(canonicalize(b, options?.stripNullish ?? false));
+ 
+-const canonicalize = (value: unknown, stripNullish: boolean): unknown => {
++const canonicalize = (
++  value: unknown,
++  stripNullish: boolean,
++  // Ancestor-path cycle guard — see _stripUnresolved (#1082).
++  ancestors: WeakSet<object> = new WeakSet(),
++): unknown => {
+   if (stripNullish && value == null) return undefined;
+   if (Redacted.isRedacted(value)) {
+     return {
+@@ -199,16 +238,28 @@
+       value: Redacted.value(value),
+     };
+   }
+-  if (Array.isArray(value)) {
+-    return value.map((v) => canonicalize(v, stripNullish));
++  // JSON-safe leaves compare by their serialized form (Duration/Date have
++  // toJSON).
++  if (Duration.isDuration(value) || value instanceof Date) return value;
++  if (isPlainData(value)) {
++    const rebuilt = mapPlainData(value, ancestors, (child) =>
++      canonicalize(child, stripNullish, ancestors),
++    );
++    if (rebuilt === undefined || Array.isArray(rebuilt)) return rebuilt;
++    // Deterministic key order for the JSON.stringify comparison. Filtering
++    // after the walk is JSON-equivalent to filtering before it —
++    // undefined-valued keys are dropped by JSON.stringify either way.
++    return Object.fromEntries(
++      Object.entries(rebuilt as Record<string, unknown>)
++        .filter(([, nested]) => !stripNullish || nested != null)
++        .sort(([a], [b]) => a.localeCompare(b)),
++    );
+   }
+   if (value && typeof value === "object") {
+-    return Object.fromEntries(
+-      Object.entries(value)
+-        .filter(([, nested]) => !stripNullish || nested != null)
+-        .sort(([a], [b]) => a.localeCompare(b))
+-        .map(([key, nested]) => [key, canonicalize(nested, stripNullish)]),
+-    );
++    // Non-plain instances (Effect, Layer, Context, SDK objects) never
++    // canonicalize — walking them is unsafe (cyclic on effect
++    // ≥4.0.0-beta.103 — #1082) and comparing them is meaningless.
++    return undefined;
+   }
+   return value;
+ };
+diff --git a/lib/Diff.js b/lib/Diff.js
+--- a/lib/Diff.js
++++ b/lib/Diff.js
+@@ -2,7 +2,7 @@
+ import * as Effect from "effect/Effect";
+ import * as Redacted from "effect/Redacted";
+ import * as Output from "./Output.js";
+-import { isPrimitive } from "./Util/data.js";
++import { isPlainData, isPrimitive, mapPlainData } from "./Util/data.js";
+ /**
+  * Returns true when `value` (or any nested leaf) is still an unresolved
+  * plan-time expression — i.e. an `Output`/`Expr` or an `Effect` that was
+@@ -17,15 +17,18 @@
+  */
+ export const hasUnresolvedInputs = (value) => _hasUnresolved(value);
+ export const isResolved = (value) => !_hasUnresolved(value);
+-const _hasUnresolved = (value) => {
++const _hasUnresolved = (value, seen = new WeakSet()) => {
+     if (value == null || isPrimitive(value))
+         return false;
+     if (Output.isExpr(value) || Effect.isEffect(value))
+         return true;
+-    if (Array.isArray(value))
+-        return value.some(_hasUnresolved);
+-    if (typeof value === "object") {
+-        return Object.values(value).some(_hasUnresolved);
++    // Only plain data is traversed; any other class instance (Layer, Context,
++    // Date, SDK objects) is a resolved leaf — see isPlainData (#1082).
++    if (isPlainData(value)) {
++        if (seen.has(value))
++            return false;
++        seen.add(value);
++        return Object.values(value).some((v) => _hasUnresolved(v, seen));
+     }
+     return false;
+ };
+@@ -45,21 +48,31 @@
+  * resolved `Props`.
+  */
+ export const stripUnresolved = (value) => _stripUnresolved(value);
+-const _stripUnresolved = (value) => {
++const _stripUnresolved = (value, 
++// Ancestor-path cycle guard: a value on its own ancestor chain is cut to
++// `undefined` (a cycle can never persist). Sync DFS, so add/delete around
++// the recursion is race-free and keeps shared diamond references intact
++// (#1082).
++ancestors = new WeakSet()) => {
+     if (value == null || isPrimitive(value))
+         return value;
+     if (Output.isExpr(value) || Effect.isEffect(value))
+         return undefined;
+-    // Opaque resolved values — rebuilding them structurally would strip
+-    // their prototype (see resolveInput in Plan.ts for the same rule).
+-    if (Redacted.isRedacted(value) || Duration.isDuration(value))
+-        return value;
+-    if (Array.isArray(value))
+-        return value.map(_stripUnresolved);
+-    if (typeof value === "object") {
+-        return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, _stripUnresolved(item)]));
+-    }
+-    return value;
++    // Serializable leaves — the only class instances persisted state may
++    // carry (StateEncoding knows Redacted/Duration; Date JSON-encodes).
++    // Rebuilding them structurally would strip their prototype.
++    if (Redacted.isRedacted(value) ||
++        Duration.isDuration(value) ||
++        value instanceof Date) {
++        return value;
++    }
++    if (isPlainData(value)) {
++        return mapPlainData(value, ancestors, (child) => _stripUnresolved(child, ancestors));
++    }
++    // Any other class instance (Layer, Context, SDK objects) is runtime-only
++    // wiring that can't round-trip through JSON — a beta.103 Context is even
++    // cyclic (#1082). Persisted state holds plain data only.
++    return undefined;
+ };
+ /**
+  * Deeply replace Effect-valued entries with `undefined`, leaving resolved
+@@ -74,7 +87,9 @@
+  * identity is carried by the resolved binding data instead.
+  */
+ export const stripEffects = (value) => _stripEffects(value);
+-const _stripEffects = (value) => {
++const _stripEffects = (value, 
++// Ancestor-path cycle guard — see _stripUnresolved (#1082).
++ancestors = new WeakSet()) => {
+     if (value == null || isPrimitive(value))
+         return value;
+     // Output proxies are left intact (so `isResolved` still sees them); they
+@@ -84,14 +99,18 @@
+         return value;
+     if (Effect.isEffect(value))
+         return undefined;
+-    if (Redacted.isRedacted(value) || Duration.isDuration(value))
+-        return value;
+-    if (Array.isArray(value))
+-        return value.map(_stripEffects);
+-    if (typeof value === "object") {
+-        return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, _stripEffects(item)]));
+-    }
+-    return value;
++    if (Redacted.isRedacted(value) ||
++        Duration.isDuration(value) ||
++        value instanceof Date) {
++        return value;
++    }
++    if (isPlainData(value)) {
++        return mapPlainData(value, ancestors, (child) => _stripEffects(child, ancestors));
++    }
++    // Non-plain instances (Layer, Context, SDK objects) are dropped with
++    // Effects — same runtime-only rationale, and their internals may be
++    // cyclic (effect ≥4.0.0-beta.103's Context — #1082).
++    return undefined;
+ };
+ export const somePropsAreDifferent = (olds, news, props) => {
+     for (const prop of props) {
+@@ -135,7 +154,9 @@
+  */
+ export const deepEqual = (a, b, options) => JSON.stringify(canonicalize(a, options?.stripNullish ?? false)) ===
+     JSON.stringify(canonicalize(b, options?.stripNullish ?? false));
+-const canonicalize = (value, stripNullish) => {
++const canonicalize = (value, stripNullish, 
++// Ancestor-path cycle guard — see _stripUnresolved (#1082).
++ancestors = new WeakSet()) => {
+     if (stripNullish && value == null)
+         return undefined;
+     if (Redacted.isRedacted(value)) {
+@@ -144,14 +165,26 @@
+             value: Redacted.value(value),
+         };
+     }
+-    if (Array.isArray(value)) {
+-        return value.map((v) => canonicalize(v, stripNullish));
++    // JSON-safe leaves compare by their serialized form (Duration/Date have
++    // toJSON).
++    if (Duration.isDuration(value) || value instanceof Date)
++        return value;
++    if (isPlainData(value)) {
++        const rebuilt = mapPlainData(value, ancestors, (child) => canonicalize(child, stripNullish, ancestors));
++        if (rebuilt === undefined || Array.isArray(rebuilt))
++            return rebuilt;
++        // Deterministic key order for the JSON.stringify comparison. Filtering
++        // after the walk is JSON-equivalent to filtering before it —
++        // undefined-valued keys are dropped by JSON.stringify either way.
++        return Object.fromEntries(Object.entries(rebuilt)
++            .filter(([, nested]) => !stripNullish || nested != null)
++            .sort(([a], [b]) => a.localeCompare(b)));
+     }
+     if (value && typeof value === "object") {
+-        return Object.fromEntries(Object.entries(value)
+-            .filter(([, nested]) => !stripNullish || nested != null)
+-            .sort(([a], [b]) => a.localeCompare(b))
+-            .map(([key, nested]) => [key, canonicalize(nested, stripNullish)]));
++        // Non-plain instances (Effect, Layer, Context, SDK objects) never
++        // canonicalize — walking them is unsafe (cyclic on effect
++        // ≥4.0.0-beta.103 — #1082) and comparing them is meaningless.
++        return undefined;
+     }
+     return value;
+ };
+diff --git a/src/Util/data.ts b/src/Util/data.ts
+--- a/src/Util/data.ts
++++ b/src/Util/data.ts
+@@ -26,6 +26,58 @@
+ ): value is Record<string, unknown> => {
+   if (!Predicate.isObject(value)) return false;
+   return Object.getPrototypeOf(value) === Object.prototype;
++};
++
++/**
++ * Is `value` plain data the engine's deep walkers may traverse — an array,
++ * or an object whose prototype is `Object.prototype`/`null`?
++ *
++ * Everything else (class instances: effect's Effect/Layer/Context, Dates,
++ * SDK config objects, functions, ...) is a LEAF for every deep walker in
++ * the engine. The engine cannot meaningfully evaluate, diff, or persist
++ * *through* a foreign class instance — rebuilding one entry-by-entry strips
++ * its prototype — and walking one is not safe: effect ≥4.0.0-beta.103's
++ * Context is self-referential (`cacheRoot` points back at itself), which
++ * sent the naive walk-everything traversal into unbounded recursion
++ * (#1082). Resources and Outputs are detected structurally *before* this
++ * gate, so dependencies declared in plain props are unaffected.
++ */
++export const isPlainData = (
++  value: unknown,
++): value is Record<string, unknown> | unknown[] => {
++  if (Array.isArray(value)) return true;
++  if (typeof value !== "object" || value === null) return false;
++  const proto = Object.getPrototypeOf(value);
++  return proto === Object.prototype || proto === null;
++};
++
++/**
++ * Rebuild a plain-data value by mapping each child through `walk`,
++ * preserving the shape (array → array, object → object).
++ *
++ * Cycle-guarded by ancestor path: a value that appears on its own ancestor
++ * chain is a true cycle and becomes `undefined` (it could never serialize
++ * or persist anyway). The guard is scoped to the current path — NOT a
++ * visited-set — so a diamond (the same object legitimately referenced from
++ * two places) is rebuilt in both places. Sync DFS only: add/delete around
++ * the recursion is race-free. (#1082)
++ */
++export const mapPlainData = (
++  value: Record<string, unknown> | unknown[],
++  ancestors: WeakSet<object>,
++  walk: (child: unknown) => unknown,
++): unknown => {
++  if (ancestors.has(value)) return undefined;
++  ancestors.add(value);
++  try {
++    return Array.isArray(value)
++      ? value.map(walk)
++      : Object.fromEntries(
++          Object.entries(value).map(([key, child]) => [key, walk(child)]),
++        );
++  } finally {
++    ancestors.delete(value);
++  }
+ };
+ 
+ export const stripFields = <T>(value: T, empty: null | undefined): T => {
+diff --git a/lib/Util/data.js b/lib/Util/data.js
+--- a/lib/Util/data.js
++++ b/lib/Util/data.js
+@@ -12,6 +12,52 @@
+     if (!Predicate.isObject(value))
+         return false;
+     return Object.getPrototypeOf(value) === Object.prototype;
++};
++/**
++ * Is `value` plain data the engine's deep walkers may traverse — an array,
++ * or an object whose prototype is `Object.prototype`/`null`?
++ *
++ * Everything else (class instances: effect's Effect/Layer/Context, Dates,
++ * SDK config objects, functions, ...) is a LEAF for every deep walker in
++ * the engine. The engine cannot meaningfully evaluate, diff, or persist
++ * *through* a foreign class instance — rebuilding one entry-by-entry strips
++ * its prototype — and walking one is not safe: effect ≥4.0.0-beta.103's
++ * Context is self-referential (`cacheRoot` points back at itself), which
++ * sent the naive walk-everything traversal into unbounded recursion
++ * (#1082). Resources and Outputs are detected structurally *before* this
++ * gate, so dependencies declared in plain props are unaffected.
++ */
++export const isPlainData = (value) => {
++    if (Array.isArray(value))
++        return true;
++    if (typeof value !== "object" || value === null)
++        return false;
++    const proto = Object.getPrototypeOf(value);
++    return proto === Object.prototype || proto === null;
++};
++/**
++ * Rebuild a plain-data value by mapping each child through `walk`,
++ * preserving the shape (array → array, object → object).
++ *
++ * Cycle-guarded by ancestor path: a value that appears on its own ancestor
++ * chain is a true cycle and becomes `undefined` (it could never serialize
++ * or persist anyway). The guard is scoped to the current path — NOT a
++ * visited-set — so a diamond (the same object legitimately referenced from
++ * two places) is rebuilt in both places. Sync DFS only: add/delete around
++ * the recursion is race-free. (#1082)
++ */
++export const mapPlainData = (value, ancestors, walk) => {
++    if (ancestors.has(value))
++        return undefined;
++    ancestors.add(value);
++    try {
++        return Array.isArray(value)
++            ? value.map(walk)
++            : Object.fromEntries(Object.entries(value).map(([key, child]) => [key, walk(child)]));
++    }
++    finally {
++        ancestors.delete(value);
++    }
+ };
+ export const stripFields = (value, empty) => {
+     if (Array.isArray(value)) {

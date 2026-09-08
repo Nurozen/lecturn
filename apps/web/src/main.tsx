@@ -78,7 +78,7 @@ void Promise.all([managedAuthShellModule?.then((module) => module.default) ?? nu
     // The auth shell chunk failed and the guarded reload is spent. Say so
     // instead of leaving the splash up forever.
     if (reloadScheduled) return;
-    console.error("T3 Code failed to load its startup chunks.", error);
+    console.error("Lecturn failed to load its startup chunks.", error);
     const bootShell = document.getElementById("boot-shell");
-    if (bootShell) bootShell.textContent = "T3 Code could not load. Reload to try again.";
+    if (bootShell) bootShell.textContent = "Lecturn could not load. Reload to try again.";
   });

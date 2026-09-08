@@ -138,6 +138,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
    the variables and Settings -> Appearance can override them at runtime. The
    default stacks are mirrored in `appearanceFonts.ts`. */
 @theme {
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono:
     ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
@@ -527,7 +528,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     background-color: color-mix(in oklab, var(--primary) 45%, transparent);
   }
   :root {
-    /* Keep the original T3 Code artwork palettes as the defaults. Built-in
+    /* Keep the original Lecturn artwork palettes as the defaults. Built-in
        themes override them with their own pigments in the components layer. */
     --stage-art-top: oklch(0.782169 0.123386 240.226);
     --stage-art-mid: oklch(0.616111 0.195824 259.735);
@@ -1078,6 +1079,124 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --sidebar-border: var(--border);
     --sidebar-stage-fade: var(--card);
   }
+}
+
+/* Lecturn: parchment and brass by day, midnight ink and amber by night.
+   Keep this before custom palettes so user-selected themes still win. */
+:root,
+[data-app-sidebar] {
+  --background: #f4eddf;
+  --app-chrome-background: #f4eddf;
+  --toolbar-background: #f4eddf;
+  --toolbar-foreground: #302a22;
+  --toolbar-border: #d6c8b2;
+  --toolbar-control: #fff9ee;
+  --toolbar-control-foreground: #302a22;
+  --toolbar-control-hover: #e9deca;
+  --card: #fff9ee;
+  --surface-raised: #f4eddf;
+  --popover: #fff9ee;
+  --foreground: #302a22;
+  --muted-foreground: #756650;
+  --border: #d6c8b2;
+  --input: #bca98a;
+  --ring: #805419;
+  --primary: #805419;
+  --primary-foreground: #fff9ee;
+  --secondary: #ede3d2;
+  --secondary-foreground: #302a22;
+  --muted: #ede3d2;
+  --muted-foreground: #756650;
+  --placeholder: #756650;
+  --secondary-label: #756650;
+  --icon-muted: #756650;
+  --accent: #e9deca;
+  --accent-foreground: #302a22;
+  --message-surface: #e9deca;
+  --message-foreground: #302a22;
+  --message-action: #805419;
+  --message-action-foreground: #fff9ee;
+  --message-action-hover: #694211;
+  --code-background: #fff9ee;
+  --code-foreground: #302a22;
+  --sidebar: #ede3d2;
+  --sidebar-foreground: #302a22;
+  --sidebar-muted-foreground: #756650;
+  --sidebar-control-surface: #e9deca;
+  --sidebar-row-hover: #f4eddf;
+  --sidebar-row-active: #fff9ee;
+  --sidebar-row-selected: #fff9ee;
+  --sidebar-border: #d6c8b2;
+  --terminal-background: #f4eddf;
+  --terminal-foreground: #302a22;
+  --terminal-cursor: #805419;
+  --terminal-selection-background: #d5bd91;
+  --app-scrollbar-thumb: #c7b494;
+  --app-scrollbar-thumb-hover: #a48e6a;
+  --update: #805419;
+  --update-foreground: #805419;
+  --update-surface: #e9dcc4;
+  --card-foreground: var(--foreground);
+  --popover-foreground: var(--foreground);
+  --sidebar-stage-fade: var(--sidebar);
+}
+
+:root.dark,
+.dark [data-app-sidebar] {
+  --background: #061522;
+  --app-chrome-background: #061522;
+  --toolbar-background: #061522;
+  --toolbar-foreground: #dfc7a4;
+  --toolbar-border: #263746;
+  --toolbar-control: #0c1d2b;
+  --toolbar-control-foreground: #dfc7a4;
+  --toolbar-control-hover: #142838;
+  --card: #0c1d2b;
+  --surface-raised: #0c1d2b;
+  --popover: #0c1d2b;
+  --foreground: #dfc7a4;
+  --muted-foreground: #a5957f;
+  --border: #263746;
+  --input: #354451;
+  --ring: #d9a34e;
+  --primary: #d9a34e;
+  --primary-foreground: #061522;
+  --secondary: #0c1d2b;
+  --secondary-foreground: #dfc7a4;
+  --muted: #0c1d2b;
+  --muted-foreground: #a5957f;
+  --placeholder: #a5957f;
+  --secondary-label: #a5957f;
+  --icon-muted: #a5957f;
+  --accent: #142838;
+  --accent-foreground: #dfc7a4;
+  --message-surface: #142838;
+  --message-foreground: #dfc7a4;
+  --message-action: #d9a34e;
+  --message-action-foreground: #061522;
+  --message-action-hover: #edb864;
+  --code-background: #0c1d2b;
+  --code-foreground: #dfc7a4;
+  --sidebar: #04101a;
+  --sidebar-foreground: #dfc7a4;
+  --sidebar-muted-foreground: #9eacb7;
+  --sidebar-control-surface: #061522;
+  --sidebar-row-hover: #132a39;
+  --sidebar-row-active: #203746;
+  --sidebar-row-selected: #0c1d2b;
+  --sidebar-border: #142838;
+  --terminal-background: #061522;
+  --terminal-foreground: #dfc7a4;
+  --terminal-cursor: #d9a34e;
+  --terminal-selection-background: #3e413a;
+  --app-scrollbar-thumb: #263746;
+  --app-scrollbar-thumb-hover: #415367;
+  --update: #d9a34e;
+  --update-foreground: #d9a34e;
+  --update-surface: #2b2c28;
+  --card-foreground: var(--foreground);
+  --popover-foreground: var(--foreground);
+  --sidebar-stage-fade: var(--sidebar);
 }
 
 /* Theme files are expressed in app color roles and mapped to the existing

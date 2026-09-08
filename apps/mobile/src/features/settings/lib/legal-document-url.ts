@@ -1,4 +1,4 @@
-const DEFAULT_MARKETING_SITE_URL = "https://t3.codes";
+const DEFAULT_MARKETING_SITE_URL = "https://lecturn.cloudgatherer.net";
 
 function resolveMarketingSiteUrl(override: string | undefined): URL {
   try {

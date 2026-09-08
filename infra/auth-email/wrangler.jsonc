@@ -1,0 +1,11 @@
+{
+  "name": "lecturn-auth-email",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {
+    "AUTH_EMAIL_FROM": "Lecturn <notifications@cloudgatherer.net>",
+  },
+}

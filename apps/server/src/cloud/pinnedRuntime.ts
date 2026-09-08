@@ -1,3 +1,4 @@
+import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -15,6 +16,13 @@ import * as ProcessRunner from "../processRunner.ts";
  * switching over, never `npx t3`, whose cache is ephemeral and whose
  * registry fetch at boot would make startup depend on the network.
  */
+
+// Set only by a distribution adapter after a Lecturn runtime package is published.
+// An inherited upstream npm package name must never be used for a fork install.
+export const RuntimeDistributionPackage = Context.Reference<string | null>(
+  "lecturn/cloud/RuntimeDistributionPackage",
+  { defaultValue: () => null },
+);
 
 const PINNED_RUNTIME_DIR = "runtime";
 const PINNED_RUNTIME_INSTALL_TIMEOUT = Duration.minutes(10);
@@ -91,6 +99,12 @@ interface PinnedRuntimeInstallInput {
 const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(function* (
   input: PinnedRuntimeInstallInput,
 ) {
+  const runtimePackage = yield* RuntimeDistributionPackage;
+  if (runtimePackage === null) {
+    return yield* new PinnedRuntimeInstallError({
+      step: "preparing Lecturn distribution: standalone service installation and server self-update are unavailable until a Lecturn runtime is published. Use the Lecturn desktop app to host Connect",
+    });
+  }
   const { fs, runner } = input;
   const paths = pinnedRuntimePaths(input.path, input.baseDir, input.version);
   const [versionDirExists, entryExists, sentinel] = yield* Effect.all([
@@ -155,7 +169,14 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
     yield* runner
       .run({
         command: "npm",
-        args: ["install", "--prefix", stagingDir, "--no-fund", "--no-audit", `t3@${input.version}`],
+        args: [
+          "install",
+          "--prefix",
+          stagingDir,
+          "--no-fund",
+          "--no-audit",
+          `${runtimePackage}@${input.version}`,
+        ],
         // Native dependencies may compile from source on slower machines.
         timeout: PINNED_RUNTIME_INSTALL_TIMEOUT,
       })

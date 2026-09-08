@@ -435,12 +435,12 @@ function AboutVersionSection() {
       ) : selectedHostedAppChannel ? (
         <SettingsRow
           title="Update track"
-          description="Switches the hosted app release channel."
+          description="Latest is available. Hosted Nightly is not deployed yet."
           control={
             <Select
               value={selectedHostedAppChannel}
               onValueChange={(value) => {
-                if (value === selectedHostedAppChannel) return;
+                if (value === selectedHostedAppChannel || value === "nightly") return;
                 window.location.assign(
                   buildHostedChannelSelectionUrl({ channel: value as HostedAppChannel }),
                 );
@@ -453,7 +453,7 @@ function AboutVersionSection() {
                 <SelectItem hideIndicator value="latest">
                   Latest
                 </SelectItem>
-                <SelectItem hideIndicator value="nightly">
+                <SelectItem hideIndicator value="nightly" disabled>
                   Nightly
                 </SelectItem>
               </SelectPopup>

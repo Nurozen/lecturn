@@ -6,18 +6,18 @@ export type ThemePreviewColors = Readonly<{
   messageAction: string;
 }>;
 
-/** The standard T3 Code artwork is not a built-in theme, so its preview colors live here. */
+/** The standard Lecturn artwork is not a built-in theme, so its preview colors live here. */
 export const STANDARD_THEME_PREVIEW_COLORS: Readonly<Record<ThemeAppearance, ThemePreviewColors>> =
   {
     light: {
-      canvas: "#fcfcfc",
-      accent: "#f4f4f5",
-      messageAction: "#4f46e5",
+      canvas: "#f4eddf",
+      accent: "#e9deca",
+      messageAction: "#805419",
     },
     dark: {
-      canvas: "#0a0a0a",
-      accent: "#1c1c1f",
-      messageAction: "#8b9cff",
+      canvas: "#061522",
+      accent: "#142838",
+      messageAction: "#d9a34e",
     },
   };
 
@@ -43,7 +43,7 @@ export type ThemePreviewRenderSpec = Readonly<{
 export const THEME_PREVIEW_RENDER_SPECS: Readonly<Record<ThemeAppearance, ThemePreviewRenderSpec>> =
   {
     light: {
-      baseTarget: "#ffffff",
+      baseTarget: "#061522",
       baseWeight: 0.8,
       accent: {
         center: [0.72, 0.22],

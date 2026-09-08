@@ -1,9 +1,9 @@
 ---
 import {
-  ANDROID_PLAY_STORE_URL,
+
   GITHUB_REPOSITORY_URL,
-  IOS_APP_STORE_URL,
-  MARKETING_STATS,
+
+
 } from "../lib/site";
 
 interface Props {
@@ -13,8 +13,8 @@ interface Props {
 }
 
 const {
-  title = "T3 Code",
-  description = "T3 Code — The open-source control plane for coding agents.",
+  title = "Lecturn",
+  description = "Lecturn — The open-source control plane for coding agents.",
   pageClass,
 } = Astro.props;
 ---
@@ -40,8 +40,8 @@ const {
     <div class:list={["page", pageClass]}>
       <nav class="nav">
         <div class="nav-inner">
-          <a href="/" class="nav-brand" aria-label="T3 Code home">
-            <span class="nav-brand-name">T3 Code</span>
+          <a href="/" class="nav-brand" aria-label="Lecturn home">
+            <span class="nav-brand-name">Lecturn</span>
           </a>
           <div class="nav-right">
             <a
@@ -49,12 +49,12 @@ const {
               href={GITHUB_REPOSITORY_URL}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label={`Star T3 Code on GitHub — ${MARKETING_STATS.githubStars} stars`}
+              aria-label="Lecturn on GitHub"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M12 2.3l2.9 5.88 6.49.94-4.7 4.58 1.11 6.47L12 17.12l-5.8 3.05 1.11-6.47-4.7-4.58 6.49-.94L12 2.3z"/>
               </svg>
-              <span><strong>{MARKETING_STATS.githubStars}</strong> GitHub stars</span>
+              <span>View source</span>
             </a>
           </div>
         </div>
@@ -68,14 +68,13 @@ const {
         <div class="footer-inner">
           <div class="footer-brand">
             <img src="/icon.webp" alt="" />
-            <span>&copy; {new Date().getFullYear()} T3 Tools Inc · MIT licensed</span>
+            <span>&copy; {new Date().getFullYear()} Cloud Gatherer Labs · Based on T3 Code, MIT licensed</span>
           </div>
           <div class="footer-links">
             <a href={GITHUB_REPOSITORY_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
-            <a href="https://discord.gg/jn4EGJjrvv" target="_blank" rel="noopener noreferrer">Discord</a>
             <a href="/download">Download</a>
-            <a href={IOS_APP_STORE_URL} target="_blank" rel="noopener noreferrer">iOS app</a>
-            <a href={ANDROID_PLAY_STORE_URL} target="_blank" rel="noopener noreferrer">Android app</a>
+            <span>iOS · TestFlight coming soon</span>
+            <span>Android · coming soon</span>
             <a href="/terms-of-service">Terms</a>
             <a href="/privacy-policy">Privacy</a>
             <a href="/security-policy">Security</a>
@@ -99,21 +98,22 @@ const {
 
 <style is:global>
   :root {
-    --bg: #09090b;
-    --bg-elev: #0c0c0e;
-    --bg-card: #111113;
-    --fg: #fafafa;
-    --fg-muted: #a1a1aa;
-    --fg-dim: #71717a;
-    --fg-faint: #52525b;
+    --bg: #061522;
+    --bg-elev: #0a1927;
+    --bg-card: #0c1d2b;
+    --fg: #dfc7a4;
+    --fg-muted: #a5957f;
+    --fg-dim: #91a0ac;
+    --fg-faint: #71818e;
     --border: rgba(255, 255, 255, 0.08);
     --border-strong: rgba(255, 255, 255, 0.14);
-    --accent-h: 250;
-    --accent: oklch(0.68 0.17 var(--accent-h));
-    --accent-dim: oklch(0.68 0.17 var(--accent-h) / 0.15);
+    --accent-h: 75;
+    --accent: #d9a34e;
+    --accent-dim: rgb(217 163 78 / 15%);
     --ok: oklch(0.72 0.16 150);
     --warn: oklch(0.76 0.15 75);
     --font-sans: "DM Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
     --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
     --radius: 12px;
     --radius-sm: 8px;
@@ -212,7 +212,7 @@ const {
 
   .btn-primary {
     background: var(--fg);
-    color: #09090b;
+    color: #061522;
     font-weight: 600;
   }
 
@@ -471,4 +471,12 @@ const {
       font-size: 12px;
     }
   }
+</style>
+
+<style is:global>
+  .display, .nav-brand-name { font-family: var(--font-display); font-weight: 500; letter-spacing: -0.035em; }
+  .nav-brand-name { color: var(--accent); }
+  .btn-primary { color: #061522; background: #d9a34e; border-color: #d9a34e; }
+  .hero-grid { opacity: 0.3; }
+  .footer-links span { color: var(--fg-muted); font-size: 12px; }
 </style>

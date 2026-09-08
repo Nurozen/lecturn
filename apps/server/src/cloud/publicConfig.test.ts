@@ -6,6 +6,7 @@ import * as Result from "effect/Result";
 import {
   hostedAppUrlConfig,
   makeCloudCliOAuthConfig,
+  makeHostedAppUrlConfig,
   makeRelayUrlConfig,
   resolveRelayClientTracingConfig,
 } from "./publicConfig.ts";
@@ -179,3 +180,20 @@ it("resolves relay client tracing from runtime config with build-time fallback",
     null,
   );
 });
+
+it.effect(
+  "uses the bundled hosted app origin for browser login without runtime configuration",
+  () =>
+    Effect.gen(function* () {
+      assert.equal(
+        yield* makeHostedAppUrlConfig("https://lecturn.example.test/").pipe(provideEnv({})),
+        "https://lecturn.example.test",
+      );
+      assert.equal(
+        yield* makeHostedAppUrlConfig("https://lecturn.example.test").pipe(
+          provideEnv({ T3CODE_HOSTED_APP_URL: "https://override.example.test" }),
+        ),
+        "https://override.example.test",
+      );
+    }),
+);

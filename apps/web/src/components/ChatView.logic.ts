@@ -701,7 +701,7 @@ export function resolveForkDisabledReason(input: {
   if (!input.capability) {
     return {
       title: "Forking needs a server update",
-      description: "Update the T3 Code server on this environment to fork threads.",
+      description: "Update the Lecturn server on this environment to fork threads.",
     };
   }
   const instanceId = input.sessionProviderInstanceId ?? input.modelSelection?.instanceId ?? null;
