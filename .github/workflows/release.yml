@@ -30,6 +30,11 @@ on:
         description: "Release version (for example 1.2.3 or v1.2.3)"
         required: false
         type: string
+      stave_version:
+        description: "Stave release tag to bundle (for example v0.4.0) or latest"
+        required: false
+        default: latest
+        type: string
 
 # Serialize nightlies (scheduled and manual) so overlapping runs cannot build
 # the same commit twice or publish out of order. Stable tag releases get their
@@ -108,6 +113,7 @@ jobs:
       cli_dist_tag: ${{ steps.release_meta.outputs.cli_dist_tag }}
       is_prerelease: ${{ steps.release_meta.outputs.is_prerelease }}
       make_latest: ${{ steps.release_meta.outputs.make_latest }}
+      stave_tag: ${{ steps.stave_tag.outputs.stave_tag }}
       ref: ${{ github.sha }}
     steps:
       - name: Checkout
@@ -187,6 +193,28 @@ jobs:
             --channel "${{ steps.release_meta.outputs.release_channel }}" \
             --current-tag "${{ steps.release_meta.outputs.tag }}" \
             --github-output
+
+      # Resolve the bundled Stave release once so every build and publish job
+      # pins the same tag, even when the input is `latest` and a new Stave
+      # release lands mid-run. Inputs are empty on tag and schedule events, so
+      # those always resolve latest.
+      - id: stave_tag
+        name: Resolve Stave release tag
+        shell: bash
+        env:
+          STAVE_VERSION_INPUT: ${{ inputs.stave_version || 'latest' }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/fetch-stave.ts \
+            --resolve-only \
+            --version "${STAVE_VERSION_INPUT:-latest}" \
+            --github-output
+
+      - name: Record bundled Stave tag
+        env:
+          STAVE_TAG: ${{ steps.stave_tag.outputs.stave_tag }}
+        run: |
+          echo "- Bundled Stave: \`${STAVE_TAG}\`" >> "$GITHUB_STEP_SUMMARY"
 
   quality:
     name: Release quality checks
@@ -407,6 +435,30 @@ jobs:
           name: wsl-node-pty-x64
           path: wsl-prebuild
 
+      - name: Fetch Stave binary
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/fetch-stave.ts \
+            --platform-key "${{ matrix.resource_key }}" \
+            --version "${{ needs.preflight.outputs.stave_tag }}" \
+            --out "$GITHUB_WORKSPACE/stave-bin"
+
+      # The WSL backend runs the Linux Stave binary for the host's architecture.
+      # The matrix only builds Windows x64 today; a Windows arm64 leg would
+      # fetch linux-arm64 here instead.
+      - name: Fetch Stave WSL binary
+        if: matrix.platform == 'win'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/fetch-stave.ts \
+            --platform-key linux-x64 \
+            --version "${{ needs.preflight.outputs.stave_tag }}" \
+            --out "$GITHUB_WORKSPACE/stave-bin"
+
       - name: Install Spectre-mitigated MSVC libs
         if: matrix.platform == 'win'
         shell: pwsh
@@ -598,6 +650,10 @@ jobs:
             # so the packaged WSL backend ships a ready binary (no first-launch
             # compile). Required for a working WSL backend on Windows.
             args+=(--wsl-prebuild "$GITHUB_WORKSPACE/wsl-prebuild/pty.node")
+            # The Windows app runs stave.exe natively and stages the Linux
+            # binary into the WSL server payload for the WSL backend.
+            args+=(--stave-binary "$GITHUB_WORKSPACE/stave-bin/${{ matrix.resource_key }}/stave.exe")
+            args+=(--stave-wsl-binary "$GITHUB_WORKSPACE/stave-bin/linux-x64/stave")
             if has_all \
               "$AZURE_TENANT_ID" \
               "$AZURE_CLIENT_ID" \
@@ -613,6 +669,12 @@ jobs:
             fi
           else
             echo "Signing disabled for ${{ matrix.platform }}."
+          fi
+
+          # Bundle the Stave binary fetched above for this platform. CI never
+          # passes --allow-missing-stave: a release without Stave is a failure.
+          if [[ "${{ matrix.platform }}" != "win" ]]; then
+            args+=(--stave-binary "$GITHUB_WORKSPACE/stave-bin/${{ matrix.resource_key }}/stave")
           fi
 
           vp run dist:desktop:artifact "${args[@]}"
@@ -758,8 +820,19 @@ jobs:
             chmod +x "$target_dir"/t3-resource-monitor 2>/dev/null || true
           done
 
+      # The CLI package ships Stave for every supported platform key, not just
+      # the four the desktop matrix builds, so users on any host get a binary.
+      - name: Bundle Stave binaries into CLI package
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/fetch-stave.ts \
+            --all \
+            --version "${{ needs.preflight.outputs.stave_tag }}" \
+            --out apps/server/dist/stave
+
       - name: Publish CLI package
-        run: node apps/server/scripts/cli.ts publish --tag "${{ needs.preflight.outputs.cli_dist_tag }}" --app-version "${{ needs.preflight.outputs.version }}" --package-name lecturn --bin-name lecturn --verbose
+        run: node apps/server/scripts/cli.ts publish --tag "${{ needs.preflight.outputs.cli_dist_tag }}" --app-version "${{ needs.preflight.outputs.version }}" --package-name lecturn --bin-name lecturn --require-stave --verbose
 
   release:
     name: Publish GitHub Release

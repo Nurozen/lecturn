@@ -79,6 +79,26 @@ export const forEachBoundedTree = <Node, E, R>(
     }
   });
 
+// copyTree writes every file with the default mode, which drops the exec bit
+// the extensionless Linux Stave binary needs once the distro runs it over
+// /mnt. Restore it for every per-arch copy the tree carries; best-effort
+// because a missing stave dir (or a host fs without POSIX modes) is not an
+// extraction failure.
+const markStaveExecutable = (
+  fs: FileSystem.FileSystem,
+  join: (first: string, ...rest: string[]) => string,
+  root: string,
+): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const staveDir = join(root, "apps/server/dist/stave");
+    const entries = yield* fs.readDirectory(staveDir).pipe(Effect.orElseSucceed(() => []));
+    yield* Effect.forEach(
+      entries,
+      (entry) => fs.chmod(join(staveDir, entry, "stave"), 0o755).pipe(Effect.ignore),
+      { discard: true },
+    );
+  });
+
 interface CopyTreeEntry {
   readonly sourcePath: string;
   readonly targetPath: string;
@@ -156,6 +176,7 @@ export const make = Effect.gen(function* () {
     });
     yield* Effect.gen(function* () {
       yield* copyTree(fs, join, serverRoot, partialDir);
+      yield* markStaveExecutable(fs, join, partialDir);
       const markerJson = yield* encodeMarker({ version });
       yield* fs.writeFileString(join(partialDir, MARKER_FILE_NAME), `${markerJson}\n`);
       // The marker is written before the rename, so a directory named after
