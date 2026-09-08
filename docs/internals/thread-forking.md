@@ -52,7 +52,7 @@ the child row, sets `latestTurnId` to the fork turn, and refreshes the thread sh
 in-memory model in [`projector.ts`][projector] projects only lineage and summary state (fork
 origin, linked pull request, latest turn, proposed plans); message and activity bodies stay empty
 there because the in-memory model mirrors post-boot hydration, which seeds those arrays empty.
-Migration [`045_ProjectionThreadForkLineage.ts`][mig045] adds `forked_from_json` and
+Migration [`048_ProjectionThreadForkLineage.ts`][mig048] adds `forked_from_json` and
 `fork_source_json` to `projection_threads` and `provider_turn_ref` to `projection_turns`.
 [`ProjectionSnapshotQuery.ts`][snapshot] exposes the lineage via `getThreadForkContextById` and
 the turn rows via `listThreadTurnsById`. Inherited rows keep their original timestamps; only the
@@ -114,7 +114,7 @@ and hard-stops forks from older or misbehaving ones.
 [projector]: ../../apps/server/src/orchestration/projector.ts
 [pipeline]: ../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts
 [snapshot]: ../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts
-[mig045]: ../../apps/server/src/persistence/Migrations/045_ProjectionThreadForkLineage.ts
+[mig048]: ../../apps/server/src/persistence/Migrations/048_ProjectionThreadForkLineage.ts
 [ckpt]: ../../apps/server/src/checkpointing/CheckpointStore.ts
 [reactor]: ../../apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
 [env]: ../../apps/server/src/environment/ServerEnvironment.ts

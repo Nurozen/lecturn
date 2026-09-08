@@ -1,0 +1,139 @@
+# Fork-only workflow: keeps this fork in sync with pingdotgg/t3code.
+#
+# Branch model:
+#   - `main` is this fork's product line. It may diverge from upstream; fork
+#     releases are cut from it. Clean upstream merges land here automatically.
+#   - `upstream-main` is a pristine mirror of upstream main, force-updated on
+#     every run. Cut upstream-bound PR branches from `upstream-main`, never
+#     from `main`, so they cannot carry fork-only commits like this file.
+#
+# Each run: fetch upstream (never tags — upstream `v*` tags must not trigger
+# this fork's release pipeline), force-update the mirror, then merge the
+# mirror into `main`. A clean merge is pushed directly. A conflict aborts the
+# merge and opens (or refreshes) a PR from `upstream-main` into `main`
+# listing the conflicted files, to be resolved by a human or an agent.
+#
+# Failure mode to know about: GitHub suspends scheduled workflows after 60
+# days without repository activity. Any push re-arms it, and `workflow_dispatch`
+# always works.
+name: Upstream Sync
+
+on:
+  schedule:
+    - cron: "23 9 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: pingdotgg/t3code
+  UPSTREAM_BRANCH: main
+  MIRROR_BRANCH: upstream-main
+  TARGET_BRANCH: main
+
+jobs:
+  sync:
+    # Guard against ever running in the upstream repository.
+    if: github.repository != 'pingdotgg/t3code'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+          fetch-tags: false
+
+      - name: Configure git identity
+        run: |
+          git config user.name "upstream-sync[bot]"
+          git config user.email "upstream-sync@users.noreply.github.com"
+
+      - name: Fetch upstream and update mirror branch
+        run: |
+          set -euo pipefail
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --no-tags upstream "${UPSTREAM_BRANCH}"
+          git push --force origin \
+            "refs/remotes/upstream/${UPSTREAM_BRANCH}:refs/heads/${MIRROR_BRANCH}"
+
+      - name: Merge upstream into target
+        id: merge
+        run: |
+          set -euo pipefail
+          upstream_sha="$(git rev-parse "upstream/${UPSTREAM_BRANCH}")"
+
+          if git merge-base --is-ancestor "$upstream_sha" HEAD; then
+            echo "Already up to date with upstream ${upstream_sha}."
+            echo "outcome=up-to-date" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git merge --no-edit "$upstream_sha" \
+            -m "chore: merge upstream ${UPSTREAM_REPO}@${upstream_sha:0:12}"; then
+            git push origin "HEAD:${TARGET_BRANCH}"
+            echo "Merged and pushed upstream ${upstream_sha}."
+            echo "outcome=merged" >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "conflicts<<EOF"
+              git diff --name-only --diff-filter=U
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            git merge --abort
+            echo "outcome=conflict" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open or refresh conflict PR
+        if: steps.merge.outputs.outcome == 'conflict'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONFLICTS: ${{ steps.merge.outputs.conflicts }}
+        run: |
+          set -euo pipefail
+          body_file="$(mktemp)"
+          {
+            echo "Nightly upstream sync hit merge conflicts. Resolve by merging"
+            echo "\`${MIRROR_BRANCH}\` into \`${TARGET_BRANCH}\` locally and pushing,"
+            echo "then this PR closes itself on the next run."
+            echo
+            echo "Conflicting files:"
+            echo
+            echo '```'
+            echo "$CONFLICTS"
+            echo '```'
+          } > "$body_file"
+
+          existing="$(gh pr list --repo "$GITHUB_REPOSITORY" \
+            --head "$MIRROR_BRANCH" --base "$TARGET_BRANCH" \
+            --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --repo "$GITHUB_REPOSITORY" --body-file "$body_file"
+            echo "Refreshed conflict PR #$existing."
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" \
+              --head "$MIRROR_BRANCH" --base "$TARGET_BRANCH" \
+              --title "chore: resolve upstream sync conflicts" \
+              --body-file "$body_file"
+          fi
+
+      - name: Close stale conflict PR
+        if: steps.merge.outputs.outcome != 'conflict'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          existing="$(gh pr list --repo "$GITHUB_REPOSITORY" \
+            --head "$MIRROR_BRANCH" --base "$TARGET_BRANCH" \
+            --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh pr close "$existing" --repo "$GITHUB_REPOSITORY" \
+              --comment "Superseded: ${TARGET_BRANCH} now contains upstream ${UPSTREAM_BRANCH}."
+          fi
