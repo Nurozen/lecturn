@@ -12,63 +12,31 @@
  *
  * @module StaveError
  */
+import {
+  STAVE_CLI_ERROR_CODES,
+  STAVE_HOST_ERROR_CODES,
+  STAVE_OPERATION_ERROR_CODES,
+} from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-/** Codes Stave itself emits (errcode.go + errcode_repos.go, v0.4). */
-export const STAVE_CLI_ERROR_CODES = [
-  "dirty_worktrees",
-  "dependent_spaces",
-  "memory_in_use",
-  "space_exists",
-  "space_not_found",
-  "repo_not_found",
-  "repo_not_in_space",
-  "repo_already_in_space",
-  "repo_mode_ambiguous",
-  "saga_space",
-  "saga_member",
-  "invalid_name",
-  "branch_missing",
-  "ambiguous_archive",
-  "archive_not_found",
-  "invalid_arguments",
-  "unknown",
-  "repo_exists",
-  "clone_failed",
-  "cache_exists",
-  "config_exists",
-] as const;
-
-/** Codes Lecturn synthesises without a Stave envelope behind them. */
-export const STAVE_HOST_ERROR_CODES = [
-  /** No usable `stave` binary (resolution failed or spawn hit ENOENT). */
-  "binary_missing",
-  /** Stave is installed but `stave setup` has not been run for this config. */
-  "not_setup",
-  /** The Stave integration is switched off in server settings. */
-  "disabled",
-  /** Stave exited without a JSON payload or envelope on stdout. */
-  "non_json_output",
-  /** The process could not be started or its pipes could not be read. */
-  "spawn_failed",
-  /** The verb's timeout elapsed (reads 60s, mutations 15m). */
-  "timeout",
-  /** A project root sits inside another Stave space. */
-  "nested_project",
-  /** The operation targets a space that is archived. */
-  "archived_project",
-  /** A saga member's manifest stamp differs from the roster's record. */
-  "incarnation_mismatch",
-  /** Saga membership could not be determined. */
-  "membership_unknown",
-  /** Stave answered with JSON that does not fit the verb's contract. */
-  "unreadable",
-  /** A pending operation handle is no longer valid. */
-  "operation_expired",
-] as const;
-
-export const STAVE_ERROR_CODES = [...STAVE_CLI_ERROR_CODES, ...STAVE_HOST_ERROR_CODES] as const;
+// The code lists live in contracts (`STAVE_OPERATION_ERROR_CODES`) because the
+// same values travel in `StaveOperationError`; the server only re-exports them.
+// Host codes, raised here without a Stave envelope behind them:
+//   binary_missing       no usable `stave` binary (resolution failed or ENOENT)
+//   not_setup            Stave is installed but `stave setup` has not run
+//   disabled             the integration is switched off in server settings
+//   non_json_output      Stave exited without a JSON payload or envelope
+//   spawn_failed         the process could not be started or read
+//   timeout              the verb's timeout elapsed (reads 60s, mutations 15m)
+//   nested_project       a project root sits inside another Stave space
+//   archived_project     the operation targets an archived space
+//   incarnation_mismatch the manifest stamp differs from the expected one
+//   membership_unknown   saga membership could not be determined
+//   unreadable           JSON that does not fit the verb's contract
+//   operation_expired    a pending operation handle is no longer valid
+export { STAVE_CLI_ERROR_CODES, STAVE_HOST_ERROR_CODES };
+export const STAVE_ERROR_CODES = STAVE_OPERATION_ERROR_CODES;
 
 export const StaveErrorCode = Schema.Literals(STAVE_ERROR_CODES);
 export type StaveErrorCode = typeof StaveErrorCode.Type;

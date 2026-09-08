@@ -75,6 +75,7 @@ import * as StaveAdmission from "./stave/StaveAdmission.ts";
 import * as StaveBinary from "./stave/StaveBinary.ts";
 import * as StaveCli from "./stave/StaveCli.ts";
 import * as StaveConfigReader from "./stave/StaveConfigReader.ts";
+import * as StaveOperations from "./stave/StaveOperations.ts";
 import * as StaveRoots from "./stave/StaveRoots.ts";
 import * as StaveRpcHandlers from "./stave/staveRpcHandlers.ts";
 import * as StaveWorkspaceReader from "./stave/StaveWorkspaceReader.ts";
@@ -548,6 +549,10 @@ export const makeRoutesLayer = Layer.mergeAll(
   // Both transports consume the same service instance, so caches single-flight across clients
   // and mutations observed on WebSocket invalidate patches subsequently read over HTTP.
   Layer.provide(PullRequestServiceLive),
+  // One registry per server: a Stave operation started over one socket keeps
+  // running after that socket closes and can be re-attached from any other.
+  // Its Stave/orchestration dependencies come from the runtime layer.
+  Layer.provide(StaveOperations.layer.pipe(Layer.provide(ProcessRunner.layer))),
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(ServerSelfUpdate.layer.pipe(Layer.provide(DesktopAppUpdateLayerLive))),
   Layer.provide(commandReadinessLayer),

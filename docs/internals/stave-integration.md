@@ -5,7 +5,7 @@
 > Fork framing and release differences live in
 > [docs/operations/lecturn-release.md](../operations/lecturn-release.md).
 
-Status: in progress — Phase 2 (binary, settings, status)
+Status: in progress — Phase 3 (create a space: operations, registry, wizard)
 
 ## What a Stave space is to Lecturn
 
@@ -51,8 +51,9 @@ with the on-disk schema in `apps/server/src/stave/staveManifest.ts`.
 - **Cache.** An `effect/Cache` keyed by root (capacity 512) with separate TTLs: 30s for a found
   manifest, 60s for a negative result (both overridable via `StaveWorkspaceReaderOptions`).
   `invalidate(root)` drops one entry so the next `load` re-reads disk; `invalidateAll()` drops
-  everything. Lifecycle operations that mutate a space are expected to call `invalidate` — none
-  exist yet (planned, Phase 3+).
+  everything. Every mutation in [`StaveOperations`](#staveoperations) that touches a space root
+  calls `invalidate` on it (`createSpace` after verify, `removePartialSpace` through
+  `afterMutation`).
 - `layer` is the live reader (needs `FileSystem`, `Path`, `RepositoryIdentityResolver`; wired in
   `apps/server/src/server.ts` as `StaveWorkspaceReaderLayerLive`). `layerNoop` finds no manifest
   anywhere, for tests whose roots are never spaces.
@@ -111,7 +112,10 @@ Defined in `packages/contracts/src/orchestration.ts`. `project.refresh` is a mem
   `projectUpsertOrRemove`, so shell subscribers receive a project upsert whose `stave`/`notice`
   were freshly derived (after an `invalidate`, from disk). This is the mechanism for pushing
   derived-state changes without a projection write.
-- No production caller dispatches it yet; Stave lifecycle operations will — planned (Phase 3+).
+- The one production caller is `afterMutation` in [`StaveOperations`](#staveoperations): after a
+  mutation on a root that an active project sits on (today `removePartialSpace`), it invalidates
+  the reader and dispatches `project.refresh` with a `server:stave:refresh:<uuid>` command id.
+  Lifecycle operations (archive, destroy, sync) will use the same path — planned (Phase 4).
 
 ## `StaveAdmission`
 
@@ -171,9 +175,10 @@ usual message. Web consumers: `useThreadActions`, `useThreadActionMenu`, `useFor
 
 Everything below `apps/server/src/stave/` that touches the CLI is built once per server process
 in `apps/server/src/server.ts` (`StaveBinaryLayerLive` → `StaveCliLayerLive` →
-`StaveConfigReaderLayerLive` → `StaveRootsLayerLive`, merged into `StaveLayerLive`). Nothing here
-runs a mutating verb yet; operations (create, add, archive, destroy, setup, memory, saga) are
-planned (Phase 3+).
+`StaveConfigReaderLayerLive` → `StaveRootsLayerLive`, merged into `StaveLayerLive`). The only
+caller of the mutating verbs is [`StaveOperations`](#staveoperations) (Phase 3: `space create`,
+`space destroy` for partial spaces, `repos add`, `setup`); the remaining mutations (add, remove,
+sync, retarget, archive, restore, memory, saga) are planned (Phases 4–5).
 
 ### `StaveBinary`
 
@@ -263,8 +268,10 @@ closed literal union: the codes Stave emits (`STAVE_CLI_ERROR_CODES`, from
 `references/stave/internal/space/errcode.go` and `errcode_repos.go`) plus the codes the server
 synthesises (`STAVE_HOST_ERROR_CODES`: `binary_missing`, `not_setup`, `disabled`,
 `non_json_output`, `spawn_failed`, `timeout`, `nested_project`, `archived_project`,
-`incarnation_mismatch`, `membership_unknown`, `unreadable`, `operation_expired`). Several host
-codes are reserved for lifecycle work — planned (Phase 3+).
+`incarnation_mismatch`, `membership_unknown`, `unreadable`, `operation_expired`). Phase 3 uses
+`not_setup`, `incarnation_mismatch`, `unreadable`, and `operation_expired` from the operation
+registry and its pre-flight refusals; `nested_project`, `archived_project`, and
+`membership_unknown` are reserved for lifecycle work — planned (Phase 4+).
 
 ### `StaveConfigReader` and `StaveRootsProvider`
 
@@ -352,6 +359,222 @@ live in `packages/contracts/src/stave.ts`.
   CLI failures surface as `StaveCommandError { verb, code, message }`. Answers are cached per
   root for 15s (`STAVE_SPACE_STATUS_CACHE_TTL`, capacity 256); failures are not cached, so the
   next call asks Stave again.
+
+## Stave operations (Phase 3)
+
+Long Stave mutations are _operations_: one discriminated payload (`StaveOperation` in
+`packages/contracts/src/stave.ts`, deviation 1) run by an application-lifetime service and
+streamed back as sequence-numbered progress events (deviations 18, 22, 25, 26). Phase 3
+implements `createSpace`, `registerRepo`, `removePartialSpace`, and `setup`; every other kind in
+the union (`addRepo`, `removeRepo`, `syncSpace`, `retarget`, `archiveSpace`, `destroySpace`,
+`restoreSpace`, `memoryAttach`, `memoryDetach`, `createSaga`, `sagaAdd`, `sagaRemove`,
+`sagaSync`, `sagaArchive`, `sagaDestroy`) is typed and listed in the server's switch but fails
+`invalid_arguments` ("not implemented yet") without touching Stave — planned (Phases 4–5).
+
+### `StaveOperations`
+
+`apps/server/src/stave/StaveOperations.ts` (service `t3/stave/StaveOperations`). Built **once**
+per server process in `apps/server/src/server.ts` (`StaveOperations.layer`, over
+`ProcessRunner`) and handed to every per-socket RPC layer in `ws.ts` with `Layer.succeed`, so an
+operation is owned by the service's scope and outlives the WebSocket that started it (a
+socket-bound fiber would die with the tab). Shape: `run`, `observe`, `dryRun`, `withSpaceLock`,
+`summary`.
+
+- **Keyed mutex.** `withSpaceLock(root, effect)` takes one `Semaphore(1)` per `path.resolve(root)`,
+  created on demand and never dropped. `createSpace` and `removePartialSpace` lock
+  `<agentWorkDir>/<spaceId>`; `registerRepo` and `setup` lock the config path. Admission and the
+  lifecycle sweep are meant to share these locks later (deviation 25), so two creates of one id
+  cannot both pass pre-flight.
+- **Registry.** A `Map` keyed by the client-supplied `operationId`. An entry holds `kind`,
+  `fingerprint` (sha256 of `stableStringify(operation)`), `state` (`running | finished | failed`),
+  the event ring buffer with its byte count, `nextSequence` (1-based), `terminalAtMs`,
+  `lastAccessMs`, `partialSpace`, and a `PubSub` for live followers. Bounds:
+  `STAVE_OPERATION_EVENT_LIMIT` (2,000 events) and `STAVE_OPERATION_BYTE_LIMIT` (4 MiB) per
+  operation, whichever is hit first; `STAVE_REGISTRY_BYTE_LIMIT` (64 MiB) registry-wide, enforced
+  by evicting the oldest events of the least recently attached entry. The newest event is never
+  evicted, so a retained entry can always replay its terminal event and a running one its latest
+  phase. `emit` numbers, buffers, and publishes one event in a single uninterruptible step, so no
+  follower sees a gap, and `finish` flips `state` inside the same step that buffers the terminal
+  event.
+- **Tombstones.** A terminal entry is kept for `STAVE_OPERATION_RETENTION` (24h from
+  `terminalAtMs`). `reapExpired` runs at the start of every `run`/`observe`: it deletes the entry,
+  shuts its PubSub, and adds the id to an `expired` set. Both live in process memory; a restart
+  forgets them. Incarnation binding (below), not the registry, is what makes a replayed request
+  safe (deviation 26).
+- **`run { operationId, afterSequence?, operation }`** is start-or-attach. Unknown id → new entry,
+  attach first (so the very first event is seen live), then fork the body into the service scope
+  (`Effect.forkIn`). Known id with the same fingerprint → attach from `afterSequence`, whatever
+  the state. Known id with a different fingerprint → `StaveOperationRejectedError { code:
+"invalid_arguments" }`. Reaped id → `operation_expired`. The stream ends after the terminal
+  event.
+- **`observe { operationId, afterSequence? }`** attaches only: unknown id → `invalid_arguments`,
+  reaped → `operation_expired`.
+- **`attach`** subscribes to the PubSub _before_ snapshotting the buffer (running entries only),
+  replays every buffered event with `sequence > afterSequence`, then concatenates the live
+  subscription filtered by sequence and `takeUntil` a terminal event. When `afterSequence + 1 <
+earliestSequence` (the cursor was evicted) the replay is prefixed with
+  `reset { earliestSequence }`, numbered `earliestSequence - 1`, and the client is expected to
+  drop what it holds.
+- **Events** (`StaveProgressEvent`): `phase_started { phase, commandLine? }`,
+  `output { phase, stream: stdout | stderr | notes | plan, text }`,
+  `phase_finished { phase, durationMs }`, `reset { earliestSequence }`,
+  `finished { result: { kind, result } }` (the kind/result pairing is the `StaveOperationResult`
+  union, deviation 2), `failed { error: StaveOperationError }`. Every Stave invocation is one
+  phase named after its verb (`invoke`): `phase()` emits `phase_finished` on failure too, so the
+  UI can close the step; `notes[]` from a `--json` answer arrive as `output` with
+  `stream: "notes"` inside the phase; raw stdout lines are forwarded only for prose verbs
+  (`STAVE_VERB_POLICY`), which no mutation is on the shipped binary. The `commandLine` shown is
+  built by `buildStaveArgv` (`commandLineOf`); `registerRepo` redacts URL userinfo in the shown
+  line (`redactUrl`) but hands Stave the original.
+- **`createSpace`**, inside `withSpaceLock(<agentWorkDir>/<spaceId>)`, in order:
+  1. `pre-flight` (no command line): `not_setup` when the config does not exist; `after` without
+     `saga` → `invalid_arguments`; any entry at the exact candidate name in `agentWorkDir`
+     (dangling symlinks included — Stave would create inside a manifest-less directory) →
+     `space_exists`; the realpath of the candidate equal to the realpath of any active project's
+     `workspaceRoot` → `space_exists` with the project in `details` (deviation 25). Warnings, as
+     `notes` output rather than refusals: leftover `stave/<id>/*` branches in the edited repos'
+     bare repos (`git branch --list`), and two or more `.archive/` entries matching `<id>` or
+     `<id>-<14 digits>` (`archiveEntriesMatching`; that is the later `ambiguous_archive` case).
+  2. `space create`: `specText` is written to a scoped temp file (`stave-spec-*.md`) for
+     `--spec`, otherwise `specPath` passes through; `edits` become `repo[:base]`, `references`
+     `repo[:ref]`, `memory[].spec` → `--memory`, plus `saga`, `after`, `common`, `includeWeak`,
+     `noLearn`. As soon as it returns, `entry.partialSpace = { spaceId, spacePath,
+manifestCreatedAt }` is recorded. There is no separate "attach memory" phase: memory rides
+     on `--memory` of the create (the plan's phase list named one).
+  3. `verify`: `space status <id>`; `incarnation_mismatch` unless `manifest.createdAt` equals
+     the stamp the create returned. Then `workspaceReader.invalidate(spacePath)`.
+  4. `project.create`: dispatched server-side through `normalizeDispatchCommand` (so
+     `StaveAdmission` and the usual normalisation apply) with command id
+     `server:stave:create:<basename>:<uuid>`, `title` defaulting to the space id, and
+     `createWorkspaceRootIfMissing: false`. The engine's `sequence` is returned.
+
+  Result: `StaveCreateSpaceResult` = `StaveSpaceMutationResult` (`spaceId`, `spacePath`,
+  `manifest`, `notes`) plus `{ projectId, sequence }`; clients wait for
+  `snapshotSequence >= sequence` before opening the project (deviation 26).
+
+- **Failure and no compensation.** `finish` maps the cause with `toOperationError` (a
+  `StaveError` keeps `verb`; a pre-flight `StaveRefusalError` has none; an interruption becomes
+  `unknown`) and, when `partialSpace` is set, merges it into `error.details.partialSpace`.
+  Nothing is rolled back: a create that failed after `space create` leaves the space on disk
+  (spec §3.6 forbids automatic force).
+- **`removePartialSpace { spaceId, expectedManifestCreatedAt }`** is the explicit recovery, under
+  the same root lock: `pre-flight` runs `space status` and refuses `incarnation_mismatch` unless
+  `manifest.createdAt === expectedManifestCreatedAt`, so a replayed or late request can never
+  destroy a space recreated under the same id; then `space destroy --force --memory destroy`
+  (Stave applies the `destroy` fate only to owned stores and keeps shared dens), then
+  `afterMutation(spacePath)`. Result: `StaveDestroyResult`.
+- **`registerRepo { name, url, adopt }`** runs `repos add` under the config-path lock and
+  invalidates `StaveConfigReader` (the registry is read from config). **`setup { force }`** runs
+  `setup` under the same lock and invalidates the same cache.
+- **`dryRun(operation)`** is unary, not an operation: `createSpace` → `space create --dry-run
+--json` (with the same temp-file spec handling), `registerRepo` → `repos add --dry-run
+--json`, anything else → `StaveError { code: "invalid_arguments" }` ("has no dry run"); an
+  answer that is not a `StaveDryRunPlan` → `unreadable`. `STAVE_OPERATION_VERB` maps every kind
+  to its Stave verb so errors raised before a spawn still name one.
+- `summary(operationId)` exposes `{ kind, state, earliestSequence, nextSequence,
+bufferedEvents, manifestCreatedAt }` for tests and diagnostics.
+
+### RPC surface
+
+Contracts in `packages/contracts/src/rpc.ts`, handlers in
+`apps/server/src/stave/staveRpcHandlers.ts` (same `makeStaveRpcHandlers` as the status RPCs),
+scopes in `apps/server/src/auth/RpcAuthorization.ts`. Every method below runs `requireEnabled`
+(kill switch, `settings.stave.enabled`, runnable binary); read failures are recorded in
+`StaveRpcRuntime.lastFailure` and mapped to `StaveCommandError`.
+
+| Method                                                          | Scope                           | Serves                                                                                                                                                               |
+| --------------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stave.listRepos`                                               | `AuthOrchestrationReadScope`    | `repos list --json` → `StaveRepoRow[]`                                                                                                                               |
+| `stave.listSpaces { includeArchived }`                          | `AuthOrchestrationReadScope`    | `space list --json` (+ `--archived` rows appended) → `StaveSpaceListRow[]`, incl. v0.4 identity (`logicalId`, `archiveBasename`, `manifestCreatedAt`) and `memories` |
+| `stave.listSagas`                                               | `AuthOrchestrationReadScope`    | `saga list --json` → `StaveSagaListRow[]`                                                                                                                            |
+| `stave.memoryProviders`                                         | `AuthOrchestrationReadScope`    | `memory providers --json` → `StaveMemoryProvider[]`                                                                                                                  |
+| `stave.dryRun { operation }`                                    | `AuthOrchestrationReadScope`    | `StaveOperations.dryRun` → `StaveDryRunPlan { dryRun: true, plan[] }`                                                                                                |
+| `stave.runOperation { operationId, afterSequence?, operation }` | `AuthOrchestrationOperateScope` | stream of `StaveProgressEvent` (`StaveOperations.run`)                                                                                                               |
+| `stave.observeOperation { operationId, afterSequence? }`        | `AuthOrchestrationReadScope`    | stream of `StaveProgressEvent` (`StaveOperations.observe`); watching is a read                                                                                       |
+
+Stream errors are `StaveUnavailableError | StaveNotSpaceError | StaveOperationRejectedError`
+(plus authorization); a Stave failure _inside_ a running operation is a `failed` event, never a
+stream error. `packages/client-runtime/src/rpc/client.ts` lists the two stream methods with the
+other streaming RPCs.
+
+### Client runtime
+
+`packages/client-runtime/src/state/staveOperation.ts` is the consumer, keyed on `operationId`
+and `sequence`:
+
+- `StaveOperationState { operationId, status: idle | running | finished | failed |
+disconnected, phases[], lastSequence, earliestSequence?, truncated, result?, error?,
+disconnectReason? }`; each phase keeps `commandLine?`, `startedAt`, `finishedAt?`,
+  `durationMs?`, and its retained `lines[]` (`{ stream, text }`).
+- `reduceStaveProgressEvent` is pure: it ignores events for another id, events at or below
+  `lastSequence` (replays, reordering), and anything after a terminal event; `reset` drops the
+  phases, sets `lastSequence = earliestSequence - 1` and `truncated`; output for a phase whose
+  start was never seen opens that phase lazily.
+- `runStaveOperation` / `reattachStaveOperation` never fail: a `StaveOperationRejectedError`
+  becomes `failed`, a stream that ends without a terminal event becomes `disconnected` with a
+  `reattach()` that calls `stave.observeOperation` from `lastSequence` and keeps the retained
+  phases.
+- `createStaveOperationManager(runtime)` returns `{ stateAtom, run, reattach }`: one keep-alive
+  atom per id and two commands serialised per id; `run` on a `disconnected` state resumes from
+  its `lastSequence` instead of restarting.
+- `packages/client-runtime/src/operations/projects.ts`: `AddProjectSource` gains
+  `"stave-space" | "stave-saga"` (`ADD_PROJECT_STAVE_SOURCES`, labels "New Stave space" /
+  "New Stave saga"), and `findExistingAddProject` is shared with the palette.
+
+### Web
+
+- `apps/web/src/state/staveOperations.ts` binds the manager to `connectionAtomRuntime`
+  (`staveOperations.stateAtom(operationId)` is what the progress step reads) and adds
+  `waitForStaveProjectVisible { environmentId, projectId, sequence }`, which resolves once the
+  environment shell has applied that sequence.
+- `apps/web/src/state/stave.ts` adds the query atom families `staveRepos`, `staveSpaces`,
+  `staveSagas`, `staveMemoryProviders`, the `staveDryRun` command, and `useStaveFeatureAvailable`.
+- `apps/web/src/lib/addProject.ts` is the shared "add project" tail: `addProjectAndOpenThread`
+  (reuse the project at the path, else `project.create` with optional `title` /
+  `createWorkspaceRootIfMissing`, then start a thread — the palette's folder and clone sources
+  route through it) and `openExistingProjectAndThread({ projectId, sequence? })`, which the
+  wizard calls after the server created the project: wait for `sequence`, then open the latest
+  thread or start one.
+- `apps/web/src/staveWizard.ts` is the bus on the `confirmDialog.ts` pattern:
+  `openStaveWizard({ environmentId, kind: "space" | "saga", saga?: { root } })`,
+  `readStaveWizardState`, `subscribeStaveWizard`, `closeStaveWizard`,
+  `resetStaveWizardForTests`. The host, `StaveWizardDialog`, is mounted in
+  `apps/web/src/routes/__root.tsx` beside the confirm dialog host (deviation 18).
+- Palette: `buildStaveAddProjectItems` in `apps/web/src/components/CommandPalette.logic.ts`
+  returns nothing unless `available`; `CommandPalette.tsx` feeds it
+  `useStaveFeatureAvailable(addProjectEnvironmentId).available` and launches the bus with the
+  chosen kind.
+- `apps/web/src/components/stave/staveSpaceWizard.logic.ts` holds every rule of the wizard, so
+  the dialog and step components only render. Steps `identity → repos → memory → saga → review →
+progress`, with `memory` present only when some `stave.memoryProviders` row is `available`
+  (`wizardSteps`). `validateSpaceId`: charset via `isValidStaveSpaceId`, a live row (`id` or
+  `logicalId`) blocks, archived matches (`logicalId`, `archiveBasename`, or `<id>-<14 digits>`)
+  only warn. Kind chips `ticket | spike | audit | custom`; `review` and `saga` are reserved.
+  `spaceBaseOptions` offers `space:<logicalId | id>` for live, error-free spaces that edit the
+  same repo. `memorySuggestions` is `.` plus `provider:id` for every memory on the listed spaces
+  (deviation 22). `canAdvance` gates each step (at least one repo or `emptySpace`; a well-formed
+  `space:` base; `after` only with a saga; spec text or path, not both).
+  `buildCreateSpaceOperation` / `buildRegisterRepoOperation` produce the wire payloads;
+  `describeCreateSpaceCommand` renders the review line (pasted spec shown as
+  `--spec <pasted spec>`); `partialSpaceFromError` reads `failed.error.details.partialSpace` and
+  `buildRemovePartialSpaceOperation` binds the recovery to `manifestCreatedAt` (null, and the
+  button disabled, when the stamp is unknown). The saga variant (`buildCreateSagaOperation`)
+  is typed here but the server answers `invalid_arguments` until Phase 5
+  (`isOperationNotImplemented`).
+- Components under `apps/web/src/components/stave/`: `StaveWizardDialog.tsx` (the host
+  `__root.tsx` mounts; steps in `steps/IdentityStep.tsx`, `ReposStep.tsx`, `MemoryStep.tsx`,
+  `SagaStep.tsx`, `ReviewStep.tsx`, plus `SagaCreateForm.tsx` for the saga variant);
+  `useStaveWizardData.ts` folds the four reads (`staveRepos`, `staveSpaces` with
+  `includeArchived: true`, `staveSagas`, `staveMemoryProviders`) into one `StaveWizardContext`
+  with `isPending`/`error` and `refreshRepos`/`refreshSpaces` (called after an inline register);
+  `StaveOperationProgress.tsx` renders one operation from `staveOperations.stateAtom` — every
+  phase with its command line, retained output and duration, a **Reattach** button while the
+  state is `disconnected` (manual, `staveOperations.reattach`), and the nested **Remove partial
+  space** operation on a failed create. Its rules live in `staveOperationProgress.logic.ts`:
+  `phaseStatus` (`running | done | failed | interrupted`, where `interrupted` is an open phase of
+  a disconnected operation), `removePartialSpaceAvailability` (available only with a manifest
+  stamp; otherwise a hint that nothing was created), `outputRuns` (consecutive lines of one
+  stream collapse into a block), `truncatedNotice` after a `reset`.
 
 ## Git ceiling
 
@@ -449,10 +672,27 @@ Rules built on them:
   `TestClock.adjust` on either side of 15s. `StaveRoots.layer` is covered in the same file.
 - Hosts without Stave provide `StaveBinary.layerFixed`, `StaveConfigReader.layerFixed`, and
   `StaveRootsProvider.layerNoop`.
+- **Operations** (`apps/server/src/stave/StaveOperations.test.ts`): a `scenario` harness builds
+  the service over a recording `StaveCli` mock (every call's method and input is captured) with
+  real temp roots for `agentWorkDir` and `.archive/`, a fake `ProcessRunner` for the `git branch
+--list` probe, and stubbed engine/snapshot services so the server-side `project.create` is
+  observable. Streams are collected with `Stream.runCollect(ops.run(...))` and asserted by
+  event outline; `Deferred` gates hold a phase open to test attach-from-cursor, `reset` after
+  eviction (small `layerWith` limits), a second attacher following live, and the same-id
+  serialisation; the
+  24h retention is crossed with `TestClock.adjust`. Covered: phase order, title default, temp
+  spec file cleanup, fingerprint mismatch, unknown/expired ids, root lock, every pre-flight
+  refusal and warning, partial space reporting, `removePartialSpace` stamp binding and refresh,
+  URL redaction, `setup`, `dryRun` per kind, and unimplemented kinds.
+- **Client consumer** (`packages/client-runtime/src/state/staveOperation.test.ts`): the reducer
+  is exercised with hand-built events (retention per phase, replay/foreign/out-of-order
+  rejection, lazy phase open, `reset`, terminal settling); `runStaveOperation` runs against
+  scripted streams to cover rejection, disconnect, and `reattach`; the manager test checks the
+  atom family is keyed by id.
 
 ## Related
 
-- [Glossary](./glossary.md) — Stave space, Saga, Den
+- [Glossary](./glossary.md) — Stave space, Saga, Den, Stave operation
 - [Stave spaces (user guide)](../user/stave.md)
 - [Workspace layout](./workspace-layout.md)
 - [Lecturn releases (fork)](../operations/lecturn-release.md)

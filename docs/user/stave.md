@@ -32,8 +32,9 @@ installing Stave or editing its config.
 
 ## A space as a project
 
-Add a space the same way you add any folder: choose the space root, the directory that holds
-`.stave.yaml`. The app recognises the manifest and treats the project as a space.
+Add an existing space the same way you add any folder: choose the space root, the directory
+that holds `.stave.yaml`. The app recognises the manifest and treats the project as a space. To
+make a new space from the app, see [Create a space](#create-a-space).
 
 - **Threads run in the space root.** Every thread works in the root directory, where all the
   space's checkouts sit side by side. The per-thread worktree options you see on ordinary
@@ -72,13 +73,104 @@ directories from that config, whether the memory provider is reachable and its v
 last Stave command that failed with its error code. Check here first when a space's live status
 is missing or stale.
 
+## Create a space
+
+Open the Command Palette, choose **Add Project**, and pick **New Stave space**. The entry is
+listed only when Stave is enabled and the server found a runnable binary; if it is missing,
+check the status line under **Settings → General → Stave**. The wizard walks through the steps
+below. Nothing is written to disk until you choose **Create** on the Review step, with one
+exception: registering a repo is a real Stave change on its own (see [Repos](#repos)).
+
+### Identity
+
+- **Space id** names the directory Stave creates under its agent-work directory. Use letters,
+  digits, `.`, `_`, or `-`, starting with a letter or digit. The wizard checks the id as you
+  type: an id a live space already uses is refused. An archived space that shares the id only
+  produces a warning, because Stave timestamps archive entries and an id can be reused after
+  archiving; restoring one of those archives later may need you to say which one.
+- **Title** is the project title shown in the sidebar. Leave it empty to use the id.
+- **Kind** is a chip: `ticket`, `spike`, `audit`, or `custom` with a word of your own (same
+  characters as ids; `review` and `saga` are reserved by Stave).
+- **Spec** is optional: paste text, or give an absolute path on the server to a spec file or
+  directory. One or the other, not both. Pasted text goes to Stave through a temporary file that
+  is removed once the create finishes.
+
+### Repos
+
+The table lists every repository registered with Stave. For each row choose a mode, or leave it
+unset to skip the repo:
+
+- **Edit** gives the space its own branch and working checkout of the repo. **Base** is the git
+  ref to branch from; leave it empty for the repo's default branch, or pick `space:<id>` from the
+  picker to stack on the branch another live space is editing in the same repo.
+- **Reference** gives the space a read-only checkout for context. **Ref** pins it; empty means
+  the default branch.
+
+Pick at least one repo, or turn on **Empty space** to create a space with no checkouts at all.
+Two toggles apply to the whole space: **Include commonly paired references** (Stave's `-c`) adds
+reference checkouts of the repositories Stave has learned are usually paired with the ones you
+edit, and **Include weak tethers** widens that to weaker pairings.
+
+**Register a repo** adds a repository Stave does not know yet: a name (same characters as ids)
+and a clone URL or local path. Registering runs `stave repos add` immediately and shows its
+progress, because it clones into Stave's bare-repo cache and Stave's preview of the create
+refuses repos it has not registered. A registered repo stays registered even if you cancel the
+wizard afterwards.
+
+### Memory
+
+This step appears only when Stave reports a memory provider as available. Add one spec per
+store to attach: `.` creates a fresh task store owned by the space, and `provider:id` attaches an
+existing den. The suggestions list `.` plus every den attached to a space Stave knows about, so
+related work can share memory; you can also type a spec by hand.
+
+### Saga
+
+Optional. Pick a saga to enrol the new space in, then choose the members the new space lands
+**after**; Stave uses that order to infer stacking bases, and the Review step shows what it
+inferred. Choosing members without a saga is refused. When you start the wizard from inside a
+saga, that saga is preselected.
+
+### Review
+
+The exact `stave space create …` line the server will run is shown, followed by Stave's own
+dry-run plan, one step per line. The plan comes from Stave with your real registry, so what you
+read is what will happen. Pasted spec text appears as `--spec <pasted spec>`. Check the plan,
+then choose **Create**.
+
+### Progress
+
+Creation is a streamed list of phases with Stave's notes under each one:
+
+1. **pre-flight** — checks made before Stave runs: Stave is set up, nothing already sits at the
+   space's path, and no existing project uses that directory (even through a symlink). Leftover
+   `stave/<id>/…` branches from an earlier space with the same id, or several archived spaces
+   that match it, are reported as notes and do not stop the create.
+2. **space create** — the command from the Review step, including your memory and saga choices.
+3. **verify** — Stave reads the new space back and the server confirms the manifest on disk is
+   the one this create wrote.
+4. **project.create** — the project is created on the server, then opens on your client: its
+   latest thread, or a new one.
+
+The operation runs on the server, not in your browser tab, so losing the connection does not
+stop it. If the stream drops, the Progress step shows **Disconnected** with a **Reattach**
+button; reattaching resumes from the last event you received, and an operation that finished
+while you were away can still be read for 24 hours after it ended.
+
+**When a create fails, nothing is undone for you.** If the failure came after Stave wrote the
+space (the verify or project step failed), the space stays on disk so you can inspect it, and
+the wizard offers **Remove partial space**. That runs `stave space destroy` with force against
+exactly the space this attempt created and refuses if the directory now holds a space made by a
+later create. Any task store the create made is destroyed with it; dens you attached from
+elsewhere are kept. If Stave itself refused the create, there is no space to remove and the
+button is not offered.
+
 ## Coming soon
 
-Creating a space from the app — picking registered repositories, choosing which are editable,
-attaching memory, and previewing Stave's plan before anything is written — is in progress, along
-with running **Set up** directly, archiving and restoring spaces, and saga members nested under
-their saga in the sidebar. Until then, create and change spaces with the `stave` command; the
-app picks up the result the next time it reads the manifest.
+Running **Set up** directly, creating sagas from the wizard, archiving and restoring spaces, and
+saga members nested under their saga in the sidebar are in progress. Until then, make those
+changes with the `stave` command; the app picks up the result the next time it reads the
+manifest.
 
 ## Related
 

@@ -1,6 +1,9 @@
 import { useEffect, useRef } from "react";
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
-import { createEnvironmentRpcQueryAtomFamily } from "@t3tools/client-runtime/state/runtime";
+import {
+  createEnvironmentRpcCommand,
+  createEnvironmentRpcQueryAtomFamily,
+} from "@t3tools/client-runtime/state/runtime";
 import {
   environmentSupportsStave,
   staveFeatureAvailable,
@@ -33,6 +36,41 @@ export const staveSpaceStatus = createEnvironmentRpcQueryAtomFamily(connectionAt
   label: "environment-data:stave:space-status",
   tag: WS_METHODS.staveSpaceStatus,
   staleTimeMs: 15_000,
+});
+
+// ── Wizard reads ──────────────────────────────────────────────
+// Registry, spaces (live + archived), sagas and memory providers for the
+// "New Stave space" wizard. Short stale windows: the wizard mutates the
+// registry (inline `registerRepo`) and refreshes explicitly afterwards.
+
+export const staveRepos = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+  label: "environment-data:stave:repos",
+  tag: WS_METHODS.staveListRepos,
+  staleTimeMs: 15_000,
+});
+
+export const staveSpaces = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+  label: "environment-data:stave:spaces",
+  tag: WS_METHODS.staveListSpaces,
+  staleTimeMs: 15_000,
+});
+
+export const staveSagas = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+  label: "environment-data:stave:sagas",
+  tag: WS_METHODS.staveListSagas,
+  staleTimeMs: 15_000,
+});
+
+export const staveMemoryProviders = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+  label: "environment-data:stave:memory-providers",
+  tag: WS_METHODS.staveMemoryProviders,
+  staleTimeMs: 60_000,
+});
+
+/** `stave <verb> --dry-run --json` for the review step; a read, but run on demand rather than cached. */
+export const staveDryRun = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:stave:dry-run",
+  tag: WS_METHODS.staveDryRun,
 });
 
 const EMPTY_SPACE_STATUS_ATOM = Atom.make(AsyncResult.initial<StaveSpaceStatus, never>(false)).pipe(

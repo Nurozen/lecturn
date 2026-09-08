@@ -1,5 +1,5 @@
 /**
- * staveRpcHandlers - the `stave.*` read RPCs served over the WebSocket group.
+ * staveRpcHandlers - the `stave.*` RPCs served over the WebSocket group.
  *
  * `stave.getStatus` is the LIVE counterpart of the static `capabilities.stave`
  * descriptor (deviation 5): it answers "is a binary runnable, does the config
@@ -8,10 +8,16 @@
  * `stave space status <id>` for the space whose manifest sits at a workspace
  * root, cached server-wide for 15 seconds per root.
  *
- * Gating: both RPCs refuse with `StaveUnavailableError{reason:
- * "disabled_by_server"}` when `T3CODE_STAVE` is off; `spaceStatus` further
- * requires `settings.stave.enabled` and a runnable binary. The status RPC
- * deliberately works without those so clients can show what is missing.
+ * The list reads (`listRepos|listSpaces|listSagas|memoryProviders`) run one
+ * `--json` read verb each; `dryRun` asks `StaveOperations` for a plan; the
+ * two stream RPCs (`runOperation`, `observeOperation`) hand the request to the
+ * application-lifetime `StaveOperations` registry, so an operation outlives
+ * the socket that started it.
+ *
+ * Gating: every RPC refuses with `StaveUnavailableError{reason:
+ * "disabled_by_server"}` when `T3CODE_STAVE` is off; all but `getStatus`
+ * further require `settings.stave.enabled` and a runnable binary. The status
+ * RPC deliberately works without those so clients can show what is missing.
  *
  * `StaveRpcRuntime` holds the server-lifetime pieces (last failure, the
  * space-status cache); `makeStaveRpcHandlers` builds one handler record per
@@ -21,8 +27,17 @@
  */
 import {
   type EnvironmentAuthorizationError,
+  type StaveDryRunInput,
+  type StaveDryRunPlan,
   type StaveLastFailure,
+  type StaveListSpacesInput,
+  type StaveMemoryProvider,
+  type StaveObserveOperationInput,
+  type StaveRepoRow,
+  type StaveRunOperationInput,
   type StaveMarmotStatus,
+  type StaveSagaListRow,
+  type StaveSpaceListRow,
   type StaveSpaceStatus,
   type StaveStatus,
   StaveCommandError,
@@ -39,6 +54,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as Stream from "effect/Stream";
 
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
@@ -46,8 +62,12 @@ import { StaveBinary, type StaveBinaryError } from "./StaveBinary.ts";
 import { StaveCli } from "./StaveCli.ts";
 import { StaveConfigReader, type StaveConfigSnapshot } from "./StaveConfigReader.ts";
 import type { StaveError } from "./StaveError.ts";
+import { StaveOperations } from "./StaveOperations.ts";
 import type {
   StaveMemoryProviders,
+  StaveReposList,
+  StaveSagaList,
+  StaveSpaceList,
   StaveSpaceStatus as StaveSpaceStatusJson,
 } from "./staveJson.ts";
 import { StaveWorkspaceReader } from "./StaveWorkspaceReader.ts";
@@ -143,6 +163,68 @@ export function toSpaceStatusDto(json: StaveSpaceStatusJson): StaveSpaceStatus {
   };
 }
 
+/** `repos list --json` rows already carry the wire shape; the copy pins the DTO type. */
+export function toRepoRows(rows: StaveReposList): ReadonlyArray<StaveRepoRow> {
+  return rows.map((row) => ({
+    name: row.name,
+    url: row.url,
+    bareRepoPath: row.bareRepoPath,
+    ...optionalString("defaultBranch", row.defaultBranch),
+    ...optionalString("description", row.description),
+    tetherCount: row.tetherCount,
+  }));
+}
+
+/** `space list [--archived] --json` rows; v0.4 identity fields pass through. */
+export function toSpaceRows(rows: StaveSpaceList): ReadonlyArray<StaveSpaceListRow> {
+  return rows.map((row) => ({
+    id: row.id,
+    path: row.path,
+    ...optionalString("kind", row.kind),
+    ...optionalString("createdAt", row.createdAt),
+    isSaga: row.isSaga,
+    ...optionalString("memberOf", row.memberOf),
+    repos: row.repos.map((repo) => ({ name: repo.name, mode: repo.mode })),
+    archived: row.archived,
+    ...optionalString("error", row.error),
+    logicalId: row.logicalId,
+    ...optionalString("archiveBasename", row.archiveBasename),
+    ...optionalString("manifestCreatedAt", row.manifestCreatedAt),
+    manifestVersion: row.manifestVersion,
+    memories: row.memories.map((memory) => ({
+      name: memory.name,
+      provider: memory.provider,
+      id: memory.id,
+      owned: memory.owned,
+    })),
+  }));
+}
+
+export function toSagaRows(rows: StaveSagaList): ReadonlyArray<StaveSagaListRow> {
+  return rows.map((row) => ({
+    id: row.id,
+    ...optionalString("kind", row.kind),
+    isSaga: row.isSaga,
+    members: [...row.members],
+    ...optionalString("memberOf", row.memberOf),
+    ...optionalString("error", row.error),
+    path: row.path,
+    logicalId: row.logicalId,
+  }));
+}
+
+export function toProviderRows(rows: StaveMemoryProviders): ReadonlyArray<StaveMemoryProvider> {
+  return rows.map((row) => ({
+    name: row.name,
+    ...optionalString("binary", row.binary),
+    default: row.default,
+    available: row.available,
+    ...optionalString("version", row.version),
+    capabilities: [...row.capabilities],
+    ...optionalString("error", row.error),
+  }));
+}
+
 // ── Server-lifetime runtime ───────────────────────────────────
 
 export interface StaveRpcRuntimeShape {
@@ -227,6 +309,11 @@ export interface StaveRpcWrappers {
     effect: Effect.Effect<A, E, R>,
     traceAttributes?: Readonly<Record<string, unknown>>,
   ) => Effect.Effect<A, E | EnvironmentAuthorizationError, R>;
+  readonly observeRpcStream: <A, E, R>(
+    method: string,
+    stream: Stream.Stream<A, E, R>,
+    traceAttributes?: Readonly<Record<string, unknown>>,
+  ) => Stream.Stream<A, E | EnvironmentAuthorizationError, R>;
 }
 
 const TRACE_ATTRIBUTES = { "rpc.aggregate": "stave" } as const;
@@ -240,6 +327,7 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
   const cli = yield* StaveCli;
   const configReader = yield* StaveConfigReader;
   const runtime = yield* StaveRpcRuntime;
+  const operations = yield* StaveOperations;
 
   // `T3CODE_STAVE=false` is the unbypassable kill switch: the capability is
   // absent AND every stave RPC refuses, like thread forking.
@@ -288,24 +376,55 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
     } satisfies StaveStatus;
   });
 
+  const requireEnabled = Effect.gen(function* () {
+    yield* requireKillSwitchOn;
+    const settings = yield* serverSettings.getSettings;
+    if (!settings.stave.enabled) {
+      return yield* new StaveUnavailableError({
+        reason: "disabled_in_settings",
+        message: "The Stave integration is turned off in server settings.",
+      });
+    }
+    yield* binary.resolveRunnable.pipe(
+      Effect.mapError(
+        (error) => new StaveUnavailableError({ reason: "binary_missing", message: error.message }),
+      ),
+    );
+  });
+
   const spaceStatus = (workspaceRoot: string) =>
-    Effect.gen(function* () {
-      yield* requireKillSwitchOn;
-      const settings = yield* serverSettings.getSettings;
-      if (!settings.stave.enabled) {
-        return yield* new StaveUnavailableError({
-          reason: "disabled_in_settings",
-          message: "The Stave integration is turned off in server settings.",
-        });
-      }
-      yield* binary.resolveRunnable.pipe(
-        Effect.mapError(
-          (error) =>
-            new StaveUnavailableError({ reason: "binary_missing", message: error.message }),
-        ),
-      );
-      return yield* runtime.spaceStatus(workspaceRoot);
-    });
+    requireEnabled.pipe(Effect.flatMap(() => runtime.spaceStatus(workspaceRoot)));
+
+  /** One gated read verb, its failure remembered for diagnostics and mapped to the wire error. */
+  const gatedRead = <A>(read: Effect.Effect<A, StaveError>) =>
+    requireEnabled.pipe(
+      Effect.flatMap(() =>
+        read.pipe(Effect.tapError(runtime.recordFailure), Effect.mapError(toStaveCommandError)),
+      ),
+    );
+
+  const listRepos = gatedRead(Effect.suspend(() => cli.reposList).pipe(Effect.map(toRepoRows)));
+  const listSpaces = (input: StaveListSpacesInput) =>
+    gatedRead(
+      Effect.gen(function* () {
+        const live = yield* cli.spaceList();
+        const archived = input.includeArchived ? yield* cli.spaceList({ archived: true }) : [];
+        return toSpaceRows([...live, ...archived]);
+      }),
+    );
+  const listSagas = gatedRead(Effect.suspend(() => cli.sagaList).pipe(Effect.map(toSagaRows)));
+  const memoryProviders = gatedRead(
+    Effect.suspend(() => cli.memoryProviders).pipe(Effect.map(toProviderRows)),
+  );
+  const dryRun = (input: StaveDryRunInput) =>
+    gatedRead(operations.dryRun(input.operation)).pipe(
+      Effect.map((plan): StaveDryRunPlan => ({ dryRun: true, plan: plan.plan })),
+    );
+
+  const runOperation = (input: StaveRunOperationInput) =>
+    Stream.unwrap(requireEnabled.pipe(Effect.map(() => operations.run(input))));
+  const observeOperation = (input: StaveObserveOperationInput) =>
+    Stream.unwrap(requireEnabled.pipe(Effect.map(() => operations.observe(input))));
 
   return {
     [WS_METHODS.staveGetStatus]: (_input: Record<string, never>) =>
@@ -314,6 +433,28 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
       wrappers.observeRpcEffect(
         WS_METHODS.staveSpaceStatus,
         spaceStatus(input.workspaceRoot),
+        TRACE_ATTRIBUTES,
+      ),
+    [WS_METHODS.staveListRepos]: (_input: Record<string, never>) =>
+      wrappers.observeRpcEffect(WS_METHODS.staveListRepos, listRepos, TRACE_ATTRIBUTES),
+    [WS_METHODS.staveListSpaces]: (input: StaveListSpacesInput) =>
+      wrappers.observeRpcEffect(WS_METHODS.staveListSpaces, listSpaces(input), TRACE_ATTRIBUTES),
+    [WS_METHODS.staveListSagas]: (_input: Record<string, never>) =>
+      wrappers.observeRpcEffect(WS_METHODS.staveListSagas, listSagas, TRACE_ATTRIBUTES),
+    [WS_METHODS.staveMemoryProviders]: (_input: Record<string, never>) =>
+      wrappers.observeRpcEffect(WS_METHODS.staveMemoryProviders, memoryProviders, TRACE_ATTRIBUTES),
+    [WS_METHODS.staveDryRun]: (input: StaveDryRunInput) =>
+      wrappers.observeRpcEffect(WS_METHODS.staveDryRun, dryRun(input), TRACE_ATTRIBUTES),
+    [WS_METHODS.staveRunOperation]: (input: StaveRunOperationInput) =>
+      wrappers.observeRpcStream(
+        WS_METHODS.staveRunOperation,
+        runOperation(input),
+        TRACE_ATTRIBUTES,
+      ),
+    [WS_METHODS.staveObserveOperation]: (input: StaveObserveOperationInput) =>
+      wrappers.observeRpcStream(
+        WS_METHODS.staveObserveOperation,
+        observeOperation(input),
         TRACE_ATTRIBUTES,
       ),
   };

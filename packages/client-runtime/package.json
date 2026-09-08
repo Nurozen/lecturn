@@ -171,6 +171,10 @@
       "types": "./src/state/stave.ts",
       "default": "./src/state/stave.ts"
     },
+    "./state/stave-operation": {
+      "types": "./src/state/staveOperation.ts",
+      "default": "./src/state/staveOperation.ts"
+    },
     "./state/source-control": {
       "types": "./src/state/sourceControl.ts",
       "default": "./src/state/sourceControl.ts"

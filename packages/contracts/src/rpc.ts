@@ -201,7 +201,18 @@ import { UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   StaveCommandError,
+  StaveDryRunInput,
+  StaveDryRunPlan,
+  StaveListSpacesInput,
+  StaveMemoryProvider,
   StaveNotSpaceError,
+  StaveObserveOperationInput,
+  StaveOperationRejectedError,
+  StaveProgressEvent,
+  StaveRepoRow,
+  StaveRunOperationInput,
+  StaveSagaListRow,
+  StaveSpaceListRow,
   StaveSpaceStatus,
   StaveSpaceStatusInput,
   StaveStatus,
@@ -313,6 +324,13 @@ export const WS_METHODS = {
   // Stave methods
   staveGetStatus: "stave.getStatus",
   staveSpaceStatus: "stave.spaceStatus",
+  staveListRepos: "stave.listRepos",
+  staveListSpaces: "stave.listSpaces",
+  staveListSagas: "stave.listSagas",
+  staveMemoryProviders: "stave.memoryProviders",
+  staveDryRun: "stave.dryRun",
+  staveRunOperation: "stave.runOperation",
+  staveObserveOperation: "stave.observeOperation",
 
   // Pull request methods
   pullRequestsList: "pullRequests.list",
@@ -532,6 +550,76 @@ export const WsStaveSpaceStatusRpc = Rpc.make(WS_METHODS.staveSpaceStatus, {
     ServerSettingsError,
     EnvironmentAuthorizationError,
   ]),
+});
+
+// Stave reads run one `--json` read verb each behind the same enablement gate
+// as `stave.spaceStatus`; the operation RPCs stream `StaveProgressEvent`s
+// keyed on the client-supplied operation id.
+const StaveReadError = Schema.Union([
+  StaveUnavailableError,
+  StaveCommandError,
+  ServerSettingsError,
+  EnvironmentAuthorizationError,
+]);
+
+export const WsStaveListReposRpc = Rpc.make(WS_METHODS.staveListRepos, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(StaveRepoRow),
+  error: StaveReadError,
+});
+
+export const WsStaveListSpacesRpc = Rpc.make(WS_METHODS.staveListSpaces, {
+  payload: StaveListSpacesInput,
+  success: Schema.Array(StaveSpaceListRow),
+  error: StaveReadError,
+});
+
+export const WsStaveListSagasRpc = Rpc.make(WS_METHODS.staveListSagas, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(StaveSagaListRow),
+  error: StaveReadError,
+});
+
+export const WsStaveMemoryProvidersRpc = Rpc.make(WS_METHODS.staveMemoryProviders, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(StaveMemoryProvider),
+  error: StaveReadError,
+});
+
+export const WsStaveDryRunRpc = Rpc.make(WS_METHODS.staveDryRun, {
+  payload: StaveDryRunInput,
+  success: StaveDryRunPlan,
+  error: Schema.Union([
+    StaveUnavailableError,
+    StaveNotSpaceError,
+    StaveCommandError,
+    ServerSettingsError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+// Stave failures inside a running operation arrive as `failed` events; the
+// stream itself only fails when the request could not be admitted.
+const StaveOperationStreamError = Schema.Union([
+  StaveUnavailableError,
+  StaveNotSpaceError,
+  StaveOperationRejectedError,
+  ServerSettingsError,
+  EnvironmentAuthorizationError,
+]);
+
+export const WsStaveRunOperationRpc = Rpc.make(WS_METHODS.staveRunOperation, {
+  payload: StaveRunOperationInput,
+  success: StaveProgressEvent,
+  error: StaveOperationStreamError,
+  stream: true,
+});
+
+export const WsStaveObserveOperationRpc = Rpc.make(WS_METHODS.staveObserveOperation, {
+  payload: StaveObserveOperationInput,
+  success: StaveProgressEvent,
+  error: StaveOperationStreamError,
+  stream: true,
 });
 
 const PullRequestRpcError = Schema.Union([
@@ -1116,6 +1204,13 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetBackgroundPolicyRpc,
   WsStaveGetStatusRpc,
   WsStaveSpaceStatusRpc,
+  WsStaveListReposRpc,
+  WsStaveListSpacesRpc,
+  WsStaveListSagasRpc,
+  WsStaveMemoryProvidersRpc,
+  WsStaveDryRunRpc,
+  WsStaveRunOperationRpc,
+  WsStaveObserveOperationRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsPullRequestsListRpc,

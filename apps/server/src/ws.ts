@@ -120,6 +120,7 @@ import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import { makeStaveRpcHandlers } from "./stave/staveRpcHandlers.ts";
 import * as StaveAdmission from "./stave/StaveAdmission.ts";
+import * as StaveOperations from "./stave/StaveOperations.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -1681,7 +1682,7 @@ const makeWsRpcLayer = (
 
       // Stave reads live in their own module; they share this connection's
       // auth/tracing wrapper so scope enforcement stays in one place.
-      const staveRpcHandlers = yield* makeStaveRpcHandlers({ observeRpcEffect });
+      const staveRpcHandlers = yield* makeStaveRpcHandlers({ observeRpcEffect, observeRpcStream });
 
       return WsRpcGroup.of({
         ...staveRpcHandlers,
@@ -3080,6 +3081,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         ),
     });
     const pullRequests = yield* PullRequestService.PullRequestService;
+    const staveOperations = yield* StaveOperations.StaveOperations;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -3119,6 +3121,9 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               // One server-lifetime service means clients share the same PR caches, and a WS
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
+              // Stave operations outlive the socket that started them, so every
+              // connection attaches to the one server-lifetime registry.
+              Layer.provide(Layer.succeed(StaveOperations.StaveOperations, staveOperations)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(

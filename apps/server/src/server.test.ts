@@ -11,6 +11,7 @@ import {
   CommandId,
   DEFAULT_SERVER_SETTINGS,
   type DpopFailureReason,
+  type EnvironmentAuthorizationError,
   EnvironmentId,
   EventId,
   GitCommandError,
@@ -33,6 +34,11 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ResolvedKeybindingRule,
+  type ServerSettingsError,
+  type StaveCommandError,
+  type StaveNotSpaceError,
+  type StaveOperationRejectedError,
+  type StaveUnavailableError,
   ThreadId,
   TurnId,
   WS_METHODS,
@@ -77,6 +83,7 @@ import {
 } from "effect/unstable/http";
 import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
+import type * as RpcClientError from "effect/unstable/rpc/RpcClientError";
 import * as Socket from "effect/unstable/socket/Socket";
 import { vi } from "vite-plus/test";
 
@@ -138,6 +145,7 @@ import * as StaveAdmission from "./stave/StaveAdmission.ts";
 import * as StaveBinary from "./stave/StaveBinary.ts";
 import * as StaveCli from "./stave/StaveCli.ts";
 import * as StaveConfigReader from "./stave/StaveConfigReader.ts";
+import { StaveError } from "./stave/StaveError.ts";
 import type { StaveSpaceStatus as StaveSpaceStatusJson } from "./stave/staveJson.ts";
 import { STAVE_MANIFEST_FILE_NAME } from "./stave/staveManifest.ts";
 import * as StaveRpcHandlers from "./stave/staveRpcHandlers.ts";
@@ -4631,6 +4639,559 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       const notSpace = yield* Effect.flip(call("/tmp/not-a-space"));
       assert.equal(notSpace._tag, "StaveNotSpaceError");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  const staveEnabledLayers = {
+    serverSettings: {
+      getSettings: Effect.succeed({
+        ...DEFAULT_SERVER_SETTINGS,
+        stave: { ...DEFAULT_SERVER_SETTINGS.stave, enabled: true },
+      }),
+    },
+    staveBinary: {
+      resolveRunnable: Effect.succeed({
+        path: "/usr/local/bin/stave",
+        source: "path" as const,
+        version: "0.4.0",
+        commit: null,
+      }),
+    },
+  };
+
+  const registerRepoOperation = {
+    kind: "registerRepo" as const,
+    name: "demo",
+    url: "https://github.com/acme/demo.git",
+    adopt: false,
+  };
+
+  /** Every Stave RPC behind `requireEnabled`, so the gating tests sweep them in one pass. */
+  type GatedStaveRpcError =
+    | StaveUnavailableError
+    | StaveNotSpaceError
+    | StaveCommandError
+    | StaveOperationRejectedError
+    | ServerSettingsError
+    | EnvironmentAuthorizationError
+    | RpcClientError.RpcClientError;
+  const gatedStaveCalls: ReadonlyArray<{
+    readonly method: string;
+    readonly call: (client: WsRpcClient) => Effect.Effect<unknown, GatedStaveRpcError>;
+  }> = [
+    { method: WS_METHODS.staveListRepos, call: (client) => client[WS_METHODS.staveListRepos]({}) },
+    {
+      method: WS_METHODS.staveListSpaces,
+      call: (client) => client[WS_METHODS.staveListSpaces]({ includeArchived: false }),
+    },
+    { method: WS_METHODS.staveListSagas, call: (client) => client[WS_METHODS.staveListSagas]({}) },
+    {
+      method: WS_METHODS.staveMemoryProviders,
+      call: (client) => client[WS_METHODS.staveMemoryProviders]({}),
+    },
+    {
+      method: WS_METHODS.staveDryRun,
+      call: (client) => client[WS_METHODS.staveDryRun]({ operation: registerRepoOperation }),
+    },
+    {
+      method: WS_METHODS.staveRunOperation,
+      call: (client) =>
+        client[WS_METHODS.staveRunOperation]({
+          operationId: "gated",
+          operation: registerRepoOperation,
+        }).pipe(Stream.runCollect),
+    },
+    {
+      method: WS_METHODS.staveObserveOperation,
+      call: (client) =>
+        client[WS_METHODS.staveObserveOperation]({ operationId: "gated" }).pipe(Stream.runCollect),
+    },
+  ];
+
+  const assertEveryStaveRpcUnavailable = (wsUrl: string, reason: string) =>
+    Effect.forEach(
+      gatedStaveCalls,
+      ({ method, call }) =>
+        Effect.gen(function* () {
+          const error = yield* Effect.flip(
+            Effect.scoped(withWsRpcClient(wsUrl, (client) => Effect.asVoid(call(client)))),
+          );
+          assert.equal(error._tag, "StaveUnavailableError", method);
+          if (error._tag === "StaveUnavailableError") {
+            assert.equal(error.reason, reason, method);
+          }
+        }),
+      { discard: true },
+    );
+
+  it.effect("stave reads and operations refuse when the setting is off", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* assertEveryStaveRpcUnavailable(wsUrl, "disabled_in_settings");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("stave reads and operations refuse when the server kill switch is off", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        config: { staveEnabled: false },
+        layers: { serverSettings: staveEnabledLayers.serverSettings },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* assertEveryStaveRpcUnavailable(wsUrl, "disabled_by_server");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("stave reads and operations refuse when no binary is runnable", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({ layers: { serverSettings: staveEnabledLayers.serverSettings } });
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* assertEveryStaveRpcUnavailable(wsUrl, "binary_missing");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("stave.listRepos maps repos list rows to the wire DTO", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          ...staveEnabledLayers,
+          staveCli: {
+            reposList: Effect.succeed([
+              {
+                name: "api",
+                url: "https://github.com/acme/api.git",
+                bareRepoPath: "/home/tester/stave/bare-repos/api.git",
+                defaultBranch: "main",
+                tetherCount: 2,
+              },
+              {
+                name: "docs",
+                url: "https://github.com/acme/docs.git",
+                bareRepoPath: "/home/tester/stave/bare-repos/docs.git",
+                tetherCount: 0,
+              },
+            ]),
+          },
+        },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+
+      const rows = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.staveListRepos]({})),
+      );
+
+      assert.deepEqual(rows, [
+        {
+          name: "api",
+          url: "https://github.com/acme/api.git",
+          bareRepoPath: "/home/tester/stave/bare-repos/api.git",
+          defaultBranch: "main",
+          tetherCount: 2,
+        },
+        {
+          name: "docs",
+          url: "https://github.com/acme/docs.git",
+          bareRepoPath: "/home/tester/stave/bare-repos/docs.git",
+          tetherCount: 0,
+        },
+      ]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("stave.listSpaces appends archived rows only when asked", () =>
+    Effect.gen(function* () {
+      const spaceListCalls = yield* Ref.make<Array<boolean>>([]);
+      const liveRow = {
+        id: "demo",
+        path: "/home/tester/stave/agent-work/demo",
+        kind: "ticket",
+        createdAt: "2026-09-01T07:32:05Z",
+        isSaga: false,
+        repos: [{ name: "api", mode: "edit" as const }],
+        archived: false,
+        logicalId: "demo",
+        manifestCreatedAt: "2026-09-01T07:32:05.38559Z",
+        manifestVersion: 2,
+        memories: [{ name: "notes", provider: "marmot", id: "den-1", owned: true }],
+      };
+      const archivedRow = {
+        id: "demo-20260801000000",
+        path: "/home/tester/stave/agent-work/.archive/demo-20260801000000",
+        isSaga: false,
+        repos: [],
+        archived: true,
+        logicalId: "demo",
+        archiveBasename: "demo-20260801000000",
+        manifestCreatedAt: "2026-08-01T00:00:00.123456Z",
+        manifestVersion: 2,
+        memories: [],
+      };
+      yield* buildAppUnderTest({
+        layers: {
+          ...staveEnabledLayers,
+          staveCli: {
+            spaceList: (input) => {
+              const archived = input?.archived ?? false;
+              return Ref.update(spaceListCalls, (calls) => [...calls, archived]).pipe(
+                Effect.as(archived ? [archivedRow] : [liveRow]),
+              );
+            },
+          },
+        },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const list = (includeArchived: boolean) =>
+        Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.staveListSpaces]({ includeArchived }),
+          ),
+        );
+
+      const withArchived = yield* list(true);
+      assert.deepEqual(yield* Ref.get(spaceListCalls), [false, true]);
+      assert.deepEqual(withArchived, [liveRow, archivedRow]);
+      assert.equal(withArchived[1]?.archived, true);
+      assert.equal(withArchived[1]?.logicalId, "demo");
+      assert.equal(withArchived[1]?.archiveBasename, "demo-20260801000000");
+      assert.equal(withArchived[1]?.manifestCreatedAt, "2026-08-01T00:00:00.123456Z");
+
+      yield* Ref.set(spaceListCalls, []);
+      const liveOnly = yield* list(false);
+      assert.deepEqual(yield* Ref.get(spaceListCalls), [false]);
+      assert.deepEqual(liveOnly, [liveRow]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("stave.listSagas and stave.memoryProviders return the mapped rows", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          ...staveEnabledLayers,
+          staveCli: {
+            sagaList: Effect.succeed([
+              {
+                id: "epic",
+                kind: "saga",
+                isSaga: true,
+                members: ["demo", "demo-2"],
+                path: "/home/tester/stave/agent-work/epic",
+                logicalId: "epic",
+              },
+              {
+                id: "broken",
+                isSaga: true,
+                members: [],
+                error: "manifest unreadable",
+                path: "/home/tester/stave/agent-work/broken",
+                logicalId: null,
+              },
+            ]),
+            memoryProviders: Effect.succeed([
+              {
+                name: "marmot",
+                binary: "marmot",
+                default: true,
+                available: true,
+                version: "marmot v0.1.12",
+                capabilities: ["dens"],
+              },
+              {
+                name: "none",
+                default: false,
+                available: false,
+                capabilities: [],
+                error: "not installed",
+              },
+            ]),
+          },
+        },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+
+      const sagas = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.staveListSagas]({})),
+      );
+      const providers = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.staveMemoryProviders]({})),
+      );
+
+      assert.deepEqual(sagas, [
+        {
+          id: "epic",
+          kind: "saga",
+          isSaga: true,
+          members: ["demo", "demo-2"],
+          path: "/home/tester/stave/agent-work/epic",
+          logicalId: "epic",
+        },
+        {
+          id: "broken",
+          isSaga: true,
+          members: [],
+          error: "manifest unreadable",
+          path: "/home/tester/stave/agent-work/broken",
+          logicalId: null,
+        },
+      ]);
+      assert.deepEqual(providers, [
+        {
+          name: "marmot",
+          binary: "marmot",
+          default: true,
+          available: true,
+          version: "marmot v0.1.12",
+          capabilities: ["dens"],
+        },
+        {
+          name: "none",
+          default: false,
+          available: false,
+          capabilities: [],
+          error: "not installed",
+        },
+      ]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("stave.dryRun plans a space create and reports CLI failures", () =>
+    Effect.gen(function* () {
+      const spaceCreateInputs = yield* Ref.make<Array<StaveCli.StaveSpaceCreateInput>>([]);
+      const reposAddFailure = new StaveError({
+        code: "cache_exists",
+        message: "a bare cache already exists at /home/tester/stave/bare-repos/demo.git",
+        details: null,
+        exitCode: 1,
+        stderrTail: null,
+        verb: "repos add",
+      });
+      yield* buildAppUnderTest({
+        layers: {
+          ...staveEnabledLayers,
+          staveCli: {
+            spaceCreate: (input) =>
+              Ref.update(spaceCreateInputs, (inputs) => [...inputs, input]).pipe(
+                Effect.as({ dryRun: true as const, plan: ["create space demo", "add edit api"] }),
+              ),
+            reposAdd: () => Effect.fail(reposAddFailure),
+          },
+        },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+
+      const plan = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.staveDryRun]({
+            operation: {
+              kind: "createSpace",
+              spaceId: "demo",
+              edits: [{ repo: "api" }, { repo: "docs", base: "release" }],
+              references: [{ repo: "shared" }],
+              memory: [],
+              after: [],
+              common: false,
+              includeWeak: false,
+              noLearn: false,
+            },
+          }),
+        ),
+      );
+      assert.deepEqual(plan, { dryRun: true, plan: ["create space demo", "add edit api"] });
+      const inputs = yield* Ref.get(spaceCreateInputs);
+      assert.equal(inputs.length, 1);
+      assert.equal(inputs[0]?.id, "demo");
+      assert.equal(inputs[0]?.dryRun, true);
+      assert.deepEqual(inputs[0]?.edits, ["api", "docs:release"]);
+      assert.deepEqual(inputs[0]?.references, ["shared"]);
+
+      const unsupported = yield* Effect.flip(
+        Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.staveDryRun]({
+              operation: { kind: "syncSpace", workspaceRoot: "/tmp/space", referencesOnly: false },
+            }),
+          ),
+        ),
+      );
+      assert.equal(unsupported._tag, "StaveCommandError");
+      if (unsupported._tag === "StaveCommandError") {
+        assert.equal(unsupported.code, "invalid_arguments");
+      }
+
+      const cliFailure = yield* Effect.flip(
+        Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.staveDryRun]({ operation: registerRepoOperation }),
+          ),
+        ),
+      );
+      assert.equal(cliFailure._tag, "StaveCommandError");
+      if (cliFailure._tag === "StaveCommandError") {
+        assert.equal(cliFailure.verb, "repos add");
+        assert.equal(cliFailure.code, "cache_exists");
+        assert.equal(cliFailure.message, reposAddFailure.message);
+      }
+
+      const status = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.staveGetStatus]({})),
+      );
+      assert.equal(status.lastFailure?.verb, "repos add");
+      assert.equal(status.lastFailure?.code, "cache_exists");
+      assert.equal(status.lastFailure?.message, reposAddFailure.message);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("stave.runOperation registers a repo, replays by id and refuses other payloads", () =>
+    Effect.gen(function* () {
+      const reposAddInputs = yield* Ref.make<Array<StaveCli.StaveReposAddInput>>([]);
+      yield* buildAppUnderTest({
+        layers: {
+          ...staveEnabledLayers,
+          staveCli: {
+            reposAdd: (input) =>
+              Ref.update(reposAddInputs, (inputs) => [...inputs, input]).pipe(
+                Effect.as({
+                  name: "demo",
+                  url: "https://github.com/acme/demo.git",
+                  bareRepoPath: "/home/tester/stave/bare-repos/demo.git",
+                  defaultBranch: "main",
+                  adopted: false,
+                  notes: ["cloned into bare-repos/demo.git", "default branch is main"],
+                }),
+              ),
+          },
+        },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const run = (operationId: string, operation: typeof registerRepoOperation) =>
+        Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.staveRunOperation]({ operationId, operation }).pipe(
+              Stream.runCollect,
+            ),
+          ),
+        );
+
+      const events = Array.from(yield* run("op-register", registerRepoOperation));
+      assert.deepEqual(yield* Ref.get(reposAddInputs), [
+        { name: "demo", url: "https://github.com/acme/demo.git", adopt: false },
+      ]);
+      assert.deepEqual(
+        events.map((event) => event.sequence),
+        events.map((_, index) => index + 1),
+      );
+      assert.ok(events.every((event) => event.operationId === "op-register"));
+      const [first] = events;
+      assert.equal(first?.kind, "phase_started");
+      if (first?.kind === "phase_started") {
+        assert.equal(first.phase, "repos add");
+        assert.ok(
+          first.commandLine?.startsWith("stave repos add --json"),
+          `unexpected command line ${first.commandLine}`,
+        );
+      }
+      const notes = events.flatMap((event) =>
+        event.kind === "output" && event.stream === "notes" ? [event] : [],
+      );
+      assert.deepEqual(
+        notes.map((event) => [event.phase, event.text]),
+        [
+          ["repos add", "cloned into bare-repos/demo.git"],
+          ["repos add", "default branch is main"],
+        ],
+      );
+      const phaseFinished = events.filter((event) => event.kind === "phase_finished");
+      assert.equal(phaseFinished.length, 1);
+      assert.equal(
+        phaseFinished[0]?.kind === "phase_finished" && phaseFinished[0].phase,
+        "repos add",
+      );
+      const last = events.at(-1);
+      assert.equal(last?.kind, "finished");
+      if (last?.kind === "finished") {
+        assert.equal(last.result.kind, "registerRepo");
+        if (last.result.kind === "registerRepo") {
+          assert.equal(last.result.result.bareRepoPath, "/home/tester/stave/bare-repos/demo.git");
+          assert.equal(last.result.result.adopted, false);
+        }
+      }
+      assert.equal(events.length, 5);
+
+      // A new socket with the same id and payload replays the buffered run
+      // without invoking Stave again.
+      const replayed = Array.from(yield* run("op-register", registerRepoOperation));
+      assert.deepEqual(replayed, events);
+      assert.equal((yield* Ref.get(reposAddInputs)).length, 1);
+
+      const differentPayload = yield* Effect.flip(
+        run("op-register", { ...registerRepoOperation, adopt: true }),
+      );
+      assert.equal(differentPayload._tag, "StaveOperationRejectedError");
+      if (differentPayload._tag === "StaveOperationRejectedError") {
+        assert.equal(differentPayload.code, "invalid_arguments");
+        assert.equal(differentPayload.operationId, "op-register");
+      }
+
+      const tail = Array.from(
+        yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.staveObserveOperation]({
+              operationId: "op-register",
+              afterSequence: events.length - 1,
+            }).pipe(Stream.runCollect),
+          ),
+        ),
+      );
+      assert.deepEqual(tail, [last]);
+
+      const unknown = yield* Effect.flip(
+        Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.staveObserveOperation]({ operationId: "op-missing" }).pipe(
+              Stream.runCollect,
+            ),
+          ),
+        ),
+      );
+      assert.equal(unknown._tag, "StaveOperationRejectedError");
+      if (unknown._tag === "StaveOperationRejectedError") {
+        assert.equal(unknown.code, "invalid_arguments");
+        assert.equal(unknown.operationId, "op-missing");
+      }
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("stave.runOperation ends an unimplemented kind with a failed event", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({ layers: staveEnabledLayers });
+      const wsUrl = yield* getWsServerUrl("/ws");
+
+      const events = Array.from(
+        yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.staveRunOperation]({
+              operationId: "op-add-repo",
+              operation: {
+                kind: "addRepo",
+                workspaceRoot: "/tmp/x",
+                repo: "demo",
+                mode: "edit",
+                noFetch: false,
+                linkMemory: false,
+              },
+            }).pipe(Stream.runCollect),
+          ),
+        ),
+      );
+
+      assert.equal(events.length, 1);
+      const [failed] = events;
+      assert.equal(failed?.kind, "failed");
+      if (failed?.kind === "failed") {
+        assert.equal(failed.sequence, 1);
+        assert.equal(failed.error.code, "invalid_arguments");
+        assertInclude(failed.error.message, "not implemented");
+      }
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

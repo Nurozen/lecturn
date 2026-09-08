@@ -1,12 +1,21 @@
-import type { ServerConfig } from "@t3tools/contracts";
-import { EnvironmentId } from "@t3tools/contracts";
+import type { OrchestrationProjectShell, ServerConfig } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
+import * as TestClock from "effect/testing/TestClock";
 import { Atom, AtomRegistry } from "effect/unstable/reactivity";
 
 import { PrimaryConnectionTarget } from "../connection/model.ts";
 import type { EnvironmentShellState } from "./shell.ts";
-import { createEnvironmentServerConfigsAtom, createEnvironmentShellSummaryAtom } from "./shell.ts";
+import {
+  createEnvironmentServerConfigsAtom,
+  createEnvironmentShellSummaryAtom,
+  findProjectVisibleAtSequence,
+  ProjectNotVisibleError,
+  waitForProjectVisible,
+} from "./shell.ts";
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-1");
 const OTHER_ENVIRONMENT_ID = EnvironmentId.make("environment-2");
@@ -127,4 +136,93 @@ describe("environment shell projections", () => {
     harness.registry.set(harness.configAtom(ENVIRONMENT_ID), config);
     expect(harness.registry.get(harness.serverConfigsAtom)).toBe(withConfig);
   });
+});
+
+describe("project visibility at a sequence", () => {
+  const projectId = ProjectId.make("project-1");
+  const project: OrchestrationProjectShell = {
+    id: projectId,
+    title: "Demo",
+    workspaceRoot: "/work/demo",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    repositoryIdentity: null,
+    defaultModelSelection: null,
+    scripts: [],
+  };
+  const withProject = (snapshotSequence: number): EnvironmentShellState => ({
+    snapshot: Option.some({
+      snapshotSequence,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      projects: [project],
+      threads: [],
+    }),
+    status: "live",
+    error: Option.none(),
+  });
+
+  it("only reports the project once the snapshot reached the create sequence", () => {
+    const target = { projectId, sequence: 7 };
+    expect(findProjectVisibleAtSequence(shellState({ status: "empty" }), target)).toBeNull();
+    expect(findProjectVisibleAtSequence(withProject(6), target)).toBeNull();
+    expect(findProjectVisibleAtSequence(withProject(7), target)).toEqual(project);
+    expect(
+      findProjectVisibleAtSequence(withProject(9), {
+        projectId: ProjectId.make("other"),
+        sequence: 7,
+      }),
+    ).toBeNull();
+  });
+
+  it.effect("resolves immediately when the store is already caught up", () =>
+    Effect.gen(function* () {
+      const registry = AtomRegistry.make();
+      const stateAtom = Atom.make(withProject(7));
+
+      const visible = yield* waitForProjectVisible({ registry, stateAtom, projectId, sequence: 7 });
+
+      expect(visible).toEqual(project);
+      registry.dispose();
+    }),
+  );
+
+  it.effect("resolves once a later shell state carries the project at the sequence", () =>
+    Effect.gen(function* () {
+      const registry = AtomRegistry.make();
+      const stateAtom = Atom.make(withProject(3));
+      const waiting = yield* Effect.forkChild(
+        waitForProjectVisible({ registry, stateAtom, projectId, sequence: 7 }),
+      );
+      yield* Effect.yieldNow;
+
+      registry.set(stateAtom, withProject(5));
+      registry.set(stateAtom, withProject(8));
+
+      expect(yield* Fiber.join(waiting)).toEqual(project);
+      registry.dispose();
+    }),
+  );
+
+  it.effect("fails once the timeout elapses without the project", () =>
+    Effect.gen(function* () {
+      const registry = AtomRegistry.make();
+      const stateAtom = Atom.make(withProject(3));
+      const waiting = yield* Effect.forkChild(
+        waitForProjectVisible({
+          registry,
+          stateAtom,
+          projectId,
+          sequence: 7,
+          timeout: "2 seconds",
+        }),
+      );
+      yield* TestClock.adjust("2 seconds");
+
+      const error = yield* Fiber.join(waiting).pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(ProjectNotVisibleError);
+      expect(error.sequence).toBe(7);
+      registry.dispose();
+    }),
+  );
 });

@@ -41,6 +41,10 @@ A Stave space that coordinates member spaces (`kind: saga` in its manifest). Rec
 
 A ContextMarmot memory store attached to a Stave space through its manifest's `memories` list. Listed on the project today; integration is planned. See [stave-integration.md][28].
 
+#### Stave operation
+
+One long Stave mutation (create a space, register a repo, remove a partial space, set up) run by the application-lifetime `StaveOperations` service under a client-chosen `operationId` and streamed as sequence-numbered progress events. A client starts or reattaches with the same id, so an operation outlives the socket that started it (fork only). See [stave-integration.md][28].
+
 ### Thread timeline
 
 #### Thread

@@ -21,6 +21,13 @@ T3 Code works with the platforms your team already uses:
 - Choose **GitHub repository**, **GitLab repository**, **Bitbucket repository**, **Azure DevOps repository**, or paste any **Git URL**
 - Enter the repository path (`owner/repo`, `group/project`, `workspace/repository`, or `project/repository`) or a full Git URL, pick a destination, and start coding
 
+**Start from a Stave space**
+
+With [Stave](./stave.md) enabled, **Add Project** also offers **New Stave space**: pick the
+registered repositories a task needs, choose which are editable and which are read-only context,
+preview Stave's plan, and open the result as a project whose threads run across all of those
+checkouts. The walkthrough is in [Create a space](./stave.md#create-a-space).
+
 **Publish local projects to the cloud**
 
 - Have a local Git repository without a remote?

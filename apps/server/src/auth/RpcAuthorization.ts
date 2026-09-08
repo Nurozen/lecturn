@@ -55,6 +55,15 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.cloudInstallRelayClient]: AuthRelayWriteScope,
   [WS_METHODS.staveGetStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.staveSpaceStatus]: AuthOrchestrationReadScope,
+  [WS_METHODS.staveListRepos]: AuthOrchestrationReadScope,
+  [WS_METHODS.staveListSpaces]: AuthOrchestrationReadScope,
+  [WS_METHODS.staveListSagas]: AuthOrchestrationReadScope,
+  [WS_METHODS.staveMemoryProviders]: AuthOrchestrationReadScope,
+  // A dry run only asks Stave what it would do; the real run mutates disk.
+  [WS_METHODS.staveDryRun]: AuthOrchestrationReadScope,
+  [WS_METHODS.staveRunOperation]: AuthOrchestrationOperateScope,
+  // Watching an operation somebody else started is a read of its progress.
+  [WS_METHODS.staveObserveOperation]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsList]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsListStats]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsSummary]: AuthOrchestrationReadScope,

@@ -29,6 +29,43 @@ export type AddProjectRemoteProviderKind = Extract<
 >;
 export type AddProjectRemoteSource = AddProjectRemoteProviderKind | "url";
 
+/**
+ * Sources that create the project through a Stave operation rather than a
+ * folder or a clone. Kept apart from `AddProjectRemoteSource` because the
+ * remote sources are switched on exhaustively (labels, hints, readiness)
+ * and none of that applies here: the wizard owns the whole flow and the
+ * server creates the project itself (deviation 26).
+ */
+export type AddProjectStaveSource = "stave-space" | "stave-saga";
+export type AddProjectSource = AddProjectRemoteSource | AddProjectStaveSource;
+
+export const ADD_PROJECT_STAVE_SOURCES: ReadonlyArray<AddProjectStaveSource> = [
+  "stave-space",
+  "stave-saga",
+];
+
+export function isAddProjectStaveSource(source: AddProjectSource): source is AddProjectStaveSource {
+  return source === "stave-space" || source === "stave-saga";
+}
+
+export function addProjectStaveSourceLabel(source: AddProjectStaveSource): string {
+  switch (source) {
+    case "stave-space":
+      return "New Stave space";
+    case "stave-saga":
+      return "New Stave saga";
+  }
+}
+
+export function addProjectStaveSourceDescription(source: AddProjectStaveSource): string {
+  switch (source) {
+    case "stave-space":
+      return "Create a Stave space from registered repos and open it";
+    case "stave-saga":
+      return "Create a Stave saga that groups spaces and open it";
+  }
+}
+
 export function canCreateProjectInEnvironment(
   connectionPhase: EnvironmentConnectionPhase | null | undefined,
 ): boolean {
@@ -302,14 +339,18 @@ export function buildProjectCreateCommand(input: {
   readonly projectId: ProjectId;
   readonly workspaceRoot: string;
   readonly createdAt: string;
+  /** Defaults to the folder name; a Stave space passes its manifest id. */
+  readonly title?: string;
+  /** Defaults to true; a Stave space root already exists when its project is created. */
+  readonly createWorkspaceRootIfMissing?: boolean;
 }): Extract<OrchestrationCommand, { type: "project.create" }> {
   return {
     type: "project.create",
     commandId: input.commandId,
     projectId: input.projectId,
-    title: inferProjectTitleFromPath(input.workspaceRoot),
+    title: input.title ?? inferProjectTitleFromPath(input.workspaceRoot),
     workspaceRoot: input.workspaceRoot,
-    createWorkspaceRootIfMissing: true,
+    createWorkspaceRootIfMissing: input.createWorkspaceRootIfMissing ?? true,
     defaultModelSelection: null,
     createdAt: input.createdAt,
   };

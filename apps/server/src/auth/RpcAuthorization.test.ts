@@ -42,6 +42,22 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.staveSpaceStatus)).toBe(AuthOrchestrationReadScope);
   });
 
+  it("lets a read-only client list, dry-run and watch Stave operations but not run them", () => {
+    for (const method of [
+      WS_METHODS.staveListRepos,
+      WS_METHODS.staveListSpaces,
+      WS_METHODS.staveListSagas,
+      WS_METHODS.staveMemoryProviders,
+      WS_METHODS.staveDryRun,
+      WS_METHODS.staveObserveOperation,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+    }
+    expect(requiredScopeForRpcMethod(WS_METHODS.staveRunOperation)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+  });
+
   it("requires permission to operate on a thread before uploading feedback", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.providerUploadFeedback)).toBe(
       AuthOrchestrationOperateScope,

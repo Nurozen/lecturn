@@ -3,6 +3,12 @@ import {
   type KeybindingCommand,
   THREAD_JUMP_KEYBINDING_COMMANDS,
 } from "@t3tools/contracts";
+import {
+  ADD_PROJECT_STAVE_SOURCES,
+  addProjectStaveSourceDescription,
+  addProjectStaveSourceLabel,
+  type AddProjectStaveSource,
+} from "@t3tools/client-runtime/operations/projects";
 import { filterFilesystemBrowseEntries } from "@t3tools/client-runtime/state/filesystem";
 import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import * as Arr from "effect/Array";
@@ -160,6 +166,31 @@ export function buildProjectActionItems(input: {
     ...(input.shortcutCommand !== undefined ? { shortcutCommand: input.shortcutCommand } : {}),
     run: async () => {
       await input.runProject(project);
+    },
+  }));
+}
+
+/**
+ * "New Stave space" / "New Stave saga" entries for the add-project source
+ * list. Present only while the feature gate passes (capability, enabled,
+ * runnable); the wizard owns everything after the click.
+ */
+export function buildStaveAddProjectItems(input: {
+  readonly environmentId: string;
+  readonly available: boolean;
+  readonly icons: Record<AddProjectStaveSource, ReactNode>;
+  readonly launch: (source: AddProjectStaveSource) => void;
+}): CommandPaletteActionItem[] {
+  if (!input.available) return [];
+  return ADD_PROJECT_STAVE_SOURCES.map((source) => ({
+    kind: "action",
+    value: `action:add-project:${input.environmentId}:${source}`,
+    searchTerms: ["stave", "new", source === "stave-space" ? "space" : "saga", "workspace"],
+    title: addProjectStaveSourceLabel(source),
+    description: addProjectStaveSourceDescription(source),
+    icon: input.icons[source],
+    run: async () => {
+      input.launch(source);
     },
   }));
 }
