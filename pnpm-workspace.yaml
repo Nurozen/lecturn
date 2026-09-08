@@ -124,6 +124,8 @@ overrides:
   "@types/node": "catalog:"
   effect: "catalog:"
   expo-router: 57.0.17
+  # Keep the version-specific native sharing patch applied during fresh resolution.
+  expo-sharing: 57.0.16
   "expo-sharing>@expo/config-plugins": 57.0.9
   "expo-sharing>@expo/config-types": 57.0.2
   vite: "catalog:"

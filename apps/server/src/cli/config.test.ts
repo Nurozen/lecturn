@@ -40,7 +40,11 @@ const makeDesktopBootstrap = (
 });
 
 it.layer(NodeServices.layer)("cli config resolution", (it) => {
-  const defaultObservabilityConfig = {
+  const defaultRuntimeConfig = {
+    threadForkingEnabled: true,
+    desktopTelemetryFd: undefined,
+    desktopTelemetryControlFd: undefined,
+    resourceMonitorPath: undefined,
     traceMinLevel: "Info",
     traceTimingEnabled: true,
     traceBatchWindowMs: 1_000,
@@ -115,7 +119,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
 
       expect(resolved).toEqual({
         logLevel: "Warn",
-        ...defaultObservabilityConfig,
+        ...defaultRuntimeConfig,
         mode: "desktop",
         port: 4001,
         cwd: process.cwd(),
@@ -186,7 +190,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
 
       expect(resolved).toEqual({
         logLevel: "Debug",
-        ...defaultObservabilityConfig,
+        ...defaultRuntimeConfig,
         mode: "web",
         port: 8788,
         cwd: process.cwd(),
@@ -259,7 +263,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
 
       expect(resolved).toEqual({
         logLevel: "Info",
-        ...defaultObservabilityConfig,
+        ...defaultRuntimeConfig,
         mode: "web",
         port: 8788,
         cwd: process.cwd(),
@@ -333,7 +337,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
 
       expect(resolved).toEqual({
         logLevel: "Info",
-        ...defaultObservabilityConfig,
+        ...defaultRuntimeConfig,
         otlpTracesUrl: "http://localhost:4318/v1/traces",
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
         mode: "desktop",
@@ -468,7 +472,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
 
       expect(resolved).toEqual({
         logLevel: "Debug",
-        ...defaultObservabilityConfig,
+        ...defaultRuntimeConfig,
         mode: "web",
         port: 8788,
         cwd: process.cwd(),
@@ -535,7 +539,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved.otlpMetricsUrl).toBe("http://localhost:4318/v1/metrics");
       expect(resolved).toEqual({
         logLevel: "Info",
-        ...defaultObservabilityConfig,
+        ...defaultRuntimeConfig,
         otlpTracesUrl: "http://localhost:4318/v1/traces",
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
         mode: "desktop",
@@ -600,7 +604,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
 
       expect(resolved).toEqual({
         logLevel: "Info",
-        ...defaultObservabilityConfig,
+        ...defaultRuntimeConfig,
         mode: "web",
         port: 3773,
         cwd: process.cwd(),
