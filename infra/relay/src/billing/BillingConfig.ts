@@ -10,6 +10,7 @@ export interface BillingConfig {
   readonly allowedCountries?: readonly string[];
   readonly countryPolicy?: "notice" | "enforced";
   readonly enforcementUsers?: readonly string[];
+  readonly checkoutUsers?: readonly string[] | undefined;
   readonly secretKey: string;
   readonly webhookSecret: string;
   readonly monthlyPriceId: string;
@@ -44,6 +45,18 @@ export function parseBillingConfig(
     .filter(Boolean);
   if (enforcementUsers.some((id) => id !== "*" && !/^user_[A-Za-z0-9]+$/.test(id)))
     throw new Error("BILLING_ENFORCEMENT_USERS requires explicit Clerk user IDs");
+  const checkoutUsers =
+    env.BILLING_CHECKOUT_USERS === undefined
+      ? undefined
+      : [
+          ...new Set(
+            env.BILLING_CHECKOUT_USERS.split(",")
+              .map((id) => id.trim())
+              .filter(Boolean),
+          ),
+        ];
+  if (checkoutUsers?.some((id) => id !== "*" && !/^user_[A-Za-z0-9]+$/.test(id)))
+    throw new Error("BILLING_CHECKOUT_USERS requires explicit Clerk user IDs");
   const allowedCountries = (env.BILLING_ALLOWED_COUNTRIES ?? "")
     .split(",")
     .map((s) => s.trim())
@@ -90,6 +103,8 @@ export function parseBillingConfig(
       (countryPolicy === "enforced" && !countriesVerified))
   )
     throw new Error("Live Checkout requires reviewed countries and automatic tax configuration");
+  if (livemode && checkoutEnabled && !checkoutUsers?.length)
+    throw new Error("Live Checkout requires a reviewed BILLING_CHECKOUT_USERS cohort");
   const renewalGraceSeconds = Number(env.BILLING_RENEWAL_GRACE_SECONDS ?? "0");
   if (
     !Number.isSafeInteger(renewalGraceSeconds) ||
@@ -113,6 +128,7 @@ export function parseBillingConfig(
     allowedCountries,
     countryPolicy,
     enforcementUsers,
+    checkoutUsers,
     secretKey,
     webhookSecret: env.STRIPE_WEBHOOK_SECRET ?? "",
     monthlyPriceId: env.STRIPE_MONTHLY_PRICE_ID ?? "",
@@ -131,4 +147,11 @@ export function parseBillingConfig(
     throw new Error("Checkout requires configured monthly/annual prices and portal configuration");
   }
   return config;
+}
+
+/** Purchases have their own cohort; service-enforcement enrollment never authorizes charges. */
+export function canStartBillingCheckout(config: BillingConfig, userId: string): boolean {
+  if (config.mode === "disabled" || !config.checkoutEnabled) return false;
+  if (config.checkoutUsers === undefined) return !config.livemode;
+  return config.checkoutUsers.includes("*") || config.checkoutUsers.includes(userId);
 }

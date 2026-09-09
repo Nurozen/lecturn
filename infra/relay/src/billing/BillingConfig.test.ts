@@ -1,5 +1,5 @@
 import { expect, it } from "vite-plus/test";
-import { parseBillingConfig } from "./BillingConfig.ts";
+import { canStartBillingCheckout, parseBillingConfig } from "./BillingConfig.ts";
 it("defaults to no checkout, no enforcement, no grace", () => {
   expect(parseBillingConfig({})).toMatchObject({
     mode: "disabled",
@@ -77,6 +77,7 @@ it("requires production, country and tax readiness before live checkout", () => 
       BILLING_ALLOWED_COUNTRIES: "US",
       BILLING_AUTOMATIC_TAX: "true",
       BILLING_COUNTRY_RESTRICTION_VERIFIED: "true",
+      BILLING_CHECKOUT_USERS: "user_tester",
     }).checkoutEnabled,
   ).toBe(true);
 });
@@ -107,6 +108,7 @@ it("allows an explicit sales notice policy without claiming a verified country b
     BILLING_AUTOMATIC_TAX: "true",
     BILLING_COUNTRY_POLICY: "notice",
     BILLING_COUNTRY_RESTRICTION_VERIFIED: "false",
+    BILLING_CHECKOUT_USERS: "user_tester",
   };
   expect(parseBillingConfig(checkout)).toMatchObject({
     checkoutEnabled: true,
@@ -118,4 +120,43 @@ it("allows an explicit sales notice policy without claiming a verified country b
   expect(() => parseBillingConfig({ ...checkout, BILLING_COUNTRY_POLICY: "unknown" })).toThrow(
     /COUNTRY_POLICY/,
   );
+});
+
+it("requires a separately reviewed live purchase cohort without enabling enforcement", () => {
+  const checkout = {
+    ...live,
+    BILLING_CHECKOUT_ENABLED: "true",
+    BILLING_PRODUCTION_READY: "true",
+    BILLING_ALLOWED_COUNTRIES: "US",
+    BILLING_AUTOMATIC_TAX: "true",
+    BILLING_COUNTRY_POLICY: "notice",
+  };
+  for (const cohort of [undefined, "", " , "])
+    expect(() => parseBillingConfig({ ...checkout, BILLING_CHECKOUT_USERS: cohort })).toThrow(
+      /CHECKOUT_USERS cohort/,
+    );
+  expect(() =>
+    parseBillingConfig({ ...checkout, BILLING_ENFORCEMENT_USERS: "user_tester" }),
+  ).toThrow(/CHECKOUT_USERS cohort/);
+  expect(() =>
+    parseBillingConfig({ ...checkout, BILLING_CHECKOUT_USERS: "tester@example.com" }),
+  ).toThrow(/Clerk user IDs/);
+  const restricted = parseBillingConfig({
+    ...checkout,
+    BILLING_CHECKOUT_USERS: " user_tester, user_tester ",
+  });
+  expect(restricted).toMatchObject({
+    checkoutUsers: ["user_tester"],
+    mode: "observe",
+    managedAccessEnabled: false,
+    suspensionEnabled: false,
+  });
+  expect(canStartBillingCheckout(restricted, "user_tester")).toBe(true);
+  expect(canStartBillingCheckout(restricted, "user_other")).toBe(false);
+  expect(
+    canStartBillingCheckout(
+      parseBillingConfig({ ...checkout, BILLING_CHECKOUT_USERS: "*" }),
+      "user_other",
+    ),
+  ).toBe(true);
 });

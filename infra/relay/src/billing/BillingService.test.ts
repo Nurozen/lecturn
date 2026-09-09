@@ -43,7 +43,11 @@ const subscription = (overrides: Partial<Stripe.Subscription> = {}) =>
     },
     ...overrides,
   }) as Stripe.Subscription;
-function harness(initial: Partial<BillingAccount> = {}, overrides: Partial<StripeClient> = {}) {
+function harness(
+  initial: Partial<BillingAccount> = {},
+  overrides: Partial<StripeClient> = {},
+  billingConfig = config,
+) {
   let account: BillingAccount = {
     user_id: "user_test",
     customer_id: null,
@@ -66,7 +70,7 @@ function harness(initial: Partial<BillingAccount> = {}, overrides: Partial<Strip
     load,
     save,
     receipt,
-    acquire: () => Effect.succeed(structuredClone(account)),
+    acquire: vi.fn(() => Effect.succeed(structuredClone(account))),
     release: () => Effect.succeed([]),
     quotaUsed: () => Effect.succeed(0),
     byCustomer: () => Effect.succeed(account),
@@ -132,7 +136,7 @@ function harness(initial: Partial<BillingAccount> = {}, overrides: Partial<Strip
   const recordPaymentReview = vi.fn<PaymentReviewRecorder>(() => Effect.void);
   return {
     recordPaymentReview,
-    service: makeBillingService(config, store, stripe, recordPaymentReview),
+    service: makeBillingService(billingConfig, store, stripe, recordPaymentReview),
     store,
     stripe,
     account: () => account,
@@ -145,6 +149,83 @@ const failureCode = <A>(effect: Effect.Effect<A, BillingError>) =>
   Effect.flip(effect).pipe(Effect.map((failure) => failure.code));
 
 describe("BillingService", () => {
+  it.live(
+    "keeps portal and owned return reconciliation available after purchase cohort removal",
+    () =>
+      Effect.gen(function* () {
+        const h = harness(
+          { customer_id: "cus_test", state: { sessionId: "cs_test" } },
+          {},
+          {
+            ...config,
+            livemode: true,
+            checkoutUsers: ["user_other"],
+          },
+        );
+        expect((yield* h.service.status("user_test")).portalEnabled).toBe(true);
+        yield* h.service.portal("user_test");
+        yield* h.service.reconcile("user_test", "cs_test");
+        expect(h.stripe.createPortal).toHaveBeenCalledTimes(1);
+        expect(h.stripe.retrieveCheckout).toHaveBeenCalledWith("cs_test");
+        expect(h.stripe.createCheckout).not.toHaveBeenCalled();
+      }),
+  );
+  it.live(
+    "gates live purchase status and direct mutations by the purchase cohort before persistence",
+    () =>
+      Effect.gen(function* () {
+        for (const checkoutUsers of [undefined, [], ["user_other"]]) {
+          const h = harness(
+            {},
+            {},
+            { ...config, livemode: true, checkoutUsers, enforcementUsers: ["user_test"] },
+          );
+          expect((yield* h.service.status("user_test")).checkoutEnabled).toBe(false);
+          expect(yield* failureCode(h.service.checkout("user_test", "month"))).toBe("disabled");
+          expect(h.store.acquire).not.toHaveBeenCalled();
+          expect(h.stripe.createCustomer).not.toHaveBeenCalled();
+          expect(h.stripe.createCheckout).not.toHaveBeenCalled();
+        }
+        for (const checkoutUsers of [["user_test"], ["*"]]) {
+          const h = harness({}, {}, { ...config, livemode: true, checkoutUsers });
+          expect((yield* h.service.status("user_test")).checkoutEnabled).toBe(true);
+          yield* h.service.checkout("user_test", "month");
+          expect(h.stripe.createCheckout).toHaveBeenCalledTimes(1);
+        }
+      }),
+  );
+  it.live("purchase enrollment never grants access or hides existing complimentary access", () =>
+    Effect.gen(function* () {
+      const start = Math.floor((yield* Clock.currentTimeMillis) / 1000);
+      const h = harness(
+        {
+          updated_at: start,
+          state: {
+            grant: {
+              id: "owner",
+              operator: "operator",
+              reason: "Complimentary owner access",
+              start,
+              end: start + 3600,
+              limit: 3,
+            },
+          },
+        },
+        {},
+        { ...config, livemode: true, checkoutUsers: ["user_other"] },
+      );
+      expect(yield* h.service.status("user_test")).toMatchObject({
+        checkoutEnabled: false,
+        hasAccess: true,
+        accessReason: "grant",
+      });
+      const enrolled = harness({}, {}, { ...config, livemode: true, checkoutUsers: ["user_test"] });
+      expect(yield* enrolled.service.status("user_test")).toMatchObject({
+        checkoutEnabled: true,
+        hasAccess: false,
+      });
+    }),
+  );
   it.live("disabled status and cron never query storage or Stripe", () =>
     Effect.gen(function* () {
       const h = harness();

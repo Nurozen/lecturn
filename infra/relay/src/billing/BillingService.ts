@@ -1,7 +1,7 @@
 import { Context, Effect, Layer, Clock, DateTime } from "effect";
 import type { RelayBillingStatus } from "@t3tools/contracts";
 import type Stripe from "stripe";
-import type { BillingConfig } from "./BillingConfig.ts";
+import { canStartBillingCheckout, type BillingConfig } from "./BillingConfig.ts";
 import {
   BillingError,
   makeBillingStore,
@@ -388,8 +388,7 @@ export function makeBillingService(
       cancelAt: iso(state?.cancelAt),
       state: publicState,
       checkoutEnabled:
-        enabled() &&
-        config.checkoutEnabled &&
+        canStartBillingCheckout(config, userId) &&
         !account?.deleted_at &&
         !state?.sessionComplete &&
         ["free", "canceled", "incomplete_expired"].includes(state?.status ?? "free"),
@@ -411,8 +410,10 @@ export function makeBillingService(
   });
   return {
     status,
-    checkout: (userId, interval) =>
-      withAccount(
+    checkout: (userId, interval) => {
+      if (!canStartBillingCheckout(config, userId))
+        return Effect.fail(error("disabled", "Checkout is not enabled for this account"));
+      return withAccount(
         userId,
         Effect.fn("Billing.checkout")(function* (a) {
           if (!config.checkoutEnabled) return yield* error("disabled", "Checkout is not enabled");
@@ -468,7 +469,8 @@ export function makeBillingService(
             return yield* error("pending", "Checkout is being reconciled. Please refresh.");
           return { url: session.url };
         }),
-      ),
+      );
+    },
     portal: (userId) =>
       withAccount(
         userId,

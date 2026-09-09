@@ -222,6 +222,7 @@ export const ApiLive = Api.make(
           "BILLING_COUNTRY_POLICY",
           "BILLING_COUNTRY_RESTRICTION_VERIFIED",
           "BILLING_ENFORCEMENT_USERS",
+          "BILLING_CHECKOUT_USERS",
         ].map((key) => [key, Config.string(key).pipe(Config.withDefault(""))]),
       ),
     );

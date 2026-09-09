@@ -11,7 +11,7 @@ import * as FileSystem from "effect/FileSystem";
 import { RelayBillingCheckoutRequest, RelayBillingReconcileRequest } from "@t3tools/contracts";
 import { BillingService } from "../billing/BillingService.ts";
 import { BillingError } from "../billing/BillingStore.ts";
-import type { BillingConfig } from "../billing/BillingConfig.ts";
+import { canStartBillingCheckout, type BillingConfig } from "../billing/BillingConfig.ts";
 import { RelayConfiguration } from "../Config.ts";
 import { verifyRelayClientBearerToken } from "./Api.ts";
 
@@ -91,7 +91,7 @@ export function billingRoutes(config: BillingConfig, clerkWebhookSecret = "") {
           Effect.flatMap(Schema.decodeUnknownEffect(RelayBillingCheckoutRequest)),
           Effect.mapError(badRequest),
         );
-        if (config.mode === "disabled" || !config.checkoutEnabled)
+        if (!canStartBillingCheckout(config, userId))
           return yield* new BillingError({
             code: "disabled",
             message: "Subscription checkout is not available.",

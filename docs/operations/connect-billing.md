@@ -29,33 +29,36 @@ Requests use Clerk bearer verification. Checkout requires a verified email on a 
 
 Keep sandbox credentials, database branch, Clerk instance and webhook endpoints isolated from production. Stripe API and webhook version are pinned to `2026-08-26.dahlia`. A deployed endpoint's signing secret differs from a local forwarding secret. Never put provider secrets in client builds or source control.
 
-| Binding                                             | Meaning                                                                           |
-| --------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `BILLING_MODE`                                      | `disabled`, `observe` or `enforce`; disabled is the default                       |
-| `BILLING_CHECKOUT_ENABLED`                          | Separate explicit Checkout switch                                                 |
-| `STRIPE_LIVEMODE`                                   | Select test versus live credentials                                               |
-| `STRIPE_ACCOUNT_ID`                                 | Required pinned account for live configuration                                    |
-| `BILLING_PRODUCTION_READY`                          | Explicit live charging/enforcement gate after release validation                  |
-| `BILLING_ENFORCEMENT_USERS`                         | Reviewed comma-separated Clerk user IDs; required for enforcement                 |
-| `MANAGED_GATEWAY_ENABLED`                           | Default false; requires managed access, a reviewed cohort and both gateway proofs |
-| `MANAGED_GATEWAY_ORIGIN_GUARD_VERIFIED`             | Default false; set only after direct-origin and spoofed-caller bypass tests pass  |
-| `MANAGED_GATEWAY_ROUTE_VERIFIED`                    | Default false; set only after all enrolled public hosts route through the gateway |
-| `BILLING_SUSPENSION_ENABLED`                        | Separate external tunnel retirement gate                                          |
-| `BILLING_SANDBOX_MANAGED_ACCESS_ENABLED`            | Isolated test-mode admission/notification testing                                 |
-| `BILLING_APP_ORIGIN`                                | Exact HTTPS origin of the hosted account entry                                    |
-| `BILLING_IDENTITY_RECONCILIATION_ENABLED`           | Opt-in missed-deletion scan using the matching Clerk instance; default false      |
-| `BILLING_RENEWAL_GRACE_SECONDS`                     | Launch default `259200` (three days) for previously settled renewal service       |
-| `BILLING_ALLOWED_COUNTRIES`                         | Reviewed ISO country codes for the sales policy                                   |
-| `BILLING_COUNTRY_POLICY`                            | `notice` displays the sales policy; `enforced` also requires verified blocking    |
-| `BILLING_COUNTRY_RESTRICTION_VERIFIED`              | Evidence-backed gate for `enforced`; do not set for a notice-only policy          |
-| `BILLING_AUTOMATIC_TAX`                             | Required for live Checkout; does not create tax registrations                     |
-| `STRIPE_SECRET_KEY`                                 | Server-only key whose mode matches the configuration                              |
-| `STRIPE_WEBHOOK_SECRET`                             | This deployment's Stripe signing secret                                           |
-| `CLERK_BILLING_WEBHOOK_SECRET`                      | Dedicated lifecycle secret, separate from authentication email                    |
-| `STRIPE_MONTHLY_PRICE_ID`, `STRIPE_ANNUAL_PRICE_ID` | Recurring USD prices                                                              |
-| `STRIPE_PORTAL_CONFIGURATION_ID`                    | Account portal configuration                                                      |
+| Binding                                             | Meaning                                                                                                            |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `BILLING_MODE`                                      | `disabled`, `observe` or `enforce`; disabled is the default                                                        |
+| `BILLING_CHECKOUT_ENABLED`                          | Separate explicit Checkout switch                                                                                  |
+| `BILLING_CHECKOUT_USERS`                            | Separate reviewed Clerk user ID cohort for purchases; live Checkout requires it; `*` explicitly opens public sales |
+| `STRIPE_LIVEMODE`                                   | Select test versus live credentials                                                                                |
+| `STRIPE_ACCOUNT_ID`                                 | Required pinned account for live configuration                                                                     |
+| `BILLING_PRODUCTION_READY`                          | Explicit live charging/enforcement gate after release validation                                                   |
+| `BILLING_ENFORCEMENT_USERS`                         | Reviewed comma-separated Clerk user IDs; required for enforcement                                                  |
+| `MANAGED_GATEWAY_ENABLED`                           | Default false; requires managed access, a reviewed cohort and both gateway proofs                                  |
+| `MANAGED_GATEWAY_ORIGIN_GUARD_VERIFIED`             | Default false; set only after direct-origin and spoofed-caller bypass tests pass                                   |
+| `MANAGED_GATEWAY_ROUTE_VERIFIED`                    | Default false; set only after all enrolled public hosts route through the gateway                                  |
+| `BILLING_SUSPENSION_ENABLED`                        | Separate external tunnel retirement gate                                                                           |
+| `BILLING_SANDBOX_MANAGED_ACCESS_ENABLED`            | Isolated test-mode admission/notification testing                                                                  |
+| `BILLING_APP_ORIGIN`                                | Exact HTTPS origin of the hosted account entry                                                                     |
+| `BILLING_IDENTITY_RECONCILIATION_ENABLED`           | Opt-in missed-deletion scan using the matching Clerk instance; default false                                       |
+| `BILLING_RENEWAL_GRACE_SECONDS`                     | Launch default `259200` (three days) for previously settled renewal service                                        |
+| `BILLING_ALLOWED_COUNTRIES`                         | Reviewed ISO country codes for the sales policy                                                                    |
+| `BILLING_COUNTRY_POLICY`                            | `notice` displays the sales policy; `enforced` also requires verified blocking                                     |
+| `BILLING_COUNTRY_RESTRICTION_VERIFIED`              | Evidence-backed gate for `enforced`; do not set for a notice-only policy                                           |
+| `BILLING_AUTOMATIC_TAX`                             | Required for live Checkout; does not create tax registrations                                                      |
+| `STRIPE_SECRET_KEY`                                 | Server-only key whose mode matches the configuration                                                               |
+| `STRIPE_WEBHOOK_SECRET`                             | This deployment's Stripe signing secret                                                                            |
+| `CLERK_BILLING_WEBHOOK_SECRET`                      | Dedicated lifecycle secret, separate from authentication email                                                     |
+| `STRIPE_MONTHLY_PRICE_ID`, `STRIPE_ANNUAL_PRICE_ID` | Recurring USD prices                                                                                               |
+| `STRIPE_PORTAL_CONFIGURATION_ID`                    | Account portal configuration                                                                                       |
 
 Configuration eligibility is not proof that a release passed its deployment gates. Live products can be prepared while Checkout and enforcement remain off. Changing a flag must not silently migrate every existing user into paid enforcement. Inventory an intended cohort and resolve its subscriptions and environment count before enrolling it; users outside the cohort retain their previous managed behavior.
+
+For a controlled live purchase test, resolve the tester's verified production Clerk account ID and set `BILLING_CHECKOUT_USERS` to that ID, with live observation mode, Checkout enabled and production readiness approved. Status hides purchase controls from everyone else and the server rejects their Checkout requests. Keep `BILLING_ENFORCEMENT_USERS`, gateway enrollment and suspension unchanged until the managed-service cohort is separately reviewed. Purchase enrollment does not grant access or remove complimentary grants, and leaving the purchase cohort does not block an existing subscriber's portal or Checkout return reconciliation. Sandbox Checkout keeps its unrestricted default unless a purchase cohort is explicitly configured. Only set `BILLING_CHECKOUT_USERS=*` for an intentional public sales rollout.
 
 ## Lifecycle and access
 

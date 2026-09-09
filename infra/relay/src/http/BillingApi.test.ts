@@ -158,7 +158,7 @@ describe("billing HTTP boundary", () => {
       expect(checkout).not.toHaveBeenCalled();
     }),
   );
-  it.effect("requires a verified email before enabled checkout", () =>
+  it.effect("requires a verified email even for the live purchase cohort", () =>
     Effect.gen(function* () {
       auth();
       vi.mocked(createClerkClient).mockReturnValue({
@@ -171,6 +171,8 @@ describe("billing HTTP boundary", () => {
         (yield* run(post("checkout", { interval: "month" }), makeService({ checkout }), {
           ...config,
           mode: "observe",
+          livemode: true,
+          checkoutUsers: ["user_verified"],
           checkoutEnabled: true,
         })).status,
       ).toBe(403);
@@ -210,6 +212,7 @@ describe("billing HTTP boundary", () => {
           mode: "enforce",
           livemode: true,
           checkoutEnabled: true,
+          checkoutUsers: ["user_verified"],
         },
       );
       expect(response.status).toBe(200);
@@ -224,6 +227,30 @@ describe("billing HTTP boundary", () => {
       ).toBe(503);
       expect(checkout).toHaveBeenCalledTimes(1);
     }),
+  );
+  it.effect(
+    "rejects live purchase callers outside the cohort even with enforcement enrollment",
+    () =>
+      Effect.gen(function* () {
+        auth();
+        const checkout = vi.fn(() => Effect.succeed({ url: "https://checkout.stripe.com/live" }));
+        for (const checkoutUsers of [undefined, [], ["user_other"]]) {
+          const response = yield* run(
+            post("checkout", { interval: "month" }),
+            makeService({ checkout }),
+            {
+              ...config,
+              mode: "observe",
+              livemode: true,
+              checkoutEnabled: true,
+              enforcementUsers: ["user_verified"],
+              checkoutUsers,
+            },
+          );
+          expect(response.status).toBe(503);
+        }
+        expect(checkout).not.toHaveBeenCalled();
+      }),
   );
   it.effect(
     "reconciles only Checkout session identifiers matching the configured Stripe mode",
