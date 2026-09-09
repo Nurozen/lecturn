@@ -910,6 +910,78 @@ describe("buildForkTurnIdByMessageId", () => {
     messageEntry(userM3, "user"),
   ];
 
+  const latestTurn = {
+    turnId: turnB,
+    state: "completed" as const,
+    requestedAt: now,
+    startedAt: now,
+    completedAt: now,
+    assistantMessageId: assistantM2,
+  };
+
+  it("offers completed plain-chat replies without Git checkpoints", () => {
+    const byMessageId = buildForkTurnIdByMessageId({
+      timelineEntries: entries,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      activeRunningTurnId: null,
+      completedTurns: [
+        { turnId: turnA, assistantMessageId: assistantM1, hasProviderTurnRef: true },
+        { turnId: turnB, assistantMessageId: assistantM2, hasProviderTurnRef: true },
+      ],
+      latestTurn,
+    });
+    expect([...byMessageId]).toEqual([
+      [assistantM1, turnA],
+      [userM2, turnA],
+      [assistantM2, turnB],
+      [userM3, turnB],
+    ]);
+  });
+
+  it("does not infer completion from a checkpoint when authoritative turn data is present", () => {
+    expect(
+      buildForkTurnIdByMessageId({
+        timelineEntries: entries,
+        turnDiffSummaryByAssistantMessageId: new Map([
+          [assistantM1, summaryFor(turnA, assistantM1, "ready")],
+        ]),
+        activeRunningTurnId: null,
+        completedTurns: [],
+      }).size,
+    ).toBe(0);
+  });
+
+  it("permits an anchorless Claude fork only at the end of the conversation", () => {
+    const byMessageId = buildForkTurnIdByMessageId({
+      timelineEntries: entries,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      activeRunningTurnId: null,
+      completedTurns: [
+        { turnId: turnA, assistantMessageId: assistantM1, hasProviderTurnRef: false },
+        { turnId: turnB, assistantMessageId: assistantM2, hasProviderTurnRef: false },
+      ],
+      latestTurn,
+      requiresProviderTurnRef: true,
+    });
+    expect([...byMessageId]).toEqual([
+      [assistantM2, turnB],
+      [userM3, turnB],
+    ]);
+  });
+
+  it("uses the completed latest reply from older servers without checkpoint metadata", () => {
+    const byMessageId = buildForkTurnIdByMessageId({
+      timelineEntries: entries,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      activeRunningTurnId: null,
+      latestTurn,
+    });
+    expect([...byMessageId]).toEqual([
+      [assistantM2, turnB],
+      [userM3, turnB],
+    ]);
+  });
+
   it("maps assistant rows to their own turn and user rows to the previous checkpoint's turn", () => {
     const byMessageId = buildForkTurnIdByMessageId({
       timelineEntries: entries,

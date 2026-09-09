@@ -5,6 +5,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
 import type { RelayClientEnvironmentRecord } from "@t3tools/contracts/relay";
+import { configuredHostedAppUrl } from "../../hostedPairing";
 import { ServerIcon } from "lucide-react";
 import { useRef, useState } from "react";
 
@@ -211,6 +212,17 @@ export function T3ConnectUserProfilePage() {
       }
     >
       <div>
+        <a
+          className="mb-4 inline-block text-sm underline"
+          href={new URL("/account/billing", configuredHostedAppUrl()).href}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          View subscription in browser
+        </a>
+        <p className="mb-4 text-xs text-muted-foreground">
+          Use the same Lecturn account in your browser.
+        </p>
         {environmentsState.error ? (
           <div className="mb-4 border-t border-destructive/35 py-3 text-[0.8125rem]" role="alert">
             <p className="font-medium text-destructive-foreground">

@@ -19,6 +19,7 @@ import { RelayEnvironmentAuth } from "@t3tools/contracts/relay";
 
 import {
   RELAY_REQUEST_DEADLINE_MS,
+  RELAY_LIFECYCLE_REQUEST_DEADLINE_MS,
   relayCors,
   relayDocsRedirectRoute,
   relayEnvironmentAuthLayer,
@@ -279,14 +280,17 @@ describe("relay environment unlink", () => {
   it.effect("commits database revocation before deprovisioning the managed endpoint", () => {
     const calls: Array<string> = [];
     const deprovisionTarget = {
-      userId: "user-1",
-      environmentId: "environment-1",
-      hostname: "environment-1.example.test",
-      tunnelId: "tunnel-1",
-      tunnelName: "environment-1-tunnel",
-      dnsRecordId: "dns-1",
-      readyAt: "2026-07-28T00:00:00.000Z",
-      updatedAt: "generation-before-unlink",
+      reservationGeneration: null,
+      allocation: {
+        userId: "user-1",
+        environmentId: "environment-1",
+        hostname: "environment-1.example.test",
+        tunnelId: "tunnel-1",
+        tunnelName: "environment-1-tunnel",
+        dnsRecordId: "dns-1",
+        readyAt: "2026-07-28T00:00:00.000Z",
+        updatedAt: "generation-before-unlink",
+      },
     } satisfies ManagedEndpointProvider.ManagedEndpointDeprovisionTarget;
 
     return Effect.gen(function* () {
@@ -470,6 +474,47 @@ describe("relay request tracing", () => {
       }),
   );
 
+  for (const [method, path] of [
+    ["POST", "/v1/client/environment-links"],
+    ["DELETE", "/v1/client/environment-links/env_a"],
+    ["DELETE", "/v1/client/environment-links/env_a/tunnel"],
+  ] as const) {
+    it.effect(
+      `allows bounded provider work beyond the ordinary deadline for ${method} ${path}`,
+      () =>
+        Effect.gen(function* () {
+          const request = HttpServerRequest.fromWeb(
+            new Request(`https://relay.test${path}`, { method }),
+          );
+          const fiber = yield* traceRelayHttpRequestWith(
+            Effect.sleep(Duration.seconds(20)).pipe(
+              Effect.as(HttpServerResponse.empty({ status: 204 })),
+            ),
+            Layer.empty,
+          ).pipe(
+            Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+            Effect.forkChild,
+          );
+          yield* TestClock.adjust(Duration.millis(RELAY_LIFECYCLE_REQUEST_DEADLINE_MS));
+          expect((yield* Fiber.join(fiber)).status).toBe(204);
+        }),
+    );
+  }
+
+  it.effect("still bounds a hung environment provision request", () =>
+    Effect.gen(function* () {
+      const request = HttpServerRequest.fromWeb(
+        new Request("https://relay.test/v1/client/environment-links", { method: "POST" }),
+      );
+      const fiber = yield* traceRelayHttpRequestWith(Effect.never, Layer.empty).pipe(
+        Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+        Effect.forkChild,
+      );
+      yield* TestClock.adjust(Duration.millis(RELAY_LIFECYCLE_REQUEST_DEADLINE_MS));
+      expect((yield* Fiber.join(fiber)).status).toBe(504);
+    }),
+  );
+
   it.effect("fails hung requests with a 504 before the client's 10s abort", () =>
     Effect.gen(function* () {
       const spans: Array<Tracer.NativeSpan> = [];
@@ -530,3 +575,42 @@ describe("relay routing fallback", () => {
     }).pipe(Effect.scoped),
   );
 });
+
+for (const [method, path, origin, preflightMethod, expectedOrigin] of [
+  ["GET", "/v1/billing/status", "lecturn://app", "", "lecturn://app"],
+  ["OPTIONS", "/v1/billing/status", "lecturn://app", "GET", "lecturn://app"],
+  ["OPTIONS", "/v1/billing/status", "lecturn://app", "POST", undefined],
+  ["POST", "/v1/billing/checkout", "lecturn://app", "", undefined],
+  ["OPTIONS", "/v1/billing/portal", "lecturn://app", "POST", undefined],
+  ["GET", "/v1/billing/status", "https://untrusted.example", "", undefined],
+  [
+    "GET",
+    "/v1/billing/status",
+    "https://lecturn.cloudgatherer.net",
+    "",
+    "https://lecturn.cloudgatherer.net",
+  ],
+] as const) {
+  it.effect(`billing CORS ${method} ${path} ${origin} ${preflightMethod}`, () =>
+    Effect.gen(function* () {
+      const httpEffect = yield* HttpRouter.toHttpEffect(Layer.merge(relayNotFoundRoute, relayCors));
+      const response = yield* httpEffect.pipe(
+        Effect.provideService(
+          HttpServerRequest.HttpServerRequest,
+          HttpServerRequest.fromWeb(
+            new Request(`https://relay.cloudgatherer.net${path}`, {
+              method,
+              headers: { origin, "access-control-request-method": preflightMethod },
+            }),
+          ),
+        ),
+      );
+      expect(response.headers["access-control-allow-origin"]).toBe(expectedOrigin);
+      if (method === "OPTIONS") expect(response.status).toBe(expectedOrigin ? 204 : 403);
+      if (origin === "lecturn://app" && expectedOrigin && method === "OPTIONS") {
+        expect(response.headers["access-control-allow-methods"]).toBe("GET,OPTIONS");
+        expect(response.headers["access-control-allow-headers"]).toContain("authorization");
+      }
+    }).pipe(Effect.scoped),
+  );
+}

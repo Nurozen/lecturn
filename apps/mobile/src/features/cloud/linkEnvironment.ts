@@ -28,7 +28,7 @@ import { findErrorTraceId } from "@t3tools/client-runtime/errors";
 import {
   dpopFailureMessage,
   ManagedRelay,
-  relayProtectedErrorMessage,
+  relayClientErrorDetail,
 } from "@t3tools/client-runtime/relay";
 import { makeEnvironmentHttpApiClient } from "@t3tools/client-runtime/rpc";
 
@@ -129,10 +129,8 @@ function withDevCause(message: string, cause: unknown): string {
 
 function decodedRelayClientError(message: string) {
   return (cause: ManagedRelay.ManagedRelayClientError) => {
-    const relayError =
-      cause._tag === "ManagedRelayRequestFailedError" ? cause.relayError : undefined;
-    const traceId = cause._tag === "ManagedRelayRequestFailedError" ? cause.traceId : undefined;
-    const detail = relayError ? relayProtectedErrorMessage(relayError) : null;
+    const traceId = "traceId" in cause ? cause.traceId : undefined;
+    const detail = relayClientErrorDetail(cause);
     return new CloudEnvironmentLinkError({
       message: detail ? `${message}: ${detail}` : message,
       cause,

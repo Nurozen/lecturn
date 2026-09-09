@@ -41,3 +41,6 @@ node_modules/
 
 # Lecturn worktree runtime state
 .lecturn/
+
+# Transient summary written by upstream-integrate.yml, read into the PR body
+.upstream-integration-summary.md

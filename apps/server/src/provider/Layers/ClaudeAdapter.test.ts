@@ -43,11 +43,7 @@ import {
   SYNTHETIC_CLAUDE_STANDARD_MODEL,
   SYNTHETIC_CLAUDE_THINKING_MODEL,
 } from "../ClaudeModelCatalog.testFixtures.ts";
-import {
-  ProviderAdapterProcessError,
-  ProviderAdapterSessionClosedError,
-  ProviderAdapterValidationError,
-} from "../Errors.ts";
+import { ProviderAdapterProcessError, ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
@@ -168,6 +164,7 @@ function makeHarness(config?: {
   readonly baseDir?: string;
   readonly claudeConfig?: Partial<ClaudeSettings>;
   readonly instanceId?: ProviderInstanceId;
+  readonly forkSession?: ClaudeAdapterLiveOptions["forkSession"];
 }) {
   const query = new FakeClaudeQuery();
   let createInput:
@@ -179,6 +176,7 @@ function makeHarness(config?: {
 
   const adapterOptions: ClaudeAdapterLiveOptions = {
     ...(config?.instanceId ? { instanceId: config.instanceId } : {}),
+    forkSession: config?.forkSession ?? (async () => ({ sessionId: FORK_CHILD_SESSION_ID })),
     modelCatalog: Effect.succeed(SYNTHETIC_CLAUDE_MODEL_CATALOG),
     createQuery: (input) => {
       createInput = input;
@@ -296,26 +294,6 @@ function makeForkInput(providerTurnRef: string | null) {
     throughTurnOrdinal: 2,
     atEnd: false,
   };
-}
-
-function makeInitSdkMessage(sessionId: string, uuid: string): SDKMessage {
-  return {
-    type: "system",
-    subtype: "init",
-    apiKeySource: "none",
-    claude_code_version: "test",
-    cwd: "/tmp/claude-adapter-test",
-    tools: [],
-    mcp_servers: [],
-    model: "claude-sonnet-4-5",
-    permissionMode: "bypassPermissions",
-    slash_commands: [],
-    output_style: "default",
-    skills: [],
-    plugins: [],
-    session_id: sessionId,
-    uuid,
-  } as unknown as SDKMessage;
 }
 
 describe("ClaudeAdapterLive", () => {
@@ -4470,140 +4448,94 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("forks the parent Claude session natively and adopts the child session id", () => {
-    const harness = makeHarness();
+  it.effect("starts a durable Claude fork before init so the first prompt can be sent", () => {
+    const forkCalls: Parameters<NonNullable<ClaudeAdapterLiveOptions["forkSession"]>>[0][] = [];
+    const harness = makeHarness({
+      forkSession: async (input) => {
+        forkCalls.push(input);
+        return { sessionId: FORK_CHILD_SESSION_ID };
+      },
+    });
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
-
-      // Script the init handshake up-front: a fork start blocks until the
-      // SDK stream adopts the child session id.
-      harness.query.emit(makeInitSdkMessage(FORK_CHILD_SESSION_ID, "fork-init"));
-
+      // No init is emitted: real Claude waits for the first prompt to emit it.
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
+        cwd: "/tmp",
         fork: makeForkInput("assistant-anchor-7"),
       });
-
+      assert.equal(forkCalls[0]?.sourceSessionId, FORK_PARENT_SESSION_ID);
+      assert.equal(forkCalls[0]?.upToMessageId, "assistant-anchor-7");
+      assert.equal(forkCalls[0]?.cwd, "/tmp");
       const options = harness.getLastCreateQueryInput()?.options;
-      assert.equal(options?.resume, FORK_PARENT_SESSION_ID);
-      assert.equal(options?.forkSession, true);
-      assert.equal(options?.resumeSessionAt, "assistant-anchor-7");
+      assert.equal(options?.resume, FORK_CHILD_SESSION_ID);
+      assert.equal(options?.forkSession, undefined);
+      assert.equal(options?.resumeSessionAt, undefined);
       assert.equal(options?.sessionId, undefined);
-
       assert.deepEqual(session.resumeCursor, {
         threadId: THREAD_ID,
         resume: FORK_CHILD_SESSION_ID,
         turnCount: 0,
       });
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
+      yield* adapter.sendTurn({ threadId: THREAD_ID, input: "Continue the fork", attachments: [] });
+      assert.equal(
+        yield* Effect.promise(() => readFirstPromptText(harness.getLastCreateQueryInput())),
+        "Continue the fork",
+      );
+    }).pipe(Effect.provide(harness.layer));
   });
 
-  it.effect("keeps a forked child unbound from the parent until the SDK init arrives", () => {
-    const harness = makeHarness();
+  it.effect("resumes the durable child after stopping without forking the parent again", () => {
+    const forkCalls: string[] = [];
+    const harness = makeHarness({
+      forkSession: async (input) => {
+        forkCalls.push(input.sourceSessionId);
+        return { sessionId: FORK_CHILD_SESSION_ID };
+      },
+    });
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
+      const child = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        fork: makeForkInput(null),
+      });
+      yield* adapter.stopSession(THREAD_ID);
+      const resumed = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        resumeCursor: child.resumeCursor,
+      });
+      assert.deepEqual(forkCalls, [FORK_PARENT_SESSION_ID]);
+      assert.equal(harness.getLastCreateQueryInput()?.options.resume, FORK_CHILD_SESSION_ID);
+      assert.deepEqual(resumed.resumeCursor, child.resumeCursor);
+    }).pipe(Effect.provide(harness.layer));
+  });
 
-      const startFiber = yield* adapter
+  it.effect("rejects a failed history fork before creating or registering a query", () => {
+    const harness = makeHarness({
+      forkSession: async () => {
+        throw new Error("Source history missing");
+      },
+    });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const error = yield* adapter
         .startSession({
           threadId: THREAD_ID,
           provider: ProviderDriverKind.make("claudeAgent"),
           runtimeMode: "full-access",
           fork: makeForkInput(null),
         })
-        .pipe(Effect.forkChild);
-
-      // session.started / session.configured / session.state.changed land
-      // before the fork start blocks on child adoption.
-      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
-
-      // A legacy fork turn carries no anchor: resumeSessionAt stays unset.
-      const options = harness.getLastCreateQueryInput()?.options;
-      assert.equal(options?.resume, FORK_PARENT_SESSION_ID);
-      assert.equal(options?.forkSession, true);
-      assert.equal(options?.resumeSessionAt, undefined);
-      assert.equal(options?.sessionId, undefined);
-
-      // Before init the child has no resume identity at all — a fork that
-      // dies here must not leave a cursor that would resume the parent.
-      const pendingSessions = yield* adapter.listSessions();
-      const pendingCursor = pendingSessions[0]?.resumeCursor as { resume?: string } | undefined;
-      assert.equal(pendingCursor?.resume, undefined);
-
-      harness.query.emit(makeInitSdkMessage(FORK_CHILD_SESSION_ID, "fork-init-late"));
-
-      const session = yield* Fiber.join(startFiber);
-      assert.deepEqual(session.resumeCursor, {
-        threadId: THREAD_ID,
-        resume: FORK_CHILD_SESSION_ID,
-        turnCount: 0,
-      });
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
-
-  it.effect("tears down a fork start whose stream dies before init", () => {
-    const queries: FakeClaudeQuery[] = [];
-    const layer = Layer.effect(
-      ClaudeAdapter,
-      Effect.gen(function* () {
-        const claudeConfig = decodeClaudeSettings({});
-        return yield* makeClaudeAdapter(claudeConfig, {
-          createQuery: () => {
-            const query = new FakeClaudeQuery();
-            queries.push(query);
-            return query;
-          },
-        });
-      }),
-    ).pipe(
-      Layer.provideMerge(ServerConfig.layerTest("/tmp/claude-adapter-test", "/tmp")),
-      Layer.provideMerge(ServerSettingsService.layerTest()),
-      Layer.provideMerge(NodeServices.layer),
-    );
-
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
-
-      const startFiber = yield* adapter
-        .startSession({
-          threadId: THREAD_ID,
-          provider: ProviderDriverKind.make("claudeAgent"),
-          runtimeMode: "full-access",
-          fork: makeForkInput("assistant-anchor-7"),
-        })
-        .pipe(Effect.forkChild);
-
-      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
-      queries[0]?.fail(new Error("stream died before init"));
-
-      const result = yield* Fiber.join(startFiber).pipe(Effect.result);
-      assert.equal(result._tag, "Failure");
-      if (result._tag === "Failure") {
-        assert.instanceOf(result.failure, ProviderAdapterSessionClosedError);
-      }
-
-      // The dead fork left nothing behind: the thread is free again and a
-      // fresh start binds a brand-new query cleanly.
+        .pipe(Effect.flip);
+      assert.instanceOf(error, ProviderAdapterProcessError);
       assert.equal(yield* adapter.hasSession(THREAD_ID), false);
-      const session = yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: ProviderDriverKind.make("claudeAgent"),
-        runtimeMode: "full-access",
-      });
-      assert.equal(session.status, "ready");
-      assert.equal(yield* adapter.hasSession(THREAD_ID), true);
-      assert.equal(queries.length, 2);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(layer),
-    );
+      assert.equal(harness.getLastCreateQueryInput(), undefined);
+    }).pipe(Effect.provide(harness.layer));
   });
 
   it.effect("rejects a fork whose source cursor lacks a native session id", () => {

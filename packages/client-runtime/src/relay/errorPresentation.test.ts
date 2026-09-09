@@ -1,3 +1,4 @@
+import { ManagedRelayRequestTimeoutError, ManagedRelayRequestFailedError } from "./managedRelay.ts";
 import { RelayAuthInvalidError } from "@t3tools/contracts/relay";
 import { describe, expect, it } from "@effect/vitest";
 
@@ -6,6 +7,7 @@ import {
   DPOP_RETRY_HINT,
   DPOP_UNKNOWN_HINT,
   relayProtectedErrorMessage,
+  relayClientErrorDetail,
 } from "./errorPresentation.ts";
 
 describe("relayProtectedErrorMessage", () => {
@@ -53,5 +55,31 @@ describe("relayProtectedErrorMessage", () => {
     });
 
     expect(relayProtectedErrorMessage(error)).toBe("Relay rejected the cloud session token.");
+  });
+});
+
+describe("relayClientErrorDetail", () => {
+  it("retains the timeout and recovery action for setup screens", () => {
+    expect(
+      relayClientErrorDetail(
+        new ManagedRelayRequestTimeoutError({
+          activity: "Relay environment link challenge",
+          timeoutMs: 35000,
+          traceId: "trace-client",
+        }),
+      ),
+    ).toBe(
+      "Relay environment link challenge timed out after 35 seconds. Check your connection and try again.",
+    );
+  });
+  it("does not expose raw transport causes", () => {
+    expect(
+      relayClientErrorDetail(
+        new ManagedRelayRequestFailedError({
+          action: "create relay environment link challenge",
+          cause: new Error("private transport details"),
+        }),
+      ),
+    ).toBeNull();
   });
 });

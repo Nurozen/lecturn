@@ -552,6 +552,14 @@ export const ThreadForkHistory = Schema.Struct({
 });
 export type ThreadForkHistory = typeof ThreadForkHistory.Type;
 
+/** Completed conversation fork points, independent of Git checkpoints. */
+export const OrchestrationCompletedTurn = Schema.Struct({
+  turnId: TurnId,
+  assistantMessageId: Schema.NullOr(MessageId),
+  hasProviderTurnRef: Schema.Boolean,
+});
+export type OrchestrationCompletedTurn = typeof OrchestrationCompletedTurn.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -568,6 +576,8 @@ export const OrchestrationThread = Schema.Struct({
   // and cached snapshots still decode.
   forkedFrom: Schema.optional(Schema.NullOr(ThreadForkOrigin)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
+  // Detail-window fork points. Absent on older servers and shell-only snapshots.
+  completedTurns: Schema.optional(Schema.Array(OrchestrationCompletedTurn)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),

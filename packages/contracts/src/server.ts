@@ -201,6 +201,8 @@ export const ServerProvider = Schema.Struct({
   // forward compatibility: values today are "native" | "unsupported", and
   // clients must treat unknown values (or absence) as unsupported.
   conversationFork: Schema.optional(TrimmedNonEmptyString),
+  // Hide historical fork points when the provider needs an unavailable native anchor.
+  conversationForkRequiresAnchor: Schema.optional(Schema.Boolean),
   enabled: Schema.Boolean,
   installed: Schema.Boolean,
   version: Schema.NullOr(TrimmedNonEmptyString),

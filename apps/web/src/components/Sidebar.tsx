@@ -49,6 +49,7 @@ import {
   FolderIcon,
   FolderPlusIcon,
   GitBranchIcon,
+  GitForkIcon,
   PinIcon,
   PlusIcon,
   SearchIcon,
@@ -771,6 +772,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   isRenaming: boolean;
   renamingTitle: string;
   onContextMenu: (threadRef: ScopedThreadRef, position: { x: number; y: number }) => void;
+  canFork: boolean;
+  onFork: (threadRef: ScopedThreadRef) => Promise<boolean>;
   onSettle: (threadRef: ScopedThreadRef) => void;
   onUnsettle: (threadRef: ScopedThreadRef) => void;
   onSnooze: (threadRef: ScopedThreadRef, preset: SnoozePreset) => void;
@@ -792,6 +795,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     onContextMenu,
     onAcknowledgeWoke,
     onRenameTitleChange,
+    onFork,
     onSettle,
     onSnooze,
     onStartRename,
@@ -1077,6 +1081,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       onCommitRename(threadRef, renamingTitle, thread.title);
     }
   }, [onCommitRename, renamingTitle, thread.title, threadRef]);
+  const [isForking, setIsForking] = useState(false);
+  const forkInFlightRef = useRef(false);
+  const handleForkClick = async (event: ReactMouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (forkInFlightRef.current) return;
+    forkInFlightRef.current = true;
+    setIsForking(true);
+    try {
+      await onFork(threadRef);
+    } finally {
+      forkInFlightRef.current = false;
+      setIsForking(false);
+    }
+  };
   const handleSettleClick = useCallback(
     (event: ReactMouseEvent) => {
       event.preventDefault();
@@ -1595,6 +1614,33 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ) : null}
             </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+              {props.canFork ? (
+                <span className="flex shrink-0 items-center gap-1">
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          aria-label="Fork thread"
+                          aria-busy={isForking || undefined}
+                          disabled={isForking}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={handleForkClick}
+                          className={cn(
+                            "pointer-events-none inline-flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-md bg-transparent text-muted-foreground opacity-0 outline-none transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-focus-visible/sidebar-row:pointer-events-auto group-focus-visible/sidebar-row:opacity-100 group-has-[:focus-visible]/sidebar-row:pointer-events-auto group-has-[:focus-visible]/sidebar-row:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100 disabled:cursor-wait",
+                            isForking && "opacity-100",
+                          )}
+                        />
+                      }
+                    >
+                      <GitForkIcon aria-hidden className="size-3.5" />
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">
+                      Fork thread at the latest completed reply
+                    </TooltipPopup>
+                  </Tooltip>
+                </span>
+              ) : null}
               {/* Always the branch. The plan step used to take this slot while
                   working, but it truncated to a half-sentence and dropped the
                   branch, so the row lost its most stable identifier. */}
@@ -3929,6 +3975,11 @@ export default function Sidebar() {
                         isRenaming={renamingThreadKey === threadKey}
                         renamingTitle={renamingThreadKey === threadKey ? renamingTitle : ""}
                         onContextMenu={handleThreadContextMenu}
+                        canFork={
+                          readForkAtLatestTurn(scopeThreadRef(thread.environmentId, thread.id))
+                            .blockReason === null
+                        }
+                        onFork={forkThreadAtLatestTurn}
                         onSettle={attemptSettle}
                         onUnsettle={attemptUnsettle}
                         onSnooze={attemptSnooze}

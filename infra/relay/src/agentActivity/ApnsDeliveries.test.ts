@@ -4,6 +4,8 @@ import type {
 } from "@t3tools/contracts/relay";
 import * as NodeCryptoLayer from "@effect/platform-node/NodeCrypto";
 import { describe, expect, it } from "@effect/vitest";
+import { TestClock } from "effect/testing";
+import type { BillingAccount } from "../billing/BillingStore.ts";
 import * as NodeCrypto from "node:crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -29,6 +31,13 @@ import * as ApnsDeliveryQueue from "./ApnsDeliveryQueue.ts";
 import * as AgentActivityRows from "./AgentActivityRows.ts";
 import * as ApnsDeliveries from "./ApnsDeliveries.ts";
 import * as ApnsClient from "./ApnsClient.ts";
+import {
+  ManagedAccess,
+  make as makeManagedAccess,
+  ManagedAccessRequired,
+  ManagedAccessUnavailable,
+  layerDisabled,
+} from "../billing/ManagedAccess.ts";
 import * as ApnsProviderTokens from "./ApnsProviderTokens.ts";
 
 const config = RelayConfiguration.RelayConfiguration.of({
@@ -143,6 +152,8 @@ const target: LiveActivities.TargetRow = {
 };
 
 function makeLayer(input: {
+  readonly managedAccess?: ManagedAccess["Service"];
+  readonly failCompletion?: boolean;
   readonly attempts: Array<DeliveryAttempts.DeliveryAttemptInput>;
   readonly sourceJobClaims?: ReadonlyMap<string, DeliveryAttempts.DeliverySourceJobClaimResult>;
   readonly queuedJobs?: Array<SignedApnsDeliveryJob>;
@@ -171,12 +182,14 @@ function makeLayer(input: {
     request: HttpClientRequest.HttpClientRequest,
   ) => Effect.Effect<HttpClientResponse.HttpClientResponse>;
 }) {
+  const completedJobs = new Set<string>();
   return ApnsDeliveries.layer.pipe(
     Layer.provide(ApnsClient.layer),
     Layer.provide(ApnsProviderTokens.layer),
     Layer.provide(ApnsDeliveryQueue.layer.pipe(Layer.provide(NodeCryptoLayer.layer))),
     Layer.provide(
       Layer.mergeAll(
+        input.managedAccess ? Layer.succeed(ManagedAccess, input.managedAccess) : layerDisabled,
         Layer.succeed(AgentActivityRows.AgentActivityRows, {
           upsert: () => Effect.void,
           remove: () => Effect.void,
@@ -206,6 +219,7 @@ function makeLayer(input: {
             }),
           claimSourceJob: (attempt) =>
             Effect.sync(() => {
+              if (completedJobs.has(attempt.sourceJobId)) return "completed";
               const claim = input.sourceJobClaims?.get(attempt.sourceJobId);
               if (claim) {
                 return claim;
@@ -214,14 +228,28 @@ function makeLayer(input: {
               return "claimed";
             }),
           completeSourceJob: (completion) =>
-            Effect.sync(() => {
-              const attempt = input.attempts.find(
-                (row) => row.sourceJobId === completion.sourceJobId,
-              );
-              if (attempt) {
-                Object.assign(attempt, completion);
-              }
-            }),
+            input.failCompletion
+              ? Effect.fail(
+                  new DeliveryAttempts.DeliveryAttemptRecordPersistenceError({
+                    operation: "complete-source-job",
+                    sourceJobId: completion.sourceJobId,
+                    userId: null,
+                    environmentId: null,
+                    threadId: null,
+                    deviceId: null,
+                    kind: null,
+                    cause: new Error("Database unavailable"),
+                  }),
+                )
+              : Effect.sync(() => {
+                  completedJobs.add(completion.sourceJobId);
+                  const attempt = input.attempts.find(
+                    (row) => row.sourceJobId === completion.sourceJobId,
+                  );
+                  if (attempt) {
+                    Object.assign(attempt, completion);
+                  }
+                }),
         }),
         Layer.succeed(LiveActivities.LiveActivities, {
           register: () => Effect.void,
@@ -1783,5 +1811,509 @@ describe("live activity alert decisions", () => {
         nowMs: 0,
       }),
     ).toBeNull();
+  });
+});
+
+describe("paid recipient delivery", () => {
+  const denied = () => Effect.fail(new ManagedAccessRequired({ message: "Subscription required" }));
+  it.effect(
+    "checks each recipient before enqueueing without suppressing another user's work",
+    () => {
+      const queuedJobs: SignedApnsDeliveryJob[] = [];
+      const calls: string[] = [];
+      return Effect.gen(function* () {
+        const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+        const unpaid = yield* deliveries.sendForTarget({ target, aggregate, nowMs: 0 });
+        const paid = yield* deliveries.sendForTarget({
+          target: { ...target, user_id: "paid-user" },
+          aggregate,
+          nowMs: 0,
+        });
+        expect(unpaid).toBeNull();
+        expect(paid).not.toBeNull();
+        expect(queuedJobs).toHaveLength(1);
+        expect(calls).toEqual([target.user_id, "paid-user"]);
+      }).pipe(
+        Effect.provide(
+          makeLayer({
+            attempts: [],
+            queuedJobs,
+            managedAccess: {
+              check: (id) => {
+                calls.push(id);
+                return id === "paid-user" ? Effect.void : denied();
+              },
+            },
+          }),
+        ),
+      );
+    },
+  );
+  it.effect("acknowledges a queued update after access expires without sending APNs", () => {
+    const queuedJobs: SignedApnsDeliveryJob[] = [];
+    let paid = true;
+    let sends = 0;
+    return Effect.gen(function* () {
+      const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+      yield* deliveries.sendForTarget({ target, aggregate, nowMs: 0 });
+      paid = false;
+      const result = yield* deliveries.processSignedJob(queuedJobs[0]!);
+      expect(result.ok).toBe(true);
+      expect(result.apnsStatus).toBeNull();
+      expect(sends).toBe(0);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          attempts: [],
+          queuedJobs,
+          managedAccess: { check: () => (paid ? Effect.void : denied()) },
+          execute: (request) =>
+            Effect.sync(() => {
+              sends++;
+              return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+            }),
+        }),
+      ),
+    );
+  });
+  it.effect("database failure leaves queued work failed and unclaimed for retry", () => {
+    const queuedJobs: SignedApnsDeliveryJob[] = [];
+    const attempts: DeliveryAttempts.DeliveryAttemptInput[] = [];
+    let unavailable = false;
+    return Effect.gen(function* () {
+      const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+      yield* deliveries.sendForTarget({ target, aggregate, nowMs: 0 });
+      unavailable = true;
+      const result = yield* deliveries.processSignedJob(queuedJobs[0]!).pipe(Effect.flip);
+      expect(result._tag).toBe("ManagedAccessUnavailable");
+      expect(attempts).toEqual([]);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          attempts,
+          queuedJobs,
+          managedAccess: {
+            check: () =>
+              unavailable
+                ? Effect.fail(new ManagedAccessUnavailable({ message: "Database unavailable" }))
+                : Effect.void,
+          },
+        }),
+      ),
+    );
+  });
+  it.effect("allows cleanup ends after expiry but drops companion paid pushes", () => {
+    const queuedJobs: SignedApnsDeliveryJob[] = [];
+    let sends = 0;
+    return Effect.gen(function* () {
+      const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+      yield* deliveries.sendForTarget({
+        target: { ...target, preferences_json: disabledPreferences, push_token: "push-token" },
+        aggregate: {
+          ...aggregate,
+          activities: [
+            { ...aggregate.activities[0]!, phase: "waiting_for_input", status: "Input" },
+          ],
+        },
+        nowMs: 0,
+      });
+      expect(queuedJobs).toHaveLength(1);
+      const result = yield* deliveries.processSignedJob(queuedJobs[0]!);
+      expect(result.kind).toBe("live_activity_end");
+      expect(result.ok).toBe(true);
+      expect(sends).toBe(1);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          attempts: [],
+          queuedJobs,
+          config: signingConfig,
+          managedAccess: { check: denied },
+          execute: (request) =>
+            Effect.sync(() => {
+              sends++;
+              return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+            }),
+        }),
+      ),
+    );
+  });
+});
+
+describe("last-moment paid checks", () => {
+  for (const unavailable of [false, true]) {
+    it.effect(
+      `rechecks push access immediately before dispatch (${unavailable ? "unavailable" : "expired"})`,
+      () => {
+        let checks = 0;
+        let sends = 0;
+        return Effect.gen(function* () {
+          const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+          const task = deliveries.sendPushNotification({
+            target,
+            token: "push-token",
+            notification: {
+              title: "Thread",
+              body: "Input",
+              environmentId: "env",
+              threadId: "thread",
+              deepLink: "/",
+            },
+          });
+          if (unavailable) {
+            const failure = yield* task.pipe(Effect.flip);
+            expect(failure._tag).toBe("ManagedAccessUnavailable");
+          } else {
+            expect((yield* task).ok).toBe(true);
+          }
+          expect(checks).toBe(2);
+          expect(sends).toBe(0);
+        }).pipe(
+          Effect.provide(
+            makeLayer({
+              attempts: [],
+              managedAccess: {
+                check: () => {
+                  checks++;
+                  return checks === 1
+                    ? Effect.void
+                    : unavailable
+                      ? Effect.fail(new ManagedAccessUnavailable({ message: "Unavailable" }))
+                      : Effect.fail(new ManagedAccessRequired({ message: "Expired" }));
+                },
+              },
+              execute: (request) =>
+                Effect.sync(() => {
+                  sends++;
+                  return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+                }),
+            }),
+          ),
+        );
+      },
+    );
+  }
+  it.effect(
+    "strips an already-queued end alert during a billing outage but delivers cleanup",
+    () => {
+      let body = "";
+      return Effect.gen(function* () {
+        const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+        const result = yield* deliveries.sendLiveActivity({
+          target,
+          token: "activity-token",
+          kind: "live_activity_end",
+          aggregate: null,
+          alert: { title: "Paid alert", body: "Must not ring" },
+        });
+        expect(result.ok).toBe(true);
+        expect(body).toContain('"event":"end"');
+        expect(body).not.toContain('"alert"');
+      }).pipe(
+        Effect.provide(
+          makeLayer({
+            attempts: [],
+            config: signingConfig,
+            managedAccess: {
+              check: () => Effect.fail(new ManagedAccessUnavailable({ message: "Unavailable" })),
+            },
+            execute: (request) =>
+              Effect.sync(() => {
+                if (request.body._tag === "Uint8Array")
+                  body = new TextDecoder().decode(request.body.body);
+                return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+              }),
+          }),
+        ),
+      );
+    },
+  );
+});
+
+describe("durable subscription-denied receipts", () => {
+  for (const kind of ["live_activity_update", "push_notification"] as const) {
+    it.effect(`never sends a denied ${kind} duplicate after renewal`, () => {
+      let paid = false;
+      let sends = 0;
+      const attempts: DeliveryAttempts.DeliveryAttemptInput[] = [];
+      const payload = makeApnsDeliveryJobPayload({
+        kind,
+        userId: target.user_id,
+        deviceId: target.device_id,
+        token: kind === "push_notification" ? "push-token" : "activity-token",
+        aggregate: kind === "live_activity_update" ? aggregate : null,
+        notification:
+          kind === "push_notification"
+            ? {
+                title: "Thread",
+                body: "Input",
+                environmentId: "env",
+                threadId: "thread",
+                deepLink: "/",
+              }
+            : null,
+        createdAt: "1970-01-01T00:00:00.000Z",
+        expiresAt: "1970-01-01T00:10:00.000Z",
+        jobId: `denied-${kind}`,
+      });
+      const signed = signApnsDeliveryJob({ secret: config.apnsDeliveryJobSigningSecret, payload });
+      return Effect.gen(function* () {
+        const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+        expect((yield* deliveries.processSignedJob(signed)).ok).toBe(true);
+        expect(attempts[0]?.apnsReason).toContain("access expired");
+        paid = true;
+        const duplicate = yield* deliveries.processSignedJob(signed);
+        expect(duplicate.apnsReason).toContain("Duplicate");
+        expect(sends).toBe(0);
+      }).pipe(
+        Effect.provide(
+          makeLayer({
+            attempts,
+            config: signingConfig,
+            currentTargets: [{ ...target, push_token: "push-token" }],
+            managedAccess: {
+              check: () =>
+                paid ? Effect.void : Effect.fail(new ManagedAccessRequired({ message: "Expired" })),
+            },
+            execute: (request) =>
+              Effect.sync(() => {
+                sends++;
+                return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+              }),
+          }),
+        ),
+      );
+    });
+  }
+  it.effect("retries a denied job if its terminal receipt cannot be persisted", () =>
+    Effect.gen(function* () {
+      const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+      const failure = yield* deliveries
+        .sendPushNotification({
+          target,
+          token: "push-token",
+          sourceJobId: "denied-receipt-failed",
+          notification: {
+            title: "Thread",
+            body: "Input",
+            environmentId: "env",
+            threadId: "thread",
+            deepLink: "/",
+          },
+        })
+        .pipe(Effect.flip);
+      expect(failure._tag).toBe("DeliveryAttemptRecordPersistenceError");
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          attempts: [],
+          failCompletion: true,
+          managedAccess: {
+            check: () => Effect.fail(new ManagedAccessRequired({ message: "Expired" })),
+          },
+        }),
+      ),
+    ),
+  );
+});
+
+describe("queued delivery entitlement windows", () => {
+  const accountForWindow = (userId: string, accessWindowStart: number): BillingAccount => ({
+    user_id: userId,
+    customer_id: "cus_window",
+    deleted_at: null,
+    generation: 10,
+    updated_at: 60,
+    lease_token: null,
+    state: { accessWindowStart, accessUntil: 1000 },
+  });
+  const signedAtOrigin = (
+    kind: "push_notification" | "live_activity_update" | "live_activity_end",
+    userId = target.user_id,
+  ) =>
+    signApnsDeliveryJob({
+      secret: config.apnsDeliveryJobSigningSecret,
+      payload: makeApnsDeliveryJobPayload({
+        kind,
+        userId,
+        deviceId: target.device_id,
+        token: kind === "push_notification" ? "push-token" : "activity-token",
+        aggregate: kind === "push_notification" ? null : aggregate,
+        notification:
+          kind === "push_notification"
+            ? {
+                title: "Thread",
+                body: "Input",
+                environmentId: "env",
+                threadId: "thread",
+                deepLink: "/",
+              }
+            : null,
+        alert: kind === "live_activity_end" ? { title: "Done", body: "Finished" } : null,
+        createdAt: "1970-01-01T00:00:00.000Z",
+        expiresAt: "1970-01-01T00:10:00.000Z",
+        jobId: `window-${kind}-${userId}`,
+      }),
+    });
+
+  for (const kind of ["push_notification", "live_activity_update"] as const) {
+    for (const renewedAfterGap of [false, true]) {
+      it.effect(
+        `${kind} first delivery ${renewedAfterGap ? "drops after an access gap" : "survives continuous renewal"}`,
+        () => {
+          let sends = 0;
+          const attempts: DeliveryAttempts.DeliveryAttemptInput[] = [];
+          const accessWindowStart = renewedAfterGap ? 30 : 0;
+          return Effect.gen(function* () {
+            yield* TestClock.setTime(60_000);
+            const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+            const job = signedAtOrigin(kind);
+            const result = yield* deliveries.processSignedJob(job);
+            expect(result.ok).toBe(true);
+            expect(sends).toBe(renewedAfterGap ? 0 : 1);
+            if (renewedAfterGap) {
+              expect(attempts[0]?.apnsReason).toContain("access expired");
+              yield* deliveries.processSignedJob(job);
+              expect(sends).toBe(0);
+            }
+          }).pipe(
+            Effect.provide(
+              makeLayer({
+                attempts,
+                config: signingConfig,
+                currentTargets: [{ ...target, push_token: "push-token" }],
+                managedAccess: makeManagedAccess((userId) =>
+                  Effect.succeed(accountForWindow(userId, accessWindowStart)),
+                ),
+                execute: (request) =>
+                  Effect.sync(() => {
+                    sends++;
+                    return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+                  }),
+              }),
+            ),
+          );
+        },
+      );
+    }
+  }
+
+  it.effect("rechecks the original access window after claiming a job", () => {
+    let loads = 0;
+    let sends = 0;
+    const attempts: DeliveryAttempts.DeliveryAttemptInput[] = [];
+    return Effect.gen(function* () {
+      yield* TestClock.setTime(60_000);
+      const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+      yield* deliveries.processSignedJob(signedAtOrigin("push_notification"));
+      expect(loads).toBe(2);
+      expect(sends).toBe(0);
+      expect(attempts[0]?.apnsReason).toContain("access expired");
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          attempts,
+          config: signingConfig,
+          currentTargets: [{ ...target, push_token: "push-token" }],
+          managedAccess: makeManagedAccess((userId) =>
+            Effect.sync(() => {
+              loads++;
+              return accountForWindow(userId, loads === 1 ? 0 : 30);
+            }),
+          ),
+          execute: (request) =>
+            Effect.sync(() => {
+              sends++;
+              return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+            }),
+        }),
+      ),
+    );
+  });
+
+  it.effect("only suppresses the expired recipient on a shared environment", () => {
+    let sends = 0;
+    return Effect.gen(function* () {
+      yield* TestClock.setTime(60_000);
+      const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+      yield* deliveries.processSignedJob(signedAtOrigin("push_notification", "expired-recipient"));
+      yield* deliveries.processSignedJob(
+        signedAtOrigin("push_notification", "continuous-recipient"),
+      );
+      expect(sends).toBe(1);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          attempts: [],
+          config: signingConfig,
+          currentTargets: [{ ...target, push_token: "push-token" }],
+          managedAccess: makeManagedAccess((userId) =>
+            Effect.succeed(accountForWindow(userId, userId === "expired-recipient" ? 30 : 0)),
+          ),
+          execute: (request) =>
+            Effect.sync(() => {
+              sends++;
+              return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+            }),
+        }),
+      ),
+    );
+  });
+
+  it.effect(
+    "sends a cleanup end silently when its alert predates the current access window",
+    () => {
+      let body = "";
+      return Effect.gen(function* () {
+        yield* TestClock.setTime(60_000);
+        const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+        expect((yield* deliveries.processSignedJob(signedAtOrigin("live_activity_end"))).ok).toBe(
+          true,
+        );
+        expect(body).toContain('"event":"end"');
+        expect(body).not.toContain('"alert"');
+      }).pipe(
+        Effect.provide(
+          makeLayer({
+            attempts: [],
+            config: signingConfig,
+            managedAccess: makeManagedAccess((userId) =>
+              Effect.succeed(accountForWindow(userId, 30)),
+            ),
+            execute: (request) =>
+              Effect.sync(() => {
+                if (request.body._tag === "Uint8Array")
+                  body = new TextDecoder().decode(request.body.body);
+                return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+              }),
+          }),
+        ),
+      );
+    },
+  );
+
+  it.effect("rollback bypasses window fencing without reading billing storage", () => {
+    let sends = 0;
+    return Effect.gen(function* () {
+      yield* TestClock.setTime(60_000);
+      const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+      expect((yield* deliveries.processSignedJob(signedAtOrigin("push_notification"))).ok).toBe(
+        true,
+      );
+      expect(sends).toBe(1);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          attempts: [],
+          config: signingConfig,
+          currentTargets: [{ ...target, push_token: "push-token" }],
+          execute: (request) =>
+            Effect.sync(() => {
+              sends++;
+              return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+            }),
+        }),
+      ),
+    );
   });
 });

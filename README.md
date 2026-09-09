@@ -13,7 +13,7 @@ Use the coding-agent subscriptions and credentials you already have: Claude Code
 
 The desktop app must remain running to host remote access. Lecturn uses its own app identity and `~/.lecturn/userdata`, so it can coexist with T3 Code. It does not automatically migrate your existing T3 Code data.
 
-A standalone Lecturn npm runtime has not been published. Use the desktop host or build from source; upstream `npx t3`, Homebrew, winget, and AUR packages install T3 Code rather than this fork.
+The standalone runtime is available as `npx lecturn`. Use this fork's releases and package names for Lecturn.
 
 ## Development
 
@@ -40,4 +40,4 @@ Some inherited documentation describes upstream T3 Code distribution and service
 
 ## Attribution and license
 
-Lecturn is based on T3 Code by T3 Tools and its contributors. Their work and copyright notices are preserved. The project is available under the [MIT license](./LICENSE).
+Lecturn is based on T3 Code by T3 Tools and its contributors. Their work and copyright notices are preserved. Lecturn is independently maintained and operated by Cloud Gatherer Labs LLC; it is not affiliated with, sponsored by, or endorsed by T3 Tools Inc. or the T3 Code project. The project is available under the [MIT license](./LICENSE).

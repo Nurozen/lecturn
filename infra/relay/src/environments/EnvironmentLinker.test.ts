@@ -16,6 +16,7 @@ import * as DpopProofs from "../auth/DpopProofs.ts";
 import * as RelayTokens from "../auth/RelayTokens.ts";
 import * as EnvironmentCredentials from "./EnvironmentCredentials.ts";
 import * as EnvironmentLinks from "./EnvironmentLinks.ts";
+import * as ManagedAccess from "../billing/ManagedAccess.ts";
 import * as RelayConfiguration from "../Config.ts";
 import * as EnvironmentLinker from "./EnvironmentLinker.ts";
 import * as ManagedEndpointProvider from "./ManagedEndpointProvider.ts";
@@ -107,6 +108,7 @@ const makeRequest = Effect.gen(function* () {
 });
 
 function testLayer(input?: {
+  readonly access?: ManagedAccess.ManagedAccess["Service"];
   readonly upsert?: EnvironmentLinks.EnvironmentLinks["Service"]["upsert"];
   readonly consume?: DpopProofs.DpopProofReplay["Service"]["consume"];
   readonly deprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["deprovision"];
@@ -115,6 +117,7 @@ function testLayer(input?: {
     Layer.provideMerge(RelayTokens.layer),
     Layer.provide(
       Layer.mergeAll(
+        Layer.succeed(ManagedAccess.ManagedAccess, input?.access ?? ManagedAccess.disabled),
         RelayConfiguration.layer(config),
         Layer.succeed(DpopProofs.DpopProofReplay, {
           verifyAndConsume: () => Effect.die("unexpected DPoP proof verification"),
@@ -155,6 +158,78 @@ function testLayer(input?: {
 }
 
 describe("EnvironmentLinker", () => {
+  for (const feature of [
+    "managedTunnelsEnabled",
+    "notificationsEnabled",
+    "liveActivitiesEnabled",
+  ] as const) {
+    it.effect(`rejects unpaid ${feature} before updating the link`, () => {
+      let upserts = 0;
+      return Effect.gen(function* () {
+        const { request } = yield* makeRequest;
+        const linker = yield* EnvironmentLinker.EnvironmentLinker;
+        const result = yield* Effect.result(
+          linker.link({
+            userId: "user_123",
+            request: {
+              ...request,
+              managedTunnelsEnabled: false,
+              notificationsEnabled: false,
+              liveActivitiesEnabled: false,
+              [feature]: true,
+            },
+          }),
+        );
+        expect(result._tag).toBe("Failure");
+        if (result._tag === "Failure") expect(result.failure._tag).toBe("ManagedAccessRequired");
+        expect(upserts).toBe(0);
+      }).pipe(
+        Effect.provide(
+          testLayer({
+            access: {
+              check: () =>
+                Effect.fail(
+                  new ManagedAccess.ManagedAccessRequired({ message: "Subscription required" }),
+                ),
+            },
+            upsert: () =>
+              Effect.sync(() => {
+                upserts++;
+              }),
+          }),
+        ),
+      );
+    });
+  }
+  it.effect("allows disabling all hosted features without a subscription", () => {
+    let cleanups = 0;
+    return Effect.gen(function* () {
+      const { request } = yield* makeRequest;
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      const result = yield* linker.link({
+        userId: "user_123",
+        request: {
+          ...request,
+          managedTunnelsEnabled: false,
+          notificationsEnabled: false,
+          liveActivitiesEnabled: false,
+        },
+      });
+      expect(result.endpointRuntime).toBeNull();
+      expect(cleanups).toBe(1);
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          access: { check: () => Effect.die("Cleanup must not require billing") },
+          deprovision: () =>
+            Effect.sync(() => {
+              cleanups++;
+            }),
+        }),
+      ),
+    );
+  });
+
   it.effect("uses verified JWT claims when linking an environment", () => {
     let persistedEnvironmentId: string | null = null;
     return Effect.gen(function* () {

@@ -684,18 +684,42 @@ export function buildForkTitle(parentTitle: string | null | undefined): string {
 
 /**
  * Fork points per hover row: an assistant message forks through its own
- * turn; a user message forks through the previous assistant checkpoint's
- * turn (its text is re-seeded into the child's composer). Only `ready`
- * checkpoints are offered — interrupted or failed turns (`missing`/`error`)
- * and the active running turn have no forkable checkpoint, and the server
- * rejects forks through them.
+ * turn; a user message forks through the previous completed assistant turn
+ * (its text is re-seeded into the child's composer). Conversation completion
+ * is independent of Git checkpoints, which plain chats may never create.
  */
 export function buildForkTurnIdByMessageId(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
   activeRunningTurnId: TurnId | null;
+  completedTurns?: Thread["completedTurns"];
+  latestTurn?: Thread["latestTurn"];
+  requiresProviderTurnRef?: boolean;
 }): Map<MessageId, TurnId> {
   const byMessageId = new Map<MessageId, TurnId>();
+  const completedByMessageId = new Map<MessageId, TurnId>();
+  if (input.completedTurns !== undefined) {
+    for (const turn of input.completedTurns) {
+      if (
+        turn.assistantMessageId !== null &&
+        (!input.requiresProviderTurnRef ||
+          turn.hasProviderTurnRef ||
+          turn.turnId === input.latestTurn?.turnId)
+      ) {
+        completedByMessageId.set(turn.assistantMessageId, turn.turnId);
+      }
+    }
+  } else {
+    // Older servers expose checkpoints and only the latest turn's state.
+    for (const summary of input.turnDiffSummaryByAssistantMessageId.values()) {
+      if (summary.status === "ready" && summary.assistantMessageId !== null) {
+        completedByMessageId.set(summary.assistantMessageId, summary.turnId);
+      }
+    }
+    if (input.latestTurn?.state === "completed" && input.latestTurn.assistantMessageId !== null) {
+      completedByMessageId.set(input.latestTurn.assistantMessageId, input.latestTurn.turnId);
+    }
+  }
   let lastCompletedTurnId: TurnId | null = null;
   for (const entry of input.timelineEntries) {
     if (entry.kind !== "message") {
@@ -711,12 +735,12 @@ export function buildForkTurnIdByMessageId(input: {
     if (message.role !== "assistant") {
       continue;
     }
-    const summary = input.turnDiffSummaryByAssistantMessageId.get(message.id);
-    if (!summary || summary.status !== "ready" || summary.turnId === input.activeRunningTurnId) {
+    const turnId = completedByMessageId.get(message.id);
+    if (turnId === undefined || turnId === input.activeRunningTurnId || message.streaming) {
       continue;
     }
-    byMessageId.set(message.id, summary.turnId);
-    lastCompletedTurnId = summary.turnId;
+    byMessageId.set(message.id, turnId);
+    lastCompletedTurnId = turnId;
   }
   return byMessageId;
 }

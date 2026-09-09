@@ -1,5 +1,8 @@
 import { EnvironmentAuthInvalidError } from "@t3tools/contracts";
-import { RelayAuthInvalidError } from "@t3tools/contracts/relay";
+import {
+  RelayAuthInvalidError,
+  RelayConnectSubscriptionRequiredError,
+} from "@t3tools/contracts/relay";
 import { describe, expect, it } from "@effect/vitest";
 
 import { mapManagedRelayError, mapRemoteDpopEnvironmentError } from "./errors.ts";
@@ -72,4 +75,23 @@ describe("mapRemoteDpopEnvironmentError", () => {
 
     expect(mapped.message).toBe(`The environment credential is invalid. ${DPOP_RETRY_HINT}`);
   });
+});
+
+it("keeps subscription denial distinct from expired authentication", () => {
+  const mapped = mapManagedRelayError(
+    new ManagedRelayRequestFailedError({
+      action: "connect relay environment",
+      cause: new Error("denied"),
+      relayError: new RelayConnectSubscriptionRequiredError({
+        code: "connect_subscription_required",
+        traceId: "trace-billing",
+      }),
+    }),
+  );
+  expect(mapped).toMatchObject({
+    _tag: "ConnectionBlockedError",
+    reason: "permission",
+    traceId: "trace-billing",
+  });
+  expect(mapped.message).toContain("Direct connections remain available");
 });

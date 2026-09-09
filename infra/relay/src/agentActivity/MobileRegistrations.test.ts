@@ -1,3 +1,4 @@
+import { layerDisabled as managedAccessDisabled } from "../billing/ManagedAccess.ts";
 import type {
   RelayAgentActivityState,
   RelayDeviceRegistrationRequest,
@@ -152,6 +153,7 @@ function makeRegistrationReplayLayer(input: {
     Layer.provide(AgentActivityPublisher.layer),
     Layer.provide(
       ApnsDeliveries.layer.pipe(
+        Layer.provide(managedAccessDisabled),
         Layer.provide(ApnsClient.layer.pipe(Layer.provide(ApnsProviderTokens.layer))),
       ),
     ),

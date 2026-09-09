@@ -38,6 +38,7 @@ import {
   type RelayDpopFailureReason,
   RelayEnvironmentAuth,
   RelayEnvironmentConnectNotAuthorizedError,
+  RelayConnectSubscriptionRequiredError,
   RelayEnvironmentEndpointTimedOutError,
   RelayEnvironmentEndpointUnavailableError,
   RelayEnvironmentLinkFailedError,
@@ -125,26 +126,56 @@ const appendRelayTraceContextResponseHeader = Effect.gen(function* () {
   );
 }).pipe(Effect.ignore);
 
-export const relayCors = HttpRouter.middleware(
-  Effect.fnUntraced(function* <E, R>(
-    httpEffect: Effect.Effect<
-      HttpServerResponse.HttpServerResponse,
-      E,
-      HttpServerRequest.HttpServerRequest | R
-    >,
-  ) {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    if (request.method === "OPTIONS") {
-      return HttpServerResponse.empty({
-        status: 204,
-        headers: relayCorsPreflightHeaders,
-      });
-    }
-    const response = yield* httpEffect;
-    return HttpServerResponse.setHeaders(response, relayCorsHeaders);
-  }),
-  { global: true },
-);
+export const makeRelayCors = (billingOrigin = "https://lecturn.cloudgatherer.net") =>
+  HttpRouter.middleware(
+    Effect.fnUntraced(function* <E, R>(
+      httpEffect: Effect.Effect<
+        HttpServerResponse.HttpServerResponse,
+        E,
+        HttpServerRequest.HttpServerRequest | R
+      >,
+    ) {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const billingRequest = request.url.startsWith("/v1/billing/");
+      if (billingRequest) {
+        const desktopStatus =
+          request.headers.origin === "lecturn://app" &&
+          request.url.split("?")[0] === "/v1/billing/status" &&
+          (request.method === "GET" ||
+            (request.method === "OPTIONS" &&
+              request.headers["access-control-request-method"] === "GET"));
+        const allowed = request.headers.origin === billingOrigin || desktopStatus;
+        const headers = {
+          ...(allowed
+            ? { "access-control-allow-origin": desktopStatus ? "lecturn://app" : billingOrigin }
+            : {}),
+          "access-control-expose-headers": relayCorsExposedHeaders.join(","),
+          vary: "Origin",
+        };
+        if (request.method === "OPTIONS")
+          return HttpServerResponse.empty({
+            status: allowed ? 204 : 403,
+            headers: {
+              ...headers,
+              "access-control-allow-methods": desktopStatus ? "GET,OPTIONS" : "GET,POST,OPTIONS",
+              "access-control-allow-headers": relayCorsAllowedHeaders.join(","),
+            },
+          });
+        return HttpServerResponse.setHeaders(yield* httpEffect, headers);
+      }
+      if (request.method === "OPTIONS") {
+        return HttpServerResponse.empty({
+          status: 204,
+          headers: relayCorsPreflightHeaders,
+        });
+      }
+      const response = yield* httpEffect;
+      return HttpServerResponse.setHeaders(response, relayCorsHeaders);
+    }),
+    { global: true },
+  );
+
+export const relayCors = makeRelayCors();
 
 export const relayNotFoundRoute = HttpRouter.add(
   "*",
@@ -166,6 +197,17 @@ export const relayDocsRedirectRoute = HttpRouter.add(
 // contains the exact child span that stalled, and the response still carries
 // the traceparent back to the client.
 export const RELAY_REQUEST_DEADLINE_MS = 9_000;
+// Tunnel lifecycle requests perform several serial provider calls; their clients allow 35s.
+export const RELAY_LIFECYCLE_REQUEST_DEADLINE_MS = 30_000;
+
+const lifecycleRequest = (request: HttpServerRequest.HttpServerRequest) => {
+  const path = request.url.split("?", 1)[0];
+  return (
+    (request.method === "POST" && path === "/v1/client/environment-links") ||
+    (request.method === "DELETE" &&
+      /^\/v1\/client\/environment-links\/[^/]+(?:\/tunnel)?$/.test(path ?? ""))
+  );
+};
 
 const relayRequestDeadline = <E, R>(
   httpEffect: Effect.Effect<
@@ -174,30 +216,36 @@ const relayRequestDeadline = <E, R>(
     HttpServerRequest.HttpServerRequest | R
   >,
 ) =>
-  httpEffect.pipe(
-    Effect.timeoutOption(Duration.millis(RELAY_REQUEST_DEADLINE_MS)),
-    Effect.flatMap(
-      Option.match({
-        onNone: () =>
-          Effect.gen(function* () {
-            const request = yield* HttpServerRequest.HttpServerRequest;
-            yield* Effect.logError("relay request exceeded deadline", {
-              "http.method": request.method,
-              "http.url": request.url,
-              "relay.request.deadline_ms": RELAY_REQUEST_DEADLINE_MS,
-            });
-            yield* Effect.annotateCurrentSpan({
-              "relay.request.deadline_exceeded": true,
-            });
-            return HttpServerResponse.jsonUnsafe(
-              { error: "relay_request_deadline_exceeded" },
-              { status: 504 },
-            );
-          }),
-        onSome: Effect.succeed,
-      }),
-    ),
-  );
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const deadlineMs = lifecycleRequest(request)
+      ? RELAY_LIFECYCLE_REQUEST_DEADLINE_MS
+      : RELAY_REQUEST_DEADLINE_MS;
+    return yield* httpEffect.pipe(
+      Effect.timeoutOption(Duration.millis(deadlineMs)),
+      Effect.flatMap(
+        Option.match({
+          onNone: () =>
+            Effect.gen(function* () {
+              const request = yield* HttpServerRequest.HttpServerRequest;
+              yield* Effect.logError("relay request exceeded deadline", {
+                "http.method": request.method,
+                "http.url": request.url,
+                "relay.request.deadline_ms": deadlineMs,
+              });
+              yield* Effect.annotateCurrentSpan({
+                "relay.request.deadline_exceeded": true,
+              });
+              return HttpServerResponse.jsonUnsafe(
+                { error: "relay_request_deadline_exceeded" },
+                { status: 504 },
+              );
+            }),
+          onSome: Effect.succeed,
+        }),
+      ),
+    );
+  });
 
 export const traceRelayHttpRequest = <E, R>(
   httpEffect: Effect.Effect<
@@ -569,6 +617,17 @@ export const clientApi = HttpApiBuilder.group(
             };
           },
           mapErrorTags({
+            ManagedAccessRequired: (_error, traceId) =>
+              new RelayConnectSubscriptionRequiredError({
+                code: "connect_subscription_required",
+                traceId,
+              }),
+            ManagedAccessUnavailable: (_error, traceId) =>
+              new RelayInternalError({
+                code: "internal_error",
+                reason: "persistence_failed",
+                traceId,
+              }),
             EnvironmentLinkProofExpired: (_error, traceId) =>
               new RelayEnvironmentLinkProofExpiredError({
                 code: "environment_link_proof_expired",
@@ -779,6 +838,17 @@ export const dpopClientApi = HttpApiBuilder.group(
           },
           mapRelayCommonApiErrors("invalid_dpop"),
           mapErrorTags({
+            ManagedAccessRequired: (_error, traceId) =>
+              new RelayConnectSubscriptionRequiredError({
+                code: "connect_subscription_required",
+                traceId,
+              }),
+            ManagedAccessUnavailable: (_error, traceId) =>
+              new RelayInternalError({
+                code: "internal_error",
+                reason: "persistence_failed",
+                traceId,
+              }),
             EnvironmentConnectNotAuthorized: (error, traceId) =>
               new RelayEnvironmentConnectNotAuthorizedError({
                 code: "environment_connect_not_authorized",
@@ -822,6 +892,17 @@ export const dpopClientApi = HttpApiBuilder.group(
           },
           mapRelayCommonApiErrors("invalid_dpop"),
           mapErrorTags({
+            ManagedAccessRequired: (_error, traceId) =>
+              new RelayConnectSubscriptionRequiredError({
+                code: "connect_subscription_required",
+                traceId,
+              }),
+            ManagedAccessUnavailable: (_error, traceId) =>
+              new RelayInternalError({
+                code: "internal_error",
+                reason: "persistence_failed",
+                traceId,
+              }),
             EnvironmentConnectNotAuthorized: (error, traceId) =>
               new RelayEnvironmentConnectNotAuthorizedError({
                 code: "environment_connect_not_authorized",
@@ -880,6 +961,12 @@ export const serverApi = HttpApiBuilder.group(
           });
         },
         mapErrorTags({
+          ManagedAccessUnavailable: (_error, traceId) =>
+            new RelayInternalError({
+              code: "internal_error",
+              reason: "persistence_failed",
+              traceId,
+            }),
           EnvironmentPublishPublicKeyMissing: (_error, traceId) =>
             new RelayAuthInvalidError({
               code: "auth_invalid",

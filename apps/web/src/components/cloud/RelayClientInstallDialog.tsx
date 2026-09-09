@@ -65,12 +65,12 @@ export function RelayClientInstallDialog() {
             <DownloadIcon aria-hidden className="size-4.5 text-muted-foreground" />
           </div>
           <DialogTitle>
-            {isInstalling ? "Installing relay client" : "Install relay client?"}
+            {isInstalling ? "Installing relay client" : "Install Connect tunnel helper?"}
           </DialogTitle>
           <DialogDescription>
             {isInstalling
               ? "Lecturn is preparing this environment for secure access through Lecturn Connect."
-              : "Lecturn needs the relay client to make this environment available through Lecturn Connect."}
+              : "Lecturn uses Cloudflare’s cloudflared helper to connect this computer securely to your other devices. No separate Cloudflare account is needed."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel scrollFade={false}>
@@ -96,9 +96,9 @@ export function RelayClientInstallDialog() {
             </div>
           ) : (
             <div className="rounded-xl border border-border/70 bg-muted/35 p-3">
-              <p className="text-sm font-medium text-foreground">Managed relay client</p>
+              <p className="text-sm font-medium text-foreground">Cloudflare cloudflared</p>
               <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                Lecturn will download and install version{" "}
+                Lecturn will download, verify and install version{" "}
                 {view.status === "confirming" ? view.version : ""} locally.
               </p>
             </div>

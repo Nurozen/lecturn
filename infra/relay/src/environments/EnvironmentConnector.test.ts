@@ -28,6 +28,7 @@ import * as Tracer from "effect/Tracer";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
 import * as EnvironmentLinks from "./EnvironmentLinks.ts";
+import * as ManagedAccess from "../billing/ManagedAccess.ts";
 import * as RelayConfiguration from "../Config.ts";
 import * as EnvironmentConnector from "./EnvironmentConnector.ts";
 import * as ManagedEndpointAllocations from "./ManagedEndpointAllocations.ts";
@@ -161,11 +162,15 @@ function connectorTestLayer(
     request: HttpClientRequest.HttpClientRequest,
   ) => Effect.Effect<HttpClientResponse.HttpClientResponse>,
   options?: {
+    readonly access?: ManagedAccess.ManagedAccess["Service"];
     readonly links?: EnvironmentLinks.EnvironmentLinks["Service"];
     readonly allocations?: ManagedEndpointAllocations.ManagedEndpointAllocations["Service"];
   },
 ) {
   return EnvironmentConnector.layer.pipe(
+    Layer.provide(
+      Layer.succeed(ManagedAccess.ManagedAccess, options?.access ?? ManagedAccess.disabled),
+    ),
     Layer.provide(NodeCryptoLayer.layer),
     Layer.provide(Layer.succeed(EnvironmentLinks.EnvironmentLinks, options?.links ?? makeLinks())),
     Layer.provide(
@@ -231,6 +236,78 @@ function makeLinks(
 }
 
 describe("EnvironmentConnector", () => {
+  for (const operation of ["connect", "status"] as const) {
+    it.effect(`rejects unpaid managed ${operation} before contacting the environment`, () =>
+      Effect.gen(function* () {
+        const connector = yield* EnvironmentConnector.EnvironmentConnector;
+        const result = yield* Effect.result(
+          operation === "connect"
+            ? connector
+                .connect({
+                  userId: "user_123",
+                  environmentId: "env-connector-test",
+                  clientProofKeyThumbprint: "client-key",
+                })
+                .pipe(Effect.asVoid)
+            : connector
+                .status({
+                  userId: "user_123",
+                  environmentId: "env-connector-test",
+                })
+                .pipe(Effect.asVoid),
+        );
+        expect(result._tag).toBe("Failure");
+        if (result._tag === "Failure") expect(result.failure._tag).toBe("ManagedAccessRequired");
+      }).pipe(
+        Effect.provide(
+          connectorTestLayer(() => Effect.die("No upstream call permitted"), {
+            access: {
+              check: () =>
+                Effect.fail(
+                  new ManagedAccess.ManagedAccessRequired({ message: "Subscription required" }),
+                ),
+            },
+          }),
+        ),
+      ),
+    );
+  }
+  it.effect("withholds minted credentials if access expires during the environment request", () => {
+    let eligible = true;
+    const execute = (request: HttpClientRequest.HttpClientRequest) =>
+      Effect.sync(() => {
+        const mint = decodeMintRequestBody(requestBodyText(request));
+        eligible = false;
+        return HttpClientResponse.fromWeb(request, Response.json(signMintResponse(mint)));
+      });
+    return Effect.gen(function* () {
+      const connector = yield* EnvironmentConnector.EnvironmentConnector;
+      const result = yield* Effect.result(
+        connector.connect({
+          userId: "user_123",
+          environmentId: "env-connector-test",
+          clientProofKeyThumbprint: "client-key",
+        }),
+      );
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") expect(result.failure._tag).toBe("ManagedAccessRequired");
+      expect(eligible).toBe(false);
+    }).pipe(
+      Effect.provide(
+        connectorTestLayer(execute, {
+          access: {
+            check: () =>
+              eligible
+                ? Effect.void
+                : Effect.fail(
+                    new ManagedAccess.ManagedAccessRequired({ message: "Subscription expired" }),
+                  ),
+          },
+        }),
+      ),
+    );
+  });
+
   it.effect("loads the environment link and managed allocation concurrently", () =>
     Effect.gen(function* () {
       const started = yield* Ref.make(0);

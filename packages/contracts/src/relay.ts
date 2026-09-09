@@ -467,6 +467,16 @@ export class RelayEnvironmentLinkUnavailableError extends Schema.TaggedErrorClas
   }
 }
 
+export class RelayConnectSubscriptionRequiredError extends Schema.TaggedErrorClass<RelayConnectSubscriptionRequiredError>()(
+  "RelayConnectSubscriptionRequiredError",
+  { code: Schema.Literal("connect_subscription_required"), traceId: TrimmedNonEmptyString },
+  { httpApiStatus: 403 },
+) {
+  override get message(): string {
+    return "An active Connect subscription is required for this managed service.";
+  }
+}
+
 export class RelayEnvironmentLinkLimitExceededError extends Schema.TaggedErrorClass<RelayEnvironmentLinkLimitExceededError>()(
   "RelayEnvironmentLinkLimitExceededError",
   {
@@ -523,6 +533,7 @@ export class RelayInternalError extends Schema.TaggedErrorClass<RelayInternalErr
 }
 
 export const RelayProtectedError = Schema.Union([
+  RelayConnectSubscriptionRequiredError,
   RelayAuthInvalidError,
   RelayEnvironmentLinkProofExpiredError,
   RelayEnvironmentLinkProofInvalidError,
@@ -541,6 +552,7 @@ export type RelayProtectedError = typeof RelayProtectedError.Type;
 const RelayAuthAndInternalErrors = [RelayAuthInvalidError, RelayInternalError] as const;
 
 const RelayEnvironmentLinkErrors = [
+  RelayConnectSubscriptionRequiredError,
   RelayAuthInvalidError,
   RelayEnvironmentLinkProofExpiredError,
   RelayEnvironmentLinkProofInvalidError,
@@ -551,6 +563,7 @@ const RelayEnvironmentLinkErrors = [
 ] as const;
 
 const RelayEnvironmentConnectErrors = [
+  RelayConnectSubscriptionRequiredError,
   RelayAuthInvalidError,
   RelayEnvironmentConnectNotAuthorizedError,
   RelayEnvironmentEndpointUnavailableError,

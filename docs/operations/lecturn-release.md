@@ -5,7 +5,8 @@ Lecturn is a fork of [T3 Code](https://github.com/pingdotgg/t3code). This page c
 ## Branch model
 
 - `main` is the product line. Fork releases are cut from it.
-- `upstream-main` is a pristine mirror of upstream `main`, force-updated by the nightly `upstream-sync.yml` workflow (09:23 UTC). Clean merges land on `main` automatically; conflicts open a PR from `upstream-main` listing the files to resolve.
+- `t3mirror` is a pristine mirror of upstream `main`, force-updated by the nightly `t3mirror-sync.yml` workflow (09:23 UTC). It replaces the old `upstream-main` branch. Cut upstream-bound PR branches from it, never from `main`, so they cannot carry fork-only commits.
+- Nothing from upstream lands on `main` automatically. A nightly launchd job runs `.github/upstream-integration/integrate-local.sh` on your machine, inside the `lecturn-upstream` Stave space: it merges `t3mirror` in, has Claude resolve conflicts and typecheck the result, and opens a PR assigned to you. CI gates it; you merge it. `upstream-integrate.yml` is the same flow in Actions, kept disabled as a travel fallback. See [upstream integration](./upstream-integration.md).
 - Upstream tags are never fetched or pushed here. Pushing an upstream `v*.*.*` tag would trigger this fork's release pipeline.
 
 ## What the fork's `release.yml` removes

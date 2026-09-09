@@ -1,9 +1,12 @@
+import { sql } from "drizzle-orm";
 import type {
   RelayAgentActivityAggregateState,
   RelayAgentActivityState,
   RelayAgentAwarenessPreferences,
 } from "@t3tools/contracts/relay";
 import {
+  bigint,
+  check,
   boolean,
   index,
   integer,
@@ -187,5 +190,168 @@ export const relayDpopProofs = pgTable(
   (table) => [
     primaryKey({ columns: [table.thumbprint, table.jti] }),
     index("idx_relay_dpop_proofs_expires_at").on(table.expiresAt),
+  ],
+);
+
+/** Minimal durable billing state. Provider operations are fenced by a short account lease. */
+export const relayBillingAccounts = pgTable("relay_billing_accounts", {
+  userId: varchar("user_id", { length: 255 }).primaryKey(),
+  customerId: varchar("customer_id", { length: 255 }).unique(),
+  deletedAt: bigint("deleted_at", { mode: "number" }),
+  generation: integer("generation").notNull().default(0),
+  leaseToken: varchar("lease_token", { length: 64 }),
+  leaseUntil: bigint("lease_until", { mode: "number" }).notNull().default(0),
+  reconcileAfter: bigint("reconcile_after", { mode: "number" }).notNull().default(0),
+  state: jsonb("state").notNull().default({}),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+});
+
+export const relayBillingInbox = pgTable(
+  "relay_billing_inbox",
+  {
+    id: varchar("id", { length: 255 }).primaryKey(),
+    customerId: varchar("customer_id", { length: 255 }),
+    userId: varchar("user_id", { length: 255 }),
+    kind: varchar("kind", { length: 255 }).notNull(),
+    objectId: text("object_id"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    processedAt: bigint("processed_at", { mode: "number" }),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: bigint("next_attempt_at", { mode: "number" }).notNull().default(0),
+  },
+  (table) => [index("relay_billing_inbox_pending").on(table.processedAt, table.createdAt)],
+);
+
+/** Enabled pending and offline environments consume capacity until explicitly disabled. */
+export const relayManagedReservations = pgTable(
+  "relay_managed_reservations",
+  {
+    userId: varchar("user_id", { length: 255 }).notNull(),
+    environmentId: varchar("environment_id", { length: 191 }).notNull(),
+    generation: integer("generation").notNull(),
+    accountGeneration: integer("account_generation").notNull(),
+    enabled: boolean("enabled").notNull(),
+    state: varchar("state", { length: 16 }).notNull().$type<"pending" | "active" | "disabled">(),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.environmentId] })],
+);
+
+export const relayManagedSuspensions = pgTable(
+  "relay_managed_suspensions",
+  {
+    tunnelId: text("tunnel_id").primaryKey(),
+    userId: text("user_id").notNull(),
+    environmentId: text("environment_id").notNull(),
+    accountGeneration: integer("account_generation").notNull(),
+    reservationGeneration: integer("reservation_generation"),
+    stage: text("stage").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    retryAt: bigint("retry_at", { mode: "number" }).notNull().default(0),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    completedAt: bigint("completed_at", { mode: "number" }),
+    lastError: text("last_error"),
+  },
+  (table) => [
+    index("idx_relay_managed_suspensions_pending")
+      .on(table.userId, table.environmentId)
+      .where(sql`${table.completedAt} IS NULL`),
+    index("idx_relay_managed_suspensions_retry")
+      .on(table.retryAt)
+      .where(sql`${table.completedAt} IS NULL`),
+  ],
+);
+
+export const relayBillingEnforcementControl = pgTable(
+  "relay_billing_enforcement_control",
+  {
+    id: integer("id").primaryKey(),
+    enabled: boolean("enabled").notNull().default(false),
+    epoch: integer("epoch").notNull().default(0),
+  },
+  (table) => [check("relay_billing_enforcement_control_singleton", sql`${table.id}=1`)],
+);
+
+export const relayBillingIdentityChecks = pgTable("relay_billing_identity_checks", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => relayBillingAccounts.userId),
+  nextCheckAt: bigint("next_check_at", { mode: "number" }).notNull().default(0),
+  checkedAt: bigint("checked_at", { mode: "number" }),
+  outcome: text("outcome"),
+});
+
+export const relayBillingOperatorAudit = pgTable("relay_billing_operator_audit", {
+  id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+  operation: text("operation").notNull(),
+  target: text("target"),
+  reason: text("reason").notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+});
+
+export const relayBillingGrantAudit = pgTable(
+  "relay_billing_grant_audit",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    operator: text("operator").notNull(),
+    action: text("action").notNull(),
+    reason: text("reason").notNull(),
+    grantId: text("grant_id"),
+    startsAt: bigint("starts_at", { mode: "number" }),
+    endsAt: bigint("ends_at", { mode: "number" }),
+    environmentLimit: integer("environment_limit"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    check("relay_billing_grant_audit_action", sql`${table.action} IN ('grant','revoke')`),
+  ],
+);
+
+export const relayBillingPaymentReviews = pgTable("relay_billing_payment_reviews", {
+  invoiceId: text("invoice_id").primaryKey(),
+  userId: text("user_id").notNull(),
+  customerId: text("customer_id").notNull(),
+  subscriptionId: text("subscription_id").notNull(),
+  amountPaid: bigint("amount_paid", { mode: "number" }).notNull(),
+  currency: text("currency").notNull(),
+  paidAt: bigint("paid_at", { mode: "number" }).notNull(),
+  deletedAt: bigint("deleted_at", { mode: "number" }).notNull(),
+  reason: text("reason").notNull(),
+  status: text("status").notNull().default("pending"),
+  detectedAt: bigint("detected_at", { mode: "number" }).notNull(),
+  resolvedAt: bigint("resolved_at", { mode: "number" }),
+  resolution: text("resolution"),
+  operator: text("operator"),
+});
+
+export const relayManagedGatewayAccounts = pgTable(
+  "relay_managed_gateway_accounts",
+  {
+    userId: text("user_id").primaryKey(),
+    generation: bigint("generation", { mode: "number" }).notNull().default(0),
+    nextSyncAt: bigint("next_sync_at", { mode: "number" }).notNull().default(0),
+  },
+  (table) => [index("idx_relay_managed_gateway_accounts_due").on(table.nextSyncAt, table.userId)],
+);
+
+export const relayManagedGatewayEnvironments = pgTable(
+  "relay_managed_gateway_environments",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => relayManagedGatewayAccounts.userId),
+    environmentId: text("environment_id").notNull(),
+    publicHostname: text("public_hostname").notNull(),
+    originHostname: text("origin_hostname").notNull(),
+    originDnsRecordId: text("origin_dns_record_id"),
+    generation: bigint("generation", { mode: "number" }).notNull(),
+    ready: boolean("ready").notNull().default(false),
+    deleting: boolean("deleting").notNull().default(false),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.environmentId] }),
+    uniqueIndex("idx_relay_managed_gateway_public_hostname").on(table.publicHostname),
+    uniqueIndex("idx_relay_managed_gateway_origin_hostname").on(table.originHostname),
   ],
 );

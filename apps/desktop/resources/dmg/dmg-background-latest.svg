@@ -1,12 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1080" height="760" viewBox="0 0 540 380" fill="none">
 <defs><linearGradient id="surface" x2="1" y2="1"><stop stop-color="#102A39"/><stop offset="1" stop-color="#030B13"/></linearGradient></defs>
 <rect width="540" height="380" fill="url(#surface)"/>
-<path d="M28 111H512M28 282H512" stroke="#C89954" stroke-opacity=".3"/>
+<path d="M28 111H512M28 300H512" stroke="#C89954" stroke-opacity=".3"/>
 <circle cx="456" cy="45" r="92" stroke="#C89954" stroke-opacity=".1"/><circle cx="456" cy="45" r="72" stroke="#C89954" stroke-opacity=".15"/>
 <g fill="#E5D1AC" font-family="Georgia,serif"><text x="32" y="56" font-size="30" letter-spacing="1">Lecturn</text></g>
 <text x="33" y="82" font-family="-apple-system,sans-serif" fill="#C89954" font-size="10" letter-spacing="2">YOUR WORK, ILLUMINATED</text>
 <text x="508" y="50" text-anchor="end" font-family="-apple-system,sans-serif" fill="#A9ACAA" font-size="9" letter-spacing="1.5">DESKTOP</text>
-<path d="M217 210H320M310 202L320 210L310 218" stroke="#C89954" stroke-width="1.5" stroke-linecap="round"/>
+<!-- Finder draws the real icons and black filenames above this bitmap. Keep
+     both drop targets on light surfaces, including in macOS dark appearance. -->
+<rect x="35" y="161" width="190" height="133" rx="16" fill="#E5D1AC"/>
+<rect x="325" y="161" width="170" height="133" rx="16" fill="#E5D1AC"/>
+<!-- A visible folder cue remains beneath the real /Applications alias when
+     Finder fails to render its system icon on a mounted disk image. -->
+<path d="M378 198V191Q378 187 382 187H400L407 194H438Q442 194 442 198V240Q442 244 438 244H382Q378 244 378 240Z" fill="#102A39" stroke="#C89954" stroke-width="1.5"/>
+<path d="M398 231L410 205L422 231M403 221H417" stroke="#E5D1AC" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M235 210H309M299 202L309 210L299 218" stroke="#C89954" stroke-width="1.5" stroke-linecap="round"/>
 <text x="270" y="323" text-anchor="middle" font-family="-apple-system,sans-serif" fill="#E5D1AC" font-size="13">Drag Lecturn to Applications</text>
 <text x="270" y="346" text-anchor="middle" font-family="-apple-system,sans-serif" fill="#A9ACAA" font-size="10">A separate home for your work.</text>
 </svg>
