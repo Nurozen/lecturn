@@ -734,7 +734,10 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
           })
           .pipe(
             Effect.mapError(relayRequestError("create relay environment link challenge")),
-            timeoutRelayRequest("Relay environment link challenge"),
+            timeoutRelayRequest(
+              "Relay environment link challenge",
+              MANAGED_RELAY_LIFECYCLE_TIMEOUT_MS,
+            ),
           );
       },
       Effect.withSpan("clientRuntime.managedRelay.createEnvironmentLinkChallenge"),

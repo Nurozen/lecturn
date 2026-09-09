@@ -1,3 +1,4 @@
+import type { ManagedRelayClientError } from "./managedRelay.ts";
 import type { DpopFailureReason } from "@t3tools/contracts";
 import type { RelayProtectedError } from "@t3tools/contracts/relay";
 
@@ -65,4 +66,14 @@ export function relayProtectedErrorMessage(error: RelayProtectedError): string {
     case "RelayInternalError":
       return `Relay encountered an internal error (${error.reason}).`;
   }
+}
+
+/** Keep actionable transport failures when client surfaces wrap the relay error. */
+export function relayClientErrorDetail(error: ManagedRelayClientError): string | null {
+  if (error._tag === "ManagedRelayRequestTimeoutError") {
+    return `${error.activity} timed out after ${error.timeoutMs / 1000} seconds. Check your connection and try again.`;
+  }
+  return error._tag === "ManagedRelayRequestFailedError" && error.relayError
+    ? relayProtectedErrorMessage(error.relayError)
+    : null;
 }

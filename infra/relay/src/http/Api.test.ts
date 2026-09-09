@@ -575,3 +575,42 @@ describe("relay routing fallback", () => {
     }).pipe(Effect.scoped),
   );
 });
+
+for (const [method, path, origin, preflightMethod, expectedOrigin] of [
+  ["GET", "/v1/billing/status", "lecturn://app", "", "lecturn://app"],
+  ["OPTIONS", "/v1/billing/status", "lecturn://app", "GET", "lecturn://app"],
+  ["OPTIONS", "/v1/billing/status", "lecturn://app", "POST", undefined],
+  ["POST", "/v1/billing/checkout", "lecturn://app", "", undefined],
+  ["OPTIONS", "/v1/billing/portal", "lecturn://app", "POST", undefined],
+  ["GET", "/v1/billing/status", "https://untrusted.example", "", undefined],
+  [
+    "GET",
+    "/v1/billing/status",
+    "https://lecturn.cloudgatherer.net",
+    "",
+    "https://lecturn.cloudgatherer.net",
+  ],
+] as const) {
+  it.effect(`billing CORS ${method} ${path} ${origin} ${preflightMethod}`, () =>
+    Effect.gen(function* () {
+      const httpEffect = yield* HttpRouter.toHttpEffect(Layer.merge(relayNotFoundRoute, relayCors));
+      const response = yield* httpEffect.pipe(
+        Effect.provideService(
+          HttpServerRequest.HttpServerRequest,
+          HttpServerRequest.fromWeb(
+            new Request(`https://relay.cloudgatherer.net${path}`, {
+              method,
+              headers: { origin, "access-control-request-method": preflightMethod },
+            }),
+          ),
+        ),
+      );
+      expect(response.headers["access-control-allow-origin"]).toBe(expectedOrigin);
+      if (method === "OPTIONS") expect(response.status).toBe(expectedOrigin ? 204 : 403);
+      if (origin === "lecturn://app" && expectedOrigin && method === "OPTIONS") {
+        expect(response.headers["access-control-allow-methods"]).toBe("GET,OPTIONS");
+        expect(response.headers["access-control-allow-headers"]).toContain("authorization");
+      }
+    }).pipe(Effect.scoped),
+  );
+}

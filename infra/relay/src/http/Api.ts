@@ -138,9 +138,17 @@ export const makeRelayCors = (billingOrigin = "https://lecturn.cloudgatherer.net
       const request = yield* HttpServerRequest.HttpServerRequest;
       const billingRequest = request.url.startsWith("/v1/billing/");
       if (billingRequest) {
-        const allowed = request.headers.origin === billingOrigin;
+        const desktopStatus =
+          request.headers.origin === "lecturn://app" &&
+          request.url.split("?")[0] === "/v1/billing/status" &&
+          (request.method === "GET" ||
+            (request.method === "OPTIONS" &&
+              request.headers["access-control-request-method"] === "GET"));
+        const allowed = request.headers.origin === billingOrigin || desktopStatus;
         const headers = {
-          ...(allowed ? { "access-control-allow-origin": billingOrigin } : {}),
+          ...(allowed
+            ? { "access-control-allow-origin": desktopStatus ? "lecturn://app" : billingOrigin }
+            : {}),
           "access-control-expose-headers": relayCorsExposedHeaders.join(","),
           vary: "Origin",
         };
@@ -149,7 +157,7 @@ export const makeRelayCors = (billingOrigin = "https://lecturn.cloudgatherer.net
             status: allowed ? 204 : 403,
             headers: {
               ...headers,
-              "access-control-allow-methods": "GET,POST,OPTIONS",
+              "access-control-allow-methods": desktopStatus ? "GET,OPTIONS" : "GET,POST,OPTIONS",
               "access-control-allow-headers": relayCorsAllowedHeaders.join(","),
             },
           });
