@@ -31,7 +31,8 @@ export const clerkIdentityLookup =
           {
             headers: { Authorization: `Bearer ${secretKey}` },
             signal: AbortSignal.timeout(5_000),
-            redirect: "error",
+            // Workers rejects "error"; manual preserves fail-closed status validation below.
+            redirect: "manual",
           },
         );
         if (response.ok) {

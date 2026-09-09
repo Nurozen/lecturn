@@ -48,6 +48,41 @@ describe("missed Clerk deletion compensation", () => {
       expect(result._tag).toBe("Failure");
     }),
   );
+  it.effect("checks identities with the redirect modes supported by Workers", () =>
+    Effect.gen(function* () {
+      const lookup = clerkIdentityLookup("sk_test", async (_url, options) => {
+        // Workers rejects redirect: "error" before making the request.
+        if (options?.redirect === "error") throw new TypeError("Invalid redirect value");
+        expect(options?.redirect).toBe("manual");
+        return Response.json({ id: "user" });
+      });
+      expect(yield* lookup("user")).toBe("present");
+    }),
+  );
+  it.effect("never follows redirects or treats their response body as a deleted identity", () =>
+    Effect.gen(function* () {
+      let requests = 0;
+      let tombstones = 0;
+      let redirect: RequestRedirect | undefined;
+      const lookup = clerkIdentityLookup("sk_test", async (_url, options) => {
+        requests++;
+        redirect = options?.redirect;
+        return Response.json(
+          { errors: [{ code: "resource_not_found" }] },
+          { status: 302, headers: { Location: "https://untrusted.example/users/user" } },
+        );
+      });
+      const result = yield* reconcileIdentity("user", 100, lookup, () =>
+        Effect.sync(() => {
+          tombstones++;
+        }),
+      ).pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      expect(redirect).toBe("manual");
+      expect(requests).toBe(1);
+      expect(tombstones).toBe(0);
+    }),
+  );
   for (const status of [401, 403, 429, 500, 502]) {
     it.effect(`treats Clerk HTTP ${status} as uncertainty`, () =>
       Effect.gen(function* () {
