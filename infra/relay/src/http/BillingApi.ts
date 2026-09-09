@@ -91,7 +91,7 @@ export function billingRoutes(config: BillingConfig, clerkWebhookSecret = "") {
           Effect.flatMap(Schema.decodeUnknownEffect(RelayBillingCheckoutRequest)),
           Effect.mapError(badRequest),
         );
-        if (config.mode !== "observe" || !config.checkoutEnabled)
+        if (config.mode === "disabled" || !config.checkoutEnabled)
           return yield* new BillingError({
             code: "disabled",
             message: "Subscription checkout is not available.",
@@ -104,7 +104,10 @@ export function billingRoutes(config: BillingConfig, clerkWebhookSecret = "") {
           Effect.flatMap(Schema.decodeUnknownEffect(RelayBillingReconcileRequest)),
           Effect.mapError(badRequest),
         );
-        if (!/^cs_test_[A-Za-z0-9]+$/.test(payload.sessionId)) return yield* badRequest();
+        const sessionPattern = config.livemode
+          ? /^cs_live_[A-Za-z0-9]+$/
+          : /^cs_test_[A-Za-z0-9]+$/;
+        if (!sessionPattern.test(payload.sessionId)) return yield* badRequest();
         return json(yield* service.reconcile(userId, payload.sessionId));
       }
       return json(yield* service.portal(userId));

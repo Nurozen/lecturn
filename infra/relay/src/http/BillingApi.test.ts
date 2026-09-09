@@ -189,6 +189,77 @@ describe("billing HTTP boundary", () => {
       ).toBe(400);
     }),
   );
+  it.effect("allows verified live checkout when paid enforcement is enabled", () =>
+    Effect.gen(function* () {
+      auth();
+      vi.mocked(createClerkClient).mockReturnValue({
+        users: {
+          getUser: vi.fn().mockResolvedValue({
+            banned: false,
+            locked: false,
+            emailAddresses: [{ verification: { status: "verified" } }],
+          }),
+        },
+      } as never);
+      const checkout = vi.fn(() => Effect.succeed({ url: "https://checkout.stripe.com/live" }));
+      const response = yield* run(
+        post("checkout", { interval: "month" }),
+        makeService({ checkout }),
+        {
+          ...config,
+          mode: "enforce",
+          livemode: true,
+          checkoutEnabled: true,
+        },
+      );
+      expect(response.status).toBe(200);
+      expect(checkout).toHaveBeenCalledWith("user_verified", "month");
+      expect(
+        (yield* run(post("checkout", { interval: "month" }), makeService({ checkout }), {
+          ...config,
+          mode: "enforce",
+          livemode: true,
+          checkoutEnabled: false,
+        })).status,
+      ).toBe(503);
+      expect(checkout).toHaveBeenCalledTimes(1);
+    }),
+  );
+  it.effect(
+    "reconciles only Checkout session identifiers matching the configured Stripe mode",
+    () =>
+      Effect.gen(function* () {
+        auth();
+        for (const livemode of [false, true]) {
+          const reconcile = vi.fn(() => Effect.succeed(disabledStatus));
+          const activeConfig = { ...config, mode: "observe" as const, livemode };
+          const sessionId = livemode ? "cs_live_Example123" : "cs_test_Example123";
+          expect(
+            (yield* run(
+              post("checkout/reconcile", { sessionId }),
+              makeService({ reconcile }),
+              activeConfig,
+            )).status,
+          ).toBe(200);
+          expect(reconcile).toHaveBeenCalledWith("user_verified", sessionId);
+          for (const invalidId of [
+            livemode ? "cs_test_Example123" : "cs_live_Example123",
+            "cs_live_",
+            "cs_other_Example123",
+            "cs_live_Example/123",
+          ]) {
+            expect(
+              (yield* run(
+                post("checkout/reconcile", { sessionId: invalidId }),
+                makeService({ reconcile }),
+                activeConfig,
+              )).status,
+            ).toBe(400);
+          }
+          expect(reconcile).toHaveBeenCalledTimes(1);
+        }
+      }),
+  );
   it.effect("passes exact raw bytes to durable webhook ingestion", () =>
     Effect.gen(function* () {
       const receipt = vi.fn(() => Effect.void);
