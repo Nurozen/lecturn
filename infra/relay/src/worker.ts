@@ -59,6 +59,7 @@ import {
 import { ManagedEndpointZone, RelayApiZone, RelayDeploymentConfig } from "./zone.ts";
 import { relayStageSlug } from "./deploymentConfig.ts";
 import { makeRelayTraceLayer, RelayObservability } from "./observability.ts";
+import { reportBillingHealth, traceBillingMaintenance } from "./billing/BillingHealthTelemetry.ts";
 import * as DeliveryAttempts from "./agentActivity/DeliveryAttempts.ts";
 import * as AgentActivityRows from "./agentActivity/AgentActivityRows.ts";
 import * as Devices from "./agentActivity/Devices.ts";
@@ -517,11 +518,7 @@ export const ApiLive = Api.make(
               Effect.timeout("45 seconds"),
               Effect.catch(() => Effect.logWarning("Billing provider reconciliation deferred")),
             ),
-            operations
-              .health()
-              .pipe(
-                Effect.flatMap((health) => Effect.logInfo("Billing operational health", health)),
-              ),
+            reportBillingHealth(operations.health()),
           ];
           if (identityReconciliation)
             tasks.push(operations.reconcileIdentities(5).pipe(Effect.asVoid));
@@ -552,7 +549,9 @@ export const ApiLive = Api.make(
             ),
             { concurrency: "unbounded", discard: true },
           );
-        }).pipe(Effect.withSpan("relay.billing.reconcile_pending"), Effect.provide(runtimeLayer)),
+        }).pipe(Effect.provide(runtimeLayer), (maintenance) =>
+          traceBillingMaintenance(maintenance, relayTraceLayer),
+        ),
       );
     }
 
