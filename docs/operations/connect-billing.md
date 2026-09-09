@@ -4,7 +4,15 @@ Lecturn uses Clerk user IDs for ownership and Stripe Billing for Connect subscri
 
 ## Account and payment flow
 
-The hosted `/account/billing` route works without a connected environment and presents account settings in a dialog. Desktop opens the hosted account entry through its external-browser bridge. Mobile displays account status without directing users to external payment. Stripe hosts card entry, invoice history and payment-method management.
+The hosted `/account/billing` route works without a connected environment and presents account settings in a dialog. Desktop reads access using its own signed-in Clerk identity and opens billing management in the external browser, which may have a separate signed-in account. Mobile displays account access, quota and expiry without directing users to external payment. Stripe hosts card entry, invoice history and payment-method management.
+
+### iOS companion distribution
+
+The iOS app consumes existing account entitlements. Do not add Stripe checkout, subscription prices, upgrade calls to action or external purchase links to its native screens. There is no StoreKit purchase or restore-purchases flow in this model; signing into the same Clerk account restores access from the relay.
+
+Explain the companion model accurately in App Review notes and provide a working review account with Connect access and a reachable test environment. Do not hide different purchase behavior from reviewers. Apple's [App Review guideline 3.1.3(f)](https://developer.apple.com/app-store/review/guidelines/#other-purchase-methods) describes free companions to paid web tools; Apple determines whether the app qualifies. Beta approval of an older build does not approve a new billing experience.
+
+Client source changes require a desktop build and an iOS build or compatible Expo update before installed clients receive them. Backend deployment alone does not update bundled UI. Keep paid enforcement disabled until those clients have been exercised against the deployed account service.
 
 | Endpoint                              | Purpose                                                          |
 | ------------------------------------- | ---------------------------------------------------------------- |

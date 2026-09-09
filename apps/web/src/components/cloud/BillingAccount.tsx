@@ -6,33 +6,14 @@ import { resolveCloudPublicConfig, resolveRelayClerkTokenOptions } from "../../c
 import { configuredHostedAppUrl, isHostedStaticApp } from "../../hostedPairing";
 import { CreditCardIcon, RadioTowerIcon } from "lucide-react";
 import { Button } from "../ui/button";
+import { useT3ConnectAuthPrompt } from "../clerk/useT3ConnectAuthPrompt";
+import { createBillingStatusLoader } from "./billingStatusLoader";
 
 export function BillingAccount({ embedded = false }: { embedded?: boolean }) {
-  if (!isHostedStaticApp()) {
-    return (
-      <section className="space-y-5 p-6 sm:p-8">
-        <h2 className="font-heading text-2xl">Connect subscription</h2>
-        <p className="text-sm text-muted-foreground">
-          Manage your subscription securely in your browser. Sign in with the same Lecturn account.
-        </p>
-        <a
-          className="inline-flex rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-sm font-medium text-foreground"
-          href={new URL("/account/billing", configuredHostedAppUrl()).href}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Open billing in browser
-        </a>
-        <p className="text-xs text-muted-foreground">
-          Local connections, direct pairing, SSH and Tailscale remain free.
-        </p>
-      </section>
-    );
-  }
-  return <HostedBillingAccount embedded={embedded} />;
+  return <HostedBillingAccount embedded={embedded} hosted={isHostedStaticApp()} />;
 }
 
-function HostedBillingAccount({ embedded }: { embedded: boolean }) {
+function HostedBillingAccount({ embedded, hosted }: { embedded: boolean; hosted: boolean }) {
   const { isLoaded, isSignedIn, userId } = useAuth();
   if (!isLoaded)
     return (
@@ -45,19 +26,30 @@ function HostedBillingAccount({ embedded }: { embedded: boolean }) {
       key={userId ?? "signed-out"}
       signedIn={Boolean(isSignedIn)}
       embedded={embedded}
+      hosted={hosted}
     />
   );
 }
 
-function SignedBillingAccount({ signedIn, embedded }: { signedIn: boolean; embedded: boolean }) {
+function SignedBillingAccount({
+  signedIn,
+  embedded,
+  hosted,
+}: {
+  signedIn: boolean;
+  embedded: boolean;
+  hosted: boolean;
+}) {
   const { getToken } = useAuth();
   const clerk = useClerk();
+  const { authPrompt, openAuthPrompt } = useT3ConnectAuthPrompt();
   const { user } = useUser();
   const [status, setStatus] = useState<RelayBillingStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const mounted = useRef(true);
   const busy = useRef(false);
+  const statusLoader = useRef<ReturnType<typeof createBillingStatusLoader> | null>(null);
   const client = useMemo(
     () =>
       createBillingClient({
@@ -69,26 +61,33 @@ function SignedBillingAccount({ signedIn, embedded }: { signedIn: boolean; embed
 
   useEffect(() => {
     mounted.current = true;
-    let cancelled = false;
+    const loader = createBillingStatusLoader(client, {
+      status: (value) => {
+        setStatus(value);
+        setError(null);
+      },
+      error: () => setError("Your subscription could not be checked. Refresh to try again."),
+    });
+    statusLoader.current = loader;
+    const refresh = () => {
+      if (signedIn) void loader.refresh();
+    };
     if (signedIn) {
-      const sessionId = new URL(window.location.href).searchParams.get("session_id");
-      const request = sessionId ? client.reconcile(sessionId) : client.getStatus();
-      void request.then(
-        (value) => {
-          if (!cancelled) setStatus(value);
-        },
-        () => {
-          if (!cancelled) setError("Your subscription could not be checked. Refresh to try again.");
-        },
-      );
+      const sessionId = hosted
+        ? new URL(window.location.href).searchParams.get("session_id")
+        : null;
+      void loader.refresh(sessionId ?? undefined);
     }
+    if (!hosted) window.addEventListener("focus", refresh);
     return () => {
-      cancelled = true;
+      loader.dispose();
+      statusLoader.current = null;
+      window.removeEventListener("focus", refresh);
       mounted.current = false;
     };
-  }, [client, signedIn]);
+  }, [client, signedIn, hosted]);
 
-  async function run(action: () => Promise<RelayBillingStatus | string>) {
+  async function run(action: () => Promise<RelayBillingStatus | string | void>) {
     if (busy.current) return;
     busy.current = true;
     setPending(true);
@@ -97,7 +96,7 @@ function SignedBillingAccount({ signedIn, embedded }: { signedIn: boolean; embed
       const result = await action();
       if (!mounted.current) return;
       if (typeof result === "string") window.location.assign(result);
-      else setStatus(result);
+      else if (result) setStatus(result);
     } catch {
       if (mounted.current)
         setError("The billing request could not be completed. Refresh your status and try again.");
@@ -108,6 +107,7 @@ function SignedBillingAccount({ signedIn, embedded }: { signedIn: boolean; embed
   }
   return (
     <section className="mx-auto w-full max-w-2xl space-y-7 px-6 py-8 sm:px-8">
+      {authPrompt}
       <header>
         <div className="mb-4 flex size-11 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary">
           <RadioTowerIcon className="size-5" />
@@ -123,7 +123,11 @@ function SignedBillingAccount({ signedIn, embedded }: { signedIn: boolean; embed
       {!signedIn ? (
         <Button
           onClick={() =>
-            void clerk.openSignIn({ forceRedirectUrl: `${window.location.origin}/account/billing` })
+            hosted
+              ? void clerk.openSignIn({
+                  forceRedirectUrl: `${window.location.origin}/account/billing`,
+                })
+              : openAuthPrompt()
           }
         >
           Sign in
@@ -185,7 +189,7 @@ function SignedBillingAccount({ signedIn, embedded }: { signedIn: boolean; embed
                   )}
                 </>
               )}
-              {status.checkoutEnabled && (
+              {hosted && status.checkoutEnabled && (
                 <>
                   <p className="text-sm">
                     Connect includes three managed environments, push notifications and Live
@@ -218,7 +222,7 @@ function SignedBillingAccount({ signedIn, embedded }: { signedIn: boolean; embed
                   </div>
                 </>
               )}
-              {status.portalEnabled && (
+              {hosted && status.portalEnabled && (
                 <Button disabled={pending} onClick={() => void run(client.portal)}>
                   Manage payment and cancellation
                 </Button>
@@ -226,18 +230,40 @@ function SignedBillingAccount({ signedIn, embedded }: { signedIn: boolean; embed
             </section>
           )}
           <div className="flex gap-3">
-            <Button variant="outline" disabled={pending} onClick={() => void run(client.getStatus)}>
+            <Button
+              variant="outline"
+              disabled={pending}
+              onClick={() => void run(() => statusLoader.current?.refresh() ?? Promise.resolve())}
+            >
               Refresh status
             </Button>
             <Button
               variant="ghost"
               onClick={() =>
-                void clerk.signOut({ redirectUrl: `${window.location.origin}/account/billing` })
+                void clerk.signOut(
+                  hosted ? { redirectUrl: `${window.location.origin}/account/billing` } : undefined,
+                )
               }
             >
               Sign out
             </Button>
           </div>
+          {!hosted && (
+            <div className="space-y-3">
+              <a
+                className="inline-flex rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-sm font-medium text-foreground"
+                href={new URL("/account/billing", configuredHostedAppUrl()).href}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Manage billing in browser
+              </a>
+              <p className="text-sm text-muted-foreground">
+                Use the same Lecturn account in your browser. Your subscription status refreshes
+                when you return.
+              </p>
+            </div>
+          )}
           <p className="text-sm text-muted-foreground">
             If you just completed Checkout, refresh status while confirmation arrives. Returning
             from Checkout alone does not activate access.
@@ -269,17 +295,27 @@ function SignedBillingAccount({ signedIn, embedded }: { signedIn: boolean; embed
             Local, direct, SSH and Tailscale connections remain free.
           </p>
           <p>
-            <a className="underline" href="/terms-of-service/" target="_blank" rel="noreferrer">
+            <a
+              className="underline"
+              href={new URL("/terms-of-service/", configuredHostedAppUrl()).href}
+              target="_blank"
+              rel="noreferrer"
+            >
               Service terms
             </a>{" "}
             and{" "}
-            <a className="underline" href="/privacy-policy/" target="_blank" rel="noreferrer">
+            <a
+              className="underline"
+              href={new URL("/privacy-policy/", configuredHostedAppUrl()).href}
+              target="_blank"
+              rel="noreferrer"
+            >
               privacy notice
             </a>
           </p>
         </div>
       </details>
-      {!embedded && (
+      {!embedded && hosted && (
         <a href="/" className="text-sm underline">
           Back to Lecturn
         </a>
