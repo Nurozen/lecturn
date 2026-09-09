@@ -1271,6 +1271,23 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  const listCompletedTurnRowsForMessages = SqlSchema.findAll({
+    Request: Schema.Struct({ threadId: ThreadId, messageIds: Schema.Array(MessageId) }),
+    Result: Schema.Struct({
+      turnId: TurnId,
+      assistantMessageId: MessageId,
+      hasProviderTurnRef: Schema.Number,
+    }),
+    execute: ({ threadId, messageIds }) => sql`
+      SELECT turn_id AS "turnId", assistant_message_id AS "assistantMessageId",
+        CASE WHEN provider_turn_ref IS NULL THEN 0 ELSE 1 END AS "hasProviderTurnRef"
+      FROM projection_turns
+      WHERE thread_id = ${threadId} AND state = 'completed'
+        AND ${sql.in("assistant_message_id", messageIds)}
+      ORDER BY requested_at ASC, turn_id ASC
+    `,
+  });
+
   const listCheckpointRowsByThread = SqlSchema.findAll({
     Request: ThreadIdLookupInput,
     Result: ProjectionCheckpointDbRowSchema,
@@ -3046,7 +3063,27 @@ pending_approval_requests AS (
         return Option.none<OrchestrationThread>();
       }
 
+      // Query only anchors whose messages are in this detail page. Paging must
+      // not turn a short thread view into an unbounded turn-history payload.
+      const completedTurnRows =
+        messageRows.length === 0
+          ? []
+          : yield* listCompletedTurnRowsForMessages({
+              threadId,
+              messageIds: messageRows.map((row) => row.messageId),
+            }).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getThreadDetailById:listCompletedTurns:query",
+                  "ProjectionSnapshotQuery.getThreadDetailById:listCompletedTurns:decodeRows",
+                ),
+              ),
+            );
       const thread = {
+        completedTurns: completedTurnRows.map((row) => ({
+          ...row,
+          hasProviderTurnRef: row.hasProviderTurnRef === 1,
+        })),
         id: threadRow.value.threadId,
         projectId: threadRow.value.projectId,
         title: threadRow.value.title,

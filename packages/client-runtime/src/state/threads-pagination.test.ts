@@ -340,6 +340,45 @@ describe("thread pagination state", () => {
     }),
   );
 
+  it.effect(
+    "merges older fork points without resurrecting a loaded turn that is no longer completed",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness({
+          initialResponse: Option.some({
+            ...WINDOWED_SNAPSHOT,
+            thread: { ...BASE_THREAD, completedTurns: [] },
+          }),
+        });
+        yield* harness.awaitState((value) => Option.isSome(value.page));
+        requestOlderThreadTurns(TARGET.environmentId, THREAD_ID);
+        yield* harness.awaitState((value) =>
+          Option.match(value.page, { onNone: () => false, onSome: (page) => page.loadingOlder }),
+        );
+        yield* harness.resolveNextPage(
+          Option.some({
+            ...OLDER_PAGE,
+            thread: {
+              ...OLDER_PAGE.thread,
+              completedTurns: [OLDER_MESSAGE, RECENT_MESSAGE].map((message) => ({
+                turnId: message.turnId!,
+                assistantMessageId: message.id,
+                hasProviderTurnRef: true,
+              })),
+            },
+          }),
+        );
+        const state = yield* harness.awaitState((value) => hasMessage(value, "message-old"));
+        expect(Option.getOrThrow(state.data).completedTurns).toEqual([
+          {
+            turnId: OLDER_MESSAGE.turnId,
+            assistantMessageId: OLDER_MESSAGE.id,
+            hasProviderTurnRef: true,
+          },
+        ]);
+      }),
+  );
+
   it.effect("discards an in-flight older page when a revert rewrites history", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({ initialResponse: Option.some(WINDOWED_SNAPSHOT) });

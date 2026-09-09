@@ -487,7 +487,19 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       const threadDetail = yield* snapshotQuery.getThreadDetailById(ThreadId.make("thread-1"));
       assert.equal(threadDetail._tag, "Some");
       if (threadDetail._tag === "Some") {
-        assert.deepEqual(threadDetail.value, snapshot.threads[0]);
+        const snapshotThread = snapshot.threads[0];
+        if (snapshotThread === undefined)
+          throw new Error("Expected the seeded thread in snapshot.");
+        assert.deepEqual(threadDetail.value, {
+          ...snapshotThread,
+          completedTurns: [
+            {
+              turnId: asTurnId("turn-1"),
+              assistantMessageId: asMessageId("message-1"),
+              hasProviderTurnRef: false,
+            },
+          ],
+        });
       }
 
       yield* sql`
@@ -2187,6 +2199,31 @@ projectionSnapshotLayer("ProjectionSnapshotQuery windowed thread detail", (it) =
     snapshot.thread.messages.map((message) => message.id).toSorted();
   const activityIds = (snapshot: { thread: { activities: ReadonlyArray<{ id: string }> } }) =>
     snapshot.thread.activities.map((activity) => activity.id).toSorted();
+
+  it.effect("returns completed plain-chat fork points only within the loaded message window", () =>
+    Effect.gen(function* () {
+      yield* seedFanOutThread();
+      const sql = yield* SqlClient.SqlClient;
+      const query = yield* ProjectionSnapshotQuery;
+      yield* sql`UPDATE projection_turns SET assistant_message_id = turn_id || '-reply', provider_turn_ref = 'native-anchor' WHERE thread_id = 'thread-w'`;
+      yield* sql`UPDATE projection_turns SET state = 'interrupted' WHERE thread_id = 'thread-w' AND turn_id = 'turn-4'`;
+      const snapshot = yield* query.getThreadDetailSnapshot(threadW, { turnLimit: 2 });
+      assert.equal(snapshot._tag, "Some");
+      if (snapshot._tag === "Some") {
+        assert.deepEqual(snapshot.value.thread.checkpoints, []);
+        assert.deepEqual(snapshot.value.thread.completedTurns, [
+          {
+            turnId: asTurnId("turn-5"),
+            assistantMessageId: asMessageId("turn-5-reply"),
+            hasProviderTurnRef: true,
+          },
+        ]);
+      }
+      yield* sql`UPDATE projection_turns SET state = 'error' WHERE thread_id = 'thread-w' AND turn_id = 'turn-5'`;
+      const failed = yield* query.getThreadDetailSnapshot(threadW, { turnLimit: 2 });
+      if (failed._tag === "Some") assert.deepEqual(failed.value.thread.completedTurns, []);
+    }),
+  );
 
   it.effect("returns the full thread with no page metadata when no window is requested", () =>
     Effect.gen(function* () {

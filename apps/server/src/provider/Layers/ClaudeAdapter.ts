@@ -79,6 +79,7 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
+import { forkClaudeSession } from "../Drivers/ClaudeSessionFork.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { planClaudeSkillDispatch } from "../Drivers/ClaudeSkillDispatch.ts";
 import { discoverClaudeSkills } from "../Drivers/ClaudeSkills.ts";
@@ -117,10 +118,6 @@ export const CLAUDE_ADAPTER_CAPABILITIES = {
   // the recorded anchor; there is no positional fallback.
   conversationForkRequiresAnchor: true,
 } as const;
-// Bound on how long a fork start waits for the SDK init handshake to hand
-// back the child session id before the start is abandoned and cleaned up.
-const CLAUDE_FORK_INIT_TIMEOUT = "30 seconds";
-
 type ClaudeTextStreamKind = Extract<RuntimeContentStreamKind, "assistant_text" | "reasoning_text">;
 type ClaudeToolResultStreamKind = Extract<
   RuntimeContentStreamKind,
@@ -304,13 +301,6 @@ interface ClaudeSessionContext {
    * effort override inherit this. */
   currentEffort: string | undefined;
   resumeSessionId: string | undefined;
-  /**
-   * Resolves with the native session id adopted from the first durable SDK
-   * message (see ensureThreadId). Fork starts block on it so the returned
-   * cursor carries the child session id; session teardown fails it so a
-   * start waiting on a dead stream is released instead of hanging.
-   */
-  readonly adoptedNativeSessionId: Deferred.Deferred<string, ProviderAdapterError>;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   readonly turns: Array<{
@@ -354,6 +344,7 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
 
 export interface ClaudeAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
+  readonly forkSession?: typeof forkClaudeSession;
   readonly environment?: NodeJS.ProcessEnv;
   readonly createQuery?: (input: {
     readonly prompt: AsyncIterable<SDKUserMessage>;
@@ -2067,9 +2058,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     const nextThreadId = message.session_id;
     context.resumeSessionId = message.session_id;
     yield* updateResumeCursor(context);
-    // Wake a fork start blocked on adoption only after the cursor carries
-    // the adopted id; a no-op for every later durable message.
-    yield* Deferred.succeed(context.adoptedNativeSessionId, message.session_id);
 
     if (context.lastThreadStartedId !== nextThreadId) {
       context.lastThreadStartedId = nextThreadId;
@@ -3767,16 +3755,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
     context.stopped = true;
 
-    // Release a fork start blocked on session adoption (no-op once adopted):
-    // a fork whose stream dies before init must fail its start, not hang.
-    yield* Deferred.fail(
-      context.adoptedNativeSessionId,
-      new ProviderAdapterSessionClosedError({
-        provider: PROVIDER,
-        threadId: context.session.threadId,
-      }),
-    );
-
     for (const taskId of Array.from(context.liveTaskIds)) {
       if (!context.liveTaskIds.delete(taskId)) {
         continue;
@@ -3927,17 +3905,36 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }
 
       const startedAt = yield* nowIso;
-      // A forked child has no identity of its own until the SDK init message
-      // supplies the new session id, so fork mode ignores input.resumeCursor
-      // and seeds no session id: a fork that dies before init must not leave
-      // a child behind that would resume the parent.
-      const resumeState = forkInput ? undefined : readClaudeResumeState(input.resumeCursor);
+      // Fork the transcript durably before starting the streaming query. Waiting
+      // for SDK init here deadlocks: init needs the first user prompt, which
+      // orchestration cannot send until startSession returns.
+      const forkedSession =
+        forkParentSessionId !== undefined
+          ? yield* Effect.tryPromise({
+              try: () =>
+                (options?.forkSession ?? forkClaudeSession)({
+                  sourceSessionId: forkParentSessionId,
+                  ...(forkInput?.providerTurnRef
+                    ? { upToMessageId: forkInput.providerTurnRef }
+                    : {}),
+                  ...(input.cwd ? { cwd: input.cwd } : {}),
+                  environment: claudeEnvironment,
+                }),
+              catch: (cause) =>
+                new ProviderAdapterProcessError({
+                  provider: PROVIDER,
+                  threadId: input.threadId,
+                  detail: "Failed to fork the Claude session history.",
+                  cause,
+                }),
+            })
+          : undefined;
+      const resumeState = forkedSession
+        ? { resume: forkedSession.sessionId, turnCount: 0 }
+        : readClaudeResumeState(input.resumeCursor);
       const threadId = input.threadId;
       const existingResumeSessionId = resumeState?.resume;
-      const newSessionId =
-        forkInput === undefined && existingResumeSessionId === undefined
-          ? yield* randomUUIDv4
-          : undefined;
+      const newSessionId = existingResumeSessionId === undefined ? yield* randomUUIDv4 : undefined;
       const sessionId = existingResumeSessionId ?? newSessionId;
 
       const runtimeContext = yield* Effect.context<never>();
@@ -3964,7 +3961,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const liveTaskIds = new Set<string>();
 
       const contextRef = yield* Ref.make<ClaudeSessionContext | undefined>(undefined);
-      const adoptedNativeSessionId = yield* Deferred.make<string, ProviderAdapterError>();
 
       /**
        * Handle AskUserQuestion tool calls by emitting a `user-input.requested`
@@ -4430,16 +4426,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(Object.keys(settings).length > 0 ? { settings } : {}),
         ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
         ...(newSessionId ? { sessionId: newSessionId } : {}),
-        // Fork: resume the parent session and have the SDK mint the child id
-        // at init. Seeding sessionId here would write into the parent's
-        // history instead of forking it, so it stays unset.
-        ...(forkParentSessionId !== undefined
-          ? {
-              resume: forkParentSessionId,
-              forkSession: true,
-              ...(forkInput?.providerTurnRef ? { resumeSessionAt: forkInput.providerTurnRef } : {}),
-            }
-          : {}),
         includePartialMessages: true,
         canUseTool,
         onUserDialog,
@@ -4537,7 +4523,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         currentApiModelId: apiModelId,
         currentEffort: effectiveEffort ?? undefined,
         resumeSessionId: sessionId,
-        adoptedNativeSessionId,
         pendingApprovals,
         pendingUserInputs,
         turns: [],
@@ -4625,33 +4610,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           context.streamFiber = undefined;
         }
       });
-
-      if (forkParentSessionId !== undefined) {
-        // The child's identity only exists once the SDK init message adopts
-        // a fresh session id, so return only after the cursor carries it —
-        // callers persist the child binding from the returned session.
-        const adopted = yield* Deferred.await(adoptedNativeSessionId).pipe(
-          Effect.timeoutOrElse({
-            duration: CLAUDE_FORK_INIT_TIMEOUT,
-            orElse: () =>
-              Effect.fail(
-                new ProviderAdapterProcessError({
-                  provider: PROVIDER,
-                  threadId,
-                  detail: "Timed out waiting for the forked Claude session to initialize.",
-                }),
-              ),
-          }),
-          Effect.result,
-        );
-        if (adopted._tag === "Failure") {
-          // No half-registered fork session: a start that never adopted a
-          // child id is torn down before the failure surfaces.
-          yield* stopSessionInternal(context, { emitExitEvent: false }).pipe(Effect.ignore);
-          return yield* adopted.failure;
-        }
-        return { ...context.session };
-      }
 
       return {
         ...session,

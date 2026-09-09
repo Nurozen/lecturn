@@ -47,6 +47,7 @@ export const CLAUDE_PRESENTATION = {
   displayName: "Claude",
   showInteractionModeToggle: true,
   conversationFork: "native",
+  conversationForkRequiresAnchor: true,
 } as const;
 function toTitleCaseWords(value: string): string {
   const parts: Array<string> = [];

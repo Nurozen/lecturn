@@ -196,6 +196,10 @@ describe("conversationFork capability/presentation parity", () => {
       },
     });
     expect(snapshot.conversationFork).toBe(presentation.conversationFork);
+    expect(snapshot.conversationForkRequiresAnchor ?? false).toBe(
+      "conversationForkRequiresAnchor" in presentation &&
+        presentation.conversationForkRequiresAnchor,
+    );
   });
 
   // Claude is the only provider without a positional fallback for anchor-less
@@ -205,9 +209,12 @@ describe("conversationFork capability/presentation parity", () => {
   });
 
   it.each(drivers)(
-    "$driver keeps the anchor requirement off the presentation",
-    ({ presentation }) => {
-      expect(presentation).not.toHaveProperty("conversationForkRequiresAnchor");
+    "$driver exposes the anchor requirement consistently for message actions",
+    ({ presentation, capabilities }) => {
+      expect(
+        "conversationForkRequiresAnchor" in presentation &&
+          presentation.conversationForkRequiresAnchor,
+      ).toBe(capabilities.conversationForkRequiresAnchor);
     },
   );
 });

@@ -633,6 +633,118 @@ describe("applyThreadDetailEvent", () => {
   });
 
   describe("thread.session-set", () => {
+    it("tracks native plain-chat completion before message finalization and removes invalidated forks", () => {
+      const turnId = TurnId.make("plain-turn");
+      const messageId = MessageId.make("plain-answer");
+      const starting: OrchestrationThread = {
+        ...baseThread,
+        completedTurns: [],
+        latestTurn: {
+          turnId,
+          state: "running",
+          requestedAt: baseThread.createdAt,
+          startedAt: baseThread.createdAt,
+          completedAt: null,
+          assistantMessageId: null,
+        },
+      };
+      const completion = {
+        ...baseEventFields,
+        metadata: { providerTurnId: "native-anchor" },
+        sequence: 1,
+        occurredAt: baseThread.updatedAt,
+        aggregateKind: "thread" as const,
+        aggregateId: baseThread.id,
+        type: "thread.session-set" as const,
+        payload: {
+          threadId: baseThread.id,
+          completedTurnId: turnId,
+          session: {
+            threadId: baseThread.id,
+            status: "ready" as const,
+            providerName: "claude" as const,
+            runtimeMode: "full-access" as const,
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: baseThread.updatedAt,
+          },
+        },
+      };
+      const initialReady = applyThreadDetailEvent(starting, {
+        ...completion,
+        payload: { threadId: baseThread.id, session: completion.payload.session },
+      });
+      if (initialReady.kind !== "updated") throw new Error("Expected ready update");
+      expect(initialReady.thread.completedTurns).toEqual([]);
+      const completed = applyThreadDetailEvent(starting, completion);
+      expect(completed.kind).toBe("updated");
+      if (completed.kind !== "updated") return;
+      expect(completed.thread.completedTurns).toEqual([
+        { turnId, assistantMessageId: null, hasProviderTurnRef: true },
+      ]);
+      const finalized = applyThreadDetailEvent(completed.thread, {
+        ...baseEventFields,
+        sequence: 2,
+        occurredAt: baseThread.updatedAt,
+        aggregateKind: "thread",
+        aggregateId: baseThread.id,
+        type: "thread.message-sent",
+        payload: {
+          threadId: baseThread.id,
+          turnId,
+          messageId,
+          role: "assistant",
+          text: "pong",
+          streaming: false,
+          createdAt: baseThread.createdAt,
+          updatedAt: baseThread.updatedAt,
+        },
+      });
+      if (finalized.kind !== "updated") throw new Error("Expected final answer");
+      expect(finalized.thread.completedTurns).toEqual([
+        { turnId, assistantMessageId: messageId, hasProviderTurnRef: true },
+      ]);
+      for (const status of ["error", "interrupted"] as const) {
+        const invalidated = applyThreadDetailEvent(finalized.thread, {
+          ...completion,
+          payload: { ...completion.payload, session: { ...completion.payload.session, status } },
+        });
+        if (invalidated.kind !== "updated") throw new Error("Expected lifecycle update");
+        expect(invalidated.thread.completedTurns).toEqual([]);
+      }
+      const failedCheckpoint = applyThreadDetailEvent(finalized.thread, {
+        ...baseEventFields,
+        sequence: 3,
+        occurredAt: baseThread.updatedAt,
+        aggregateKind: "thread",
+        aggregateId: baseThread.id,
+        type: "thread.turn-diff-completed",
+        payload: {
+          threadId: baseThread.id,
+          turnId,
+          checkpointTurnCount: 1,
+          checkpointRef: CheckpointRef.make("failed-checkpoint"),
+          status: "error",
+          files: [],
+          assistantMessageId: messageId,
+          completedAt: baseThread.updatedAt,
+        },
+      });
+      if (failedCheckpoint.kind !== "updated") throw new Error("Expected checkpoint update");
+      expect(failedCheckpoint.thread.completedTurns).toEqual([]);
+      const reverted = applyThreadDetailEvent(finalized.thread, {
+        ...baseEventFields,
+        sequence: 3,
+        occurredAt: baseThread.updatedAt,
+        aggregateKind: "thread",
+        aggregateId: baseThread.id,
+        type: "thread.reverted",
+        payload: { threadId: baseThread.id, turnCount: 0 },
+      });
+      if (reverted.kind !== "updated") throw new Error("Expected revert");
+      expect(reverted.thread.completedTurns).toEqual([]);
+    });
+
     it("settles a running latestTurn when the session leaves the running status", () => {
       const threadWithRunningTurn: OrchestrationThread = {
         ...baseThread,

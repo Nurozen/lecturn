@@ -2920,9 +2920,7 @@ function ChatViewContent(props: ChatViewProps) {
       providerStatuses,
     ],
   );
-  // Fork points per hover row (ready checkpoints only), derived by
-  // `buildForkTurnIdByMessageId`. Empty when the provider/server cannot
-  // fork, which hides the buttons.
+  // Fork completed conversation turns even when no Git checkpoint exists.
   const forkTurnIdByMessageId = useMemo(() => {
     if (forkUnavailableReason !== null || !isServerThread) {
       return new Map<MessageId, TurnId>();
@@ -2931,9 +2929,22 @@ function ChatViewContent(props: ChatViewProps) {
       timelineEntries,
       turnDiffSummaryByAssistantMessageId,
       activeRunningTurnId,
+      completedTurns: activeThread?.completedTurns,
+      latestTurn: activeThread?.latestTurn ?? null,
+      requiresProviderTurnRef:
+        providerStatuses.find(
+          (provider) =>
+            provider.instanceId ===
+            (activeThread?.session?.providerInstanceId ?? activeThread?.modelSelection.instanceId),
+        )?.conversationForkRequiresAnchor === true,
     });
   }, [
     activeRunningTurnId,
+    activeThread?.completedTurns,
+    activeThread?.latestTurn,
+    activeThread?.session?.providerInstanceId,
+    activeThread?.modelSelection.instanceId,
+    providerStatuses,
     forkUnavailableReason,
     isServerThread,
     timelineEntries,

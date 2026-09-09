@@ -58,6 +58,7 @@ export interface ServerProviderPresentation {
   readonly showInteractionModeToggle?: boolean;
   readonly requiresNewThreadForModelChange?: boolean;
   readonly conversationFork?: "native" | "unsupported";
+  readonly conversationForkRequiresAnchor?: boolean;
 }
 
 export type ServerProviderDraft = Omit<ServerProvider, "instanceId" | "driver">;
@@ -242,6 +243,9 @@ export function buildServerProvider(input: {
       : {}),
     ...(input.presentation.conversationFork
       ? { conversationFork: input.presentation.conversationFork }
+      : {}),
+    ...(input.presentation.conversationForkRequiresAnchor !== undefined
+      ? { conversationForkRequiresAnchor: input.presentation.conversationForkRequiresAnchor }
       : {}),
     enabled: input.enabled,
     installed: input.probe.installed,

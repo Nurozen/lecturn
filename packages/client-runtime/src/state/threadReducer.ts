@@ -75,6 +75,77 @@ export function applyThreadDetailEvent(
   thread: OrchestrationThread,
   event: OrchestrationEvent,
 ): ThreadDetailReducerResult {
+  const result = reduceThreadDetailEvent(thread, event);
+  if (result.kind !== "updated" || result.thread.completedTurns === undefined) return result;
+  let completedTurns = result.thread.completedTurns;
+  if (event.type === "thread.session-set") {
+    const turnId =
+      event.payload.completedTurnId ??
+      (thread.latestTurn?.state === "running" ? thread.latestTurn.turnId : undefined);
+    if (turnId !== undefined) {
+      const state = settledTurnStateForSessionStatus(event.payload.session.status);
+      if (state === "completed" && event.payload.completedTurnId !== undefined) {
+        const existing = completedTurns.find((turn) => turn.turnId === turnId);
+        const assistantMessageId =
+          result.thread.messages.findLast(
+            (message) => message.role === "assistant" && message.turnId === turnId,
+          )?.id ??
+          existing?.assistantMessageId ??
+          null;
+        completedTurns = [
+          ...completedTurns.filter((turn) => turn.turnId !== turnId),
+          {
+            turnId,
+            assistantMessageId,
+            hasProviderTurnRef:
+              event.metadata.providerTurnId !== undefined ||
+              (existing?.hasProviderTurnRef ?? false),
+          },
+        ];
+      } else if (state !== null && state !== "completed") {
+        completedTurns = completedTurns.filter((turn) => turn.turnId !== turnId);
+      }
+    }
+  } else if (event.type === "thread.message-sent" && event.payload.role === "assistant") {
+    if (
+      completedTurns.some(
+        (turn) =>
+          turn.turnId === event.payload.turnId &&
+          turn.assistantMessageId !== event.payload.messageId,
+      )
+    ) {
+      completedTurns = completedTurns.map((turn) =>
+        turn.turnId === event.payload.turnId
+          ? { ...turn, assistantMessageId: event.payload.messageId }
+          : turn,
+      );
+    }
+  } else if (
+    event.type === "thread.turn-diff-completed" &&
+    event.payload.status === "error" &&
+    !(thread.session?.status === "running" && thread.session.activeTurnId === event.payload.turnId)
+  ) {
+    completedTurns = completedTurns.filter((turn) => turn.turnId !== event.payload.turnId);
+  } else if (event.type === "thread.turn-interrupt-requested") {
+    completedTurns = completedTurns.filter((turn) => turn.turnId !== event.payload.turnId);
+  } else if (event.type === "thread.reverted") {
+    const retained = new Set(result.thread.messages.map((message) => message.id));
+    completedTurns = completedTurns.filter(
+      (turn) => turn.assistantMessageId !== null && retained.has(turn.assistantMessageId),
+    );
+  }
+  return completedTurns === result.thread.completedTurns
+    ? result
+    : {
+        ...result,
+        thread: { ...result.thread, completedTurns },
+      };
+}
+
+function reduceThreadDetailEvent(
+  thread: OrchestrationThread,
+  event: OrchestrationEvent,
+): ThreadDetailReducerResult {
   switch (event.type) {
     // ── Project events (irrelevant to thread detail) ────────────────
     case "project.created":
@@ -109,6 +180,7 @@ export function applyThreadDetailEvent(
           proposedPlans: [],
           activities: [],
           checkpoints: [],
+          completedTurns: [],
           session: null,
         },
       };
