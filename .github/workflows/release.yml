@@ -539,12 +539,46 @@ jobs:
 
           if [[ "${{ matrix.platform }}" == "mac" ]]; then
             if has_all "$CSC_LINK" "$CSC_KEY_PASSWORD" "$APPLE_API_KEY" "$APPLE_API_KEY_ID" "$APPLE_API_ISSUER"; then
-              key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+              # electron-builder uses the certificate password to unlock its
+              # generated keychain. Import into an explicit keychain instead.
+              original_umask="$(umask)"
+              umask 077
+              signing_dir="$(mktemp -d "$RUNNER_TEMP/lecturn-signing.XXXXXX")"
+              keychain_path="$signing_dir/signing.keychain-db"
+              keychain_password="$(openssl rand -hex 32)"
+              echo "::add-mask::$keychain_password"
+              original_keychains=()
+              while IFS= read -r original_keychain; do
+                original_keychains+=("$original_keychain")
+              done < <(security list-keychains -d user | sed -E 's/^[[:space:]]*"//; s/"[[:space:]]*$//')
+              cleanup_signing() {
+                security list-keychains -d user -s "${original_keychains[@]}" >/dev/null 2>&1 || true
+                security delete-keychain "$keychain_path" >/dev/null 2>&1 || true
+                rm -rf "$signing_dir"
+              }
+              trap cleanup_signing EXIT
+
+              certificate_path="$signing_dir/certificate.p12"
+              printf '%s' "$CSC_LINK" | base64 -D > "$certificate_path"
+              security create-keychain -p "$keychain_password" "$keychain_path"
+              security set-keychain-settings -lut 21600 "$keychain_path"
+              security unlock-keychain -p "$keychain_password" "$keychain_path"
+              # codesign still searches the user's keychain list even with
+              # --keychain. Preserve its entries so certificate chains resolve.
+              security list-keychains -d user -s "$keychain_path" "${original_keychains[@]}"
+              security import "$certificate_path" -k "$keychain_path" \
+                -T /usr/bin/codesign -T /usr/bin/productbuild -P "$CSC_KEY_PASSWORD"
+              security set-key-partition-list -S apple-tool:,apple: -s \
+                -k "$keychain_password" "$keychain_path" >/dev/null
+              export CSC_KEYCHAIN="$keychain_path"
+              unset CSC_LINK CSC_KEY_PASSWORD
+
+              key_path="$signing_dir/AuthKey_${APPLE_API_KEY_ID}.p8"
               printf '%s' "$APPLE_API_KEY" > "$key_path"
               export APPLE_API_KEY="$key_path"
 
               if has_all "$APPLE_TEAM_ID" "$MACOS_PROVISIONING_PROFILE"; then
-                profile_path="$RUNNER_TEMP/t3code.provisionprofile"
+                profile_path="$signing_dir/lecturn.provisionprofile"
                 printf '%s' "$MACOS_PROVISIONING_PROFILE" | base64 -D > "$profile_path"
                 security cms -D -i "$profile_path" >/dev/null
                 export T3CODE_APPLE_TEAM_ID="$APPLE_TEAM_ID"
@@ -553,6 +587,7 @@ jobs:
                 echo "::notice::macOS passkey entitlements disabled (no team id / provisioning profile)"
               fi
 
+              umask "$original_umask"
               echo "macOS signing enabled."
               args+=(--signed)
             else
