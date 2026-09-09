@@ -66,3 +66,57 @@ export function computeConnectEntitlement(
     return result("grace", Math.min(paidThrough + renewalGraceSeconds, stop));
   return result("expired", null);
 }
+
+export interface SettledServiceInterval {
+  readonly start: number;
+  readonly end: number;
+  /** Service is not granted retroactively when an invoice is settled late. */
+  readonly settledAt: number;
+}
+
+/** Reconstruct continuity from canonical payment times, including gaps missed by the cron. */
+export function connectedAccessWindowStart(
+  paid: readonly SettledServiceInterval[],
+  trial: { start: number; end: number } | null,
+  now: number,
+  renewalGraceSeconds: number,
+  inGrace: boolean,
+): number | null {
+  const intervals = paid.map((period) => ({
+    serviceStart: period.start,
+    start: Math.max(period.start, period.settledAt),
+    end: period.end,
+    paid: true,
+  }));
+  if (trial) intervals.push({ serviceStart: trial.start, ...trial, paid: false });
+  const valid = intervals
+    .filter(
+      (period) =>
+        Number.isFinite(period.start) &&
+        Number.isFinite(period.end) &&
+        period.start > 0 &&
+        period.start < period.end,
+    )
+    .toSorted((a, b) => a.start - b.start);
+  const windows: { start: number; end: number; paid: boolean }[] = [];
+  for (const period of valid) {
+    const previous = windows.at(-1);
+    if (
+      previous &&
+      (period.start <= previous.end ||
+        (previous.paid &&
+          period.serviceStart <= previous.end &&
+          period.start <= previous.end + renewalGraceSeconds))
+    ) {
+      previous.end = Math.max(previous.end, period.end);
+      previous.paid = period.paid;
+    } else windows.push({ start: period.start, end: period.end, paid: period.paid });
+  }
+  return (
+    windows.findLast(
+      (period) =>
+        period.start <= now &&
+        now < period.end + (inGrace && period.paid ? renewalGraceSeconds : 0),
+    )?.start ?? null
+  );
+}

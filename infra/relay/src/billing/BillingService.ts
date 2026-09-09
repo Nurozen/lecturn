@@ -7,11 +7,18 @@ import {
   makeBillingStore,
   operationId,
   type BillingAccount,
+  type BillingEvent,
   type BillingStore,
 } from "./BillingStore.ts";
 import { createStripeClient, type StripeClient } from "./StripeClient.ts";
-import { computeConnectEntitlement } from "./ConnectEntitlements.ts";
+import {
+  computeConnectEntitlement,
+  connectedAccessWindowStart,
+  type SettledServiceInterval,
+} from "./ConnectEntitlements.ts";
 import { stripeEventReceipt } from "./BillingWebhook.ts";
+import { makePaymentReviews, type PaymentReviewRecorder } from "./PaymentReviews.ts";
+import { effectiveAccountAccess } from "./BillingGrants.ts";
 import { verifyAccountDeletion } from "./AccountDeletion.ts";
 
 export { BillingError } from "./BillingStore.ts";
@@ -53,6 +60,7 @@ export function makeBillingService(
   config: BillingConfig,
   store: BillingStore,
   stripe: StripeClient,
+  recordPaymentReview: PaymentReviewRecorder,
 ): BillingServiceShape {
   const enabled = () => config.mode !== "disabled";
   const assertEnabled = () =>
@@ -64,7 +72,17 @@ export function makeBillingService(
     Effect.gen(function* () {
       yield* assertEnabled();
       const account = yield* store.acquire(userId, yield* now);
-      return yield* run(account).pipe(Effect.ensuring(store.release(account).pipe(Effect.ignore)));
+      return yield* run(account).pipe(
+        // Leave room to release the 120-second lease. Interrupted provider results cannot save later.
+        Effect.timeoutOrElse({
+          duration: "90 seconds",
+          orElse: () =>
+            Effect.fail(
+              error("provider", "Billing reconciliation exceeded its budget and will retry"),
+            ),
+        }),
+        Effect.ensuring(store.release(account).pipe(Effect.ignore)),
+      );
     });
   const save = (a: BillingAccount) => now.pipe(Effect.flatMap((time) => store.save(a, time)));
   const ensureCustomer = Effect.fn("Billing.ensureCustomer")(function* (a: BillingAccount) {
@@ -83,7 +101,10 @@ export function makeBillingService(
     yield* save(a);
     return customer.id;
   });
-  const refresh = Effect.fn("Billing.refresh")(function* (a: BillingAccount) {
+  const refresh = Effect.fn("Billing.refresh")(function* (
+    a: BillingAccount,
+    disputeChargeIds: readonly string[] = [],
+  ) {
     if (!a.customer_id && a.deleted_at && a.state.operation) yield* ensureCustomer(a);
     if (!a.customer_id) {
       yield* save(a);
@@ -115,10 +136,44 @@ export function makeBillingService(
           }
         }),
       );
+      // A charge may settle after deletion raced Checkout or renewal. Preserve it for an
+      // explicit operator refund review even when cancellation/Checkout recovery must retry.
+      for (const sub of subscriptions) {
+        const invoices = yield* provider(() => stripe.listInvoices(sub.id));
+        for (const invoice of invoices) {
+          const paidAt = invoice.status_transitions.paid_at;
+          if (
+            invoice.status !== "paid" ||
+            invoice.amount_paid <= 0 ||
+            paidAt === null ||
+            paidAt < a.deleted_at
+          )
+            continue;
+          if (
+            referenceId(invoice.customer) !== a.customer_id ||
+            referenceId(invoice.parent?.subscription_details?.subscription ?? null) !== sub.id
+          )
+            return yield* error(
+              "ownership",
+              "Post-deletion invoice ownership could not be verified",
+            );
+          yield* recordPaymentReview({
+            invoiceId: invoice.id,
+            userId: a.user_id,
+            customerId: a.customer_id!,
+            subscriptionId: sub.id,
+            amountPaid: invoice.amount_paid,
+            currency: invoice.currency,
+            paidAt,
+            deletedAt: a.deleted_at,
+          });
+        }
+      }
       if (cancellationError) return yield* cancellationError;
       if (compensation._tag === "Failure") return yield* compensation.failure;
       a.state.status = "canceled";
       a.state.accessUntil = null;
+      a.state.accessWindowStart = null;
       yield* save(a);
       return;
     }
@@ -133,6 +188,7 @@ export function makeBillingService(
       }
       a.state.status = "free";
       a.state.accessUntil = null;
+      a.state.accessWindowStart = null;
       yield* save(a);
       return;
     }
@@ -144,22 +200,95 @@ export function makeBillingService(
     )
       return yield* error("recovery_required", "Subscription plan requires support review");
     const invoices = yield* provider(() => stripe.listInvoices(sub.id));
+    const time = yield* now;
+    const settled: SettledServiceInterval[] = [];
+    // Only recent continuity can authorize a queued notification (maximum age ten minutes).
+    const financialHorizon = time - 600 - config.renewalGraceSeconds;
+    let suspended = false;
+    let currentTermDisputeReceipt = false;
+    let refundedCurrentTerm: string | undefined;
+    for (const invoice of invoices) {
+      if (invoice.status !== "paid" || invoice.amount_paid <= 0) continue;
+      if (invoice.lines.has_more)
+        return yield* error("recovery_required", "Invoice lines require support review");
+      const terms = invoice.lines.data.filter(
+        (line) =>
+          line.parent?.subscription_item_details?.subscription === sub.id &&
+          !line.parent.subscription_item_details.proration &&
+          line.pricing?.price_details?.price === sub.items.data[0]!.price.id &&
+          line.period.start <= time &&
+          line.period.end > financialHorizon,
+      );
+      if (!terms.length) continue;
+      const payments = yield* provider(() => stripe.listInvoicePayments(invoice.id));
+      let captured = 0;
+      let refunded = 0;
+      let disputed = false;
+      const seenCharges = new Set<string>();
+      for (const payment of payments) {
+        if (referenceId(payment.invoice) !== invoice.id || payment.status !== "paid")
+          return yield* error("ownership", "Invoice payment ownership could not be verified");
+        const intent = payment.payment.payment_intent;
+        const chargeRef =
+          payment.payment.charge ?? (typeof intent === "object" ? intent.latest_charge : undefined);
+        const chargeId = chargeRef ? referenceId(chargeRef) : undefined;
+        if (!chargeId)
+          return yield* error("recovery_required", "Invoice payment requires support review");
+        if (
+          disputeChargeIds.includes(chargeId) &&
+          terms.some((line) => line.period.start <= time && time < line.period.end)
+        )
+          currentTermDisputeReceipt = true;
+        if (seenCharges.has(chargeId)) continue;
+        seenCharges.add(chargeId);
+        const charge = yield* provider(() => stripe.retrieveCharge(chargeId));
+        if (referenceId(charge.customer) !== a.customer_id || charge.currency !== invoice.currency)
+          return yield* error("ownership", "Invoice charge ownership could not be verified");
+        if (charge.amount !== payment.amount_paid)
+          return yield* error(
+            "recovery_required",
+            "Shared invoice charge allocation requires support review",
+          );
+        if (!charge.paid || charge.status !== "succeeded") continue;
+        captured += Math.min(payment.amount_paid ?? 0, charge.amount);
+        // Only a completely refunded charge removes its allocation. Partial refunds keep service.
+        if (charge.refunded && charge.amount_refunded >= charge.amount)
+          refunded += Math.min(payment.amount_paid ?? 0, charge.amount);
+        const disputes = yield* provider(() => stripe.listDisputes(charge.id));
+        if (disputes.some((dispute) => referenceId(dispute.charge) !== charge.id))
+          return yield* error("ownership", "Dispute ownership could not be verified");
+        disputed ||= disputes.some(
+          (dispute) => !["won", "warning_closed", "prevented"].includes(dispute.status),
+        );
+      }
+      if (captured < invoice.amount_paid)
+        return yield* error("recovery_required", "Invoice settlement requires support review");
+      const fullyRefunded = captured > 0 && refunded >= captured;
+      const currentTerm = terms.some((line) => line.period.start <= time && time < line.period.end);
+      if (currentTerm && fullyRefunded) refundedCurrentTerm = invoice.id;
+      if (currentTerm && disputed) suspended = true;
+      if (fullyRefunded || disputed) continue;
+      const paidAt = invoice.status_transitions.paid_at;
+      if (paidAt === null)
+        return yield* error("recovery_required", "Invoice settlement time is missing");
+      settled.push(...terms.map((line) => ({ ...line.period, settledAt: paidAt })));
+    }
     const paidThrough =
       Math.max(
         0,
-        ...invoices
-          .filter((invoice) => invoice.status === "paid" && invoice.amount_paid > 0)
-          .flatMap((invoice) =>
-            invoice.lines.data
-              .filter(
-                (line) =>
-                  line.parent?.subscription_item_details?.subscription === sub.id &&
-                  !line.parent.subscription_item_details.proration &&
-                  line.pricing?.price_details?.price === sub.items.data[0]!.price.id,
-              )
-              .map((line) => line.period.end),
-          ),
+        ...settled
+          .filter((period) => Math.max(period.start, period.settledAt) <= time)
+          .map((period) => period.end),
       ) || null;
+    if (refundedCurrentTerm && !terminal(sub)) {
+      // Persist revocation before attempting provider cancellation; retries never restore refunded access.
+      a.state.accessUntil = null;
+      a.state.accessWindowStart = null;
+      yield* save(a);
+      yield* provider(() =>
+        stripe.cancelSubscription(sub.id, `refund:${sub.id}:${refundedCurrentTerm}`),
+      );
+    }
     const payment = sub.default_payment_method;
     const customerPayment = customer.invoice_settings.default_payment_method;
     const card =
@@ -169,7 +298,7 @@ export function makeBillingService(
           ? customerPayment
           : null;
     const trialCardConfirmed =
-      sub.status === "trialing" && card !== null
+      sub.trial_start !== null && card !== null
         ? yield* provider(() => stripe.hasSuccessfulCardSetup(a.customer_id!, card.id))
         : false;
     const access = computeConnectEntitlement(
@@ -180,9 +309,9 @@ export function makeBillingService(
         trialCardConfirmed,
         cancelAt: sub.cancel_at,
         endedAt: sub.ended_at,
-        suspended: false,
+        suspended: suspended || !!refundedCurrentTerm,
       },
-      yield* now,
+      time,
       config.renewalGraceSeconds,
     );
     a.state.status = sub.status;
@@ -192,7 +321,24 @@ export function makeBillingService(
     a.state.trialEnd = sub.trial_end;
     a.state.cancelAtPeriodEnd = sub.cancel_at_period_end;
     a.state.cancelAt = sub.cancel_at;
-    a.state.accessUntil = access.allowed ? access.validUntil : null;
+    const windowStart = connectedAccessWindowStart(
+      settled,
+      trialCardConfirmed && sub.trial_start !== null && sub.trial_end !== null
+        ? { start: sub.trial_start, end: sub.trial_end }
+        : null,
+      time,
+      config.renewalGraceSeconds,
+      access.reason === "grace",
+    );
+    if (currentTermDisputeReceipt || (a.state.suspended && !suspended))
+      a.state.financialWindowStart = time;
+    a.state.suspended = suspended;
+    a.state.accessWindowStart =
+      access.allowed && windowStart !== null
+        ? Math.max(windowStart, a.state.financialWindowStart ?? 0)
+        : null;
+    a.state.accessUntil =
+      access.allowed && a.state.accessWindowStart !== null ? access.validUntil : null;
     yield* save(a);
   });
   const createSession = Effect.fn("Billing.createSession")(function* (a: BillingAccount) {
@@ -235,11 +381,8 @@ export function makeBillingService(
     )
       ? (rawState as RelayBillingStatus["state"])
       : "unavailable";
-    const hasAccess =
-      !!account &&
-      (yield* now) - Number(account.updated_at) < 900 &&
-      !account.deleted_at &&
-      (state?.accessUntil ?? 0) > (yield* now);
+    const access = effectiveAccountAccess(account, yield* now);
+    const hasAccess = enabled() && access.allowed;
     return {
       trialEligible: !state?.trialConsumed,
       cancelAt: iso(state?.cancelAt),
@@ -256,12 +399,14 @@ export function makeBillingService(
       trialEnd: iso(state?.trialEnd),
       cancelAtPeriodEnd: state?.cancelAtPeriodEnd ?? false,
       hasAccess,
+      accessReason: access.reason,
+      accessUntil: iso(access.validUntil),
       features: {
         managedConnect: hasAccess,
         pushNotifications: hasAccess,
         liveActivities: hasAccess,
       },
-      quota: { limit: 3, used: enabled() ? yield* store.quotaUsed(userId) : 0 },
+      quota: { limit: access.limit, used: enabled() ? yield* store.quotaUsed(userId) : 0 },
     };
   });
   return {
@@ -366,7 +511,18 @@ export function makeBillingService(
         try: () => stripe.verifyWebhook(raw, signature),
         catch: () => error("signature", "Stripe webhook signature or event scope is invalid"),
       });
-      const receipt = stripeEventReceipt(event);
+      let routingCustomer: string | undefined;
+      let routingObjectId: string | undefined;
+      if (/^(refund\.|charge\.dispute\.)/.test(event.type)) {
+        const object = event.data.object as Stripe.Refund | Stripe.Dispute;
+        const chargeId = referenceId(object.charge);
+        if (chargeId) {
+          const charge = yield* provider(() => stripe.retrieveCharge(chargeId));
+          routingCustomer = referenceId(charge.customer);
+          routingObjectId = charge.id;
+        }
+      }
+      const receipt = stripeEventReceipt(event, routingCustomer, routingObjectId);
       if (receipt) yield* store.receipt(receipt, yield* now);
     }),
     receiveClerkWebhook: Effect.fn("Billing.receiveClerkWebhook")(
@@ -381,27 +537,71 @@ export function makeBillingService(
     ),
     processPending: Effect.fn("Billing.processPending")(function* (limit = 20) {
       if (!enabled()) return;
-      for (const event of yield* store.pending(limit, yield* now)) {
-        yield* store.attempted(event.id, yield* now);
-        const account = event.user_id
-          ? yield* store.load(event.user_id)
-          : event.customer_id
-            ? yield* store.byCustomer(event.customer_id)
-            : undefined;
-        if (!account) continue; // Quarantine unknown customer; never grant from untrusted metadata.
-        yield* withAccount(account.user_id, refresh).pipe(
-          Effect.flatMap(() => now.pipe(Effect.flatMap((time) => store.complete(event.id, time)))),
-          Effect.catch(() =>
-            Effect.logWarning("Billing reconciliation remains pending", { eventId: event.id }),
-          ),
-        );
-      }
-      for (const account of yield* store.stale(yield* now, limit)) {
-        yield* store.deferReconcile(account.user_id, yield* now);
-        yield* withAccount(account.user_id, refresh).pipe(
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
+        return yield* error("invalid", "Billing reconciliation batch must be 1 through 100");
+      const time = yield* now;
+      const [events, stale] = yield* Effect.all(
+        [store.pending(limit, time), store.stale(time, limit)],
+        { concurrency: 2 },
+      );
+      const groups = new Map<string, BillingEvent[]>();
+      // Routing is bounded database work; provider calls start only after the per-user grouping.
+      yield* Effect.forEach(
+        events,
+        (event) =>
+          Effect.gen(function* () {
+            const account = event.user_id
+              ? yield* store.load(event.user_id)
+              : event.customer_id
+                ? yield* store.byCustomer(event.customer_id)
+                : undefined;
+            if (!account) {
+              // Quarantine unknown customers with durable backoff, never grant from metadata.
+              yield* store.attempted(event.id, yield* now);
+              return;
+            }
+            const existing = groups.get(account.user_id);
+            if (existing) existing.push(event);
+            else groups.set(account.user_id, [event]);
+          }),
+        { concurrency: 4, discard: true },
+      );
+      const refreshGroup = (userId: string, receipts: readonly BillingEvent[]) =>
+        Effect.gen(function* () {
+          // Only started work is deferred. An interrupted batch leaves unscheduled users due.
+          const startedAt = yield* now;
+          yield* store.deferReconcile(userId, startedAt);
+          for (const event of receipts) yield* store.attempted(event.id, startedAt);
+          const disputeCharges = [
+            ...new Set(
+              receipts
+                .filter((event) => event.kind.startsWith("charge.dispute.") && event.object_id)
+                .map((event) => event.object_id!),
+            ),
+          ];
+          yield* withAccount(userId, (account) => refresh(account, disputeCharges));
+          for (const event of receipts) yield* store.complete(event.id, yield* now);
+        }).pipe(
           Effect.catch(() => Effect.logWarning("Billing account reconciliation remains pending")),
         );
-      }
+      const staleUsers = [...new Set(stale.map((account) => account.user_id))].filter(
+        (userId) => !groups.has(userId),
+      );
+      // Separate lanes ensure two stalled event accounts cannot starve ordinary sweeps.
+      // Each lane has two account slots: no more than four provider flows in flight.
+      yield* Effect.all(
+        [
+          Effect.forEach([...groups], ([userId, receipts]) => refreshGroup(userId, receipts), {
+            concurrency: 2,
+            discard: true,
+          }),
+          Effect.forEach(staleUsers, (userId) => refreshGroup(userId, []), {
+            concurrency: 2,
+            discard: true,
+          }),
+        ],
+        { concurrency: 2, discard: true },
+      );
     }),
   };
 }
@@ -417,9 +617,12 @@ export const layer = (config: BillingConfig) =>
           : createStripeClient({
               secretKey: config.secretKey,
               webhookSecret: config.webhookSecret,
-              livemode: false,
+              livemode: config.livemode,
+              ...(config.accountId ? { expectedAccountId: config.accountId } : {}),
+              automaticTax: config.automaticTax ?? false,
               allowedPriceIds: [config.monthlyPriceId, config.annualPriceId],
             });
-      return BillingService.of(makeBillingService(config, store, stripe));
+      const reviews = yield* makePaymentReviews;
+      return BillingService.of(makeBillingService(config, store, stripe, reviews.record));
     }),
   );

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
-import { computeConnectEntitlement, type SubscriptionAccessFacts } from "./ConnectEntitlements.ts";
+import {
+  computeConnectEntitlement,
+  connectedAccessWindowStart,
+  type SubscriptionAccessFacts,
+} from "./ConnectEntitlements.ts";
 const base: SubscriptionAccessFacts = {
   status: "active",
   paidThrough: null,
@@ -54,5 +58,57 @@ describe("Connect access policy", () => {
   it("rejects invalid clocks and ignores non-finite provider boundaries", () => {
     expect(() => computeConnectEntitlement(base, NaN)).toThrow();
     expect(computeConnectEntitlement({ ...base, paidThrough: Infinity }, 100).allowed).toBe(false);
+  });
+});
+
+describe("canonical access windows", () => {
+  it("retains the original window through uninterrupted settled renewal", () => {
+    expect(
+      connectedAccessWindowStart(
+        [
+          { start: 100, end: 200, settledAt: 100 },
+          { start: 200, end: 300, settledAt: 200 },
+        ],
+        null,
+        250,
+        0,
+        false,
+      ),
+    ).toBe(100);
+  });
+  it("starts a new window after late settlement even if no cron ran during the gap", () => {
+    const invoices = [
+      { start: 100, end: 200, settledAt: 100 },
+      { start: 200, end: 300, settledAt: 220 },
+    ];
+    expect(connectedAccessWindowStart(invoices, null, 250, 10, false)).toBe(220);
+    expect(connectedAccessWindowStart(invoices, null, 215, 10, false)).toBeNull();
+  });
+  it("bridges renewal grace only from settled service and contiguous terms", () => {
+    expect(
+      connectedAccessWindowStart(
+        [
+          { start: 100, end: 200, settledAt: 100 },
+          { start: 200, end: 300, settledAt: 205 },
+        ],
+        null,
+        250,
+        10,
+        false,
+      ),
+    ).toBe(100);
+    expect(
+      connectedAccessWindowStart(
+        [
+          { start: 100, end: 200, settledAt: 100 },
+          { start: 205, end: 300, settledAt: 205 },
+        ],
+        null,
+        250,
+        10,
+        false,
+      ),
+    ).toBe(205);
+    expect(connectedAccessWindowStart([], { start: 100, end: 200 }, 205, 10, true)).toBeNull();
   });
 });

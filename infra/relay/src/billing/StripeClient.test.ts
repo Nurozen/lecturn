@@ -163,3 +163,70 @@ describe("Stripe sandbox adapter", () => {
     expect(requested).toContain("payment_method=pm_test");
   });
 });
+
+describe("Stripe production account scope", () => {
+  it("pins the account before writes and refuses a mismatched account", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(JSON.stringify({ id: "acct_other" })));
+    const client = createStripeClient({ ...config, expectedAccountId: "acct_expected" }, fetcher);
+    await expect(client.createCheckout(checkout, "key")).rejects.toThrow("account mismatch");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(String(fetcher.mock.calls[0]![0])).toContain("/v1/account");
+  });
+  it("accepts only matching live keys and resources and collects tax address", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "acct_expected" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "cs_live", livemode: true })));
+    const client = createStripeClient(
+      {
+        ...config,
+        secretKey: "sk_live_example",
+        livemode: true,
+        expectedAccountId: "acct_expected",
+        automaticTax: true,
+      },
+      fetcher,
+    );
+    await client.createCheckout(checkout, "key");
+    const body = new URLSearchParams(String(fetcher.mock.calls[1]![1]?.body));
+    expect(body.get("billing_address_collection")).toBe("required");
+    expect(body.get("customer_update[address]")).toBe("auto");
+    expect(body.get("automatic_tax[enabled]")).toBe("true");
+    expect(() => createStripeClient({ ...config, livemode: true })).toThrow("key mode mismatch");
+  });
+  it("requests canonical invoice payment expansion and scopes disputes to one charge", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockImplementation(
+        async () => new Response(JSON.stringify({ object: "list", data: [], has_more: false })),
+      );
+    const client = createStripeClient(config, fetcher);
+    await client.listInvoicePayments("in_test");
+    await client.listDisputes("ch_test");
+    const payments = new URL(String(fetcher.mock.calls[0]![0]));
+    expect(payments.searchParams.get("invoice")).toBe("in_test");
+    expect(payments.searchParams.get("expand[0]")).toBe(
+      "data.payment.payment_intent.latest_charge",
+    );
+    expect(new URL(String(fetcher.mock.calls[1]![0])).searchParams.get("charge")).toBe("ch_test");
+  });
+});
+
+it("uses the newest invoice page even when more than one hundred invoices exist", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(
+    async () =>
+      new Response(
+        JSON.stringify({
+          object: "list",
+          data: Array.from({ length: 100 }, (_, index) => ({ id: `in_${index}`, livemode: false })),
+          has_more: true,
+          url: "/v1/invoices",
+        }),
+      ),
+  );
+  const invoices = await createStripeClient(config, fetcher).listInvoices("sub_long_lived");
+  expect(invoices).toHaveLength(100);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});

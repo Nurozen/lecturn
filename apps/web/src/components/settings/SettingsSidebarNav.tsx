@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
+import { BillingSettingsMenuItem } from "../cloud/BillingSettingsDialog";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Kbd } from "../ui/kbd";
@@ -286,6 +287,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                     </SidebarMenuItem>
                   );
                 })}
+            {!isSearching && <BillingSettingsMenuItem />}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>

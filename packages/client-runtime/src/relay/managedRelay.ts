@@ -220,6 +220,7 @@ export class ManagedRelayDpopSigner extends Context.Service<
 >()("@t3tools/client-runtime/relay/managedRelay/ManagedRelayDpopSigner") {}
 
 export const MANAGED_RELAY_REQUEST_TIMEOUT_MS = 10_000;
+const MANAGED_RELAY_LIFECYCLE_TIMEOUT_MS = 35_000;
 
 export interface ManagedRelayAccessTokenCacheEntry {
   readonly accountId: string;
@@ -328,12 +329,15 @@ function isRejectedDpopAccessToken(error: ManagedRelayClientError): boolean {
   );
 }
 
-function timeoutRelayRequest(activity: ManagedRelayRequestActivity) {
+function timeoutRelayRequest(
+  activity: ManagedRelayRequestActivity,
+  timeoutMs = MANAGED_RELAY_REQUEST_TIMEOUT_MS,
+) {
   return <A, E, R>(
     effect: Effect.Effect<A, E, R>,
   ): Effect.Effect<A, E | ManagedRelayClientError, R> =>
     effect.pipe(
-      Effect.timeoutOption(Duration.millis(MANAGED_RELAY_REQUEST_TIMEOUT_MS)),
+      Effect.timeoutOption(Duration.millis(timeoutMs)),
       Effect.flatMap(
         Option.match({
           onNone: () =>
@@ -344,7 +348,7 @@ function timeoutRelayRequest(activity: ManagedRelayRequestActivity) {
                 Effect.fail(
                   new ManagedRelayRequestTimeoutError({
                     activity,
-                    timeoutMs: MANAGED_RELAY_REQUEST_TIMEOUT_MS,
+                    timeoutMs,
                     traceId,
                   }),
                 ),
@@ -745,7 +749,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
           })
           .pipe(
             Effect.mapError(relayRequestError("link relay environment")),
-            timeoutRelayRequest("Relay environment linking"),
+            timeoutRelayRequest("Relay environment linking", MANAGED_RELAY_LIFECYCLE_TIMEOUT_MS),
           );
       },
       Effect.withSpan("clientRuntime.managedRelay.linkEnvironment"),
@@ -760,7 +764,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
           })
           .pipe(
             Effect.mapError(relayRequestError("unlink relay environment")),
-            timeoutRelayRequest("Relay environment unlinking"),
+            timeoutRelayRequest("Relay environment unlinking", MANAGED_RELAY_LIFECYCLE_TIMEOUT_MS),
           );
       },
       Effect.withSpan("clientRuntime.managedRelay.unlinkEnvironment"),

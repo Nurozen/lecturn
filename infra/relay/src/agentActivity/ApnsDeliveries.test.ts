@@ -4,6 +4,8 @@ import type {
 } from "@t3tools/contracts/relay";
 import * as NodeCryptoLayer from "@effect/platform-node/NodeCrypto";
 import { describe, expect, it } from "@effect/vitest";
+import { TestClock } from "effect/testing";
+import type { BillingAccount } from "../billing/BillingStore.ts";
 import * as NodeCrypto from "node:crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -31,6 +33,7 @@ import * as ApnsDeliveries from "./ApnsDeliveries.ts";
 import * as ApnsClient from "./ApnsClient.ts";
 import {
   ManagedAccess,
+  make as makeManagedAccess,
   ManagedAccessRequired,
   ManagedAccessUnavailable,
   layerDisabled,
@@ -2112,4 +2115,205 @@ describe("durable subscription-denied receipts", () => {
       ),
     ),
   );
+});
+
+describe("queued delivery entitlement windows", () => {
+  const accountForWindow = (userId: string, accessWindowStart: number): BillingAccount => ({
+    user_id: userId,
+    customer_id: "cus_window",
+    deleted_at: null,
+    generation: 10,
+    updated_at: 60,
+    lease_token: null,
+    state: { accessWindowStart, accessUntil: 1000 },
+  });
+  const signedAtOrigin = (
+    kind: "push_notification" | "live_activity_update" | "live_activity_end",
+    userId = target.user_id,
+  ) =>
+    signApnsDeliveryJob({
+      secret: config.apnsDeliveryJobSigningSecret,
+      payload: makeApnsDeliveryJobPayload({
+        kind,
+        userId,
+        deviceId: target.device_id,
+        token: kind === "push_notification" ? "push-token" : "activity-token",
+        aggregate: kind === "push_notification" ? null : aggregate,
+        notification:
+          kind === "push_notification"
+            ? {
+                title: "Thread",
+                body: "Input",
+                environmentId: "env",
+                threadId: "thread",
+                deepLink: "/",
+              }
+            : null,
+        alert: kind === "live_activity_end" ? { title: "Done", body: "Finished" } : null,
+        createdAt: "1970-01-01T00:00:00.000Z",
+        expiresAt: "1970-01-01T00:10:00.000Z",
+        jobId: `window-${kind}-${userId}`,
+      }),
+    });
+
+  for (const kind of ["push_notification", "live_activity_update"] as const) {
+    for (const renewedAfterGap of [false, true]) {
+      it.effect(
+        `${kind} first delivery ${renewedAfterGap ? "drops after an access gap" : "survives continuous renewal"}`,
+        () => {
+          let sends = 0;
+          const attempts: DeliveryAttempts.DeliveryAttemptInput[] = [];
+          const accessWindowStart = renewedAfterGap ? 30 : 0;
+          return Effect.gen(function* () {
+            yield* TestClock.setTime(60_000);
+            const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+            const job = signedAtOrigin(kind);
+            const result = yield* deliveries.processSignedJob(job);
+            expect(result.ok).toBe(true);
+            expect(sends).toBe(renewedAfterGap ? 0 : 1);
+            if (renewedAfterGap) {
+              expect(attempts[0]?.apnsReason).toContain("access expired");
+              yield* deliveries.processSignedJob(job);
+              expect(sends).toBe(0);
+            }
+          }).pipe(
+            Effect.provide(
+              makeLayer({
+                attempts,
+                config: signingConfig,
+                currentTargets: [{ ...target, push_token: "push-token" }],
+                managedAccess: makeManagedAccess((userId) =>
+                  Effect.succeed(accountForWindow(userId, accessWindowStart)),
+                ),
+                execute: (request) =>
+                  Effect.sync(() => {
+                    sends++;
+                    return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+                  }),
+              }),
+            ),
+          );
+        },
+      );
+    }
+  }
+
+  it.effect("rechecks the original access window after claiming a job", () => {
+    let loads = 0;
+    let sends = 0;
+    const attempts: DeliveryAttempts.DeliveryAttemptInput[] = [];
+    return Effect.gen(function* () {
+      yield* TestClock.setTime(60_000);
+      const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+      yield* deliveries.processSignedJob(signedAtOrigin("push_notification"));
+      expect(loads).toBe(2);
+      expect(sends).toBe(0);
+      expect(attempts[0]?.apnsReason).toContain("access expired");
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          attempts,
+          config: signingConfig,
+          currentTargets: [{ ...target, push_token: "push-token" }],
+          managedAccess: makeManagedAccess((userId) =>
+            Effect.sync(() => {
+              loads++;
+              return accountForWindow(userId, loads === 1 ? 0 : 30);
+            }),
+          ),
+          execute: (request) =>
+            Effect.sync(() => {
+              sends++;
+              return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+            }),
+        }),
+      ),
+    );
+  });
+
+  it.effect("only suppresses the expired recipient on a shared environment", () => {
+    let sends = 0;
+    return Effect.gen(function* () {
+      yield* TestClock.setTime(60_000);
+      const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+      yield* deliveries.processSignedJob(signedAtOrigin("push_notification", "expired-recipient"));
+      yield* deliveries.processSignedJob(
+        signedAtOrigin("push_notification", "continuous-recipient"),
+      );
+      expect(sends).toBe(1);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          attempts: [],
+          config: signingConfig,
+          currentTargets: [{ ...target, push_token: "push-token" }],
+          managedAccess: makeManagedAccess((userId) =>
+            Effect.succeed(accountForWindow(userId, userId === "expired-recipient" ? 30 : 0)),
+          ),
+          execute: (request) =>
+            Effect.sync(() => {
+              sends++;
+              return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+            }),
+        }),
+      ),
+    );
+  });
+
+  it.effect(
+    "sends a cleanup end silently when its alert predates the current access window",
+    () => {
+      let body = "";
+      return Effect.gen(function* () {
+        yield* TestClock.setTime(60_000);
+        const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+        expect((yield* deliveries.processSignedJob(signedAtOrigin("live_activity_end"))).ok).toBe(
+          true,
+        );
+        expect(body).toContain('"event":"end"');
+        expect(body).not.toContain('"alert"');
+      }).pipe(
+        Effect.provide(
+          makeLayer({
+            attempts: [],
+            config: signingConfig,
+            managedAccess: makeManagedAccess((userId) =>
+              Effect.succeed(accountForWindow(userId, 30)),
+            ),
+            execute: (request) =>
+              Effect.sync(() => {
+                if (request.body._tag === "Uint8Array")
+                  body = new TextDecoder().decode(request.body.body);
+                return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+              }),
+          }),
+        ),
+      );
+    },
+  );
+
+  it.effect("rollback bypasses window fencing without reading billing storage", () => {
+    let sends = 0;
+    return Effect.gen(function* () {
+      yield* TestClock.setTime(60_000);
+      const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+      expect((yield* deliveries.processSignedJob(signedAtOrigin("push_notification"))).ok).toBe(
+        true,
+      );
+      expect(sends).toBe(1);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          attempts: [],
+          config: signingConfig,
+          currentTargets: [{ ...target, push_token: "push-token" }],
+          execute: (request) =>
+            Effect.sync(() => {
+              sends++;
+              return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+            }),
+        }),
+      ),
+    );
+  });
 });

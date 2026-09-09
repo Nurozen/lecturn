@@ -19,6 +19,7 @@ import { RelayEnvironmentAuth } from "@t3tools/contracts/relay";
 
 import {
   RELAY_REQUEST_DEADLINE_MS,
+  RELAY_LIFECYCLE_REQUEST_DEADLINE_MS,
   relayCors,
   relayDocsRedirectRoute,
   relayEnvironmentAuthLayer,
@@ -471,6 +472,47 @@ describe("relay request tracing", () => {
         expect(Option.isNone(spans[0]!.parent)).toBe(true);
         expect(Option.getOrUndefined(spans[1]!.parent)?.spanId).toBe(spans[0]?.spanId);
       }),
+  );
+
+  for (const [method, path] of [
+    ["POST", "/v1/client/environment-links"],
+    ["DELETE", "/v1/client/environment-links/env_a"],
+    ["DELETE", "/v1/client/environment-links/env_a/tunnel"],
+  ] as const) {
+    it.effect(
+      `allows bounded provider work beyond the ordinary deadline for ${method} ${path}`,
+      () =>
+        Effect.gen(function* () {
+          const request = HttpServerRequest.fromWeb(
+            new Request(`https://relay.test${path}`, { method }),
+          );
+          const fiber = yield* traceRelayHttpRequestWith(
+            Effect.sleep(Duration.seconds(20)).pipe(
+              Effect.as(HttpServerResponse.empty({ status: 204 })),
+            ),
+            Layer.empty,
+          ).pipe(
+            Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+            Effect.forkChild,
+          );
+          yield* TestClock.adjust(Duration.millis(RELAY_LIFECYCLE_REQUEST_DEADLINE_MS));
+          expect((yield* Fiber.join(fiber)).status).toBe(204);
+        }),
+    );
+  }
+
+  it.effect("still bounds a hung environment provision request", () =>
+    Effect.gen(function* () {
+      const request = HttpServerRequest.fromWeb(
+        new Request("https://relay.test/v1/client/environment-links", { method: "POST" }),
+      );
+      const fiber = yield* traceRelayHttpRequestWith(Effect.never, Layer.empty).pipe(
+        Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+        Effect.forkChild,
+      );
+      yield* TestClock.adjust(Duration.millis(RELAY_LIFECYCLE_REQUEST_DEADLINE_MS));
+      expect((yield* Fiber.join(fiber)).status).toBe(504);
+    }),
   );
 
   it.effect("fails hung requests with a 504 before the client's 10s abort", () =>

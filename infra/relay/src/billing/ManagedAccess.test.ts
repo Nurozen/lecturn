@@ -55,3 +55,64 @@ it.effect("separates expired/deleted access from stale or unavailable storage", 
 it.effect("disabled mode needs neither billing storage nor payment", () =>
   disabled.check("any-user", "managedConnect"),
 );
+
+it.effect(
+  "rejects old or unknown notification windows while keeping ordinary access available",
+  () =>
+    Effect.gen(function* () {
+      const time = Math.floor((yield* Clock.currentTimeMillis) / 1000);
+      for (const accessWindowStart of [undefined, time]) {
+        const service = make(() =>
+          Effect.succeed({
+            ...account(time),
+            state: {
+              accessUntil: time + 100,
+              ...(accessWindowStart === undefined ? {} : { accessWindowStart }),
+            },
+          }),
+        );
+        yield* service.check("owner", "managedConnect");
+        expect(
+          (yield* service.check("owner", "pushNotifications", time - 1).pipe(Effect.flip))._tag,
+        ).toBe("ManagedAccessRequired");
+      }
+    }),
+);
+
+it.effect(
+  "accepts continuous-window delivery and subsecond job creation while rejecting invalid origins",
+  () =>
+    Effect.gen(function* () {
+      const time = Math.floor((yield* Clock.currentTimeMillis) / 1000);
+      const service = make(() =>
+        Effect.succeed({
+          ...account(time),
+          state: { accessUntil: time + 100, accessWindowStart: time - 100 },
+        }),
+      );
+      yield* service.check("owner", "pushNotifications", time - 100);
+      yield* service.check("owner", "liveActivities", time + 0.999);
+      for (const origin of [NaN, Infinity, time + 2, time - 100.001])
+        expect(
+          (yield* service.check("owner", "pushNotifications", origin).pipe(Effect.flip))._tag,
+        ).toBe("ManagedAccessRequired");
+    }),
+);
+
+it.effect("observe and disabled rollback service ignores old notification origin windows", () =>
+  disabled.check("any-user", "pushNotifications", -1000),
+);
+
+it.effect("payment cohort exemptions never exempt deleted recipients", () =>
+  Effect.gen(function* () {
+    const time = Math.floor((yield* Clock.currentTimeMillis) / 1000);
+    const deleted = { ...account(time), deleted_at: time };
+    for (const enforce of [true, false]) {
+      const service = make(() => Effect.succeed(deleted), [], enforce);
+      expect((yield* Effect.flip(service.check("owner", "pushNotifications")))._tag).toBe(
+        "ManagedAccessRequired",
+      );
+    }
+    yield* make(() => Effect.succeed(account(time)), [], true).check("owner", "pushNotifications");
+  }),
+);

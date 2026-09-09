@@ -435,6 +435,103 @@ describe("ManagedRelayClient", () => {
     }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managedRelayTestLayer(fetchFn))));
   });
 
+  for (const operation of ["link", "unlink"] as const) {
+    it.effect(`allows ${operation} to finish after the ordinary request timeout`, () => {
+      let respond!: (response: Response) => void;
+      const response = new Promise<Response>((resolve) => {
+        respond = resolve;
+      });
+      const fetchFn = (() => response) satisfies typeof globalThis.fetch;
+      return Effect.gen(function* () {
+        const client = yield* ManagedRelay.ManagedRelayClient;
+        const request: Effect.Effect<unknown, ManagedRelay.ManagedRelayClientError> =
+          operation === "link"
+            ? client.linkEnvironment({
+                clerkToken: "clerk-token",
+                payload: {
+                  proof: "link-proof",
+                  notificationsEnabled: false,
+                  liveActivitiesEnabled: false,
+                  managedTunnelsEnabled: true,
+                },
+              })
+            : client.unlinkEnvironment({
+                clerkToken: "clerk-token",
+                environmentId: EnvironmentId.make("env-1"),
+              });
+        const fiber = yield* request.pipe(Effect.forkScoped);
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust("30 seconds");
+        respond(
+          Response.json(
+            operation === "unlink"
+              ? { ok: true }
+              : {
+                  ok: true,
+                  cloudUserId: "user_owner",
+                  environmentId: "env-1",
+                  endpoint: {
+                    httpBaseUrl: "https://env.example.test/",
+                    wsBaseUrl: "wss://env.example.test/ws",
+                    providerKind: "cloudflare_tunnel",
+                  },
+                  endpointRuntime: null,
+                  relayIssuer: "https://relay.example.test",
+                  environmentCredential: "credential",
+                  cloudMintPublicKey: "public-key",
+                },
+          ),
+        );
+        expect(yield* Fiber.join(fiber)).toMatchObject({ ok: true });
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managedRelayTestLayer(fetchFn))));
+    });
+    it.effect(`bounds stalled ${operation} requests at 35 seconds`, () => {
+      const fetchFn = (() =>
+        new Promise<Response>(() => undefined)) satisfies typeof globalThis.fetch;
+      return Effect.gen(function* () {
+        const client = yield* ManagedRelay.ManagedRelayClient;
+        const request: Effect.Effect<unknown, ManagedRelay.ManagedRelayClientError> =
+          operation === "link"
+            ? client.linkEnvironment({
+                clerkToken: "clerk-token",
+                payload: {
+                  proof: "link-proof",
+                  notificationsEnabled: false,
+                  liveActivitiesEnabled: false,
+                  managedTunnelsEnabled: true,
+                },
+              })
+            : client.unlinkEnvironment({
+                clerkToken: "clerk-token",
+                environmentId: EnvironmentId.make("env-1"),
+              });
+        let finished = false;
+        const fiber = yield* request.pipe(
+          Effect.result,
+          Effect.onExit(() =>
+            Effect.sync(() => {
+              finished = true;
+            }),
+          ),
+          Effect.forkScoped,
+        );
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust("10 seconds");
+        expect(finished).toBe(false);
+        yield* TestClock.adjust("25 seconds");
+        const result = yield* Fiber.join(fiber);
+        expect(result._tag).toBe("Failure");
+        if (result._tag === "Failure")
+          expect(result.failure).toMatchObject({
+            _tag: "ManagedRelayRequestTimeoutError",
+            timeoutMs: 35000,
+            activity:
+              operation === "link" ? "Relay environment linking" : "Relay environment unlinking",
+          });
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managedRelayTestLayer(fetchFn))));
+    });
+  }
+
   it.effect("preserves typed relay trace IDs on client errors", () => {
     const fetchFn = (() =>
       Promise.resolve(

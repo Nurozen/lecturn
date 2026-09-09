@@ -4,8 +4,10 @@ export const STRIPE_API_VERSION = "2026-08-26.dahlia" as const;
 export interface StripeClientConfig {
   readonly secretKey: string;
   readonly webhookSecret: string;
-  readonly livemode: false;
+  readonly livemode: boolean;
   readonly allowedPriceIds: readonly string[];
+  readonly expectedAccountId?: string;
+  readonly automaticTax?: boolean;
 }
 export interface CheckoutInput {
   readonly customerId: string;
@@ -28,6 +30,9 @@ export interface StripeClient {
   ): Promise<Stripe.BillingPortal.Session>;
   retrieveSubscription(id: string): Promise<Stripe.Subscription>;
   listInvoices(subscriptionId: string): Promise<Stripe.Invoice[]>;
+  listInvoicePayments(invoiceId: string): Promise<Stripe.InvoicePayment[]>;
+  retrieveCharge(id: string): Promise<Stripe.Charge>;
+  listDisputes(chargeId: string): Promise<Stripe.Dispute[]>;
   hasSuccessfulCardSetup(customerId: string, paymentMethodId: string): Promise<boolean>;
   cancelSubscription(id: string, key: string): Promise<Stripe.Subscription>;
   verifyWebhook(rawBody: Uint8Array, signature: string): Promise<Stripe.Event>;
@@ -38,16 +43,30 @@ export function createStripeClient(
   config: StripeClientConfig,
   fetcher?: typeof fetch,
 ): StripeClient {
-  if (config.livemode !== false || !/^(sk|rk)_test_/.test(config.secretKey))
-    throw new Error("Only Stripe sandbox billing is supported");
+  const keyPattern = config.livemode ? /^(sk|rk)_live_/ : /^(sk|rk)_test_/;
+  if (!keyPattern.test(config.secretKey)) throw new Error("Stripe secret key mode mismatch");
   const stripe = new Stripe(config.secretKey, {
     apiVersion: STRIPE_API_VERSION,
     httpClient: Stripe.createFetchHttpClient(fetcher),
     maxNetworkRetries: 2,
     timeout: 20_000,
   });
+  let accountCheck: Promise<void> | undefined;
+  const assertAccount = (): Promise<void> => {
+    if (!config.expectedAccountId) return Promise.resolve();
+    accountCheck ??= stripe.accounts
+      .retrieve(null)
+      .then((account) => {
+        if (account.id !== config.expectedAccountId) throw new Error("Stripe account mismatch");
+      })
+      .catch((cause: unknown) => {
+        accountCheck = undefined;
+        throw cause;
+      });
+    return accountCheck;
+  };
   const sandbox = <T extends { livemode: boolean }>(value: T): T => {
-    if (value.livemode !== false) throw new Error("Stripe resource mode mismatch");
+    if (value.livemode !== config.livemode) throw new Error("Stripe resource mode mismatch");
     return value;
   };
   const request = (key: string) => {
@@ -56,6 +75,7 @@ export function createStripeClient(
   };
   return {
     async createCustomer(input, key) {
+      await assertAccount();
       return sandbox(
         await stripe.customers.create(
           {
@@ -78,11 +98,15 @@ export function createStripeClient(
         customer: customerId,
         status: "all",
         limit: 100,
-      }))
+      })) {
+        if (subscriptions.length >= 100)
+          throw new Error("Subscription history requires support review");
         subscriptions.push(sandbox(subscription));
+      }
       return subscriptions;
     },
     async createCheckout(input, key) {
+      await assertAccount();
       if (!config.allowedPriceIds.includes(input.priceId))
         throw new Error("Stripe price is not allowed");
       return sandbox(
@@ -95,6 +119,9 @@ export function createStripeClient(
             line_items: [{ price: input.priceId, quantity: 1 }],
             payment_method_types: ["card"],
             payment_method_collection: "always",
+            billing_address_collection: "required",
+            customer_update: { address: "auto" },
+            automatic_tax: { enabled: config.automaticTax ?? false },
             subscription_data: {
               metadata: { clerk_user_id: input.ownerId },
               ...(input.trialEligible
@@ -115,9 +142,11 @@ export function createStripeClient(
       return sandbox(await stripe.checkout.sessions.retrieve(id));
     },
     async expireCheckout(id, key) {
+      await assertAccount();
       return sandbox(await stripe.checkout.sessions.expire(id, {}, request(key)));
     },
     async createPortal(input, key) {
+      await assertAccount();
       return sandbox(
         await stripe.billingPortal.sessions.create(
           {
@@ -137,11 +166,13 @@ export function createStripeClient(
       );
     },
     async hasSuccessfulCardSetup(customerId, paymentMethodId) {
+      let checked = 0;
       for await (const raw of stripe.setupIntents.list({
         customer: customerId,
         payment_method: paymentMethodId,
         limit: 100,
       })) {
+        if (++checked > 100) throw new Error("Card setup history requires support review");
         const intent = sandbox(raw);
         const customer =
           typeof intent.customer === "string" ? intent.customer : intent.customer?.id;
@@ -160,15 +191,31 @@ export function createStripeClient(
       return false;
     },
     async listInvoices(subscriptionId) {
-      const invoices: Stripe.Invoice[] = [];
-      for await (const invoice of stripe.invoices.list({
-        subscription: subscriptionId,
-        limit: 100,
-      }))
-        invoices.push(sandbox(invoice));
-      return invoices;
+      // Newest page only. Old history cannot permanently block a long-lived subscriber.
+      // Reconciliation treats this as a conservative continuity horizon, not complete history.
+      const invoices = await stripe.invoices.list({ subscription: subscriptionId, limit: 100 });
+      return invoices.data.map(sandbox);
+    },
+    async listInvoicePayments(invoiceId) {
+      const payments = await stripe.invoicePayments.list({
+        invoice: invoiceId,
+        status: "paid",
+        limit: 10,
+        expand: ["data.payment.payment_intent.latest_charge", "data.payment.charge"],
+      });
+      if (payments.has_more) throw new Error("Invoice payment history requires support review");
+      return payments.data.map(sandbox);
+    },
+    async retrieveCharge(id) {
+      return sandbox(await stripe.charges.retrieve(id));
+    },
+    async listDisputes(chargeId) {
+      const disputes = await stripe.disputes.list({ charge: chargeId, limit: 10 });
+      if (disputes.has_more) throw new Error("Dispute history requires support review");
+      return disputes.data.map(sandbox);
     },
     async cancelSubscription(id, key) {
+      await assertAccount();
       return sandbox(
         await stripe.subscriptions.cancel(id, { invoice_now: false, prorate: false }, request(key)),
       );

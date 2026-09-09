@@ -1,0 +1,1 @@
+ALTER TABLE "relay_managed_gateway_environments" ADD COLUMN "deleting" boolean DEFAULT false NOT NULL;

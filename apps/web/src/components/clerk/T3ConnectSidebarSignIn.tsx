@@ -1,6 +1,7 @@
 import { UserButton, useAuth } from "@clerk/react";
-import { LogInIcon, ServerIcon, SmartphoneIcon } from "lucide-react";
+import { CreditCardIcon, LogInIcon, ServerIcon, SmartphoneIcon } from "lucide-react";
 
+import { BillingAccount } from "../cloud/BillingAccount";
 import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
 import { MobileClientsUserProfilePage } from "./MobileClientsUserProfilePage";
@@ -33,6 +34,13 @@ function ConfiguredT3ConnectSidebarAvatar() {
         },
       }}
     >
+      <UserButton.UserProfilePage
+        label="Billing"
+        labelIcon={<CreditCardIcon className="size-4" />}
+        url="billing"
+      >
+        <BillingAccount embedded />
+      </UserButton.UserProfilePage>
       <UserButton.UserProfilePage
         label="Mobile clients"
         labelIcon={<SmartphoneIcon className="size-4" />}

@@ -1,5 +1,6 @@
 import { Clock, Context, Effect, Layer, Schema } from "effect";
 import { RelayDb } from "../db.ts";
+import { effectiveAccountAccess } from "./BillingGrants.ts";
 import { BillingError, type BillingAccount } from "./BillingStore.ts";
 
 export interface ManagedReservation {
@@ -38,11 +39,7 @@ export class ManagedReservations extends Context.Service<
 >()("t3code-relay/billing/ManagedReservations") {}
 const now = Clock.currentTimeMillis.pipe(Effect.map((ms) => Math.floor(ms / 1000)));
 const allowed = (account: BillingAccount | undefined, time: number) =>
-  !!account &&
-  account.deleted_at === null &&
-  Number(account.updated_at) > time - 900 &&
-  Number(account.updated_at) <= time &&
-  (account.state.accessUntil ?? 0) > time;
+  effectiveAccountAccess(account, time).allowed;
 const isBillingError = Schema.is(BillingError);
 const unavailable = () =>
   new BillingError({
@@ -64,7 +61,10 @@ const disabled = ManagedReservations.of({
   release: () => Effect.succeed(true),
 });
 
-export const make = (config: { readonly enabled: boolean }) =>
+export const make = (config: {
+  readonly enabled: boolean;
+  readonly enforcementUsers?: ReadonlyArray<string> | undefined;
+}) =>
   Effect.gen(function* () {
     if (!config.enabled) return disabled;
     const { $client: sql } = yield* RelayDb;
@@ -79,27 +79,41 @@ export const make = (config: { readonly enabled: boolean }) =>
       ).pipe(Effect.map((rows) => rows[0]));
     return ManagedReservations.of({
       get: Effect.fn("ManagedReservations.get")(function* (input) {
+        if (
+          config.enforcementUsers &&
+          !config.enforcementUsers.includes("*") &&
+          !config.enforcementUsers.includes(input.userId)
+        )
+          return null;
         const row = (yield* query(
           sql<ReservationRow>`SELECT * FROM relay_managed_reservations WHERE user_id=${input.userId} AND environment_id=${input.environmentId} AND enabled=true`,
         ))[0];
         return row ? publicReservation(row) : null;
       }),
       reserve: Effect.fn("ManagedReservations.reserve")(function* (input) {
+        if (
+          config.enforcementUsers &&
+          !config.enforcementUsers.includes("*") &&
+          !config.enforcementUsers.includes(input.userId)
+        )
+          return null;
         return yield* transaction(
           Effect.gen(function* () {
             const account = yield* lock(input.userId);
             const time = yield* now;
-            if (
-              account &&
-              account.deleted_at === null &&
-              (Number(account.updated_at) <= time - 900 || Number(account.updated_at) > time)
-            )
-              return yield* unavailable();
-            if (!allowed(account, time))
+            const access = effectiveAccountAccess(account, time);
+            if (!access.available) return yield* unavailable();
+            if (!access.allowed)
               return yield* new BillingError({
                 code: "subscription_required",
                 message: "An active Connect subscription is required",
               });
+            // A retired tunnel is never reused while an external teardown is in progress,
+            // including after resubscription. The worker preserves the hostname for recovery.
+            const retiring = yield* query(
+              sql`SELECT tunnel_id FROM relay_managed_suspensions WHERE user_id=${input.userId} AND environment_id=${input.environmentId} AND completed_at IS NULL LIMIT 1`,
+            );
+            if (retiring.length > 0) return yield* unavailable();
             const existing = (yield* query(
               sql<ReservationRow>`SELECT * FROM relay_managed_reservations WHERE user_id=${input.userId} AND environment_id=${input.environmentId}`,
             ))[0];
@@ -112,11 +126,10 @@ export const make = (config: { readonly enabled: boolean }) =>
             UNION
             SELECT environment_id FROM relay_managed_endpoint_allocations AS allocation WHERE user_id=${input.userId} AND environment_id<>${input.environmentId} AND NOT EXISTS (SELECT 1 FROM relay_managed_reservations AS reservation WHERE reservation.user_id=allocation.user_id AND reservation.environment_id=allocation.environment_id)
           ) AS capacity`))[0]?.count ?? 0;
-              if (used >= 3)
+              if (used >= access.limit)
                 return yield* new BillingError({
                   code: "quota",
-                  message:
-                    "Your three managed environment slots are in use. Disable one to connect another.",
+                  message: `Your ${access.limit} managed environment slots are in use. Disable one to connect another.`,
                 });
             }
             const rows =
@@ -167,8 +180,12 @@ export const make = (config: { readonly enabled: boolean }) =>
 export function layer(config: { readonly enabled: false }): Layer.Layer<ManagedReservations>;
 export function layer(config: {
   readonly enabled: boolean;
+  readonly enforcementUsers?: ReadonlyArray<string> | undefined;
 }): Layer.Layer<ManagedReservations, never, RelayDb>;
-export function layer(config: { readonly enabled: boolean }) {
+export function layer(config: {
+  readonly enabled: boolean;
+  readonly enforcementUsers?: ReadonlyArray<string> | undefined;
+}) {
   return config.enabled
     ? Layer.effect(ManagedReservations, make(config))
     : Layer.succeed(ManagedReservations, disabled);

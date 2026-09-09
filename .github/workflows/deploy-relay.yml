@@ -35,9 +35,26 @@ jobs:
       APNS_KEY_ID: ${{ vars.APNS_KEY_ID }}
       APNS_BUNDLE_ID: ${{ vars.APNS_BUNDLE_ID }}
       ALCHEMY_TELEMETRY_DISABLED: "1"
-      # Sandbox application integration is enabled only on an isolated stage.
-      BILLING_MODE: "disabled"
-      BILLING_CHECKOUT_ENABLED: "false"
+      # Flags default off; production rollout requires reviewed configuration.
+      BILLING_MODE: ${{ vars.BILLING_MODE || 'disabled' }}
+      BILLING_CHECKOUT_ENABLED: ${{ vars.BILLING_CHECKOUT_ENABLED || 'false' }}
+      STRIPE_LIVEMODE: ${{ vars.STRIPE_LIVEMODE || 'false' }}
+      STRIPE_ACCOUNT_ID: ${{ vars.STRIPE_ACCOUNT_ID }}
+      STRIPE_MONTHLY_PRICE_ID: ${{ vars.STRIPE_MONTHLY_PRICE_ID }}
+      STRIPE_ANNUAL_PRICE_ID: ${{ vars.STRIPE_ANNUAL_PRICE_ID }}
+      STRIPE_PORTAL_CONFIGURATION_ID: ${{ vars.STRIPE_PORTAL_CONFIGURATION_ID }}
+      BILLING_PRODUCTION_READY: ${{ vars.BILLING_PRODUCTION_READY || 'false' }}
+      MANAGED_GATEWAY_ENABLED: ${{ vars.MANAGED_GATEWAY_ENABLED || 'false' }}
+      MANAGED_GATEWAY_ORIGIN_GUARD_VERIFIED: ${{ vars.MANAGED_GATEWAY_ORIGIN_GUARD_VERIFIED || 'false' }}
+      MANAGED_GATEWAY_ROUTE_VERIFIED: ${{ vars.MANAGED_GATEWAY_ROUTE_VERIFIED || 'false' }}
+      BILLING_SUSPENSION_ENABLED: ${{ vars.BILLING_SUSPENSION_ENABLED || 'false' }}
+      BILLING_ENFORCEMENT_USERS: ${{ vars.BILLING_ENFORCEMENT_USERS }}
+      BILLING_AUTOMATIC_TAX: ${{ vars.BILLING_AUTOMATIC_TAX || 'false' }}
+      BILLING_ALLOWED_COUNTRIES: ${{ vars.BILLING_ALLOWED_COUNTRIES }}
+      BILLING_COUNTRY_POLICY: ${{ vars.BILLING_COUNTRY_POLICY || 'enforced' }}
+      BILLING_COUNTRY_RESTRICTION_VERIFIED: ${{ vars.BILLING_COUNTRY_RESTRICTION_VERIFIED || 'false' }}
+      BILLING_RENEWAL_GRACE_SECONDS: ${{ vars.BILLING_RENEWAL_GRACE_SECONDS || '259200' }}
+      BILLING_IDENTITY_RECONCILIATION_ENABLED: ${{ vars.BILLING_IDENTITY_RECONCILIATION_ENABLED || 'false' }}
       BILLING_SANDBOX_MANAGED_ACCESS_ENABLED: "false"
     steps:
       - name: Checkout
@@ -67,6 +84,9 @@ jobs:
           AXIOM_TOKEN: ${{ secrets.AXIOM_TOKEN }}
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           APNS_PRIVATE_KEY: ${{ secrets.APNS_PRIVATE_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          CLERK_BILLING_WEBHOOK_SECRET: ${{ secrets.CLERK_BILLING_WEBHOOK_SECRET }}
 
       - name: Publish relay deploy commit status
         uses: actions/github-script@v8

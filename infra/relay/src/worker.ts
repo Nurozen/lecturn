@@ -2,6 +2,7 @@ import * as Alchemy from "alchemy";
 import * as Cloudflare from "alchemy/Cloudflare";
 import * as Drizzle from "alchemy/Drizzle";
 import * as Config from "effect/Config";
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -9,13 +10,30 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as Redacted from "effect/Redacted";
 import { parseBillingConfig } from "./billing/BillingConfig.ts";
+import { parseManagedGatewayConfig } from "./billing/ManagedGatewayConfig.ts";
+import { makeManagedGatewayStore } from "./billing/ManagedGatewayStore.ts";
+import { GATEWAY_ORIGIN_PATH, managedGatewayOriginHop } from "./billing/ManagedGateway.ts";
+import {
+  ManagedGateway,
+  ManagedGatewayLive,
+  ManagedGatewaySecret,
+  gatewayHttpResponse,
+  mutableGatewayBindingResponse,
+} from "./environments/ManagedGatewayBinding.ts";
+import { ManagedGatewayEnrollment } from "./environments/ManagedGatewayEnrollment.ts";
 import * as ManagedReservations from "./billing/ManagedReservations.ts";
 import * as ManagedAccess from "./billing/ManagedAccess.ts";
 import * as BillingService from "./billing/BillingService.ts";
+import { makeBillingStore } from "./billing/BillingStore.ts";
+import { makeBillingOperations, clerkIdentityLookup } from "./billing/BillingOperations.ts";
+import { makeManagedSuspensions } from "./billing/ManagedSuspensions.ts";
+import { bindManagedSuspensionProvider } from "./environments/ManagedSuspensionBinding.ts";
 import { billingRoutes } from "./http/BillingApi.ts";
 import * as Etag from "effect/unstable/http/Etag";
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
+import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import * as HttpApiScalar from "effect/unstable/httpapi/HttpApiScalar";
 
@@ -39,6 +57,7 @@ import {
   withoutCapturedParentSpan,
 } from "./http/Api.ts";
 import { ManagedEndpointZone, RelayApiZone, RelayDeploymentConfig } from "./zone.ts";
+import { relayStageSlug } from "./deploymentConfig.ts";
 import { makeRelayTraceLayer, RelayObservability } from "./observability.ts";
 import * as DeliveryAttempts from "./agentActivity/DeliveryAttempts.ts";
 import * as AgentActivityRows from "./agentActivity/AgentActivityRows.ts";
@@ -102,6 +121,14 @@ const ApnsDeliveryJobSigningSecret = Alchemy.makeRandom("ApnsDeliveryJobSigningS
   bytes: 32,
 });
 
+class ManagedGatewayRuntime extends Context.Service<
+  ManagedGatewayRuntime,
+  {
+    readonly store: Effect.Success<ReturnType<typeof makeManagedGatewayStore>>;
+    readonly sync: (userId: string) => Effect.Effect<void, ManagedAccess.ManagedAccessUnavailable>;
+  }
+>()("t3code-relay/worker/ManagedGatewayRuntime") {}
+
 export class Api extends Cloudflare.Worker<Api, {}>()("Api") {}
 
 export const ApiLive = Api.make(
@@ -127,6 +154,8 @@ export const ApiLive = Api.make(
     const relayApiZone = yield* RelayApiZone;
     const managedEndpointZone = yield* ManagedEndpointZone;
     const randomApnsDeliveryJobSigningSecret = yield* ApnsDeliveryJobSigningSecret;
+    const gatewayNamespace = yield* ManagedGateway;
+    const randomGatewaySecret = yield* ManagedGatewaySecret;
     const observability = yield* RelayObservability;
 
     //
@@ -141,6 +170,7 @@ export const ApiLive = Api.make(
     const apnsBundleId = yield* Config.string("APNS_BUNDLE_ID");
     const apnsPrivateKey = yield* Config.redacted("APNS_PRIVATE_KEY");
     const apnsDeliveryJobSigningSecret = yield* randomApnsDeliveryJobSigningSecret;
+    const gatewaySecret = yield* randomGatewaySecret;
     const apnsDeliveryQueueSender = yield* Cloudflare.Queues.WriteQueue(apnsDeliveryQueue);
 
     const axiomDatasetName = yield* observability.traces.name;
@@ -179,8 +209,27 @@ export const ApiLive = Api.make(
     const portalConfiguration = yield* Config.string("STRIPE_PORTAL_CONFIGURATION_ID").pipe(
       Config.withDefault(""),
     );
+    const billingExtra = yield* Effect.all(
+      Object.fromEntries(
+        [
+          "STRIPE_LIVEMODE",
+          "STRIPE_ACCOUNT_ID",
+          "BILLING_PRODUCTION_READY",
+          "BILLING_SUSPENSION_ENABLED",
+          "BILLING_AUTOMATIC_TAX",
+          "BILLING_ALLOWED_COUNTRIES",
+          "BILLING_COUNTRY_POLICY",
+          "BILLING_COUNTRY_RESTRICTION_VERIFIED",
+          "BILLING_ENFORCEMENT_USERS",
+        ].map((key) => [key, Config.string(key).pipe(Config.withDefault(""))]),
+      ),
+    );
+    const identityReconciliation = yield* Config.boolean(
+      "BILLING_IDENTITY_RECONCILIATION_ENABLED",
+    ).pipe(Config.withDefault(false));
     const billingConfig = yield* Effect.try(() =>
       parseBillingConfig({
+        ...Object.fromEntries(Object.entries(billingExtra).filter(([, value]) => value !== "")),
         BILLING_MODE: billingMode,
         BILLING_SANDBOX_MANAGED_ACCESS_ENABLED: sandboxManagedAccess,
         BILLING_CHECKOUT_ENABLED: billingCheckout,
@@ -193,14 +242,34 @@ export const ApiLive = Api.make(
         STRIPE_PORTAL_CONFIGURATION_ID: portalConfiguration,
       }),
     ).pipe(Effect.orDie);
+    const gatewayFlags = yield* Effect.all(
+      Object.fromEntries(
+        [
+          "MANAGED_GATEWAY_ENABLED",
+          "MANAGED_GATEWAY_ORIGIN_GUARD_VERIFIED",
+          "MANAGED_GATEWAY_ROUTE_VERIFIED",
+        ].map((name) => [name, Config.string(name).pipe(Config.withDefault("false"))]),
+      ),
+    );
+    const gatewayConfig = yield* Effect.try(() =>
+      parseManagedGatewayConfig(gatewayFlags, billingConfig, stage),
+    ).pipe(Effect.orDie);
     if (billingConfig.checkoutEnabled && !Redacted.value(clerkBillingWebhook)) {
       return yield* Effect.die(
-        "Sandbox checkout requires a dedicated Clerk billing lifecycle webhook secret",
+        "Checkout requires a dedicated Clerk billing lifecycle webhook secret",
       );
     }
-    if (stage === "prod" && billingConfig.mode !== "disabled") {
+    if (stage === "prod" && billingConfig.mode !== "disabled" && !billingConfig.livemode) {
       return yield* Effect.die("Sandbox billing must use an isolated relay stage and database");
     }
+
+    if (stage !== "prod" && billingConfig.livemode)
+      return yield* Effect.die("Live Stripe resources require the production stage");
+    if (
+      billingConfig.mode !== "disabled" &&
+      !Redacted.value(clerkSecretKey).startsWith(billingConfig.livemode ? "sk_live_" : "sk_test_")
+    )
+      return yield* Effect.die("Clerk and Stripe environment mismatch");
 
     const cloudMintPrivateKey = yield* cloudMintKeyPair.privateKey;
     const cloudMintPublicKey = yield* cloudMintKeyPair.publicKey;
@@ -208,6 +277,7 @@ export const ApiLive = Api.make(
     const db = yield* Drizzle.Postgres(hyperdrive.connectionString);
 
     const managedEndpointTunnelBinding = yield* Cloudflare.Tunnel.ReadWriteTunnel();
+    const suspensionProvider = yield* bindManagedSuspensionProvider;
     // Keep Worker custom-domain reconciliation ordered after API zone provisioning.
     yield* yield* relayApiZone.zoneId;
     const managedEndpointDnsBinding = yield* Cloudflare.DNS.ReadWriteDns(managedEndpointZone);
@@ -217,6 +287,91 @@ export const ApiLive = Api.make(
     // 3. Runtime layers and app construction
     //
     const alchemyRuntimeContext: Alchemy.BaseRuntimeContext = yield* Cloudflare.Worker;
+
+    const gatewayUnavailable = () =>
+      new ManagedAccess.ManagedAccessUnavailable({
+        message: "Managed gateway state is unavailable. Retry shortly.",
+      });
+    const gatewayRuntimeLayer = Layer.effect(
+      ManagedGatewayRuntime,
+      Effect.gen(function* () {
+        const store = yield* makeManagedGatewayStore({
+          ...gatewayConfig,
+          stage,
+          baseDomain: yield* managedEndpointZoneName,
+        });
+        const sync = (userId: string) =>
+          Effect.gen(function* () {
+            const snapshot = yield* store.capture(userId);
+            yield* gatewayNamespace.getByName(userId).update(snapshot);
+          }).pipe(
+            Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
+            Effect.timeout("5 seconds"),
+            Effect.catchCause(() => Effect.fail(gatewayUnavailable())),
+          );
+        return { store, sync };
+      }).pipe(Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext)),
+    );
+    // Keep the adapter installed when enrollment is disabled so existing gateway allocations
+    // can be closed and removed, and can never silently downgrade to direct tunnels.
+    const gatewayEnrollmentLayer = Layer.effect(
+      ManagedGatewayEnrollment,
+      Effect.gen(function* () {
+        const { store, sync } = yield* ManagedGatewayRuntime;
+        const available = <A, E>(effect: Effect.Effect<A, E>) =>
+          effect.pipe(Effect.mapError(gatewayUnavailable));
+        const mappingFor = (userId: string, environmentId: string) =>
+          available(store.get(userId, environmentId)).pipe(
+            Effect.map((mapping) =>
+              mapping ? { ...mapping, originDnsRecordId: mapping.originDnsRecordId ?? null } : null,
+            ),
+          );
+        return ManagedGatewayEnrollment.of({
+          enabledFor: (userId) =>
+            Effect.succeed(
+              gatewayConfig.enabled &&
+                (gatewayConfig.enforcementUsers.includes("*") ||
+                  gatewayConfig.enforcementUsers.includes(userId)),
+            ),
+          get: ({ userId, environmentId }) => mappingFor(userId, environmentId),
+          registerPending: (input) =>
+            available(store.registerPending(input)).pipe(
+              Effect.map((mapping) => ({
+                ...mapping,
+                originDnsRecordId: mapping.originDnsRecordId ?? null,
+              })),
+            ),
+          recordOriginDns: (input) => available(store.recordOriginDns(input)),
+          checkpointAllocation: (input) => available(store.checkpointAllocation(input)),
+          markReady: (input) =>
+            Effect.gen(function* () {
+              const mapping = yield* mappingFor(input.userId, input.environmentId);
+              if (!mapping || mapping.deleting || mapping.generation !== input.generation)
+                return false;
+              return yield* available(store.markReady(mapping));
+            }),
+          pause: (input) =>
+            available(store.pause(input)).pipe(Effect.map((mapping) => mapping !== undefined)),
+          remove: (input) =>
+            Effect.gen(function* () {
+              const mapping = yield* mappingFor(input.userId, input.environmentId);
+              if (!mapping || mapping.generation !== input.generation) return false;
+              return (
+                (yield* available(
+                  store.remove(
+                    input.userId,
+                    input.environmentId,
+                    mapping.originHostname,
+                    input.generation,
+                  ),
+                )) !== undefined
+              );
+            }),
+          finalizeRemove: (input) => available(store.finalizeRemove(input)),
+          sync,
+        });
+      }),
+    );
 
     const loadSettings = Effect.gen(function* () {
       return RelayConfiguration.RelayConfiguration.of({
@@ -260,7 +415,7 @@ export const ApiLive = Api.make(
           managedEndpointTunnelBinding,
           managedEndpointDnsBinding,
           alchemyRuntimeContext,
-        ),
+        ).pipe(Layer.provideMerge(gatewayEnrollmentLayer), Layer.provideMerge(gatewayRuntimeLayer)),
       ),
       Layer.provideMerge(DpopProofs.layer),
       Layer.provideMerge(ApnsDeliveries.layer),
@@ -276,8 +431,16 @@ export const ApiLive = Api.make(
           EnvironmentLinks.layer,
           ManagedEndpointAllocations.layer,
           ManagedTunnelLimits.layer,
-          ManagedAccess.layer(billingConfig.managedAccessEnabled === true),
-          ManagedReservations.layer({ enabled: billingConfig.managedAccessEnabled === true }),
+          ManagedAccess.layer(
+            billingConfig.mode !== "disabled",
+            billingConfig.mode === "enforce" ? billingConfig.enforcementUsers : undefined,
+            billingConfig.managedAccessEnabled === true,
+          ),
+          ManagedReservations.layer({
+            enabled: billingConfig.managedAccessEnabled === true,
+            enforcementUsers:
+              billingConfig.mode === "enforce" ? billingConfig.enforcementUsers : undefined,
+          }),
         ),
       ),
       Layer.provideMerge(LiveActivities.layer),
@@ -342,13 +505,77 @@ export const ApiLive = Api.make(
 
     if (billingConfig.mode !== "disabled") {
       yield* Cloudflare.Workers.cron("* * * * *", () =>
-        BillingService.BillingService.pipe(
-          Effect.flatMap((billing) => billing.processPending()),
-          Effect.withSpan("relay.billing.reconcile_pending"),
-          Effect.provide(runtimeLayer),
-        ),
+        Effect.gen(function* () {
+          const store = yield* makeBillingStore;
+          const operations = yield* makeBillingOperations({
+            store,
+            identity: clerkIdentityLookup(Redacted.value(clerkSecretKey)),
+          });
+          const billing = yield* BillingService.BillingService;
+          const tasks = [
+            billing.processPending(20).pipe(
+              Effect.timeout("45 seconds"),
+              Effect.catch(() => Effect.logWarning("Billing provider reconciliation deferred")),
+            ),
+            operations
+              .health()
+              .pipe(
+                Effect.flatMap((health) => Effect.logInfo("Billing operational health", health)),
+              ),
+          ];
+          if (identityReconciliation)
+            tasks.push(operations.reconcileIdentities(5).pipe(Effect.asVoid));
+          if (billingConfig.suspensionEnabled) {
+            const suspensions = yield* makeManagedSuspensions({
+              enabled: () =>
+                Effect.succeed(
+                  billingConfig.mode === "enforce" && billingConfig.suspensionEnabled === true,
+                ),
+              enforcementUsers: billingConfig.enforcementUsers,
+              provider: suspensionProvider(alchemyRuntimeContext),
+            });
+            tasks.push(
+              suspensions.drain().pipe(
+                Effect.timeout("50 seconds"),
+                Effect.catch(() => Effect.logWarning("Billing suspension drain deferred")),
+              ),
+            );
+          }
+          // Independent deadlines keep provider outages from starving cutoff and health reporting.
+          yield* Effect.all(
+            tasks.map((task) =>
+              task.pipe(
+                Effect.catch(() =>
+                  Effect.logWarning("An independent billing maintenance task failed"),
+                ),
+              ),
+            ),
+            { concurrency: "unbounded", discard: true },
+          );
+        }).pipe(Effect.withSpan("relay.billing.reconcile_pending"), Effect.provide(runtimeLayer)),
       );
     }
+
+    // Always reconcile existing objects, including after billing/enrollment is disabled.
+    yield* Cloudflare.Workers.cron("* * * * *", () =>
+      Effect.gen(function* () {
+        const { store, sync } = yield* ManagedGatewayRuntime;
+        const users = yield* store.claimDue(20);
+        yield* Effect.forEach(
+          users,
+          (userId) =>
+            sync(userId).pipe(
+              Effect.catch(() => Effect.logWarning("Managed gateway reconciliation deferred")),
+            ),
+          { concurrency: 4, discard: true },
+        );
+      }).pipe(
+        Effect.timeout("45 seconds"),
+        Effect.catchCause(() => Effect.logWarning("Managed gateway maintenance deferred")),
+        Effect.withSpan("relay.gateway.reconcile"),
+        Effect.provide(runtimeLayer),
+      ),
+    );
 
     const fetch = Layer.merge(
       Layer.mergeAll(
@@ -371,7 +598,64 @@ export const ApiLive = Api.make(
     ).pipe(
       HttpRouter.toHttpEffect,
       withoutCapturedParentSpan,
-      Effect.flatMap((httpEffect) => traceRelayHttpRequestWith(httpEffect, relayTraceLayer)),
+      Effect.flatMap((httpEffect) =>
+        traceRelayHttpRequestWith(
+          Effect.gen(function* () {
+            const request = yield* HttpServerRequest.HttpServerRequest;
+            const webRequest = yield* HttpServerRequest.toWeb(request);
+            const url = new URL(webRequest.url);
+            const baseDomain = yield* managedEndpointZoneName;
+            const managedHostname = url.hostname.endsWith(`.${baseDomain}`);
+            const originHop = url.pathname === GATEWAY_ORIGIN_PATH;
+            const gatewaySuffix = `-g-${relayStageSlug(stage)}.${baseDomain}`;
+            const gatewayHostname =
+              managedHostname &&
+              (url.hostname.endsWith(gatewaySuffix) ||
+                url.hostname.startsWith("g-") ||
+                /-g-[a-z0-9-]+\./.test(url.hostname));
+            if (managedHostname && url.hostname.startsWith("gw-origin-"))
+              return HttpServerResponse.text("Forbidden", { status: 403 });
+            if (!originHop && !gatewayHostname) return yield* httpEffect;
+            return yield* Effect.gen(function* () {
+              if (originHop) {
+                const secret = Redacted.value(yield* gatewaySecret);
+                const response = yield* Effect.tryPromise(() =>
+                  managedGatewayOriginHop(webRequest, {
+                    secret,
+                    originSuffix: baseDomain,
+                    fetch: globalThis.fetch,
+                  }),
+                );
+                return gatewayHttpResponse(response);
+              }
+              if (
+                !url.hostname.endsWith(gatewaySuffix) ||
+                !/^[a-f0-9]{16}$/.test(url.hostname.slice(0, -gatewaySuffix.length)) ||
+                url.protocol !== "https:" ||
+                url.port
+              )
+                return HttpServerResponse.text("Unknown managed environment", { status: 404 });
+              return yield* Effect.gen(function* () {
+                const { store, sync } = yield* ManagedGatewayRuntime;
+                const mapping = yield* store.lookupPublicHostname(url.hostname);
+                if (!mapping)
+                  return HttpServerResponse.text("Unknown managed environment", { status: 404 });
+                yield* sync(mapping.userId);
+                return mutableGatewayBindingResponse(
+                  yield* gatewayNamespace.getByName(mapping.userId).fetch(request),
+                );
+              }).pipe(Effect.provide(runtimeLayer));
+            }).pipe(
+              Effect.catchCause(() =>
+                Effect.succeed(
+                  HttpServerResponse.text("Managed connection unavailable", { status: 503 }),
+                ),
+              ),
+            );
+          }).pipe(Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext)),
+          relayTraceLayer,
+        ),
+      ),
     );
 
     return { fetch };
@@ -384,6 +668,7 @@ export const ApiLive = Api.make(
         Layer.provideMerge(Cloudflare.Queues.EventSourceLive),
         Layer.provideMerge(Cloudflare.Tunnel.ReadWriteTunnelBinding),
         Layer.provideMerge(Cloudflare.DNS.ReadWriteDnsHttp),
+        Layer.provideMerge(ManagedGatewayLive),
       ),
     ),
   ),

@@ -189,6 +189,17 @@ export const relayDocsRedirectRoute = HttpRouter.add(
 // contains the exact child span that stalled, and the response still carries
 // the traceparent back to the client.
 export const RELAY_REQUEST_DEADLINE_MS = 9_000;
+// Tunnel lifecycle requests perform several serial provider calls; their clients allow 35s.
+export const RELAY_LIFECYCLE_REQUEST_DEADLINE_MS = 30_000;
+
+const lifecycleRequest = (request: HttpServerRequest.HttpServerRequest) => {
+  const path = request.url.split("?", 1)[0];
+  return (
+    (request.method === "POST" && path === "/v1/client/environment-links") ||
+    (request.method === "DELETE" &&
+      /^\/v1\/client\/environment-links\/[^/]+(?:\/tunnel)?$/.test(path ?? ""))
+  );
+};
 
 const relayRequestDeadline = <E, R>(
   httpEffect: Effect.Effect<
@@ -197,30 +208,36 @@ const relayRequestDeadline = <E, R>(
     HttpServerRequest.HttpServerRequest | R
   >,
 ) =>
-  httpEffect.pipe(
-    Effect.timeoutOption(Duration.millis(RELAY_REQUEST_DEADLINE_MS)),
-    Effect.flatMap(
-      Option.match({
-        onNone: () =>
-          Effect.gen(function* () {
-            const request = yield* HttpServerRequest.HttpServerRequest;
-            yield* Effect.logError("relay request exceeded deadline", {
-              "http.method": request.method,
-              "http.url": request.url,
-              "relay.request.deadline_ms": RELAY_REQUEST_DEADLINE_MS,
-            });
-            yield* Effect.annotateCurrentSpan({
-              "relay.request.deadline_exceeded": true,
-            });
-            return HttpServerResponse.jsonUnsafe(
-              { error: "relay_request_deadline_exceeded" },
-              { status: 504 },
-            );
-          }),
-        onSome: Effect.succeed,
-      }),
-    ),
-  );
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const deadlineMs = lifecycleRequest(request)
+      ? RELAY_LIFECYCLE_REQUEST_DEADLINE_MS
+      : RELAY_REQUEST_DEADLINE_MS;
+    return yield* httpEffect.pipe(
+      Effect.timeoutOption(Duration.millis(deadlineMs)),
+      Effect.flatMap(
+        Option.match({
+          onNone: () =>
+            Effect.gen(function* () {
+              const request = yield* HttpServerRequest.HttpServerRequest;
+              yield* Effect.logError("relay request exceeded deadline", {
+                "http.method": request.method,
+                "http.url": request.url,
+                "relay.request.deadline_ms": deadlineMs,
+              });
+              yield* Effect.annotateCurrentSpan({
+                "relay.request.deadline_exceeded": true,
+              });
+              return HttpServerResponse.jsonUnsafe(
+                { error: "relay_request_deadline_exceeded" },
+                { status: 504 },
+              );
+            }),
+          onSome: Effect.succeed,
+        }),
+      ),
+    );
+  });
 
 export const traceRelayHttpRequest = <E, R>(
   httpEffect: Effect.Effect<

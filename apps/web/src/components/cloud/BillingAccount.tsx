@@ -3,20 +3,53 @@ import { createBillingClient } from "@t3tools/client-runtime/relay";
 import type { RelayBillingStatus } from "@t3tools/contracts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { resolveCloudPublicConfig, resolveRelayClerkTokenOptions } from "../../cloud/publicConfig";
+import { configuredHostedAppUrl, isHostedStaticApp } from "../../hostedPairing";
+import { CreditCardIcon, RadioTowerIcon } from "lucide-react";
 import { Button } from "../ui/button";
 
-export function BillingAccount() {
+export function BillingAccount({ embedded = false }: { embedded?: boolean }) {
+  if (!isHostedStaticApp()) {
+    return (
+      <section className="space-y-5 p-6 sm:p-8">
+        <h2 className="font-heading text-2xl">Connect subscription</h2>
+        <p className="text-sm text-muted-foreground">
+          Manage your subscription securely in your browser. Sign in with the same Lecturn account.
+        </p>
+        <a
+          className="inline-flex rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-sm font-medium text-foreground"
+          href={new URL("/account/billing", configuredHostedAppUrl()).href}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Open billing in browser
+        </a>
+        <p className="text-xs text-muted-foreground">
+          Local connections, direct pairing, SSH and Tailscale remain free.
+        </p>
+      </section>
+    );
+  }
+  return <HostedBillingAccount embedded={embedded} />;
+}
+
+function HostedBillingAccount({ embedded }: { embedded: boolean }) {
   const { isLoaded, isSignedIn, userId } = useAuth();
   if (!isLoaded)
     return (
-      <main className="p-8" role="status">
+      <div className="p-8" role="status">
         Loading account…
-      </main>
+      </div>
     );
-  return <SignedBillingAccount key={userId ?? "signed-out"} signedIn={Boolean(isSignedIn)} />;
+  return (
+    <SignedBillingAccount
+      key={userId ?? "signed-out"}
+      signedIn={Boolean(isSignedIn)}
+      embedded={embedded}
+    />
+  );
 }
 
-function SignedBillingAccount({ signedIn }: { signedIn: boolean }) {
+function SignedBillingAccount({ signedIn, embedded }: { signedIn: boolean; embedded: boolean }) {
   const { getToken } = useAuth();
   const clerk = useClerk();
   const { user } = useUser();
@@ -74,10 +107,15 @@ function SignedBillingAccount({ signedIn }: { signedIn: boolean }) {
     }
   }
   return (
-    <main className="mx-auto max-w-xl space-y-6 px-6 py-12">
+    <section className="mx-auto w-full max-w-2xl space-y-7 px-6 py-8 sm:px-8">
       <header>
-        <p className="text-sm text-muted-foreground">Lecturn account</p>
-        <h1 className="mt-2 text-3xl font-semibold">Connect subscription</h1>
+        <div className="mb-4 flex size-11 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary">
+          <RadioTowerIcon className="size-5" />
+        </div>
+        <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+          Lecturn Connect
+        </p>
+        <h2 className="mt-2 font-heading text-2xl font-semibold">Your connection, everywhere.</h2>
       </header>
       <p className="text-sm text-muted-foreground">
         Local connections, direct pairing, SSH and Tailscale remain free.
@@ -98,14 +136,29 @@ function SignedBillingAccount({ signedIn }: { signedIn: boolean }) {
           {error && <p role="alert">{error}</p>}
           {!status && !error && <p role="status">Checking subscription…</p>}
           {status && (
-            <section className="space-y-4 rounded-xl border p-5">
-              <p className="font-medium">
+            <section className="space-y-5 rounded-xl border border-primary/20 bg-primary/5 p-5">
+              <p className="flex items-center gap-2 font-medium">
+                <CreditCardIcon aria-hidden="true" className="size-4 text-primary" />
                 {status.state === "disabled"
                   ? "Subscription billing is not enabled"
                   : status.state === "unavailable"
                     ? "Subscription status unavailable"
                     : `Subscription: ${status.state.replaceAll("_", " ")}`}
               </p>
+              {status.state !== "disabled" && (
+                <p className="text-sm" role="status">
+                  {status.accessReason === "suspended"
+                    ? "Managed access is suspended while a payment issue is reviewed."
+                    : status.accessReason === "grant" || status.accessReason === "paid_and_grant"
+                      ? "Complimentary Connect access is active."
+                      : status.hasAccess
+                        ? "Managed Connect access is active."
+                        : "Managed Connect access is not active."}
+                  {status.accessUntil &&
+                    status.hasAccess &&
+                    ` Available through ${new Date(status.accessUntil).toLocaleDateString()}.`}
+                </p>
+              )}
               {status.state !== "disabled" && status.state !== "unavailable" && (
                 <>
                   <p className="text-sm">
@@ -144,6 +197,10 @@ function SignedBillingAccount({ signedIn }: { signedIn: boolean }) {
                       automatically after the trial. Cancel before the trial ends to avoid a charge.
                     </p>
                   )}
+                  <p className="text-xs text-muted-foreground">
+                    Available in the United States. Prices are in USD; applicable taxes are
+                    calculated at Checkout.
+                  </p>
                   <div className="flex flex-wrap gap-3">
                     <Button
                       disabled={pending}
@@ -187,9 +244,46 @@ function SignedBillingAccount({ signedIn }: { signedIn: boolean }) {
           </p>
         </>
       )}
-      <a href="/" className="text-sm underline">
-        Back to Lecturn
-      </a>
-    </main>
+      <details className="border-t pt-4 text-sm text-muted-foreground">
+        <summary className="cursor-pointer font-medium text-foreground">Subscription terms</summary>
+        <div className="mt-3 space-y-3">
+          <p>
+            Subscriptions renew automatically. Cancel in the payment portal to stop the next
+            renewal; access continues through the current paid or trial term.
+          </p>
+          <p>
+            A failed renewal after a paid term has a three-day grace period. A trial does not
+            receive extra grace after its first payment fails.
+          </p>
+          <p>
+            For refunds or billing help, contact{" "}
+            <a className="underline" href="mailto:accounts@cloudgatherer.net">
+              accounts@cloudgatherer.net
+            </a>
+            . A full refund of the current term ends that term’s access. Partial refunds and refunds
+            for earlier terms do not end a newer paid term. Disputed payments may suspend the
+            affected term while reviewed.
+          </p>
+          <p>
+            Existing users receive a 30-day transition without automatic enrollment or charges.
+            Local, direct, SSH and Tailscale connections remain free.
+          </p>
+          <p>
+            <a className="underline" href="/terms-of-service/" target="_blank" rel="noreferrer">
+              Service terms
+            </a>{" "}
+            and{" "}
+            <a className="underline" href="/privacy-policy/" target="_blank" rel="noreferrer">
+              privacy notice
+            </a>
+          </p>
+        </div>
+      </details>
+      {!embedded && (
+        <a href="/" className="text-sm underline">
+          Back to Lecturn
+        </a>
+      )}
+    </section>
   );
 }

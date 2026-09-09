@@ -615,6 +615,7 @@ interface SendLiveActivityDeliveryInputBase {
   readonly target: LiveActivityDeliveryTarget;
   readonly token: string;
   readonly sourceJobId?: string | null;
+  readonly originCreatedAtSeconds?: number;
 }
 
 export type SendLiveActivityDeliveryInput =
@@ -689,6 +690,7 @@ export class ApnsDeliveries extends Context.Service<
       readonly target: LiveActivityDeliveryTarget;
       readonly token: string;
       readonly sourceJobId?: string | null;
+      readonly originCreatedAtSeconds?: number;
       readonly notification: ApnsNotificationPayload;
     }) => Effect.Effect<RelayDeliveryResult, ApnsDeliveryError>;
   }
@@ -696,11 +698,15 @@ export class ApnsDeliveries extends Context.Service<
 
 export const make = Effect.gen(function* () {
   const managedAccess = yield* ManagedAccess;
-  const permitted = (userId: string, kind: RelayDeliveryKind) =>
+  const permitted = (userId: string, kind: RelayDeliveryKind, originCreatedAtSeconds?: number) =>
     kind === "live_activity_end"
       ? Effect.succeed(true)
       : managedAccess
-          .check(userId, kind === "push_notification" ? "pushNotifications" : "liveActivities")
+          .check(
+            userId,
+            kind === "push_notification" ? "pushNotifications" : "liveActivities",
+            originCreatedAtSeconds,
+          )
           .pipe(
             Effect.as(true),
             Effect.catchTag("ManagedAccessRequired", () => Effect.succeed(false)),
@@ -709,8 +715,9 @@ export const make = Effect.gen(function* () {
   const cleanupAlertsPermitted = (
     userId: string,
     feature: "pushNotifications" | "liveActivities",
+    originCreatedAtSeconds?: number,
   ) =>
-    managedAccess.check(userId, feature).pipe(
+    managedAccess.check(userId, feature, originCreatedAtSeconds).pipe(
       Effect.as(true),
       Effect.catchTag(["ManagedAccessRequired", "ManagedAccessUnavailable"], () =>
         Effect.succeed(false),
@@ -877,7 +884,7 @@ export const make = Effect.gen(function* () {
       ...(input.sourceJobId ? { "relay.delivery.job_id": input.sourceJobId } : {}),
     });
     // Check before claiming too: a provider/database outage must leave the queued job retryable.
-    if (!(yield* permitted(input.target.user_id, input.kind))) {
+    if (!(yield* permitted(input.target.user_id, input.kind, input.originCreatedAtSeconds))) {
       yield* discardDeniedJob(input);
       if (input.kind === "live_activity_start")
         yield* liveActivities.clearStartQueued({
@@ -962,7 +969,7 @@ export const make = Effect.gen(function* () {
       }
       return staleJobResult({ deviceId: input.target.device_id, kind: input.kind });
     }
-    if (!(yield* permitted(input.target.user_id, input.kind))) {
+    if (!(yield* permitted(input.target.user_id, input.kind, input.originCreatedAtSeconds))) {
       if (input.kind === "live_activity_start")
         yield* liveActivities.clearStartQueued({
           userId: input.target.user_id,
@@ -977,7 +984,11 @@ export const make = Effect.gen(function* () {
     }
     const finalRequest =
       input.kind === "live_activity_end" &&
-      !(yield* cleanupAlertsPermitted(input.target.user_id, "liveActivities"))
+      !(yield* cleanupAlertsPermitted(
+        input.target.user_id,
+        "liveActivities",
+        input.originCreatedAtSeconds,
+      ))
         ? makeLiveActivityDeliveryRequest(apns, { ...input, alert: null }, now).request
         : request;
     const result = yield* apns
@@ -1048,7 +1059,9 @@ export const make = Effect.gen(function* () {
       "relay.delivery.kind": "push_notification",
       ...(input.sourceJobId ? { "relay.delivery.job_id": input.sourceJobId } : {}),
     });
-    if (!(yield* permitted(input.target.user_id, "push_notification"))) {
+    if (
+      !(yield* permitted(input.target.user_id, "push_notification", input.originCreatedAtSeconds))
+    ) {
       yield* discardDeniedJob({ ...input, kind: "push_notification" });
       return staleJobResult({ deviceId: input.target.device_id, kind: "push_notification" });
     }
@@ -1122,7 +1135,9 @@ export const make = Effect.gen(function* () {
         });
       }
     }
-    if (!(yield* permitted(input.target.user_id, "push_notification"))) {
+    if (
+      !(yield* permitted(input.target.user_id, "push_notification", input.originCreatedAtSeconds))
+    ) {
       if (input.sourceJobId)
         yield* attempts.completeSourceJob({
           sourceJobId: input.sourceJobId,
@@ -1203,6 +1218,9 @@ export const make = Effect.gen(function* () {
       "relay.delivery.kind": payload.kind,
       "relay.delivery.job_id": payload.jobId,
     });
+    // The signed creation time belongs to the original uninterrupted access window.
+    // A newly paid subscription must not authorize a delayed first delivery from an old one.
+    const originCreatedAtSeconds = Date.parse(payload.createdAt) / 1000;
     return yield* Effect.suspend(() => {
       switch (payload.kind) {
         case "live_activity_start":
@@ -1226,6 +1244,7 @@ export const make = Effect.gen(function* () {
             },
             token: payload.target.token,
             sourceJobId: payload.jobId,
+            originCreatedAtSeconds,
             kind: payload.kind,
             aggregate: payload.aggregate,
             alert: payload.alert ?? null,
@@ -1240,6 +1259,7 @@ export const make = Effect.gen(function* () {
             },
             token: payload.target.token,
             sourceJobId: payload.jobId,
+            originCreatedAtSeconds,
             kind: payload.kind,
             aggregate: payload.aggregate,
             alert: payload.alert ?? null,
@@ -1263,6 +1283,7 @@ export const make = Effect.gen(function* () {
             },
             token: payload.target.token,
             sourceJobId: payload.jobId,
+            originCreatedAtSeconds,
             notification: payload.notification,
           });
       }

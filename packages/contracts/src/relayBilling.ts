@@ -21,6 +21,8 @@ export const RelayBillingStatus = Schema.Struct({
   trialEnd: Schema.NullOr(Schema.String),
   cancelAtPeriodEnd: Schema.Boolean,
   hasAccess: Schema.Boolean,
+  accessReason: Schema.optionalKey(Schema.String),
+  accessUntil: Schema.optionalKey(Schema.NullOr(Schema.String)),
   features: Schema.Struct({
     managedConnect: Schema.Boolean,
     pushNotifications: Schema.Boolean,

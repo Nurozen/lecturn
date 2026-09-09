@@ -50,6 +50,8 @@ function SettingsContentLayout() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      // A nested settings dialog owns Escape and returns focus to its trigger.
+      if (event.target instanceof HTMLElement && event.target.closest('[role="dialog"]')) return;
       if (event.key === "Escape") {
         event.preventDefault();
 

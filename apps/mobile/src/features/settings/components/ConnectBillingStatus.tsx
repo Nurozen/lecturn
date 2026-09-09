@@ -44,7 +44,11 @@ export function ConnectBillingStatus() {
       ? "Connect subscription status unavailable"
       : status.state === "disabled"
         ? "Connect subscription billing is not enabled"
-        : `Connect subscription: ${status.state.replaceAll("_", " ")}`;
+        : status.accessReason === "suspended"
+          ? "Connect access suspended for payment review"
+          : status.hasAccess
+            ? "Connect access active"
+            : "Connect access is not active";
   return (
     <Text className="px-2 text-sm text-foreground-muted" accessibilityLiveRegion="polite">
       {label}

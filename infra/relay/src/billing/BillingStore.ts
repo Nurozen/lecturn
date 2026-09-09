@@ -23,6 +23,17 @@ export interface BillingState {
   trialEnd?: number | null;
   cancelAt?: number | null;
   accessUntil?: number | null;
+  accessWindowStart?: number | null;
+  suspended?: boolean;
+  financialWindowStart?: number | null;
+  grant?: {
+    id: string;
+    start: number;
+    end: number;
+    limit: number;
+    reason: string;
+    operator: string;
+  };
 }
 export interface BillingAccount {
   user_id: string;
@@ -38,6 +49,7 @@ export interface BillingEvent {
   customer_id: string | null;
   user_id: string | null;
   kind: string;
+  object_id?: string | null;
 }
 export const makeBillingStore = Effect.gen(function* () {
   const { $client: sql } = yield* RelayDb;
@@ -86,7 +98,7 @@ export const makeBillingStore = Effect.gen(function* () {
     );
   const receipt = (event: BillingEvent, now: number) =>
     query(
-      sql`INSERT INTO relay_billing_inbox(id,customer_id,user_id,kind,created_at) VALUES (${event.id},${event.customer_id},${event.user_id},${event.kind},${now}) ON CONFLICT DO NOTHING`,
+      sql`INSERT INTO relay_billing_inbox(id,customer_id,user_id,kind,object_id,created_at) VALUES (${event.id},${event.customer_id},${event.user_id},${event.kind},${event.object_id ?? null},${now}) ON CONFLICT DO NOTHING`,
     );
   const tombstone = (userId: string, now: number, eventId: string) =>
     query(

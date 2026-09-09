@@ -37,6 +37,52 @@ it.effect("disabled reservations never request a database service", () =>
 );
 
 describe.skipIf(!databaseUrl)("ManagedReservations PostgreSQL", () => {
+  it.effect(
+    "operator grants preserve their explicit capacity even with a stale Stripe projection",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const { sql, userId, reservations } = yield* testAccount;
+          yield* sql`UPDATE relay_billing_accounts SET updated_at=-1000,state=${encodeJson({ accessUntil: 0, grant: { id: "transition", start: 0, end: 1000, limit: 4, reason: "Transition existing environments", operator: "test" } })}::jsonb WHERE user_id=${userId}`;
+          for (const environmentId of ["one", "two", "three", "four"]) {
+            const reservation = yield* reservations.reserve({ userId, environmentId });
+            expect(yield* reservations.complete(reservation)).toBe(true);
+          }
+          const fifth = yield* reservations
+            .reserve({ userId, environmentId: "five" })
+            .pipe(Effect.result);
+          expect(fifth._tag === "Failure" && fifth.failure.code).toBe("quota");
+        }),
+      ),
+  );
+
+  it.effect("blocks resubscription from reusing a resource under durable retirement", () =>
+    run(
+      Effect.gen(function* () {
+        const { sql, userId, reservations } = yield* testAccount;
+        const old = yield* reservations.reserve({ userId, environmentId: "retiring" });
+        yield* sql`INSERT INTO relay_managed_suspensions(tunnel_id,user_id,environment_id,account_generation,reservation_generation,stage,created_at)
+        VALUES (${userId},${userId},'retiring',1,${old!.generation},'rotated',0)`;
+        const blocked = yield* reservations
+          .reserve({ userId, environmentId: "retiring" })
+          .pipe(Effect.result);
+        expect(blocked._tag === "Failure" && blocked.failure.code).toBe("unavailable");
+        yield* sql`UPDATE relay_managed_suspensions SET completed_at=1 WHERE tunnel_id=${userId}`;
+        const replacement = yield* reservations.reserve({ userId, environmentId: "retiring" });
+        expect(replacement!.generation).toBeGreaterThan(old!.generation);
+        expect(
+          yield* reservations.release({
+            userId,
+            environmentId: "retiring",
+            generation: old!.generation,
+          }),
+        ).toBe(false);
+        expect((yield* reservations.get({ userId, environmentId: "retiring" }))!.generation).toBe(
+          replacement!.generation,
+        );
+      }),
+    ),
+  );
   it.effect("permits exactly one of two different environments racing for the last slot", () =>
     run(
       Effect.gen(function* () {
