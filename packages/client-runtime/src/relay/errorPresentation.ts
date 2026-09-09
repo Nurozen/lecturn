@@ -23,6 +23,8 @@ export function dpopFailureMessage(message: string, reason: DpopFailureReason | 
 
 export function relayProtectedErrorMessage(error: RelayProtectedError): string {
   switch (error._tag) {
+    case "RelayConnectSubscriptionRequiredError":
+      return "This managed feature requires an active Connect subscription. Direct connections remain available.";
     case "RelayAuthInvalidError":
       switch (error.reason) {
         case "missing_bearer":

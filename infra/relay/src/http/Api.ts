@@ -38,6 +38,7 @@ import {
   type RelayDpopFailureReason,
   RelayEnvironmentAuth,
   RelayEnvironmentConnectNotAuthorizedError,
+  RelayConnectSubscriptionRequiredError,
   RelayEnvironmentEndpointTimedOutError,
   RelayEnvironmentEndpointUnavailableError,
   RelayEnvironmentLinkFailedError,
@@ -125,26 +126,48 @@ const appendRelayTraceContextResponseHeader = Effect.gen(function* () {
   );
 }).pipe(Effect.ignore);
 
-export const relayCors = HttpRouter.middleware(
-  Effect.fnUntraced(function* <E, R>(
-    httpEffect: Effect.Effect<
-      HttpServerResponse.HttpServerResponse,
-      E,
-      HttpServerRequest.HttpServerRequest | R
-    >,
-  ) {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    if (request.method === "OPTIONS") {
-      return HttpServerResponse.empty({
-        status: 204,
-        headers: relayCorsPreflightHeaders,
-      });
-    }
-    const response = yield* httpEffect;
-    return HttpServerResponse.setHeaders(response, relayCorsHeaders);
-  }),
-  { global: true },
-);
+export const makeRelayCors = (billingOrigin = "https://lecturn.cloudgatherer.net") =>
+  HttpRouter.middleware(
+    Effect.fnUntraced(function* <E, R>(
+      httpEffect: Effect.Effect<
+        HttpServerResponse.HttpServerResponse,
+        E,
+        HttpServerRequest.HttpServerRequest | R
+      >,
+    ) {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const billingRequest = request.url.startsWith("/v1/billing/");
+      if (billingRequest) {
+        const allowed = request.headers.origin === billingOrigin;
+        const headers = {
+          ...(allowed ? { "access-control-allow-origin": billingOrigin } : {}),
+          "access-control-expose-headers": relayCorsExposedHeaders.join(","),
+          vary: "Origin",
+        };
+        if (request.method === "OPTIONS")
+          return HttpServerResponse.empty({
+            status: allowed ? 204 : 403,
+            headers: {
+              ...headers,
+              "access-control-allow-methods": "GET,POST,OPTIONS",
+              "access-control-allow-headers": relayCorsAllowedHeaders.join(","),
+            },
+          });
+        return HttpServerResponse.setHeaders(yield* httpEffect, headers);
+      }
+      if (request.method === "OPTIONS") {
+        return HttpServerResponse.empty({
+          status: 204,
+          headers: relayCorsPreflightHeaders,
+        });
+      }
+      const response = yield* httpEffect;
+      return HttpServerResponse.setHeaders(response, relayCorsHeaders);
+    }),
+    { global: true },
+  );
+
+export const relayCors = makeRelayCors();
 
 export const relayNotFoundRoute = HttpRouter.add(
   "*",
@@ -569,6 +592,17 @@ export const clientApi = HttpApiBuilder.group(
             };
           },
           mapErrorTags({
+            ManagedAccessRequired: (_error, traceId) =>
+              new RelayConnectSubscriptionRequiredError({
+                code: "connect_subscription_required",
+                traceId,
+              }),
+            ManagedAccessUnavailable: (_error, traceId) =>
+              new RelayInternalError({
+                code: "internal_error",
+                reason: "persistence_failed",
+                traceId,
+              }),
             EnvironmentLinkProofExpired: (_error, traceId) =>
               new RelayEnvironmentLinkProofExpiredError({
                 code: "environment_link_proof_expired",
@@ -779,6 +813,17 @@ export const dpopClientApi = HttpApiBuilder.group(
           },
           mapRelayCommonApiErrors("invalid_dpop"),
           mapErrorTags({
+            ManagedAccessRequired: (_error, traceId) =>
+              new RelayConnectSubscriptionRequiredError({
+                code: "connect_subscription_required",
+                traceId,
+              }),
+            ManagedAccessUnavailable: (_error, traceId) =>
+              new RelayInternalError({
+                code: "internal_error",
+                reason: "persistence_failed",
+                traceId,
+              }),
             EnvironmentConnectNotAuthorized: (error, traceId) =>
               new RelayEnvironmentConnectNotAuthorizedError({
                 code: "environment_connect_not_authorized",
@@ -822,6 +867,17 @@ export const dpopClientApi = HttpApiBuilder.group(
           },
           mapRelayCommonApiErrors("invalid_dpop"),
           mapErrorTags({
+            ManagedAccessRequired: (_error, traceId) =>
+              new RelayConnectSubscriptionRequiredError({
+                code: "connect_subscription_required",
+                traceId,
+              }),
+            ManagedAccessUnavailable: (_error, traceId) =>
+              new RelayInternalError({
+                code: "internal_error",
+                reason: "persistence_failed",
+                traceId,
+              }),
             EnvironmentConnectNotAuthorized: (error, traceId) =>
               new RelayEnvironmentConnectNotAuthorizedError({
                 code: "environment_connect_not_authorized",
@@ -880,6 +936,12 @@ export const serverApi = HttpApiBuilder.group(
           });
         },
         mapErrorTags({
+          ManagedAccessUnavailable: (_error, traceId) =>
+            new RelayInternalError({
+              code: "internal_error",
+              reason: "persistence_failed",
+              traceId,
+            }),
           EnvironmentPublishPublicKeyMissing: (_error, traceId) =>
             new RelayAuthInvalidError({
               code: "auth_invalid",

@@ -56,6 +56,7 @@ import {
   runAppUpdateCheck,
 } from "../updates/app-updates";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
+import { ConnectBillingStatus } from "./components/ConnectBillingStatus";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
@@ -472,6 +473,7 @@ function ConfiguredSettingsRouteScreen() {
               onPress={openAccount}
             />
           </SettingsSection>
+          <ConnectBillingStatus />
           <Text className="px-2 text-sm text-foreground-muted">
             Lecturn works locally without signing in. Cloud features are optional.
           </Text>

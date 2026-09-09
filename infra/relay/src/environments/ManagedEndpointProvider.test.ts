@@ -1,3 +1,5 @@
+import * as ManagedAccess from "../billing/ManagedAccess.ts";
+import * as ManagedReservations from "../billing/ManagedReservations.ts";
 import * as NodeCrypto from "node:crypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 
@@ -274,8 +276,16 @@ function providerLayer(
   dnsClient = makeDnsClient(),
   allocations = makeAllocations(),
   tunnelLimits = makeTunnelLimits(),
+  access = ManagedAccess.disabled,
+  reservationService?: ManagedReservations.ManagedReservations["Service"],
 ) {
   return ManagedEndpointProvider.layer.pipe(
+    Layer.provide(Layer.succeed(ManagedAccess.ManagedAccess, access)),
+    Layer.provide(
+      reservationService
+        ? Layer.succeed(ManagedReservations.ManagedReservations, reservationService)
+        : ManagedReservations.layer({ enabled: false }),
+    ),
     Layer.provideMerge(NodeServices.layer),
     Layer.provide(RelayConfiguration.layer(config)),
     Layer.provide(ManagedEndpointProvider.layerTunnelClient(tunnelClient)),
@@ -325,6 +335,8 @@ describe("ManagedEndpointProvider", () => {
       dnsClient,
       runtimeContext,
     ).pipe(
+      Layer.provide(ManagedAccess.layerDisabled),
+      Layer.provide(ManagedReservations.layer({ enabled: false })),
       Layer.provideMerge(NodeServices.layer),
       Layer.provide(RelayConfiguration.layer(config)),
       Layer.provide(
@@ -1260,3 +1272,117 @@ describe("ManagedEndpointProvider", () => {
     }).pipe(Effect.provide(providerLayer(makeTunnelClient(), dnsClient)));
   });
 });
+
+const provisionInput = {
+  userId: "user_ABC",
+  environmentId: "env_ABC",
+  origin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
+};
+it.effect("denies unpaid provision before Cloudflare is touched", () => {
+  const calls: TunnelCall[] = [];
+  return Effect.gen(function* () {
+    const provider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
+    expect((yield* Effect.flip(provider.provision(provisionInput)))._tag).toBe(
+      "ManagedAccessRequired",
+    );
+    expect(calls).toHaveLength(0);
+  }).pipe(
+    Effect.provide(
+      providerLayer(
+        makeTunnelClient(calls),
+        undefined,
+        undefined,
+        undefined,
+        ManagedAccess.ManagedAccess.of({
+          check: () => Effect.fail(new ManagedAccess.ManagedAccessRequired({ message: "expired" })),
+        }),
+      ),
+    ),
+  );
+});
+it.effect("withholds connector credentials if access expires during provisioning", () => {
+  let checks = 0;
+  return Effect.gen(function* () {
+    const provider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
+    expect((yield* Effect.flip(provider.provision(provisionInput)))._tag).toBe(
+      "ManagedAccessRequired",
+    );
+    expect(checks).toBe(2);
+  }).pipe(
+    Effect.provide(
+      providerLayer(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        ManagedAccess.ManagedAccess.of({
+          check: () =>
+            Effect.suspend(() =>
+              ++checks === 1
+                ? Effect.void
+                : Effect.fail(new ManagedAccess.ManagedAccessRequired({ message: "expired" })),
+            ),
+        }),
+      ),
+    ),
+  );
+});
+it.effect("withholds credentials when a reservation is superseded during provider work", () => {
+  const reservation: ManagedReservations.ManagedReservation = {
+    ...provisionInput,
+    generation: 1,
+    accountGeneration: 1,
+    state: "pending",
+  };
+  const service = ManagedReservations.ManagedReservations.of({
+    get: () => Effect.succeed(reservation),
+    reserve: () => Effect.succeed(reservation),
+    complete: () => Effect.succeed(false),
+    release: () => Effect.succeed(true),
+  });
+  return Effect.gen(function* () {
+    const provider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
+    expect((yield* Effect.flip(provider.provision(provisionInput)))._tag).toBe(
+      "ManagedAccessUnavailable",
+    );
+  }).pipe(
+    Effect.provide(providerLayer(undefined, undefined, undefined, undefined, undefined, service)),
+  );
+});
+it.effect(
+  "old unlink captures reservation generation before a newer provision even without an allocation",
+  () => {
+    let generation = 1;
+    const released: number[] = [];
+    const service = ManagedReservations.ManagedReservations.of({
+      get: () =>
+        Effect.sync(() => ({
+          ...provisionInput,
+          generation,
+          accountGeneration: 1,
+          state: "pending" as const,
+        })),
+      reserve: () => Effect.succeed(null),
+      complete: () => Effect.succeed(true),
+      release: (input) =>
+        Effect.sync(() => {
+          if (input.generation !== generation) return false;
+          released.push(generation);
+          return true;
+        }),
+    });
+    return Effect.gen(function* () {
+      const provider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
+      const target = yield* provider.prepareDeprovision(provisionInput);
+      generation = 2;
+      yield* provider.deprovision({ ...provisionInput, target });
+      expect(released).toEqual([]);
+      yield* provider.deprovision(provisionInput);
+      expect(released).toEqual([2]);
+    }).pipe(
+      Effect.provide(
+        providerLayer(undefined, undefined, makeAllocations(), undefined, undefined, service),
+      ),
+    );
+  },
+);

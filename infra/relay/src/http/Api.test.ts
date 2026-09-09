@@ -279,14 +279,17 @@ describe("relay environment unlink", () => {
   it.effect("commits database revocation before deprovisioning the managed endpoint", () => {
     const calls: Array<string> = [];
     const deprovisionTarget = {
-      userId: "user-1",
-      environmentId: "environment-1",
-      hostname: "environment-1.example.test",
-      tunnelId: "tunnel-1",
-      tunnelName: "environment-1-tunnel",
-      dnsRecordId: "dns-1",
-      readyAt: "2026-07-28T00:00:00.000Z",
-      updatedAt: "generation-before-unlink",
+      reservationGeneration: null,
+      allocation: {
+        userId: "user-1",
+        environmentId: "environment-1",
+        hostname: "environment-1.example.test",
+        tunnelId: "tunnel-1",
+        tunnelName: "environment-1-tunnel",
+        dnsRecordId: "dns-1",
+        readyAt: "2026-07-28T00:00:00.000Z",
+        updatedAt: "generation-before-unlink",
+      },
     } satisfies ManagedEndpointProvider.ManagedEndpointDeprovisionTarget;
 
     return Effect.gen(function* () {

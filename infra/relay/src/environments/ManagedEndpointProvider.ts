@@ -15,6 +15,8 @@ import type {
   RelayManagedEndpointRuntimeConfig,
 } from "@t3tools/contracts/relay";
 
+import * as ManagedAccess from "../billing/ManagedAccess.ts";
+import * as ManagedReservations from "../billing/ManagedReservations.ts";
 import * as RelayConfiguration from "../Config.ts";
 import {
   managedEndpointDigestInput,
@@ -114,6 +116,8 @@ export class ManagedEndpointOriginNotAllowed extends Schema.TaggedErrorClass<Man
 }
 
 export type ManagedEndpointProviderError =
+  | ManagedAccess.ManagedAccessRequired
+  | ManagedAccess.ManagedAccessUnavailable
   | ManagedEndpointProvisioningNotConfigured
   | ManagedEndpointProvisioningFailed
   | ManagedEndpointOriginNotAllowed
@@ -124,7 +128,10 @@ export interface ManagedEndpointProvisioningResult {
   readonly runtime: RelayManagedEndpointRuntimeConfig;
 }
 
-export type ManagedEndpointDeprovisionTarget = ManagedEndpointAllocations.ManagedEndpointAllocation;
+export interface ManagedEndpointDeprovisionTarget {
+  readonly allocation: ManagedEndpointAllocations.ManagedEndpointAllocation | null;
+  readonly reservationGeneration: number | null;
+}
 
 export class ManagedEndpointProvider extends Context.Service<
   ManagedEndpointProvider,
@@ -368,6 +375,8 @@ export const make = Effect.gen(function* () {
   const dns = yield* ManagedEndpointDnsClient;
   const allocations = yield* ManagedEndpointAllocations.ManagedEndpointAllocations;
   const tunnelLimits = yield* ManagedTunnelLimits.ManagedTunnelLimits;
+  const managedAccess = yield* ManagedAccess.ManagedAccess;
+  const reservations = yield* ManagedReservations.ManagedReservations;
 
   const updateExistingDnsRecords = Effect.fnUntraced(function* (
     records: ReadonlyArray<{ readonly id: string }>,
@@ -442,7 +451,7 @@ export const make = Effect.gen(function* () {
 
   const prepareDeprovision = Effect.fn("relay.managed_endpoint_provider.prepare_deprovision")(
     function* (input: { readonly userId: string; readonly environmentId: string }) {
-      return yield* allocations.get(input).pipe(
+      const reservation = yield* reservations.get(input).pipe(
         Effect.mapError(
           (cause) =>
             new ManagedEndpointDeprovisioningFailed({
@@ -452,6 +461,19 @@ export const make = Effect.gen(function* () {
             }),
         ),
       );
+      const allocation = yield* allocations.get(input).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ManagedEndpointDeprovisioningFailed({
+              ...input,
+              stage: "load-allocation",
+              cause,
+            }),
+        ),
+      );
+      return allocation === null && reservation === null
+        ? null
+        : { allocation, reservationGeneration: reservation?.generation ?? null };
     },
   );
 
@@ -462,9 +484,30 @@ export const make = Effect.gen(function* () {
         "relay.user_id": input.userId,
         "relay.environment_id": input.environmentId,
       });
-      const allocation =
-        input.target === undefined ? yield* prepareDeprovision(input) : input.target;
+      const target = input.target === undefined ? yield* prepareDeprovision(input) : input.target;
+      const releaseReservation =
+        target?.reservationGeneration == null
+          ? Effect.void
+          : reservations
+              .release({
+                userId: input.userId,
+                environmentId: input.environmentId,
+                generation: target.reservationGeneration,
+              })
+              .pipe(
+                Effect.asVoid,
+                Effect.mapError(
+                  (cause) =>
+                    new ManagedEndpointDeprovisioningFailed({
+                      ...input,
+                      stage: "remove-allocation",
+                      cause,
+                    }),
+                ),
+              );
+      const allocation = target?.allocation ?? null;
       if (allocation === null) {
+        yield* releaseReservation;
         return;
       }
       const claimedAt = yield* allocations
@@ -516,7 +559,7 @@ export const make = Effect.gen(function* () {
           ),
         );
       }
-      yield* allocations
+      const removed = yield* allocations
         .removeClaimed({
           userId: input.userId,
           environmentId: input.environmentId,
@@ -534,6 +577,7 @@ export const make = Effect.gen(function* () {
               }),
           ),
         );
+      if (removed) yield* releaseReservation;
     }),
     release: Effect.fn("relay.managed_endpoint_provider.release")(function* (input) {
       yield* Effect.annotateCurrentSpan({
@@ -616,6 +660,7 @@ export const make = Effect.gen(function* () {
           port: input.origin.localHttpPort,
         });
       }
+      yield* managedAccess.check(input.userId, "managedConnect");
       const cf = yield* requireCloudflareSettings(config, input);
       const environmentHash = yield* crypto
         .digest(
@@ -642,26 +687,43 @@ export const make = Effect.gen(function* () {
         environmentHash,
       );
       const requestedTunnelName = managedEndpointTunnelName(cf.namespace, environmentHash);
-      yield* tunnelLimits
-        .ensureCapacity({
-          userId: input.userId,
-          environmentId: input.environmentId,
-        })
-        .pipe(
-          Effect.catchTags({
-            ManagedTunnelLimitPersistenceError: (cause) =>
-              Effect.fail(
-                new ManagedEndpointProvisioningFailed({
-                  userId: input.userId,
-                  environmentId: input.environmentId,
-                  stage: "check-tunnel-limit",
-                  hostname: requestedHostname,
-                  tunnelName: requestedTunnelName,
-                  cause,
-                }),
-              ),
-          }),
-        );
+      const reservation = yield* reservations.reserve(input).pipe(
+        Effect.mapError((error) => {
+          if (error.code === "subscription_required")
+            return new ManagedAccess.ManagedAccessRequired({ message: error.message });
+          if (error.code === "quota")
+            return new ManagedTunnelLimits.ManagedTunnelLimitExceeded({
+              userId: input.userId,
+              environmentId: input.environmentId,
+              maxTunnels: 3,
+              activeTunnels: 3,
+            });
+          return new ManagedAccess.ManagedAccessUnavailable({
+            message: "Managed environment capacity is temporarily unavailable.",
+          });
+        }),
+      );
+      if (reservation === null)
+        yield* tunnelLimits
+          .ensureCapacity({
+            userId: input.userId,
+            environmentId: input.environmentId,
+          })
+          .pipe(
+            Effect.catchTags({
+              ManagedTunnelLimitPersistenceError: (cause) =>
+                Effect.fail(
+                  new ManagedEndpointProvisioningFailed({
+                    userId: input.userId,
+                    environmentId: input.environmentId,
+                    stage: "check-tunnel-limit",
+                    hostname: requestedHostname,
+                    tunnelName: requestedTunnelName,
+                    cause,
+                  }),
+                ),
+            }),
+          );
       const allocation = yield* allocations
         .reserve({
           userId: input.userId,
@@ -844,6 +906,19 @@ export const make = Effect.gen(function* () {
           ),
         );
 
+      yield* managedAccess.check(input.userId, "managedConnect");
+      const completed = yield* reservations.complete(reservation).pipe(
+        Effect.mapError(
+          () =>
+            new ManagedAccess.ManagedAccessUnavailable({
+              message: "Managed environment reservation could not be confirmed.",
+            }),
+        ),
+      );
+      if (!completed)
+        return yield* new ManagedAccess.ManagedAccessUnavailable({
+          message: "Managed access changed during provisioning. Retry after reconciliation.",
+        });
       return {
         endpoint: managedEndpointForHostname(hostname),
         runtime: {

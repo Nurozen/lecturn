@@ -40,6 +40,7 @@ import * as DeliveryAttempts from "./DeliveryAttempts.ts";
 import * as LiveActivities from "./LiveActivities.ts";
 import * as RelayConfiguration from "../Config.ts";
 import * as ApnsDeliveryQueue from "./ApnsDeliveryQueue.ts";
+import { ManagedAccess, type ManagedAccessUnavailable } from "../billing/ManagedAccess.ts";
 import { withSpanAttributes } from "../observability.ts";
 
 const MIN_LIVE_ACTIVITY_UPDATE_INTERVAL_MS = 15_000;
@@ -81,6 +82,7 @@ type ChosenPushNotificationDelivery = {
 type ChosenDelivery = ChosenLiveActivityDelivery | ChosenPushNotificationDelivery;
 
 export type ApnsDeliveryError =
+  | ManagedAccessUnavailable
   | ApnsDeliveryQueue.ApnsDeliveryQueueError
   | ApnsDeliveryJobVerificationError
   | ApnsDeliveryJobClaimInFlight
@@ -693,7 +695,52 @@ export class ApnsDeliveries extends Context.Service<
 >()("t3code-relay/agentActivity/ApnsDeliveries") {}
 
 export const make = Effect.gen(function* () {
+  const managedAccess = yield* ManagedAccess;
+  const permitted = (userId: string, kind: RelayDeliveryKind) =>
+    kind === "live_activity_end"
+      ? Effect.succeed(true)
+      : managedAccess
+          .check(userId, kind === "push_notification" ? "pushNotifications" : "liveActivities")
+          .pipe(
+            Effect.as(true),
+            Effect.catchTag("ManagedAccessRequired", () => Effect.succeed(false)),
+          );
+  // Cleanup may end an existing card even if billing cannot be read, but must stay silent.
+  const cleanupAlertsPermitted = (
+    userId: string,
+    feature: "pushNotifications" | "liveActivities",
+  ) =>
+    managedAccess.check(userId, feature).pipe(
+      Effect.as(true),
+      Effect.catchTag(["ManagedAccessRequired", "ManagedAccessUnavailable"], () =>
+        Effect.succeed(false),
+      ),
+    );
   const attempts = yield* DeliveryAttempts.DeliveryAttempts;
+  const discardDeniedJob = Effect.fnUntraced(function* (input: {
+    readonly target: LiveActivityDeliveryTarget;
+    readonly kind: RelayDeliveryKind;
+    readonly token: string;
+    readonly sourceJobId?: string | null;
+  }) {
+    if (!input.sourceJobId) return;
+    // Persist the skip before acknowledging. Otherwise an at-least-once duplicate could
+    // send this same denied notification after the recipient renews their subscription.
+    const claim = yield* attempts.claimSourceJob({
+      userId: input.target.user_id,
+      deviceId: input.target.device_id,
+      kind: input.kind,
+      token: input.token,
+      sourceJobId: input.sourceJobId,
+      environmentId: null,
+      threadId: null,
+    });
+    if (claim !== "completed")
+      yield* attempts.completeSourceJob({
+        sourceJobId: input.sourceJobId,
+        apnsReason: "Managed subscription access expired; delivery skipped.",
+      });
+  });
   const liveActivities = yield* LiveActivities.LiveActivities;
   const deliveryQueue = yield* ApnsDeliveryQueue.ApnsDeliveryQueue;
   const config = yield* RelayConfiguration.RelayConfiguration;
@@ -829,6 +876,16 @@ export const make = Effect.gen(function* () {
       "relay.delivery.kind": input.kind,
       ...(input.sourceJobId ? { "relay.delivery.job_id": input.sourceJobId } : {}),
     });
+    // Check before claiming too: a provider/database outage must leave the queued job retryable.
+    if (!(yield* permitted(input.target.user_id, input.kind))) {
+      yield* discardDeniedJob(input);
+      if (input.kind === "live_activity_start")
+        yield* liveActivities.clearStartQueued({
+          userId: input.target.user_id,
+          deviceId: input.target.device_id,
+        });
+      return staleJobResult({ deviceId: input.target.device_id, kind: input.kind });
+    }
     const now = yield* DateTime.now;
     const aggregate =
       input.aggregate === null ? null : sanitizeAgentActivityAggregateState(input.aggregate);
@@ -905,10 +962,28 @@ export const make = Effect.gen(function* () {
       }
       return staleJobResult({ deviceId: input.target.device_id, kind: input.kind });
     }
+    if (!(yield* permitted(input.target.user_id, input.kind))) {
+      if (input.kind === "live_activity_start")
+        yield* liveActivities.clearStartQueued({
+          userId: input.target.user_id,
+          deviceId: input.target.device_id,
+        });
+      if (input.sourceJobId)
+        yield* attempts.completeSourceJob({
+          sourceJobId: input.sourceJobId,
+          apnsReason: "Managed subscription access expired; delivery skipped.",
+        });
+      return staleJobResult({ deviceId: input.target.device_id, kind: input.kind });
+    }
+    const finalRequest =
+      input.kind === "live_activity_end" &&
+      !(yield* cleanupAlertsPermitted(input.target.user_id, "liveActivities"))
+        ? makeLiveActivityDeliveryRequest(apns, { ...input, alert: null }, now).request
+        : request;
     const result = yield* apns
       .sendLiveActivityRequest({
         credentials: credentialsForTarget(config.apns, input.target),
-        request,
+        request: finalRequest,
         issuedAtUnixSeconds: epochSeconds,
       })
       .pipe(
@@ -973,6 +1048,10 @@ export const make = Effect.gen(function* () {
       "relay.delivery.kind": "push_notification",
       ...(input.sourceJobId ? { "relay.delivery.job_id": input.sourceJobId } : {}),
     });
+    if (!(yield* permitted(input.target.user_id, "push_notification"))) {
+      yield* discardDeniedJob({ ...input, kind: "push_notification" });
+      return staleJobResult({ deviceId: input.target.device_id, kind: "push_notification" });
+    }
     const now = yield* DateTime.now;
     const epochSeconds = Math.floor(now.epochMilliseconds / 1_000);
     const notification = sanitizeApnsNotificationPayload(input.notification);
@@ -1042,6 +1121,14 @@ export const make = Effect.gen(function* () {
           kind: "push_notification",
         });
       }
+    }
+    if (!(yield* permitted(input.target.user_id, "push_notification"))) {
+      if (input.sourceJobId)
+        yield* attempts.completeSourceJob({
+          sourceJobId: input.sourceJobId,
+          apnsReason: "Managed subscription access expired; delivery skipped.",
+        });
+      return staleJobResult({ deviceId: input.target.device_id, kind: "push_notification" });
     }
     const result = yield* apns
       .sendPushNotificationRequest({
@@ -1194,6 +1281,8 @@ export const make = Effect.gen(function* () {
         nowMs: now.epochMilliseconds,
       });
       const token = input.target.push_token;
+      if (notification && token && !(yield* permitted(input.target.user_id, "push_notification")))
+        return null;
       return yield* notification && token
         ? deliveryQueue.enqueuePushNotification({
             userId: input.target.user_id,
@@ -1211,7 +1300,7 @@ export const make = Effect.gen(function* () {
         aggregate: input.aggregate,
         nowMs: input.nowMs,
       });
-      if (!delivery) {
+      if (!delivery || !(yield* permitted(input.target.user_id, delivery.kind))) {
         return null;
       }
       if (delivery.kind === "push_notification") {
@@ -1234,8 +1323,12 @@ export const make = Effect.gen(function* () {
       // push notification is about to ring the device (below), the activity end
       // stays silent; otherwise the end itself carries the alert so LA-only
       // users still get the buzz.
-      const alert =
-        delivery.kind === "live_activity_end"
+      const endAlertsAllowed =
+        delivery.kind !== "live_activity_end" ||
+        (yield* cleanupAlertsPermitted(input.target.user_id, "liveActivities"));
+      const alert = !endAlertsAllowed
+        ? null
+        : delivery.kind === "live_activity_end"
           ? notification && input.target.push_token
             ? null
             : alertForTerminalAggregate({
@@ -1253,7 +1346,12 @@ export const make = Effect.gen(function* () {
         aggregate: delivery.aggregate,
         alert,
       });
-      if (delivery.kind === "live_activity_end" && notification && input.target.push_token) {
+      if (
+        delivery.kind === "live_activity_end" &&
+        notification &&
+        input.target.push_token &&
+        (yield* cleanupAlertsPermitted(input.target.user_id, "pushNotifications"))
+      ) {
         yield* deliveryQueue.enqueuePushNotification({
           userId: input.target.user_id,
           deviceId: input.target.device_id,

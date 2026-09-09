@@ -41,6 +41,7 @@ import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
 
 import * as EnvironmentLinks from "./EnvironmentLinks.ts";
+import * as ManagedAccess from "../billing/ManagedAccess.ts";
 import * as ManagedEndpointAllocations from "./ManagedEndpointAllocations.ts";
 import * as RelayConfiguration from "../Config.ts";
 import { isManagedEndpointHostname } from "../deploymentConfig.ts";
@@ -119,6 +120,8 @@ export class EnvironmentMintResponseInvalid extends Schema.TaggedErrorClass<Envi
 }
 
 export type EnvironmentConnectorError =
+  | ManagedAccess.ManagedAccessRequired
+  | ManagedAccess.ManagedAccessUnavailable
   | EnvironmentConnectNotAuthorized
   | EnvironmentMintRequestFailed
   | EnvironmentMintRequestTimedOut
@@ -289,6 +292,7 @@ function verifyEnvironmentHealthResponse(input: {
 }
 
 const make = Effect.gen(function* () {
+  const managedAccess = yield* ManagedAccess.ManagedAccess;
   const links = yield* EnvironmentLinks.EnvironmentLinks;
   const allocations = yield* ManagedEndpointAllocations.ManagedEndpointAllocations;
   const settings = yield* RelayConfiguration.RelayConfiguration;
@@ -416,6 +420,7 @@ const make = Effect.gen(function* () {
         link,
         allocation,
       });
+      yield* managedAccess.check(input.userId, "managedConnect");
       const now = yield* DateTime.now;
       const expiresAt = DateTime.add(now, { minutes: 2 });
       const nonce = yield* crypto.randomUUIDv4.pipe(
@@ -571,6 +576,7 @@ const make = Effect.gen(function* () {
         link,
         allocation,
       });
+      yield* managedAccess.check(input.userId, "managedConnect");
       const now = yield* DateTime.now;
       const expiresAt = DateTime.add(now, { minutes: 2 });
       const nonce = yield* crypto.randomUUIDv4.pipe(
@@ -662,6 +668,7 @@ const make = Effect.gen(function* () {
           operation: "connect",
         });
       }
+      yield* managedAccess.check(input.userId, "managedConnect");
       return {
         environmentId: link.environmentId,
         endpoint,

@@ -19,6 +19,7 @@ import * as DpopProofs from "../auth/DpopProofs.ts";
 import * as RelayTokens from "../auth/RelayTokens.ts";
 import * as EnvironmentCredentials from "./EnvironmentCredentials.ts";
 import * as EnvironmentLinks from "./EnvironmentLinks.ts";
+import * as ManagedAccess from "../billing/ManagedAccess.ts";
 import * as ManagedEndpointProvider from "./ManagedEndpointProvider.ts";
 import * as RelayConfiguration from "../Config.ts";
 
@@ -63,6 +64,8 @@ export class EnvironmentLinkProofInvalid extends Schema.TaggedErrorClass<Environ
 }
 
 export type EnvironmentLinkError =
+  | ManagedAccess.ManagedAccessRequired
+  | ManagedAccess.ManagedAccessUnavailable
   | EnvironmentLinkProofExpired
   | EnvironmentLinkProofInvalid
   | DpopProofs.DpopProofReplayPersistenceError
@@ -136,6 +139,7 @@ function isLoopbackManagedTunnelOrigin(
 }
 
 const make = Effect.gen(function* () {
+  const managedAccess = yield* ManagedAccess.ManagedAccess;
   const links = yield* EnvironmentLinks.EnvironmentLinks;
   const credentials = yield* EnvironmentCredentials.EnvironmentCredentials;
   const managedEndpointProvider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
@@ -287,6 +291,13 @@ const make = Effect.gen(function* () {
           stage: "validate_origin",
         });
       }
+      // Disabled in normal deployments; sandbox gates only requested hosted features.
+      if (input.request.managedTunnelsEnabled)
+        yield* managedAccess.check(input.userId, "managedConnect");
+      if (input.request.notificationsEnabled)
+        yield* managedAccess.check(input.userId, "pushNotifications");
+      if (input.request.liveActivitiesEnabled)
+        yield* managedAccess.check(input.userId, "liveActivities");
       // Downgrading a managed link to publish-only must release the tunnel and
       // DNS that were provisioned for it — nothing else cleans them up until a
       // full unlink. Best effort: a cleanup failure must not block the link

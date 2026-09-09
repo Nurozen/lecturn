@@ -7,6 +7,12 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
+import * as Redacted from "effect/Redacted";
+import { parseBillingConfig } from "./billing/BillingConfig.ts";
+import * as ManagedReservations from "./billing/ManagedReservations.ts";
+import * as ManagedAccess from "./billing/ManagedAccess.ts";
+import * as BillingService from "./billing/BillingService.ts";
+import { billingRoutes } from "./http/BillingApi.ts";
 import * as Etag from "effect/unstable/http/Etag";
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
@@ -23,7 +29,7 @@ import {
   mobileApi,
   relayClientAuthLayer,
   relayDpopClientAuthLayer,
-  relayCors,
+  makeRelayCors,
   relayDocsRedirectRoute,
   relayEnvironmentAuthLayer,
   relayNotFoundRoute,
@@ -144,6 +150,57 @@ export const ApiLive = Api.make(
     const clerkSecretKey = yield* Config.redacted("CLERK_SECRET_KEY");
     const clerkPublishableKey = yield* Config.string("CLERK_PUBLISHABLE_KEY");
     const clerkJwtAudience = yield* Config.string("CLERK_JWT_AUDIENCE");
+    const billingMode = yield* Config.string("BILLING_MODE").pipe(Config.withDefault("disabled"));
+    const billingCheckout = yield* Config.string("BILLING_CHECKOUT_ENABLED").pipe(
+      Config.withDefault("false"),
+    );
+    const sandboxManagedAccess = yield* Config.string(
+      "BILLING_SANDBOX_MANAGED_ACCESS_ENABLED",
+    ).pipe(Config.withDefault("false"));
+    const billingAppOrigin = yield* Config.string("BILLING_APP_ORIGIN").pipe(
+      Config.withDefault("https://lecturn.cloudgatherer.net"),
+    );
+    const billingGrace = yield* Config.string("BILLING_RENEWAL_GRACE_SECONDS").pipe(
+      Config.withDefault("0"),
+    );
+    const stripeSecret = yield* Config.redacted("STRIPE_SECRET_KEY").pipe(
+      Config.withDefault(Redacted.make("")),
+    );
+    const stripeWebhook = yield* Config.redacted("STRIPE_WEBHOOK_SECRET").pipe(
+      Config.withDefault(Redacted.make("")),
+    );
+    const clerkBillingWebhook = yield* Config.redacted("CLERK_BILLING_WEBHOOK_SECRET").pipe(
+      Config.withDefault(Redacted.make("")),
+    );
+    const monthlyPrice = yield* Config.string("STRIPE_MONTHLY_PRICE_ID").pipe(
+      Config.withDefault(""),
+    );
+    const annualPrice = yield* Config.string("STRIPE_ANNUAL_PRICE_ID").pipe(Config.withDefault(""));
+    const portalConfiguration = yield* Config.string("STRIPE_PORTAL_CONFIGURATION_ID").pipe(
+      Config.withDefault(""),
+    );
+    const billingConfig = yield* Effect.try(() =>
+      parseBillingConfig({
+        BILLING_MODE: billingMode,
+        BILLING_SANDBOX_MANAGED_ACCESS_ENABLED: sandboxManagedAccess,
+        BILLING_CHECKOUT_ENABLED: billingCheckout,
+        BILLING_APP_ORIGIN: billingAppOrigin,
+        BILLING_RENEWAL_GRACE_SECONDS: billingGrace,
+        STRIPE_SECRET_KEY: Redacted.value(stripeSecret),
+        STRIPE_WEBHOOK_SECRET: Redacted.value(stripeWebhook),
+        STRIPE_MONTHLY_PRICE_ID: monthlyPrice,
+        STRIPE_ANNUAL_PRICE_ID: annualPrice,
+        STRIPE_PORTAL_CONFIGURATION_ID: portalConfiguration,
+      }),
+    ).pipe(Effect.orDie);
+    if (billingConfig.checkoutEnabled && !Redacted.value(clerkBillingWebhook)) {
+      return yield* Effect.die(
+        "Sandbox checkout requires a dedicated Clerk billing lifecycle webhook secret",
+      );
+    }
+    if (stage === "prod" && billingConfig.mode !== "disabled") {
+      return yield* Effect.die("Sandbox billing must use an isolated relay stage and database");
+    }
 
     const cloudMintPrivateKey = yield* cloudMintKeyPair.privateKey;
     const cloudMintPublicKey = yield* cloudMintKeyPair.publicKey;
@@ -191,7 +248,9 @@ export const ApiLive = Api.make(
     );
 
     const runtimeLayer = Layer.empty.pipe(
-      Layer.provideMerge(MobileRegistrations.layer),
+      Layer.provideMerge(
+        Layer.merge(BillingService.layer(billingConfig), MobileRegistrations.layer),
+      ),
       Layer.provideMerge(AgentActivityPublisher.layer),
       Layer.provideMerge(EnvironmentConnector.layer),
       Layer.provideMerge(EnvironmentLinker.layer),
@@ -217,6 +276,8 @@ export const ApiLive = Api.make(
           EnvironmentLinks.layer,
           ManagedEndpointAllocations.layer,
           ManagedTunnelLimits.layer,
+          ManagedAccess.layer(billingConfig.managedAccessEnabled === true),
+          ManagedReservations.layer({ enabled: billingConfig.managedAccessEnabled === true }),
         ),
       ),
       Layer.provideMerge(LiveActivities.layer),
@@ -279,6 +340,16 @@ export const ApiLive = Api.make(
       ),
     );
 
+    if (billingConfig.mode !== "disabled") {
+      yield* Cloudflare.Workers.cron("* * * * *", () =>
+        BillingService.BillingService.pipe(
+          Effect.flatMap((billing) => billing.processPending()),
+          Effect.withSpan("relay.billing.reconcile_pending"),
+          Effect.provide(runtimeLayer),
+        ),
+      );
+    }
+
     const fetch = Layer.merge(
       Layer.mergeAll(
         HttpApiBuilder.layer(RelayApi, { openapiPath: "/openapi.json" }).pipe(
@@ -286,7 +357,16 @@ export const ApiLive = Api.make(
         ),
         HttpApiScalar.layer(RelayApi, { path: "/docs" }),
         relayDocsRedirectRoute,
-      ).pipe(Layer.provide([Etag.layerWeak, httpPlatformNotSupportedLayer, relayCors])),
+        billingRoutes(billingConfig, Redacted.value(clerkBillingWebhook)).pipe(
+          Layer.provide(runtimeLayer),
+        ),
+      ).pipe(
+        Layer.provide([
+          Etag.layerWeak,
+          httpPlatformNotSupportedLayer,
+          makeRelayCors(billingConfig.appOrigin),
+        ]),
+      ),
       relayNotFoundRoute,
     ).pipe(
       HttpRouter.toHttpEffect,

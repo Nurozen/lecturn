@@ -1,4 +1,4 @@
-name: Deploy T3 Connect relay
+name: Deploy Lecturn Connect relay
 
 on:
   push:
@@ -35,6 +35,10 @@ jobs:
       APNS_KEY_ID: ${{ vars.APNS_KEY_ID }}
       APNS_BUNDLE_ID: ${{ vars.APNS_BUNDLE_ID }}
       ALCHEMY_TELEMETRY_DISABLED: "1"
+      # Sandbox application integration is enabled only on an isolated stage.
+      BILLING_MODE: "disabled"
+      BILLING_CHECKOUT_ENABLED: "false"
+      BILLING_SANDBOX_MANAGED_ACCESS_ENABLED: "false"
     steps:
       - name: Checkout
         uses: actions/checkout@v6

@@ -4,6 +4,7 @@ import type {
   RelayAgentAwarenessPreferences,
 } from "@t3tools/contracts/relay";
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -188,4 +189,47 @@ export const relayDpopProofs = pgTable(
     primaryKey({ columns: [table.thumbprint, table.jti] }),
     index("idx_relay_dpop_proofs_expires_at").on(table.expiresAt),
   ],
+);
+
+/** Minimal durable billing state. Provider operations are fenced by a short account lease. */
+export const relayBillingAccounts = pgTable("relay_billing_accounts", {
+  userId: varchar("user_id", { length: 255 }).primaryKey(),
+  customerId: varchar("customer_id", { length: 255 }).unique(),
+  deletedAt: bigint("deleted_at", { mode: "number" }),
+  generation: integer("generation").notNull().default(0),
+  leaseToken: varchar("lease_token", { length: 64 }),
+  leaseUntil: bigint("lease_until", { mode: "number" }).notNull().default(0),
+  reconcileAfter: bigint("reconcile_after", { mode: "number" }).notNull().default(0),
+  state: jsonb("state").notNull().default({}),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+});
+
+export const relayBillingInbox = pgTable(
+  "relay_billing_inbox",
+  {
+    id: varchar("id", { length: 255 }).primaryKey(),
+    customerId: varchar("customer_id", { length: 255 }),
+    userId: varchar("user_id", { length: 255 }),
+    kind: varchar("kind", { length: 255 }).notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    processedAt: bigint("processed_at", { mode: "number" }),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: bigint("next_attempt_at", { mode: "number" }).notNull().default(0),
+  },
+  (table) => [index("relay_billing_inbox_pending").on(table.processedAt, table.createdAt)],
+);
+
+/** Enabled pending and offline environments consume capacity until explicitly disabled. */
+export const relayManagedReservations = pgTable(
+  "relay_managed_reservations",
+  {
+    userId: varchar("user_id", { length: 255 }).notNull(),
+    environmentId: varchar("environment_id", { length: 191 }).notNull(),
+    generation: integer("generation").notNull(),
+    accountGeneration: integer("account_generation").notNull(),
+    enabled: boolean("enabled").notNull(),
+    state: varchar("state", { length: 16 }).notNull().$type<"pending" | "active" | "disabled">(),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.environmentId] })],
 );
