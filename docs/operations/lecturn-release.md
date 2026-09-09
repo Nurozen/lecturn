@@ -16,7 +16,15 @@ Lecturn is a fork of [T3 Code](https://github.com/pingdotgg/t3code). This page c
 - AUR publishing, Vercel web deploy, Discord announcements, and the GitHub App used by `finalize` (it uses the workflow token instead).
 - The nightly cron runs once a day (10:38 UTC, after the upstream sync) instead of every three hours. `check_changes` still skips it when `main` has not moved.
 
-Other upstream workflows that depend on upstream infrastructure (relay deploy, mobile EAS, previews, PR bots) are disabled in the repository's Actions settings rather than deleted, so they never conflict with nightly merges.
+Upstream workflows that still depend on upstream infrastructure can be disabled in the repository's Actions settings rather than deleted. The fork's mobile EAS production workflow is active.
+
+## Mobile production builds
+
+`mobile-eas-production.yml` builds both mobile platforms on relevant pushes to `main` and publishes OTA updates only when a finished production binary matches the current platform fingerprint. An existing version, including a queued build, prevents duplicate automatic builds. Native changes without a matching binary require a manual build dispatch even if the app version is unchanged.
+
+iOS builds automatically submit to TestFlight. Android builds and fingerprint-gated OTA remain enabled, but Google Play submission defaults off. Set the repository variable `EAS_ANDROID_AUTO_SUBMIT=true` only after completing Play Console onboarding, uploading the first app as required by Google, and configuring the Google service account for the production EAS submission profile. Manual `build` dispatches follow the same submission policy.
+
+Enabling Android submission does not resubmit an existing build. Submit that build explicitly from CI or EAS after credentials are ready; do not create a duplicate merely to retry submission. The workflow summary distinguishes build-only Android runs from store submission.
 
 ## npm package
 

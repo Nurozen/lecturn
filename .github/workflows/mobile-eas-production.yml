@@ -9,7 +9,7 @@ name: Mobile EAS Production
 # Every merge to main that touches the mobile app reconciles, per platform:
 #   1. Store builds: if the latest production build's version differs from
 #      app.config.ts, cut a new build and submit it (TestFlight + Play internal
-#      track). Bumping `version` is therefore all it takes to
+#      track when Android submission is enabled). Bumping `version` is therefore all it takes to
 #      start the next release train — the first build of a version enters
 #      external-TestFlight beta review immediately, and later builds of the
 #      same version auto-approve until that version is released. After App
@@ -82,6 +82,8 @@ jobs:
     env:
       APP_VARIANT: production
       NODE_OPTIONS: --max-old-space-size=8192
+      # Google Play onboarding and an EAS service account are separate from building Android.
+      ANDROID_AUTO_SUBMIT: ${{ vars.EAS_ANDROID_AUTO_SUBMIT == 'true' && 'true' || 'false' }}
     steps:
       - id: expo-token
         name: Check for EXPO_TOKEN
@@ -210,12 +212,24 @@ jobs:
             echo "> Apple closes an iOS release train after App Store approval. Before building iOS, confirm \`$version\` is newer than the approved App Store version."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Build and submit (manual)
+      - name: Build and submit configured stores (manual)
         if: steps.expo-token.outputs.present == 'true' && github.event_name == 'workflow_dispatch' && inputs.mode == 'build'
         working-directory: apps/mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: eas build --platform ${{ inputs.platform }} --profile production --auto-submit --non-interactive --no-wait
+          BUILD_PLATFORM: ${{ inputs.platform }}
+        run: |
+          platforms=("$BUILD_PLATFORM")
+          if [ "$BUILD_PLATFORM" = "all" ]; then platforms=(ios android); fi
+          for platform in "${platforms[@]}"; do
+            submission=()
+            if [ "$platform" = "ios" ] || [ "$ANDROID_AUTO_SUBMIT" = "true" ]; then
+              submission=(--auto-submit)
+            else
+              echo "Android build only: EAS_ANDROID_AUTO_SUBMIT is off; Google Play submission skipped." >> "$GITHUB_STEP_SUMMARY"
+            fi
+            eas build --platform "$platform" --profile production "${submission[@]}" --non-interactive --no-wait
+          done
 
       - name: Publish OTA update (manual)
         if: steps.expo-token.outputs.present == 'true' && github.event_name == 'workflow_dispatch' && inputs.mode == 'update'
@@ -251,8 +265,14 @@ jobs:
               continue
             fi
             echo "$platform: latest production build is $latest, app.config.ts says $version — building"
-            if eas build --platform "$platform" --profile production --auto-submit --non-interactive --no-wait; then
-              echo ":building_construction: $platform: scheduled production build and submission for $version" >> "$GITHUB_STEP_SUMMARY"
+            submission=()
+            if [ "$platform" = "ios" ] || [ "$ANDROID_AUTO_SUBMIT" = "true" ]; then
+              submission=(--auto-submit)
+            else
+              echo "Android build only: EAS_ANDROID_AUTO_SUBMIT is off; Google Play submission skipped." >> "$GITHUB_STEP_SUMMARY"
+            fi
+            if eas build --platform "$platform" --profile production "${submission[@]}" --non-interactive --no-wait; then
+              echo ":building_construction: $platform: scheduled production build for $version (auto-submit: $([ "${#submission[@]}" -gt 0 ] && echo on || echo off))" >> "$GITHUB_STEP_SUMMARY"
             else
               failed=1
               echo ":x: $platform: production build or submission failed for $version" >> "$GITHUB_STEP_SUMMARY"
