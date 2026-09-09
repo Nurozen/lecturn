@@ -1,33 +1,12 @@
-<svg width="1080" height="760" viewBox="0 0 540 380" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="latest-surface" x1="0" y1="0" x2="540" y2="380" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FAFAF9"/>
-      <stop offset="1" stop-color="#F5F5F4"/>
-    </linearGradient>
-    <radialGradient id="latest-light" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(430 0) rotate(152) scale(320 150)">
-      <stop stop-color="#FFFFFF"/>
-      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-
-  <rect width="540" height="380" fill="url(#latest-surface)"/>
-  <rect width="540" height="112" fill="#EFEFED"/>
-  <rect width="540" height="112" fill="url(#latest-light)"/>
-  <path d="M0 111.5H540" stroke="#18181B" stroke-opacity="0.08"/>
-  <path d="M32 28H64" stroke="#18181B" stroke-width="2"/>
-
-  <g font-family="-apple-system, BlinkMacSystemFont, sans-serif" fill="#18181B">
-    <text x="32" y="50" font-size="12" font-weight="600" letter-spacing="1.4">T3 CODE</text>
-    <text x="32" y="82" font-size="22" font-weight="600" letter-spacing="-0.45">Desktop</text>
-    <text x="508" y="50" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="8.5" font-weight="600" letter-spacing="1.2" fill="#71717A">LATEST RELEASE</text>
-  </g>
-
-  <path d="M196 224C242 239 307 201 362 220" stroke="#71717A" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="1 7" opacity="0.42"/>
-  <circle cx="362" cy="220" r="2" fill="#71717A" opacity="0.55"/>
-  <path d="M176 204V227L182 221L187.5 232L192 229.8L186.5 219H194L176 204Z" fill="#71717A" stroke="#F7F7F5" stroke-width="1.5" stroke-linejoin="round"/>
-
-  <g font-family="-apple-system, BlinkMacSystemFont, sans-serif" text-anchor="middle">
-    <text x="270" y="322" font-size="13" font-weight="600" letter-spacing="-0.1" fill="#18181B">Drag T3 Code to Applications</text>
-    <text x="270" y="345" font-size="9.5" fill="#71717A">Open it from Applications when the copy finishes.</text>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="760" viewBox="0 0 540 380" fill="none">
+<defs><linearGradient id="surface" x2="1" y2="1"><stop stop-color="#102A39"/><stop offset="1" stop-color="#030B13"/></linearGradient></defs>
+<rect width="540" height="380" fill="url(#surface)"/>
+<path d="M28 111H512M28 282H512" stroke="#C89954" stroke-opacity=".3"/>
+<circle cx="456" cy="45" r="92" stroke="#C89954" stroke-opacity=".1"/><circle cx="456" cy="45" r="72" stroke="#C89954" stroke-opacity=".15"/>
+<g fill="#E5D1AC" font-family="Georgia,serif"><text x="32" y="56" font-size="30" letter-spacing="1">Lecturn</text></g>
+<text x="33" y="82" font-family="-apple-system,sans-serif" fill="#C89954" font-size="10" letter-spacing="2">YOUR WORK, ILLUMINATED</text>
+<text x="508" y="50" text-anchor="end" font-family="-apple-system,sans-serif" fill="#A9ACAA" font-size="9" letter-spacing="1.5">DESKTOP</text>
+<path d="M217 210H320M310 202L320 210L310 218" stroke="#C89954" stroke-width="1.5" stroke-linecap="round"/>
+<text x="270" y="323" text-anchor="middle" font-family="-apple-system,sans-serif" fill="#E5D1AC" font-size="13">Drag Lecturn to Applications</text>
+<text x="270" y="346" text-anchor="middle" font-family="-apple-system,sans-serif" fill="#A9ACAA" font-size="10">A separate home for your work.</text>
 </svg>

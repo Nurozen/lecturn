@@ -1,0 +1,17 @@
+{
+  "name": "lecturn-auth-email",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vp test run",
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@clerk/backend": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260601.1",
+    "@types/node": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

@@ -1,3 +1,4 @@
+import { RuntimeDistributionPackage } from "./pinnedRuntime.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -9,10 +10,13 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 
 import * as ProcessRunner from "../processRunner.ts";
 import {
-  ensurePinnedRuntimeInstalled,
+  ensurePinnedRuntimeInstalled as installRuntime,
   pinnedRuntimePaths,
   PinnedRuntimeInstallError,
 } from "./pinnedRuntime.ts";
+
+const ensurePinnedRuntimeInstalled = (input: Parameters<typeof installRuntime>[0]) =>
+  installRuntime(input).pipe(Effect.provideService(RuntimeDistributionPackage, "t3"));
 
 const successfulRunner = (fs: FileSystem.FileSystem, path: Path.Path) =>
   ProcessRunner.ProcessRunner.of({
@@ -174,3 +178,29 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     }),
   );
 });
+
+it.effect("refuses an unpublished Lecturn runtime before touching disk or invoking npm", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-no-upstream-install-" });
+    let called = false;
+    const error = yield* installRuntime({
+      baseDir,
+      version: "1.2.3",
+      fs,
+      path,
+      runner: ProcessRunner.ProcessRunner.of({
+        run: () => {
+          called = true;
+          return Effect.die("unexpected npm");
+        },
+      }),
+      validate: () => Effect.void,
+    }).pipe(Effect.flip);
+    assert.equal(error._tag, "PinnedRuntimeInstallError");
+    assert.include(error.message, "until a Lecturn runtime is published");
+    assert.isFalse(called);
+    assert.deepEqual(yield* fs.readDirectory(baseDir), []);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);

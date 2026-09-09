@@ -130,7 +130,7 @@ function ChatRouteGlobalShortcuts() {
             stackedThreadToast({
               type: "info",
               title: "Preview is desktop-only",
-              description: "Open T3 Code in the desktop app to use the in-app preview.",
+              description: "Open Lecturn in the desktop app to use the in-app preview.",
             }),
           );
           return;

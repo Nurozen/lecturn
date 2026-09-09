@@ -1,27 +1,7 @@
-import { matchers, routes, type Transform, type VercelConfig } from "@vercel/config/v1";
+import { matchers, routes, type VercelConfig } from "@vercel/config/v1";
 
-const ROUTER_HOST = "app.t3.codes";
-const HOSTED_WEB_CHANNEL_COOKIE = "t3code_web_channel";
-const LATEST_ORIGIN = "https://latest.app.t3.codes";
-const NIGHTLY_ORIGIN = "https://nightly.app.t3.codes";
-const CLEAN_CHANNEL_QUERY_TRANSFORMS = [
-  {
-    type: "request.query",
-    op: "delete",
-    target: { key: "channel" },
-  },
-] satisfies Transform[];
-
-function channelCookie(channel: "latest" | "nightly"): string {
-  return [
-    `${HOSTED_WEB_CHANNEL_COOKIE}=${channel}`,
-    "Path=/",
-    "Max-Age=31536000",
-    "HttpOnly",
-    "Secure",
-    "SameSite=Lax",
-  ].join("; ");
-}
+const LATEST_ORIGIN = "https://lecturn.cloudgatherer.net";
+const NIGHTLY_ORIGIN = "https://nightly.lecturn.cloudgatherer.net";
 
 export const config: VercelConfig = {
   buildCommand:
@@ -32,35 +12,27 @@ export const config: VercelConfig = {
   installCommand:
     "npm install -g vite-plus && vp install --ignore-scripts --filter '@t3tools/scripts...' --filter '@t3tools/web...'",
   routes: [
+    // Keep the existing client endpoint compatible. Channels redirect to their
+    // own deployments; the primary host serves its local static files directly.
     {
       src: "/__t3code/channel",
       has: [matchers.query("channel", "nightly")],
-      transforms: CLEAN_CHANNEL_QUERY_TRANSFORMS,
-      headers: {
-        Location: "/",
-        "Set-Cookie": channelCookie("nightly"),
-      },
+      headers: { Location: `${NIGHTLY_ORIGIN}/` },
       status: 302,
     },
     {
       src: "/__t3code/channel",
-      transforms: CLEAN_CHANNEL_QUERY_TRANSFORMS,
-      headers: {
-        Location: "/",
-        "Set-Cookie": channelCookie("latest"),
-      },
+      headers: { Location: `${LATEST_ORIGIN}/` },
       status: 302,
     },
-    {
-      src: "/(.*)",
-      has: [matchers.host(ROUTER_HOST), matchers.cookie(HOSTED_WEB_CHANNEL_COOKIE, "nightly")],
-      dest: `${NIGHTLY_ORIGIN}/$1`,
-    },
-    {
-      src: "/(.*)",
-      has: [matchers.host(ROUTER_HOST)],
-      dest: `${LATEST_ORIGIN}/$1`,
-    },
   ],
-  rewrites: [routes.rewrite("/(.*)", "/index.html")],
+  rewrites: [
+    routes.rewrite("/privacy-policy", "/privacy-policy/index.html"),
+    routes.rewrite("/privacy-policy/", "/privacy-policy/index.html"),
+    routes.rewrite("/terms-of-service", "/terms-of-service/index.html"),
+    routes.rewrite("/terms-of-service/", "/terms-of-service/index.html"),
+    routes.rewrite("/security-policy", "/security-policy/index.html"),
+    routes.rewrite("/security-policy/", "/security-policy/index.html"),
+    routes.rewrite("/(.*)", "/index.html"),
+  ],
 };

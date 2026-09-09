@@ -226,7 +226,7 @@ export const buildPublishManifest = (input: PublishManifestInput): PackageJson =
     bin:
       input.binName === undefined
         ? serverPackageJson.bin
-        : { [input.binName]: serverPackageJson.bin.t3 },
+        : { [input.binName]: serverPackageJson.bin.lecturn },
     type: serverPackageJson.type,
     version: input.version,
     engines: serverPackageJson.engines,

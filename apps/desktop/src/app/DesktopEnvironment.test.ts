@@ -13,9 +13,9 @@ const defaultInput = {
   platform: "darwin",
   processArch: "arm64",
   appVersion: "0.0.22",
-  appPath: "/Applications/T3 Code.app/Contents/Resources/app.asar",
+  appPath: "/Applications/Lecturn.app/Contents/Resources/app.asar",
   isPackaged: false,
-  resourcesPath: "/Applications/T3 Code.app/Contents/Resources",
+  resourcesPath: "/Applications/Lecturn.app/Contents/Resources",
   runningUnderArm64Translation: false,
 } satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
 
@@ -40,7 +40,7 @@ describe("DesktopEnvironment", () => {
       const environment = yield* makeEnvironment(
         {},
         {
-          T3CODE_HOME: " /tmp/t3 ",
+          LECTURN_HOME: " /tmp/t3 ",
           T3CODE_COMMIT_HASH: " 0123456789abcdef ",
           T3CODE_PORT: "4949",
           VITE_DEV_SERVER_URL: "http://localhost:5173",
@@ -68,8 +68,8 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.serverRoot, "/repo");
       assert.equal(environment.backendEntryPath, "/repo/apps/server/dist/bin.mjs");
       assert.equal(environment.backendCwd, "/repo");
-      assert.equal(environment.appUserModelId, "com.t3tools.t3code.dev");
-      assert.equal(environment.linuxWmClass, "t3code-dev");
+      assert.equal(environment.appUserModelId, "com.cloudgatherer.lecturn.dev");
+      assert.equal(environment.linuxWmClass, "lecturn-dev");
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),
         Option.some("http://localhost:5173/"),
@@ -87,7 +87,7 @@ describe("DesktopEnvironment", () => {
       const environment = yield* makeEnvironment(
         {},
         {
-          T3CODE_HOME: "/tmp/t3",
+          LECTURN_HOME: "/tmp/t3",
         },
       );
 
@@ -125,8 +125,8 @@ describe("DesktopEnvironment", () => {
       );
       const production = yield* makeEnvironment();
 
-      assert.equal(development.stateDir, "/Users/alice/.t3/dev");
-      assert.equal(production.stateDir, "/Users/alice/.t3/userdata");
+      assert.equal(development.stateDir, "/Users/alice/.lecturn/dev");
+      assert.equal(production.stateDir, "/Users/alice/.lecturn/userdata");
     }),
   );
 
@@ -135,12 +135,12 @@ describe("DesktopEnvironment", () => {
       const environment = yield* makeEnvironment(
         {},
         {
-          T3CODE_DESKTOP_APP_USER_MODEL_ID: " com.t3tools.t3code.dev.local ",
+          T3CODE_DESKTOP_APP_USER_MODEL_ID: " com.cloudgatherer.lecturn.dev.local ",
           VITE_DEV_SERVER_URL: "http://localhost:5173",
         },
       );
 
-      assert.equal(environment.appUserModelId, "com.t3tools.t3code.dev.local");
+      assert.equal(environment.appUserModelId, "com.cloudgatherer.lecturn.dev.local");
     }),
   );
 
@@ -164,3 +164,19 @@ describe("DesktopEnvironment", () => {
     }),
   );
 });
+
+it.effect("isolates Lecturn from the installed T3 Code home and OS identity", () =>
+  Effect.gen(function* () {
+    const environment = yield* makeEnvironment(
+      { isPackaged: true },
+      { T3CODE_HOME: "/Users/alice/.t3" },
+    );
+    assert.equal(environment.baseDir, "/Users/alice/.lecturn");
+    assert.equal(environment.stateDir, "/Users/alice/.lecturn/userdata");
+    assert.equal(environment.displayName, "Lecturn");
+    assert.equal(environment.userDataDirName, "lecturn");
+    assert.notInclude(environment.legacyUserDataDirName, "T3");
+    assert.equal(environment.appUserModelId, "com.cloudgatherer.lecturn");
+    assert.equal(environment.linuxDesktopEntryName, "lecturn.desktop");
+  }),
+);

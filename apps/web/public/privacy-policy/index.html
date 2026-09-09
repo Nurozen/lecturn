@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy notice · Lecturn</title>
+    <style>
+      html {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        background: #061522;
+        color: #dfc7a4;
+        font:
+          17px/1.7 -apple-system,
+          BlinkMacSystemFont,
+          system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 740px;
+        margin: 72px auto;
+        padding: 0 24px 80px;
+      }
+      h1,
+      h2,
+      .brand {
+        font-family: Georgia, serif;
+        font-weight: 400;
+      }
+      h1 {
+        font-size: 46px;
+        line-height: 1.15;
+      }
+      h2 {
+        font-size: 26px;
+        margin-top: 36px;
+      }
+      a {
+        color: #d9a34e;
+      }
+      nav {
+        display: flex;
+        gap: 24px;
+        border-top: 1px solid #263746;
+        padding-top: 24px;
+        margin-top: 44px;
+      }
+      .brand {
+        font-size: 24px;
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a class="brand" href="/">Lecturn</a>
+      <h1>Privacy notice</h1>
+      <p>
+        Lecturn is operated by Cloud Gatherer Labs. It is a fork of the open-source T3 Code project.
+        This notice describes the Lecturn deployment at lecturn.cloudgatherer.net and
+        relay.cloudgatherer.net.
+      </p>
+      <h2>Your account and connections</h2>
+      <p>
+        Clerk handles account sign-in and authentication. Our hosted services store account and
+        linked-environment identifiers and connection metadata needed to connect your clients to
+        your computer. Cloudflare provides hosting and connection routing; PlanetScale stores
+        service data. Resend delivers service emails.
+      </p>
+      <h2>Your coding work</h2>
+      <p>
+        Your computer runs the coding agents and stores local project and conversation state. A
+        remote client exchanges application traffic through the connection service. Your chosen
+        model and coding-agent providers process the prompts, code, and other information you send
+        to them under their own policies. Do not assume remote traffic or diagnostic records contain
+        no sensitive information.
+      </p>
+      <h2>Analytics and diagnostics</h2>
+      <p>
+        Lecturn uses PostHog for product analytics and Axiom for operational diagnostics. Product
+        analytics can be disabled in the app's privacy settings. That setting does not disable all
+        local diagnostic logs or hosted operational logging needed to run and troubleshoot the
+        service. Diagnostic data may include errors, timings, identifiers, and connection details.
+        Automatic session replay and automatic interaction capture are not enabled for this
+        deployment.
+      </p>
+      <h2>Questions and requests</h2>
+      <p>
+        For questions about your account, data access, or deletion, contact
+        <a href="mailto:accounts@cloudgatherer.net">accounts@cloudgatherer.net</a>. We will review
+        requests for data controlled by this deployment; your independent provider accounts are
+        managed by those providers.
+      </p>
+      <nav>
+        <a href="/privacy-policy/">Privacy</a><a href="/terms-of-service/">Using Lecturn</a>
+      </nav>
+    </main>
+  </body>
+</html>

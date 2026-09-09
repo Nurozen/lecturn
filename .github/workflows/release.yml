@@ -46,6 +46,12 @@ permissions:
   contents: read
   id-token: none
 
+env:
+  T3CODE_HOSTED_APP_URL: ${{ vars.T3CODE_HOSTED_APP_URL }}
+  VITE_HOSTED_APP_URL: ${{ vars.T3CODE_HOSTED_APP_URL }}
+  T3CODE_POSTHOG_KEY: ${{ vars.T3CODE_POSTHOG_KEY }}
+  T3CODE_POSTHOG_HOST: ${{ vars.T3CODE_POSTHOG_HOST }}
+
 jobs:
   check_changes:
     name: Check for changes since last nightly
@@ -288,6 +294,12 @@ jobs:
     if: ${{ !cancelled() && needs.preflight.result == 'success' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    environment: production
+    env:
+      T3CODE_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
+      T3CODE_CLERK_JWT_TEMPLATE: ${{ vars.CLERK_JWT_TEMPLATE }}
+      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.CLERK_CLI_OAUTH_CLIENT_ID }}
+      T3CODE_RELAY_URL: https://${{ vars.RELAY_DOMAIN }}
     strategy:
       fail-fast: false
       matrix:
@@ -334,6 +346,20 @@ jobs:
             /*
             !/.repos/
           sparse-checkout-cone-mode: false
+
+      - name: Verify Lecturn public configuration
+        shell: bash
+        run: |
+          for name in T3CODE_HOSTED_APP_URL T3CODE_CLERK_PUBLISHABLE_KEY T3CODE_CLERK_JWT_TEMPLATE T3CODE_CLERK_CLI_OAUTH_CLIENT_ID; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required Lecturn release configuration: $name" >&2
+              exit 1
+            fi
+          done
+          if [[ -z "${T3CODE_RELAY_URL#https://}" ]]; then
+            echo "Missing required Lecturn release configuration: RELAY_DOMAIN" >&2
+            exit 1
+          fi
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -627,6 +653,12 @@ jobs:
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    environment: production
+    env:
+      T3CODE_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
+      T3CODE_CLERK_JWT_TEMPLATE: ${{ vars.CLERK_JWT_TEMPLATE }}
+      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.CLERK_CLI_OAUTH_CLIENT_ID }}
+      T3CODE_RELAY_URL: https://${{ vars.RELAY_DOMAIN }}
     permissions:
       contents: read
       id-token: write
@@ -639,6 +671,20 @@ jobs:
             /*
             !/.repos/
           sparse-checkout-cone-mode: false
+
+      - name: Verify Lecturn public configuration
+        shell: bash
+        run: |
+          for name in T3CODE_HOSTED_APP_URL T3CODE_CLERK_PUBLISHABLE_KEY T3CODE_CLERK_JWT_TEMPLATE T3CODE_CLERK_CLI_OAUTH_CLIENT_ID; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required Lecturn release configuration: $name" >&2
+              exit 1
+            fi
+          done
+          if [[ -z "${T3CODE_RELAY_URL#https://}" ]]; then
+            echo "Missing required Lecturn release configuration: RELAY_DOMAIN" >&2
+            exit 1
+          fi
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1

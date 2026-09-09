@@ -16,6 +16,7 @@ import * as AnalyticsService from "./AnalyticsService.ts";
 interface RecordedBatchRequest {
   readonly path: string;
   readonly body: {
+    readonly api_key?: string;
     readonly batch?: ReadonlyArray<{
       readonly event?: string;
       readonly properties?: {
@@ -109,6 +110,10 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
           Array.isArray(request.body?.batch),
       );
       assert.equal(batchRequests.length, 3);
+      assert.equal(
+        batchRequests.every((request) => request.body?.api_key === "phc_test_key"),
+        true,
+      );
       assert.equal(
         batchRequests.every(
           (request) => request.path.endsWith("/batch/") || request.path.endsWith("/batch"),

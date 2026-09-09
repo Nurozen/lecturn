@@ -15,7 +15,7 @@ it("builds the default manifest from the workspace package.json", () => {
   const manifest = buildPublishManifest({ version: "1.2.3", workspaceConfig });
 
   assert.equal(manifest.name, "t3");
-  assert.deepStrictEqual(manifest.bin, { t3: "./dist/bin.mjs" });
+  assert.deepStrictEqual(manifest.bin, { lecturn: "./dist/bin.mjs" });
   assert.deepStrictEqual(manifest.repository, serverPackageJson.repository);
   assert.equal(manifest.version, "1.2.3");
   assert.deepStrictEqual(Object.keys(manifest), [

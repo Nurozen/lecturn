@@ -29,12 +29,20 @@ interface BufferedAnalyticsEvent {
   readonly capturedAt: string;
 }
 
+declare const __T3CODE_BUILD_POSTHOG_KEY__: string | undefined;
+declare const __T3CODE_BUILD_POSTHOG_HOST__: string | undefined;
+
+const buildPosthogKey =
+  typeof __T3CODE_BUILD_POSTHOG_KEY__ === "undefined" ? "" : __T3CODE_BUILD_POSTHOG_KEY__;
+const buildPosthogHost =
+  typeof __T3CODE_BUILD_POSTHOG_HOST__ === "undefined" ? "" : __T3CODE_BUILD_POSTHOG_HOST__;
+
 const TelemetryEnvConfig = Config.all({
   posthogKey: Config.string("T3CODE_POSTHOG_KEY").pipe(
-    Config.withDefault("phc_XOWci4oZP4VvLiEyrFqkFjP4CZn55mjYYBMREK5Wd6m"),
+    Config.withDefault(buildPosthogKey || "phc_XOWci4oZP4VvLiEyrFqkFjP4CZn55mjYYBMREK5Wd6m"),
   ),
   posthogHost: Config.string("T3CODE_POSTHOG_HOST").pipe(
-    Config.withDefault("https://us.i.posthog.com"),
+    Config.withDefault(buildPosthogHost || "https://us.i.posthog.com"),
   ),
   enabled: Config.boolean("T3CODE_TELEMETRY_ENABLED").pipe(Config.withDefault(true)),
   flushBatchSize: Config.number("T3CODE_TELEMETRY_FLUSH_BATCH_SIZE").pipe(Config.withDefault(20)),
