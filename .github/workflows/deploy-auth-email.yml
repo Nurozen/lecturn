@@ -41,6 +41,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: infra/auth-email
+          packageManager: pnpm
           wranglerVersion: "4.82.2"
           command: deploy
           secrets: |
