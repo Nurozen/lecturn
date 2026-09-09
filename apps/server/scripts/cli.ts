@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { LECTURN_LEGAL_NOTICES } from "@t3tools/shared/legalNotices";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
@@ -30,6 +31,7 @@ import {
 } from "./cliErrors.ts";
 
 interface PackageJson {
+  license: string;
   name: string;
   repository: {
     type: string;
@@ -162,6 +164,12 @@ const buildCmd = Command.make(
         }),
       );
 
+      yield* fs.copyFile(path.join(repoRoot, "LICENSE"), path.join(serverDir, "dist/LICENSE"));
+      yield* fs.writeFileString(
+        path.join(serverDir, "dist/THIRD_PARTY_NOTICES.txt"),
+        LECTURN_LEGAL_NOTICES,
+      );
+
       const webDist = path.join(repoRoot, "apps/web/dist");
       const clientTarget = path.join(serverDir, "dist/client");
 
@@ -219,6 +227,7 @@ export const buildPublishManifest = (input: PublishManifestInput): PackageJson =
   const workspaceCatalog = input.workspaceConfig.catalog ?? {};
   const workspaceOverrides = input.workspaceConfig.overrides ?? {};
   return {
+    license: serverPackageJson.license,
     name: input.packageName ?? serverPackageJson.name,
     repository: input.githubRepository
       ? { ...serverPackageJson.repository, url: `https://github.com/${input.githubRepository}` }

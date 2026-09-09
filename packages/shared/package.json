@@ -258,6 +258,10 @@
     "./uuid": {
       "types": "./src/uuid.ts",
       "import": "./src/uuid.ts"
+    },
+    "./legalNotices": {
+      "types": "./src/legalNotices.ts",
+      "import": "./src/legalNotices.ts"
     }
   },
   "scripts": {

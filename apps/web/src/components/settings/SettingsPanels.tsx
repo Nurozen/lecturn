@@ -1,3 +1,4 @@
+import { LECTURN_LEGAL_NOTICES } from "@t3tools/shared/legalNotices";
 import { ArchiveIcon, ArchiveX, ChevronRightIcon, LoaderIcon, SettingsIcon } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import type { CSSProperties, ReactNode } from "react";
@@ -2771,6 +2772,12 @@ export function GeneralSettingsPanel() {
       </SettingsSection>
 
       <SettingsSection title="About">
+        <details className="px-4 py-3">
+          <summary className="cursor-pointer text-sm font-medium">Open-source attribution</summary>
+          <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+            {LECTURN_LEGAL_NOTICES}
+          </p>
+        </details>
         {isElectron || HOSTED_APP_CHANNEL ? (
           <AboutVersionSection />
         ) : (

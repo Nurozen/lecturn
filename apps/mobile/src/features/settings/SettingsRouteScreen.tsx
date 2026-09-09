@@ -1,3 +1,4 @@
+import { LECTURN_LEGAL_NOTICES } from "@t3tools/shared/legalNotices";
 import { useAuth, useUser } from "@clerk/expo";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import Constants from "expo-constants";
@@ -466,7 +467,7 @@ function ConfiguredSettingsRouteScreen() {
           <SettingsSection title="Account">
             <SettingsRow
               icon="person.crop.circle"
-              label="T3 Account"
+              label="Lecturn Account"
               value={accountLabel}
               onPress={openAccount}
             />
@@ -710,6 +711,7 @@ function LegacySettingsSection() {
 }
 
 function AppSettingsSection() {
+  const [showLegalNotices, setShowLegalNotices] = useState(false);
   const [updateState, setUpdateState] = useState<AppUpdateCheckState>("idle");
   const updateInFlight = useRef(false);
   const hiddenUpdateTapCount = useRef(0);
@@ -797,6 +799,22 @@ function AppSettingsSection() {
     <SettingsSection title="App">
       <SettingsRow icon="internaldrive" label="Client Storage" target="SettingsClientStorage" />
       <SettingsRow icon="doc.text" label="Legal" fullScreenTarget="SettingsLegal" />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: showLegalNotices }}
+        onPress={() => setShowLegalNotices((visible) => !visible)}
+        className="p-4"
+      >
+        <Text className="text-lg text-foreground">Open-source attribution</Text>
+        <Text className="text-sm text-foreground-muted">
+          {showLegalNotices ? "Hide notices" : "View license and attribution"}
+        </Text>
+      </Pressable>
+      {showLegalNotices ? (
+        <Text selectable className="px-4 pb-4 text-sm leading-normal text-foreground-muted">
+          {LECTURN_LEGAL_NOTICES}
+        </Text>
+      ) : null}
       {updateCheckAvailable ? (
         <Pressable
           accessibilityLabel={`Version ${versionLabel}`}
