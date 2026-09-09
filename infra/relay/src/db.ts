@@ -62,6 +62,7 @@ export const PlanetscaleDatabase = Effect.gen(function* () {
     mode === "stage-branch"
       ? yield* Planetscale.PostgresBranch("RelayPostgresBranch", {
           database,
+          clusterSize: "PS_DEV",
           migrationsDir: schema.out,
           migrationsTable: "relay_migrations",
         })
