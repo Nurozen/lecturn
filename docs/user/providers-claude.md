@@ -48,6 +48,9 @@ Claude can show its own resume prompt when you continue an old session.
 
 ## Where Claude Skills Are Loaded
 
+You can send a Claude slash command such as `/my-skill explain this` with an image or file
+attached. The attachments stay available to Claude, and the command still runs as a skill.
+
 T3 Code looks for Claude skills in the Claude config directory's `skills` folder and
 `<workspace>/.claude/skills`, the two places Claude Code loads them from.
 
