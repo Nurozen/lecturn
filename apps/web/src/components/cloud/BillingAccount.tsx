@@ -194,9 +194,8 @@ function SignedBillingAccount({
                 !status.hasAccess &&
                 !status.checkoutEnabled && (
                   <p className="text-sm text-muted-foreground">
-                    Connect subscriptions are being opened to invited accounts. Checkout is not
-                    enabled for this account yet. If you were invited, refresh your status after
-                    your account has been approved.
+                    Checkout is temporarily unavailable. Managed Connect requires an active
+                    subscription, trial, or complimentary access. Refresh your status to try again.
                   </p>
                 )}
               {hosted && status.checkoutEnabled && (

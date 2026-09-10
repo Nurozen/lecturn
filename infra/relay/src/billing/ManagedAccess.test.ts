@@ -116,3 +116,37 @@ it.effect("payment cohort exemptions never exempt deleted recipients", () =>
     yield* make(() => Effect.succeed(account(time)), [], true).check("owner", "pushNotifications");
   }),
 );
+
+it.effect(
+  "public enforcement never gives a new account implicit Connect or notification access",
+  () =>
+    Effect.gen(function* () {
+      const time = Math.floor((yield* Clock.currentTimeMillis) / 1000);
+      for (const value of [undefined, { ...account(time), state: {} }]) {
+        const service = make(() => Effect.succeed(value), ["*"], true);
+        for (const feature of ["managedConnect", "pushNotifications", "liveActivities"] as const)
+          expect((yield* Effect.flip(service.check("new-account", feature)))._tag).toBe(
+            "ManagedAccessRequired",
+          );
+      }
+      const explicitlyGranted = make(
+        () =>
+          Effect.succeed({
+            ...account(time),
+            state: {
+              grant: {
+                id: "reviewed-existing-owner",
+                operator: "maintainer",
+                reason: "Existing owner transition",
+                start: time,
+                end: time + 30 * 86400,
+                limit: 3,
+              },
+            },
+          }),
+        ["*"],
+        true,
+      );
+      yield* explicitlyGranted.check("existing-owner", "managedConnect");
+    }),
+);

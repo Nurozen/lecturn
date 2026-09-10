@@ -109,6 +109,10 @@ function ConfiguredConnectOnboardingRouteScreen() {
           <RefreshControl refreshing={isPullRefreshing} onRefresh={handlePullRefresh} />
         }
       >
+        <Text className="text-sm leading-normal text-foreground-muted">
+          Managed Connect uses your account’s active subscription, trial, or complimentary access.
+          Signing in alone does not activate managed access.
+        </Text>
         {isSignedIn ? (
           <CloudEnvironmentRows
             connectedCloudEnvironments={connectedCloudEnvironments}

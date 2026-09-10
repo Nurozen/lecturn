@@ -221,8 +221,9 @@ function ConfiguredConnectOnboardingDialog() {
         <DialogHeader>
           <DialogTitle>Set up Lecturn Connect</DialogTitle>
           <DialogDescription>
-            Mesh your devices together — publish this environment and connect the rest, all in one
-            place.
+            Publish this environment and connect your other devices. Managed Connect requires an
+            active subscription, trial, or complimentary access. Local and direct connections remain
+            free.
           </DialogDescription>
           {steps.length > 1 ? (
             <OnboardingStepper

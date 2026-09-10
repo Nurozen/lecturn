@@ -2,6 +2,12 @@
 
 Lecturn Connect brings your linked computers, managed notifications and Live Activities to your account. Local connections, direct pairing, SSH and Tailscale remain free.
 
+## Subscription
+
+Connect costs **$10/month or $100/year** in USD and includes three managed environments, managed push notifications and Live Activities. Start a **14-day trial with a card** on the web. The selected plan renews automatically after the trial; cancel before it ends to avoid a charge. Applicable taxes are calculated at Checkout. Sales are currently offered in the United States.
+
+Managed Connect requires an active subscription, trial, or an explicit access grant. Creating an account alone does not activate it. Existing transition grants last only through their recorded end date and never create automatic charges. Local connections, direct pairing, SSH and Tailscale remain free.
+
 ## Desktop
 
 Open **Settings → Billing** to check your signed-in account's Connect access and managed environment usage. Billing management opens in your browser. Use the same Lecturn account there, then return to the desktop app and refresh its status after making a change.

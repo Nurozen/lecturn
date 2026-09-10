@@ -30,7 +30,7 @@ _Forking is available for Codex, Claude, and OpenCode. Cursor and Grok do not ye
 
 ![An observatory library with glowing celestial charts and threads connecting distant lights.](./docs/images/lecturn-observatory.webp)
 
-Lecturn Connect links your hosting computers to your account for remote access, managed notifications, and Live Activities. The hosting app must remain running. Local connections, direct pairing, SSH, and Tailscale remain free; managed Connect access is being rolled out to a limited test cohort.
+Lecturn Connect links your hosting computers to your account for remote access, managed notifications, and Live Activities. The hosting app must remain running. Local connections, direct pairing, SSH, and Tailscale remain free; managed Connect requires an active subscription, trial, or explicit complimentary access. Connect costs $10/month or $100/year for three managed environments, with a 14-day card-required trial.
 
 The iOS app is a companion to your existing account access. Notification delivery also needs device permission and the corresponding settings enabled. See [Connect access](./docs/user/connect-subscription.md) and [remote access](./docs/user/remote-access.md) for details.
 
