@@ -1,3 +1,5 @@
+import { StaveLifecycleSettings } from "./StaveLifecycleSettings";
+import { StavePendingCleanups } from "./StavePendingCleanups";
 import { useAtomValue } from "@effect/atom-react";
 import { DEFAULT_UNIFIED_SETTINGS, type EnvironmentId } from "@t3tools/contracts";
 import { RefreshCwIcon } from "lucide-react";
@@ -36,10 +38,12 @@ export function StaveSettingsSection() {
   return (
     <SettingsSection title="Stave">
       <StaveEnabledSetting />
+      <StaveLifecycleSettings />
       <StaveStatusRow />
       <StaveBinaryPathSetting />
       <StaveConfigPathSetting />
       <StaveSagaNestingSetting />
+      <StavePendingCleanups />
     </SettingsSection>
   );
 }
@@ -236,7 +240,7 @@ function StaveSagaNestingSetting() {
   const update = useUpdateClientSettings();
   return (
     <SettingsRow
-      title="Nest saga members"
+      {...searchableSetting("stave-nest-sagas")}
       description="Group member projects under their saga in dependency order in this client's sidebars."
       control={
         <Switch

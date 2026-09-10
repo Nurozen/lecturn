@@ -46,6 +46,15 @@ const make = Effect.gen(function* () {
     read(
       sql`SELECT ${columns} FROM stave_project_lifecycle WHERE delete_intent_sequence IS NOT NULL OR disposition IN ('pending_evaluation','pending_destroy','pending_archive','archiving','restoring','destroying') ORDER BY project_id`,
     );
+  const listDeletedCleanups: StaveLifecycleRepositoryShape["listDeletedCleanups"] = () =>
+    read(sql`SELECT ${columns} FROM stave_project_lifecycle
+      WHERE delete_intent_sequence IS NOT NULL
+        AND disposition IN ('refused','pending_evaluation','pending_destroy','pending_archive')
+        AND project_id IN (SELECT project_id FROM projection_projects WHERE deleted_at IS NOT NULL)
+      ORDER BY project_id`);
+  const isProjectDeleted: StaveLifecycleRepositoryShape["isProjectDeleted"] = (projectId) =>
+    changed(sql`SELECT project_id FROM projection_projects
+      WHERE project_id = ${projectId} AND deleted_at IS NOT NULL`);
   const listIncomplete: StaveLifecycleRepositoryShape["listIncomplete"] = () =>
     read(
       sql`SELECT ${columns} FROM stave_project_lifecycle WHERE disposition IN ('archiving','restoring','destroying','destroyed') ORDER BY project_id`,
@@ -99,6 +108,14 @@ const make = Effect.gen(function* () {
       WHERE project_id = ${input.projectId} AND lease_epoch = ${input.leaseEpoch} AND owner_token = ${input.ownerToken}
       AND lease_until > ${input.now} RETURNING project_id`);
   };
+  const resetScheduleEpisode: StaveLifecycleRepositoryShape["resetScheduleEpisode"] = (input) =>
+    changed(sql`UPDATE stave_project_lifecycle SET
+      anchor_at = ${input.anchorAt}, scheduled_at = ${input.scheduledAt},
+      archive_deadline_at = ${input.archiveDeadlineAt}, disposition = ${input.disposition},
+      refusal_code = NULL, refusal_message = NULL, refreshed_at = NULL, updated_at = ${input.now}
+      WHERE project_id = ${input.projectId} AND lease_epoch = ${input.leaseEpoch}
+        AND owner_token = ${input.ownerToken} AND lease_until > ${input.now}
+      RETURNING project_id`);
   const markRefreshed: StaveLifecycleRepositoryShape["markRefreshed"] = (input) =>
     changed(
       sql`UPDATE stave_project_lifecycle SET refreshed_at = ${input.refreshedAt} WHERE project_id = ${input.projectId} AND updated_at = ${input.updatedAt} RETURNING project_id`,
@@ -107,6 +124,8 @@ const make = Effect.gen(function* () {
     getByProjectId,
     getByWorkspaceRoot,
     listPending,
+    listDeletedCleanups,
+    isProjectDeleted,
     listIncomplete,
     listUnrefreshed,
     ensure,
@@ -114,6 +133,7 @@ const make = Effect.gen(function* () {
     renewLease,
     releaseLease,
     updateDisposition,
+    resetScheduleEpisode,
     markRefreshed,
   } satisfies StaveLifecycleRepositoryShape;
 });

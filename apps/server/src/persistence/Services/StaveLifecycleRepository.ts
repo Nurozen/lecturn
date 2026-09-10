@@ -68,6 +68,8 @@ export interface StaveLifecycleRepositoryShape {
   readonly getByProjectId: (projectId: ProjectId) => Result<Option.Option<StaveLifecycleRow>>;
   readonly getByWorkspaceRoot: (workspaceRoot: string) => Result<Option.Option<StaveLifecycleRow>>;
   readonly listPending: () => Result<ReadonlyArray<StaveLifecycleRow>>;
+  readonly listDeletedCleanups: () => Result<ReadonlyArray<StaveLifecycleRow>>;
+  readonly isProjectDeleted: (projectId: ProjectId) => Result<boolean>;
   readonly listIncomplete: () => Result<ReadonlyArray<StaveLifecycleRow>>;
   readonly listUnrefreshed: () => Result<ReadonlyArray<StaveLifecycleRow>>;
   readonly ensure: (input: {
@@ -90,6 +92,14 @@ export interface StaveLifecycleRepositoryShape {
   readonly releaseLease: (input: StaveLifecycleLease) => Result<boolean>;
   readonly updateDisposition: (
     input: StaveLifecycleLease & { readonly patch: StaveLifecyclePatch },
+  ) => Result<boolean>;
+  readonly resetScheduleEpisode: (
+    input: StaveLifecycleLease & {
+      readonly anchorAt: string | null;
+      readonly scheduledAt: string | null;
+      readonly archiveDeadlineAt: string | null;
+      readonly disposition: "live" | "pending_archive" | "kept";
+    },
   ) => Result<boolean>;
   readonly markRefreshed: (input: {
     readonly projectId: ProjectId;

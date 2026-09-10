@@ -5,7 +5,7 @@
 > Fork framing and release differences live in
 > [docs/operations/lecturn-release.md](../operations/lecturn-release.md).
 
-Status: in progress — Phase 5 (sagas and merge settlement; lifecycle automation follows)
+Status: in progress — Phase 6 (lifecycle automation; provider memory wiring follows)
 
 ## What a Stave space is to Lecturn
 
@@ -694,16 +694,17 @@ Rules built on them:
 Migration `049_StaveProjectLifecycle` creates `stave_project_lifecycle`. It stores the project,
 canonical root, manifest `(id, createdAt)`, disposition, durable delete intent and saga-removal
 confirmation, refusal, archive/schedule metadata, and a lease epoch, owner token, and expiry.
-The lifecycle projector upserts delete intent inside the event's SQL transaction, preserving
-an existing terminal disposition. Historical events without roots are ignored. Migration seeds
+The lifecycle projector upserts delete intent inside the event's SQL transaction. A new delete
+rearms a previous live archive schedule, Keep, or refusal; completed archive/destroy and in-flight
+dispositions are preserved. Missing event identity fields retain the journaled incarnation. Historical events without roots are ignored. Migration seeds
 the projector at the current event sequence; a separate operational cursor survives projection
 resets so rebuilding read models cannot revive historical cleanup intents. Both lifecycle tables
 are excluded from resets. This is lifecycle recovery state, not an operation replay ledger.
 
 `StaveLifecycleRepository` lives under persistence `Services/` and `Layers/`. Lease acquisition,
 renewal, terminal writes, and release compare the epoch and owner. Ordinary lease updates do
-not slide `scheduled_at`. Phase 6 supplies the recurring policy sweep; Phase 4 stores deletion
-intents without automatically destroying spaces.
+not slide `scheduled_at`. An explicit lease-checked schedule reset starts or cancels an inactive
+episode. The recurring lifecycle sweep consumes persisted deletion intents.
 
 `StaveSpaceLock` supplies the canonical-root mutex shared by operations and admission.
 The engine rechecks relevant thread commands under that lock immediately before committing,
@@ -770,3 +771,48 @@ manifest incarnations. A member needs at least one editable repo and every repo 
 `ThreadSettlementReactor` retains its ordinary eligibility guards and snapshot-sequenced
 auto-settle commands. The Stave merge toggle is independent of the ordinary PR-merge toggle.
 The existing primary repository path/branch supplies Stave PR fallback queries.
+
+## Lifecycle automation (Phase 6)
+
+`StaveLifecycleService` is an application-lifetime reactor with one drainable worker. Engine
+events and settings changes nudge that worker; a parked loop also schedules an immediate sweep
+and subsequent sweeps every minute. The server switch, enabled setting, and configured binary
+must all permit cleanup. The runtime provides one `StaveOperations` instance to both the RPC
+handlers and this service, sharing its operation registry, fencing, and reconciliation logic.
+
+For deleted projects, the sweep consumes durable delete intent and waits for
+`ThreadDeletionReactor.drainThrough` at the recorded sequence. The policy chooses destroy,
+archive, or keep. An already archived space is kept. Incarnation mismatch, unreadable disk
+state, or missing saga-removal consent refuses cleanup. Refused rows require an explicit user
+retry; the periodic sweep does not automatically force them. The delete intent is checked again
+after waiting for thread deletion and inside the operation lease, so Dismiss can cancel a queued
+cleanup before the CLI starts.
+
+For live spaces, `StaveLifecyclePolicy.resolveArchiveDeadline` considers every thread row,
+including archived and deleted rows as inactive timestamp anchors. No threads, or any active
+thread, means no archive schedule. A schedule uses the later of the thread anchor and immutable
+`scheduledAt`, plus the configured grace. Ordinary lease updates cannot move that deadline.
+Keep suppresses the current inactive episode; a changed anchor starts another episode.
+Re-enabling automatic cleanup starts a fresh grace period. Generation tracking retains that
+reset for a project temporarily skipped because another operation holds its lease.
+`archive` uses zero grace, `archive-after-grace` uses the configured days, `suggest` only shows a
+notice, and `nothing` cancels scheduling. Automatic execution rechecks policy and thread state
+under the operation's lease before invoking the CLI. An automatic saga archive also waits for
+each registered member's inactive episode and grace period, honoring member Keep. A fresh roster
+precheck leaves the coordinator pending while members are ineligible; checks under all participant
+leases catch races before quiescence and again before the CLI. A race at that point becomes a
+reviewable refusal. Explicit saga archive uses its separate reviewed operation.
+
+The existing streamed operation union carries `lifecycleAction` for Keep, Dismiss, Archive now,
+and Retry. Retry freezes the archive/destroy target from its preview. Keep and Dismiss update
+only the durable row, so they remain available when the binary or manifest cannot be read.
+Disk-changing actions require a matching creation timestamp and reuse the ordinary explicit
+Force and saga-removal confirmation rules. No lifecycle operation bypasses incarnation,
+nested-root, or lease admission checks.
+
+`listDeletedCleanups` joins lifecycle intent to the soft-deleted project projection. Live
+archive schedules and unprojected records therefore cannot appear in Settings pending cleanups.
+Derived project notices are refreshed after lifecycle changes; a durable refresh marker allows
+a later sweep to repair an interrupted notification. Web settings poll deleted cleanups while
+mounted. Project banners and sidebar badges show live notices; mobile exposes read-only badges
+and directs cleanup management to web or desktop.

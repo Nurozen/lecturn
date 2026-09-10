@@ -197,6 +197,8 @@ describe("searchSettings", () => {
       "stave-binary-path",
       "stave-config-path",
       "stave-enabled",
+      "stave-pending-cleanups",
+      "stave-nest-sagas",
     ]);
   });
 
@@ -242,4 +244,35 @@ describe("searchSettings", () => {
     });
     expect(searchSettings("external links")[0]).toMatchObject({ id: "browser-link-target" });
   });
+});
+
+it("only exposes lifecycle search targets whose conditional rows are visible", () => {
+  const base = {
+    hasCloudPublicConfig: false,
+    hasPrimaryEnvironment: true,
+    hasProviderSettingsEnvironment: false,
+    canManageLocalBackend: false,
+    isWslSettingsRowVisible: false,
+    hasThreadAutoSettlement: false,
+    hasStave: true,
+  };
+  const enabled = filterAvailableSettingsSearchItems({
+    ...base,
+    hasStaveLifecycle: true,
+    hasStaveGrace: true,
+    hasStaveDestroy: true,
+  }).map((item) => item.id);
+  expect(enabled).toContain("stave-settle-on-saga-merge");
+  expect(enabled).toContain("stave-archive-grace-days");
+  expect(enabled).toContain("stave-memory-fate-on-destroy");
+  const hidden = filterAvailableSettingsSearchItems(base).map((item) => item.id);
+  expect(hidden).not.toContain("stave-on-project-delete");
+  expect(hidden).not.toContain("stave-settle-on-saga-merge");
+  expect(hidden).toContain("stave-pending-cleanups");
+  const conditional = filterAvailableSettingsSearchItems({ ...base, hasStaveLifecycle: true }).map(
+    (item) => item.id,
+  );
+  expect(conditional).toContain("stave-on-all-threads-settled");
+  expect(conditional).not.toContain("stave-archive-grace-days");
+  expect(conditional).not.toContain("stave-memory-fate-on-destroy");
 });

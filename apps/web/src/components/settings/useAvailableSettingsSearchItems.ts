@@ -44,6 +44,14 @@ export function useAvailableSettingsSearchItems() {
         hasThreadAutoSettlement:
           primaryServerConfig?.environment.capabilities.threadAutoSettlement === true,
         hasStave: primaryServerConfig?.environment.capabilities.stave !== undefined,
+        hasStaveLifecycle: primaryServerConfig?.settings.stave.enabled === true,
+        hasStaveGrace:
+          primaryServerConfig?.settings.stave.enabled === true &&
+          primaryServerConfig.settings.stave.lifecycle.onAllThreadsSettled ===
+            "archive-after-grace",
+        hasStaveDestroy:
+          primaryServerConfig?.settings.stave.enabled === true &&
+          primaryServerConfig.settings.stave.lifecycle.onProjectDelete === "destroy",
       }),
     [
       canManageLocalBackend,

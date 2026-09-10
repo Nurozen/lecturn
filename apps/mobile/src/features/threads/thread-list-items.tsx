@@ -164,6 +164,9 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
               : ""}
             {` · ${props.memberStatus?.state ?? props.project.stave.state ?? "unknown"}`}
             {props.memberStatus?.dirty ? " · dirty" : ""}
+            {props.project.notice?.kind === "archive_scheduled" ? " · archive reminder" : ""}
+            {props.project.notice?.kind === "refused" ? " · cleanup needs attention" : ""}
+            {props.project.notice?.kind === "pending_cleanup" ? " · cleanup pending" : ""}
             {props.memberStatus?.state === "live" &&
             props.memberStatus.repos.length > 0 &&
             props.memberStatus.repos.every((repo) => repo.baseHealth === "merged")

@@ -1,3 +1,4 @@
+import { StaveLifecycleBadge } from "./stave/StaveLifecycleBadge";
 import { autoAnimate } from "@formkit/auto-animate";
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
@@ -3752,6 +3753,11 @@ export default function Sidebar() {
                     <span className="min-w-0 flex-1 truncate">
                       {scopedProjectGroup?.displayName ?? "All projects"}
                     </span>
+                    {scopedProjectGroup ? (
+                      <StaveLifecycleBadge
+                        notices={scopedProjectGroup.memberProjects.map((member) => member.notice)}
+                      />
+                    ) : null}
                     <ChevronDownIcon className="-mr-px size-4 shrink-0" />
                   </ComboboxTrigger>
                   <ComboboxPopup
@@ -3807,6 +3813,11 @@ export default function Sidebar() {
                               <FolderIcon className="size-4 shrink-0" />
                             )}
                             <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
+                            {project ? (
+                              <StaveLifecycleBadge
+                                notices={project.memberProjects.map((member) => member.notice)}
+                              />
+                            ) : null}
                             {project ? (
                               <Button
                                 size="icon-xs"

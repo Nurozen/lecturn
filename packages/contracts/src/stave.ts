@@ -522,7 +522,22 @@ export const StaveSagaDestroyOperation = Schema.Struct({
 });
 export type StaveSagaDestroyOperation = typeof StaveSagaDestroyOperation.Type;
 
+/** Durable cleanup controls share operation progress and confirmation with disk mutations. */
+export const StaveLifecycleActionOperation = Schema.Struct({
+  kind: Schema.Literal("lifecycleAction"),
+  projectId: ProjectId,
+  ...SpaceScoped.fields,
+  action: Schema.Literals(["keep", "retry", "archiveNow", "dismiss"]),
+  /** Required for retry so a settings change cannot change the reviewed disk verb. */
+  target: Schema.optional(Schema.Literals(["archive", "destroy"])),
+  force: Schema.Boolean,
+  memory: StaveDestroyMemoryFate,
+  sagaRemoveConfirmed: Schema.optional(Schema.Boolean),
+});
+export type StaveLifecycleActionOperation = typeof StaveLifecycleActionOperation.Type;
+
 export const StaveOperation = Schema.Union([
+  StaveLifecycleActionOperation,
   StaveCreateSpaceOperation,
   StaveRegisterRepoOperation,
   StaveAddRepoOperation,
@@ -886,6 +901,10 @@ const operationResult = <Kind extends StaveOperationKind, Result extends Schema.
 
 /** Terminal pairing of an operation kind with its result schema (deviation 2). */
 export const StaveOperationResult = Schema.Union([
+  operationResult(
+    "lifecycleAction",
+    Schema.Struct({ projectId: ProjectId, disposition: Schema.String }),
+  ),
   operationResult("createSpace", StaveCreateSpaceResult),
   operationResult("registerRepo", StaveRegisterRepoResult),
   operationResult("addRepo", StaveSpaceMutationResult),

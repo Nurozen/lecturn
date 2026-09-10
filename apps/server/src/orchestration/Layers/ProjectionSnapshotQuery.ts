@@ -393,7 +393,12 @@ function lifecycleNotice(
       row.disposition === "pending_archive"
         ? {
             kind: "archive_scheduled" as const,
-            ...(row.archiveDeadlineAt ? { at: row.archiveDeadlineAt } : {}),
+            ...(row.archiveDeadlineAt
+              ? { at: row.archiveDeadlineAt }
+              : {
+                  code: "archive_suggested",
+                  message: "All threads are settled. Archive this space when ready.",
+                }),
           }
         : row.disposition === "refused"
           ? {

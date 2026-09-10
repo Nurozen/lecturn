@@ -35,6 +35,7 @@ import {
   type StaveObserveOperationInput,
   type StaveRepoRow,
   type StaveRunOperationInput,
+  type StaveOperation,
   type StaveMarmotStatus,
   type StaveSagaListRow,
   type StaveSagaStatus,
@@ -396,7 +397,7 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
 
   // `T3CODE_STAVE=false` is the unbypassable kill switch: the capability is
   // absent AND every stave RPC refuses, like thread forking.
-  const requireKillSwitchOn = config.staveEnabled
+  const requireKillSwitchOn: Effect.Effect<void, StaveUnavailableError> = config.staveEnabled
     ? Effect.void
     : Effect.fail(
         new StaveUnavailableError({
@@ -439,7 +440,7 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
       lastFailure: Option.getOrNull(lastFailure),
       pendingCleanups: Option.isNone(lifecycle)
         ? []
-        : yield* lifecycle.value.listPending().pipe(
+        : yield* lifecycle.value.listDeletedCleanups().pipe(
             Effect.map((rows) =>
               rows.map((row) => ({
                 projectId: row.projectId,
@@ -497,15 +498,36 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
   const memoryProviders = gatedRead(
     Effect.suspend(() => cli.memoryProviders).pipe(Effect.map(toProviderRows)),
   );
+  const metadataAction = (operation: StaveOperation) =>
+    operation.kind === "lifecycleAction" &&
+    (operation.action === "keep" || operation.action === "dismiss");
   const dryRun = (input: StaveDryRunInput) =>
-    gatedRead(operations.dryRun(input.operation)).pipe(
-      Effect.map((plan): StaveDryRunPlan => ({ dryRun: true, plan: plan.plan })),
-    );
+    (metadataAction(input.operation)
+      ? requireKillSwitchOn.pipe(
+          Effect.andThen(
+            operations.dryRun(input.operation).pipe(Effect.mapError(toStaveCommandError)),
+          ),
+        )
+      : gatedRead(operations.dryRun(input.operation))
+    ).pipe(Effect.map((plan): StaveDryRunPlan => ({ dryRun: true, plan: plan.plan })));
 
   const runOperation = (input: StaveRunOperationInput) =>
-    Stream.unwrap(requireEnabled.pipe(Effect.map(() => operations.run(input))));
+    Stream.unwrap(
+      (metadataAction(input.operation)
+        ? requireKillSwitchOn
+        : requireEnabled.pipe(Effect.asVoid)
+      ).pipe(Effect.map(() => operations.run(input))),
+    );
   const observeOperation = (input: StaveObserveOperationInput) =>
-    Stream.unwrap(requireEnabled.pipe(Effect.map(() => operations.observe(input))));
+    Stream.unwrap(
+      Effect.gen(function* () {
+        yield* requireKillSwitchOn;
+        const summary = yield* operations.summary(input.operationId);
+        if (Option.isNone(summary) || summary.value.kind !== "lifecycleAction")
+          yield* requireEnabled;
+        return operations.observe(input);
+      }),
+    );
 
   return {
     [WS_METHODS.staveGetStatus]: (_input: Record<string, never>) =>

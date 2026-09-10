@@ -235,9 +235,38 @@ tablet sidebar adds saga project navigation beside its default flat thread list;
 legacy list nests project headers. **Project Grouping → Nest saga members** is a device-local
 preference. Create and edit sagas on web or desktop.
 
-## Coming soon
+## Automatic cleanup
 
-Automatic cleanup after deleting a project or settling its last thread is still being integrated.
+Stave lifecycle settings belong to the connected environment. Their defaults are:
+
+| Trigger                                         | Default behavior                                         | Other choices                                          |
+| ----------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------ |
+| Delete a project                                | Destroy its live Stave space after the deletion is saved | Archive or keep files                                  |
+| All threads are settled or no longer active     | Archive after a seven-day grace period                   | Archive immediately, suggest an archive, or do nothing |
+| Destroy memory                                  | Keep stores                                              | Contribute and keep, or destroy owned stores           |
+| Every editable repo in a saga member has merged | Leave thread settlement unchanged                        | Enable settlement on saga merge                        |
+
+A project with no thread history is never archived automatically. In grace-period mode, settling
+an old project or enabling cleanup for the first time starts a fresh countdown. Ordinary checks do not move the
+deadline. Starting or un-settling work cancels the schedule; **Keep** suppresses that settlement
+episode until activity changes its anchor. **Archive now** lets you review and run the archive
+without waiting. Suggestion mode offers the action without automatically archiving.
+
+Deleting a project records cleanup before it disappears from the app. A server restart does not
+lose that intent. When Stave refuses, **Settings → Stave → Pending cleanups** shows the problem.
+Retry reviews the exact archive/destroy choice that will run. Dirty/dependent refusals can offer
+an explicit **Force** review; a saga member needs confirmation to remove its roster entry and
+dependent edges before destruction. Force never bypasses incarnation or memory-in-use guards.
+**Dismiss** stops retrying and leaves the files in place. Keep and Dismiss remain usable when a
+manifest needs repair. Deleting an already archived project leaves its archive in place.
+
+Project settings show archive reminders and refusals, and sidebar badges keep them visible.
+Mobile shows read-only reminders; manage cleanup from web or desktop. Disabling Stave stops
+its automatic sweep and does not delete existing spaces. Re-enabling archive-after-grace policy starts a
+fresh grace window rather than immediately cleaning up old settled work.
+
+Automatic saga archiving also waits for each registered member’s archive grace period and honors
+its Keep choice. A coordinator stays pending while a member has active work or is not yet eligible.
 
 ## Related
 

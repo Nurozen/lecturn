@@ -141,6 +141,12 @@ import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolve
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
+import * as StaveOperations from "./stave/StaveOperations.ts";
+import { layer as staveTestProcessRunnerLayer } from "./processRunner.ts";
+import {
+  StaveLifecycleRepository,
+  type StaveLifecycleRow,
+} from "./persistence/Services/StaveLifecycleRepository.ts";
 import { StaveLifecycleRepositoryLive } from "./persistence/Layers/StaveLifecycleRepository.ts";
 import * as StaveSpaceLock from "./stave/StaveSpaceLock.ts";
 import * as StaveAdmission from "./stave/StaveAdmission.ts";
@@ -504,6 +510,7 @@ const buildAppUnderTest = (options?: {
     desktopTelemetryReceiver?: Partial<
       DesktopTelemetryReceiver.DesktopTelemetryReceiver["Service"]
     >;
+    staveLifecycle?: Partial<StaveLifecycleRepository["Service"]>;
     staveWorkspaceReader?: Partial<StaveWorkspaceReader.StaveWorkspaceReader["Service"]>;
     staveBinary?: Partial<StaveBinary.StaveBinary["Service"]>;
     staveCli?: Partial<StaveCli.StaveCli["Service"]>;
@@ -717,7 +724,12 @@ const buildAppUnderTest = (options?: {
         Layer.mergeAll(
           staveWorkspaceReaderLayer,
           StaveSpaceLock.layer,
-          StaveLifecycleRepositoryLive.pipe(Layer.provide(SqlitePersistenceMemory)),
+          options?.layers?.staveLifecycle
+            ? Layer.mock(StaveLifecycleRepository)({
+                listIncomplete: () => Effect.succeed([]),
+                ...options.layers.staveLifecycle,
+              })
+            : StaveLifecycleRepositoryLive.pipe(Layer.provide(SqlitePersistenceMemory)),
         ),
       ),
     );
@@ -756,7 +768,10 @@ const buildAppUnderTest = (options?: {
     );
 
     const servedRoutesLayer = HttpRouter.serve(
-      makeRoutesLayer.pipe(Layer.provide(serviceLauncherClientLayer)),
+      makeRoutesLayer.pipe(
+        Layer.provide(StaveOperations.layer.pipe(Layer.provide(staveTestProcessRunnerLayer))),
+        Layer.provide(serviceLauncherClientLayer),
+      ),
       {
         disableListenLog: true,
         disableLogger: true,
@@ -4448,6 +4463,88 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(error.reason, "disabled_by_server");
       }
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "metadata cleanup can be previewed, dismissed, and observed without enabled Stave or a binary",
+    () =>
+      Effect.gen(function* () {
+        let row: StaveLifecycleRow = {
+          projectId: ProjectId.make("old-cleanup"),
+          workspaceRoot: "/missing-space",
+          spaceId: "old",
+          manifestCreatedAt: null,
+          disposition: "refused",
+          deleteIntentSequence: 8,
+          sagaRemoveConfirmed: false,
+          refusalCode: "unreadable",
+          refusalMessage: "unreadable",
+          anchorAt: null,
+          scheduledAt: null,
+          archiveDeadlineAt: null,
+          archiveBasename: null,
+          leaseEpoch: 0,
+          ownerToken: null,
+          leaseUntil: null,
+          updatedAt: DateTime.formatIso(TEST_EPOCH),
+          refreshedAt: null,
+        };
+        yield* buildAppUnderTest({
+          layers: {
+            staveLifecycle: {
+              getByProjectId: () => Effect.sync(() => Option.some(row)),
+              acquireLease: (input) =>
+                Effect.sync(() => {
+                  row = {
+                    ...row,
+                    leaseEpoch: 1,
+                    ownerToken: input.ownerToken,
+                    leaseUntil: input.leaseUntil,
+                  };
+                  return Option.some(row);
+                }),
+              updateDisposition: (input) =>
+                Effect.sync(() => {
+                  row = { ...row, ...input.patch };
+                  return true;
+                }),
+              releaseLease: () => Effect.succeed(true),
+            },
+          },
+        });
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const operation = {
+          kind: "lifecycleAction" as const,
+          projectId: row.projectId,
+          workspaceRoot: row.workspaceRoot,
+          action: "dismiss" as const,
+          force: false,
+          memory: "keep" as const,
+        };
+        const plan = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) => client[WS_METHODS.staveDryRun]({ operation })),
+        );
+        assert.isTrue(plan.dryRun);
+        const events = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.staveRunOperation]({
+              operationId: "metadata-dismiss",
+              operation,
+            }).pipe(Stream.runCollect),
+          ),
+        );
+        assert.equal(events.at(-1)?.kind, "finished");
+        assert.equal(row.disposition, "kept");
+        assert.isNull(row.deleteIntentSequence);
+        const attached = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.staveObserveOperation]({ operationId: "metadata-dismiss" }).pipe(
+              Stream.runCollect,
+            ),
+          ),
+        );
+        assert.equal(attached.at(-1)?.kind, "finished");
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("stave.getStatus reports a missing binary and config instead of failing", () =>

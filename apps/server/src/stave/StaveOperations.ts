@@ -30,6 +30,7 @@ import {
   CommandId,
   ProjectId,
   type StaveCreateSpaceOperation,
+  type StaveLifecycleActionOperation,
   type StaveCreateSagaOperation,
   type StaveMemoryAttachResult,
   type StaveObserveOperationInput,
@@ -60,7 +61,10 @@ import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { StaveLifecycleRepository } from "../persistence/Services/StaveLifecycleRepository.ts";
+import {
+  StaveLifecycleRepository,
+  type StaveLifecycleRow,
+} from "../persistence/Services/StaveLifecycleRepository.ts";
 import { ProviderService } from "../provider/Services/ProviderService.ts";
 import { TerminalManager } from "../terminal/Manager.ts";
 import { WorkspacePaths } from "../workspace/WorkspacePaths.ts";
@@ -176,6 +180,7 @@ export function archiveEntriesMatching(spaceId: string, entries: ReadonlyArray<s
 
 /** The Stave verb each operation kind runs, for errors raised before it is invoked. */
 export const STAVE_OPERATION_VERB: Readonly<Record<StaveOperationKind, StaveVerb>> = {
+  lifecycleAction: "space destroy",
   createSpace: "space create",
   registerRepo: "repos add",
   addRepo: "space add",
@@ -284,6 +289,13 @@ export interface StaveOperationsShape {
     root: string,
     effect: Effect.Effect<A, E, R>,
   ) => Effect.Effect<A, E, R>;
+  readonly executeLifecycle: (
+    operation: StaveLifecycleActionOperation,
+    revalidate?: Effect.Effect<void, StaveError | StaveRefusalError>,
+    revalidateParticipant?: (
+      projectId: ProjectId,
+    ) => Effect.Effect<void, StaveError | StaveRefusalError>,
+  ) => Effect.Effect<void, StaveError | StaveRefusalError>;
   readonly reconcileIncomplete: Effect.Effect<void, StaveError | StaveRefusalError>;
   readonly summary: (operationId: string) => Effect.Effect<Option.Option<StaveOperationSummary>>;
 }
@@ -1019,7 +1031,10 @@ export const make = Effect.fn("StaveOperations.make")(function* (
 
   // ── space edits and durable lifecycle ──────────────────────
 
-  type SpaceOperation = Extract<StaveOperation, { workspaceRoot: string }>;
+  type SpaceOperation = Exclude<
+    Extract<StaveOperation, { workspaceRoot: string }>,
+    StaveLifecycleActionOperation
+  >;
   const asRefusal = (cause: { readonly message: string }) => refuse("unknown", cause.message);
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const freshInfo = (root: string) =>
@@ -1122,13 +1137,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       })
       .pipe(Effect.mapError(asRefusal), Effect.asVoid);
 
-  type LifecycleRow = NonNullable<
-    ReturnType<typeof lifecycle.listIncomplete> extends Effect.Effect<infer A, infer _E>
-      ? A extends ReadonlyArray<infer B>
-        ? B
-        : never
-      : never
-  >;
+  type LifecycleRow = StaveLifecycleRow;
   const reconcileRow = (row: LifecycleRow) =>
     Effect.gen(function* () {
       const active = yield* snapshotQuery
@@ -1214,6 +1223,8 @@ export const make = Effect.fn("StaveOperations.make")(function* (
   const runSpaceOperation = (
     entry: RegistryEntry,
     operation: SpaceOperation,
+    durableTarget?: LifecycleRow,
+    revalidate: Effect.Effect<void, StaveError | StaveRefusalError> = Effect.void,
   ): Effect.Effect<OperationOutcome, StaveError | StaveRefusalError> =>
     withSpaceLock(
       operation.workspaceRoot,
@@ -1237,15 +1248,22 @@ export const make = Effect.fn("StaveOperations.make")(function* (
         let lease: LifecycleRow | undefined;
         let removedEdges: unknown = null;
         if (isLifecycle) {
-          if (Option.isNone(project))
+          if (Option.isNone(project) && durableTarget === undefined)
             return yield* refuse(
               "invalid_arguments",
               "Lifecycle operations require an active project.",
             );
+          const projectId = durableTarget?.projectId ?? Option.getOrThrow(project).id;
+          if (
+            durableTarget !== undefined &&
+            Option.isSome(project) &&
+            project.value.id !== projectId
+          )
+            return yield* refuse("incarnation_mismatch", "Another project now owns this root.");
           const shell = yield* snapshotQuery.getShellSnapshot().pipe(Effect.mapError(asRefusal));
           for (const other of shell.projects) {
             if (
-              other.id !== project.value.id &&
+              other.id !== projectId &&
               (yield* isPathUnder(operation.workspaceRoot, other.workspaceRoot))
             )
               return yield* refuse(
@@ -1256,7 +1274,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           const now = yield* nowIso;
           const row = yield* lifecycle
             .ensure({
-              projectId: project.value.id,
+              projectId,
               workspaceRoot: operation.workspaceRoot,
               spaceId: id,
               manifestCreatedAt: info.createdAt ?? null,
@@ -1264,9 +1282,10 @@ export const make = Effect.fn("StaveOperations.make")(function* (
             })
             .pipe(Effect.mapError(asRefusal));
           if (
-            row.manifestCreatedAt !== null &&
-            info.createdAt !== undefined &&
-            !sameManifestIncarnation(row.manifestCreatedAt, info.createdAt)
+            (row.spaceId !== null && row.spaceId !== id) ||
+            (row.manifestCreatedAt !== null &&
+              info.createdAt !== undefined &&
+              !sameManifestIncarnation(row.manifestCreatedAt, info.createdAt))
           )
             return yield* refuse(
               "incarnation_mismatch",
@@ -1307,6 +1326,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                   return yield* refuse("space_transitioning", "The lifecycle lease was lost.");
               });
         const body = Effect.gen(function* () {
+          yield* revalidate;
           if (isLifecycle) {
             yield* patch({
               disposition:
@@ -1376,6 +1396,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
               .closeSessionsUnder(operation.workspaceRoot)
               .pipe(Effect.mapError(asRefusal));
           }
+          yield* revalidate;
           let outcome: OperationOutcome;
           switch (operation.kind) {
             case "addRepo": {
@@ -1455,14 +1476,15 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                   workspaceRoot: archivedRoot,
                   archiveBasename: path.basename(archivedRoot),
                 };
-                yield* engine
-                  .dispatch({
-                    type: "project.meta.update",
-                    commandId: CommandId.make(`server:stave:archive:${NodeCrypto.randomUUID()}`),
-                    projectId: lease.projectId,
-                    workspaceRoot: archivedRoot,
-                  })
-                  .pipe(Effect.mapError(asRefusal));
+                if (Option.isSome(project))
+                  yield* engine
+                    .dispatch({
+                      type: "project.meta.update",
+                      commandId: CommandId.make(`server:stave:archive:${NodeCrypto.randomUUID()}`),
+                      projectId: lease.projectId,
+                      workspaceRoot: archivedRoot,
+                    })
+                    .pipe(Effect.mapError(asRefusal));
                 yield* afterMutation(archivedRoot);
               }
               outcome = { kind: operation.kind, result };
@@ -1581,8 +1603,25 @@ export const make = Effect.fn("StaveOperations.make")(function* (
               break;
             }
           }
-          if (lease !== undefined && operation.kind !== "destroySpace")
+          if (lease !== undefined && operation.kind !== "destroySpace") {
             yield* patch(yield* reconcileRow(lease));
+            if (operation.kind === "restoreSpace") {
+              const reset = yield* lifecycle
+                .resetScheduleEpisode({
+                  projectId: lease.projectId,
+                  leaseEpoch: lease.leaseEpoch,
+                  ownerToken: entry.operationId,
+                  now: yield* nowIso,
+                  anchorAt: null,
+                  scheduledAt: null,
+                  archiveDeadlineAt: null,
+                  disposition: "live",
+                })
+                .pipe(Effect.mapError(asRefusal));
+              if (!reset)
+                return yield* refuse("space_transitioning", "The lifecycle lease was lost.");
+            }
+          }
           return outcome;
         });
         const renewLease = Effect.forever(
@@ -2009,6 +2048,11 @@ export const make = Effect.fn("StaveOperations.make")(function* (
     entry: RegistryEntry,
     operation: SagaOperation,
     allowMemberTeardown = true,
+    durableTarget?: LifecycleRow,
+    revalidate: Effect.Effect<void, StaveError | StaveRefusalError> = Effect.void,
+    revalidateParticipant?: (
+      projectId: ProjectId,
+    ) => Effect.Effect<void, StaveError | StaveRefusalError>,
   ): Effect.Effect<OperationOutcome, StaveError | StaveRefusalError> =>
     withSaga(operation, (saga) =>
       Effect.gen(function* () {
@@ -2144,11 +2188,27 @@ export const make = Effect.fn("StaveOperations.make")(function* (
             const project = yield* snapshotQuery
               .getActiveProjectByWorkspaceRoot(member.root)
               .pipe(Effect.mapError(asRefusal));
-            if (Option.isNone(project)) continue;
+            const prior = Option.isNone(project)
+              ? yield* lifecycle.getByWorkspaceRoot(member.root).pipe(Effect.mapError(asRefusal))
+              : Option.none<LifecycleRow>();
+            const deletedRow =
+              durableTarget?.workspaceRoot === member.root
+                ? durableTarget
+                : Option.getOrUndefined(prior);
+            if (Option.isNone(project) && deletedRow === undefined) continue;
+            if (
+              deletedRow !== undefined &&
+              Option.isSome(project) &&
+              project.value.id !== deletedRow.projectId
+            )
+              return yield* refuse(
+                "incarnation_mismatch",
+                "Another project now owns the saga root.",
+              );
             const now = yield* nowIso;
             const row = yield* lifecycle
               .ensure({
-                projectId: project.value.id,
+                projectId: deletedRow?.projectId ?? Option.getOrThrow(project).id,
                 workspaceRoot: member.root,
                 spaceId: member.info.spaceId,
                 manifestCreatedAt: member.info.createdAt ?? null,
@@ -2183,6 +2243,9 @@ export const make = Effect.fn("StaveOperations.make")(function* (
               );
             leases.push(acquired.value);
           }
+          yield* revalidate;
+          if (revalidateParticipant)
+            for (const row of leases) yield* revalidateParticipant(row.projectId);
           // All rows are durable and fenced before the first session is stopped.
           for (const row of leases)
             yield* patch(row, {
@@ -2261,6 +2324,9 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                   `Project '${project.title}' is nested inside saga participant '${member.info.spaceId}'.`,
                 );
             }
+          yield* revalidate;
+          if (revalidateParticipant)
+            for (const row of leases) yield* revalidateParticipant(row.projectId);
           return yield* mutate;
         });
         const recovered = Effect.gen(function* () {
@@ -2337,11 +2403,192 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       }),
     );
 
+  const actionRow = (operation: StaveLifecycleActionOperation) =>
+    Effect.gen(function* () {
+      const found = yield* lifecycle
+        .getByProjectId(operation.projectId)
+        .pipe(Effect.mapError(asRefusal));
+      if (Option.isNone(found) || found.value.workspaceRoot !== operation.workspaceRoot)
+        return yield* refuse(
+          "invalid_arguments",
+          "This cleanup record changed. Refresh before retrying.",
+        );
+      return found.value;
+    });
+  const actionDiskOperation = (operation: StaveLifecycleActionOperation, row: LifecycleRow) =>
+    Effect.gen(function* () {
+      if (
+        operation.expectedManifestCreatedAt === undefined ||
+        row.manifestCreatedAt === null ||
+        !sameManifestIncarnation(operation.expectedManifestCreatedAt, row.manifestCreatedAt)
+      )
+        return yield* refuse(
+          "incarnation_mismatch",
+          "A disk cleanup needs the recorded space incarnation.",
+        );
+      const target = operation.action === "archiveNow" ? "archive" : operation.target;
+      if (target === undefined)
+        return yield* refuse("invalid_arguments", "Choose the cleanup action before reviewing it.");
+      if (target === "archive" && operation.memory === "destroy")
+        return yield* refuse("invalid_arguments", "Archiving cannot destroy memory.");
+      const info = yield* freshInfo(operation.workspaceRoot);
+      if (info.spaceId !== row.spaceId)
+        return yield* refuse(
+          "incarnation_mismatch",
+          "The recorded space id no longer matches this root.",
+        );
+      const memory = operation.memory;
+      const scope = {
+        expectedManifestCreatedAt: operation.expectedManifestCreatedAt,
+        force: operation.force,
+      };
+      return info.isSaga
+        ? target === "archive"
+          ? {
+              kind: "sagaArchive" as const,
+              sagaRoot: operation.workspaceRoot,
+              ...scope,
+              memory: operation.memory as "keep" | "contribute",
+            }
+          : { kind: "sagaDestroy" as const, sagaRoot: operation.workspaceRoot, ...scope, memory }
+        : target === "archive"
+          ? {
+              kind: "archiveSpace" as const,
+              workspaceRoot: operation.workspaceRoot,
+              ...scope,
+              memory: operation.memory as "keep" | "contribute",
+            }
+          : {
+              kind: "destroySpace" as const,
+              workspaceRoot: operation.workspaceRoot,
+              ...scope,
+              memory,
+              sagaRemoveConfirmed: operation.sagaRemoveConfirmed ?? row.sagaRemoveConfirmed,
+            };
+    });
+  const runLifecycleAction = (
+    entry: RegistryEntry,
+    operation: StaveLifecycleActionOperation,
+    revalidate: Effect.Effect<void, StaveError | StaveRefusalError> = Effect.void,
+    revalidateParticipant?: (
+      projectId: ProjectId,
+    ) => Effect.Effect<void, StaveError | StaveRefusalError>,
+  ): Effect.Effect<OperationOutcome, StaveError | StaveRefusalError> =>
+    Effect.gen(function* () {
+      const row = yield* actionRow(operation);
+      if (operation.action === "keep" || operation.action === "dismiss") {
+        yield* withSpaceLock(
+          row.workspaceRoot,
+          Effect.gen(function* () {
+            const current = yield* actionRow(operation);
+            const now = yield* nowIso;
+            const lease = yield* lifecycle
+              .acquireLease({
+                projectId: row.projectId,
+                expectedEpoch: current.leaseEpoch,
+                ownerToken: entry.operationId,
+                now,
+                leaseUntil: DateTime.formatIso(
+                  DateTime.add(DateTime.makeUnsafe(now), { minutes: 1 }),
+                ),
+              })
+              .pipe(Effect.mapError(asRefusal));
+            if (Option.isNone(lease))
+              return yield* refuse("space_transitioning", "Another cleanup owns this space.");
+            const guard = {
+              projectId: row.projectId,
+              leaseEpoch: lease.value.leaseEpoch,
+              ownerToken: entry.operationId,
+            };
+            yield* Effect.gen(function* () {
+              const changed = yield* lifecycle
+                .updateDisposition({
+                  ...guard,
+                  now,
+                  patch: {
+                    disposition: "kept",
+                    deleteIntentSequence: null,
+                    refusalCode: null,
+                    refusalMessage: null,
+                    archiveDeadlineAt: null,
+                  },
+                })
+                .pipe(Effect.mapError(asRefusal));
+              if (!changed)
+                return yield* refuse("space_transitioning", "The cleanup lease was lost.");
+              yield* afterMutation(row.workspaceRoot);
+            }).pipe(Effect.ensuring(lifecycle.releaseLease({ ...guard, now }).pipe(Effect.ignore)));
+          }),
+        );
+      } else {
+        const disk = yield* actionDiskOperation(operation, row);
+        const validate = Effect.gen(function* () {
+          const current = yield* actionRow(operation);
+          if (
+            current.spaceId !== row.spaceId ||
+            current.manifestCreatedAt !== row.manifestCreatedAt
+          )
+            return yield* refuse("incarnation_mismatch", "The cleanup incarnation changed.");
+          const deleted = yield* lifecycle
+            .isProjectDeleted(row.projectId)
+            .pipe(Effect.mapError(asRefusal));
+          if (operation.action === "archiveNow" && deleted)
+            return yield* refuse(
+              "invalid_arguments",
+              "This project was deleted. Review its pending cleanup.",
+            );
+          yield* revalidate;
+        });
+        if (disk.kind === "sagaArchive" || disk.kind === "sagaDestroy")
+          yield* runSagaOperation(entry, disk, true, row, validate, revalidateParticipant);
+        else yield* runSpaceOperation(entry, disk, row, validate);
+      }
+      const finalRow = yield* lifecycle
+        .getByProjectId(row.projectId)
+        .pipe(Effect.mapError(asRefusal));
+      return {
+        kind: "lifecycleAction",
+        result: { projectId: row.projectId, disposition: Option.getOrThrow(finalRow).disposition },
+      };
+    });
+
+  const executeLifecycle: StaveOperationsShape["executeLifecycle"] = (
+    operation,
+    revalidate,
+    revalidateParticipant,
+  ) =>
+    Effect.gen(function* () {
+      const entry: RegistryEntry = {
+        operationId: `server:stave:lifecycle:${NodeCrypto.randomUUID()}`,
+        kind: "lifecycleAction",
+        fingerprint: fingerprintOperation(operation),
+        state: "running",
+        events: [],
+        bytes: 0,
+        nextSequence: 1,
+        terminalAtMs: null,
+        lastAccessMs: yield* Clock.currentTimeMillis,
+        partialSpace: null,
+        partialCleanupEdges: null,
+        pubsub: yield* PubSub.unbounded<StaveProgressEvent>(),
+      };
+      yield* runLifecycleAction(entry, operation, revalidate, revalidateParticipant).pipe(
+        Effect.ensuring(
+          Effect.gen(function* () {
+            registryBytes -= entry.bytes;
+            yield* PubSub.shutdown(entry.pubsub);
+          }),
+        ),
+      );
+    });
+
   const runOperationBody = (
     entry: RegistryEntry,
     operation: StaveOperation,
   ): Effect.Effect<OperationOutcome, StaveError | StaveRefusalError> => {
     switch (operation.kind) {
+      case "lifecycleAction":
+        return runLifecycleAction(entry, operation);
       case "createSpace":
         return runCreateSpace(entry, operation);
       case "removePartialSpace":
@@ -2505,6 +2752,31 @@ export const make = Effect.fn("StaveOperations.make")(function* (
             }),
           );
     switch (operation.kind) {
+      case "lifecycleAction":
+        return Effect.gen(function* () {
+          const row = yield* actionRow(operation);
+          if (operation.action === "keep" || operation.action === "dismiss")
+            return {
+              dryRun: true as const,
+              plan: ["Keep the space and memory on disk; stop this cleanup or archive schedule."],
+            };
+          const disk = yield* actionDiskOperation(operation, row);
+          return yield* dryRun(disk);
+        }).pipe(
+          Effect.mapError((error) =>
+            error._tag === "StaveError"
+              ? error
+              : new StaveError({
+                  code: error.code,
+                  message: error.message,
+                  details: error.details,
+                  exitCode: null,
+                  stderrTail: null,
+                  verb: "space destroy",
+                }),
+          ),
+        );
+
       case "removePartialSpace":
         return loadRoots.pipe(
           Effect.mapError(
@@ -2812,7 +3084,15 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           });
     });
 
-  return StaveOperations.of({ run, observe, dryRun, withSpaceLock, summary, reconcileIncomplete });
+  return StaveOperations.of({
+    run,
+    observe,
+    dryRun,
+    withSpaceLock,
+    summary,
+    reconcileIncomplete,
+    executeLifecycle,
+  });
 });
 
 export const layer = Layer.effect(

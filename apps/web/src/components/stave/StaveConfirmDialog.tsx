@@ -46,7 +46,7 @@ export function StaveConfirmDialog({
   onFinished: () => void;
   membershipWorkspaceRoot?: string | undefined;
 }) {
-  const [forced, setForced] = useState(false);
+  const [forced, setForced] = useState("force" in initial && initial.force);
   const [sagaConfirmed, setSagaConfirmed] = useState(false);
   const [membership, setMembership] = useState<StaveSagaMembership | null>(null);
   const [memory, setMemory] = useState<"keep" | "contribute" | "destroy">(
@@ -58,11 +58,32 @@ export function StaveConfirmDialog({
   const [started, setStarted] = useState(false);
   const operation = useMemo((): StaveOperation => {
     let next = initial;
-    if ((next.kind === "destroySpace" || next.kind === "removePartialSpace") && sagaConfirmed)
+    if (
+      (next.kind === "destroySpace" ||
+        next.kind === "removePartialSpace" ||
+        (next.kind === "lifecycleAction" &&
+          next.action === "retry" &&
+          next.target === "destroy")) &&
+      sagaConfirmed
+    )
       next = { ...next, sagaRemoveConfirmed: true };
     if (next.kind === "destroySpace" || next.kind === "sagaDestroy") next = { ...next, memory };
     if (next.kind === "archiveSpace" || next.kind === "sagaArchive") {
       next = { ...next, memory: memory === "destroy" ? "keep" : memory };
+    }
+    if (
+      next.kind === "lifecycleAction" &&
+      (next.action === "retry" || next.action === "archiveNow")
+    ) {
+      next = {
+        ...next,
+        memory:
+          next.action === "archiveNow" || next.target === "archive"
+            ? memory === "destroy"
+              ? "keep"
+              : memory
+            : memory,
+      };
     }
     return forced ? forceStaveOperation(next) : next;
   }, [initial, memory, forced, sagaConfirmed]);
@@ -114,8 +135,16 @@ export function StaveConfirmDialog({
   useEffect(() => {
     let stale = false;
     const workspaceRoot =
-      initial.kind === "destroySpace" ? initial.workspaceRoot : membershipWorkspaceRoot;
-    if (refusal !== "saga_member" || workspaceRoot === undefined) return;
+      initial.kind === "destroySpace" || initial.kind === "lifecycleAction"
+        ? initial.workspaceRoot
+        : membershipWorkspaceRoot;
+    const destroys =
+      initial.kind === "destroySpace" ||
+      initial.kind === "removePartialSpace" ||
+      (initial.kind === "lifecycleAction" &&
+        initial.action === "retry" &&
+        initial.target === "destroy");
+    if (!destroys || refusal !== "saga_member" || workspaceRoot === undefined) return;
     void readStatus({ environmentId, input: { workspaceRoot } }).then((result) => {
       if (!stale && result._tag === "Success" && !result.value.membershipUnknown) {
         setMembership(result.value.sagaMembership ?? null);
@@ -130,8 +159,15 @@ export function StaveConfirmDialog({
     operation.kind === "destroySpace" ||
     operation.kind === "sagaDestroy" ||
     operation.kind === "archiveSpace" ||
-    operation.kind === "sagaArchive";
-  const canDestroyMemory = operation.kind === "destroySpace" || operation.kind === "sagaDestroy";
+    operation.kind === "sagaArchive" ||
+    (operation.kind === "lifecycleAction" &&
+      (operation.action === "retry" || operation.action === "archiveNow"));
+  const canDestroyMemory =
+    operation.kind === "destroySpace" ||
+    operation.kind === "sagaDestroy" ||
+    (operation.kind === "lifecycleAction" &&
+      operation.action === "retry" &&
+      operation.target === "destroy");
 
   return (
     <AlertDialog
@@ -248,7 +284,12 @@ export function StaveConfirmDialog({
           ) : null}
           {!started ? (
             <Button
-              variant="destructive"
+              variant={
+                operation.kind === "lifecycleAction" &&
+                (operation.action === "keep" || operation.action === "dismiss")
+                  ? "default"
+                  : "destructive"
+              }
               disabled={currentPreview?.plan === undefined}
               onClick={() => {
                 setStarted(true);

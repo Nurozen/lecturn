@@ -33,6 +33,9 @@ export interface SettingsSearchItem {
   readonly requiresThreadAutoSettlement?: boolean;
   // Its row only renders when the server build advertises `capabilities.stave`.
   readonly requiresStave?: boolean;
+  readonly requiresStaveLifecycle?: boolean;
+  readonly requiresStaveGrace?: boolean;
+  readonly requiresStaveDestroy?: boolean;
 }
 
 export interface SettingsSearchAvailability {
@@ -43,6 +46,9 @@ export interface SettingsSearchAvailability {
   readonly isWslSettingsRowVisible: boolean;
   readonly hasThreadAutoSettlement: boolean;
   readonly hasStave: boolean;
+  readonly hasStaveLifecycle?: boolean;
+  readonly hasStaveGrace?: boolean;
+  readonly hasStaveDestroy?: boolean;
 }
 
 /**
@@ -180,6 +186,60 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Enable Stave",
     to: "/settings/general",
     searchTerms: ["stave spaces worktrees memories saga integration"],
+    requiresStave: true,
+  },
+  {
+    id: "stave-on-project-delete",
+    title: "On project deletion",
+    to: "/settings/general",
+    searchTerms: ["stave delete destroy archive keep cleanup"],
+    requiresStave: true,
+    requiresStaveLifecycle: true,
+  },
+  {
+    id: "stave-on-all-threads-settled",
+    title: "On all threads settled",
+    to: "/settings/general",
+    searchTerms: ["stave archive grace suggest nothing lifecycle"],
+    requiresStave: true,
+    requiresStaveLifecycle: true,
+  },
+  {
+    id: "stave-archive-grace-days",
+    title: "Archive grace days",
+    to: "/settings/general",
+    searchTerms: ["stave countdown deadline wait archive days"],
+    requiresStave: true,
+    requiresStaveGrace: true,
+  },
+  {
+    id: "stave-memory-fate-on-destroy",
+    title: "Memory on destroy",
+    to: "/settings/general",
+    searchTerms: ["stave keep contribute destroy owned memory"],
+    requiresStave: true,
+    requiresStaveDestroy: true,
+  },
+  {
+    id: "stave-settle-on-saga-merge",
+    title: "Settle threads on saga merge",
+    to: "/settings/general",
+    searchTerms: ["stave pull requests merged settlement members"],
+    requiresStave: true,
+    requiresStaveLifecycle: true,
+  },
+  {
+    id: "stave-pending-cleanups",
+    title: "Pending Stave cleanups",
+    to: "/settings/general",
+    searchTerms: ["stave refused retry force saga dismiss destroy archive"],
+    requiresStave: true,
+  },
+  {
+    id: "stave-nest-sagas",
+    title: "Nest saga members",
+    to: "/settings/general",
+    searchTerms: ["stave sidebar grouping dependency order"],
     requiresStave: true,
   },
   {
@@ -554,7 +614,10 @@ export function filterAvailableSettingsSearchItems(
       (!item.localBackendManagementOnly || availability.canManageLocalBackend) &&
       (!item.wslAvailableOnly || availability.isWslSettingsRowVisible) &&
       (!item.requiresThreadAutoSettlement || availability.hasThreadAutoSettlement) &&
-      (!item.requiresStave || availability.hasStave),
+      (!item.requiresStave || availability.hasStave) &&
+      (!item.requiresStaveLifecycle || availability.hasStaveLifecycle === true) &&
+      (!item.requiresStaveGrace || availability.hasStaveGrace === true) &&
+      (!item.requiresStaveDestroy || availability.hasStaveDestroy === true),
   );
 }
 

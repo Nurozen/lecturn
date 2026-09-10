@@ -51,6 +51,7 @@ import type {
 import {
   layerWith,
   StaveOperations,
+  StaveRefusalError,
   type StaveOperationsLimits,
   type StaveOperationsShape,
   sameManifestIncarnation,
@@ -310,7 +311,10 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
             ...options.cliExtra,
           }),
           configReader,
-          Layer.mock(StaveLifecycleRepository)({ ...options.lifecycle }),
+          Layer.mock(StaveLifecycleRepository)({
+            getByWorkspaceRoot: () => Effect.succeed(Option.none()),
+            ...options.lifecycle,
+          }),
           Layer.mock(ProviderService)({
             listSessions: () => Effect.succeed([]),
             stopSessionsUnder: () =>
@@ -1235,6 +1239,20 @@ const lifecycleFixture = (root: string, disposition: StaveLifecycleRow["disposit
   const history: Array<string> = [];
   const service: Partial<StaveLifecycleRepositoryShape> = {
     ensure: () => Effect.succeed(row),
+    getByProjectId: () => Effect.sync(() => Option.some(row)),
+    getByWorkspaceRoot: () => Effect.sync(() => Option.some(row)),
+    isProjectDeleted: () => Effect.succeed(true),
+    resetScheduleEpisode: (input) =>
+      Effect.sync(() => {
+        row = {
+          ...row,
+          anchorAt: input.anchorAt,
+          scheduledAt: input.scheduledAt,
+          archiveDeadlineAt: input.archiveDeadlineAt,
+          disposition: input.disposition,
+        };
+        return true;
+      }),
     listIncomplete: () => Effect.succeed([row]),
     acquireLease: (input) =>
       Effect.sync(() => {
@@ -2789,4 +2807,244 @@ it.effect("rechecks nested projects added while saga sessions are stopping", () 
         expect([...fixture.rows.values()].every((row) => row.ownerToken === null)).toBe(true);
       }),
   ),
+);
+
+it.effect("keeps a legacy unreadable cleanup without reading or mutating the disk", () =>
+  scenario(
+    (roots) =>
+      Effect.sync(() => {
+        const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+        const fixture = lifecycleFixture(root, "refused");
+        let reads = 0;
+        return {
+          root,
+          fixture,
+          lifecycle: fixture.service,
+          reads: () => reads,
+          readerLoad: () =>
+            Effect.sync(() => {
+              reads++;
+              return Option.none<StaveProjectInfo>();
+            }),
+        };
+      }),
+    (harness, options) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        const operation = {
+          kind: "lifecycleAction" as const,
+          projectId: ProjectId.make("p"),
+          workspaceRoot: options.root,
+          action: "dismiss" as const,
+          force: false,
+          memory: "keep" as const,
+        };
+        expect((yield* ops.dryRun(operation)).plan).toHaveLength(1);
+        expect(finishedResult(yield* runToEnd(ops, "dismiss-legacy", operation))).toEqual({
+          kind: "lifecycleAction",
+          result: { projectId: "p", disposition: "kept" },
+        });
+        expect(options.reads()).toBe(0);
+        expect(yield* Ref.get(harness.cliCalls)).toEqual([]);
+        expect(options.fixture.row().deleteIntentSequence).toBeNull();
+      }),
+  ),
+);
+
+it.effect(
+  "destroys a durable deleted-project row with no active shell and no duplicate project deletion",
+  () =>
+    scenario(
+      (roots) =>
+        Effect.gen(function* () {
+          const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+          yield* roots.fs.makeDirectory(root).pipe(Effect.orDie);
+          const fixture = lifecycleFixture(root, "pending_destroy");
+          return {
+            root,
+            fixture,
+            lifecycle: fixture.service,
+            readerLoad: () => Effect.succeed(Option.some(infoFor())),
+          };
+        }),
+      (harness, options) =>
+        Effect.gen(function* () {
+          const ops = yield* StaveOperations;
+          yield* ops.executeLifecycle({
+            kind: "lifecycleAction",
+            projectId: ProjectId.make("p"),
+            workspaceRoot: options.root,
+            expectedManifestCreatedAt: CREATED_AT,
+            action: "retry",
+            target: "destroy",
+            force: false,
+            memory: "keep",
+          });
+          expect(options.fixture.history).toEqual(["lease", "destroying", "destroyed", "release"]);
+          expect(
+            (yield* Ref.get(harness.cliCalls)).filter((call) => call.method === "spaceDestroy"),
+          ).toHaveLength(1);
+          expect(
+            (yield* Ref.get(harness.dispatched)).filter(
+              (command) => command.type === "project.delete",
+            ),
+          ).toEqual([]);
+        }),
+    ),
+);
+
+it.effect("revalidates automatic eligibility after quiescence and prevents the disk verb", () =>
+  scenario(
+    (roots) =>
+      Effect.gen(function* () {
+        const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+        yield* roots.fs.makeDirectory(root).pipe(Effect.orDie);
+        const fixture = lifecycleFixture(root, "pending_archive");
+        let eligible = true;
+        return {
+          root,
+          fixture,
+          lifecycle: fixture.service,
+          readerLoad: () => Effect.succeed(Option.some(infoFor())),
+          onQuiesce: Effect.sync(() => {
+            eligible = false;
+          }),
+          validate: Effect.suspend(() =>
+            eligible
+              ? Effect.void
+              : new StaveRefusalError({
+                  code: "space_transitioning",
+                  message: "Thread became active",
+                  details: null,
+                }),
+          ),
+          cliExtra: { spaceList: () => Effect.succeed([listRow(root)]) },
+        };
+      }),
+    (harness, options) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        const error = yield* Effect.flip(
+          ops.executeLifecycle(
+            {
+              kind: "lifecycleAction",
+              projectId: ProjectId.make("p"),
+              workspaceRoot: options.root,
+              expectedManifestCreatedAt: CREATED_AT,
+              action: "retry",
+              target: "archive",
+              force: false,
+              memory: "keep",
+            },
+            options.validate,
+          ),
+        );
+        expect(error.code).toBe("space_transitioning");
+        expect(
+          (yield* Ref.get(harness.cliCalls)).filter((call) => call.method === "spaceDestroy"),
+        ).toEqual([]);
+        expect(options.fixture.row().disposition).toBe("refused");
+      }),
+  ),
+);
+
+it.effect("requires an explicit reviewed cleanup verb and the recorded incarnation", () =>
+  scenario(
+    (roots) =>
+      Effect.sync(() => {
+        const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+        const fixture = lifecycleFixture(root, "refused");
+        return {
+          root,
+          fixture,
+          lifecycle: fixture.service,
+          readerLoad: () => Effect.succeed(Option.some({ ...infoFor(), spaceId: "replacement" })),
+        };
+      }),
+    (harness, options) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        const operation = {
+          kind: "lifecycleAction" as const,
+          projectId: ProjectId.make("p"),
+          workspaceRoot: options.root,
+          action: "retry" as const,
+          force: false,
+          memory: "keep" as const,
+        };
+        expect((yield* Effect.flip(ops.dryRun(operation))).code).toBe("incarnation_mismatch");
+        expect(
+          (yield* Effect.flip(ops.dryRun({ ...operation, expectedManifestCreatedAt: CREATED_AT })))
+            .code,
+        ).toBe("invalid_arguments");
+        expect(
+          (yield* Effect.flip(
+            ops.dryRun({ ...operation, expectedManifestCreatedAt: CREATED_AT, target: "destroy" }),
+          )).code,
+        ).toBe("incarnation_mismatch");
+        expect(yield* Ref.get(harness.cliCalls)).toEqual([]);
+      }),
+  ),
+);
+
+it.effect(
+  "automatic saga revalidates every participant before quiescence and again before CLI",
+  () =>
+    scenario(
+      (roots) =>
+        Effect.gen(function* () {
+          const fixture = yield* sagaFixture(roots);
+          const root = fixture.rootsById.get("story")!;
+          const row = yield* fixture.lifecycle.ensure!({
+            projectId: ProjectId.make("story"),
+            workspaceRoot: root,
+            spaceId: "story",
+            manifestCreatedAt: CREATED_AT,
+            now: NOW,
+          }).pipe(Effect.orDie);
+          return {
+            ...fixture,
+            root,
+            lifecycle: {
+              ...fixture.lifecycle,
+              getByProjectId: () =>
+                Effect.sync(() => Option.some(fixture.rows.get(row.projectId)!)),
+              isProjectDeleted: () => Effect.succeed(false),
+            },
+          };
+        }),
+      (_harness, fixture) =>
+        Effect.gen(function* () {
+          const ops = yield* StaveOperations;
+          const validated: string[] = [];
+          const error = yield* Effect.flip(
+            ops.executeLifecycle(
+              {
+                kind: "lifecycleAction",
+                projectId: ProjectId.make("story"),
+                workspaceRoot: fixture.root,
+                expectedManifestCreatedAt: CREATED_AT,
+                action: "archiveNow",
+                force: false,
+                memory: "keep",
+              },
+              Effect.void,
+              (id) =>
+                Effect.suspend(() => {
+                  validated.push(id);
+                  return id === "b" && validated.filter((value) => value === "b").length === 2
+                    ? new StaveRefusalError({
+                        code: "space_transitioning",
+                        message: "Member became active",
+                        details: null,
+                      })
+                    : Effect.void;
+                }),
+            ),
+          );
+          expect(error.code).toBe("space_transitioning");
+          expect(validated.filter((id) => id === "b")).toHaveLength(2);
+          expect(fixture.history).not.toContain("cli");
+        }),
+    ),
 );

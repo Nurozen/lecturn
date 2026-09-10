@@ -87,6 +87,12 @@ export function SagaSidebarRoster(props: {
               onPress={() => open(node.group.representative)}
             >
               <Text className="text-sm font-t3-bold text-foreground">{node.group.label}</Text>
+              {node.group.representative.notice?.kind === "archive_scheduled" ? (
+                <Text className="text-xs text-foreground-muted">Archive reminder</Text>
+              ) : null}
+              {node.group.representative.notice?.kind === "refused" ? (
+                <Text className="text-xs text-foreground-muted">Cleanup needs attention</Text>
+              ) : null}
             </Pressable>
           </View>
           {!collapsed.has(node.group.key)
@@ -100,6 +106,12 @@ export function SagaSidebarRoster(props: {
                   <Text className="text-sm text-foreground">{child.group.label}</Text>
                   <Text className="text-xs text-foreground-muted">
                     {child.memberStatus?.state}
+                    {child.group.representative.notice?.kind === "archive_scheduled"
+                      ? " · archive reminder"
+                      : ""}
+                    {child.group.representative.notice?.kind === "refused"
+                      ? " · cleanup needs attention"
+                      : ""}
                     {child.memberStatus?.dirty ? " · dirty" : ""}
                     {child.memberStatus?.state === "live" &&
                     child.memberStatus.repos.length > 0 &&

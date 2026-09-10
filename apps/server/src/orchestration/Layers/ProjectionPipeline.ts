@@ -1872,9 +1872,13 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           VALUES (${event.payload.projectId}, ${event.payload.workspaceRoot}, ${event.payload.staveSpaceId ?? null}, ${event.payload.staveCreatedAt ?? null}, 'pending_evaluation', ${event.sequence}, ${event.payload.staveSagaRemoveConfirmed === true ? 1 : 0}, ${event.occurredAt})
           ON CONFLICT(project_id) DO UPDATE SET
             delete_intent_sequence = excluded.delete_intent_sequence,
+            disposition = CASE WHEN stave_project_lifecycle.disposition IN ('destroyed','archived','not_stave','destroying','archiving','restoring')
+              THEN stave_project_lifecycle.disposition ELSE 'pending_evaluation' END,
+            refusal_code = CASE WHEN stave_project_lifecycle.disposition IN ('live','pending_evaluation','pending_destroy','pending_archive','kept','refused') THEN NULL ELSE refusal_code END,
+            refusal_message = CASE WHEN stave_project_lifecycle.disposition IN ('live','pending_evaluation','pending_destroy','pending_archive','kept','refused') THEN NULL ELSE refusal_message END,
             workspace_root = excluded.workspace_root,
-            space_id = excluded.space_id,
-            manifest_created_at = excluded.manifest_created_at,
+            space_id = COALESCE(excluded.space_id, stave_project_lifecycle.space_id),
+            manifest_created_at = COALESCE(excluded.manifest_created_at, stave_project_lifecycle.manifest_created_at),
             saga_remove_confirmed = excluded.saga_remove_confirmed,
             updated_at = excluded.updated_at,
             refreshed_at = NULL`;

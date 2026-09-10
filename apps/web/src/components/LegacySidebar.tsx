@@ -1,3 +1,4 @@
+import { StaveLifecycleBadge } from "./stave/StaveLifecycleBadge";
 import { useSagaSidebarTree } from "./stave/useSagaSidebarTree";
 import { flattenSagaSidebarTree, staveSagaMemberBadges } from "./stave/staveSaga.logic";
 import { StaveConfirmDialog } from "./stave/StaveConfirmDialog";
@@ -2472,6 +2473,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             <span className="truncate text-sm font-medium text-sidebar-foreground/90">
               {project.displayName}
             </span>
+            <StaveLifecycleBadge notices={project.memberProjects.map((member) => member.notice)} />
             {project.groupedProjectCount > 1 ? (
               <span className="shrink-0 text-secondary-label text-[10px]">
                 {project.groupedProjectCount} projects

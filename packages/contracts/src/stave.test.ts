@@ -32,6 +32,16 @@ const SAGA_ROOT = "/work/spaces/epic-7";
 
 /** One wire payload per operation kind; the record keeps the table exhaustive. */
 const OPERATIONS: { readonly [K in StaveOperationKind]: Record<string, unknown> } = {
+  lifecycleAction: {
+    kind: "lifecycleAction",
+    projectId: "project-1",
+    workspaceRoot: ROOT,
+    action: "retry",
+    target: "destroy",
+    force: false,
+    memory: "keep",
+    expectedManifestCreatedAt: "2026-09-01T10:00:00.123456789Z",
+  },
   createSpace: {
     kind: "createSpace",
     spaceId: "ticket-42",
@@ -168,6 +178,7 @@ const syncReport = {
 
 /** One valid result per operation kind, paired the way `finished` carries it. */
 const RESULTS: { readonly [K in StaveOperationKind]: Record<string, unknown> } = {
+  lifecycleAction: { projectId: "project-1", disposition: "destroyed" },
   createSpace: { ...spaceMutation, projectId: "project-1", sequence: 12 },
   registerRepo: {
     name: "t3code",

@@ -3,6 +3,10 @@ import type { StaveOperation } from "@t3tools/contracts";
 /** Only refusals that Stave explicitly allows --force to bypass offer a retry. */
 export function canForceStaveOperation(operation: StaveOperation, code: string | undefined) {
   return (
+    !(
+      operation.kind === "lifecycleAction" &&
+      (operation.action === "keep" || operation.action === "dismiss")
+    ) &&
     "force" in operation &&
     !operation.force &&
     (code === "dirty_worktrees" || code === "dependent_spaces")
@@ -15,6 +19,14 @@ export function forceStaveOperation(operation: StaveOperation): StaveOperation {
 
 export function staveOperationLossCopy(operation: StaveOperation): string {
   switch (operation.kind) {
+    case "lifecycleAction":
+      if (operation.action === "keep")
+        return "Keep this space and cancel this cleanup episode. Its files and memories remain in place.";
+      if (operation.action === "dismiss")
+        return "Dismiss this cleanup record. Lecturn will leave the space and its memories in place.";
+      return operation.action === "archiveNow" || operation.target === "archive"
+        ? "This stops sessions and archives the space. Specs, notes, memories and committed branches survive. Unarchive restores its worktrees."
+        : "This permanently removes the space directory, including its spec and notes. Committed branches remain in Stave's repository cache.";
     case "destroySpace":
     case "removePartialSpace":
       return "This permanently removes the space directory, including its spec and notes. Committed branches remain in Stave's repository cache.";

@@ -95,6 +95,60 @@ it.layer(layer)("Stave delete intent projector", (it) => {
         assert.equal(rolledBackEvents.length, 0);
       }),
   );
+  it.effect(
+    "a new delete rearms Keep and refused archive episodes without losing durable incarnation",
+    () =>
+      Effect.gen(function* () {
+        const store = yield* OrchestrationEventStore;
+        const pipeline = yield* OrchestrationProjectionPipeline;
+        const sql = yield* SqlClient.SqlClient;
+        for (const disposition of [
+          "kept",
+          "refused",
+          "live",
+          "pending_archive",
+          "destroying",
+          "archived",
+        ] as const) {
+          yield* sql`INSERT INTO stave_project_lifecycle (project_id,workspace_root,space_id,manifest_created_at,disposition,refusal_code,updated_at)
+          VALUES (${disposition}, ${`/space/${disposition}`}, ${disposition}, ${now}, ${disposition}, 'dirty_worktrees', ${now})`;
+          const event = yield* store.append({
+            ...deleted(disposition),
+            payload: {
+              projectId: ProjectId.make(disposition),
+              deletedAt: now,
+              workspaceRoot: `/space/${disposition}`,
+            },
+          });
+          yield* pipeline.projectEvent(event);
+          const rows = yield* sql<{
+            disposition: string;
+            space_id: string;
+            manifest_created_at: string;
+            refusal_code: string | null;
+          }>`SELECT * FROM stave_project_lifecycle WHERE project_id = ${disposition}`;
+          assert.equal(
+            rows[0]?.disposition,
+            disposition === "destroying" || disposition === "archived"
+              ? disposition
+              : "pending_evaluation",
+          );
+          assert.equal(rows[0]?.space_id, disposition);
+          assert.equal(rows[0]?.manifest_created_at, now);
+          if (disposition !== "destroying" && disposition !== "archived")
+            assert.isNull(rows[0]?.refusal_code);
+          yield* sql`UPDATE stave_project_lifecycle SET disposition = 'kept' WHERE project_id = ${disposition}`;
+          yield* pipeline.projectEvent(event);
+          assert.equal(
+            (yield* sql<{
+              disposition: string;
+            }>`SELECT disposition FROM stave_project_lifecycle WHERE project_id = ${disposition}`)[0]
+              ?.disposition,
+            "kept",
+          );
+        }
+      }),
+  );
   it.effect("migration skips existing deletes and projection reset does not backfill them", () =>
     Effect.gen(function* () {
       const store = yield* OrchestrationEventStore;

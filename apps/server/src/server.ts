@@ -56,6 +56,7 @@ import * as GitManager from "./git/GitManager.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
+import * as StaveLifecycleService from "./orchestration/Layers/StaveLifecycleService.ts";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor.ts";
 import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus.ts";
 import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion.ts";
@@ -275,6 +276,8 @@ const PlatformServicesLive = Layer.unwrap(
 
 const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(OrchestrationReactorLive),
+  Layer.provideMerge(StaveLifecycleService.layer),
+  Layer.provideMerge(StaveOperations.layer.pipe(Layer.provide(ProcessRunner.layer))),
   Layer.provideMerge(ProviderRuntimeIngestionLive),
   Layer.provideMerge(ProviderCommandReactorLive),
   Layer.provideMerge(CheckpointReactorLive),
@@ -582,7 +585,6 @@ export const makeRoutesLayer = Layer.mergeAll(
   // One registry per server: a Stave operation started over one socket keeps
   // running after that socket closes and can be re-attached from any other.
   // Its Stave/orchestration dependencies come from the runtime layer.
-  Layer.provide(StaveOperations.layer.pipe(Layer.provide(ProcessRunner.layer))),
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(ServerSelfUpdate.layer.pipe(Layer.provide(DesktopAppUpdateLayerLive))),
   Layer.provide(commandReadinessLayer),

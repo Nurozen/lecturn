@@ -1,3 +1,4 @@
+import { StaveLifecycleBadge } from "./StaveLifecycleBadge";
 import { useState } from "react";
 import { ChevronDownIcon, ChevronRightIcon, MoreHorizontalIcon } from "lucide-react";
 import type { StaveOperation } from "@t3tools/contracts";
@@ -102,6 +103,9 @@ export function SagaSidebarSection({
               >
                 {project.displayName}
               </button>
+              <StaveLifecycleBadge
+                notices={project.memberProjects.map((member) => member.notice)}
+              />
               {members.map((member) => (
                 <Button
                   key={member.physicalProjectKey}
@@ -130,6 +134,9 @@ export function SagaSidebarSection({
                       onClick={() => onOpen(target)}
                     >
                       <span className="mr-auto truncate">{target.displayName}</span>
+                      <StaveLifecycleBadge
+                        notices={target.memberProjects.map((member) => member.notice)}
+                      />
                       {child.memberStatus
                         ? staveSagaMemberBadges(child.memberStatus).map((badge) => (
                             <Badge key={badge} variant={badge === "dirty" ? "warning" : "outline"}>

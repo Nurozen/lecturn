@@ -1,3 +1,4 @@
+import { StaveLifecycleNotice } from "../stave/StaveLifecycleNotice";
 import { prepareStaveProjectDeletion } from "../../lib/staveProjectDeletion";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -516,7 +517,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   const selectedCheckout =
     group.memberProjects.find((member) => member.physicalProjectKey === selectedCheckoutKey) ??
     representative;
-  const staveInfo = selectedCheckout.stave ?? representative.stave ?? null;
+  const staveInfo = selectedCheckout.stave ?? null;
   const selectedServerConfig = useAtomValue(
     serverEnvironment.configValueAtom(selectedCheckout.environmentId),
   );
@@ -1253,6 +1254,16 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
           ) : null}
         </SettingsSection>
 
+        {staveInfo && selectedCheckout.notice ? (
+          <StaveLifecycleNotice
+            key={`${selectedCheckout.environmentId}:${selectedCheckout.id}:${selectedCheckout.workspaceRoot}:${staveInfo.createdAt}`}
+            environmentId={selectedCheckout.environmentId}
+            projectId={selectedCheckout.id}
+            workspaceRoot={selectedCheckout.workspaceRoot}
+            stave={staveInfo}
+            notice={selectedCheckout.notice}
+          />
+        ) : null}
         {staveInfo ? (
           <StaveProjectSection
             stave={staveInfo}
