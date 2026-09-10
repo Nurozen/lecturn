@@ -549,12 +549,19 @@ export const TraitsPicker = memo(function TraitsPicker({
   triggerClassName,
   isComposerOwned,
   size = "sm",
+  hidden = false,
   ...persistence
 }: TraitsMenuContentProps &
   TraitsPersistence & {
     size?: ComposerControlSize;
+    hidden?: boolean;
   }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [wasHidden, setWasHidden] = useState(hidden);
+  if (hidden !== wasHidden) {
+    setWasHidden(hidden);
+    if (hidden) setIsMenuOpen(false);
+  }
   const { descriptors, primarySelectDescriptor, ultrathinkPromptControlled } =
     getTraitsSectionVisibility({
       provider,
@@ -603,7 +610,7 @@ export const TraitsPicker = memo(function TraitsPicker({
 
   return (
     <Menu
-      open={isMenuOpen}
+      open={isMenuOpen && !hidden}
       onOpenChange={(open) => {
         setIsMenuOpen(open);
       }}
