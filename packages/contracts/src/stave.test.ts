@@ -6,6 +6,7 @@ import {
   STAVE_OPERATION_ERROR_CODES,
   type StaveManifest,
   StaveName,
+  StaveSagaStatus,
   StaveOperation,
   StaveOperationError,
   StaveOperationResult,
@@ -14,6 +15,7 @@ import {
   type StaveOperationKind,
 } from "./stave.ts";
 
+const decodeSagaStatus = Schema.decodeUnknownSync(StaveSagaStatus);
 const decodeOperation = Schema.decodeUnknownSync(StaveOperation);
 const encodeOperation = Schema.encodeUnknownSync(StaveOperation);
 const decodeOperationExit = Schema.decodeUnknownExit(StaveOperation);
@@ -224,7 +226,7 @@ const RESULTS: { readonly [K in StaveOperationKind]: Record<string, unknown> } =
     ...spaceMutation,
     detached: [{ name: "default", provider: "marmot", id: "den-1", owned: false, fate: "keep" }],
   },
-  createSaga: sagaMutation,
+  createSaga: { ...sagaMutation, projectId: "project-1", sequence: 1 },
   sagaAdd: sagaMutation,
   sagaRemove: sagaMutation,
   sagaSync: {
@@ -381,5 +383,52 @@ describe("StaveOperationError", () => {
     const future = decodeError({ code: "quantum_flux", message: "m", details: null });
     expect(future.code).toBe("unknown");
     expect(encodeError(future)).toEqual({ code: "unknown", message: "m", details: null });
+  });
+});
+
+describe("saga status wire compatibility", () => {
+  it("decodes camelCase and preserves topological order with unknown states", () => {
+    const value = decodeSagaStatus({
+      sagaId: "s",
+      members: [
+        {
+          id: "b",
+          after: ["a"],
+          state: "future",
+          dirty: false,
+          repos: [
+            {
+              name: "r",
+              branch: "b",
+              base: "main",
+              ahead: 0,
+              behind: 0,
+              baseHealth: "future",
+              mergedVia: "future",
+            },
+          ],
+          prs: [],
+        },
+        { id: "a", after: [], state: "live", dirty: false, repos: [], prs: [] },
+      ],
+      notes: [{ kind: "future", text: "note" }],
+    });
+    expect(value.members.map((member) => member.id)).toEqual(["b", "a"]);
+    expect(value.members[0]?.state).toBe("unknown");
+    expect(value.members[0]?.repos[0]?.baseHealth).toBe("unknown");
+    expect(value.members[0]?.repos[0]?.mergedVia).toBe("unknown");
+    expect(value.notes[0]?.kind).toBe("unknown");
+  });
+  it("preserves saga and member incarnation stamps on roster operations", () => {
+    const stamp = "2026-09-09T00:00:00.123456789Z";
+    const result = decodeOperation({
+      ...OPERATIONS.sagaAdd,
+      expectedManifestCreatedAt: stamp,
+      expectedMemberCreatedAt: stamp,
+    });
+    expect(result).toMatchObject({
+      expectedManifestCreatedAt: stamp,
+      expectedMemberCreatedAt: stamp,
+    });
   });
 });

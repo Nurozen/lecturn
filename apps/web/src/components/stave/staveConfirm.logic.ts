@@ -16,12 +16,22 @@ export function forceStaveOperation(operation: StaveOperation): StaveOperation {
 export function staveOperationLossCopy(operation: StaveOperation): string {
   switch (operation.kind) {
     case "destroySpace":
-    case "sagaDestroy":
     case "removePartialSpace":
       return "This permanently removes the space directory, including its spec and notes. Committed branches remain in Stave's repository cache.";
     case "archiveSpace":
-    case "sagaArchive":
       return "This stops sessions, removes worktrees, and moves the space into the archive. Its manifest, spec, notes, and committed branches survive. Unarchive restores the worktrees.";
+    case "sagaDestroy":
+      return "This permanently removes the saga and every live member, including their specs and notes, in reverse dependency order. Committed branches remain in Stave's repository cache. A refusal can leave earlier members already removed; review the result before retrying.";
+    case "sagaArchive":
+      return "This stops sessions and archives the saga and every live member in reverse dependency order. Specs, notes and committed branches survive. A refusal can leave earlier members already archived. Members can be unarchived individually.";
+    case "sagaRemove":
+      return "This removes the member from the saga and removes other members' after edges to it. The member's files and project are kept. Rejoining does not restore the removed edges automatically.";
+    case "sagaAdd":
+      return operation.after.length > 0
+        ? "This replaces the member's dependency edges with the selected predecessors. Its files are kept."
+        : operation.clearAfter
+          ? "This clears all existing dependency edges for the member. Its files are kept."
+          : "This enrolls the space while keeping any existing dependency edges. Its files are kept.";
     case "removeRepo":
       return "This removes the selected checkout from this space. Its committed branch remains in Stave's repository cache.";
     case "memoryDetach":

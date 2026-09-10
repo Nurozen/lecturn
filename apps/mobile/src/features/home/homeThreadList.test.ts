@@ -72,6 +72,24 @@ function buildGroups(
 }
 
 describe("buildHomeThreadGroups", () => {
+  it("keeps empty Stave coordinators visible only when nesting is enabled", () => {
+    const project = makeProject({
+      environmentId: EnvironmentId.make("local"),
+      id: ProjectId.make("saga"),
+      title: "Saga",
+      stave: { spaceId: "saga", isSaga: true, state: "live", repos: [], memories: [] },
+    });
+    expect(buildGroups([project], [])).toEqual([]);
+    expect(
+      buildGroups([project], [], { includeStaveProjects: true }).map(
+        (group) => group.representative.id,
+      ),
+    ).toEqual(["saga"]);
+    expect(
+      buildGroups([project], [], { includeStaveProjects: true, searchQuery: "unrelated" }),
+    ).toEqual([]);
+  });
+
   it("builds one v2 scope for the same repository across environments", () => {
     const localEnvironmentId = EnvironmentId.make("environment-local");
     const remoteEnvironmentId = EnvironmentId.make("environment-remote");

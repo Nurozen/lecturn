@@ -31,6 +31,7 @@ export interface Preferences {
   /** @deprecated Kept temporarily so older OTA bundles retain the selected mode. */
   readonly projectGroupingEnabled?: boolean;
   readonly projectGroupingMode?: SidebarProjectGroupingMode;
+  readonly sidebarNestSagas?: boolean;
   /**
    * Device-local mirror of the web `legacySidebarEnabled` setting. Mobile has
    * no client-settings sync, so the legacy grouped thread list is opted into
@@ -99,6 +100,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     collapsedProjectGroups?: readonly string[];
     projectGroupingEnabled?: boolean;
     projectGroupingMode?: SidebarProjectGroupingMode;
+    sidebarNestSagas?: boolean;
     legacyThreadListEnabled?: boolean;
     planModeEnabled?: boolean;
     threadListSettledShelfExpanded?: boolean;
@@ -153,6 +155,9 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     preferences.collapsedProjectGroups = parsed.collapsedProjectGroups.filter(
       (key): key is string => typeof key === "string",
     );
+  }
+  if (typeof parsed.sidebarNestSagas === "boolean") {
+    preferences.sidebarNestSagas = parsed.sidebarNestSagas;
   }
   if (typeof parsed.projectGroupingEnabled === "boolean") {
     preferences.projectGroupingEnabled = parsed.projectGroupingEnabled;

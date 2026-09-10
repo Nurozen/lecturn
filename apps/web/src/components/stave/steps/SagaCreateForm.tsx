@@ -1,7 +1,13 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import { useNavigate } from "@tanstack/react-router";
+import { useNewThreadHandler } from "../../../hooks/useHandleNewThread";
+import { openExistingProjectAndThread } from "../../../lib/addProject";
+import { notifyStaveMutation } from "../../../staveMutation";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { staveDryRun } from "../../../state/stave";
 import { randomUUID } from "../../../lib/utils";
 import { staveOperations } from "../../../state/staveOperations";
 import { useAtomCommand } from "../../../state/use-atom-command";
@@ -22,7 +28,6 @@ import { Textarea } from "../../ui/textarea";
 import {
   buildCreateSagaOperation,
   createInitialSagaWizardState,
-  isOperationNotImplemented,
   type StaveSagaWizardState,
   syncRepoRows,
   toggleMemoryEntry,
@@ -51,12 +56,32 @@ export function SagaCreateForm(props: {
   const [operationId, setOperationId] = useState<string | null>(null);
   const runOperation = useAtomCommand(staveOperations.run, { reportFailure: false });
   const operation = useAtomValue(staveOperations.stateAtom(operationId ?? IDLE_OPERATION_ID));
-  const running = operation.status === "running" || operation.status === "disconnected";
+  const running =
+    operationId !== null && operation.status !== "finished" && operation.status !== "failed";
   const terminal = operation.status === "finished" || operation.status === "failed";
-  const notImplemented =
-    operation.status === "failed" &&
-    operation.error !== undefined &&
-    isOperationNotImplemented(operation.error);
+  const navigate = useNavigate();
+  const handleNewThread = useNewThreadHandler();
+  const opened = useRef(false);
+  const [openError, setOpenError] = useState<string | null>(null);
+  const result = operation.status === "finished" ? operation.result : undefined;
+  useEffect(() => {
+    if (result?.kind !== "createSaga" || opened.current) return;
+    opened.current = true;
+    notifyStaveMutation(environmentId);
+    void openExistingProjectAndThread({
+      environmentId,
+      projectId: result.result.projectId,
+      sequence: result.result.sequence,
+      navigate,
+      handleNewThread,
+    }).then((outcome) => {
+      if (outcome.status === "failed") {
+        setOpenError(
+          outcome.error instanceof Error ? outcome.error.message : "Opening the saga failed.",
+        );
+      } else closeStaveWizard();
+    });
+  }, [environmentId, result, navigate, handleNewThread]);
 
   useEffect(() => {
     onBusyChange(running);
@@ -73,18 +98,43 @@ export function SagaCreateForm(props: {
     }));
   }
 
+  const dryRun = useAtomCommand(staveDryRun, { reportFailure: false });
+  const payload = useMemo(() => buildCreateSagaOperation(state), [state]);
+  const payloadKey = JSON.stringify([environmentId, payload]);
+  const [preview, setPreview] = useState<{
+    key: string;
+    plan?: readonly string[];
+    error?: string;
+  } | null>(null);
+  const [previewPending, setPreviewPending] = useState(false);
+  const currentPreview = preview?.key === payloadKey ? preview : null;
   const gate = validateSagaWizard(state, context.spaces);
   const id = validateSpaceId(state.sagaId, context.spaces);
   const idMessage = state.sagaId.length > 0 && !id.ok ? id.message : undefined;
 
   const create = () => {
-    if (!gate.ok || operationId !== null) return;
+    if (!gate.ok || operationId !== null || previewPending) return;
+    if (!currentPreview?.plan) {
+      setPreviewPending(true);
+      void dryRun({ environmentId, input: { operation: payload } }).then((result) => {
+        if (result._tag === "Success") setPreview({ key: payloadKey, plan: result.value.plan });
+        else {
+          const error = squashAtomCommandFailure(result);
+          setPreview({
+            key: payloadKey,
+            error: error instanceof Error ? error.message : "Could not preview saga creation.",
+          });
+        }
+        setPreviewPending(false);
+      });
+      return;
+    }
     const nextId = randomUUID();
     setOperationId(nextId);
     void runOperation({
       environmentId,
       operationId: nextId,
-      operation: buildCreateSagaOperation(state),
+      operation: payload,
     });
   };
 
@@ -108,17 +158,13 @@ export function SagaCreateForm(props: {
       <DialogPanel>
         {operationId !== null ? (
           <div className="flex flex-col gap-3">
-            {notImplemented ? (
-              <Alert variant="info">
-                <AlertTitle>Creating sagas from Lecturn is coming soon</AlertTitle>
-                <AlertDescription>
-                  Run <code className="font-mono">stave saga create {state.sagaId.trim()}</code> in
-                  a terminal for now.
-                </AlertDescription>
+            <StaveOperationProgress environmentId={environmentId} operationId={operationId} />
+            {openError ? (
+              <Alert variant="error">
+                <AlertTitle>Could not open saga</AlertTitle>
+                <AlertDescription>{openError}</AlertDescription>
               </Alert>
-            ) : (
-              <StaveOperationProgress environmentId={environmentId} operationId={operationId} />
-            )}
+            ) : null}
           </div>
         ) : (
           <div className="flex flex-col gap-4">
@@ -233,6 +279,19 @@ export function SagaCreateForm(props: {
             ) : null}
           </div>
         )}
+        {operationId === null && currentPreview?.plan ? (
+          <div className="mt-4 rounded-lg border p-3">
+            <p className="mb-2 text-sm font-medium">Creation plan</p>
+            <ol className="list-decimal space-y-1 pl-5 text-xs">
+              {currentPreview.plan.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
+          </div>
+        ) : null}
+        {operationId === null && currentPreview?.error ? (
+          <p className="mt-3 text-xs text-destructive-foreground">{currentPreview.error}</p>
+        ) : null}
       </DialogPanel>
       <DialogFooter>
         {operationId === null ? (
@@ -243,8 +302,12 @@ export function SagaCreateForm(props: {
             <Button variant="outline" onClick={closeStaveWizard}>
               Cancel
             </Button>
-            <Button disabled={!gate.ok} onClick={create}>
-              Create
+            <Button disabled={!gate.ok || previewPending} onClick={create}>
+              {previewPending
+                ? "Reading plan…"
+                : currentPreview?.plan
+                  ? "Create saga"
+                  : "Review plan"}
             </Button>
           </>
         ) : terminal ? (

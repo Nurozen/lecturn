@@ -202,10 +202,42 @@ root through a symlink. Resolve the overlapping project entry before retrying. I
 restarts during archive or restore, it reconciles the project with the matching live or archived
 space; ambiguous or unreadable results require repair instead of guessing.
 
+## Work with sagas
+
+Choose **New Stave saga** in the command palette to create a coordinator with an id, title,
+spec, reference repositories, and optional memory. Review the plan, then create it. The project
+opens after the server has created it, including when you reattach after a connection loss.
+
+In the saga's project settings, **Add member** can create a new space or adopt an existing
+space. Choose predecessors with **after** to express dependency order. Editing that selection
+updates the existing member; clearing it removes its ordering edges. Removing a member leaves
+its space on disk and drops the edges that depended on that membership.
+
+The **Sagas** sidebar section and legacy sidebar nest member projects in Stave's dependency
+order. Badges show live, archived, missing, or corrupt members, dirty worktrees, and merged
+bases. Use the saga row's menu for **Add member** or **Archive saga**. A member without a
+visible saga project remains in the ordinary project list. Matching names on different servers
+never combine saga membership. Nesting can be disabled in client settings.
+
+**Sync saga** refreshes its members. **Archive saga** and **Destroy saga** show the ordered
+teardown plan, memory fate, and losses before confirmation. They stop sessions across all
+members. A failure may leave some members already archived or destroyed; Lecturn rereads every
+member so their projects follow what actually happened. Force remains a separate explicit
+choice after a refusal. Archived survivors can be restored from their own project settings.
+
+When **settle on saga merge** is enabled, a live member becomes an automatic settlement
+candidate only when every editable repository reports a merged base. A partially merged member
+or a member with no editable repositories does not qualify. Running work and explicit thread
+settlement overrides keep their existing protections.
+
+Mobile shows space/saga identity and status in project headers and the new-task picker. The
+tablet sidebar adds saga project navigation beside its default flat thread list; the optional
+legacy list nests project headers. **Project Grouping → Nest saga members** is a device-local
+preference. Create and edit sagas on web or desktop.
+
 ## Coming soon
 
-Creating sagas from the wizard, saga nesting, and automatic lifecycle cleanup are still being
-integrated. Until then, manage saga structure with the Stave command.
+Automatic cleanup after deleting a project or settling its last thread is still being integrated.
 
 ## Related
 

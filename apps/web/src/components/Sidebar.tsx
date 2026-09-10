@@ -203,6 +203,7 @@ import {
   ComboboxTrigger,
   useComboboxFilter,
 } from "./ui/combobox";
+import { SagaSidebarSection } from "./stave/SagaSidebarSection";
 import { SidebarContent, SidebarGroup, SidebarMenuButton, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
@@ -3707,6 +3708,7 @@ export default function Sidebar() {
                 </Tooltip>
               </div>
             </div>
+            <SagaSidebarSection projects={projectGroups} onOpen={openProjectSettings} />
             {projectGroups.length > 0 ? (
               <div className="flex items-center gap-1">
                 <Combobox

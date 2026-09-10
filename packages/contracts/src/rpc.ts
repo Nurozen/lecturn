@@ -212,6 +212,8 @@ import {
   StaveRepoRow,
   StaveRunOperationInput,
   StaveSagaListRow,
+  StaveSagaStatus,
+  StaveSagaStatusInput,
   StaveSpaceListRow,
   StaveSpaceStatus,
   StaveSpaceStatusInput,
@@ -324,6 +326,7 @@ export const WS_METHODS = {
   // Stave methods
   staveGetStatus: "stave.getStatus",
   staveSpaceStatus: "stave.spaceStatus",
+  staveSagaStatus: "stave.sagaStatus",
   staveListRepos: "stave.listRepos",
   staveListSpaces: "stave.listSpaces",
   staveListSagas: "stave.listSagas",
@@ -543,6 +546,18 @@ export const WsStaveGetStatusRpc = Rpc.make(WS_METHODS.staveGetStatus, {
 export const WsStaveSpaceStatusRpc = Rpc.make(WS_METHODS.staveSpaceStatus, {
   payload: StaveSpaceStatusInput,
   success: StaveSpaceStatus,
+  error: Schema.Union([
+    StaveUnavailableError,
+    StaveNotSpaceError,
+    StaveCommandError,
+    ServerSettingsError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+export const WsStaveSagaStatusRpc = Rpc.make(WS_METHODS.staveSagaStatus, {
+  payload: StaveSagaStatusInput,
+  success: StaveSagaStatus,
   error: Schema.Union([
     StaveUnavailableError,
     StaveNotSpaceError,
@@ -1204,6 +1219,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetBackgroundPolicyRpc,
   WsStaveGetStatusRpc,
   WsStaveSpaceStatusRpc,
+  WsStaveSagaStatusRpc,
   WsStaveListReposRpc,
   WsStaveListSpacesRpc,
   WsStaveListSagasRpc,

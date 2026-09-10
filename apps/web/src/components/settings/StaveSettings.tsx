@@ -6,7 +6,12 @@ import { useEffect, useState } from "react";
 import { staveOperations } from "../../state/staveOperations";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { StaveOperationProgress } from "../stave/StaveOperationProgress";
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
+import {
+  useClientSettings,
+  useUpdateClientSettings,
+  usePrimarySettings,
+  useUpdatePrimarySettings,
+} from "../../hooks/useSettings";
 import { cn, randomUUID } from "../../lib/utils";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { primaryServerConfigAtom } from "../../state/server";
@@ -34,6 +39,7 @@ export function StaveSettingsSection() {
       <StaveStatusRow />
       <StaveBinaryPathSetting />
       <StaveConfigPathSetting />
+      <StaveSagaNestingSetting />
     </SettingsSection>
   );
 }
@@ -219,6 +225,24 @@ function StaveConfigPathSetting() {
           placeholder="~/.config/stave/config.yaml"
           spellCheck={false}
           aria-label="Stave config path"
+        />
+      }
+    />
+  );
+}
+
+function StaveSagaNestingSetting() {
+  const enabled = useClientSettings((settings) => settings.sidebarNestSagas);
+  const update = useUpdateClientSettings();
+  return (
+    <SettingsRow
+      title="Nest saga members"
+      description="Group member projects under their saga in dependency order in this client's sidebars."
+      control={
+        <Switch
+          checked={enabled}
+          onCheckedChange={(checked) => update({ sidebarNestSagas: checked })}
+          aria-label="Nest saga members"
         />
       }
     />

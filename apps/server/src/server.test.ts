@@ -4547,6 +4547,74 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("stave.sagaStatus exposes ordered camelCase status through the gated RPC", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          serverSettings: {
+            getSettings: Effect.succeed({
+              ...DEFAULT_SERVER_SETTINGS,
+              stave: { ...DEFAULT_SERVER_SETTINGS.stave, enabled: true },
+            }),
+          },
+          staveBinary: {
+            resolveRunnable: Effect.succeed({
+              path: "/bin/stave",
+              source: "path",
+              version: "0.4.0",
+              commit: null,
+            }),
+          },
+          staveWorkspaceReader: {
+            load: () =>
+              Effect.succeed(
+                Option.some({ spaceId: "s", isSaga: true, state: "live", repos: [], memories: [] }),
+              ),
+          },
+          staveCli: {
+            sagaStatus: () =>
+              Effect.succeed({
+                sagaId: "s",
+                notes: [],
+                members: [
+                  { id: "a", after: [], state: "live", dirty: false, repos: [], prs: [] },
+                  {
+                    id: "b",
+                    after: ["a"],
+                    state: "live",
+                    dirty: true,
+                    repos: [
+                      {
+                        name: "r",
+                        branch: "b",
+                        base: "main",
+                        ahead: 0,
+                        behind: 0,
+                        baseHealth: "merged",
+                        mergedVia: "ancestry",
+                      },
+                    ],
+                    prs: [],
+                  },
+                ],
+              }),
+          },
+        },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.staveSagaStatus]({ sagaRoot: "/spaces/s" }),
+        ),
+      );
+      assert.deepEqual(
+        result.members.map((member) => member.id),
+        ["a", "b"],
+      );
+      assert.equal(result.members[1]?.repos[0]?.baseHealth, "merged");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("stave.spaceStatus runs space status once per root within the TTL", () =>
     Effect.gen(function* () {
       const spaceStatusCalls = yield* Ref.make<Array<string>>([]);

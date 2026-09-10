@@ -6,6 +6,7 @@ import { useStaveFeatureAvailable, useStaveSpaceStatus } from "../../state/stave
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { StaveSagaActions, StaveSpaceMembership } from "../stave/StaveSagaActions";
 import { StaveSpaceActions } from "../stave/StaveSpaceActions";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { formatStaveRepoStatus } from "./StaveProjectSection.logic";
@@ -126,7 +127,23 @@ export function StaveProjectSection({
           />
         ) : null}
       </SettingsRow>
-      {available && !stave.isSaga ? (
+      {available && (stave.isSaga || stave.kind === "saga") ? (
+        <StaveSagaActions
+          key={`${environmentId}:${workspaceRoot}:${stave.createdAt}`}
+          environmentId={environmentId}
+          sagaRoot={workspaceRoot}
+          stave={stave}
+        />
+      ) : null}
+      {available && !stave.isSaga && stave.kind !== "saga" ? (
+        <StaveSpaceMembership
+          key={`${environmentId}:${workspaceRoot}:${stave.createdAt}:membership`}
+          environmentId={environmentId}
+          workspaceRoot={workspaceRoot}
+          stave={stave}
+        />
+      ) : null}
+      {available && !stave.isSaga && stave.kind !== "saga" ? (
         <StaveSpaceActions
           key={`${environmentId}:${workspaceRoot}:${stave.createdAt ?? "legacy"}`}
           environmentId={environmentId}

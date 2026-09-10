@@ -177,6 +177,15 @@ describe("mobile connection storage", () => {
     await expect(loadPreferences()).resolves.toEqual({ baseFontSize: 17 });
   });
 
+  it("round-trips the device saga nesting preference and drops invalid values", async () => {
+    mocks.setPreferencesJson(JSON.stringify({ sidebarNestSagas: false }), 10);
+    await expect(loadPreferences()).resolves.toEqual({ sidebarNestSagas: false });
+    await savePreferencesPatch({ sidebarNestSagas: true });
+    await expect(loadPreferences()).resolves.toEqual({ sidebarNestSagas: true });
+    mocks.setPreferencesJson(JSON.stringify({ sidebarNestSagas: "false" }), 11);
+    await expect(loadPreferences()).resolves.toEqual({});
+  });
+
   it("persists independent light and dark theme choices", async () => {
     mocks.setPreferencesJson(
       JSON.stringify({

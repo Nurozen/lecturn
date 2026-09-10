@@ -5,7 +5,7 @@
 > Fork framing and release differences live in
 > [docs/operations/lecturn-release.md](../operations/lecturn-release.md).
 
-Status: in progress — Phase 4 (lifecycle fencing and space edits; saga/lifecycle automation follow)
+Status: in progress — Phase 5 (sagas and merge settlement; lifecycle automation follows)
 
 ## What a Stave space is to Lecturn
 
@@ -23,7 +23,7 @@ Status: in progress — Phase 4 (lifecycle fencing and space edits; saga/lifecyc
   `branch` becomes `primaryBranch`. `mode: reference` entries are read-only context and are
   listed but not targeted.
 - **Sagas** (`kind: saga`, or any `saga:` block) are recognised and flagged (`isSaga`), but their
-  members are not projected yet — planned (Phase 5).
+  members are enriched from best-effort Stave roster reads.
 
 ## `StaveWorkspaceReader`
 
@@ -45,7 +45,7 @@ with the on-disk schema in `apps/server/src/stave/staveManifest.ts`.
   `mode: edit` entry, and `state`. `state` is `archived` when the root's parent directory is
   named `.archive` (Stave moves archived spaces to `<agentWorkDir>/.archive/<space>`), in which
   case `archiveBasename` is the root's basename; otherwise `live`. Optional keys are omitted,
-  never set to `undefined`. `memberOf` is not populated — planned (Phase 5).
+  never set to `undefined`. `memberOf` is enriched from a best-effort display cache; manifest recognition still works without a binary.
 - `primaryRepositoryIdentity` is resolved through `RepositoryIdentityResolver` on
   `primaryRepoPath` after the pure projection and attached only when non-null.
 - **Cache.** An `effect/Cache` keyed by root (capacity 512) with separate TTLs: 30s for a found
@@ -177,7 +177,7 @@ Everything below `apps/server/src/stave/` that touches the CLI is built once per
 in `apps/server/src/server.ts` (`StaveBinaryLayerLive` → `StaveCliLayerLive` →
 `StaveConfigReaderLayerLive` → `StaveRootsLayerLive`, merged into `StaveLayerLive`). The only
 caller of the mutating verbs is [`StaveOperations`](#staveoperations), including space edits,
-archive, restore, destroy, and memory actions. Saga operations follow in Phase 5.
+archive, restore, destroy, and memory actions. Saga operations use the same registry and progress stream.
 
 ### `StaveBinary`
 
@@ -367,7 +367,7 @@ Long Stave mutations are _operations_: one discriminated payload (`StaveOperatio
 streamed back as sequence-numbered progress events (deviations 18, 22, 25, 26). Phase 3
 implements `createSpace`, `registerRepo`, `removePartialSpace`, and `setup`. Phase 4 adds
 `addRepo`, `removeRepo`, `syncSpace`, `retarget`, `archiveSpace`, `destroySpace`,
-`restoreSpace`, `memoryAttach`, and `memoryDetach`. Saga operation kinds follow in Phase 5.
+`restoreSpace`, `memoryAttach`, and `memoryDetach`. Saga operations add all-participant fencing and reconciliation.
 
 ### `StaveOperations`
 
@@ -558,9 +558,8 @@ progress`, with `memory` present only when some `stave.memoryProviders` row is `
   `describeCreateSpaceCommand` renders the review line (pasted spec shown as
   `--spec <pasted spec>`); `partialSpaceFromError` reads `failed.error.details.partialSpace` and
   `buildRemovePartialSpaceOperation` binds the recovery to `manifestCreatedAt` (null, and the
-  button disabled, when the stamp is unknown). The saga variant (`buildCreateSagaOperation`)
-  is typed here but the server answers `invalid_arguments` until Phase 5
-  (`isOperationNotImplemented`).
+  button disabled, when the stamp is unknown). The saga variant (`buildCreateSagaOperation`) follows its own form and returns the
+  server-created project id and sequence before navigation.
 - Components under `apps/web/src/components/stave/`: `StaveWizardDialog.tsx` (the host
   `__root.tsx` mounts; steps in `steps/IdentityStep.tsx`, `ReposStep.tsx`, `MemoryStep.tsx`,
   `SagaStep.tsx`, `ReviewStep.tsx`, plus `SagaCreateForm.tsx` for the saga variant);
@@ -742,3 +741,32 @@ existing server operation directly and refreshes status when it completes.
 - [Stave spaces (user guide)](../user/stave.md)
 - [Workspace layout](./workspace-layout.md)
 - [Lecturn releases (fork)](../operations/lecturn-release.md)
+
+## Sagas (Phase 5)
+
+`stave.sagaStatus { sagaRoot }` returns the frozen CLI status shape in camelCase. Its
+15-second success cache shares an invalidation generation with mutation paths. The manifest
+reader stays binary-independent; a separate best-effort display enrichment supplies `memberOf`.
+Destructive decisions use fresh authoritative roster and manifest reads, never the display cache.
+
+Saga creation normalizes and dispatches `project.create` server-side and returns `projectId`
+and `sequence`. Clients wait for that shell sequence before opening once. Saga/member edits
+carry their expected creation timestamps. Saga teardown acquires canonical-root mutexes and
+leases across all participants in deterministic order, journals member intents before the CLI,
+and reconciles every participant after success or partial failure. Durable per-project rows
+support restart recovery without persisting the streamed operation registry.
+
+`buildSagaProjectTree(groups, sagaIndex)` adds one level over existing `ProjectGroup` objects.
+Index entries are scoped by environment and saga root; children retain their original group
+keys and navigation targets. Stave's status order overrides drag order. Ambiguous membership
+or mixed physical groups stay flat; no group is dropped or duplicated. Web isolates its new
+section in `SagaSidebarSection`; the legacy sidebar excludes nested children from drag sorting.
+Mobile preserves flat thread-list semantics with a separate tablet saga roster and nests headers
+in its optional legacy list. Its `sidebarNestSagas` preference is stored only on the device.
+
+`StaveMergeSignal` produces project-id candidates from fresh live saga status and matching
+manifest incarnations. A member needs at least one editable repo and every repo must report
+`baseHealth: merged`; missing, corrupt, replaced, unknown, or partial results are ineligible.
+`ThreadSettlementReactor` retains its ordinary eligibility guards and snapshot-sequenced
+auto-settle commands. The Stave merge toggle is independent of the ordinary PR-merge toggle.
+The existing primary repository path/branch supplies Stave PR fallback queries.

@@ -15,6 +15,7 @@ import {
   resolveMobileProjectGroupingSettings,
 } from "../../state/project-grouping";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { useSidebarNestSagas } from "../../state/stave";
 import { SettingsSection } from "./components/SettingsSection";
 
 const GROUPING_OPTIONS: ReadonlyArray<{
@@ -41,6 +42,7 @@ const GROUPING_OPTIONS: ReadonlyArray<{
 
 export function SettingsProjectGroupingRouteScreen() {
   const navigation = useNavigation();
+  const nestSagas = useSidebarNestSagas();
   const insets = useSafeAreaInsets();
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
@@ -99,6 +101,23 @@ export function SettingsProjectGroupingRouteScreen() {
               ) : null}
             </Pressable>
           ))}
+        </SettingsSection>
+        <SettingsSection title="Stave sagas">
+          <Pressable
+            accessibilityRole="switch"
+            accessibilityState={{ checked: nestSagas, disabled: !preferencesReady }}
+            disabled={!preferencesReady}
+            onPress={() => savePreferences({ sidebarNestSagas: !nestSagas })}
+            className="flex-row items-center gap-4 p-4"
+          >
+            <View className="min-w-0 flex-1 gap-1">
+              <Text className="text-lg text-foreground">Nest saga members</Text>
+              <Text className="text-sm text-foreground-muted">
+                Use dependency order in the tablet sidebar and legacy list.
+              </Text>
+            </View>
+            <Text className="text-sm text-foreground-muted">{nestSagas ? "On" : "Off"}</Text>
+          </Pressable>
         </SettingsSection>
       </ScrollView>
     </View>

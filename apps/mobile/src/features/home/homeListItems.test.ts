@@ -240,3 +240,65 @@ describe("buildHomeListLayout", () => {
     expect(layout.items[8]).toMatchObject({ type: "header", isFirst: false });
   });
 });
+
+describe("saga list layout", () => {
+  const sagaGroup = (id: string, isSaga = false) => {
+    const group = makeGroup(id, 1);
+    const project = {
+      ...group.representative,
+      stave: { spaceId: id, isSaga, state: "live" as const, repos: [], memories: [] },
+    };
+    return { ...group, representative: project, projects: [project] };
+  };
+  const index = [
+    {
+      environmentId,
+      sagaRoot: "/workspaces/saga",
+      status: {
+        sagaId: "saga",
+        members: [
+          { id: "a", after: [], state: "live" as const, dirty: false, repos: [], prs: [] },
+          { id: "b", after: ["a"], state: "live" as const, dirty: true, repos: [], prs: [] },
+        ],
+        notes: [],
+      },
+    },
+  ];
+  it("orders nested headers and keeps sticky header offsets attached to their rows", () => {
+    const layout = buildHomeListLayout({
+      groups: [sagaGroup("b"), sagaGroup("saga", true), sagaGroup("a")],
+      displayStates: new Map(),
+      sagaIndex: index,
+    });
+    const headers = layout.items.filter((item) => item.type === "header");
+    expect(headers.map((item) => [item.group.key, item.depth])).toEqual([
+      ["saga", 0],
+      ["a", 1],
+      ["b", 1],
+    ]);
+    expect(layout.stickyHeaderIndices).toEqual([0, 2, 4]);
+    expect(headers[2]?.memberStatus?.dirty).toBe(true);
+  });
+  it("collapses the whole saga while search reveals member matches", () => {
+    const input = {
+      groups: [sagaGroup("b"), sagaGroup("saga", true), sagaGroup("a")],
+      displayStates: new Map([["saga", { collapsed: true, visibleCount: 6 }]]),
+      sagaIndex: index,
+    };
+    expect(buildHomeListLayout(input).items.map((item) => item.key)).toEqual(["header:saga"]);
+    expect(
+      buildHomeListLayout({ ...input, showAllThreads: true }).items.filter(
+        (item) => item.type === "header",
+      ),
+    ).toHaveLength(3);
+  });
+  it("keeps missing parents and disabled nesting flat", () => {
+    const groups = [sagaGroup("b"), sagaGroup("a")];
+    for (const sagaIndex of [index, []]) {
+      const layout = buildHomeListLayout({ groups, displayStates: new Map(), sagaIndex });
+      expect(
+        layout.items.filter((item) => item.type === "header").map((item) => item.group.key),
+      ).toEqual(["b", "a"]);
+    }
+  });
+});

@@ -1,3 +1,4 @@
+import { useMobileSagaIndex, useSidebarNestSagas } from "../../state/stave";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import {
   LegendList,
@@ -212,6 +213,7 @@ export function HomeScreen(props: HomeScreenProps) {
   >(() => new Map());
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
   const threadListV2Enabled = useThreadListV2Enabled();
+  const nestSagas = useSidebarNestSagas();
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const listRef = useRef<LegendListRef | null>(null);
@@ -373,6 +375,7 @@ export function HomeScreen(props: HomeScreenProps) {
   const projectGroups = useMemo(
     () =>
       buildHomeThreadGroups({
+        includeStaveProjects: nestSagas,
         projects: scopedProjects,
         threads: scopedThreads,
         pendingTasks: scopedPendingTasks,
@@ -384,6 +387,7 @@ export function HomeScreen(props: HomeScreenProps) {
         projectGroupingMode: props.projectGroupingMode,
       }),
     [
+      nestSagas,
       props.projectGroupingMode,
       props.projectSortOrder,
       props.searchQuery,
@@ -396,6 +400,7 @@ export function HomeScreen(props: HomeScreenProps) {
     ],
   );
 
+  const sagaIndex = useMobileSagaIndex(scopedProjects, nestSagas && !threadListV2Enabled);
   const hasSearchQuery = props.searchQuery.trim().length > 0;
   const listLayout = useMemo(
     () =>
@@ -403,8 +408,9 @@ export function HomeScreen(props: HomeScreenProps) {
         groups: projectGroups,
         displayStates: effectiveGroupDisplayStates,
         showAllThreads: hasSearchQuery,
+        sagaIndex,
       }),
-    [projectGroups, effectiveGroupDisplayStates, hasSearchQuery],
+    [projectGroups, effectiveGroupDisplayStates, hasSearchQuery, sagaIndex],
   );
 
   const projectCwdByKey = useMemo(() => {
@@ -956,6 +962,8 @@ export function HomeScreen(props: HomeScreenProps) {
               variant="compact"
               collapsed={item.collapsed}
               isFirst={item.isFirst}
+              depth={item.depth}
+              memberStatus={item.memberStatus}
               groupKey={item.group.key}
               onGroupAction={updateGroupDisplay}
               // Aggregated groups (same repo across machines) have no single

@@ -30,6 +30,7 @@ import {
   CommandId,
   ProjectId,
   type StaveCreateSpaceOperation,
+  type StaveCreateSagaOperation,
   type StaveMemoryAttachResult,
   type StaveObserveOperationInput,
   type StaveOperation,
@@ -79,6 +80,7 @@ import {
   type StaveStreamOptions,
   type StaveVerb,
 } from "./StaveCli.ts";
+import { StaveReadCache } from "./StaveReadCache.ts";
 import { StaveConfigReader } from "./StaveConfigReader.ts";
 import { StaveError, StaveErrorCode, StaveErrorDetails } from "./StaveError.ts";
 import { isStaveDryRunPlan, type StaveDryRunPlan } from "./staveJson.ts";
@@ -298,6 +300,8 @@ export const make = Effect.fn("StaveOperations.make")(function* (
   const cli = yield* StaveCli;
   const configReader = yield* StaveConfigReader;
   const workspaceReader = yield* StaveWorkspaceReader;
+  const readCache = yield* Effect.serviceOption(StaveReadCache);
+  const invalidateReads = Option.isSome(readCache) ? readCache.value.invalidate : Effect.void;
   const processRunner = yield* ProcessRunner;
   const engine = yield* OrchestrationEngineService;
   const snapshotQuery = yield* ProjectionSnapshotQuery;
@@ -550,6 +554,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
   const afterMutation = (root: string) =>
     Effect.gen(function* () {
       yield* workspaceReader.invalidate(root);
+      yield* invalidateReads;
       const project = yield* snapshotQuery
         .getActiveProjectByWorkspaceRoot(root)
         .pipe(Effect.orElseSucceed(() => Option.none()));
@@ -696,8 +701,11 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       const candidate = path.join(agentWorkDir, operation.spaceId);
       const bareRepoPathOf = (repo: string) =>
         snapshot.repos.find((entry) => entry.name === repo)?.bareRepoPath;
-      return yield* withSpaceLock(
-        candidate,
+      return yield* withRoots(
+        [
+          candidate,
+          ...(operation.saga === undefined ? [] : [path.join(agentWorkDir, operation.saga)]),
+        ],
         Effect.gen(function* () {
           yield* phase(
             entry,
@@ -706,6 +714,17 @@ export const make = Effect.fn("StaveOperations.make")(function* (
             preflightCreateSpace(entry, operation, agentWorkDir, candidate, bareRepoPathOf),
           );
 
+          if (operation.saga !== undefined) {
+            const saga = yield* cli.spaceStatus(operation.saga);
+            if (saga.manifest.saga === undefined)
+              return yield* refuse("invalid_arguments", "The target is not a saga.");
+            yield* checkSpace({
+              kind: "syncSpace",
+              workspaceRoot: path.join(agentWorkDir, operation.saga),
+              expectedManifestCreatedAt: saga.manifest.createdAt,
+              referencesOnly: false,
+            });
+          }
           const mutation = yield* Effect.scoped(
             Effect.gen(function* () {
               const input = yield* spaceCreateInput(operation, false);
@@ -749,11 +768,18 @@ export const make = Effect.fn("StaveOperations.make")(function* (
             undefined,
             createProject(mutation.spacePath, operation.title ?? operation.spaceId),
           );
+          yield* invalidateReads;
           return {
             kind: "createSpace",
             result: { ...mutation, projectId, sequence },
           } satisfies OperationOutcome;
-        }),
+        }).pipe(
+          Effect.ensuring(
+            operation.saga === undefined
+              ? invalidateReads
+              : afterMutation(path.join(agentWorkDir, operation.saga)),
+          ),
+        ),
       );
     });
 
@@ -802,6 +828,39 @@ export const make = Effect.fn("StaveOperations.make")(function* (
     Effect.gen(function* () {
       const { agentWorkDir } = yield* loadRoots;
       const root = path.join(agentWorkDir, operation.spaceId);
+      yield* workspaceReader.invalidate(root);
+      const partialInfo = yield* workspaceReader.load(root);
+      if (Option.isSome(partialInfo) && partialInfo.value.isSaga) {
+        const status = yield* cli.spaceStatus(operation.spaceId);
+        if ((status.manifest.saga?.members.length ?? 0) > 0)
+          return yield* refuse(
+            "invalid_arguments",
+            "This partial saga now has members. Import it and review the full saga teardown before removing it.",
+          );
+        const outcome = yield* runSagaOperation(
+          entry,
+          {
+            kind: "sagaDestroy",
+            sagaRoot: root,
+            expectedManifestCreatedAt: operation.expectedManifestCreatedAt,
+            force: operation.force === true,
+            memory: "destroy",
+          },
+          false,
+        );
+        if (outcome.kind !== "sagaDestroy")
+          return yield* refuse("unknown", "Partial saga cleanup returned an unexpected result.");
+        return {
+          kind: "removePartialSpace" as const,
+          result: {
+            spaceId: operation.spaceId,
+            spacePath: root,
+            destroyed: true as const,
+            memory: "destroy" as const,
+            notes: outcome.result.notes,
+          },
+        };
+      }
       const project = yield* snapshotQuery
         .getActiveProjectByWorkspaceRoot(root)
         .pipe(Effect.mapError((cause) => refuse("unknown", cause.message)));
@@ -1027,6 +1086,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
             "membership_unknown",
             "A saga manifest is unreadable; membership cannot be established.",
           );
+        if (!saga.isSaga) continue;
         const status = yield* cli
           .spaceStatus(saga.logicalId ?? saga.id)
           .pipe(
@@ -1160,6 +1220,11 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       Effect.gen(function* () {
         const info = yield* checkSpace(operation);
         const id = info.spaceId;
+        if (info.isSaga && (operation.kind === "archiveSpace" || operation.kind === "destroySpace"))
+          return yield* refuse(
+            "saga_space",
+            "Use Archive saga or Destroy saga to review all member spaces.",
+          );
         const isLifecycle =
           operation.kind === "archiveSpace" ||
           operation.kind === "destroySpace" ||
@@ -1675,8 +1740,602 @@ export const make = Effect.fn("StaveOperations.make")(function* (
 
   // ── dispatch ────────────────────────────────────────────────
 
-  const notImplemented = (kind: StaveOperationKind) =>
-    refuse("invalid_arguments", `Operation '${kind}' is not implemented yet.`);
+  // Saga participant discovery is repeated after acquiring the complete lock set.
+  // A roster edit racing the first read therefore refuses before any mutation.
+  type SagaOperation = Extract<StaveOperation, { sagaRoot: string }>;
+  const withRoots = <A, E, R>(roots: ReadonlyArray<string>, body: Effect.Effect<A, E, R>) =>
+    Effect.forEach(roots, canonicalPath).pipe(
+      Effect.flatMap((canonical) =>
+        [...new Set(canonical)].sort().reduceRight((next, root) => withSpaceLock(root, next), body),
+      ),
+    );
+
+  const sagaCreateInput = (operation: StaveCreateSagaOperation, dryRun: boolean) =>
+    Effect.gen(function* () {
+      let spec: string | undefined;
+      if (operation.specText !== undefined) {
+        spec = yield* fileSystem.makeTempFileScoped({ prefix: "stave-saga-spec-", suffix: ".md" });
+        yield* fileSystem.writeFileString(spec, operation.specText);
+      }
+      return {
+        id: operation.sagaId,
+        spec,
+        dryRun,
+        references: operation.references.map((ref) =>
+          ref.ref === undefined ? ref.repo : `${ref.repo}:${ref.ref}`,
+        ),
+        memory: operation.memory.map((memory) => memory.spec),
+      };
+    }).pipe(Effect.mapError(asRefusal));
+
+  const runCreateSaga = (entry: RegistryEntry, operation: StaveCreateSagaOperation) =>
+    Effect.gen(function* () {
+      const { agentWorkDir } = yield* loadRoots;
+      const root = path.join(agentWorkDir, operation.sagaId);
+      return yield* withSpaceLock(
+        root,
+        Effect.gen(function* () {
+          const siblings = yield* fileSystem
+            .readDirectory(agentWorkDir)
+            .pipe(Effect.mapError(asRefusal));
+          if (siblings.includes(operation.sagaId))
+            return yield* refuse("space_exists", "The saga root already exists.");
+          if ((yield* canonicalPath(root)) !== path.resolve(root))
+            return yield* refuse(
+              "invalid_arguments",
+              "Symlink-aliased saga roots cannot be created.",
+            );
+          const shell = yield* snapshotQuery.getShellSnapshot().pipe(Effect.mapError(asRefusal));
+          for (const project of shell.projects) {
+            if ((yield* canonicalPath(project.workspaceRoot)) === root)
+              return yield* refuse("space_exists", "A project already uses the saga root.");
+          }
+          const created = yield* Effect.scoped(
+            Effect.gen(function* () {
+              const input = yield* sagaCreateInput(operation, false);
+              return yield* invoke(
+                entry,
+                "saga create",
+                buildStaveArgv.sagaCreate(input),
+                (stream) => cli.sagaCreate(input, stream),
+                notesUnlessPlan,
+              );
+            }),
+          );
+          if (isStaveDryRunPlan(created)) return yield* unexpectedPlan("saga create");
+          entry.partialSpace = {
+            spaceId: created.sagaId,
+            spacePath: created.spacePath,
+            manifestCreatedAt: created.manifest.createdAt,
+          };
+          const verified = yield* cli.spaceStatus(operation.sagaId);
+          if (
+            created.sagaId !== operation.sagaId ||
+            verified.spaceId !== operation.sagaId ||
+            path.resolve(created.spacePath) !== root ||
+            path.resolve(verified.spacePath) !== root ||
+            verified.manifest.kind !== "saga" ||
+            !sameManifestIncarnation(created.manifest.createdAt, verified.manifest.createdAt)
+          )
+            return yield* refuse(
+              "incarnation_mismatch",
+              "The created saga manifest changed before verification.",
+            );
+          yield* workspaceReader.invalidate(root);
+          const project = yield* phase(
+            entry,
+            "project.create",
+            undefined,
+            createProject(root, operation.title ?? operation.sagaId),
+          );
+          yield* invalidateReads;
+          return {
+            kind: "createSaga",
+            result: { ...created, ...project },
+          } satisfies OperationOutcome;
+        }),
+      );
+    });
+
+  const discoverSaga = (operation: SagaOperation) =>
+    Effect.gen(function* () {
+      const info = yield* checkSpace({
+        kind: "syncSpace",
+        workspaceRoot: operation.sagaRoot,
+        expectedManifestCreatedAt: operation.expectedManifestCreatedAt,
+        referencesOnly: false,
+      });
+      if (!info.isSaga) return yield* refuse("invalid_arguments", "This project is not a saga.");
+      if (info.state !== "live")
+        return yield* refuse("archived_project", "Restore the saga before editing it.");
+      const status = yield* cli.spaceStatus(info.spaceId);
+      if (
+        status.manifest.saga === undefined ||
+        status.manifest.id !== info.spaceId ||
+        info.createdAt === undefined ||
+        !sameManifestIncarnation(status.manifest.createdAt, info.createdAt)
+      )
+        return yield* refuse(
+          "incarnation_mismatch",
+          "The saga manifest changed during pre-flight.",
+        );
+      const { agentWorkDir } = yield* loadRoots;
+      const participants = [{ root: operation.sagaRoot, info }];
+      if (operation.kind === "sagaAdd" || operation.kind === "sagaRemove") {
+        const member = yield* checkSpace({
+          kind: "syncSpace",
+          workspaceRoot: operation.memberRoot,
+          expectedManifestCreatedAt: operation.expectedMemberCreatedAt,
+          referencesOnly: false,
+        });
+        if (member.isSaga || (operation.kind === "sagaAdd" && member.state !== "live"))
+          return yield* refuse("invalid_arguments", "Choose a live non-saga member space.");
+        const enrolled = status.manifest.saga?.members.find((row) => row.id === member.spaceId);
+        if (operation.kind === "sagaRemove" && enrolled === undefined)
+          return yield* refuse("invalid_arguments", "This space is not a member of this saga.");
+        if (
+          enrolled !== undefined &&
+          (enrolled.createdAt === undefined ||
+            member.createdAt === undefined ||
+            !sameManifestIncarnation(enrolled.createdAt, member.createdAt))
+        )
+          return yield* refuse(
+            "incarnation_mismatch",
+            "The roster refers to a different member incarnation.",
+          );
+        participants.push({ root: operation.memberRoot, info: member });
+      } else {
+        // Use manifests, not rounded list timestamps, to select archived members.
+        const archived = yield* cli.spaceList({ archived: true });
+        for (const member of status.manifest.saga?.members ?? []) {
+          if (member.createdAt === undefined)
+            return yield* refuse(
+              "incarnation_mismatch",
+              "A legacy saga member has no incarnation stamp.",
+            );
+          const liveRoot = path.join(agentWorkDir, member.id);
+          yield* workspaceReader.invalidate(liveRoot);
+          const live = yield* workspaceReader.load(liveRoot);
+          const matches: Array<{ root: string; info: typeof info }> = [];
+          if (Option.isSome(live)) {
+            if (
+              live.value.spaceId !== member.id ||
+              live.value.createdAt === undefined ||
+              !sameManifestIncarnation(member.createdAt, live.value.createdAt)
+            )
+              return yield* refuse(
+                "incarnation_mismatch",
+                `Member '${member.id}' has been replaced.`,
+              );
+            matches.push({ root: liveRoot, info: live.value });
+          } else if (yield* fileSystem.exists(liveRoot).pipe(Effect.mapError(asRefusal))) {
+            return yield* refuse("unreadable", `Cannot read member '${member.id}'.`);
+          }
+          for (const archive of archived) {
+            if (archive.error !== undefined)
+              return yield* refuse("unreadable", "An archive manifest is unreadable.");
+            const candidate = yield* freshInfo(archive.path);
+            if (
+              candidate.spaceId === member.id &&
+              candidate.createdAt !== undefined &&
+              sameManifestIncarnation(member.createdAt, candidate.createdAt)
+            )
+              matches.push({ root: archive.path, info: candidate });
+          }
+          if (matches.length > 1)
+            return yield* refuse(
+              "ambiguous_archive",
+              `Member '${member.id}' has duplicate incarnations.`,
+            );
+          const match = matches[0];
+          if (match !== undefined) {
+            yield* checkSpace({
+              kind: "syncSpace",
+              workspaceRoot: match.root,
+              expectedManifestCreatedAt: member.createdAt,
+              referencesOnly: false,
+            });
+            if (match.info.isSaga)
+              return yield* refuse("invalid_arguments", "Nested sagas cannot be members.");
+            participants.push(match);
+          } else {
+            if ((yield* canonicalPath(liveRoot)) !== path.resolve(liveRoot))
+              return yield* refuse(
+                "invalid_arguments",
+                "A missing member root is symlink-aliased.",
+              );
+            participants.push({
+              root: liveRoot,
+              info: {
+                spaceId: member.id,
+                createdAt: member.createdAt,
+                isSaga: false,
+                repos: [],
+                memories: [],
+                state: "live",
+              },
+            });
+          }
+        }
+      }
+      return { info, participants, roster: status.manifest.saga?.members ?? [] };
+    });
+
+  const withSaga = <A>(
+    operation: SagaOperation,
+    body: (
+      saga: Effect.Success<ReturnType<typeof discoverSaga>>,
+    ) => Effect.Effect<A, StaveError | StaveRefusalError>,
+  ) =>
+    Effect.gen(function* () {
+      const before = yield* discoverSaga(operation);
+      const roots = yield* Effect.forEach(before.participants, (member) =>
+        canonicalPath(member.root),
+      );
+      return yield* withRoots(
+        roots,
+        Effect.gen(function* () {
+          const fresh = yield* discoverSaga(operation);
+          const signature = (saga: typeof before) =>
+            stableStringify({
+              roster: saga.roster,
+              roots: saga.participants.map((member) => [member.root, member.info.createdAt]).sort(),
+            });
+          if (signature(before) !== signature(fresh))
+            return yield* refuse(
+              "incarnation_mismatch",
+              "The saga roster changed. Review it again before retrying.",
+            );
+          if (operation.kind === "sagaArchive" || operation.kind === "sagaDestroy") {
+            const shell = yield* snapshotQuery.getShellSnapshot().pipe(Effect.mapError(asRefusal));
+            for (const member of fresh.participants)
+              for (const project of shell.projects) {
+                if (
+                  project.workspaceRoot !== member.root &&
+                  (yield* isPathUnder(member.root, project.workspaceRoot))
+                )
+                  return yield* refuse(
+                    "nested_project",
+                    `Project '${project.title}' is nested inside saga participant '${member.info.spaceId}'.`,
+                  );
+              }
+          }
+          return yield* body(fresh);
+        }),
+      );
+    });
+
+  const runSagaOperation = (
+    entry: RegistryEntry,
+    operation: SagaOperation,
+    allowMemberTeardown = true,
+  ): Effect.Effect<OperationOutcome, StaveError | StaveRefusalError> =>
+    withSaga(operation, (saga) =>
+      Effect.gen(function* () {
+        if (!allowMemberTeardown && saga.roster.length > 0)
+          return yield* refuse(
+            "invalid_arguments",
+            "This partial saga now has members. Import it and review the full saga teardown before removing it.",
+          );
+        const id = saga.info.spaceId;
+        const mutate = Effect.gen(function* () {
+          switch (operation.kind) {
+            case "sagaAdd": {
+              const member = saga.participants[1]!;
+              const input = {
+                sagaId: id,
+                spaceId: member.info.spaceId,
+                after: operation.after,
+                clearAfter: operation.clearAfter,
+              };
+              const result = yield* invoke(
+                entry,
+                "saga add",
+                buildStaveArgv.sagaAdd(input),
+                (stream) => cli.sagaAdd(input, stream),
+                notesUnlessPlan,
+              );
+              if (isStaveDryRunPlan(result)) return yield* unexpectedPlan("saga add");
+              return { kind: operation.kind, result } satisfies OperationOutcome;
+            }
+            case "sagaRemove": {
+              const input = { sagaId: id, spaceId: saga.participants[1]!.info.spaceId };
+              const result = yield* invoke(
+                entry,
+                "saga remove",
+                buildStaveArgv.sagaRemove(input),
+                (stream) => cli.sagaRemove(input, stream),
+                notesUnlessPlan,
+              );
+              if (isStaveDryRunPlan(result)) return yield* unexpectedPlan("saga remove");
+              return { kind: operation.kind, result } satisfies OperationOutcome;
+            }
+            case "sagaSync": {
+              const input = { id };
+              const result = yield* invoke(
+                entry,
+                "saga sync",
+                buildStaveArgv.sagaSync(input),
+                (stream) => cli.sagaSync(input, stream),
+              );
+              if (isStaveDryRunPlan(result)) return yield* unexpectedPlan("saga sync");
+              return { kind: operation.kind, result } satisfies OperationOutcome;
+            }
+            case "sagaArchive": {
+              const input = { id, force: operation.force, memory: operation.memory };
+              const result = yield* invoke(
+                entry,
+                "saga archive",
+                buildStaveArgv.sagaArchive(input),
+                (stream) => cli.sagaArchive(input, stream),
+                notesUnlessPlan,
+              );
+              if (isStaveDryRunPlan(result)) return yield* unexpectedPlan("saga archive");
+              return { kind: operation.kind, result } satisfies OperationOutcome;
+            }
+            case "sagaDestroy": {
+              const input = { id, force: operation.force, memory: operation.memory };
+              const result = yield* invoke(
+                entry,
+                "saga destroy",
+                buildStaveArgv.sagaDestroy(input),
+                (stream) => cli.sagaDestroy(input, stream),
+                notesUnlessPlan,
+              );
+              if (isStaveDryRunPlan(result)) return yield* unexpectedPlan("saga destroy");
+              return { kind: operation.kind, result } satisfies OperationOutcome;
+            }
+          }
+        });
+        if (operation.kind !== "sagaArchive" && operation.kind !== "sagaDestroy")
+          return yield* mutate.pipe(
+            Effect.ensuring(
+              Effect.forEach(saga.participants, (member) => afterMutation(member.root), {
+                discard: true,
+              }),
+            ),
+          );
+        const leases: Array<LifecycleRow> = [];
+        const patch = (
+          row: LifecycleRow,
+          changes: Parameters<typeof lifecycle.updateDisposition>[0]["patch"],
+        ) =>
+          Effect.gen(function* () {
+            const updated = yield* lifecycle
+              .updateDisposition({
+                projectId: row.projectId,
+                leaseEpoch: row.leaseEpoch,
+                ownerToken: entry.operationId,
+                now: yield* nowIso,
+                patch: changes,
+              })
+              .pipe(Effect.mapError(asRefusal));
+            if (!updated)
+              return yield* refuse("space_transitioning", "A saga participant lease was lost.");
+          });
+        const renew = Effect.forever(
+          Effect.gen(function* () {
+            yield* Effect.sleep(Duration.seconds(20));
+            for (const row of leases) {
+              const now = yield* nowIso;
+              const ok = yield* lifecycle
+                .renewLease({
+                  projectId: row.projectId,
+                  leaseEpoch: row.leaseEpoch,
+                  ownerToken: entry.operationId,
+                  now,
+                  leaseUntil: DateTime.formatIso(
+                    DateTime.add(DateTime.makeUnsafe(now), { minutes: 1 }),
+                  ),
+                })
+                .pipe(Effect.mapError(asRefusal));
+              if (!ok)
+                return yield* refuse(
+                  "space_transitioning",
+                  "A saga participant lease was lost; teardown stopped.",
+                );
+            }
+          }),
+        );
+        const body = Effect.gen(function* () {
+          for (const member of [...saga.participants].sort((a, b) =>
+            a.root.localeCompare(b.root),
+          )) {
+            const project = yield* snapshotQuery
+              .getActiveProjectByWorkspaceRoot(member.root)
+              .pipe(Effect.mapError(asRefusal));
+            if (Option.isNone(project)) continue;
+            const now = yield* nowIso;
+            const row = yield* lifecycle
+              .ensure({
+                projectId: project.value.id,
+                workspaceRoot: member.root,
+                spaceId: member.info.spaceId,
+                manifestCreatedAt: member.info.createdAt ?? null,
+                now,
+              })
+              .pipe(Effect.mapError(asRefusal));
+            if (
+              row.spaceId !== member.info.spaceId ||
+              row.manifestCreatedAt === null ||
+              member.info.createdAt === undefined ||
+              !sameManifestIncarnation(row.manifestCreatedAt, member.info.createdAt)
+            )
+              return yield* refuse(
+                "incarnation_mismatch",
+                "A participant lifecycle row belongs to an earlier incarnation.",
+              );
+            const acquired = yield* lifecycle
+              .acquireLease({
+                projectId: row.projectId,
+                expectedEpoch: row.leaseEpoch,
+                ownerToken: entry.operationId,
+                now,
+                leaseUntil: DateTime.formatIso(
+                  DateTime.add(DateTime.makeUnsafe(now), { minutes: 1 }),
+                ),
+              })
+              .pipe(Effect.mapError(asRefusal));
+            if (Option.isNone(acquired))
+              return yield* refuse(
+                "space_transitioning",
+                "Another operation owns a saga participant.",
+              );
+            leases.push(acquired.value);
+          }
+          // All rows are durable and fenced before the first session is stopped.
+          for (const row of leases)
+            yield* patch(row, {
+              disposition: operation.kind === "sagaArchive" ? "archiving" : "destroying",
+              refusalCode: null,
+              refusalMessage: null,
+            });
+          const shell = yield* snapshotQuery.getShellSnapshot().pipe(Effect.mapError(asRefusal));
+          const sessions = yield* providers.listSessions();
+          if (
+            providers.stopSessionsUnder === undefined ||
+            terminals.closeSessionsUnder === undefined
+          )
+            return yield* refuse("unknown", "Session quiescence is unavailable.");
+          const ownedThreads = shell.threads.filter((thread) =>
+            leases.some((row) => row.projectId === thread.projectId),
+          );
+          const interruptIds = new Set(
+            ownedThreads
+              .filter((thread) => thread.session?.activeTurnId != null)
+              .map((thread) => thread.id),
+          );
+          for (const session of sessions) {
+            if (session.cwd !== undefined && session.activeTurnId != null) {
+              for (const member of saga.participants)
+                if (yield* isPathUnder(member.root, session.cwd))
+                  interruptIds.add(session.threadId);
+            }
+          }
+          for (const threadId of interruptIds) {
+            const command = yield* normalizeDispatchCommand({
+              type: "thread.turn.interrupt",
+              commandId: CommandId.make(`server:stave:interrupt:${NodeCrypto.randomUUID()}`),
+              threadId,
+              createdAt: yield* nowIso,
+            }).pipe(Effect.provide(normalizerContext), Effect.mapError(asRefusal));
+            yield* engine.dispatch(command).pipe(Effect.mapError(asRefusal));
+          }
+          for (const session of sessions)
+            if (
+              session.cwd === undefined &&
+              ownedThreads.some((thread) => thread.id === session.threadId)
+            )
+              yield* providers
+                .stopSession({ threadId: session.threadId })
+                .pipe(Effect.mapError(asRefusal));
+          for (const member of saga.participants) {
+            yield* providers.stopSessionsUnder(member.root).pipe(Effect.mapError(asRefusal));
+            yield* terminals.closeSessionsUnder(member.root).pipe(Effect.mapError(asRefusal));
+          }
+          const final = yield* discoverSaga(operation);
+          if (
+            stableStringify(final.roster) !== stableStringify(saga.roster) ||
+            stableStringify(
+              final.participants.map((member) => [member.root, member.info.createdAt]),
+            ) !==
+              stableStringify(
+                saga.participants.map((member) => [member.root, member.info.createdAt]),
+              )
+          )
+            return yield* refuse(
+              "incarnation_mismatch",
+              "The saga changed while sessions were stopping.",
+            );
+          const finalShell = yield* snapshotQuery
+            .getShellSnapshot()
+            .pipe(Effect.mapError(asRefusal));
+          for (const member of final.participants)
+            for (const project of finalShell.projects) {
+              if (
+                project.workspaceRoot !== member.root &&
+                (yield* isPathUnder(member.root, project.workspaceRoot))
+              )
+                return yield* refuse(
+                  "nested_project",
+                  `Project '${project.title}' is nested inside saga participant '${member.info.spaceId}'.`,
+                );
+            }
+          return yield* mutate;
+        });
+        const recovered = Effect.gen(function* () {
+          const result = yield* Effect.exit(body);
+          if (Exit.isFailure(result) && Cause.hasInterruptsOnly(result.cause))
+            return yield* Effect.failCause(result.cause);
+          const failures: Array<{ projectId: string; message: string }> = [];
+          for (const row of leases) {
+            const reconcile = yield* Effect.exit(
+              Effect.gen(function* () {
+                const changes = yield* reconcileRow(row);
+                yield* patch(row, changes);
+                if (Exit.isFailure(result)) {
+                  const error = toOperationError(result.cause);
+                  yield* patch(row, {
+                    refusalCode: error.code,
+                    refusalMessage: stableStringify({
+                      message: error.message,
+                      details: error.details,
+                    }),
+                    ...(changes.disposition === "live" ? { disposition: "refused" as const } : {}),
+                  });
+                }
+              }),
+            );
+            if (Exit.isFailure(reconcile)) {
+              if (Cause.hasInterruptsOnly(reconcile.cause))
+                return yield* Effect.failCause(reconcile.cause);
+              const error = toOperationError(reconcile.cause);
+              failures.push({ projectId: row.projectId, message: error.message });
+              yield* patch(row, {
+                disposition: "refused",
+                refusalCode: error.code,
+                refusalMessage: error.message,
+              }).pipe(Effect.ignore);
+            }
+          }
+          if (Exit.isFailure(result)) {
+            const error = toOperationError(result.cause);
+            return yield* refuse(error.code, error.message, {
+              ...error.details,
+              reconciliationFailures: failures,
+            });
+          }
+          if (failures.length > 0)
+            return yield* refuse(
+              "unreadable",
+              "Saga teardown finished but some projects need reconciliation.",
+              { reconciliationFailures: failures, result: result.value },
+            );
+          return result.value;
+        });
+        return yield* Effect.raceFirst(recovered, renew).pipe(
+          Effect.ensuring(
+            Effect.gen(function* () {
+              for (const member of saga.participants)
+                yield* afterMutation(member.root).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning("stave: saga refresh failed", { root: member.root, cause }),
+                  ),
+                );
+              for (const row of leases)
+                yield* lifecycle
+                  .releaseLease({
+                    projectId: row.projectId,
+                    leaseEpoch: row.leaseEpoch,
+                    ownerToken: entry.operationId,
+                    now: yield* nowIso,
+                  })
+                  .pipe(Effect.ignore);
+            }),
+          ),
+        );
+      }),
+    );
 
   const runOperationBody = (
     entry: RegistryEntry,
@@ -1691,7 +2350,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
         return runSetup(entry, operation);
       case "registerRepo":
         return runRegisterRepo(entry, operation);
-      // Space operations share lifecycle guards; saga orchestration follows in Phase 5.
+      // Space operations share lifecycle guards.
       case "addRepo":
       case "removeRepo":
       case "syncSpace":
@@ -1703,12 +2362,13 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       case "memoryDetach":
         return runSpaceOperation(entry, operation);
       case "createSaga":
+        return runCreateSaga(entry, operation);
       case "sagaAdd":
       case "sagaRemove":
       case "sagaSync":
       case "sagaArchive":
       case "sagaDestroy":
-        return notImplemented(operation.kind);
+        return runSagaOperation(entry, operation);
     }
   };
 
@@ -1859,13 +2519,38 @@ export const make = Effect.fn("StaveOperations.make")(function* (
               }),
           ),
           Effect.flatMap(({ agentWorkDir }) =>
-            dryRun({
-              kind: "destroySpace",
-              workspaceRoot: path.join(agentWorkDir, operation.spaceId),
-              expectedManifestCreatedAt: operation.expectedManifestCreatedAt,
-              sagaRemoveConfirmed: operation.sagaRemoveConfirmed,
-              force: operation.force === true,
-              memory: "destroy",
+            Effect.gen(function* () {
+              const root = path.join(agentWorkDir, operation.spaceId);
+              yield* workspaceReader.invalidate(root);
+              const info = yield* workspaceReader.load(root);
+              if (Option.isSome(info) && info.value.isSaga) {
+                const status = yield* cli.spaceStatus(operation.spaceId);
+                if ((status.manifest.saga?.members.length ?? 0) > 0)
+                  return yield* new StaveError({
+                    code: "invalid_arguments",
+                    message:
+                      "This partial saga now has members. Import it and review the full saga teardown before removing it.",
+                    details: null,
+                    exitCode: null,
+                    stderrTail: null,
+                    verb: "saga destroy",
+                  });
+                return yield* dryRun({
+                  kind: "sagaDestroy",
+                  sagaRoot: root,
+                  expectedManifestCreatedAt: operation.expectedManifestCreatedAt,
+                  force: operation.force === true,
+                  memory: "destroy",
+                });
+              }
+              return yield* dryRun({
+                kind: "destroySpace",
+                workspaceRoot: root,
+                expectedManifestCreatedAt: operation.expectedManifestCreatedAt,
+                sagaRemoveConfirmed: operation.sagaRemoveConfirmed,
+                force: operation.force === true,
+                memory: "destroy",
+              });
             }),
           ),
         );
@@ -1885,6 +2570,89 @@ export const make = Effect.fn("StaveOperations.make")(function* (
             ),
             Effect.flatMap((input) => cli.spaceCreate(input)),
             Effect.flatMap((outcome) => expectPlan("space create", outcome)),
+          ),
+        );
+      case "createSaga":
+        return Effect.scoped(
+          sagaCreateInput(operation, true).pipe(
+            Effect.flatMap((input) => cli.sagaCreate(input)),
+            Effect.flatMap((value) => expectPlan("saga create", value)),
+            Effect.mapError((error) =>
+              error._tag === "StaveError"
+                ? error
+                : new StaveError({
+                    code: error.code,
+                    message: error.message,
+                    details: error.details,
+                    exitCode: null,
+                    stderrTail: null,
+                    verb: "saga create",
+                  }),
+            ),
+          ),
+        );
+      case "sagaAdd":
+      case "sagaRemove":
+      case "sagaSync":
+      case "sagaArchive":
+      case "sagaDestroy":
+        return withSaga(operation, (saga) =>
+          Effect.gen(function* () {
+            switch (operation.kind) {
+              case "sagaAdd":
+                return yield* cli
+                  .sagaAdd({
+                    sagaId: saga.info.spaceId,
+                    spaceId: saga.participants[1]!.info.spaceId,
+                    after: operation.after,
+                    clearAfter: operation.clearAfter,
+                    dryRun: true,
+                  })
+                  .pipe(Effect.flatMap((value) => expectPlan("saga add", value)));
+              case "sagaRemove":
+                return yield* cli
+                  .sagaRemove({
+                    sagaId: saga.info.spaceId,
+                    spaceId: saga.participants[1]!.info.spaceId,
+                    dryRun: true,
+                  })
+                  .pipe(Effect.flatMap((value) => expectPlan("saga remove", value)));
+              case "sagaSync":
+                return yield* cli
+                  .sagaSync({ id: saga.info.spaceId, dryRun: true })
+                  .pipe(Effect.flatMap((value) => expectPlan("saga sync", value)));
+              case "sagaArchive":
+                return yield* cli
+                  .sagaArchive({
+                    id: saga.info.spaceId,
+                    memory: operation.memory,
+                    force: operation.force,
+                    dryRun: true,
+                  })
+                  .pipe(Effect.flatMap((value) => expectPlan("saga archive", value)));
+              case "sagaDestroy":
+                return yield* cli
+                  .sagaDestroy({
+                    id: saga.info.spaceId,
+                    memory: operation.memory,
+                    force: operation.force,
+                    dryRun: true,
+                  })
+                  .pipe(Effect.flatMap((value) => expectPlan("saga destroy", value)));
+            }
+          }),
+        ).pipe(
+          Effect.mapError((error) =>
+            error._tag === "StaveError"
+              ? error
+              : new StaveError({
+                  code: error.code,
+                  message: error.message,
+                  details: error.details,
+                  exitCode: null,
+                  stderrTail: null,
+                  verb: STAVE_OPERATION_VERB[operation.kind],
+                }),
           ),
         );
       case "registerRepo":
@@ -1920,6 +2688,18 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                   }),
               ),
             );
+            if (
+              info.isSaga &&
+              (operation.kind === "archiveSpace" || operation.kind === "destroySpace")
+            )
+              return yield* new StaveError({
+                code: "saga_space",
+                message: "Use Archive saga or Destroy saga to review all member spaces.",
+                details: null,
+                exitCode: null,
+                stderrTail: null,
+                verb: STAVE_OPERATION_VERB[operation.kind],
+              });
             switch (operation.kind) {
               case "addRepo":
                 return yield* cli

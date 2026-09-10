@@ -1,5 +1,6 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useMemo } from "react";
+import { subscribeStaveMutation } from "../../staveMutation";
+import { useEffect, useMemo } from "react";
 
 import { useEnvironmentQuery } from "../../state/query";
 import { staveMemoryProviders, staveRepos, staveSagas, staveSpaces } from "../../state/stave";
@@ -36,6 +37,19 @@ export function useStaveWizardData(environmentId: EnvironmentId | null): StaveWi
   );
   const providers = useEnvironmentQuery(
     environmentId === null ? null : staveMemoryProviders({ environmentId, input: {} }),
+  );
+
+  const refreshSpaces = spaces.refresh;
+  const refreshSagas = sagas.refresh;
+  useEffect(
+    () =>
+      subscribeStaveMutation((changed) => {
+        if (changed === environmentId) {
+          refreshSpaces();
+          refreshSagas();
+        }
+      }),
+    [environmentId, refreshSpaces, refreshSagas],
   );
 
   const repoRows = repos.data ?? EMPTY;

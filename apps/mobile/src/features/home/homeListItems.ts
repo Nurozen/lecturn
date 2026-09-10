@@ -1,3 +1,9 @@
+import {
+  buildSagaProjectTree,
+  derivePhysicalProjectKey,
+  type SagaProjectIndexEntry,
+} from "@t3tools/client-runtime/state/project-grouping";
+import type { StaveSagaMemberStatus } from "@t3tools/contracts";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
@@ -25,6 +31,8 @@ export interface HomeHeaderListItem {
   readonly group: HomeThreadGroup;
   readonly collapsed: boolean;
   readonly isFirst: boolean;
+  readonly depth?: number;
+  readonly memberStatus?: StaveSagaMemberStatus | null;
 }
 
 export interface HomeThreadListItem {
@@ -92,7 +100,9 @@ export function homeListItemsAreEqual(previous: HomeListItem, item: HomeListItem
         previous.type === "header" &&
         previous.group === item.group &&
         previous.collapsed === item.collapsed &&
-        previous.isFirst === item.isFirst
+        previous.isFirst === item.isFirst &&
+        previous.depth === item.depth &&
+        previous.memberStatus === item.memberStatus
       );
     case "pending-task":
       return (
@@ -123,11 +133,42 @@ export function buildHomeListLayout(input: {
    * When searching, pagination is suspended so every match stays visible.
    */
   readonly showAllThreads?: boolean;
+  readonly sagaIndex?: ReadonlyArray<SagaProjectIndexEntry>;
 }): HomeListLayout {
   const items: HomeListItem[] = [];
   const stickyHeaderIndices: number[] = [];
 
-  for (const [groupIndex, group] of input.groups.entries()) {
+  const groupsByKey = new Map(input.groups.map((group) => [group.key, group]));
+  const tree = buildSagaProjectTree(
+    input.groups.map((group) => ({
+      key: group.key,
+      label: group.title,
+      representative: group.representative,
+      members: group.projects.map((project) => ({
+        physicalProjectKey: derivePhysicalProjectKey(project),
+        project,
+      })),
+      memberProjectRefs: group.projects.map((project) => ({
+        environmentId: project.environmentId,
+        projectId: project.id,
+      })),
+    })),
+    input.sagaIndex ?? [],
+  );
+  const ordered = tree.flatMap((node) => {
+    const collapsed = input.displayStates.get(node.group.key)?.collapsed && !input.showAllThreads;
+    return [
+      { group: groupsByKey.get(node.group.key)!, depth: 0, memberStatus: node.memberStatus },
+      ...(collapsed
+        ? []
+        : node.children.map((child) => ({
+            group: groupsByKey.get(child.group.key)!,
+            depth: 1,
+            memberStatus: child.memberStatus,
+          }))),
+    ];
+  });
+  for (const [groupIndex, { group, depth, memberStatus }] of ordered.entries()) {
     const display = input.displayStates.get(group.key) ?? DEFAULT_GROUP_DISPLAY_STATE;
     const collapsed = display.collapsed && input.showAllThreads !== true;
 
@@ -138,6 +179,8 @@ export function buildHomeListLayout(input: {
       group,
       collapsed,
       isFirst: groupIndex === 0,
+      depth,
+      memberStatus,
     });
 
     if (collapsed) {

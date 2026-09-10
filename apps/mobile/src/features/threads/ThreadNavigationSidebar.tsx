@@ -1,3 +1,5 @@
+import { SagaSidebarRoster } from "./SagaSidebarRoster";
+import { useMobileSagaIndex, useSidebarNestSagas } from "../../state/stave";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import type {
   EnvironmentProject,
@@ -165,6 +167,7 @@ function ThreadNavigationSidebarPane(
     forkThread,
   } = useThreadListActions();
   const threadListV2Enabled = useThreadListV2Enabled();
+  const nestSagas = useSidebarNestSagas();
   const pendingTasks = usePendingNewTasks();
   const { openPendingTask, confirmDeletePendingTask } = usePendingTaskListActions();
   const environments = useMemo(
@@ -303,6 +306,7 @@ function ThreadNavigationSidebarPane(
   const groups = useMemo(
     () =>
       buildHomeThreadGroups({
+        includeStaveProjects: nestSagas,
         projects: scopedProjects,
         threads: scopedThreads,
         pendingTasks: scopedPendingTasks,
@@ -314,6 +318,7 @@ function ThreadNavigationSidebarPane(
         projectGroupingMode: options.projectGroupingMode,
       }),
     [
+      nestSagas,
       matchedThreadKeys,
       options,
       props.searchQuery,
@@ -335,6 +340,7 @@ function ThreadNavigationSidebarPane(
       return next;
     });
   }, []);
+  const sagaIndex = useMobileSagaIndex(scopedProjects, nestSagas && props.visible);
   const hasSearchQuery = props.searchQuery.trim().length > 0;
   const listLayout = useMemo(
     () =>
@@ -342,8 +348,9 @@ function ThreadNavigationSidebarPane(
         groups,
         displayStates: groupDisplayStates,
         showAllThreads: hasSearchQuery,
+        sagaIndex,
       }),
-    [groups, groupDisplayStates, hasSearchQuery],
+    [groups, groupDisplayStates, hasSearchQuery, sagaIndex],
   );
   const projectCwdByKey = useMemo(() => {
     const map = new Map<string, string>();
@@ -979,6 +986,8 @@ function ThreadNavigationSidebarPane(
               variant="sidebar"
               collapsed={item.collapsed}
               isFirst={item.isFirst}
+              depth={item.depth}
+              memberStatus={item.memberStatus}
               groupKey={item.group.key}
               onGroupAction={updateGroupDisplay}
               // Same gating as the compact Home list: aggregated groups have no
@@ -1172,6 +1181,18 @@ function ThreadNavigationSidebarPane(
     </Text>
   );
 
+  const sagaRoster =
+    threadListV2Enabled && nestSagas ? (
+      <SagaSidebarRoster
+        projects={scopedProjects}
+        threads={scopedThreads}
+        index={sagaIndex}
+        groupingMode={options.projectGroupingMode}
+        onNewThread={props.onNewThreadInProject}
+        onSelectThread={props.onSelectThread}
+      />
+    ) : null;
+
   if (props.nativeChrome) {
     return (
       <>
@@ -1213,6 +1234,7 @@ function ThreadNavigationSidebarPane(
             <GestureDetector gesture={sidebarScrollGesture}>
               <LegendList
                 data={listItems}
+                ListHeaderComponent={sagaRoster}
                 drawDistance={500}
                 estimatedItemSize={64}
                 extraData={listExtraData}
@@ -1259,6 +1281,7 @@ function ThreadNavigationSidebarPane(
           <GestureDetector gesture={sidebarScrollGesture}>
             <LegendList
               data={listItems}
+              ListHeaderComponent={sagaRoster}
               drawDistance={500}
               estimatedItemSize={64}
               extraData={listExtraData}

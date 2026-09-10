@@ -47,6 +47,7 @@ describe("RPC authorization scopes", () => {
       WS_METHODS.staveListRepos,
       WS_METHODS.staveListSpaces,
       WS_METHODS.staveListSagas,
+      WS_METHODS.staveSagaStatus,
       WS_METHODS.staveMemoryProviders,
       WS_METHODS.staveDryRun,
       WS_METHODS.staveObserveOperation,

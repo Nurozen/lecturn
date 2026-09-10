@@ -10,6 +10,7 @@ export const scanStaveMembership = Effect.fn("scanStaveMembership")(function* (s
     let membership: StaveSagaMembership | null = null;
     for (const saga of sagas) {
       if (saga.error) return { sagaMembership: null, membershipUnknown: true };
+      if (!saga.isSaga) continue;
       const status = yield* cli.sagaStatus(saga.logicalId ?? saga.id);
       if (!status.members.some((member) => member.id === spaceId)) continue;
       if (membership !== null) return { sagaMembership: null, membershipUnknown: true };

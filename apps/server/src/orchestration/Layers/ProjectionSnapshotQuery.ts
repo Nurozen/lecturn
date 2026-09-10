@@ -70,6 +70,7 @@ import {
 } from "../threadDetailCursor.ts";
 import { projectActivityPayload } from "../ActivityPayloadProjection.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
+import { StaveDisplayMembership } from "../../stave/StaveDisplayMembership.ts";
 import * as StaveWorkspaceReader from "../../stave/StaveWorkspaceReader.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import {
@@ -493,6 +494,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
   );
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
   const staveWorkspaceReader = yield* StaveWorkspaceReader.StaveWorkspaceReader;
+  const displayMembership = yield* Effect.serviceOption(StaveDisplayMembership);
   const derivedFieldsResolutionConcurrency = 4;
 
   /** Resolve identity and Stave info for one root; must run outside SQL transactions. */
@@ -503,11 +505,19 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       [repositoryIdentityResolver.resolve(workspaceRoot), staveWorkspaceReader.load(workspaceRoot)],
       { concurrency: 2 },
     ).pipe(
-      Effect.map(([repositoryIdentity, stave]): ProjectDerivedFields => ({
-        repositoryIdentity,
-        stave: Option.getOrNull(stave),
-        notice: null,
-      })),
+      Effect.flatMap(([repositoryIdentity, stave]) =>
+        Effect.gen(function* (): Effect.fn.Return<ProjectDerivedFields> {
+          const info = Option.getOrNull(stave);
+          return {
+            repositoryIdentity,
+            stave:
+              info !== null && Option.isSome(displayMembership)
+                ? yield* displayMembership.value.enrich(workspaceRoot, info)
+                : info,
+            notice: null,
+          };
+        }),
+      ),
     ),
   );
 

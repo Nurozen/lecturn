@@ -4,6 +4,7 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import type { EnvironmentId, StaveOperation, StaveSagaMembership } from "@t3tools/contracts";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { notifyStaveMutation } from "../../staveMutation";
 import { randomUUID } from "../../lib/utils";
 import { staveDryRun, staveSpaceStatusRead } from "../../state/stave";
 import { staveOperations } from "../../state/staveOperations";
@@ -95,11 +96,15 @@ export function StaveConfirmDialog({
   }, [environmentId, operation, key, dryRun, started]);
 
   useEffect(() => {
-    if (state.status === "finished" && notified.current !== operationId) {
+    if (
+      (state.status === "finished" || state.status === "failed") &&
+      notified.current !== operationId
+    ) {
       notified.current = operationId;
-      onFinished();
+      notifyStaveMutation(environmentId);
+      if (state.status === "finished") onFinished();
     }
-  }, [state.status, operationId, onFinished]);
+  }, [state.status, operationId, onFinished, environmentId]);
 
   const currentPreview = preview?.key === key ? preview : null;
   const busy =

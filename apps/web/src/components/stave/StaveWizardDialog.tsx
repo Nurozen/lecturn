@@ -3,6 +3,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
+import { notifyStaveMutation } from "../../staveMutation";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { openExistingProjectAndThread } from "../../lib/addProject";
 import { cn, randomUUID } from "../../lib/utils";
@@ -181,6 +182,7 @@ function SpaceWizard(props: {
   useEffect(() => {
     if (result === undefined || result.kind !== "createSpace" || openedRef.current) return;
     openedRef.current = true;
+    notifyStaveMutation(environmentId);
     void openExistingProjectAndThread({
       environmentId,
       projectId: result.result.projectId,

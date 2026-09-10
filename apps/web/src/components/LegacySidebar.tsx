@@ -1,3 +1,17 @@
+import { useSagaSidebarTree } from "./stave/useSagaSidebarTree";
+import { flattenSagaSidebarTree, staveSagaMemberBadges } from "./stave/staveSaga.logic";
+import { StaveConfirmDialog } from "./stave/StaveConfirmDialog";
+import { openStaveWizard } from "../staveWizard";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { serverEnvironment } from "../state/server";
+import { staveStatus } from "../state/stave";
+import { AsyncResult } from "effect/unstable/reactivity";
+import * as Option from "effect/Option";
+import {
+  environmentSupportsStave,
+  staveFeatureAvailable,
+} from "@t3tools/client-runtime/state/stave";
+import type { StaveOperation } from "@t3tools/contracts";
 import { prepareStaveProjectDeletion } from "../lib/staveProjectDeletion";
 import {
   ArchiveIcon,
@@ -1167,6 +1181,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     (settings) => settings.confirmThreadArchive,
   );
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
+  const [sagaConfirmation, setSagaConfirmation] = useState<{
+    member: SidebarProjectGroupMember;
+    operation: StaveOperation;
+  } | null>(null);
   const deleteProject = useAtomCommand(projectEnvironment.delete, {
     reportFailure: false,
   });
@@ -1743,8 +1761,59 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           };
         };
 
+        const sagaItems: ContextMenuItem<string>[] = project.memberProjects.flatMap((member) => {
+          const config = appAtomRegistry.get(
+            serverEnvironment.configValueAtom(member.environmentId),
+          );
+          if (
+            !member.stave?.isSaga ||
+            !environmentSupportsStave(config) ||
+            !config?.settings.stave.enabled
+          )
+            return [];
+          const suffix =
+            project.memberProjects.length > 1
+              ? ` (${member.environmentLabel ?? member.workspaceRoot})`
+              : "";
+          const addId = `stave-add:${member.physicalProjectKey}`;
+          const archiveId = `stave-archive:${member.physicalProjectKey}`;
+          const status = Option.getOrNull(
+            AsyncResult.value(
+              appAtomRegistry.get(staveStatus({ environmentId: member.environmentId, input: {} })),
+            ),
+          );
+          const disabled =
+            !staveFeatureAvailable({ config, settings: config.settings, status }) ||
+            !member.stave.createdAt ||
+            member.stave.state === "archived";
+          actionHandlers.set(addId, () =>
+            openStaveWizard({
+              environmentId: member.environmentId,
+              kind: "space",
+              saga: { root: member.workspaceRoot },
+            }),
+          );
+          actionHandlers.set(archiveId, () => {
+            if (member.stave?.createdAt)
+              setSagaConfirmation({
+                member,
+                operation: {
+                  kind: "sagaArchive",
+                  sagaRoot: member.workspaceRoot,
+                  expectedManifestCreatedAt: member.stave.createdAt,
+                  force: false,
+                  memory: "keep",
+                },
+              });
+          });
+          return [
+            { id: addId, label: `Add member${suffix}`, disabled },
+            { id: archiveId, label: `Archive saga${suffix}`, disabled },
+          ];
+        });
         const clicked = await api.contextMenu.show(
           [
+            ...sagaItems,
             buildTargetedItem("rename", "Rename"),
             buildTargetedItem("grouping", "Group into..."),
             buildTargetedItem("copy-path", "Copy Path"),
@@ -2511,6 +2580,16 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         collapseThreadListForProject={collapseThreadListForProject}
       />
 
+      {sagaConfirmation ? (
+        <StaveConfirmDialog
+          environmentId={sagaConfirmation.member.environmentId}
+          operation={sagaConfirmation.operation}
+          title="Archive saga"
+          onClose={() => setSagaConfirmation(null)}
+          onFinished={() => {}}
+        />
+      ) : null}
+
       <Dialog
         open={projectRenameTarget !== null}
         onOpenChange={(open) => {
@@ -2629,14 +2708,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         </DialogPopup>
       </Dialog>
     </>
-  );
-});
-
-const SidebarProjectListRow = memo(function SidebarProjectListRow(props: SidebarProjectItemProps) {
-  return (
-    <SidebarMenuItem className="rounded-md">
-      <SidebarProjectItem {...props} />
-    </SidebarMenuItem>
   );
 });
 
@@ -2900,6 +2971,8 @@ interface SidebarProjectsContentProps {
   archiveThread: ReturnType<typeof useThreadActions>["archiveThread"];
   deleteThread: ReturnType<typeof useThreadActions>["deleteThread"];
   sortedProjects: readonly SidebarProjectSnapshot[];
+  nestedProjectKeys: ReadonlySet<string>;
+  sagaBadgesByProject: ReadonlyMap<string, readonly string[]>;
   expandedThreadListsByProject: ReadonlySet<string>;
   activeRouteProjectKey: string | null;
   routeThreadKey: string | null;
@@ -2942,6 +3015,8 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     archiveThread,
     deleteThread,
     sortedProjects,
+    nestedProjectKeys,
+    sagaBadgesByProject,
     expandedThreadListsByProject,
     activeRouteProjectKey,
     routeThreadKey,
@@ -2978,6 +3053,45 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     [updateSettings],
   );
 
+  const renderProject = (
+    project: SidebarProjectSnapshot,
+    dragHandleProps: SortableProjectHandleProps | null,
+  ) => (
+    <div
+      className={
+        nestedProjectKeys.has(project.projectKey)
+          ? "ml-5 border-l border-border/60 pl-1"
+          : undefined
+      }
+    >
+      {sagaBadgesByProject.get(project.projectKey) ? (
+        <p className="px-2 pt-1 text-[10px] text-muted-foreground">
+          {sagaBadgesByProject.get(project.projectKey)?.join(" · ")}
+        </p>
+      ) : null}
+      <SidebarProjectItem
+        project={project}
+        isThreadListExpanded={expandedThreadListsByProject.has(project.projectKey)}
+        activeRouteThreadKey={activeRouteProjectKey === project.projectKey ? routeThreadKey : null}
+        openPullRequestsInRightPanel={openPullRequestsInRightPanel}
+        newThreadShortcutLabel={newThreadShortcutLabel}
+        handleNewThread={handleNewThread}
+        archiveThread={archiveThread}
+        deleteThread={deleteThread}
+        threadJumpLabelByKey={threadJumpLabelByKey}
+        attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
+        expandThreadListForProject={expandThreadListForProject}
+        collapseThreadListForProject={collapseThreadListForProject}
+        dragInProgressRef={dragInProgressRef}
+        suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
+        suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
+        isManualProjectSorting={
+          isManualProjectSorting && !nestedProjectKeys.has(project.projectKey)
+        }
+        dragHandleProps={dragHandleProps}
+      />
+    </div>
+  );
   return (
     <SidebarContent
       className="gap-0"
@@ -3075,66 +3189,31 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
           >
             <SidebarMenu>
               <SortableContext
-                items={sortedProjects.map((project) => project.projectKey)}
+                items={sortedProjects
+                  .filter((project) => !nestedProjectKeys.has(project.projectKey))
+                  .map((project) => project.projectKey)}
                 strategy={verticalListSortingStrategy}
               >
-                {sortedProjects.map((project) => (
-                  <SortableProjectItem key={project.projectKey} projectId={project.projectKey}>
-                    {(dragHandleProps) => (
-                      <SidebarProjectItem
-                        project={project}
-                        isThreadListExpanded={expandedThreadListsByProject.has(project.projectKey)}
-                        activeRouteThreadKey={
-                          activeRouteProjectKey === project.projectKey ? routeThreadKey : null
-                        }
-                        openPullRequestsInRightPanel={openPullRequestsInRightPanel}
-                        newThreadShortcutLabel={newThreadShortcutLabel}
-                        handleNewThread={handleNewThread}
-                        archiveThread={archiveThread}
-                        deleteThread={deleteThread}
-                        threadJumpLabelByKey={threadJumpLabelByKey}
-                        attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
-                        expandThreadListForProject={expandThreadListForProject}
-                        collapseThreadListForProject={collapseThreadListForProject}
-                        dragInProgressRef={dragInProgressRef}
-                        suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
-                        suppressProjectClickForContextMenuRef={
-                          suppressProjectClickForContextMenuRef
-                        }
-                        isManualProjectSorting={isManualProjectSorting}
-                        dragHandleProps={dragHandleProps}
-                      />
-                    )}
-                  </SortableProjectItem>
-                ))}
+                {sortedProjects.map((project) =>
+                  nestedProjectKeys.has(project.projectKey) ? (
+                    <SidebarMenuItem key={project.projectKey}>
+                      {renderProject(project, null)}
+                    </SidebarMenuItem>
+                  ) : (
+                    <SortableProjectItem key={project.projectKey} projectId={project.projectKey}>
+                      {(dragHandleProps) => renderProject(project, dragHandleProps)}
+                    </SortableProjectItem>
+                  ),
+                )}
               </SortableContext>
             </SidebarMenu>
           </DndContext>
         ) : (
           <SidebarMenu ref={attachProjectListAutoAnimateRef}>
             {sortedProjects.map((project) => (
-              <SidebarProjectListRow
-                key={project.projectKey}
-                project={project}
-                isThreadListExpanded={expandedThreadListsByProject.has(project.projectKey)}
-                activeRouteThreadKey={
-                  activeRouteProjectKey === project.projectKey ? routeThreadKey : null
-                }
-                openPullRequestsInRightPanel={openPullRequestsInRightPanel}
-                newThreadShortcutLabel={newThreadShortcutLabel}
-                handleNewThread={handleNewThread}
-                archiveThread={archiveThread}
-                deleteThread={deleteThread}
-                threadJumpLabelByKey={threadJumpLabelByKey}
-                attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
-                expandThreadListForProject={expandThreadListForProject}
-                collapseThreadListForProject={collapseThreadListForProject}
-                dragInProgressRef={dragInProgressRef}
-                suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
-                suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
-                isManualProjectSorting={isManualProjectSorting}
-                dragHandleProps={null}
-              />
+              <SidebarMenuItem key={project.projectKey} className="rounded-md">
+                {renderProject(project, null)}
+              </SidebarMenuItem>
             ))}
           </SidebarMenu>
         )}
@@ -3424,7 +3503,7 @@ export default function LegacySidebar() {
     () => sidebarThreads.filter((thread) => thread.archivedAt === null),
     [sidebarThreads],
   );
-  const sortedProjects = useMemo(() => {
+  const flatSortedProjects = useMemo(() => {
     const sortableProjects = sidebarProjects.map((project) => ({
       ...project,
       id: project.projectKey,
@@ -3455,6 +3534,39 @@ export default function LegacySidebar() {
     sidebarProjects,
     visibleThreads,
   ]);
+  const { tree: sagaTree } = useSagaSidebarTree(flatSortedProjects);
+  const nestedProjectKeys = useMemo(
+    () => new Set(sagaTree.flatMap((node) => node.children.map((child) => child.group.key))),
+    [sagaTree],
+  );
+  const sagaBadgesByProject = useMemo(
+    () =>
+      new Map(
+        sagaTree.flatMap((node) =>
+          node.children.flatMap((child) =>
+            child.memberStatus
+              ? [[child.group.key, staveSagaMemberBadges(child.memberStatus)] as const]
+              : [],
+          ),
+        ),
+      ),
+    [sagaTree],
+  );
+  const sortedProjects = useMemo(
+    () =>
+      flattenSagaSidebarTree(sagaTree, (node) => {
+        const project = sidebarProjectByKey.get(node.group.key);
+        return (
+          !!project &&
+          resolveProjectExpanded(projectExpandedById, projectExpansionPreferenceKeys(project))
+        );
+      }).flatMap((node) => {
+        const project = sidebarProjectByKey.get(node.group.key);
+        return project ? [project] : [];
+      }),
+    [sagaTree, sidebarProjectByKey, projectExpandedById],
+  );
+
   const isManualProjectSorting = sidebarProjectSortOrder === "manual";
   const visibleSidebarThreadKeys = useMemo(
     () =>
@@ -3804,6 +3916,8 @@ export default function LegacySidebar() {
         archiveThread={archiveThread}
         deleteThread={deleteThread}
         sortedProjects={sortedProjects}
+        nestedProjectKeys={nestedProjectKeys}
+        sagaBadgesByProject={sagaBadgesByProject}
         expandedThreadListsByProject={expandedThreadListsByProject}
         activeRouteProjectKey={activeRouteProjectKey}
         routeThreadKey={routeThreadKey}

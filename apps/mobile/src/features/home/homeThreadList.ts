@@ -212,6 +212,7 @@ export function buildHomeThreadGroups(input: {
   readonly projectGroupingMode: SidebarProjectGroupingMode;
   /** Current time used for the recency window; defaults to now. Injectable for tests. */
   readonly now?: number;
+  readonly includeStaveProjects?: boolean;
 }): ReadonlyArray<HomeThreadGroup> {
   const now = input.now ?? Date.now();
   const groups = new Map<string, MutableHomeThreadGroup>();
@@ -294,7 +295,12 @@ export function buildHomeThreadGroups(input: {
 
   for (const group of groups.values()) {
     const representative = group.projects[0];
-    if (!representative || (group.threads.length === 0 && group.pendingTasks.length === 0)) {
+    if (
+      !representative ||
+      (group.threads.length === 0 &&
+        group.pendingTasks.length === 0 &&
+        !(input.includeStaveProjects && representative.stave))
+    ) {
       continue;
     }
 
@@ -323,7 +329,11 @@ export function buildHomeThreadGroups(input: {
           pendingTask.title.toLocaleLowerCase().includes(query),
         );
 
-    if (matchingThreads.length === 0 && matchingPendingTasks.length === 0) {
+    if (
+      matchingThreads.length === 0 &&
+      matchingPendingTasks.length === 0 &&
+      !(input.includeStaveProjects && representative.stave && groupMatches)
+    ) {
       continue;
     }
 

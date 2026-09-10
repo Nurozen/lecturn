@@ -37,6 +37,7 @@ import {
   type StaveRunOperationInput,
   type StaveMarmotStatus,
   type StaveSagaListRow,
+  type StaveSagaStatus,
   type StaveSpaceListRow,
   type StaveSpaceStatus,
   type StaveStatus,
@@ -64,11 +65,13 @@ import { StaveCli } from "./StaveCli.ts";
 import { StaveConfigReader, type StaveConfigSnapshot } from "./StaveConfigReader.ts";
 import type { StaveError } from "./StaveError.ts";
 import { scanStaveMembership } from "./StaveMembership.ts";
+import { StaveReadCache } from "./StaveReadCache.ts";
 import { StaveOperations } from "./StaveOperations.ts";
 import type {
   StaveMemoryProviders,
   StaveReposList,
   StaveSagaList,
+  StaveSagaStatus as StaveSagaStatusJson,
   StaveSpaceList,
   StaveSpaceStatus as StaveSpaceStatusJson,
 } from "./staveJson.ts";
@@ -227,6 +230,10 @@ export function toProviderRows(rows: StaveMemoryProviders): ReadonlyArray<StaveM
   }));
 }
 
+export function toSagaStatusDto(json: StaveSagaStatusJson): StaveSagaStatus {
+  return json;
+}
+
 // ── Server-lifetime runtime ───────────────────────────────────
 
 export interface StaveRpcRuntimeShape {
@@ -235,6 +242,9 @@ export interface StaveRpcRuntimeShape {
   /** Remember a failed `StaveCli` call; every handler taps its CLI errors through here. */
   readonly recordFailure: (error: StaveError) => Effect.Effect<void>;
   /** `space status` for the space rooted at `workspaceRoot`, cached per root for the TTL. */
+  readonly sagaStatus: (
+    sagaRoot: string,
+  ) => Effect.Effect<StaveSagaStatus, StaveNotSpaceError | StaveCommandError>;
   readonly spaceStatus: (
     workspaceRoot: string,
   ) => Effect.Effect<StaveSpaceStatus, StaveNotSpaceError | StaveCommandError>;
@@ -253,6 +263,8 @@ export const makeRuntime = Effect.fn("StaveRpcRuntime.make")(function* (
 ) {
   const cli = yield* StaveCli;
   const reader = yield* StaveWorkspaceReader;
+  const invalidation = yield* Effect.serviceOption(StaveReadCache);
+  let seenGeneration = -1;
   const lastFailureRef = yield* Ref.make(Option.none<StaveLastFailure>());
 
   const recordFailure = (error: StaveError) =>
@@ -293,11 +305,52 @@ export const makeRuntime = Effect.fn("StaveRpcRuntime.make")(function* (
     timeToLive: Exit.match({ onSuccess: () => ttl, onFailure: () => Duration.zero }),
   });
 
+  const sagaCache = yield* Cache.makeWith(
+    Effect.fn("StaveRpcRuntime.lookupSagaStatus")(function* (sagaRoot: string) {
+      const info = yield* reader.load(sagaRoot);
+      if (Option.isNone(info) || !info.value.isSaga) {
+        return yield* new StaveNotSpaceError({
+          workspaceRoot: sagaRoot,
+          message: `No Stave saga manifest was found at '${sagaRoot}'.`,
+        });
+      }
+      if (info.value.state !== "live") {
+        return yield* new StaveCommandError({
+          verb: "saga status",
+          code: "archived_project",
+          message: "Restore the saga before reading its live status.",
+        });
+      }
+      return yield* cli
+        .sagaStatus(info.value.spaceId)
+        .pipe(
+          Effect.tapError(recordFailure),
+          Effect.mapError(toStaveCommandError),
+          Effect.map(toSagaStatusDto),
+        );
+    }),
+    {
+      capacity: STAVE_SPACE_STATUS_CACHE_CAPACITY,
+      timeToLive: Exit.match({ onSuccess: () => ttl, onFailure: () => Duration.zero }),
+    },
+  );
+  const refreshGeneration = Effect.gen(function* () {
+    if (Option.isNone(invalidation)) return;
+    const generation = yield* invalidation.value.generation;
+    if (generation === seenGeneration) return;
+    yield* Cache.invalidateAll(cache);
+    yield* Cache.invalidateAll(sagaCache);
+    seenGeneration = generation;
+  });
+
   return StaveRpcRuntime.of({
+    sagaStatus: (sagaRoot) =>
+      refreshGeneration.pipe(Effect.andThen(Cache.get(sagaCache, sagaRoot))),
     lastFailure: Ref.get(lastFailureRef),
     recordFailure,
     spaceStatus: (workspaceRoot) =>
       Effect.gen(function* () {
+        yield* refreshGeneration;
         const status = yield* Cache.get(cache, workspaceRoot);
         return {
           ...status,
@@ -461,6 +514,12 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
       wrappers.observeRpcEffect(
         WS_METHODS.staveSpaceStatus,
         spaceStatus(input.workspaceRoot),
+        TRACE_ATTRIBUTES,
+      ),
+    [WS_METHODS.staveSagaStatus]: (input: { readonly sagaRoot: string }) =>
+      wrappers.observeRpcEffect(
+        WS_METHODS.staveSagaStatus,
+        requireEnabled.pipe(Effect.andThen(runtime.sagaStatus(input.sagaRoot))),
         TRACE_ATTRIBUTES,
       ),
     [WS_METHODS.staveListRepos]: (_input: Record<string, never>) =>

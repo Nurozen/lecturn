@@ -477,12 +477,14 @@ export type StaveCreateSagaOperation = typeof StaveCreateSagaOperation.Type;
 const SagaScoped = Schema.Struct({
   /** Root of the Lecturn project that carries the saga space's `.stave.yaml`. */
   sagaRoot: TrimmedNonEmptyString,
+  expectedManifestCreatedAt: Schema.optionalKey(IsoDateTime),
 });
 
 export const StaveSagaAddOperation = Schema.Struct({
   kind: Schema.Literal("sagaAdd"),
   ...SagaScoped.fields,
   memberRoot: TrimmedNonEmptyString,
+  expectedMemberCreatedAt: Schema.optionalKey(IsoDateTime),
   /** Member ids this space lands behind. */
   after: Schema.Array(StaveName),
   /** Reset the member's after edges before applying `after`. */
@@ -494,6 +496,7 @@ export const StaveSagaRemoveOperation = Schema.Struct({
   kind: Schema.Literal("sagaRemove"),
   ...SagaScoped.fields,
   memberRoot: TrimmedNonEmptyString,
+  expectedMemberCreatedAt: Schema.optionalKey(IsoDateTime),
 });
 export type StaveSagaRemoveOperation = typeof StaveSagaRemoveOperation.Type;
 
@@ -516,7 +519,6 @@ export const StaveSagaDestroyOperation = Schema.Struct({
   ...SagaScoped.fields,
   force: Schema.Boolean,
   memory: StaveDestroyMemoryFate,
-  expectedManifestCreatedAt: Schema.optional(IsoDateTime),
 });
 export type StaveSagaDestroyOperation = typeof StaveSagaDestroyOperation.Type;
 
@@ -751,7 +753,11 @@ export const StaveSagaMutationResult = Schema.Struct({
   notes: Notes,
 });
 export type StaveSagaMutationResult = typeof StaveSagaMutationResult.Type;
-export const StaveSagaCreateResult = StaveSagaMutationResult;
+export const StaveSagaCreateResult = Schema.Struct({
+  ...StaveSagaMutationResult.fields,
+  projectId: ProjectId,
+  sequence: NonNegativeInt,
+});
 export type StaveSagaCreateResult = typeof StaveSagaCreateResult.Type;
 
 export const StaveSagaTeardownAction = ForwardCompatibleLiteral(
@@ -796,6 +802,56 @@ export const StaveSagaMemberState = ForwardCompatibleLiteral(
   "unknown",
 );
 export type StaveSagaMemberState = typeof StaveSagaMemberState.Type;
+
+export const StaveSagaBaseHealth = ForwardCompatibleLiteral(
+  ["ok", "merged", "missing", "owner_archived"],
+  "unknown",
+);
+export const StaveSagaMergedVia = ForwardCompatibleLiteral(["ancestry", "pr"], "unknown");
+export const StaveSagaRepoStatus = Schema.Struct({
+  name: Schema.String,
+  branch: Schema.String,
+  base: Schema.String,
+  ahead: Schema.Number,
+  behind: Schema.Number,
+  baseHealth: StaveSagaBaseHealth,
+  mergedVia: Schema.optionalKey(StaveSagaMergedVia),
+  note: Schema.optionalKey(Schema.String),
+});
+export type StaveSagaRepoStatus = typeof StaveSagaRepoStatus.Type;
+export const StaveSagaPrStatus = Schema.Struct({
+  repo: Schema.String,
+  number: Schema.Number,
+  state: Schema.optionalKey(Schema.String),
+  mergedAt: Schema.optionalKey(Schema.String),
+  baseRefName: Schema.optionalKey(Schema.String),
+});
+export type StaveSagaPrStatus = typeof StaveSagaPrStatus.Type;
+export const StaveSagaMemberStatus = Schema.Struct({
+  id: Schema.String,
+  after: Schema.Array(Schema.String),
+  state: StaveSagaMemberState,
+  error: Schema.optionalKey(Schema.String),
+  dirty: Schema.Boolean,
+  repos: Schema.Array(StaveSagaRepoStatus),
+  prs: Schema.Array(StaveSagaPrStatus),
+});
+export type StaveSagaMemberStatus = typeof StaveSagaMemberStatus.Type;
+export const StaveSagaNote = Schema.Struct({
+  kind: ForwardCompatibleLiteral(["degraded", "suggestion"], "unknown"),
+  member: Schema.optionalKey(Schema.String),
+  text: Schema.String,
+});
+export type StaveSagaNote = typeof StaveSagaNote.Type;
+/** Members retain the CLI's topological order. */
+export const StaveSagaStatus = Schema.Struct({
+  sagaId: Schema.String,
+  members: Schema.Array(StaveSagaMemberStatus),
+  notes: Schema.Array(StaveSagaNote),
+});
+export type StaveSagaStatus = typeof StaveSagaStatus.Type;
+export const StaveSagaStatusInput = Schema.Struct({ sagaRoot: TrimmedNonEmptyString });
+export type StaveSagaStatusInput = typeof StaveSagaStatusInput.Type;
 
 export const StaveSagaSyncMemberRow = Schema.Struct({
   id: Schema.String,
@@ -843,7 +899,7 @@ export const StaveOperationResult = Schema.Union([
   operationResult("setup", StaveSetupResult),
   operationResult("memoryAttach", StaveMemoryAttachResult),
   operationResult("memoryDetach", StaveMemoryDetachResult),
-  operationResult("createSaga", StaveSagaMutationResult),
+  operationResult("createSaga", StaveSagaCreateResult),
   operationResult("sagaAdd", StaveSagaMutationResult),
   operationResult("sagaRemove", StaveSagaMutationResult),
   operationResult("sagaSync", StaveSagaSyncReport),

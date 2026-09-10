@@ -1,3 +1,4 @@
+import type { StaveSagaMemberStatus } from "@t3tools/contracts";
 import { useRecyclingState } from "@legendapp/list/react-native";
 import type {
   EnvironmentProject,
@@ -86,6 +87,8 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
   readonly collapsed: boolean;
   readonly isFirst: boolean;
   readonly groupKey: string;
+  readonly depth?: number;
+  readonly memberStatus?: StaveSagaMemberStatus | null;
   readonly onGroupAction: (key: string, action: HomeGroupDisplayAction) => void;
   /** Project a quick new thread should target; null hides the button. */
   readonly newThreadTarget?: EnvironmentProject | null;
@@ -99,7 +102,7 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
     [groupKey, onGroupAction],
   );
   const handleNewThread = useCallback(() => {
-    if (newThreadTarget) {
+    if (newThreadTarget && newThreadTarget.stave?.state !== "archived") {
       onNewThread?.(newThreadTarget);
     }
   }, [newThreadTarget, onNewThread]);
@@ -116,7 +119,7 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
       className={compact ? "flex-row items-center bg-screen" : "flex-row items-center"}
       style={{
         minHeight: compact ? 44 : 36,
-        paddingLeft: compact ? 20 : 12,
+        paddingLeft: (compact ? 20 : 12) + (props.depth ?? 0) * 18,
         // Compact right padding centers the 20pt plus glyph on the thread
         // rows' trailing chevron column (18 + 13/2 ≈ 24.5 from the edge).
         paddingRight: compact ? 14 : 12,
@@ -153,6 +156,21 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
         >
           {props.title}
         </Text>
+        {props.project.stave ? (
+          <Text className="max-w-[150px] text-xs text-foreground-tertiary" numberOfLines={2}>
+            {props.project.stave.isSaga ? "Saga" : "Space"} {props.project.stave.spaceId}
+            {props.project.stave.kind && !props.project.stave.isSaga
+              ? ` · ${props.project.stave.kind}`
+              : ""}
+            {` · ${props.memberStatus?.state ?? props.project.stave.state ?? "unknown"}`}
+            {props.memberStatus?.dirty ? " · dirty" : ""}
+            {props.memberStatus?.state === "live" &&
+            props.memberStatus.repos.length > 0 &&
+            props.memberStatus.repos.every((repo) => repo.baseHealth === "merged")
+              ? " · merged"
+              : ""}
+          </Text>
+        ) : null}
         <Text
           className={
             compact
@@ -165,7 +183,13 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
       </Pressable>
       {showNewThreadButton ? (
         <Pressable
-          accessibilityLabel={`Create new thread in ${props.title}`}
+          accessibilityLabel={
+            newThreadTarget?.stave?.state === "archived"
+              ? "Unarchive to start a thread"
+              : `Create new thread in ${props.title}`
+          }
+          disabled={newThreadTarget?.stave?.state === "archived"}
+          accessibilityState={{ disabled: newThreadTarget?.stave?.state === "archived" }}
           accessibilityRole="button"
           hitSlop={{ ...verticalHitSlop, left: 10, right: 14 }}
           onPress={handleNewThread}

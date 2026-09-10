@@ -35,7 +35,7 @@ A project whose workspace root carries a `.stave.yaml` manifest (fork only). The
 
 #### Saga
 
-A Stave space that coordinates member spaces (`kind: saga` in its manifest). Recognised as `isSaga` today; member projection is planned. See [stave-integration.md][28].
+A Stave space that coordinates member spaces (`kind: saga` in its manifest). Its derived `memberOf` relationships and live status drive an environment-scoped project tree in the clients. See [stave-integration.md][28].
 
 #### Den
 

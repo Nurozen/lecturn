@@ -78,6 +78,9 @@ import * as StaveBinary from "./stave/StaveBinary.ts";
 import * as StaveCli from "./stave/StaveCli.ts";
 import * as StaveConfigReader from "./stave/StaveConfigReader.ts";
 import * as StaveOperations from "./stave/StaveOperations.ts";
+import * as StaveMergeSignal from "./stave/StaveMergeSignal.ts";
+import * as StaveReadCache from "./stave/StaveReadCache.ts";
+import * as StaveDisplayMembership from "./stave/StaveDisplayMembership.ts";
 import * as StaveRoots from "./stave/StaveRoots.ts";
 import * as StaveRpcHandlers from "./stave/staveRpcHandlers.ts";
 import * as StaveWorkspaceReader from "./stave/StaveWorkspaceReader.ts";
@@ -425,6 +428,20 @@ const StaveLifecycleLayerLive = StaveLifecycleRepositoryLive.pipe(
   Layer.provide(PersistenceLayerLive),
 );
 const StaveLayerLive = Layer.mergeAll(
+  StaveReadCache.layer,
+  StaveMergeSignal.layer.pipe(
+    Layer.provide(Layer.mergeAll(StaveCliLayerLive, StaveBinaryLayerLive, ServerSettingsLayerLive)),
+  ),
+  StaveDisplayMembership.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        StaveCliLayerLive,
+        StaveBinaryLayerLive,
+        ServerSettingsLayerLive,
+        StaveReadCache.layer,
+      ),
+    ),
+  ),
   StaveSpaceLock.layer,
   StaveLifecycleLayerLive,
   StaveWorkspaceReaderLayerLive,
@@ -439,7 +456,9 @@ const StaveLayerLive = Layer.mergeAll(
   StaveConfigReaderLayerLive,
   StaveRootsLayerLive,
   StaveRpcHandlers.runtimeLayer.pipe(
-    Layer.provide(Layer.mergeAll(StaveCliLayerLive, StaveWorkspaceReaderLayerLive)),
+    Layer.provide(
+      Layer.mergeAll(StaveCliLayerLive, StaveWorkspaceReaderLayerLive, StaveReadCache.layer),
+    ),
   ),
 );
 

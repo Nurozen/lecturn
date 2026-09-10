@@ -62,3 +62,18 @@ describe("Stave confirmation safety", () => {
     ).toContain("owned elsewhere is kept");
   });
 });
+
+it("discloses replacement whenever saga predecessors are supplied", () => {
+  const operation = {
+    kind: "sagaAdd",
+    sagaRoot: "/saga",
+    memberRoot: "/member",
+    after: ["new-parent"],
+    clearAfter: false,
+  } satisfies StaveOperation;
+  expect(staveOperationLossCopy(operation)).toContain("replaces");
+  expect(staveOperationLossCopy({ ...operation, after: [], clearAfter: true })).toContain(
+    "clears all",
+  );
+  expect(staveOperationLossCopy({ ...operation, after: [] })).toContain("keeping any existing");
+});

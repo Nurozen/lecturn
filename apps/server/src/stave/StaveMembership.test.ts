@@ -25,16 +25,28 @@ describe("fresh saga membership", () => {
     }).pipe(
       Effect.provide(
         Layer.mock(StaveCli)({
-          sagaList: Effect.succeed([saga]),
-          sagaStatus: () =>
-            Effect.succeed({
+          sagaList: Effect.succeed([
+            saga,
+            {
+              id: "a",
+              logicalId: "a",
+              path: "/spaces/a",
+              isSaga: false,
+              members: [],
+              memberOf: "release",
+            },
+          ]),
+          sagaStatus: (id) => {
+            expect(id).toBe("release");
+            return Effect.succeed({
               sagaId: "release",
               notes: [],
               members: [
                 { id: "a", after: [], state: "live", dirty: false, repos: [], prs: [] },
                 { id: "b", after: ["a", "other"], state: "live", dirty: false, repos: [], prs: [] },
               ],
-            }),
+            });
+          },
         }),
       ),
     ),

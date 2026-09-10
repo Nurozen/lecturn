@@ -6,10 +6,12 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
+import { StaveMergeSignal } from "../stave/StaveMergeSignal.ts";
 import * as GitManager from "../git/GitManager.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -37,6 +39,7 @@ export const make = Effect.gen(function* () {
   const git = yield* GitManager.GitManager;
   const pullRequests = yield* PullRequestService.PullRequestService;
   const crypto = yield* Crypto.Crypto;
+  const staveMergeSignal = yield* Effect.serviceOption(StaveMergeSignal);
 
   const sweep = Effect.fn("ThreadSettlementReactor.sweep")(function* (
     mergedPullRequest: PullRequestService.PullRequestMergeEvent | null,
@@ -44,6 +47,10 @@ export const make = Effect.gen(function* () {
     const snapshot = yield* snapshots.getShellSnapshot();
     const now = DateTime.formatIso(yield* DateTime.now);
     const projects = new Map(snapshot.projects.map((project) => [project.id, project]));
+    const staveMerged =
+      mergedPullRequest === null && Option.isSome(staveMergeSignal)
+        ? yield* staveMergeSignal.value.candidates(snapshot.projects)
+        : new Set();
     const candidates = snapshot.threads.filter(
       (thread) =>
         isAutoSettlementCandidate(thread, now) &&
@@ -55,6 +62,8 @@ export const make = Effect.gen(function* () {
             thread.linkedPullRequest.number === mergedPullRequest.number)),
     );
     const lookupKey = (thread: (typeof candidates)[number]) => {
+      if (staveMerged.has(thread.projectId))
+        return JSON.stringify(["stave-merged", thread.projectId]);
       if (thread.linkedPullRequest != null) {
         return JSON.stringify([
           "linked",
@@ -63,12 +72,13 @@ export const make = Effect.gen(function* () {
           thread.linkedPullRequest.number,
         ]);
       }
-      if (thread.branch === null) return JSON.stringify(["none", thread.id]);
       const project = projects.get(thread.projectId);
+      const branch = thread.branch ?? project?.stave?.primaryBranch;
+      if (branch == null) return JSON.stringify(["none", thread.id]);
       return JSON.stringify(
         project === undefined
           ? ["missing-project", thread.id]
-          : ["branch", project.workspaceRoot, thread.branch],
+          : ["branch", project.stave?.primaryRepoPath ?? project.workspaceRoot, branch],
       );
     };
     const groups = Map.groupBy(candidates, lookupKey);
@@ -99,31 +109,49 @@ export const make = Effect.gen(function* () {
           updatedAt: summary.updatedAt,
         } satisfies SettlementPullRequest;
       }
-      if (thread.branch === null) return null;
       const project = projects.get(thread.projectId);
+      const branch = thread.branch ?? project?.stave?.primaryBranch;
+      if (branch == null) return null;
       if (project === undefined) {
         return yield* Effect.die(new Error("thread project not found"));
       }
-      return yield* git.branchPullRequest({ cwd: project.workspaceRoot, branch: thread.branch });
+      if (project.stave && (project.stave.state !== "live" || !project.stave.primaryRepoPath))
+        return null;
+      return yield* git.branchPullRequest({
+        cwd: project.stave?.primaryRepoPath ?? project.workspaceRoot,
+        branch,
+      });
     });
 
     yield* Effect.forEach(
       groups.values(),
       (group) =>
         Effect.gen(function* () {
-          const pullRequest = yield* pullRequestFor(group[0]!);
+          const sagaMerged = staveMerged.has(group[0]!.projectId);
+          const pullRequest = sagaMerged
+            ? { state: "merged" as const, updatedAt: now }
+            : yield* pullRequestFor(group[0]!);
           yield* Effect.forEach(
             group,
             (thread) =>
               Effect.gen(function* () {
                 const settings = yield* settingsService.getSettings;
+                if (
+                  sagaMerged &&
+                  (!settings.stave.enabled || !settings.stave.lifecycle.settleOnSagaMerge)
+                )
+                  return;
                 const decisionNow = DateTime.formatIso(yield* DateTime.now);
                 const settledAt = resolveAutoSettlementAt({
                   thread,
                   pullRequest,
                   now: decisionNow,
                   autoSettleAfterDays: settings.sidebarAutoSettleAfterDays,
-                  autoSettleOnMerge: settings.sidebarAutoSettleOnMerge,
+                  autoSettleOnMerge:
+                    (sagaMerged &&
+                      settings.stave.enabled &&
+                      settings.stave.lifecycle.settleOnSagaMerge) ||
+                    settings.sidebarAutoSettleOnMerge,
                 });
                 if (settledAt === null) {
                   return;
@@ -182,6 +210,8 @@ export const make = Effect.gen(function* () {
     const initialSettings = yield* settingsService.getSettings.pipe(Effect.orDie);
     let lastAfterDays = initialSettings.sidebarAutoSettleAfterDays;
     let lastOnMerge = initialSettings.sidebarAutoSettleOnMerge;
+    let lastStaveEnabled = initialSettings.stave.enabled;
+    let lastStaveMerge = initialSettings.stave.lifecycle.settleOnSagaMerge;
     yield* forkParked(
       Effect.gen(function* () {
         yield* worker.enqueue(undefined);
@@ -192,12 +222,16 @@ export const make = Effect.gen(function* () {
       Stream.runForEach(settingsChanges, (settings) => {
         if (
           settings.sidebarAutoSettleAfterDays === lastAfterDays &&
-          settings.sidebarAutoSettleOnMerge === lastOnMerge
+          settings.sidebarAutoSettleOnMerge === lastOnMerge &&
+          settings.stave.enabled === lastStaveEnabled &&
+          settings.stave.lifecycle.settleOnSagaMerge === lastStaveMerge
         ) {
           return Effect.void;
         }
         lastAfterDays = settings.sidebarAutoSettleAfterDays;
         lastOnMerge = settings.sidebarAutoSettleOnMerge;
+        lastStaveEnabled = settings.stave.enabled;
+        lastStaveMerge = settings.stave.lifecycle.settleOnSagaMerge;
         return worker.enqueue(undefined);
       }),
     );

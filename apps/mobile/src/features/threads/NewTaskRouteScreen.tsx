@@ -279,7 +279,15 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
                   className={cn(scopeIndex > 0 && "border-t border-border-subtle")}
                 >
                   <Pressable
-                    disabled={reservedDestinationProject !== null}
+                    disabled={
+                      reservedDestinationProject !== null ||
+                      selectionTarget.stave?.state === "archived"
+                    }
+                    accessibilityState={{
+                      disabled:
+                        reservedDestinationProject !== null ||
+                        selectionTarget.stave?.state === "archived",
+                    }}
                     onPress={() => void selectProject(selectionTarget)}
                     className="flex-row items-center gap-3 bg-card px-4 py-3.5"
                   >
@@ -294,6 +302,18 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
                     </View>
                     <View className="min-w-0 flex-1">
                       <Text className="text-base leading-snug font-t3-bold">{scope.title}</Text>
+                      {scope.representative.stave ? (
+                        <Text className="text-xs text-foreground-muted">
+                          {scope.representative.stave.isSaga ? "Saga" : "Space"}{" "}
+                          {scope.representative.stave.spaceId}
+                          {scope.representative.stave.kind && !scope.representative.stave.isSaga
+                            ? ` · ${scope.representative.stave.kind}`
+                            : ""}
+                          {scope.representative.stave.state === "archived"
+                            ? " · Unarchive to start a thread"
+                            : ""}
+                        </Text>
+                      ) : null}
                       <Text
                         className="text-xs leading-snug text-foreground-muted"
                         ellipsizeMode="middle"

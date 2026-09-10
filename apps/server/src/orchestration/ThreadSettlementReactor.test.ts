@@ -24,6 +24,7 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 
+import { StaveMergeSignal } from "../stave/StaveMergeSignal.ts";
 import { GitManager } from "../git/GitManager.ts";
 import {
   PullRequestService,
@@ -132,6 +133,7 @@ function makePullRequestSummary(input: {
 interface HarnessOptions {
   readonly snapshot: OrchestrationShellSnapshot;
   readonly settings?: ServerSettings;
+  readonly staveMerged?: ReadonlySet<ProjectId>;
   readonly branchPullRequest?: GitManager["Service"]["branchPullRequest"];
   readonly pullRequestSummary?: PullRequestService["Service"]["summary"];
   readonly onDispatch?: (
@@ -212,6 +214,9 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
   });
 
   const dependencies = Layer.mergeAll(
+    Layer.succeed(StaveMergeSignal, {
+      candidates: () => Effect.succeed(options.staveMerged ?? new Set<ProjectId>()),
+    }),
     Layer.mock(ProjectionSnapshotQuery)({
       getShellSnapshot: () =>
         Ref.updateAndGet(snapshotReadCount, (count) => count + 1).pipe(
@@ -686,5 +691,74 @@ describe("ThreadSettlementReactor", () => {
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),
+  );
+});
+
+describe("Stave saga settlement", () => {
+  it.effect(
+    "settles all merged members with the independent Stave toggle while retaining candidate guards",
+    () =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const harness = yield* makeHarness({
+          snapshot: makeSnapshot([
+            makeThread("ready"),
+            makeThread("busy", {
+              session: {
+                threadId: ThreadId.make("busy"),
+                status: "running",
+                updatedAt: NOW,
+              } as OrchestrationThreadShell["session"],
+            }),
+            makeThread("override", { settledOverride: "active" }),
+          ]),
+          settings: {
+            ...DEFAULT_SERVER_SETTINGS,
+            stave: {
+              ...DEFAULT_SERVER_SETTINGS.stave,
+              enabled: true,
+              lifecycle: { ...DEFAULT_SERVER_SETTINGS.stave.lifecycle, settleOnSagaMerge: true },
+            },
+            sidebarAutoSettleAfterDays: null,
+            sidebarAutoSettleOnMerge: false,
+          },
+          staveMerged: new Set([PROJECT_ID]),
+          branchPullRequest: () => Effect.die("must not query Git for saga merge signal"),
+        });
+        yield* Effect.gen(function* () {
+          const reactor = yield* ThreadSettlementReactor.ThreadSettlementReactor;
+          yield* startHarness(reactor, harness.activation, harness.snapshotReads);
+          const commands = yield* Ref.get(harness.commands);
+          assert.deepStrictEqual(
+            commands.map((command) => command.threadId),
+            [ThreadId.make("ready")],
+          );
+        }).pipe(Effect.provide(harness.layer));
+      }),
+  );
+  it.effect("uses the primary repo and manifest branch for ordinary Stave PR lookup", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(Date.parse(NOW));
+      const project = {
+        ...makeProject(),
+        stave: {
+          spaceId: "s",
+          isSaga: false,
+          repos: [],
+          memories: [],
+          state: "live" as const,
+          primaryRepoPath: "/workspace/project/repo",
+          primaryBranch: "stave/s/repo",
+        },
+      };
+      const harness = yield* makeHarness({ snapshot: makeSnapshot([makeThread("a")], [project]) });
+      yield* Effect.gen(function* () {
+        const reactor = yield* ThreadSettlementReactor.ThreadSettlementReactor;
+        yield* startHarness(reactor, harness.activation, harness.snapshotReads);
+        assert.deepStrictEqual(yield* Ref.get(harness.branchCalls), [
+          { cwd: "/workspace/project/repo", branch: "stave/s/repo" },
+        ]);
+      }).pipe(Effect.provide(harness.layer));
+    }),
   );
 });

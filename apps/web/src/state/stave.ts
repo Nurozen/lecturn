@@ -16,11 +16,10 @@ import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { type EnvironmentQueryView, useEnvironmentQuery } from "./query";
 import { serverEnvironment } from "./server";
+import { subscribeStaveMutation } from "../staveMutation";
 
 /**
- * Web-only Stave reads. Mobile v1 shows a badge from the project shell and
- * never calls these RPCs, so the atom families live here rather than in the
- * shared client-runtime server atoms.
+ * Web Stave reads. Mobile has its own query binding to the shared RPC contracts.
  */
 
 /** Live binary/config/marmot probe. 15s stale window matches the server-side
@@ -37,6 +36,36 @@ export const staveSpaceStatus = createEnvironmentRpcQueryAtomFamily(connectionAt
   tag: WS_METHODS.staveSpaceStatus,
   staleTimeMs: 15_000,
 });
+
+export const staveSagaStatus = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+  label: "environment-data:stave:saga-status",
+  tag: WS_METHODS.staveSagaStatus,
+  staleTimeMs: 15_000,
+});
+
+export function useStaveSagaStatus(
+  environmentId: EnvironmentId,
+  sagaRoot: string,
+  enabled: boolean,
+) {
+  const query = useEnvironmentQuery(
+    enabled ? staveSagaStatus({ environmentId, input: { sagaRoot } }) : null,
+  );
+  const refresh = query.refresh;
+  useEffect(
+    () =>
+      subscribeStaveMutation((changed) => {
+        if (enabled && changed === environmentId) refresh();
+      }),
+    [enabled, environmentId, refresh],
+  );
+  useEffect(() => {
+    if (!enabled) return;
+    const timer = setInterval(refresh, 15_000);
+    return () => clearInterval(timer);
+  }, [enabled, refresh]);
+  return query;
+}
 
 // ── Wizard reads ──────────────────────────────────────────────
 // Registry, spaces (live + archived), sagas and memory providers for the
@@ -169,6 +198,13 @@ export function useStaveSpaceStatus(target: {
       : EMPTY_SPACE_STATUS_ATOM;
   const result = useAtomValue(atom);
   const refresh = useAtomRefresh(atom);
+  useEffect(
+    () =>
+      subscribeStaveMutation((changed) => {
+        if (target.enabled && changed === target.environmentId) refresh();
+      }),
+    [target.enabled, target.environmentId, refresh],
+  );
   return {
     data: Option.getOrNull(AsyncResult.value(result)),
     error: result._tag === "Failure" ? Cause.squash(result.cause) : null,
