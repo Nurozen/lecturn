@@ -7,7 +7,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location('batches', Path(__file__).with_name('run-batches.py'))
 batches = importlib.util.module_from_spec(spec)
@@ -60,6 +60,53 @@ class GitSafetyTests(unittest.TestCase):
         self.assertEqual(result, (self.accepted, 1, 1))
         with self.assertRaisesRegex(batches.Blocked, 'commits'):
             batches.check_selection(self.repo, self.base, self.accepted, self.target, self.target, 0, 100)
+
+    def test_review_agent_has_network_and_only_external_report_writes(self):
+        runner = batches.Runner.__new__(batches.Runner)
+        runner.lock_fd = None
+        schema = {'required': ['verdict']}
+
+        def launch(argv, cwd, **kwargs):
+            self.assertNotIn('-s', argv)
+            config = [argv[i + 1] for i, arg in enumerate(argv) if arg == '-c']
+            self.assertEqual(config, [
+                'default_permissions="lecturn_review"',
+                'permissions.lecturn_review={filesystem={":root"="read",'
+                + json.dumps(str(self.folder.resolve())) + '="write"},network={enabled=true}}',
+                'shell_environment_policy.set={TMPDIR=' + json.dumps(str(self.folder.resolve()))
+                + ',TMPPREFIX=' + json.dumps(str(self.folder.resolve() / 'zsh')) + '}',
+                'approval_policy="never"',
+            ])
+            self.assertIn('--ephemeral', argv)
+            self.assertNotIn('--add-dir', argv)
+            Path(argv[argv.index('-o') + 1]).write_text('{"verdict":"approve"}')
+
+        with patch.object(batches, 'command', side_effect=launch) as command:
+            result = runner.agent(self.repo, self.folder, 'review', 'Review source', schema, readonly=True)
+        command.assert_called_once()
+        self.assertEqual(result, {'verdict': 'approve'})
+
+    def test_review_agent_rejects_report_write_grant_covering_source(self):
+        runner = batches.Runner.__new__(batches.Runner)
+        for folder in (self.repo, self.repo / 'reports', self.repo.parent):
+            with self.subTest(folder=folder), patch.object(batches, 'command') as command:
+                with self.assertRaisesRegex(batches.Blocked, 'separate from source'):
+                    runner.agent(self.repo, folder, 'review', 'Review source', {}, readonly=True)
+                command.assert_not_called()
+
+    def test_builder_keeps_existing_host_access(self):
+        runner = batches.Runner.__new__(batches.Runner)
+        runner.lock_fd = None
+
+        def launch(argv, cwd, **kwargs):
+            self.assertEqual(argv[argv.index('-s') + 1], 'danger-full-access')
+            self.assertEqual(argv[argv.index('--add-dir') + 1], str(self.folder))
+            self.assertFalse(any('lecturn_review' in arg for arg in argv))
+            Path(argv[argv.index('-o') + 1]).write_text('{"ready":true}')
+
+        with patch.object(batches, 'command', side_effect=launch):
+            self.assertEqual(runner.agent(self.repo, self.folder, 'builder', 'Build', {'required': ['ready']}),
+                             {'ready': True})
 
     def test_resumed_builder_receives_local_branch_and_accepted_provenance(self):
         self.git('branch', '-m', 'stave/example/lecturn')

@@ -14,7 +14,13 @@ and package-manager tools on PATH. The controller inherits configured Codex
 model selection and authentication. It does not install or change credentials.
 Builder execution uses the explicitly authorized local host access; worktrees
 isolate source and application state, not credentials or execution. Reviewers
-run read-only. Approval prompts are disabled for these unattended sessions.
+use the `lecturn_review` Codex permission profile: source remains read-only,
+only the separate external report directory is writable, and network access
+allows authenticated evidence retrieval. The installed Codex must support named
+permission profiles. Reviewer shell `TMPDIR` and `TMPPREFIX` use that report
+directory so temporary files and zsh heredocs work without granting global
+temporary-directory writes. Approval prompts are disabled for these unattended
+sessions.
 
 Bootstrap accepted upstream ancestry explicitly after inspecting the prior real
 integration merge and its acceptance on fork main:
@@ -83,6 +89,8 @@ compatibility. A separate fresh adversarial verifier assesses candidate findings
 Confirmed findings return to a new builder session; repairs invalidate previous
 checks and both reviews. Refuted findings receive a fresh holistic assessment.
 A bounded repair limit prevents an unattended loop from silently running forever.
+Hosted CI is expected to be pending during staged pre-PR review; the controller
+requires it on the exact published head before merging.
 
 UI behavior changes require authorized isolated client validation and real
 before/after GitHub attachment URLs. The current operator has authorized browser

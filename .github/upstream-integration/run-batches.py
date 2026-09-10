@@ -201,13 +201,23 @@ class Runner:
         return git(self.repo, 'rev-parse', 'origin/main'), git(self.repo, 'rev-parse', 'origin/t3mirror')
 
     def agent(self, repo, folder, name, prompt, output_schema, readonly=False):
+        permissions = ['-s', 'danger-full-access', '--add-dir', str(folder)]
+        if readonly:
+            source, reports = repo.resolve(), folder.resolve()
+            require(source != reports and source not in reports.parents and reports not in source.parents,
+                    'Reviewer report directory must be separate from source')
+            permissions = ['-c', 'default_permissions="lecturn_review"', '-c',
+                           'permissions.lecturn_review={filesystem={":root"="read",'
+                           + json.dumps(str(reports)) + '="write"},network={enabled=true}}', '-c',
+                           'shell_environment_policy.set={TMPDIR=' + json.dumps(str(reports))
+                           + ',TMPPREFIX=' + json.dumps(str(reports / 'zsh')) + '}']
         schema_path, output_path = folder / f'{name}.schema.json', folder / f'{name}.json'
         write_json(schema_path, output_schema)
         (folder / f'{name}.prompt.md').write_text(prompt)
         # Each exec is a new session; never resume/fork a builder into its reviewer.
-        command(['codex', 'exec', '-C', str(repo), '-s', 'read-only' if readonly else 'danger-full-access',
+        command(['codex', 'exec', '-C', str(repo), *permissions,
                  '-c', 'approval_policy="never"',
-                 '--add-dir', str(folder), '--ephemeral', '--json', '--output-schema', str(schema_path),
+                 '--ephemeral', '--json', '--output-schema', str(schema_path),
                  '-o', str(output_path), '-'], repo, log=folder / f'{name}.events.log',
                 stdin=prompt, lock_fd=self.lock_fd)
         value = json.loads(output_path.read_text())
@@ -344,6 +354,8 @@ Review entire git diff {m['review_base']} to staged tree {tree}; do not trust bu
 Inspect upstream intent, clean semantic merges, conflict resolutions and fork-only consumers.
 Cover correctness, security, test adequacy, performance, collateral effects and API/migrations; adversarially verify findings.
 Inspect {folder}/{prefix}-builder.json and controller check logs for exact tree. Require focused behavioral tests where applicable.
+This is staged pre-PR review: hosted CI is expected to be pending and is not a prerequisite for staged approval.
+The controller requires successful hosted CI on the exact head after publication before it can merge.
 Verify before/after evidence applicability, authenticity and accessibility when UI behavior changes; mark ui_evidence_valid false if missing.
 Use authenticated gh api on returned attachment URLs and compare retrieved bytes' SHA-256 with external upload receipts/hashes.
 Unlinked pre-PR assets can return anonymous 404; require successful authenticated retrieval and matching hashes before approving evidence.
