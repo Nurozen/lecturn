@@ -14,6 +14,13 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
+const isUserDataPathError = Schema.is(
+  Schema.Union([
+    DesktopAppIdentity.DesktopUserDataPathResolutionError,
+    DesktopAppIdentity.DesktopUserDataPathCreationError,
+  ]),
+);
+
 declare const __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
 
 export class DesktopClerkBridgeInitializationError extends Schema.TaggedErrorClass<DesktopClerkBridgeInitializationError>()(
@@ -95,7 +102,23 @@ export const make = Effect.gen(function* () {
   // directory here — under the default productName-derived path, acquiring
   // the lock would create "Lecturn (Alpha)" and make the legacy-install
   // detection in resolveUserDataPath match on fresh installs.
-  const userDataPath = yield* DesktopAppIdentity.resolveUserDataPath;
+  // An asynchronous stat or mkdir here can let Electron emit ready before
+  // createClerkBridge registers its scheme privileges.
+  const userDataPath = yield* Effect.try({
+    try: () =>
+      DesktopAppIdentity.resolveUserDataPathBeforeReady(environment, {
+        exists: NodeFS.existsSync,
+        makeDirectory: (path) => NodeFS.mkdirSync(path, { recursive: true }),
+      }),
+    catch: (cause) =>
+      isUserDataPathError(cause)
+        ? cause
+        : new DesktopClerkBridgeInitializationError({
+            stateDir: environment.stateDir,
+            isDevelopment: environment.isDevelopment,
+            cause,
+          }),
+  });
   yield* electronApp.setPath("userData", userDataPath);
 
   const bridge = yield* Effect.acquireRelease(
@@ -152,3 +175,5 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(DesktopClerk, make);
+// @effect-diagnostics nodeBuiltinImport:off - profile setup must not yield before Clerk registers Electron scheme privileges.
+import * as NodeFS from "node:fs";

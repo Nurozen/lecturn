@@ -60,6 +60,35 @@ const normalizeCommitHash = (value: string): Option.Option<string> => {
     : Option.none();
 };
 
+export function resolveUserDataPathBeforeReady(
+  environment: DesktopEnvironment.DesktopEnvironment["Service"],
+  fileSystem: {
+    readonly exists: (path: string) => boolean;
+    readonly makeDirectory: (path: string) => void;
+  },
+): string {
+  if (environment.userDataPathOverride !== undefined) {
+    try {
+      fileSystem.makeDirectory(environment.userDataPathOverride);
+    } catch (cause) {
+      throw new DesktopUserDataPathCreationError({ path: environment.userDataPathOverride, cause });
+    }
+    return environment.userDataPathOverride;
+  }
+
+  const legacyPath = environment.path.join(
+    environment.appDataDirectory,
+    environment.legacyUserDataDirName,
+  );
+  try {
+    return fileSystem.exists(legacyPath)
+      ? legacyPath
+      : environment.path.join(environment.appDataDirectory, environment.userDataDirName);
+  } catch (cause) {
+    throw new DesktopUserDataPathResolutionError({ legacyPath, cause });
+  }
+}
+
 export const resolveUserDataPath = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;

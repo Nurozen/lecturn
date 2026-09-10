@@ -146,6 +146,29 @@ const withIdentity = <A, E, R>(
 };
 
 describe("DesktopAppIdentity", () => {
+  it.effect(
+    "uses the same profile before and after ready for explicit, default, and legacy homes",
+    () =>
+      Effect.gen(function* () {
+        for (const home of [undefined, "   ", "/tmp/lecturn-test"]) {
+          for (const legacyPathExists of [false, true]) {
+            yield* withIdentity(
+              Effect.gen(function* () {
+                const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
+                const environment = yield* DesktopEnvironment.DesktopEnvironment;
+                const beforeReady = DesktopAppIdentity.resolveUserDataPathBeforeReady(environment, {
+                  exists: () => legacyPathExists,
+                  makeDirectory: () => {},
+                });
+                assert.equal(beforeReady, yield* identity.resolveUserDataPath);
+              }),
+              { environment: { env: { LECTURN_HOME: home } }, legacyPathExists },
+            );
+          }
+        }
+      }),
+  );
+
   it.effect("isolates explicit homes from each other and existing legacy profiles", () =>
     Effect.gen(function* () {
       for (const home of ["/tmp/lecturn-one", "/tmp/lecturn-two"]) {
