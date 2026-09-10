@@ -309,6 +309,16 @@ class Runner:
         m['phase'] = 'building'
         self.save(folder, m)
 
+    def retain_blocked_review(self, folder, m, name, review):
+        """Keep unverified review feedback for a bounded repair, never as approval."""
+        findings = review['findings'].strip()
+        m.update(phase='building', blocked_review={'report': name, 'result': review}, feedback=(
+            f'Review blocked in {name}. Independently investigate the following unresolved findings or '
+            'validation gaps; they are not confirmed defects. Preserve required gates and obtain fresh '
+            f'evidence and review before delivery.\n{findings}'))
+        self.save(folder, m)
+        require(findings, 'Reviewer blocked without actionable feedback; work and evidence retained')
+
     def build_review(self, folder, m):
         repo = Path(m['worktree'])
         require(m['round'] < self.args.max_rounds, 'Repair limit reached; work and evidence retained')
@@ -389,7 +399,10 @@ transient infrastructure failure that should be rerun. Otherwise return ci_retry
             review = self.agent(repo, folder, prefix + '-' + label, review_prompt, REVIEW_SCHEMA, True)
             require(staged_tree(repo, m['expected_head'], m['merge_parent']) == tree, 'Reviewer changed worktree')
             require(review['tree'] == tree, 'Review tree mismatch')
-            require(review['verdict'] in ('approve', 'changes'), f"Reviewer blocked: {review['findings']}")
+            if review['verdict'] == 'blocked':
+                self.retain_blocked_review(folder, m, prefix + '-' + label, review)
+                return
+            require(review['verdict'] in ('approve', 'changes'), 'Invalid review verdict')
             reviews.append(review)
         if any(review['verdict'] == 'changes' for review in reviews):
             verifier = self.agent(repo, folder, prefix + '-adversarial-verifier', review_prompt +
@@ -398,7 +411,9 @@ transient infrastructure failure that should be rerun. Otherwise return ci_retry
                 json.dumps(reviews), REVIEW_SCHEMA, True)
             require(staged_tree(repo, m['expected_head'], m['merge_parent']) == tree and verifier['tree'] == tree,
                     'Verifier tree mismatch')
-            require(verifier['verdict'] != 'blocked', verifier['findings'])
+            if verifier['verdict'] == 'blocked':
+                self.retain_blocked_review(folder, m, prefix + '-adversarial-verifier', verifier)
+                return
             if verifier['verdict'] == 'changes':
                 m['feedback'] = verifier['findings']
                 self.save(folder, m)
@@ -411,6 +426,9 @@ transient infrastructure failure that should be rerun. Otherwise return ci_retry
             if holistic['verdict'] == 'changes':
                 m['feedback'] = holistic['findings']
                 self.save(folder, m)
+                return
+            if holistic['verdict'] == 'blocked':
+                self.retain_blocked_review(folder, m, prefix + '-holistic', holistic)
                 return
             require(holistic['verdict'] == 'approve', holistic['findings'])
             reviews.append(holistic)
