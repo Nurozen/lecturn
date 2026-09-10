@@ -425,6 +425,18 @@ describe("shouldShowEnvironmentIndicator", () => {
 });
 
 describe("shouldShowComposerContextStrip", () => {
+  it("keeps Stave workspace context visible with no editable Git repo", () => {
+    expect(
+      shouldShowComposerContextStrip({
+        hasActiveProject: true,
+        isGitRepo: false,
+        isStaveProject: true,
+        showEnvironmentIndicator: false,
+        hostsRestingComposerControls: false,
+      }),
+    ).toBe(true);
+  });
+
   it("keeps the environment indicator visible for a non-Git project", () => {
     expect(
       shouldShowComposerContextStrip({

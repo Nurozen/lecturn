@@ -1,3 +1,4 @@
+import { describeStaveWorkspace } from "./stave/staveWorkspaceContext.logic";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { staveAdmissionErrorMessage } from "@t3tools/client-runtime/errors";
 import {
@@ -140,6 +141,7 @@ export function BranchToolbarBranchSelector({
       ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
       : null;
   const activeProject = useProject(activeProjectRef);
+  const staveContext = describeStaveWorkspace(activeProject);
 
   const activeThreadId = serverThread?.id ?? (draftThread ? threadId : undefined);
   const activeThreadBranch =
@@ -787,6 +789,11 @@ export function BranchToolbarBranchSelector({
           <ComboboxTrigger
             render={<Button variant="ghost" size="xs" />}
             className="min-w-0 max-w-full font-normal text-muted-foreground/70 text-xs! hover:text-foreground/80"
+            aria-label={
+              staveContext
+                ? `Git branch for ${staveContext.primaryRepoName ?? "primary repo"}: ${triggerLabel}`
+                : undefined
+            }
             disabled={isInitialBranchesLoadPending || isBranchActionPending}
           >
             <GitBranchIcon className="size-3 shrink-0 opacity-70" />
@@ -798,7 +805,9 @@ export function BranchToolbarBranchSelector({
                 data-composer-label-motion
                 className="block w-full min-w-0 max-w-[240px] origin-left truncate transition-[opacity,transform] duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:[transform:translateX(-0.25rem)_scaleX(0.95)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transform-none motion-reduce:transition-opacity"
               >
-                {triggerLabel}
+                {staveContext
+                  ? `Git: ${staveContext.primaryRepoName ?? "primary repo"}`
+                  : triggerLabel}
               </span>
             </span>
             <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
@@ -806,6 +815,15 @@ export function BranchToolbarBranchSelector({
         </span>
       </div>
       <ComboboxPopup align="end" side="top" className="flex w-80 flex-col">
+        {staveContext ? (
+          <div className="border-b px-3 py-2 text-xs text-muted-foreground">
+            <p className="font-medium text-foreground">
+              Git: {staveContext.primaryRepoName ?? "primary repo"}
+            </p>
+            <p className="mt-1 break-all">Current branch: {triggerLabel}</p>
+            <p className="mt-1">Branch changes apply to this repo. Threads use the whole space.</p>
+          </div>
+        ) : null}
         <div className="shrink-0 px-3 pt-2.5">
           <div className="relative -translate-y-px border-b border-border/70 pb-1.5 transition-colors focus-within:border-ring">
             <SearchIcon

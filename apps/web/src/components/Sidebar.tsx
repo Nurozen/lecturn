@@ -1,4 +1,5 @@
 import { StaveLifecycleBadge } from "./stave/StaveLifecycleBadge";
+import { describeStaveWorkspace } from "./stave/staveWorkspaceContext.logic";
 import { autoAnimate } from "@formkit/auto-animate";
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
@@ -289,6 +290,7 @@ function SidebarThreadTooltip({
   projectCwd,
   projectFaviconPath,
   projectIcon,
+  staveWorkspace,
   environmentLabel,
   environmentMachine,
   providerEntry,
@@ -304,6 +306,7 @@ function SidebarThreadTooltip({
   projectCwd: string | null;
   projectFaviconPath: string | null;
   projectIcon: ProjectIconOverride | null;
+  staveWorkspace: ReturnType<typeof describeStaveWorkspace>;
   environmentLabel: string | null;
   environmentMachine: EnvironmentMachineKind;
   providerEntry: ProviderInstanceEntry | null;
@@ -353,7 +356,17 @@ function SidebarThreadTooltip({
               <div className="min-w-0 truncate text-foreground/75">{environmentLabel}</div>
             </div>
           ) : null}
-          {thread.branch ? (
+          {staveWorkspace ? (
+            <div className="flex min-w-0 items-start gap-2">
+              <FolderIcon className="mt-0.5 size-3 shrink-0 stroke-muted-foreground" />
+              <div className="min-w-0 text-foreground/75">
+                <div>{staveWorkspace.label}</div>
+                <div className="mt-1 text-muted-foreground whitespace-pre-line wrap-break-word">
+                  {staveWorkspace.title}
+                </div>
+              </div>
+            </div>
+          ) : thread.branch ? (
             <div className="flex min-w-0 items-center gap-2">
               <GitBranchIcon className="size-3 shrink-0 stroke-muted-foreground" />
               <div className="min-w-0 truncate text-foreground/75">{thread.branch}</div>
@@ -850,6 +863,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     fallbackCwd: props.projectCwd,
   });
   const gitCwd = gitTarget.cwd;
+  const staveWorkspace = describeStaveWorkspace(threadProject);
   const linkedPullRequestStatus = useLinkedThreadPullRequest(
     leaseLiveStatus ? thread.environmentId : null,
     leaseLiveStatus ? thread.linkedPullRequest : null,
@@ -1025,6 +1039,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       projectCwd={props.projectCwd}
       projectFaviconPath={props.projectFaviconPath}
       projectIcon={props.projectIcon}
+      staveWorkspace={staveWorkspace}
       environmentLabel={props.environmentLabel}
       environmentMachine={props.environmentMachine}
       providerEntry={providerEntry}
@@ -1666,10 +1681,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   </Tooltip>
                 </span>
               ) : null}
-              {/* Always the branch. The plan step used to take this slot while
-                  working, but it truncated to a half-sentence and dropped the
-                  branch, so the row lost its most stable identifier. */}
-              {thread.branch ? (
+              {/* Stave threads span the space; their primary Git branch is only
+                  one repo inside that workspace. */}
+              {staveWorkspace ? (
+                <>
+                  <FolderIcon aria-hidden className="size-3 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate whitespace-nowrap">
+                    {staveWorkspace.label}
+                  </span>
+                </>
+              ) : thread.branch ? (
                 <>
                   <ThreadWorktreeIndicator thread={thread} />
                   <span className="min-w-0 flex-1 truncate whitespace-nowrap">{thread.branch}</span>
@@ -1850,6 +1871,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
           projectCwd={props.projectCwd}
           projectFaviconPath={props.projectFaviconPath}
           projectIcon={props.projectIcon}
+          staveWorkspace={describeStaveWorkspace(threadProject)}
           environmentLabel={props.environmentLabel}
           environmentMachine={props.environmentMachine}
           providerEntry={providerEntry}

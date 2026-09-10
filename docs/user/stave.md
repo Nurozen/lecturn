@@ -38,10 +38,14 @@ make a new space from the app, see [Create a space](#create-a-space).
 - **Threads run in the space root.** Every thread works in the root directory, where all the
   space's checkouts sit side by side. The per-thread worktree options you see on ordinary
   projects are not offered, and the project's default environment mode is fixed to local.
+  The composer and chat list show **Stave space** with its editable repo count. Open the
+  composer's space control to see the working directory and all editable and reference repos.
 - **The first editable repo drives git.** A space root is not a repository itself, so branch
   status, the pull request lookup, and the Git actions in the toolbar target the first `edit`
   repo in the manifest on its manifest branch. Reference checkouts are listed but never
   targeted. A space without an editable repo has no Git target; Git status and actions stay unavailable.
+  The branch control is labelled **Git: repo-name**; open it to see the branch. A name such as
+  `stave/my-space/my-repo` identifies that repo's branch, not the thread's working directory.
 - **Checkpoints are unavailable.** A space spans several repositories, so per-thread checkpoints
   (and the diff and revert built on them) are off in spaces. Use Git in the editable repo
   instead.

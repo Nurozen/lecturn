@@ -42,6 +42,8 @@ import {
 import { Separator } from "./ui/separator";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { cn } from "~/lib/utils";
+import { describeStaveWorkspace } from "./stave/staveWorkspaceContext.logic";
+import { StaveWorkspaceContext } from "./stave/StaveWorkspaceContext";
 
 interface BranchToolbarProps {
   environmentId: EnvironmentId;
@@ -439,6 +441,7 @@ export const BranchToolbar = memo(function BranchToolbar({
       ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
       : null;
   const activeProject = useProject(activeProjectRef);
+  const staveContext = describeStaveWorkspace(activeProject);
   const hasActiveThread = serverThread !== null || draftThread !== null;
   const activeWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
   // A Stave space's repos are already worktrees: the mode is pinned to local
@@ -518,7 +521,7 @@ export const BranchToolbar = memo(function BranchToolbar({
         !contextStripVisible && "pointer-events-none invisible absolute inset-x-0 top-full",
       )}
     >
-      {showGitControls ? (
+      {showGitControls && !staveContext ? (
         <div className="contents @3xl/composer-surface:hidden">
           <MobileRunContextSelector
             envLocked={envLocked}
@@ -537,11 +540,11 @@ export const BranchToolbar = memo(function BranchToolbar({
           />
         </div>
       ) : null}
-      {showGitControls || showEnvironmentIndicator ? (
+      {showGitControls || showEnvironmentIndicator || staveContext ? (
         <div
           className={cn(
             "min-h-7 min-w-10 items-center gap-1 sm:min-h-6",
-            showGitControls ? "hidden @3xl/composer-surface:flex" : "flex",
+            showGitControls && !staveContext ? "hidden @3xl/composer-surface:flex" : "flex",
             composerControlsHostRef ? "shrink" : "flex-1",
           )}
         >
@@ -562,7 +565,9 @@ export const BranchToolbar = memo(function BranchToolbar({
               ) : null}
             </>
           )}
-          {showGitControls ? (
+          {staveContext ? (
+            <StaveWorkspaceContext context={staveContext} />
+          ) : showGitControls ? (
             <BranchToolbarEnvModeSelector
               envLocked={envModeLocked}
               effectiveEnvMode={effectiveEnvMode}
