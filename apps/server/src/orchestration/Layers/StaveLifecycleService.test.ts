@@ -4,6 +4,7 @@ import {
   ThreadId,
   type OrchestrationProjectShell,
   EventId,
+  MessageId,
   type OrchestrationEvent,
   type ServerSettings,
   type StaveLifecycleSettings,
@@ -86,6 +87,7 @@ const harness = Effect.fn(function* (
     deleted?: boolean;
     saga?: boolean;
     policy?: Partial<StaveLifecycleSettings>;
+    domainEvents?: Stream.Stream<OrchestrationEvent>;
   } = {},
 ) {
   yield* TestClock.setTime(Date.parse(NOW));
@@ -116,6 +118,8 @@ const harness = Effect.fn(function* (
   const activation = yield* Deferred.make<void>();
   const reads = yield* Queue.unbounded<void>();
   const calls = yield* Ref.make<ReadonlyArray<string>>([]);
+  const storageCalls = yield* Ref.make<ReadonlyArray<string>>([]);
+  const metadataCommands = yield* Ref.make<ReadonlyArray<string>>([]);
   const anchors = yield* Ref.make<ReadonlyArray<ProjectionThreadLifecycleAnchor>>([ANCHOR]);
   const projects = yield* Ref.make<ReadonlyArray<OrchestrationProjectShell>>(
     options.deleted
@@ -160,7 +164,17 @@ const harness = Effect.fn(function* (
     });
   const dependencies = Layer.mergeAll(
     Layer.succeed(ServerConfig, { ...config, staveEnabled: options.serverEnabled ?? true }),
-    Layer.succeed(StaveLifecycleRepository, repo),
+    Layer.succeed(StaveLifecycleRepository, {
+      ...repo,
+      observePolicy: (input) =>
+        Ref.update(storageCalls, (all) => [...all, "observe-policy"]).pipe(
+          Effect.andThen(repo.observePolicy(input)),
+        ),
+      releaseExpiredLeases: (now) =>
+        Ref.update(storageCalls, (all) => [...all, "release-leases"]).pipe(
+          Effect.andThen(repo.releaseExpiredLeases(now)),
+        ),
+    }),
     Layer.mock(ServerSettingsService)({
       getSettings: Ref.get(settings),
       subscribeChanges: PubSub.subscribe(settingsChanges).pipe(Effect.map(Stream.fromSubscription)),
@@ -221,8 +235,11 @@ const harness = Effect.fn(function* (
       listThreadLifecycleAnchorsByProjectId: () => Ref.get(anchors),
     }),
     Layer.mock(OrchestrationEngineService)({
-      dispatch: () => Effect.succeed({ sequence: 43 }),
-      streamDomainEvents: Stream.fromPubSub(events),
+      dispatch: (command) =>
+        Ref.update(metadataCommands, (all) => [...all, command.type]).pipe(
+          Effect.as({ sequence: 43 }),
+        ),
+      streamDomainEvents: options.domainEvents ?? Stream.fromPubSub(events),
     }),
     Layer.mock(ThreadDeletionReactor)({
       drainThrough: (seq) =>
@@ -268,6 +285,8 @@ const harness = Effect.fn(function* (
     service,
     projects,
     calls,
+    storageCalls,
+    metadataCommands,
     anchors,
     beforeValidate,
     binaryAvailable,
@@ -296,7 +315,139 @@ const test = <E>(
   >,
 ) => it.effect(name, () => body.pipe(Effect.provide(persistence), Effect.scoped));
 
+const activityEvent = (sequence: number): OrchestrationEvent => ({
+  type: "thread.unsettled",
+  sequence,
+  eventId: EventId.make(`activity-${sequence}`),
+  aggregateKind: "thread",
+  aggregateId: ANCHOR.threadId,
+  occurredAt: NOW,
+  commandId: null,
+  causationEventId: null,
+  correlationId: null,
+  metadata: {},
+  payload: { threadId: ANCHOR.threadId, reason: "activity", updatedAt: NOW },
+});
+const assistantDelta = (sequence: number): OrchestrationEvent => ({
+  ...activityEvent(sequence),
+  type: "thread.message-sent",
+  payload: {
+    threadId: ANCHOR.threadId,
+    messageId: MessageId.make("streaming-message"),
+    role: "assistant",
+    text: "delta",
+    turnId: null,
+    streaming: true,
+    createdAt: NOW,
+    updatedAt: NOW,
+  },
+});
+const eventBatch = (
+  events: ReadonlyArray<OrchestrationEvent>,
+  ready: Deferred.Deferred<void>,
+  consumed: Deferred.Deferred<void>,
+) =>
+  Stream.fromEffect(Deferred.await(ready)).pipe(
+    Stream.flatMap(() => Stream.fromIterable(events)),
+    Stream.ensuring(Deferred.succeed(consumed, undefined)),
+  );
+
 describe("StaveLifecycleService", () => {
+  for (const disabled of [{ serverEnabled: false }, { enabled: false }]) {
+    test(
+      `disabled startup and event bursts leave lifecycle journals untouched for ${JSON.stringify(disabled)}`,
+      Effect.gen(function* () {
+        const ready = yield* Deferred.make<void>();
+        const consumed = yield* Deferred.make<void>();
+        const h = yield* harness({
+          ...disabled,
+          domainEvents: eventBatch(
+            Array.from({ length: 1000 }, (_, i) => activityEvent(i + 100)),
+            ready,
+            consumed,
+          ),
+        });
+        yield* h.patch({ disposition: "archiving" });
+        const row = yield* h.row;
+        yield* h.repo.acquireLease({
+          projectId: ID,
+          expectedEpoch: row.leaseEpoch,
+          ownerToken: "crashed",
+          now: NOW,
+          leaseUntil: "2026-09-01T00:01:00.000Z",
+        });
+        yield* TestClock.adjust("2 minutes");
+        const before = yield* h.row;
+        yield* h.service.start();
+        yield* Deferred.succeed(h.activation, undefined);
+        yield* Deferred.succeed(ready, undefined);
+        yield* Deferred.await(consumed);
+        yield* h.service.drain;
+        yield* TestClock.adjust("2 minutes");
+        yield* h.service.drain;
+        assert.deepEqual(yield* Ref.get(h.calls), []);
+        assert.deepEqual(yield* Ref.get(h.metadataCommands), []);
+        assert.deepEqual(yield* Ref.get(h.storageCalls), ["observe-policy"]);
+        assert.deepEqual(yield* h.row, before);
+      }),
+    );
+  }
+  test(
+    "streaming assistant deltas do not request lifecycle sweeps",
+    Effect.gen(function* () {
+      const ready = yield* Deferred.make<void>();
+      const consumed = yield* Deferred.make<void>();
+      const h = yield* harness({
+        domainEvents: eventBatch(
+          Array.from({ length: 2000 }, (_, i) => assistantDelta(i + 100)),
+          ready,
+          consumed,
+        ),
+      });
+      yield* h.service.start();
+      yield* Deferred.succeed(h.activation, undefined);
+      yield* Queue.take(h.reads);
+      yield* h.service.drain;
+      const beforeStorage = yield* Ref.get(h.storageCalls);
+      yield* Deferred.succeed(ready, undefined);
+      yield* Deferred.await(consumed);
+      yield* h.service.drain;
+      assert.equal((yield* Ref.get(h.calls)).filter((call) => call === "reconcile").length, 1);
+      assert.deepEqual(yield* Ref.get(h.storageCalls), beforeStorage);
+    }),
+  );
+  test(
+    "coalesces a high-volume event burst into one follow-up while a sweep is in flight",
+    Effect.gen(function* () {
+      const ready = yield* Deferred.make<void>();
+      const consumed = yield* Deferred.make<void>();
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const h = yield* harness({
+        domainEvents: eventBatch(
+          Array.from({ length: 2000 }, (_, i) => activityEvent(i + 100)),
+          ready,
+          consumed,
+        ),
+      });
+      yield* Ref.set(
+        h.reconciliation,
+        Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release))),
+      );
+      yield* h.service.start();
+      yield* Deferred.succeed(h.activation, undefined);
+      yield* Deferred.await(started);
+      yield* Deferred.succeed(ready, undefined);
+      yield* Deferred.await(consumed);
+      yield* Deferred.succeed(release, undefined);
+      yield* h.service.drain;
+      assert.equal((yield* Ref.get(h.calls)).filter((call) => call === "reconcile").length, 2);
+      assert.equal(
+        (yield* Ref.get(h.storageCalls)).filter((call) => call === "release-leases").length,
+        2,
+      );
+    }),
+  );
   test(
     "retains re-enable episode resets across a restart while the binary is unavailable",
     Effect.gen(function* () {

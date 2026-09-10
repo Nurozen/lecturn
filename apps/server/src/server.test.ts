@@ -5745,6 +5745,137 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("stave saga preview crosses RPC intact and authorizes the real operation runner", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const agentWorkDir = yield* fs.realPath(
+        yield* fs.makeTempDirectoryScoped({ prefix: "stave-saga-rpc-" }),
+      );
+      const sagaRoot = path.join(agentWorkDir, "story");
+      const memberRoot = path.join(agentWorkDir, "member");
+      const createdAt = "2026-09-01T00:00:00.123456789Z";
+      yield* fs.makeDirectory(sagaRoot);
+      yield* fs.makeDirectory(memberRoot);
+      yield* fs.writeFileString(
+        path.join(sagaRoot, ".stave.yaml"),
+        `version: 2\nid: story\nkind: saga\ncreatedAt: '${createdAt}'\nrepos: []\nmemories: []\nsaga:\n  members:\n    - id: member\n      createdAt: '${createdAt}'\n      after: []\n`,
+      );
+      yield* fs.writeFileString(
+        path.join(memberRoot, ".stave.yaml"),
+        `version: 2\nid: member\ncreatedAt: '${createdAt}'\nrepos: []\nmemories: []\n`,
+      );
+      const mutations = yield* Ref.make(0);
+      yield* buildAppUnderTest({
+        layers: {
+          ...staveEnabledLayers,
+          staveConfigReader: {
+            load: Effect.succeed({
+              configPath: path.join(agentWorkDir, "config.yaml"),
+              exists: true,
+              agentWorkDir,
+              repos: [],
+              source: "fs-fallback",
+            }),
+          },
+          staveCli: {
+            spaceList: () => Effect.succeed([]),
+            spaceStatus: () =>
+              Effect.succeed({
+                spaceId: "story",
+                spacePath: sagaRoot,
+                manifest: {
+                  version: 2,
+                  id: "story",
+                  kind: "saga",
+                  createdAt,
+                  repos: [],
+                  memories: [],
+                  saga: { members: [{ id: "member", createdAt, after: [], prs: [] }] },
+                },
+                repos: [],
+                memories: [],
+              }),
+            sagaDestroy: (input) =>
+              input.dryRun
+                ? Effect.succeed({ dryRun: true as const, plan: ["Destroy member and story"] })
+                : Effect.gen(function* () {
+                    yield* Ref.update(mutations, (count) => count + 1);
+                    yield* fs.remove(memberRoot, { recursive: true });
+                    yield* fs.remove(sagaRoot, { recursive: true });
+                    return {
+                      sagaId: "story",
+                      sagaPath: sagaRoot,
+                      action: "destroyed" as const,
+                      memory: "keep" as const,
+                      members: [{ id: "member", path: memberRoot, action: "destroyed" as const }],
+                      notes: [],
+                    };
+                  }).pipe(Effect.orDie),
+          },
+          providerService: {
+            listSessions: () => Effect.succeed([]),
+            stopSessionsUnder: () => Effect.succeed(0),
+          },
+          terminalManager: { closeSessionsUnder: () => Effect.succeed(0) },
+        },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const operation = {
+        kind: "sagaDestroy" as const,
+        sagaRoot,
+        expectedManifestCreatedAt: createdAt,
+        force: false,
+        memory: "keep" as const,
+      };
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.gen(function* () {
+            const plan = yield* client[WS_METHODS.staveDryRun]({ operation });
+            assert.deepEqual(plan.plan, ["Destroy member and story"]);
+            assert.ok(plan.sagaReview);
+            if (plan.sagaReview === undefined) return;
+            assert.deepEqual(
+              plan.sagaReview.participants.map((participant) => participant.spaceId).sort(),
+              ["member", "story"],
+            );
+            assert.equal(plan.sagaReview.sagaCreatedAt, createdAt);
+            for (const [id, expectedSagaReview] of [
+              ["missing", undefined],
+              ["mismatch", "wrong-review"],
+            ] as const) {
+              const refused = Array.from(
+                yield* client[WS_METHODS.staveRunOperation]({
+                  operationId: `saga-rpc-${id}`,
+                  operation: {
+                    ...operation,
+                    ...(expectedSagaReview === undefined ? {} : { expectedSagaReview }),
+                  },
+                }).pipe(Stream.runCollect),
+              ).at(-1);
+              assert.equal(refused?.kind, "failed");
+              if (refused?.kind === "failed")
+                assert.equal(refused.error.code, "incarnation_mismatch");
+              assert.equal(yield* Ref.get(mutations), 0);
+            }
+            const events = Array.from(
+              yield* client[WS_METHODS.staveRunOperation]({
+                operationId: "saga-rpc-authorized",
+                operation: { ...operation, expectedSagaReview: plan.sagaReview.fingerprint },
+              }).pipe(Stream.runCollect),
+            );
+            const finished = events.at(-1);
+            assert.equal(finished?.kind, "finished");
+            if (finished?.kind === "finished") assert.equal(finished.result.kind, "sagaDestroy");
+            assert.equal(yield* Ref.get(mutations), 1);
+            assert.equal(yield* fs.exists(memberRoot), false);
+            assert.equal(yield* fs.exists(sagaRoot), false);
+          }),
+        ),
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("stave.runOperation refuses a missing space before editing it", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest({ layers: staveEnabledLayers });

@@ -13,6 +13,7 @@ import type { OrchestrationProjectShell, ThreadEnvMode } from "@t3tools/contract
 
 type ProjectLike = Pick<OrchestrationProjectShell, "workspaceRoot"> & {
   readonly stave?: OrchestrationProjectShell["stave"];
+  readonly repositoryIdentity?: OrchestrationProjectShell["repositoryIdentity"];
 };
 
 interface ThreadLike {
@@ -69,4 +70,32 @@ export function staveForcedEnvMode(
   project: ProjectLike | null | undefined,
 ): ThreadEnvMode | undefined {
   return isStaveProject(project) ? "local" : undefined;
+}
+
+/** PR identity follows the same primary checkout as Git status. */
+export function resolveProjectGitRepositoryIdentity(project: ProjectLike | null | undefined) {
+  return project?.stave
+    ? (project.stave.primaryRepositoryIdentity ?? null)
+    : (project?.repositoryIdentity ?? null);
+}
+
+/** Normalize saved or explicit workspace choices before creating/submitting a Stave thread. */
+export function normalizeProjectThreadWorkspace<
+  T extends {
+    readonly envMode?: ThreadEnvMode;
+    readonly worktreePath?: string | null;
+    readonly branch?: string | null;
+    readonly startFromOrigin?: boolean;
+  },
+>(project: ProjectLike | null | undefined, workspace: T) {
+  if (!project?.stave) return workspace;
+  return {
+    ...workspace,
+    envMode: "local" as const,
+    worktreePath: null,
+    startFromOrigin: false,
+    ...(workspace.envMode === "worktree" || workspace.worktreePath
+      ? { branch: resolveProjectGitBranch({ project }) }
+      : {}),
+  };
 }

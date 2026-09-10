@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { StaveOperation, StaveSagaReview } from "@t3tools/contracts";
+import { ProjectId, type StaveOperation, type StaveSagaReview } from "@t3tools/contracts";
 import {
   bindStaveSagaReview,
   canForceStaveOperation,
@@ -117,4 +117,33 @@ describe("saga reviewed scope", () => {
   it("does not require saga consent for an ordinary space", () => {
     expect(bindStaveSagaReview(destroy, undefined)).toEqual(destroy);
   });
+});
+
+it("binds pending saga retries from the preview without project-kind metadata", () => {
+  const operation = {
+    kind: "lifecycleAction",
+    projectId: ProjectId.make("saga-project"),
+    workspaceRoot: "/saga",
+    action: "retry",
+    target: "destroy",
+    force: false,
+    memory: "keep",
+  } satisfies StaveOperation;
+  const review = {
+    fingerprint: "current-scope",
+    projectDeletionFingerprint: "deleted-project-scope",
+    sagaRoot: "/saga",
+    sagaCreatedAt: "2026-01-01T00:00:00Z",
+    target: "destroy",
+    force: false,
+    memory: "keep",
+    participants: [],
+  } satisfies StaveSagaReview;
+  expect(bindStaveSagaReview(operation, review)).toEqual({
+    ...operation,
+    expectedSagaReview: "current-scope",
+  });
+  expect(bindStaveSagaReview({ ...operation, force: true }, review)).toBeNull();
+  expect(bindStaveSagaReview(operation, undefined)).toEqual(operation);
+  expect(bindStaveSagaReview(operation, undefined, true)).toBeNull();
 });

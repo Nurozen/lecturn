@@ -19,6 +19,7 @@ import * as Context from "effect/Context";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
@@ -129,6 +130,7 @@ export const make = Effect.fn("StaveAdmission.make")(function* () {
   const lifecycle = yield* Effect.serviceOption(StaveLifecycleRepository);
   const lock = yield* Effect.serviceOption(StaveSpaceLock);
   const fs = yield* Effect.serviceOption(FileSystem.FileSystem);
+  const path = yield* Effect.serviceOption(Path.Path);
   const checkUnderLock = Effect.fn("StaveAdmission.checkUnderLock")(function* (
     input: StaveAdmissionInput,
   ) {
@@ -138,7 +140,37 @@ export const make = Effect.fn("StaveAdmission.make")(function* () {
         intent: input.intent,
         message: "This Stave space is transitioning. Try again after the operation finishes.",
       });
-    const space = yield* reader.load(input.projectRoot);
+    let space = yield* reader.load(input.projectRoot);
+    // A Stave checkout stays managed after its parent project is removed from
+    // Lecturn. Resolve physical ancestors before admitting worktree/PR writes.
+    if (
+      Option.isNone(space) &&
+      intentUsesWorktree(input) &&
+      Option.isSome(fs) &&
+      Option.isSome(path)
+    ) {
+      let candidate = path.value.resolve(input.projectRoot);
+      const missing: string[] = [];
+      while (true) {
+        const canonical = yield* fs.value.realPath(candidate).pipe(Effect.option);
+        if (Option.isSome(canonical)) {
+          candidate = path.value.join(canonical.value, ...missing.toReversed());
+          break;
+        }
+        const parent = path.value.dirname(candidate);
+        if (parent === candidate) break;
+        missing.push(path.value.basename(candidate));
+        candidate = parent;
+      }
+      while (true) {
+        yield* reader.invalidate(candidate);
+        space = yield* reader.load(candidate);
+        if (Option.isSome(space)) break;
+        const parent = path.value.dirname(candidate);
+        if (parent === candidate) break;
+        candidate = parent;
+      }
+    }
     if (Option.isSome(lifecycle)) {
       const canonicalRoot = Option.isSome(fs)
         ? yield* fs.value

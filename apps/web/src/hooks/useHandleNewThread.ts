@@ -1,5 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
-import { staveThreadStartMessage } from "@t3tools/client-runtime/state/projectGit";
+import {
+  isStaveProject,
+  normalizeProjectThreadWorkspace,
+  staveThreadStartMessage,
+} from "@t3tools/client-runtime/state/projectGit";
 import { toastManager } from "../components/ui/toast";
 import {
   scopedProjectKey,
@@ -177,6 +181,18 @@ export function useNewThreadHandler() {
       const logicalProjectKey = project
         ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
         : scopedProjectKey(projectRef);
+      const workspaceOptionsForDraft = (draft?: NewThreadWorkspaceOptions) =>
+        normalizeProjectThreadWorkspace(project, {
+          ...(isStaveProject(project) && draft
+            ? {
+                branch: draft.branch,
+                worktreePath: draft.worktreePath,
+                envMode: draft.envMode,
+                startFromOrigin: draft.startFromOrigin,
+              }
+            : {}),
+          ...pickExplicitWorkspaceOptions(options),
+        });
       const hasBranchOption = options?.branch !== undefined;
       const hasWorktreePathOption = options?.worktreePath !== undefined;
       const hasEnvModeOption = options?.envMode !== undefined;
@@ -217,6 +233,7 @@ export function useNewThreadHandler() {
             currentRouteTarget?.kind === "draft" &&
             currentRouteTarget.draftId === emptyStoredDraftThread.draftId;
           const hasExplicitWorkspaceOption =
+            isStaveProject(project) ||
             hasBranchOption ||
             hasWorktreePathOption ||
             hasEnvModeOption ||
@@ -232,7 +249,7 @@ export function useNewThreadHandler() {
           // below and does not follow this guard.
           let workspaceContext: NewThreadWorkspaceOptions | null = null;
           if (hasExplicitWorkspaceOption) {
-            workspaceContext = pickExplicitWorkspaceOptions(options);
+            workspaceContext = workspaceOptionsForDraft(emptyStoredDraftThread);
           } else if (!isDraftAlreadyOpen) {
             const defaultEnvMode = await resolveDefaultEnvMode();
             // The await yields. If the draft was opened (a concurrent
@@ -346,19 +363,23 @@ export function useNewThreadHandler() {
         !composerDraftHasUserContent(getComposerDraft(currentRouteTarget.draftId))
       ) {
         if (
+          isStaveProject(project) ||
           hasBranchOption ||
           hasWorktreePathOption ||
           hasEnvModeOption ||
           hasStartFromOriginOption
         ) {
-          setDraftThreadContext(currentRouteTarget.draftId, pickExplicitWorkspaceOptions(options));
+          setDraftThreadContext(
+            currentRouteTarget.draftId,
+            workspaceOptionsForDraft(latestActiveDraftThread),
+          );
         }
         setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, currentRouteTarget.draftId, {
           threadId: latestActiveDraftThread.threadId,
           createdAt: latestActiveDraftThread.createdAt,
           runtimeMode: latestActiveDraftThread.runtimeMode,
           interactionMode: latestActiveDraftThread.interactionMode,
-          ...pickExplicitWorkspaceOptions(options),
+          ...workspaceOptionsForDraft(latestActiveDraftThread),
         });
         return Promise.resolve({
           draftId: currentRouteTarget.draftId,
@@ -398,7 +419,7 @@ export function useNewThreadHandler() {
             createdAt: racedDraft.createdAt,
             runtimeMode: racedDraft.runtimeMode,
             interactionMode: racedDraft.interactionMode,
-            ...pickExplicitWorkspaceOptions(options),
+            ...workspaceOptionsForDraft(racedDraft),
           });
           await router.navigate({
             to: "/draft/$draftId",
@@ -407,21 +428,26 @@ export function useNewThreadHandler() {
           });
           return { draftId: racedDraft.draftId, threadId: racedDraft.threadId };
         }
-        setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
-          threadId,
-          createdAt,
-          branch: options?.branch ?? null,
-          worktreePath: options?.worktreePath ?? null,
-          envMode: initialEnvMode,
-          startFromOrigin:
-            options?.startFromOrigin ??
-            resolveNewDraftStartFromOrigin({
-              envMode: initialEnvMode,
-              newWorktreesStartFromOrigin: primaryServerSettings.newWorktreesStartFromOrigin,
-            }),
-          runtimeMode: carryRuntimeMode ?? DEFAULT_RUNTIME_MODE,
-          ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
-        });
+        setLogicalProjectDraftThreadId(
+          logicalProjectKey,
+          projectRef,
+          draftId,
+          normalizeProjectThreadWorkspace(project, {
+            threadId,
+            createdAt,
+            branch: options?.branch ?? null,
+            worktreePath: options?.worktreePath ?? null,
+            envMode: initialEnvMode,
+            startFromOrigin:
+              options?.startFromOrigin ??
+              resolveNewDraftStartFromOrigin({
+                envMode: initialEnvMode,
+                newWorktreesStartFromOrigin: primaryServerSettings.newWorktreesStartFromOrigin,
+              }),
+            runtimeMode: carryRuntimeMode ?? DEFAULT_RUNTIME_MODE,
+            ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
+          }),
+        );
         applyStickyState(draftId);
         const modelSelectionOverride = resolveModelSelectionOverride(draftId);
         if (modelSelectionOverride) {

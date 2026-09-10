@@ -1,4 +1,8 @@
-import { CommandId, type StaveLifecycleActionOperation } from "@t3tools/contracts";
+import {
+  CommandId,
+  type OrchestrationEvent,
+  type StaveLifecycleActionOperation,
+} from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
@@ -8,6 +12,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
+import * as TxRef from "effect/TxRef";
 import * as NodeCrypto from "node:crypto";
 import { ServerConfig } from "../../config.ts";
 import {
@@ -27,6 +32,38 @@ import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts"
 import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
 import { StaveLifecycleService } from "../Services/StaveLifecycleService.ts";
 import { evaluateDeletedProject, resolveArchiveDeadline } from "../StaveLifecyclePolicy.ts";
+
+function changesLifecycleEligibility(event: OrchestrationEvent): boolean {
+  switch (event.type) {
+    case "project.created":
+    case "project.meta-updated":
+    case "project.deleted":
+    case "thread.created":
+    case "thread.forked":
+    case "thread.deleted":
+    case "thread.archived":
+    case "thread.unarchived":
+    case "thread.settled":
+    case "thread.unsettled":
+    case "thread.snoozed":
+    case "thread.unsnoozed":
+    case "thread.pinned":
+    case "thread.unpinned":
+    case "thread.pin-reordered":
+    case "thread.meta-updated":
+    case "thread.runtime-mode-set":
+    case "thread.interaction-mode-set":
+    case "thread.turn-start-requested":
+    case "thread.session-set":
+    case "thread.turn-diff-completed":
+    case "thread.reverted":
+      return true;
+    case "thread.message-sent":
+      return !event.payload.streaming;
+    default:
+      return false;
+  }
+}
 
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig;
@@ -414,8 +451,8 @@ export const make = Effect.gen(function* () {
     });
   const sweep = Effect.gen(function* () {
     yield* observePolicy(yield* settings.getSettings);
-    yield* repo.releaseExpiredLeases(yield* nowIso);
     if (!(yield* enabled)) return;
+    yield* repo.releaseExpiredLeases(yield* nowIso);
     yield* safely(operations.reconcileIncomplete);
     for (const row of yield* repo.listPending()) {
       if (!(yield* enabled)) return;
@@ -428,27 +465,39 @@ export const make = Effect.gen(function* () {
     }
     for (const row of yield* repo.listUnrefreshed()) yield* safely(refresh(row));
   }).pipe(safely, Effect.asVoid);
-  const worker = yield* makeDrainableWorker(() => sweep);
+  // A running sweep can have one follow-up. All later nudges share that follow-up.
+  const queued = yield* TxRef.make(false);
+  const worker = yield* makeDrainableWorker(() =>
+    TxRef.set(queued, false).pipe(Effect.andThen(sweep)),
+  );
+  const requestSweep = Effect.gen(function* () {
+    if (yield* TxRef.get(queued)) return;
+    yield* TxRef.set(queued, true);
+    yield* worker.enqueue(undefined);
+  }).pipe(Effect.tx);
   const start: StaveLifecycleService["Service"]["start"] = Effect.fn("StaveLifecycleService.start")(
     function* () {
       const changes = yield* settings.subscribeChanges;
       const initial = yield* settings.getSettings.pipe(Effect.orDie);
       yield* observePolicy(initial).pipe(Effect.orDie);
+      let acceptingEvents = config.staveEnabled && initial.stave.enabled;
+      const requestIfEnabled = Effect.suspend(() => (acceptingEvents ? requestSweep : Effect.void));
       yield* forkParked(
         Effect.gen(function* () {
-          yield* worker.enqueue(undefined);
+          yield* requestIfEnabled;
           yield* worker.drain;
         }).pipe(Effect.repeat(Schedule.spaced("1 minute")), Effect.asVoid),
       );
       yield* forkParked(
         Stream.runForEach(engine.streamDomainEvents, (event) =>
-          event.type === "project.refreshed" ? Effect.void : worker.enqueue(undefined),
+          changesLifecycleEligibility(event) ? requestIfEnabled : Effect.void,
         ),
       );
       yield* forkParked(
-        Stream.runForEach(changes, (current) =>
-          observePolicy(current).pipe(Effect.andThen(worker.enqueue(undefined)), safely),
-        ),
+        Stream.runForEach(changes, (current) => {
+          acceptingEvents = config.staveEnabled && current.stave.enabled;
+          return observePolicy(current).pipe(Effect.andThen(requestIfEnabled), safely);
+        }),
       );
     },
   );

@@ -499,3 +499,189 @@ it.effect(
       }).pipe(Effect.provide(testLayer));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
+
+it.effect(
+  "restore fences archived source and live destination through rebuild and reconciliation",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const temp = yield* fs.makeTempDirectoryScoped({ prefix: "stave-restore-fence-" });
+      const root = yield* fs.realPath(temp);
+      const agentWorkDir = path.join(root, "spaces");
+      const live = path.join(agentWorkDir, "demo");
+      const archive = path.join(agentWorkDir, ".archive", "demo");
+      const alias = path.join(root, "live-alias");
+      yield* fs.makeDirectory(path.join(archive, "repo"), { recursive: true });
+      yield* fs.symlink(live, alias);
+      yield* fs.writeFileString(
+        path.join(archive, ".stave.yaml"),
+        `id: demo\ncreatedAt: '${now}'\nrepos: []\nmemories: []\n`,
+      );
+      const projectId = ProjectId.make("restore-original");
+      const rebuilding = yield* Deferred.make<void>();
+      const finishRebuild = yield* Deferred.make<void>();
+      const reconciling = yield* Deferred.make<void>();
+      const finishReconcile = yield* Deferred.make<void>();
+      const stopped: string[] = [];
+      const testLayer = layerWith({}).pipe(
+        Layer.provideMerge(StaveRuntimeFence.layer),
+        Layer.provideMerge(makeEngineLayer(root)),
+        Layer.provide(
+          Layer.mergeAll(
+            AnalyticsService.layerTest,
+            StaveExecution.layerNoop,
+            Layer.succeed(StaveConfigReader, {
+              load: Effect.succeed({
+                configPath: path.join(root, "config.yaml"),
+                exists: true,
+                root,
+                agentWorkDir,
+                bareReposDir: path.join(root, "bare"),
+                repos: [],
+                source: "fs-fallback" as const,
+              }),
+              invalidate: Effect.void,
+            }),
+            Layer.mock(StaveCli)({
+              spaceRestore: () =>
+                Effect.gen(function* () {
+                  expect(stopped).toEqual([
+                    `provider:${archive}`,
+                    `terminal:${archive}`,
+                    `provider:${live}`,
+                    `terminal:${live}`,
+                  ]);
+                  yield* fs.rename(archive, live).pipe(Effect.orDie);
+                  yield* Deferred.succeed(rebuilding, undefined);
+                  yield* Deferred.await(finishRebuild);
+                  return {
+                    spaceId: "demo",
+                    spacePath: live,
+                    manifest: { id: "demo", createdAt: now, repos: [], memories: [] },
+                    notes: [],
+                  };
+                }),
+              spaceList: (input) =>
+                Effect.gen(function* () {
+                  yield* Deferred.succeed(reconciling, undefined);
+                  yield* Deferred.await(finishReconcile);
+                  return input?.archived
+                    ? []
+                    : [
+                        {
+                          id: "demo",
+                          path: live,
+                          isSaga: false,
+                          repos: [],
+                          archived: false,
+                          logicalId: "demo",
+                          manifestCreatedAt: now,
+                          manifestVersion: 1,
+                          memories: [],
+                        },
+                      ];
+                }),
+            }),
+            Layer.mock(ProcessRunner)({}),
+            Layer.mock(ProviderService)({
+              listSessions: () => Effect.succeed([]),
+              stopSessionsUnder: (cwd) =>
+                Effect.sync(() => {
+                  stopped.push(`provider:${cwd}`);
+                }),
+            }),
+            Layer.mock(TerminalManager)({
+              closeSessionsUnder: (cwd) =>
+                Effect.sync(() => {
+                  stopped.push(`terminal:${cwd}`);
+                }),
+            }),
+            WorkspacePaths.layer,
+          ),
+        ),
+      );
+      yield* Effect.gen(function* () {
+        const engine = yield* OrchestrationEngineService;
+        const operations = yield* StaveOperations;
+        const fence = yield* StaveRuntimeFence.StaveRuntimeFence;
+        const locks = yield* StaveSpaceLock.StaveSpaceLock;
+        const snapshots = yield* ProjectionSnapshotQuery;
+        yield* engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("restore-original-create"),
+          projectId,
+          title: "Archived",
+          workspaceRoot: archive,
+          createdAt: now,
+        });
+        const restoring = yield* operations
+          .run({
+            operationId: "restore-both-roots",
+            operation: {
+              kind: "restoreSpace",
+              workspaceRoot: archive,
+              from: "demo",
+              expectedManifestCreatedAt: now,
+            },
+          })
+          .pipe(Stream.runCollect, Effect.forkChild);
+        yield* Effect.raceFirst(
+          Deferred.await(rebuilding),
+          Fiber.join(restoring).pipe(
+            Effect.flatMap((progress) =>
+              Effect.die(`Restore ended before rebuilding: ${progress.at(-1)?.kind}`),
+            ),
+          ),
+        );
+        for (const [index, cwd] of [
+          live,
+          path.join(live, "repo"),
+          path.join(alias, "repo"),
+        ].entries()) {
+          const admission = yield* engine
+            .dispatch({
+              type: "project.create",
+              commandId: CommandId.make(`racing-import-${index}`),
+              projectId: ProjectId.make(`racing-${index}`),
+              title: "Racing import",
+              workspaceRoot: cwd,
+              createdAt: now,
+            })
+            .pipe(Effect.flip);
+          expect(admission._tag).toBe("OrchestrationCommandInvariantError");
+          expect(
+            (yield* fence
+              .withStart(cwd, Effect.die("provider must not start during rebuild"))
+              .pipe(Effect.flip))._tag,
+          ).toBe("StaveRuntimeFenced");
+        }
+        for (const cwd of [archive, live])
+          expect(Option.isNone(yield* locks.tryWithSpaceLock(cwd, Effect.void))).toBe(true);
+        expect((yield* snapshots.getShellSnapshot()).projects).toHaveLength(1);
+        yield* Deferred.succeed(finishRebuild, undefined);
+        yield* Deferred.await(reconciling);
+        expect(
+          (yield* fence
+            .withStart(live, Effect.die("provider must not start during reconciliation"))
+            .pipe(Effect.flip))._tag,
+        ).toBe("StaveRuntimeFenced");
+        expect(Option.isNone(yield* locks.tryWithWorkspaceLocks([live], Effect.void))).toBe(true);
+        yield* Deferred.succeed(finishReconcile, undefined);
+        expect((yield* Fiber.join(restoring)).at(-1)?.kind).toBe("finished");
+        expect(
+          (yield* snapshots.getShellSnapshot()).projects.map((project) => [
+            project.id,
+            project.workspaceRoot,
+          ]),
+        ).toEqual([[projectId, live]]);
+        expect(yield* fence.withStart(live, Effect.succeed("provider may start"))).toBe(
+          "provider may start",
+        );
+        for (const cwd of [archive, live])
+          expect(yield* locks.tryWithSpaceLock(cwd, Effect.succeed("released"))).toEqual(
+            Option.some("released"),
+          );
+      }).pipe(Effect.provide(testLayer));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);

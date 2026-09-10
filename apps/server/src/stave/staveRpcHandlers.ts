@@ -35,7 +35,6 @@ import { StaveMemoryWiring, noop as noopMemoryWiring } from "./StaveMemoryWiring
 import {
   type EnvironmentAuthorizationError,
   type StaveDryRunInput,
-  type StaveDryRunPlan,
   type StaveLastFailure,
   type StaveListSpacesInput,
   type StaveMemoryProvider,
@@ -622,14 +621,13 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
     operation.kind === "lifecycleAction" &&
     (operation.action === "keep" || operation.action === "dismiss");
   const dryRun = (input: StaveDryRunInput) =>
-    (metadataAction(input.operation)
+    metadataAction(input.operation)
       ? requireKillSwitchOn.pipe(
           Effect.andThen(
             operations.dryRun(input.operation).pipe(Effect.mapError(toStaveCommandError)),
           ),
         )
-      : gatedRead(operations.dryRun(input.operation))
-    ).pipe(Effect.map((plan): StaveDryRunPlan => ({ dryRun: true, plan: plan.plan })));
+      : gatedRead(operations.dryRun(input.operation));
 
   const runOperation = (input: StaveRunOperationInput) =>
     Stream.unwrap(

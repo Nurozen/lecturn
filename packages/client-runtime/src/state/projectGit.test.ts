@@ -2,6 +2,8 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   isStaveProject,
+  normalizeProjectThreadWorkspace,
+  resolveProjectGitRepositoryIdentity,
   resolveProjectGitBranch,
   resolveProjectGitCwd,
   staveForcedEnvMode,
@@ -101,5 +103,90 @@ describe("staveForcedEnvMode", () => {
     expect(staveForcedEnvMode(plainProject)).toBeUndefined();
     expect(staveForcedEnvMode(plainProjectExplicitNull)).toBeUndefined();
     expect(staveForcedEnvMode(null)).toBeUndefined();
+  });
+});
+
+describe("workspace submission normalization", () => {
+  const savedDraft = {
+    envMode: "worktree" as const,
+    worktreePath: "/old/worktree",
+    branch: "old/base",
+    startFromOrigin: true,
+    prompt: "Preserve my work",
+  };
+  it("submits an invested saved Stave draft locally and preserves its content", () => {
+    expect(normalizeProjectThreadWorkspace(staveProject, savedDraft)).toEqual({
+      ...savedDraft,
+      envMode: "local",
+      worktreePath: null,
+      branch: "space-1/app",
+      startFromOrigin: false,
+    });
+    expect(savedDraft.worktreePath).toBe("/old/worktree");
+  });
+  it("overrides worktree requests even before a path exists", () => {
+    expect(
+      normalizeProjectThreadWorkspace(staveProject, { ...savedDraft, worktreePath: null }),
+    ).toMatchObject({
+      envMode: "local",
+      worktreePath: null,
+      branch: "space-1/app",
+      startFromOrigin: false,
+    });
+    expect(
+      normalizeProjectThreadWorkspace(staveProjectWithoutPrimary, savedDraft).branch,
+    ).toBeNull();
+  });
+  it("keeps an explicitly selected local Stave branch", () => {
+    expect(
+      normalizeProjectThreadWorkspace(staveProject, {
+        envMode: "local",
+        worktreePath: null,
+        branch: "selected",
+      }).branch,
+    ).toBe("selected");
+  });
+  it("preserves ordinary project worktree choices", () => {
+    expect(normalizeProjectThreadWorkspace(plainProject, savedDraft)).toBe(savedDraft);
+  });
+});
+
+describe("PR repository identity", () => {
+  const outer = {
+    canonicalKey: "github.com/acme/outer",
+    displayName: "acme/outer",
+    rootPath: "/work",
+    locator: {
+      source: "git-remote" as const,
+      remoteName: "origin",
+      remoteUrl: "https://github.com/acme/outer",
+    },
+  };
+  const primary = {
+    ...outer,
+    canonicalKey: "github.com/acme/app",
+    displayName: "acme/app",
+    rootPath: "/work/space/app",
+  };
+  it("uses the primary repo for a Stave space inside another Git repository", () => {
+    expect(
+      resolveProjectGitRepositoryIdentity({
+        ...staveProject,
+        repositoryIdentity: outer,
+        stave: { ...staveProject.stave, primaryRepositoryIdentity: primary },
+      }),
+    ).toBe(primary);
+    expect(
+      resolveProjectGitRepositoryIdentity({
+        ...staveProjectWithoutPrimary,
+        repositoryIdentity: outer,
+      }),
+    ).toBeNull();
+  });
+  it("retains ordinary repository identity", () => {
+    expect(
+      resolveProjectGitRepositoryIdentity({ ...plainProject, repositoryIdentity: outer }),
+    ).toBe(outer);
+    expect(resolveProjectGitRepositoryIdentity(null)).toBeNull();
   });
 });

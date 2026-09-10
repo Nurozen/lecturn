@@ -3181,9 +3181,12 @@ export const checkStaveWorktreeRpcOwnership = Effect.fn("checkStaveWorktreeRpcOw
           }),
       ),
     );
-    if (Option.isNone(owner)) return;
     yield* admission
-      .check({ projectRoot: owner.value.workspaceRoot, projectId: owner.value.id, intent })
+      .check(
+        Option.isSome(owner)
+          ? { projectRoot: owner.value.workspaceRoot, projectId: owner.value.id, intent }
+          : { projectRoot: cwd, intent },
+      )
       .pipe(
         Effect.mapError(
           (error) =>

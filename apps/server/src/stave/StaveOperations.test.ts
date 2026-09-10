@@ -21,6 +21,7 @@ import {
   type OrchestrationCommand,
   type OrchestrationProject,
   type OrchestrationProjectShell,
+  DEFAULT_SERVER_SETTINGS,
   ProjectId,
   ThreadId,
   type StaveCreateSpaceOperation,
@@ -60,6 +61,7 @@ import type {
 } from "./staveJson.ts";
 import {
   layerWith,
+  layer as productionOperationsLayer,
   StaveOperations,
   StaveRefusalError,
   type StaveOperationsLimits,
@@ -192,6 +194,9 @@ interface CliCall {
 }
 
 interface HarnessOptions {
+  readonly productionLayer?: boolean;
+  readonly settingsEnabled?: boolean;
+  readonly serverEnabled?: boolean;
   readonly threadAnchors?: ProjectionSnapshotQuery["Service"]["listThreadLifecycleAnchorsByProjectId"];
   readonly executionLayer?: Layer.Layer<StaveExecution.StaveExecution>;
   readonly cliLayer?: Layer.Layer<StaveCli>;
@@ -323,7 +328,9 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
       }),
     );
 
-    const layer = layerWith(options.limits ?? {}).pipe(
+    const layer = (
+      options.productionLayer ? productionOperationsLayer : layerWith(options.limits ?? {})
+    ).pipe(
       Layer.provide(
         Layer.mergeAll(
           options.executionLayer ?? StaveExecution.layerNoop,
@@ -407,7 +414,23 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
               ),
           }),
           WorkspacePaths.layer,
-          ServerConfig.layerTest(process.cwd(), { prefix: "t3-stave-operations-" }),
+          Layer.effect(
+            ServerConfig.ServerConfig,
+            Effect.gen(function* () {
+              const current = yield* ServerConfig.ServerConfig;
+              return { ...current, staveEnabled: options.serverEnabled ?? current.staveEnabled };
+            }),
+          ).pipe(
+            Layer.provide(
+              ServerConfig.layerTest(process.cwd(), { prefix: "t3-stave-operations-" }),
+            ),
+          ),
+          Layer.mock(ServerSettings.ServerSettingsService)({
+            getSettings: Effect.succeed({
+              ...DEFAULT_SERVER_SETTINGS,
+              stave: { ...DEFAULT_SERVER_SETTINGS.stave, enabled: options.settingsEnabled ?? true },
+            }),
+          }),
           StaveAdmission.layerNoop,
         ),
       ),
@@ -2095,6 +2118,64 @@ it.effect("uses durable lifecycle cleanup when a partial already has a project",
         ).toMatchObject({ force: false });
       }),
   ),
+);
+
+it.effect(
+  "refuses a restore destination changed between the pre-lock and under-lock manifest reads",
+  () =>
+    scenario(
+      (roots) =>
+        Effect.gen(function* () {
+          const archived = roots.path.join(roots.agentWorkDir, ".archive", SPACE_ID);
+          yield* roots.fs.makeDirectory(archived, { recursive: true }).pipe(Effect.orDie);
+          const fixture = lifecycleFixture(archived, "archived");
+          const reads = yield* Ref.make(0);
+          const restoreCalls = yield* Ref.make(0);
+          const quiesced: Array<string> = [];
+          return {
+            archived,
+            fixture,
+            reads,
+            restoreCalls,
+            quiesced,
+            activeProject: project("p", archived),
+            readerLoad: () =>
+              Ref.updateAndGet(reads, (count) => count + 1).pipe(
+                Effect.map((count) =>
+                  Option.some({
+                    ...infoFor("archived"),
+                    spaceId: count === 1 ? SPACE_ID : "changed-destination",
+                  }),
+                ),
+              ),
+            lifecycle: fixture.service,
+            cliExtra: {
+              spaceRestore: () =>
+                Ref.update(restoreCalls, (count) => count + 1).pipe(
+                  Effect.as(mutationResult(SPACE_ID, archived)),
+                ),
+            },
+          };
+        }),
+      (harness, options) =>
+        Effect.gen(function* () {
+          const ops = yield* StaveOperations;
+          const events = yield* runToEnd(ops, "changed-restore-destination", {
+            kind: "restoreSpace",
+            workspaceRoot: options.archived,
+            from: SPACE_ID,
+            expectedManifestCreatedAt: CREATED_AT,
+          });
+          expect(failedError(events).code).toBe("incarnation_mismatch");
+          expect(failedError(events).message).toContain("restore destination changed");
+          expect(yield* Ref.get(options.reads)).toBe(2);
+          expect(yield* Ref.get(options.restoreCalls)).toBe(0);
+          expect(options.fixture.row().disposition).toBe("archived");
+          expect(options.fixture.row().ownerToken).toBeNull();
+          expect(options.quiesced).toEqual([]);
+          expect(yield* Ref.get(harness.dispatched)).toEqual([]);
+        }),
+    ),
 );
 
 it.effect("reconciles a restore that renamed the archive before failing", () =>
@@ -3851,3 +3932,39 @@ it.effect(
         }),
     ),
 );
+
+for (const disabled of ["settings", "server"] as const) {
+  it.effect(
+    `production operation layer leaves recovery to the worker with ${disabled} disabled`,
+    () =>
+      scenario(
+        (roots) =>
+          Effect.gen(function* () {
+            const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+            const recoveryReads: string[] = [];
+            const fixture = lifecycleFixture(root, "archiving");
+            return {
+              productionLayer: true,
+              settingsEnabled: disabled !== "settings",
+              serverEnabled: disabled !== "server",
+              recoveryReads,
+              lifecycle: {
+                ...fixture.service,
+                listIncomplete: () =>
+                  Effect.sync(() => {
+                    recoveryReads.push("read");
+                    return [fixture.row()];
+                  }),
+              },
+            };
+          }),
+        (harness, options) =>
+          Effect.gen(function* () {
+            yield* StaveOperations;
+            expect(options.recoveryReads).toEqual([]);
+            expect(yield* Ref.get(harness.cliCalls)).toEqual([]);
+            expect(yield* Ref.get(harness.dispatched)).toEqual([]);
+          }),
+      ),
+  );
+}

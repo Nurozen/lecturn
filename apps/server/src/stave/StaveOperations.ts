@@ -1332,17 +1332,48 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       };
     });
 
+  const withSpaceOperationLocks = <A, E, R>(
+    operation: SpaceOperation,
+    body: (roots: ReadonlyArray<string>) => Effect.Effect<A, E, R>,
+  ) =>
+    Effect.gen(function* () {
+      const roots = [operation.workspaceRoot];
+      if (operation.kind === "restoreSpace") {
+        const info = yield* freshInfo(operation.workspaceRoot);
+        const { agentWorkDir } = yield* loadRoots;
+        roots.push(path.join(agentWorkDir, info.spaceId));
+      }
+      return yield* withRoots(roots, body(roots));
+    });
+
   const runSpaceOperation = (
     entry: RegistryEntry,
     operation: SpaceOperation,
     durableTarget?: LifecycleRow,
     revalidate: Effect.Effect<void, StaveError | StaveRefusalError> = Effect.void,
   ): Effect.Effect<OperationOutcome, StaveError | StaveRefusalError> =>
-    withSpaceLock(
-      operation.workspaceRoot,
+    withSpaceOperationLocks(operation, (mutationRoots) =>
       Effect.gen(function* () {
         const info = yield* checkSpace(operation);
         const id = info.spaceId;
+        if (operation.kind === "restoreSpace") {
+          const { agentWorkDir } = yield* loadRoots;
+          if (path.resolve(path.join(agentWorkDir, id)) !== path.resolve(mutationRoots[1]!))
+            return yield* refuse(
+              "incarnation_mismatch",
+              "The restore destination changed while acquiring its locks. Refresh the project before trying again.",
+            );
+          if (info.state !== "archived" || operation.from !== info.archiveBasename)
+            return yield* refuse(
+              "incarnation_mismatch",
+              "The selected archive no longer matches this project.",
+            );
+          if (yield* fileSystem.exists(mutationRoots[1]!).pipe(Effect.mapError(asRefusal)))
+            return yield* refuse(
+              "space_exists",
+              "The live destination already exists. Resolve it before restoring this archive.",
+            );
+        }
         if (info.isSaga && (operation.kind === "archiveSpace" || operation.kind === "destroySpace"))
           return yield* refuse(
             "saga_space",
@@ -1376,7 +1407,9 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           for (const other of shell.projects) {
             if (
               other.id !== projectId &&
-              (yield* isPathUnder(operation.workspaceRoot, other.workspaceRoot))
+              (yield* Effect.findFirst(mutationRoots, (root) =>
+                isPathUnder(root, other.workspaceRoot),
+              ).pipe(Effect.map(Option.isSome)))
             )
               return yield* refuse(
                 "nested_project",
@@ -1485,7 +1518,9 @@ export const make = Effect.fn("StaveOperations.make")(function* (
               if (
                 !ownThreads.some((thread) => thread.id === session.threadId) &&
                 session.cwd !== undefined &&
-                (yield* isPathUnder(operation.workspaceRoot, session.cwd)) &&
+                (yield* Effect.findFirst(mutationRoots, (root) =>
+                  isPathUnder(root, session.cwd!),
+                ).pipe(Effect.map(Option.isSome))) &&
                 session.activeTurnId !== undefined &&
                 session.activeTurnId !== null
               ) {
@@ -1512,12 +1547,10 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                   .stopSession({ threadId: session.threadId })
                   .pipe(Effect.mapError(asRefusal));
             }
-            yield* providers
-              .stopSessionsUnder(operation.workspaceRoot)
-              .pipe(Effect.mapError(asRefusal));
-            yield* terminals
-              .closeSessionsUnder(operation.workspaceRoot)
-              .pipe(Effect.mapError(asRefusal));
+            for (const root of mutationRoots) {
+              yield* providers.stopSessionsUnder(root).pipe(Effect.mapError(asRefusal));
+              yield* terminals.closeSessionsUnder(root).pipe(Effect.mapError(asRefusal));
+            }
           }
           yield* revalidate;
           let outcome: OperationOutcome;
@@ -1800,11 +1833,20 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       }),
     );
 
+  const withRecoveryLocks = <A, E, R>(row: LifecycleRow, body: Effect.Effect<A, E, R>) =>
+    row.disposition === "restoring" && row.spaceId !== null
+      ? loadRoots.pipe(
+          Effect.flatMap(({ agentWorkDir }) =>
+            withRoots([row.workspaceRoot, path.join(agentWorkDir, row.spaceId!)], body),
+          ),
+        )
+      : withSpaceLock(row.workspaceRoot, body);
+
   const reconcileIncomplete = Effect.gen(function* () {
     const rows = yield* lifecycle.listIncomplete().pipe(Effect.mapError(asRefusal));
     for (const row of rows) {
-      const reconcile = withSpaceLock(
-        row.workspaceRoot,
+      const reconcile = withRecoveryLocks(
+        row,
         Effect.gen(function* () {
           if (row.ownerToken !== null && row.leaseUntil !== null) {
             const remaining = Date.parse(row.leaseUntil) - (yield* Clock.currentTimeMillis);
@@ -3342,20 +3384,9 @@ export const make = Effect.fn("StaveOperations.make")(function* (
   });
 });
 
-export const layer = Layer.effect(
-  StaveOperations,
-  make().pipe(
-    Effect.tap((service) =>
-      service.reconcileIncomplete.pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("stave: startup reconciliation failed; durable rows retained", {
-            cause,
-          }),
-        ),
-      ),
-    ),
-  ),
-);
+// The gated lifecycle worker owns startup and retry reconciliation.
+// Constructing the operation registry never mutates spaces or project metadata.
+export const layer = Layer.effect(StaveOperations, make());
 
 export const layerWith = (limits: StaveOperationsLimits) =>
   Layer.effect(StaveOperations, make(limits));

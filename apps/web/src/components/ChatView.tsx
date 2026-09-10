@@ -1,4 +1,8 @@
 import {
+  normalizeProjectThreadWorkspace,
+  resolveProjectGitRepositoryIdentity,
+} from "@t3tools/client-runtime/state/projectGit";
+import {
   type AssistantCitation,
   type ApprovalRequestId,
   type ChatFileAttachment,
@@ -2983,13 +2987,17 @@ function ChatViewContent(props: ChatViewProps) {
   const gitCwd = activeProject
     ? projectScriptCwd({
         project: { cwd: activeProject.workspaceRoot },
-        worktreePath: activeThread?.worktreePath ?? null,
+        worktreePath: activeProject.stave ? null : (activeThread?.worktreePath ?? null),
       })
     : null;
   // `gitCwd` is where scripts, terminals and provider sessions run (the space
   // root for Stave); git status and the header's git actions target the
   // thread's repo instead, which for a Stave space is its primary repo.
-  const gitStatusCwd = resolveThreadGitTarget({ project: activeProject, thread: activeThread }).cwd;
+  const activeThreadGitTarget = resolveThreadGitTarget({
+    project: activeProject,
+    thread: activeThread,
+  });
+  const gitStatusCwd = activeThreadGitTarget.cwd;
   const gitStatusQuery = useEnvironmentQuery(
     gitStatusCwd === null
       ? null
@@ -3087,7 +3095,9 @@ function ChatViewContent(props: ChatViewProps) {
     : null;
   const hasTimelineTopBanner = Boolean(visibleThreadError) || visibleProviderStatus !== null;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
-  const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
+  const activeThreadWorktreePath = activeProject?.stave
+    ? null
+    : (activeThread?.worktreePath ?? null);
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
   const activeTerminalLaunchContext =
     terminalUiLaunchContext?.threadId === activeThreadId ? terminalUiLaunchContext : null;
@@ -3751,14 +3761,15 @@ function ChatViewContent(props: ChatViewProps) {
   const persistedLinkedThreadPullRequest = isServerThread
     ? (activeThreadShell?.linkedPullRequest ?? activeThread?.linkedPullRequest ?? null)
     : (activeThread?.linkedPullRequest ?? null);
-  const activeProjectRepository = activeProject?.repositoryIdentity?.displayName ?? null;
+  const activeProjectRepository =
+    resolveProjectGitRepositoryIdentity(activeProject)?.displayName ?? null;
   const persistedLinkedThreadPullRequestStatus = useLinkedThreadPullRequest(
     activeThreadRef?.environmentId ?? null,
     persistedLinkedThreadPullRequest,
   );
   const replacementLinkedThreadPullRequest = useMemo(() => {
     const detected = gitStatusQuery.data?.pr;
-    const threadBranch = activeThread?.branch;
+    const threadBranch = activeThreadGitTarget.branch;
     const projectId = activeProject?.id;
     if (
       persistedLinkedThreadPullRequest === null ||
@@ -3785,7 +3796,7 @@ function ChatViewContent(props: ChatViewProps) {
   }, [
     activeProject?.id,
     activeProjectRepository,
-    activeThread?.branch,
+    activeThreadGitTarget.branch,
     gitStatusQuery.data,
     persistedLinkedThreadPullRequest,
     persistedLinkedThreadPullRequestStatus?.pr.state,
@@ -4918,9 +4929,9 @@ function ChatViewContent(props: ChatViewProps) {
     setExpandedImage(null);
   }, []);
 
-  const activeWorktreePath = activeThread?.worktreePath ?? null;
+  const requestedWorktreePath = activeThread?.worktreePath ?? null;
   const derivedEnvMode: DraftThreadEnvMode = resolveEffectiveEnvMode({
-    activeWorktreePath,
+    activeWorktreePath: requestedWorktreePath,
     hasServerThread: isServerThread,
     draftThreadEnvMode: isLocalDraftThread ? draftThread?.envMode : undefined,
   });
@@ -4931,19 +4942,30 @@ function ChatViewContent(props: ChatViewProps) {
     activeThread.worktreePath === null &&
     !envLocked,
   );
-  const envMode: DraftThreadEnvMode = canOverrideServerThreadEnvMode
+  const requestedEnvMode: DraftThreadEnvMode = canOverrideServerThreadEnvMode
     ? (pendingServerThreadEnvMode ?? draftThread?.envMode ?? derivedEnvMode)
     : derivedEnvMode;
-  const activeThreadBranch =
+  const requestedThreadBranch =
     canOverrideServerThreadEnvMode && pendingServerThreadBranch !== undefined
       ? pendingServerThreadBranch
       : (activeThread?.branch ?? null);
-  const startFromOrigin = isLocalDraftThread
+  const requestedStartFromOrigin = isLocalDraftThread
     ? (draftThread?.startFromOrigin ?? false)
     : canOverrideServerThreadEnvMode
       ? (pendingServerThreadStartFromOriginByThreadId[activeThread?.id ?? ""] ??
         primaryServerSettings.newWorktreesStartFromOrigin)
       : false;
+  const {
+    envMode,
+    worktreePath: activeWorktreePath,
+    branch: activeThreadBranch,
+    startFromOrigin,
+  } = normalizeProjectThreadWorkspace(activeProject, {
+    envMode: requestedEnvMode,
+    worktreePath: requestedWorktreePath,
+    branch: requestedThreadBranch,
+    startFromOrigin: requestedStartFromOrigin,
+  });
   const sendEnvMode = resolveSendEnvMode({
     requestedEnvMode: envMode,
     isGitRepo,
@@ -5012,7 +5034,7 @@ function ChatViewContent(props: ChatViewProps) {
     replacementLinkedThreadPullRequest !== null
       ? (gitStatusQuery.data?.pr ?? null)
       : resolveDisplayedThreadPr({
-          threadBranch: activeThread?.branch ?? null,
+          threadBranch: activeThreadGitTarget.branch,
           gitStatus: gitStatusQuery.data ?? null,
           snapshot: activeThreadKey ? changeRequestSnapshotByKey.get(activeThreadKey) : undefined,
           retainTerminalOnBranchMismatch: activeThread?.worktreePath === null,
@@ -6309,14 +6331,14 @@ function ChatViewContent(props: ChatViewProps) {
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
-      isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
+      isFirstMessage && sendEnvMode === "worktree" && !activeWorktreePath
         ? activeThreadBranch
         : null;
 
     // In worktree mode, require an explicit base branch so we don't silently
     // fall back to local execution when branch selection is missing.
     const shouldCreateWorktree =
-      isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath;
+      isFirstMessage && sendEnvMode === "worktree" && !activeWorktreePath;
     if (shouldCreateWorktree && !activeThreadBranch) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
       return;
@@ -6629,7 +6651,7 @@ function ChatViewContent(props: ChatViewProps) {
                       runtimeMode,
                       interactionMode,
                       branch: activeThreadBranch,
-                      worktreePath: activeThread.worktreePath,
+                      worktreePath: activeWorktreePath,
                       createdAt: activeThread.createdAt,
                     },
                   }
@@ -7194,7 +7216,7 @@ function ChatViewContent(props: ChatViewProps) {
         runtimeMode,
         interactionMode: "default",
         branch: activeThreadBranch,
-        worktreePath: activeThread.worktreePath,
+        worktreePath: activeWorktreePath,
         createdAt,
       },
     });
@@ -7278,6 +7300,7 @@ function ChatViewContent(props: ChatViewProps) {
     activeProject,
     activeProposedPlan,
     activeThreadBranch,
+    activeWorktreePath,
     activeThread,
     beginLocalDispatch,
     activeEnvironmentUnavailable,

@@ -73,7 +73,7 @@ export function bindStaveSagaReview(
     operation.kind === "sagaArchive" ||
     operation.kind === "sagaDestroy" ||
     (operation.kind === "lifecycleAction" &&
-      lifecycleIsSaga &&
+      (lifecycleIsSaga || review !== undefined) &&
       (operation.action === "retry" || operation.action === "archiveNow"));
   if (!requiresReview) return operation;
   if (!review) return null;

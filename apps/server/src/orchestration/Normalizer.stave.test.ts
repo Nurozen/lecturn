@@ -88,6 +88,7 @@ const makeTestLayer = (reads: string[]) =>
     StaveAdmission.layer.pipe(
       Layer.provide(
         Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
+          invalidate: () => Effect.void,
           load: (root) =>
             Effect.sync(() => {
               reads.push(`manifest:${root}`);
@@ -187,7 +188,13 @@ describe("normalizeDispatchCommand Stave worktree rule", () => {
     return Effect.gen(function* () {
       const normalized = yield* normalizeDispatchCommand(createThread(plainProjectId, "/wt/plain"));
       expect(normalized.type === "thread.create" && normalized.worktreePath).toBe("/wt/plain");
-      expect(reads).toEqual([`project:${plainProjectId}`, `manifest:${PLAIN_ROOT}`]);
+      expect(reads).toEqual([
+        `project:${plainProjectId}`,
+        `manifest:${PLAIN_ROOT}`,
+        `manifest:${PLAIN_ROOT}`,
+        "manifest:/projects",
+        "manifest:/",
+      ]);
     }).pipe(Effect.provide(makeTestLayer(reads)));
   });
 
