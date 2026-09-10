@@ -230,3 +230,10 @@ On desktop, press `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows and Linux from
 start it in the background. T3 Code opens another new thread and shows an **Open** action for the
 thread that started. The new thread keeps the selected workspace mode and base branch. If **New
 worktree** is selected, each background thread creates its own worktree.
+
+## Resting controls on web and desktop
+
+When the composer rests in the project context strip, project labels shorten to icons as
+space runs out. Additional controls move into the overflow menu. Widening the panel restores
+the controls. Open traits, runtime, and overflow menus close when their buttons disappear
+and stay closed when the panel widens again.

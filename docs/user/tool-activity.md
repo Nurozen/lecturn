@@ -25,3 +25,7 @@ Group summaries count browser actions separately, such as "Used browser 18 times
 
 Command summaries show the program inside a shell wrapper, such as "Running vp" for
 `/bin/zsh -lc 'vp test run'`. Expanded rows keep the full command.
+
+On web and desktop, image previews from agent activity stay visible in the conversation while
+the agent works and after the turn finishes. You do not need to expand the call or the
+"Worked for" section to see them. Select a preview to open the image viewer.
