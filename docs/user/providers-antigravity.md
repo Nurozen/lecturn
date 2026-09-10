@@ -174,6 +174,8 @@ session succeeds. To check account access and reload models, use **Refresh provi
 in web or desktop provider settings, or **Refresh models** in the mobile model picker. Refresh
 uses saved Google sign-in and does not open a login page. If sign-in is required, use the
 provider's setup controls. Automatic status checks verify the installation only.
+Missing API credentials do not count as an installed runtime: install Antigravity first,
+then complete the selected authentication method's configuration.
 
 If Google reports `SUBSCRIPTION_REQUIRED`, an account restriction, or a usage limit, read the
 provider's message. A finished turn can contain an upstream error instead of completed work.

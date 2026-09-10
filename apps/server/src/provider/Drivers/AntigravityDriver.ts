@@ -123,13 +123,6 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
         AcpError | ProviderSetupError,
         Scope.Scope
       > {
-        if (authConfigIssue !== null) {
-          return yield* new ProviderSetupError({
-            instanceId,
-            operation: "configure",
-            detail: authConfigIssue,
-          });
-        }
         const executable = yield* installation
           .acquire(settings.binaryPath, processEnvironment)
           .pipe(
@@ -142,6 +135,15 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
                 }),
             ),
           );
+        // Resolve installation before credentials so configuration errors cannot
+        // make an absent runtime appear installed in provider setup.
+        if (authConfigIssue !== null) {
+          return yield* new ProviderSetupError({
+            instanceId,
+            operation: "configure",
+            detail: authConfigIssue,
+          });
+        }
         const profile = yield* prepareAntigravityProfile({
           profileDirectory,
           baseEnv: processEnvironment,

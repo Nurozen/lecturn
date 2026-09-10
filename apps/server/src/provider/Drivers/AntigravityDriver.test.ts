@@ -55,7 +55,11 @@ function shellQuote(value: string): string {
 }
 
 const makeHarness = Effect.fn("makeAntigravityDriverHarness")(function* (
-  options: { readonly config?: Partial<AntigravitySettings> } = {},
+  options: {
+    readonly config?: Partial<AntigravitySettings>;
+    readonly enabled?: boolean;
+    readonly missingInstallation?: boolean;
+  } = {},
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -108,7 +112,7 @@ const makeHarness = Effect.fn("makeAntigravityDriverHarness")(function* (
   const first = yield* makeExecutable("runtime 'one");
   const second = yield* makeExecutable("runtime two");
   const signedOut = yield* makeExecutable("runtime signed-out", true);
-  const controls = { selected: first, failResolution: false };
+  const controls = { selected: first, failResolution: options.missingInstallation ?? false };
   const acquisitions: Array<{ binaryPath: string | undefined; path: string | undefined }> = [];
   const releases: Array<string | null> = [];
   const launches: Array<{
@@ -132,7 +136,9 @@ const makeHarness = Effect.fn("makeAntigravityDriverHarness")(function* (
         if (controls.failResolution) {
           return yield* new AntigravityInstallationError({
             operation: "resolve",
-            detail: "Fixture resolution failed.",
+            detail: options.missingInstallation
+              ? "Antigravity is not installed."
+              : "Fixture resolution failed.",
           });
         }
         const selected = controls.selected;
@@ -170,7 +176,7 @@ const makeHarness = Effect.fn("makeAntigravityDriverHarness")(function* (
   const instance = yield* AntigravityDriver.create({
     instanceId,
     displayName: "Google test account",
-    enabled: false,
+    enabled: options.enabled ?? false,
     config: { ...AntigravityDriver.defaultConfig(), ...options.config },
     environment: [
       { name: "PATH", value: instancePath },
@@ -238,6 +244,28 @@ const testLayer = ServerConfig.layerTest(process.cwd(), {
 );
 
 it.layer(testLayer)("AntigravityDriver", (it) => {
+  for (const missingInstallation of [true, false]) {
+    it.effect.skipIf(windowsHost)(
+      `reports installation independently of missing API credentials (missing runtime: ${missingInstallation})`,
+      () =>
+        Effect.gen(function* () {
+          const h = yield* makeHarness({
+            enabled: true,
+            missingInstallation,
+            config: { authMethod: "gemini-api-key", apiKey: "" },
+          });
+          const snapshot = yield* h.instance.snapshot.refresh;
+          expect(snapshot.installed).toBe(!missingInstallation);
+          expect(snapshot.status).toBe("error");
+          expect(snapshot.message).toContain(missingInstallation ? "not installed" : "API key");
+          expect(h.acquisitions.length).toBeGreaterThan(0);
+          expect(h.launches).toEqual([]);
+          expect(yield* h.fs.exists(h.profileDirectory)).toBe(false);
+          expect(h.releases.length).toBe(missingInstallation ? 0 : h.acquisitions.length);
+        }).pipe(Effect.scoped),
+    );
+  }
+
   it.effect.skipIf(windowsHost)("does not launch a process for a disabled instance", () =>
     Effect.gen(function* () {
       const h = yield* makeHarness();

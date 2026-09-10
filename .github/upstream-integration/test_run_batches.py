@@ -132,6 +132,107 @@ class GitSafetyTests(unittest.TestCase):
         runner.agent.assert_called_once()
         self.assertEqual(self.git('rev-parse', 'HEAD'), self.base)
 
+    def staged_review_fixture(self):
+        runner, m = self.runner_manifest()
+        self.git('branch', '-m', 'stave/example/lecturn')
+        runner.args.max_rounds = 3
+        runner.lock_fd = None
+        runner.progress = {}
+        m.update(worktree=str(self.repo.resolve()), phase='building', round=0, space='example', accepted=self.accepted,
+                 base=self.base, review_base=self.base, branch='upstream/batch-example')
+        (self.folder / 'BATCH_PROMPT.md').write_text('Integrate the pinned target.')
+        build = dict(ready=True, tree=m['tree'], summary='Integrate feature',
+                     checks=[{'argv': [sys.executable, '-c', 'pass'], 'cwd': '.'}],
+                     ui_changed=False, motion_changed=False, video_urls=[], ci_retry=False)
+        approved = dict(verdict='approve', tree=m['tree'], findings='',
+                        ui_evidence_valid=True, ci_retry_safe=False)
+        return runner, m, build, approved
+
+    def test_blocked_review_repairs_with_feedback_and_two_fresh_approvals(self):
+        runner, m, build, approved = self.staged_review_fixture()
+        blocked = dict(approved, verdict='blocked', ui_evidence_valid=False,
+                       findings='Attachment hash receipt is missing; capture and verify evidence.')
+        runner.agent = Mock(side_effect=[build, blocked, build, approved, approved])
+        runner.build_review(self.folder, m)
+        persisted = json.loads((self.folder / 'manifest.json').read_text())
+        self.assertEqual(persisted['phase'], 'building')
+        self.assertEqual(persisted['blocked_review']['result'], blocked)
+        self.assertIn(blocked['findings'], persisted['feedback'])
+        self.assertNotIn('reviews', persisted)
+        self.assertEqual(self.git('rev-parse', 'HEAD'), self.base)
+        runner.build_review(self.folder, persisted)
+        self.assertEqual(persisted['phase'], 'reviewed')
+        self.assertEqual(persisted['round'], 2)
+        self.assertEqual(persisted['reviews'], [approved, approved])
+        calls = runner.agent.call_args_list
+        self.assertIn(blocked['findings'], calls[2].args[3])
+        self.assertEqual([call.args[2] for call in calls[2:]],
+                         ['round-2-builder', 'round-2-reviewer', 'round-2-outside-reviewer'])
+
+    def test_all_staged_review_blocks_are_retained_for_repair(self):
+        runner, m, build, approved = self.staged_review_fixture()
+        changes = dict(approved, verdict='changes', findings='Candidate regression')
+        blocked = dict(approved, verdict='blocked', findings='Missing baseline test for candidate')
+        sequences = {
+            'outside-reviewer': [build, approved, blocked],
+            'adversarial-verifier': [build, changes, approved, blocked],
+            'holistic': [build, changes, approved, approved, blocked],
+        }
+        for stage, results in sequences.items():
+            with self.subTest(stage=stage):
+                m['round'] = 0
+                runner.agent = Mock(side_effect=results)
+                runner.build_review(self.folder, m)
+                self.assertEqual(m['phase'], 'building')
+                self.assertEqual(m['blocked_review']['report'], 'round-1-' + stage)
+                self.assertIn(blocked['findings'], m['feedback'])
+                self.assertEqual(runner.agent.call_count, len(results))
+
+    def test_persistent_review_block_stops_at_existing_round_limit(self):
+        runner, m, build, approved = self.staged_review_fixture()
+        runner.args.max_rounds = 2
+        blocked = dict(approved, verdict='blocked', findings='Evidence service unavailable')
+        runner.agent = Mock(side_effect=[build, blocked, build, blocked])
+        runner.build_review(self.folder, m)
+        runner.build_review(self.folder, m)
+        with self.assertRaisesRegex(batches.Blocked, 'Repair limit'):
+            runner.build_review(self.folder, m)
+        self.assertEqual(runner.agent.call_count, 4)
+        self.assertEqual(m['phase'], 'building')
+        self.assertEqual(m['round'], 2)
+        self.assertEqual(self.git('rev-parse', 'HEAD'), self.base)
+
+    def test_empty_blocked_feedback_stops_and_retains_verdict(self):
+        runner, m, build, approved = self.staged_review_fixture()
+        blocked = dict(approved, verdict='blocked', findings='  ')
+        runner.agent = Mock(side_effect=[build, blocked])
+        with self.assertRaisesRegex(batches.Blocked, 'without actionable feedback'):
+            runner.build_review(self.folder, m)
+        persisted = json.loads((self.folder / 'manifest.json').read_text())
+        self.assertEqual(persisted['blocked_review']['result'], blocked)
+        self.assertEqual(persisted['phase'], 'building')
+        self.assertEqual(runner.agent.call_count, 2)
+
+    def test_stale_blocked_review_cannot_authorize_repair_feedback(self):
+        runner, m, build, approved = self.staged_review_fixture()
+        runner.agent = Mock(side_effect=[build, dict(approved, verdict='blocked', tree='stale',
+                                                   findings='Wrong tree findings')])
+        with self.assertRaisesRegex(batches.Blocked, 'Review tree mismatch'):
+            runner.build_review(self.folder, m)
+        self.assertNotIn('blocked_review', m)
+        self.assertNotIn('feedback', m)
+
+    def test_repair_approval_still_requires_valid_ui_evidence(self):
+        runner, m, build, approved = self.staged_review_fixture()
+        blocked = dict(approved, verdict='blocked', findings='Upload receipt missing')
+        runner.agent = Mock(side_effect=[build, blocked, build, approved,
+                                        dict(approved, ui_evidence_valid=False)])
+        runner.build_review(self.folder, m)
+        with self.assertRaisesRegex(batches.Blocked, 'UI evidence applicability'):
+            runner.build_review(self.folder, m)
+        self.assertEqual(m['phase'], 'building')
+        self.assertNotIn('reviews', m)
+
     def test_rewritten_accepted_ancestry_is_rejected(self):
         with self.assertRaisesRegex(batches.Blocked, 'Accepted ancestry'):
             batches.check_selection(self.repo, self.base, self.base, self.target, self.target, 10, 100)
