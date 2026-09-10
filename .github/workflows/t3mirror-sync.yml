@@ -7,7 +7,8 @@
 #   - a base to cut upstream-bound PR branches from, so they cannot carry
 #     fork-only commits
 #
-# `upstream-integrate.yml` consumes this branch and opens the integration PR.
+# The local run-batches.py controller consumes this branch one reviewed
+# checkpoint PR at a time. The Actions integration workflow is informational.
 #
 # Tags are never fetched: upstream `v*` tags would otherwise trigger this
 # fork's release pipeline.

@@ -1,0 +1,25 @@
+name: Upstream Runner Tests
+
+on:
+  pull_request:
+    paths:
+      - ".github/upstream-integration/**"
+      - ".github/workflows/upstream-runner-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - ".github/upstream-integration/**"
+      - ".github/workflows/upstream-runner-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  controller:
+    name: Upstream Controller
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Controller safety and recovery tests
+        run: python3 -m unittest discover -s .github/upstream-integration -p 'test_run_batches.py' -v
