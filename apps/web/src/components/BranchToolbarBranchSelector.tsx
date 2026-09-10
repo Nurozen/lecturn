@@ -1,6 +1,10 @@
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { staveAdmissionErrorMessage } from "@t3tools/client-runtime/errors";
-import { resolveProjectGitCwd, staveForcedEnvMode } from "@t3tools/client-runtime/state/projectGit";
+import {
+  isStaveProject,
+  resolveProjectGitCwd,
+  staveForcedEnvMode,
+} from "@t3tools/client-runtime/state/projectGit";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -166,6 +170,7 @@ export function BranchToolbarBranchSelector({
   const setThreadBranch = useCallback(
     (branch: string | null, worktreePath: string | null) => {
       if (!activeThreadId || !activeProject) return;
+      if (isStaveProject(activeProject)) worktreePath = null;
       if (serverSession && worktreePath !== activeWorktreePath) {
         void stopThreadSession({
           environmentId,
@@ -411,6 +416,7 @@ export function BranchToolbarBranchSelector({
     }
 
     const selectionTarget = resolveBranchSelectionTarget({
+      isStave: isStaveProject(activeProject),
       activeProjectCwd,
       activeWorktreePath,
       refName,

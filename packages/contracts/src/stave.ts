@@ -6,6 +6,7 @@ import {
   IsoDateTime,
   NonNegativeInt,
   ProjectId,
+  ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
 import { RepositoryIdentity } from "./environment.ts";
@@ -536,11 +537,45 @@ export const StaveSagaSyncOperation = Schema.Struct({
 });
 export type StaveSagaSyncOperation = typeof StaveSagaSyncOperation.Type;
 
+/** The exact saga/member scope reviewed before a cascading disk mutation. */
+export const StaveSagaReview = Schema.Struct({
+  fingerprint: TrimmedNonEmptyString,
+  /** Member-only consent used after the already-confirmed coordinator project is deleted. */
+  projectDeletionFingerprint: Schema.optional(TrimmedNonEmptyString),
+  sagaRoot: TrimmedNonEmptyString,
+  sagaCreatedAt: IsoDateTime,
+  target: Schema.Literals(["archive", "destroy"]),
+  force: Schema.Boolean,
+  memory: StaveDestroyMemoryFate,
+  participants: Schema.Array(
+    Schema.Struct({
+      spaceId: TrimmedNonEmptyString,
+      createdAt: IsoDateTime,
+      workspaceRoot: TrimmedNonEmptyString,
+      state: Schema.String,
+      projectId: Schema.optional(ProjectId),
+      projectTitle: Schema.optional(Schema.String),
+      threadIds: Schema.Array(ThreadId),
+    }),
+  ),
+});
+export type StaveSagaReview = typeof StaveSagaReview.Type;
+
+/** Durable authorization for the cascade triggered by deleting a saga project. */
+export const StaveSagaTeardownAuthorization = Schema.Struct({
+  expectedSagaReview: TrimmedNonEmptyString,
+  target: Schema.Literals(["archive", "destroy"]),
+  force: Schema.Boolean,
+  memory: StaveDestroyMemoryFate,
+});
+export type StaveSagaTeardownAuthorization = typeof StaveSagaTeardownAuthorization.Type;
+
 export const StaveSagaArchiveOperation = Schema.Struct({
   kind: Schema.Literal("sagaArchive"),
   ...SagaScoped.fields,
   force: Schema.Boolean,
   memory: StaveArchiveMemoryFate,
+  expectedSagaReview: Schema.optional(TrimmedNonEmptyString),
 });
 export type StaveSagaArchiveOperation = typeof StaveSagaArchiveOperation.Type;
 
@@ -549,6 +584,7 @@ export const StaveSagaDestroyOperation = Schema.Struct({
   ...SagaScoped.fields,
   force: Schema.Boolean,
   memory: StaveDestroyMemoryFate,
+  expectedSagaReview: Schema.optional(TrimmedNonEmptyString),
 });
 export type StaveSagaDestroyOperation = typeof StaveSagaDestroyOperation.Type;
 
@@ -563,6 +599,7 @@ export const StaveLifecycleActionOperation = Schema.Struct({
   force: Schema.Boolean,
   memory: StaveDestroyMemoryFate,
   sagaRemoveConfirmed: Schema.optional(Schema.Boolean),
+  expectedSagaReview: Schema.optional(TrimmedNonEmptyString),
 });
 export type StaveLifecycleActionOperation = typeof StaveLifecycleActionOperation.Type;
 
@@ -921,6 +958,7 @@ export type StaveSagaSyncReport = typeof StaveSagaSyncReport.Type;
 export const StaveDryRunPlan = Schema.Struct({
   dryRun: Schema.Literal(true),
   plan: Schema.Array(Schema.String),
+  sagaReview: Schema.optional(StaveSagaReview),
 });
 export type StaveDryRunPlan = typeof StaveDryRunPlan.Type;
 

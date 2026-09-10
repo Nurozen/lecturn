@@ -1,4 +1,4 @@
-import type { StaveOperation } from "@t3tools/contracts";
+import type { StaveOperation, StaveSagaReview } from "@t3tools/contracts";
 
 /** Only refusals that Stave explicitly allows --force to bypass offer a retry. */
 export function canForceStaveOperation(operation: StaveOperation, code: string | undefined) {
@@ -61,4 +61,44 @@ export function staveRefusalCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null) return undefined;
   const code = Reflect.get(error, "code");
   return typeof code === "string" ? code : undefined;
+}
+
+/** Attach consent only to the operation whose options were reviewed. */
+export function bindStaveSagaReview(
+  operation: StaveOperation,
+  review: StaveSagaReview | undefined,
+  lifecycleIsSaga = false,
+): StaveOperation | null {
+  const requiresReview =
+    operation.kind === "sagaArchive" ||
+    operation.kind === "sagaDestroy" ||
+    (operation.kind === "lifecycleAction" &&
+      lifecycleIsSaga &&
+      (operation.action === "retry" || operation.action === "archiveNow"));
+  if (!requiresReview) return operation;
+  if (!review) return null;
+  if (
+    operation.kind !== "sagaArchive" &&
+    operation.kind !== "sagaDestroy" &&
+    operation.kind !== "lifecycleAction"
+  )
+    return null;
+  const target =
+    operation.kind === "sagaArchive" ||
+    (operation.kind === "lifecycleAction" && operation.action === "archiveNow")
+      ? "archive"
+      : operation.kind === "sagaDestroy"
+        ? "destroy"
+        : operation.target;
+  const root = operation.kind === "lifecycleAction" ? operation.workspaceRoot : operation.sagaRoot;
+  if (
+    review.target !== target ||
+    review.force !== operation.force ||
+    review.memory !== operation.memory ||
+    review.sagaRoot !== root ||
+    (operation.expectedManifestCreatedAt !== undefined &&
+      review.sagaCreatedAt !== operation.expectedManifestCreatedAt)
+  )
+    return null;
+  return { ...operation, expectedSagaReview: review.fingerprint };
 }

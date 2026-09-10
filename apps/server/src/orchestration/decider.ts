@@ -308,6 +308,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               ...(command.staveCreatedAt !== undefined
                 ? { staveCreatedAt: command.staveCreatedAt }
                 : {}),
+              ...(command.staveSagaTeardown !== undefined
+                ? { staveSagaTeardown: command.staveSagaTeardown }
+                : {}),
               ...(command.staveSagaRemoveConfirmed !== undefined
                 ? { staveSagaRemoveConfirmed: command.staveSagaRemoveConfirmed }
                 : {}),
@@ -331,6 +334,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.staveSpaceId !== undefined ? { staveSpaceId: command.staveSpaceId } : {}),
           ...(command.staveCreatedAt !== undefined
             ? { staveCreatedAt: command.staveCreatedAt }
+            : {}),
+          ...(command.staveSagaTeardown !== undefined
+            ? { staveSagaTeardown: command.staveSagaTeardown }
             : {}),
           ...(command.staveSagaRemoveConfirmed !== undefined
             ? { staveSagaRemoveConfirmed: command.staveSagaRemoveConfirmed }

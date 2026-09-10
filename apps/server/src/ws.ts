@@ -1,5 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - assembleThreadFork mints ids through a synchronous callback, which the Effect Crypto service cannot satisfy
 import * as NodeCrypto from "node:crypto";
+import * as NodePath from "node:path";
+import { isPathUnder } from "./stave/StaveSpaceLock.ts";
 
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -3134,7 +3136,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
   }),
 );
 
-/** A separately imported primary repository still belongs to its Stave space. */
+/** Separately imported repositories and canonical aliases retain their Stave ownership. */
 export const checkStaveWorktreeRpcOwnership = Effect.fn("checkStaveWorktreeRpcOwnership")(
   function* (
     projection: Pick<
@@ -3150,16 +3152,24 @@ export const checkStaveWorktreeRpcOwnership = Effect.fn("checkStaveWorktreeRpcOw
   ) {
     const { operation, intent, cwd } = input;
     const owner = yield* projection.getShellSnapshot().pipe(
-      Effect.flatMap((snapshot) => {
-        const stave = snapshot.projects.find(
-          (project) =>
-            project.stave != null &&
-            (project.stave.primaryRepoPath === cwd || project.workspaceRoot === cwd),
-        );
-        return stave === undefined
-          ? projection.getActiveProjectByWorkspaceRoot(cwd)
-          : Effect.succeed(Option.some(stave));
-      }),
+      Effect.flatMap((snapshot) =>
+        Effect.gen(function* () {
+          for (const project of snapshot.projects) {
+            if (project.stave == null) continue;
+            const roots = [
+              project.workspaceRoot,
+              ...(project.stave.primaryRepoPath ? [project.stave.primaryRepoPath] : []),
+              ...project.stave.repos.map((repo) =>
+                NodePath.resolve(project.workspaceRoot, repo.path),
+              ),
+            ];
+            for (const root of roots) {
+              if (yield* isPathUnder(root, cwd)) return Option.some(project);
+            }
+          }
+          return yield* projection.getActiveProjectByWorkspaceRoot(cwd);
+        }),
+      ),
       Effect.mapError(
         (cause) =>
           new GitCommandError({

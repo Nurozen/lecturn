@@ -248,6 +248,7 @@ export function resolveLocalCheckoutBranchMismatch(input: {
 }
 
 export function resolveBranchSelectionTarget(input: {
+  isStave?: boolean;
   activeProjectCwd: string;
   activeWorktreePath: string | null;
   refName: Pick<VcsRef, "isDefault" | "worktreePath">;
@@ -257,6 +258,13 @@ export function resolveBranchSelectionTarget(input: {
   reuseExistingWorktree: boolean;
 } {
   const { activeProjectCwd, activeWorktreePath, refName } = input;
+  if (input.isStave) {
+    return {
+      checkoutCwd: activeProjectCwd,
+      nextWorktreePath: null,
+      reuseExistingWorktree: false,
+    };
+  }
 
   if (refName.worktreePath) {
     return {

@@ -1,10 +1,16 @@
 import { useAtomValue } from "@effect/atom-react";
 import { staveRpcErrorMessage } from "@t3tools/client-runtime/errors";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, StaveOperation, StaveSagaMembership } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  StaveOperation,
+  StaveSagaMembership,
+  StaveSagaReview,
+} from "@t3tools/contracts";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { notifyStaveMutation } from "../../staveMutation";
+import { staveSagaReviewLines } from "../../lib/staveProjectDeletion.logic";
 import { randomUUID } from "../../lib/utils";
 import { staveOperationUnavailableReason } from "./staveCompatibility.logic";
 import { staveDryRun, staveSpaceStatusRead, useStaveStatus } from "../../state/stave";
@@ -23,13 +29,20 @@ import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { StaveOperationProgress } from "./StaveOperationProgressBody";
 import {
+  bindStaveSagaReview,
   canForceStaveOperation,
   forceStaveOperation,
   staveOperationLossCopy,
   staveRefusalCode,
 } from "./staveConfirm.logic";
 
-type Preview = { key: string; plan?: readonly string[]; error?: string; code?: string | undefined };
+type Preview = {
+  key: string;
+  plan?: readonly string[];
+  sagaReview?: StaveSagaReview | undefined;
+  error?: string;
+  code?: string | undefined;
+};
 
 /** A confirmation is bound to the exact payload whose dry run is displayed. */
 export function StaveConfirmDialog({
@@ -109,7 +122,8 @@ export function StaveConfirmDialog({
     if (unavailableReason) return;
     void dryRun({ environmentId, input: { operation } }).then((result) => {
       if (stale) return;
-      if (result._tag === "Success") setPreview({ key, plan: result.value.plan });
+      if (result._tag === "Success")
+        setPreview({ key, plan: result.value.plan, sagaReview: result.value.sagaReview });
       else {
         const error = squashAtomCommandFailure(result);
         setPreview({
@@ -142,6 +156,11 @@ export function StaveConfirmDialog({
     : preview?.key === key
       ? preview
       : null;
+  const reviewedOperation = bindStaveSagaReview(
+    operation,
+    currentPreview?.sagaReview,
+    lifecycleIsSaga,
+  );
   const busy =
     started &&
     (state.status === "idle" || state.status === "running" || state.status === "disconnected");
@@ -247,6 +266,16 @@ export function StaveConfirmDialog({
               the reported edges to repair membership manually.
             </p>
           ) : null}
+          {!started && currentPreview?.sagaReview ? (
+            <div className="whitespace-pre-wrap text-sm">
+              {staveSagaReviewLines(currentPreview.sagaReview).join("\n")}
+            </div>
+          ) : null}
+          {!started && currentPreview?.plan && reviewedOperation === null ? (
+            <p role="alert" className="text-sm text-destructive-foreground">
+              A matching saga review is required. Refresh the plan before confirming.
+            </p>
+          ) : null}
           {!started ? (
             currentPreview === null ? (
               <p className="text-sm text-muted-foreground">Preparing the dry-run plan…</p>
@@ -304,10 +333,15 @@ export function StaveConfirmDialog({
                   ? "default"
                   : "destructive"
               }
-              disabled={currentPreview?.plan === undefined || unavailableReason !== null}
+              disabled={
+                currentPreview?.plan === undefined ||
+                unavailableReason !== null ||
+                reviewedOperation === null
+              }
               onClick={() => {
+                if (!reviewedOperation) return;
                 setStarted(true);
-                void run({ environmentId, operationId, operation });
+                void run({ environmentId, operationId, operation: reviewedOperation });
               }}
             >
               {forced ? "Confirm force" : "Confirm"}

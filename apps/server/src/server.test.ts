@@ -730,6 +730,7 @@ const buildAppUnderTest = (options?: {
     // space by writing its manifest; `layers.staveWorkspaceReader` stubs it.
     const staveWorkspaceReaderLayer = options?.layers?.staveWorkspaceReader
       ? Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
+          invalidate: () => Effect.void,
           ...options.layers.staveWorkspaceReader,
         })
       : StaveWorkspaceReader.layer.pipe(Layer.provide(repositoryIdentityResolverLayer));
@@ -762,6 +763,7 @@ const buildAppUnderTest = (options?: {
       ...options?.layers?.staveBinary,
     });
     const staveCliLayer = Layer.mock(StaveCli.StaveCli)({
+      lastFailure: Effect.succeedNone,
       sagaList: Effect.succeed([]),
       ...options?.layers?.staveCli,
     });
@@ -4508,6 +4510,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           disposition: "refused",
           deleteIntentSequence: 8,
           sagaRemoveConfirmed: false,
+          sagaTeardown: null,
           refusalCode: "unreadable",
           refusalMessage: "unreadable",
           anchorAt: null,
@@ -4809,10 +4812,30 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           staveWorkspaceReader: {
             load: () =>
               Effect.succeed(
-                Option.some({ spaceId: "s", isSaga: true, state: "live", repos: [], memories: [] }),
+                Option.some({
+                  spaceId: "s",
+                  createdAt: DateTime.formatIso(TEST_EPOCH),
+                  isSaga: true,
+                  state: "live",
+                  repos: [],
+                  memories: [],
+                }),
               ),
           },
           staveCli: {
+            spaceStatus: () =>
+              Effect.succeed({
+                spaceId: "s",
+                spacePath: "/spaces/s",
+                manifest: {
+                  id: "s",
+                  createdAt: DateTime.formatIso(TEST_EPOCH),
+                  repos: [],
+                  memories: [],
+                },
+                repos: [],
+                memories: [],
+              }),
             sagaStatus: () =>
               Effect.succeed({
                 sagaId: "s",
@@ -4870,7 +4893,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       });
       const spaceStatusJson: StaveSpaceStatusJson = {
         spaceId: "demo",
-        spacePath: "/home/tester/stave/agent-work/demo",
+        spacePath: "/tmp/space",
         manifest: {
           id: "demo",
           createdAt: "2026-09-01T07:32:05.38559Z",
@@ -4922,6 +4945,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 workspaceRoot === "/tmp/space"
                   ? Option.some({
                       spaceId: "demo",
+                      createdAt: "2026-09-01T07:32:05.38559Z",
                       isSaga: false,
                       repos: [],
                       memories: [],

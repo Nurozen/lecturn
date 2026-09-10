@@ -35,7 +35,7 @@ import { ServerActivation } from "../../serverActivation.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { StaveBinary, StaveBinaryNotFound } from "../../stave/StaveBinary.ts";
 import { StaveCli } from "../../stave/StaveCli.ts";
-import { StaveOperations } from "../../stave/StaveOperations.ts";
+import { StaveOperations, StaveRefusalError } from "../../stave/StaveOperations.ts";
 import { StaveSpaceLock } from "../../stave/StaveSpaceLock.ts";
 import { StaveWorkspaceReader } from "../../stave/StaveWorkspaceReader.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -122,6 +122,8 @@ const harness = Effect.fn(function* (
       ? []
       : [options.saga ? { ...PROJECT, stave: { ...PROJECT.stave!, isSaga: true } } : PROJECT],
   );
+  const binaryAvailable = yield* Ref.make(options.binaryAvailable ?? true);
+  const reconciliation = yield* Ref.make<Effect.Effect<void, StaveRefusalError>>(Effect.void);
   const beforeValidate = yield* Ref.make<Effect.Effect<void>>(Effect.void);
   const onDrain = yield* Ref.make<Effect.Effect<void>>(Effect.void);
   const stamp = DateTime.now.pipe(Effect.map(DateTime.formatIso));
@@ -181,8 +183,9 @@ const harness = Effect.fn(function* (
     }),
     Layer.mock(StaveBinary)({
       resolve: Ref.update(calls, (all) => [...all, "resolve"]).pipe(
-        Effect.andThen(
-          options.binaryAvailable === false
+        Effect.andThen(Ref.get(binaryAvailable)),
+        Effect.flatMap((available) =>
+          !available
             ? Effect.fail(new StaveBinaryNotFound({ candidates: ["/configured/missing"] }))
             : Effect.succeed({
                 path: "/stave",
@@ -229,6 +232,10 @@ const harness = Effect.fn(function* (
         ),
     }),
     Layer.mock(StaveOperations)({
+      reconcileIncomplete: Ref.update(calls, (all) => [...all, "reconcile"]).pipe(
+        Effect.andThen(Ref.get(reconciliation)),
+        Effect.flatten,
+      ),
       executeLifecycle: (operation, validate, validateParticipant) =>
         Effect.gen(function* () {
           yield* Ref.update(calls, (all) => [...all, "operation"]);
@@ -250,6 +257,7 @@ const harness = Effect.fn(function* (
     Layer.succeed(StaveSpaceLock, {
       withSpaceLock: (_root, effect) => effect,
       tryWithSpaceLock: (_root, effect) => Effect.map(effect, Option.some),
+      tryWithWorkspaceLocks: (_roots, effect) => Effect.map(effect, Option.some),
     }),
     FileSystem.layerNoop({ exists: () => Effect.succeed(true) }),
     Layer.succeed(ServerActivation, Deferred.await(activation)),
@@ -262,6 +270,8 @@ const harness = Effect.fn(function* (
     calls,
     anchors,
     beforeValidate,
+    binaryAvailable,
+    reconciliation,
     onDrain,
     patch,
     reads,
@@ -287,6 +297,72 @@ const test = <E>(
 ) => it.effect(name, () => body.pipe(Effect.provide(persistence), Effect.scoped));
 
 describe("StaveLifecycleService", () => {
+  test(
+    "retains re-enable episode resets across a restart while the binary is unavailable",
+    Effect.gen(function* () {
+      const h = yield* harness();
+      yield* h.service.sweep;
+      yield* h.updateSettings(false);
+      yield* h.service.sweep;
+      yield* TestClock.adjust("8 days");
+      yield* Ref.set(h.binaryAvailable, false);
+      yield* h.updateSettings(true);
+      yield* h.service.sweep;
+      assert.isTrue(yield* h.repo.isScheduleResetRequested(ID));
+      assert.equal((yield* h.row).scheduledAt, NOW);
+      yield* Ref.set(h.binaryAvailable, true);
+      const restarted = yield* h.freshService;
+      yield* restarted.sweep;
+      assert.equal((yield* h.row).scheduledAt, "2026-09-09T00:00:00.000Z");
+      assert.equal((yield* h.row).archiveDeadlineAt, "2026-09-16T00:00:00.000Z");
+      assert.isFalse(yield* h.repo.isScheduleResetRequested(ID));
+      assert.isFalse((yield* Ref.get(h.calls)).some((call) => call.startsWith("disk:")));
+    }),
+  );
+  test(
+    "retries incomplete recovery after execution configuration becomes available",
+    Effect.gen(function* () {
+      const h = yield* harness();
+      yield* h.patch({ disposition: "archiving" });
+      yield* Ref.set(
+        h.reconciliation,
+        Effect.fail(
+          new StaveRefusalError({
+            code: "unreadable",
+            message: "Selected config unavailable",
+            details: null,
+          }),
+        ),
+      );
+      yield* h.service.sweep;
+      assert.equal((yield* h.row).disposition, "archiving");
+      yield* Ref.set(h.reconciliation, h.patch({ disposition: "archived" }).pipe(Effect.orDie));
+      yield* Ref.set(h.projects, []);
+      yield* h.service.sweep;
+      assert.equal((yield* h.row).disposition, "archived");
+      assert.equal((yield* Ref.get(h.calls)).filter((call) => call === "reconcile").length, 2);
+    }),
+  );
+  for (const activeAnchors of [[], [{ ...ANCHOR, settledOverride: "active" as const }]])
+    test(
+      `releases abandoned nontransitional leases with ${activeAnchors.length === 0 ? "no" : "active"} threads`,
+      Effect.gen(function* () {
+        const h = yield* harness();
+        yield* Ref.set(h.anchors, activeAnchors);
+        yield* h.repo.acquireLease({
+          projectId: ID,
+          expectedEpoch: 0,
+          ownerToken: "crashed",
+          now: NOW,
+          leaseUntil: "2026-09-01T00:01:00.000Z",
+        });
+        yield* TestClock.adjust("2 minutes");
+        yield* h.service.sweep;
+        assert.isNull((yield* h.row).ownerToken);
+        assert.isNull((yield* h.row).leaseUntil);
+      }),
+    );
+
   for (const options of [{ serverEnabled: false }, { enabled: false }, { binaryAvailable: false }])
     test(
       `is inert for ${JSON.stringify(options)}`,

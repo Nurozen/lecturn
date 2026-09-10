@@ -52,3 +52,7 @@ Builds are unsigned until the secrets exist; nothing fails without them.
 ## Before the first stable release
 
 The desktop build still carries upstream's app identity (bundle id, product name, protocol scheme, data directory). Installing it replaces a real T3 Code install. Use nightly prereleases for testing until the identity is changed.
+
+The resolved Stave release must be v0.4.0 or newer. `fetch-stave` validates both explicit
+`stave_version` pins and the tag returned for `latest` before downloading assets; older releases
+lack the JSON mutation protocol used by this integration.

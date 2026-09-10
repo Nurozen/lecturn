@@ -158,7 +158,11 @@ export function SagaCreateForm(props: {
       <DialogPanel>
         {operationId !== null ? (
           <div className="flex flex-col gap-3">
-            <StaveOperationProgress environmentId={environmentId} operationId={operationId} />
+            <StaveOperationProgress
+              environmentId={environmentId}
+              operationId={operationId}
+              spaceId={state.sagaId.trim()}
+            />
             {openError ? (
               <Alert variant="error">
                 <AlertTitle>Could not open saga</AlertTitle>

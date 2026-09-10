@@ -287,7 +287,8 @@ defaultBase?, repos[], memory?, source }`.
 `StaveRootsProvider` (`apps/server/src/stave/StaveRoots.ts`) is the narrow view git needs:
 `agentWorkDir` as `Option<string>`, `some` only when the config **exists** — a config that does
 not exist yet has only defaults, and nothing lives under that directory. `layer` is built on the
-reader; `layerNoop` answers none for hosts and tests without Stave; `layerFixed(dir)` pins one.
+reader's filesystem-only path, so Git never waits for Stave binary/config probes; `layerNoop`
+answers none for hosts and tests without Stave; `layerFixed(dir)` pins one.
 
 ## Capability semantics
 
@@ -456,11 +457,11 @@ manifestCreatedAt }` is recorded. There is no separate "attach memory" phase: me
 - **`registerRepo { name, url, adopt }`** runs `repos add` under the config-path lock and
   invalidates `StaveConfigReader` (the registry is read from config). **`setup { force }`** runs
   `setup` under the same lock and invalidates the same cache.
-- **`dryRun(operation)`** is unary, not an operation: `createSpace` → `space create --dry-run
---json` (with the same temp-file spec handling), `registerRepo` → `repos add --dry-run
---json`, anything else → `StaveError { code: "invalid_arguments" }` ("has no dry run"); an
-  answer that is not a `StaveDryRunPlan` → `unreadable`. `STAVE_OPERATION_VERB` maps every kind
-  to its Stave verb so errors raised before a spawn still name one.
+- **`dryRun(operation)`** is unary and covers creation, repo edits, memory, lifecycle and saga
+  operations. It uses the matching Stave preview and the same preflight constraints as execution;
+  metadata-only Keep and Dismiss produce host plans. Saga teardown also returns the reviewed
+  participant fingerprints. `STAVE_OPERATION_VERB` maps each kind to its verb so errors raised
+  before a spawn still name it.
 - `summary(operationId)` exposes `{ kind, state, earliestSequence, nextSequence,
 bufferedEvents, manifestCreatedAt }` for tests and diagnostics.
 
@@ -573,8 +574,10 @@ instance), so a space root that is not a repo would masquerade as a worktree of 
 `makeGitVcsDriverCore` (`apps/server/src/vcs/GitVcsDriverCore.ts`) takes `StaveRootsProvider`
 as an optional service and, for every git spawn whose cwd is a path-segment descendant of
 `agentWorkDir`, sets `GIT_CEILING_DIRECTORIES=<agentWorkDir>` (prepended to any existing value
-with the platform list delimiter). No provider, no config, or a cwd elsewhere → the environment
-is untouched. `server.ts` provides `StaveRootsLayerLive` to `GitVcsDriverLayerLive`.
+with the platform list delimiter). Independently, canonical ancestor discovery finds a
+`.stave.yaml` boundary and sets its parent as the ceiling, including when cwd is the space root
+itself. This still protects imported spaces outside the selected installation, with missing config
+or disabled integration. `server.ts` provides `StaveRootsLayerLive` to `GitVcsDriverLayerLive`.
 
 ## Diagnostics
 
@@ -583,8 +586,9 @@ block fed entirely by `stave.getStatus`: the runnable binary (path, source, vers
 `runnableError`, the config path and whether it exists, the three roots, marmot availability and
 version, and the last failed verb (`lastFailure`). It is rendered whenever `capabilities.stave`
 is present, independent of `settings.stave.enabled`, so a disabled or broken install is still
-inspectable. Server-side there is nothing to reset: `lastFailure` lives in `StaveRpcRuntime`
-for the life of the process.
+inspectable. `StaveCli` records failures at its shared invocation boundary, including streamed
+mutations and automatic lifecycle work. `StaveRpcRuntime` combines that with read-side failures
+and returns the latest record for the life of the process.
 
 ## Client rules
 
@@ -593,10 +597,10 @@ these choices are made so web and mobile cannot disagree:
 
 - `isStaveProject(project)` — `project.stave != null`.
 - `staveForcedEnvMode(project)` — `"local"` for a space, else `undefined`.
-- `resolveProjectGitCwd({ project, thread })` — `stave.primaryRepoPath`, else the thread's
-  `worktreePath`, else `workspaceRoot` (the pre-Stave order, unchanged for ordinary projects).
+- `resolveProjectGitCwd({ project, thread })` — for Stave, `primaryRepoPath` or explicit `null`
+  when no editable repo exists. Ordinary projects retain `thread.worktreePath` then `workspaceRoot`.
 - `resolveProjectGitBranch({ project, thread })` — the thread's `branch`, else
-  `stave.primaryBranch`, else `null`. This is the **effective branch**: new local threads carry
+  `stave.primaryBranch`, else `null`; Stave without a primary repo always returns `null`. This is the **effective branch**: new local threads carry
   `branch: null`, which suppresses PR lookup; a space fills that gap with its manifest branch.
 
 Rules built on them:
@@ -610,7 +614,7 @@ Rules built on them:
   `apps/mobile/src/features/threads/new-task-flow-provider.tsx`, never persists a worktree path
   for a Stave draft, and refuses a `worktree` mode pick.
 - **Git targeting.** Web wraps the resolvers in `apps/web/src/lib/threadGitTarget.ts`
-  (`resolveThreadGitTarget` → `cwd`, `branch`, `isStave`, `statusEnabled`, where a space always
+  (`resolveThreadGitTarget` → `cwd`, `branch`, `isStave`, `statusEnabled`, where a space with an editable repo
   enables status; `resolveThreadGitRepositoryRoot` uses `stave.primaryRepositoryIdentity.rootPath`
   for diff-file links). Mobile wraps them in `apps/mobile/src/state/thread-git-target.ts` and
   routes every git consumer (status, actions, branches, PR, review, commit sheets) through it;
@@ -872,3 +876,30 @@ archive directory before interpreting its CLI inventory. A row belonging to anot
 installation remains a refusal with its project intact. Already-recorded destruction and empty
 recovery do not require binary/config capture, so metadata cleanup still works when Stave is
 unavailable.
+
+### Reviewed saga cascades
+
+`StaveDryRunPlan.sagaReview` carries the participant roots, incarnations, member project/thread
+identities and a fingerprint bound to the roster, dependency edges, target, Force and memory
+fate. Explicit saga teardown and saga lifecycle retries submit `expectedSagaReview`. The server
+rechecks it under the participant locks before mutation. Ordinary coordinator project deletion
+persists `staveSagaTeardown` using the preview's `projectDeletionFingerprint` in its command/event
+and lifecycle row. That fingerprint excludes the coordinator project which is deleted before
+cleanup; the full explicit-operation fingerprint includes it. The worker verifies the durable
+scope after restart and refuses a replacement project at the coordinator root. Missing or changed authorization requires another review;
+it cannot silently authorize newly imported member projects or conversations.
+
+The client preserves an explicit null Git target for spaces without editable repositories,
+including through legacy web/mobile wrappers. Branch selection for Stave keeps the primary
+checkout and a null thread worktree; it never reuses a sibling space's checkout. An operation
+request refused before it starts is terminal in the client, while lost access to an already
+admitted operation remains resumable. Failed creates expose guarded partial removal only when
+the server can establish ownership; an uncertain post-command outcome requires inspection.
+
+Migration `050_StaveLifecycleRecovery` adds `saga_teardown_json` to the lifecycle row plus
+`stave_lifecycle_policy` and `stave_lifecycle_schedule_resets`. These operational tables retain
+policy observations and pending schedule resets across restart and are excluded from projection
+resets. Completed archive disposition is written only after the project path follows the archive;
+restore recovery resets its schedule episode before marking it live. Recovery retries incomplete
+rows independently, so a temporarily unavailable execution configuration does not permanently
+strand unrelated rows.

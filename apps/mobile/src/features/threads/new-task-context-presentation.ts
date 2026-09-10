@@ -103,9 +103,14 @@ export function resolveNewTaskBranchLabel(input: {
 }
 
 export function shouldCheckoutNewTaskBranch(input: {
+  readonly staveProject?: boolean;
   readonly branchIsCurrent: boolean;
   readonly branchWorktreePath: string | null | undefined;
   readonly workspaceMode: WorkspaceMode;
 }): boolean {
-  return input.workspaceMode === "local" && !input.branchIsCurrent && !input.branchWorktreePath;
+  return (
+    input.workspaceMode === "local" &&
+    !input.branchIsCurrent &&
+    (input.staveProject === true || !input.branchWorktreePath)
+  );
 }

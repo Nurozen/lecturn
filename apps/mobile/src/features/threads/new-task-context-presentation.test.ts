@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  shouldCheckoutNewTaskBranch,
   resolveNewTaskBranchWorktreePath,
   resolveNewTaskBranchLabel,
   resolveNewTaskGitCwd,
@@ -187,5 +188,20 @@ describe("resolveNewTaskBranchLabel", () => {
         workspaceMode: "worktree",
       }),
     ).toBe("Choose branch");
+  });
+});
+
+describe("Stave branch checkout", () => {
+  it("requires a checkout in the primary repo when the branch is held by another space", () => {
+    const input = {
+      branchIsCurrent: false,
+      branchWorktreePath: "/spaces/other/repo",
+      workspaceMode: "local" as const,
+    };
+    expect(shouldCheckoutNewTaskBranch({ ...input, staveProject: true })).toBe(true);
+    expect(shouldCheckoutNewTaskBranch(input)).toBe(false);
+    expect(
+      shouldCheckoutNewTaskBranch({ ...input, staveProject: true, branchIsCurrent: true }),
+    ).toBe(false);
   });
 });

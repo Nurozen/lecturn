@@ -1,4 +1,9 @@
-import { ProjectId, IsoDateTime, NonNegativeInt } from "@t3tools/contracts";
+import {
+  ProjectId,
+  IsoDateTime,
+  NonNegativeInt,
+  StaveSagaTeardownAuthorization,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Schema from "effect/Schema";
 import type * as Effect from "effect/Effect";
@@ -27,6 +32,7 @@ export const StaveLifecycleRow = Schema.Struct({
   disposition: StaveLifecycleDisposition,
   deleteIntentSequence: Schema.NullOr(NonNegativeInt),
   sagaRemoveConfirmed: Schema.Boolean,
+  sagaTeardown: Schema.NullOr(StaveSagaTeardownAuthorization),
   refusalCode: Schema.NullOr(Schema.String),
   refusalMessage: Schema.NullOr(Schema.String),
   anchorAt: Schema.NullOr(IsoDateTime),
@@ -55,6 +61,7 @@ export type StaveLifecyclePatch = Partial<
     | "disposition"
     | "deleteIntentSequence"
     | "sagaRemoveConfirmed"
+    | "sagaTeardown"
     | "refusalCode"
     | "refusalMessage"
     | "anchorAt"
@@ -72,6 +79,12 @@ export interface StaveLifecycleRepositoryShape {
   readonly isProjectDeleted: (projectId: ProjectId) => Result<boolean>;
   readonly listIncomplete: () => Result<ReadonlyArray<StaveLifecycleRow>>;
   readonly listUnrefreshed: () => Result<ReadonlyArray<StaveLifecycleRow>>;
+  readonly observePolicy: (input: {
+    readonly enabled: boolean;
+    readonly archiveMode: string;
+  }) => Result<void>;
+  readonly isScheduleResetRequested: (projectId: ProjectId) => Result<boolean>;
+  readonly releaseExpiredLeases: (now: string) => Result<void>;
   readonly ensure: (input: {
     readonly projectId: ProjectId;
     readonly workspaceRoot: string;

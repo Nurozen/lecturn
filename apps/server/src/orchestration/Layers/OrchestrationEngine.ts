@@ -14,6 +14,8 @@ import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Metric from "effect/Metric";
 import * as Option from "effect/Option";
@@ -30,7 +32,7 @@ import {
   orchestrationCommandDuration,
 } from "../../observability/Metrics.ts";
 import { StaveAdmission, type StaveAdmissionInput } from "../../stave/StaveAdmission.ts";
-import { StaveSpaceLock } from "../../stave/StaveSpaceLock.ts";
+import { isPathUnder, StaveSpaceLock } from "../../stave/StaveSpaceLock.ts";
 import { toPersistenceSqlError } from "../../persistence/Errors.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepository } from "../../persistence/Services/OrchestrationCommandReceipts.ts";
@@ -61,6 +63,7 @@ interface CommandEnvelope {
   origin: OrchestrationClientOrigin | undefined;
   result: Deferred.Deferred<{ sequence: number }, OrchestrationDispatchError>;
   startedAtMs: number;
+  staveReconciliation: boolean;
 }
 
 function commandToAggregateRef(command: OrchestrationCommand): {
@@ -92,6 +95,8 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const staveAdmission = yield* Effect.serviceOption(StaveAdmission);
   const staveLock = yield* Effect.serviceOption(StaveSpaceLock);
+  const filesystem = yield* Effect.serviceOption(FileSystem.FileSystem);
+  const pathService = yield* Effect.serviceOption(Path.Path);
   const commitAdmissionInput = (command: OrchestrationCommand): StaveAdmissionInput | null => {
     if (
       ![
@@ -100,6 +105,8 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         "thread.turn.start",
         "thread.fork",
         "thread.unsettle",
+        "thread.pin",
+        "thread.unarchive",
       ].includes(command.type)
     )
       return null;
@@ -136,7 +143,50 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const withCommitAdmission = <A, E, R>(
     command: OrchestrationCommand,
     effect: Effect.Effect<A, E, R>,
+    staveReconciliation = false,
   ) => {
+    if (
+      (command.type === "project.create" || command.type === "project.meta.update") &&
+      command.workspaceRoot !== undefined &&
+      !staveReconciliation &&
+      Option.isSome(staveLock)
+    ) {
+      const destination = command.workspaceRoot;
+      return Effect.gen(function* () {
+        const existing = commandReadModel.projects.find(
+          (project) => project.id === command.projectId,
+        );
+        if (command.type === "project.meta.update" && existing?.workspaceRoot === destination)
+          return yield* effect;
+        const roots = [destination, ...(existing ? [existing.workspaceRoot] : [])];
+        for (const project of commandReadModel.projects) {
+          if (yield* isPathUnder(project.workspaceRoot, destination))
+            roots.push(project.workspaceRoot);
+        }
+        if (Option.isSome(filesystem) && Option.isSome(pathService)) {
+          let candidate = pathService.value.resolve(destination);
+          while (true) {
+            if (
+              yield* filesystem.value
+                .exists(pathService.value.join(candidate, ".stave.yaml"))
+                .pipe(Effect.orElseSucceed(() => false))
+            )
+              roots.push(candidate);
+            const parent = pathService.value.dirname(candidate);
+            if (parent === candidate) break;
+            candidate = parent;
+          }
+        }
+        const result = yield* staveLock.value.tryWithWorkspaceLocks(roots, effect);
+        if (Option.isNone(result))
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail:
+              "A Stave operation is changing this workspace or its ancestor. Retry when it finishes.",
+          });
+        return result.value;
+      });
+    }
     const input = commitAdmissionInput(command);
     if (input === null || Option.isNone(staveAdmission)) return effect;
     const checked = staveAdmission.value.check(input).pipe(
@@ -350,6 +400,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                 ),
               ),
             ),
+          envelope.staveReconciliation,
         );
 
         commandReadModel = committedCommand.nextCommandReadModel;
@@ -463,6 +514,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         origin: options?.origin,
         result,
         startedAtMs: yield* Clock.currentTimeMillis,
+        staveReconciliation: options?.staveReconciliation === true,
       });
       return yield* Deferred.await(result);
     });

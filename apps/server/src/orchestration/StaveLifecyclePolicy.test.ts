@@ -29,6 +29,7 @@ const row: StaveLifecycleRow = {
   disposition: "pending_evaluation",
   deleteIntentSequence: 42,
   sagaRemoveConfirmed: false,
+  sagaTeardown: null,
   refusalCode: null,
   refusalMessage: null,
   anchorAt: null,

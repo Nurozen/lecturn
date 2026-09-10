@@ -2097,5 +2097,40 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.equal(inside.stdout.trim(), spaceB);
       }),
     );
+    it.effect(
+      "honors unconfigured manifest roots through aliases without adopting ancestor Git",
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const parent = yield* fs.realPath(yield* makeTmpDir("git-stave-unconfigured-"));
+          const space = path.join(parent, "space");
+          const repo = path.join(space, "editable");
+          const alias = path.join(parent, "alias");
+          yield* fs.makeDirectory(repo, { recursive: true });
+          yield* initRepoWithCommit(parent);
+          yield* fs.writeFileString(path.join(space, ".stave.yaml"), "id: space\nrepos: []\n");
+          yield* fs.symlink(space, alias);
+          const driver = yield* makeGitVcsDriverCore().pipe(
+            Effect.provide(Layer.merge(StaveRoots.layerNoop, ServerConfigLayer)),
+          );
+          const top = (cwd: string) =>
+            driver.execute({
+              operation: "test.unconfigured",
+              cwd,
+              args: ["rev-parse", "--show-toplevel"],
+              allowNonZeroExit: true,
+            });
+          for (const cwd of [space, alias, repo]) {
+            const blocked = yield* top(cwd);
+            assert.notEqual(blocked.exitCode, 0);
+            assert.include(blocked.stderr, "not a git repository");
+          }
+          yield* initRepoWithCommit(repo).pipe(
+            Effect.provideService(GitVcsDriver.GitVcsDriver, driver),
+          );
+          assert.equal((yield* top(path.join(alias, "editable"))).stdout.trim(), repo);
+        }),
+    );
   });
 });

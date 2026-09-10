@@ -643,6 +643,23 @@ describe("dedupeRemoteBranchesWithLocalMatches", () => {
 });
 
 describe("resolveBranchSelectionTarget", () => {
+  it("keeps Stave checkout in its primary repo instead of reusing a sibling worktree", () => {
+    for (const worktreePath of ["/spaces/other/repo", "/spaces/current/repo", null]) {
+      expect(
+        resolveBranchSelectionTarget({
+          isStave: true,
+          activeProjectCwd: "/spaces/current/repo",
+          activeWorktreePath: "/legacy/worktree",
+          refName: { isDefault: false, worktreePath },
+        }),
+      ).toEqual({
+        checkoutCwd: "/spaces/current/repo",
+        nextWorktreePath: null,
+        reuseExistingWorktree: false,
+      });
+    }
+  });
+
   it("reuses an existing secondary worktree for the selected ref", () => {
     expect(
       resolveBranchSelectionTarget({

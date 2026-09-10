@@ -43,8 +43,10 @@ export function resolveThreadGitTarget(input: {
 }): ThreadGitTarget {
   const { project, thread } = input;
   const isStave = isStaveProject(project);
-  const cwd =
-    resolveProjectGitCwd({ project, thread }) ?? thread?.worktreePath ?? input.fallbackCwd ?? null;
+  const resolvedCwd = resolveProjectGitCwd({ project, thread });
+  const cwd = isStave
+    ? resolvedCwd
+    : (resolvedCwd ?? thread?.worktreePath ?? input.fallbackCwd ?? null);
   const branch = resolveProjectGitBranch({ project, thread });
   const statusEnabled =
     cwd !== null && (branch != null || (thread?.worktreePath ?? null) !== null || isStave);

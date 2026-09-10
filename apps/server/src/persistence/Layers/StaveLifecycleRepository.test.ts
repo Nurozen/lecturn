@@ -18,6 +18,117 @@ it.layer(StaveLifecycleRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceM
   "Stave lifecycle repository",
   (it) => {
     it.effect(
+      "rebinds a stale active-project root and fills the new incarnation without inheriting its old episode",
+      () =>
+        Effect.gen(function* () {
+          const repo = yield* StaveLifecycleRepository;
+          const sql = yield* SqlClient.SqlClient;
+          const projectId = ProjectId.make("rebound");
+          yield* repo.ensure({ ...base, projectId, workspaceRoot: "/old-root" });
+          yield* sql`UPDATE stave_project_lifecycle SET disposition = 'pending_archive', scheduled_at = ${base.now}, anchor_at = ${base.now}, archive_deadline_at = ${base.now} WHERE project_id = ${projectId}`;
+          yield* sql`INSERT INTO projection_projects (project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES (${projectId}, 'Rebound', '/new-root', '[]', ${base.now}, ${base.now})`;
+          const row = yield* repo.ensure({
+            ...base,
+            projectId,
+            workspaceRoot: "/new-root",
+            spaceId: "new",
+            manifestCreatedAt: "2026-01-02T00:00:00.000Z",
+          });
+          assert.equal(row.workspaceRoot, "/new-root");
+          assert.equal(row.spaceId, "new");
+          assert.equal(row.manifestCreatedAt, "2026-01-02T00:00:00.000Z");
+          assert.equal(row.disposition, "pending_evaluation");
+          assert.isNull(row.scheduledAt);
+          assert.isNull(row.archiveDeadlineAt);
+          assert.equal(row.leaseEpoch, 1);
+        }),
+    );
+    it.effect("persists reset intent until the lease owner resets the episode", () =>
+      Effect.gen(function* () {
+        const repo = yield* StaveLifecycleRepository;
+        const projectId = ProjectId.make("durable-reset");
+        yield* repo.ensure({ ...base, projectId, workspaceRoot: "/durable-reset" });
+        const held = Option.getOrThrow(
+          yield* repo.acquireLease({
+            projectId,
+            expectedEpoch: 0,
+            ownerToken: "owner",
+            now: base.now,
+            leaseUntil: "2026-01-01T00:02:00.000Z",
+          }),
+        );
+        const lease = {
+          projectId,
+          leaseEpoch: held.leaseEpoch,
+          ownerToken: "owner",
+          now: base.now,
+        };
+        yield* repo.updateDisposition({
+          ...lease,
+          patch: { disposition: "pending_archive", scheduledAt: base.now },
+        });
+        yield* repo.observePolicy({ enabled: false, archiveMode: "archive-after-grace" });
+        yield* repo.observePolicy({ enabled: true, archiveMode: "archive-after-grace" });
+        assert.isTrue(yield* repo.isScheduleResetRequested(projectId));
+        const reset = {
+          ...lease,
+          disposition: "live" as const,
+          anchorAt: null,
+          scheduledAt: null,
+          archiveDeadlineAt: null,
+        };
+        assert.isFalse(yield* repo.resetScheduleEpisode({ ...reset, ownerToken: "stranger" }));
+        assert.isTrue(yield* repo.isScheduleResetRequested(projectId));
+        assert.isTrue(yield* repo.resetScheduleEpisode(reset));
+        assert.isFalse(yield* repo.isScheduleResetRequested(projectId));
+      }),
+    );
+    it.effect(
+      "clears expired abandoned owners but preserves incomplete transition journals and active leases",
+      () =>
+        Effect.gen(function* () {
+          const repo = yield* StaveLifecycleRepository;
+          for (const disposition of ["live", "archiving", "pending_evaluation"] as const) {
+            const projectId = ProjectId.make(`expired-${disposition}`);
+            yield* repo.ensure({ ...base, projectId, workspaceRoot: `/${projectId}` });
+            yield* repo.acquireLease({
+              projectId,
+              expectedEpoch: 0,
+              ownerToken: "owner",
+              now: base.now,
+              leaseUntil:
+                disposition === "pending_evaluation"
+                  ? "2026-01-01T00:10:00.000Z"
+                  : "2026-01-01T00:01:00.000Z",
+            });
+            yield* repo.updateDisposition({
+              projectId,
+              leaseEpoch: 1,
+              ownerToken: "owner",
+              now: base.now,
+              patch: { disposition },
+            });
+          }
+          yield* repo.releaseExpiredLeases("2026-01-01T00:02:00.000Z");
+          assert.isNull(
+            Option.getOrThrow(yield* repo.getByProjectId(ProjectId.make("expired-live")))
+              .ownerToken,
+          );
+          assert.equal(
+            Option.getOrThrow(yield* repo.getByProjectId(ProjectId.make("expired-archiving")))
+              .ownerToken,
+            "owner",
+          );
+          assert.equal(
+            Option.getOrThrow(
+              yield* repo.getByProjectId(ProjectId.make("expired-pending_evaluation")),
+            ).ownerToken,
+            "owner",
+          );
+        }),
+    );
+
+    it.effect(
       "fences stale owners after expiry and preserves the schedule across renewals and transitions",
       () =>
         Effect.gen(function* () {

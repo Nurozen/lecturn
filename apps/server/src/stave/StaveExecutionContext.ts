@@ -4,6 +4,7 @@ import type { StaveBinaryResolution } from "./StaveBinary.ts";
 export interface StaveExecutionSnapshot {
   readonly binary: StaveBinaryResolution;
   readonly configPath: string;
+  readonly configurationIdentity?: string;
   readonly sourceConfigPath: string;
 }
 

@@ -1,5 +1,6 @@
 import {
   ApprovalRequestId,
+  StaveSagaTeardownAuthorization,
   type ChatAttachment,
   type OrchestrationEvent,
   type OrchestrationSessionStatus,
@@ -10,6 +11,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -56,6 +58,10 @@ import {
 } from "../../attachmentStore.ts";
 
 import { STAVE_LIFECYCLE_PROJECTOR } from "../../persistence/Migrations/049_StaveProjectLifecycle.ts";
+
+const encodeStaveSagaTeardown = Schema.encodeEffect(
+  Schema.fromJsonString(StaveSagaTeardownAuthorization),
+);
 
 export const ORCHESTRATION_PROJECTOR_NAMES = {
   projects: "projection.projects",
@@ -1867,9 +1873,13 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         }>`SELECT last_applied_sequence FROM stave_lifecycle_cursor WHERE singleton = 1`;
         if (event.sequence <= (cursor[0]?.last_applied_sequence ?? Number.MAX_SAFE_INTEGER)) return;
         if (event.type === "project.deleted" && event.payload.workspaceRoot !== undefined) {
+          const sagaTeardown =
+            event.payload.staveSagaTeardown === undefined
+              ? null
+              : yield* encodeStaveSagaTeardown(event.payload.staveSagaTeardown);
           yield* sql`INSERT INTO stave_project_lifecycle
-          (project_id, workspace_root, space_id, manifest_created_at, disposition, delete_intent_sequence, saga_remove_confirmed, updated_at)
-          VALUES (${event.payload.projectId}, ${event.payload.workspaceRoot}, ${event.payload.staveSpaceId ?? null}, ${event.payload.staveCreatedAt ?? null}, 'pending_evaluation', ${event.sequence}, ${event.payload.staveSagaRemoveConfirmed === true ? 1 : 0}, ${event.occurredAt})
+          (project_id, workspace_root, space_id, manifest_created_at, disposition, delete_intent_sequence, saga_remove_confirmed, saga_teardown_json, updated_at)
+          VALUES (${event.payload.projectId}, ${event.payload.workspaceRoot}, ${event.payload.staveSpaceId ?? null}, ${event.payload.staveCreatedAt ?? null}, 'pending_evaluation', ${event.sequence}, ${event.payload.staveSagaRemoveConfirmed === true ? 1 : 0}, ${sagaTeardown}, ${event.occurredAt})
           ON CONFLICT(project_id) DO UPDATE SET
             delete_intent_sequence = excluded.delete_intent_sequence,
             disposition = CASE WHEN stave_project_lifecycle.disposition IN ('destroyed','archived','not_stave','destroying','archiving','restoring')
@@ -1880,8 +1890,23 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             space_id = COALESCE(excluded.space_id, stave_project_lifecycle.space_id),
             manifest_created_at = COALESCE(excluded.manifest_created_at, stave_project_lifecycle.manifest_created_at),
             saga_remove_confirmed = excluded.saga_remove_confirmed,
+            saga_teardown_json = excluded.saga_teardown_json,
             updated_at = excluded.updated_at,
             refreshed_at = NULL`;
+        }
+        if (event.type === "project.meta-updated" && event.payload.workspaceRoot !== undefined) {
+          // Operation-owned root moves keep their journal and lease until reconciliation finishes.
+          yield* sql`UPDATE stave_project_lifecycle SET
+            workspace_root = ${event.payload.workspaceRoot}, space_id = NULL, manifest_created_at = NULL,
+            disposition = 'pending_evaluation', delete_intent_sequence = NULL,
+            saga_remove_confirmed = 0, saga_teardown_json = NULL,
+            refusal_code = NULL, refusal_message = NULL, anchor_at = NULL, scheduled_at = NULL,
+            archive_deadline_at = NULL, archive_basename = NULL,
+            lease_epoch = lease_epoch + 1, owner_token = NULL, lease_until = NULL,
+            updated_at = ${event.occurredAt}, refreshed_at = NULL
+            WHERE project_id = ${event.payload.projectId} AND workspace_root != ${event.payload.workspaceRoot}
+              AND disposition NOT IN ('archiving','restoring','destroying')
+              AND (lease_until IS NULL OR lease_until <= ${event.occurredAt})`;
         }
         yield* sql`UPDATE stave_lifecycle_cursor SET last_applied_sequence = ${event.sequence} WHERE singleton = 1`;
       },

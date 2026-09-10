@@ -74,7 +74,8 @@ export type StaveRemovePartialSpaceAvailability =
   | { readonly kind: "available"; readonly operation: StaveRemovePartialSpaceOperation }
   | { readonly kind: "unavailable"; readonly hint: string };
 
-export const NO_PARTIAL_SPACE_HINT = "Stave did not report a partial space; nothing was created.";
+export const NO_PARTIAL_SPACE_HINT =
+  "The server could not identify a partial space that is safe to remove. Check the space directory before retrying creation.";
 
 /**
  * Whether a failed `createSpace` left something the wizard can remove: only

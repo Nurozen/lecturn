@@ -261,6 +261,7 @@ export function NewTaskBranchPickerRouteScreen() {
       try {
         let selectedBranch = branch;
         const needsCheckout = shouldCheckoutNewTaskBranch({
+          staveProject: flow.selectedProject?.stave != null,
           branchIsCurrent: branch.current,
           branchWorktreePath: branch.worktreePath,
           workspaceMode: flow.workspaceMode,

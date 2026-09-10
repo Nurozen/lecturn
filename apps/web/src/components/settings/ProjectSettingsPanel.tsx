@@ -778,6 +778,9 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
             input: {
               projectId: member.id,
               force: true,
+              ...(staveDeletions[members.indexOf(member)]?.staveSagaTeardown
+                ? { staveSagaTeardown: staveDeletions[members.indexOf(member)]!.staveSagaTeardown }
+                : {}),
               staveSagaRemoveConfirmed:
                 staveDeletions[members.indexOf(member)]?.staveSagaRemoveConfirmed ?? false,
             },

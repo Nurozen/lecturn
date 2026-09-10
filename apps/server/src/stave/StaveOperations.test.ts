@@ -22,6 +22,7 @@ import {
   type OrchestrationProject,
   type OrchestrationProjectShell,
   ProjectId,
+  ThreadId,
   type StaveCreateSpaceOperation,
   type StaveProjectInfo,
   type StaveOperation,
@@ -191,6 +192,7 @@ interface CliCall {
 }
 
 interface HarnessOptions {
+  readonly threadAnchors?: ProjectionSnapshotQuery["Service"]["listThreadLifecycleAnchorsByProjectId"];
   readonly executionLayer?: Layer.Layer<StaveExecution.StaveExecution>;
   readonly cliLayer?: Layer.Layer<StaveCli>;
   readonly configReaderLayer?: Layer.Layer<StaveConfigReader.StaveConfigReader>;
@@ -380,6 +382,8 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
               ),
           }),
           Layer.mock(ProjectionSnapshotQuery)({
+            listThreadLifecycleAnchorsByProjectId:
+              options.threadAnchors ?? (() => Effect.succeed([])),
             getShellSnapshot: () =>
               Effect.succeed({
                 snapshotSequence: 0,
@@ -505,7 +509,17 @@ const collect = (ops: StaveOperationsShape, input: StaveRunOperationInput) =>
   Stream.runCollect(ops.run(input));
 
 const runToEnd = (ops: StaveOperationsShape, operationId: string, operation: StaveOperation) =>
-  collect(ops, { operationId, operation });
+  Effect.gen(function* () {
+    if (
+      (operation.kind === "sagaArchive" || operation.kind === "sagaDestroy") &&
+      operation.expectedSagaReview === undefined
+    ) {
+      const plan = yield* ops.dryRun(operation).pipe(Effect.option);
+      if (Option.isSome(plan) && plan.value.sagaReview !== undefined)
+        operation = { ...operation, expectedSagaReview: plan.value.sagaReview.fingerprint };
+    }
+    return yield* collect(ops, { operationId, operation });
+  });
 
 const summaryOf = (ops: StaveOperationsShape, operationId: string) =>
   ops.summary(operationId).pipe(
@@ -1269,6 +1283,7 @@ const lifecycleFixture = (root: string, disposition: StaveLifecycleRow["disposit
     disposition,
     deleteIntentSequence: null,
     sagaRemoveConfirmed: false,
+    sagaTeardown: null,
     refusalCode: null,
     refusalMessage: null,
     anchorAt: null,
@@ -2181,9 +2196,7 @@ for (const retained of [true, false]) {
         (harness, options) =>
           Effect.gen(function* () {
             const ops = yield* StaveOperations;
-            const fiber = yield* (
-              retained ? ops.reconcileIncomplete : Effect.flip(ops.reconcileIncomplete)
-            ).pipe(Effect.forkChild);
+            const fiber = yield* ops.reconcileIncomplete.pipe(Effect.forkChild);
             yield* Deferred.await(options.started);
             yield* TestClock.adjust("20 seconds");
             yield* Deferred.await(options.renewed);
@@ -2192,8 +2205,8 @@ for (const retained of [true, false]) {
               yield* Fiber.join(fiber);
               expect(options.fixture.row().disposition).toBe("live");
             } else {
-              const result = yield* Fiber.join(fiber);
-              expect(result).toMatchObject({ code: "space_transitioning" });
+              yield* Fiber.join(fiber);
+              expect(options.fixture.row().disposition).toBe("archiving");
               expect(yield* Ref.get(harness.dispatched)).toEqual([]);
             }
           }),
@@ -2538,6 +2551,7 @@ describe("StaveOperations sagas", () => {
                 ...fixture.cliExtra,
                 sagaArchive: (input) =>
                   Effect.gen(function* () {
+                    if (input.dryRun) return PLAN;
                     expect(input.force).toBe(false);
                     expect(fixture.history.slice(0, 6)).toEqual([
                       "ensure:a",
@@ -2642,8 +2656,9 @@ describe("StaveOperations sagas", () => {
             ...fixture,
             cliExtra: {
               ...fixture.cliExtra,
-              sagaArchive: () =>
+              sagaArchive: (input) =>
                 Effect.gen(function* () {
+                  if (input.dryRun) return PLAN;
                   const original = fixture.rootsById.get("a")!;
                   const duplicate = roots.path.join(
                     roots.agentWorkDir,
@@ -2737,10 +2752,12 @@ for (const lost of [null, "a", "b", "story"]) {
               cliExtra: {
                 ...fixture.cliExtra,
                 sagaArchive: (input) =>
-                  Deferred.succeed(gates.reached, undefined).pipe(
-                    Effect.andThen(Deferred.await(gates.gate)),
-                    Effect.andThen(fixture.cliExtra.sagaArchive!(input)),
-                  ),
+                  input.dryRun
+                    ? Effect.succeed(PLAN)
+                    : Deferred.succeed(gates.reached, undefined).pipe(
+                        Effect.andThen(Deferred.await(gates.gate)),
+                        Effect.andThen(fixture.cliExtra.sagaArchive!(input)),
+                      ),
               },
             };
           }),
@@ -2931,7 +2948,7 @@ it.effect(
             expectedManifestCreatedAt: CREATED_AT,
             force: false,
           };
-          expect(yield* ops.dryRun(operation)).toEqual(PLAN);
+          expect(yield* ops.dryRun(operation)).toMatchObject(PLAN);
           expect(finishedResult(yield* runToEnd(ops, "partial-saga", operation)).kind).toBe(
             "removePartialSpace",
           );
@@ -3422,4 +3439,415 @@ it.effect("failure telemetry excludes raw stderr, details and command text", () 
         ]);
       }),
   ),
+);
+
+describe("reviewed saga teardown scope", () => {
+  it.effect("refuses an unreviewed cascade before leases or quiescence", () =>
+    scenario(sagaFixture, (_, fixture) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        const events = yield* collect(ops, {
+          operationId: "missing-review",
+          operation: {
+            kind: "sagaArchive",
+            sagaRoot: fixture.rootsById.get("story")!,
+            expectedManifestCreatedAt: CREATED_AT,
+            force: false,
+            memory: "keep",
+          },
+        });
+        expect(failedError(events).code).toBe("incarnation_mismatch");
+        expect(fixture.history).toEqual([]);
+      }),
+    ),
+  );
+  it.effect("rejects changed roster edges and affected member projects after preview", () =>
+    scenario(sagaFixture, (_, fixture) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        const operation = {
+          kind: "sagaArchive" as const,
+          sagaRoot: fixture.rootsById.get("story")!,
+          expectedManifestCreatedAt: CREATED_AT,
+          force: false,
+          memory: "keep" as const,
+        };
+        const preview = yield* ops.dryRun(operation);
+        expect(
+          preview.sagaReview?.participants.find((member) => member.spaceId === "a")?.projectId,
+        ).toBe("a");
+        expect(
+          preview.sagaReview?.participants.find((member) => member.spaceId === "story")?.projectId,
+        ).toBe("story");
+        fixture.setMembers(fixture.members().map((member) => ({ ...member, after: [] })));
+        const result = yield* collect(ops, {
+          operationId: "changed-review",
+          operation: { ...operation, expectedSagaReview: preview.sagaReview!.fingerprint },
+        });
+        expect(failedError(result).code).toBe("incarnation_mismatch");
+        expect(fixture.history).toEqual([]);
+        const fresh = yield* ops.dryRun(operation);
+        fixture.shellProjects.splice(
+          fixture.shellProjects.findIndex((project) => project.id === "a"),
+          1,
+        );
+        expect(
+          failedError(
+            yield* collect(ops, {
+              operationId: "changed-project",
+              operation: { ...operation, expectedSagaReview: fresh.sagaReview!.fingerprint },
+            }),
+          ).code,
+        ).toBe("incarnation_mismatch");
+        expect(fixture.history).toEqual([]);
+      }),
+    ),
+  );
+});
+
+it.effect("refuses archive of an archived incarnation before preview or mutation", () =>
+  scenario(
+    (roots) =>
+      Effect.gen(function* () {
+        const root = roots.path.join(roots.agentWorkDir, ".archive", SPACE_ID);
+        yield* roots.fs.makeDirectory(root, { recursive: true }).pipe(Effect.orDie);
+        return { root, readerLoad: () => Effect.succeed(Option.some(infoFor("archived"))) };
+      }),
+    (harness, options) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        const operation = {
+          kind: "archiveSpace" as const,
+          workspaceRoot: options.root,
+          expectedManifestCreatedAt: CREATED_AT,
+          force: true,
+          memory: "keep" as const,
+        };
+        expect((yield* Effect.flip(ops.dryRun(operation))).code).toBe("archived_project");
+        expect(failedError(yield* runToEnd(ops, "old-archive", operation)).code).toBe(
+          "archived_project",
+        );
+        expect(yield* Ref.get(harness.cliCalls)).toEqual([]);
+      }),
+  ),
+);
+
+it.effect("quiesces providers and terminals before detaching memory", () =>
+  scenario(
+    (roots) =>
+      Effect.gen(function* () {
+        const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+        yield* roots.fs.makeDirectory(root).pipe(Effect.orDie);
+        const quiesced: string[] = [];
+        return {
+          root,
+          quiesced,
+          activeProject: project("p", root),
+          readerLoad: () => Effect.succeed(Option.some(infoFor())),
+          cliExtra: {
+            memoryDetach: () =>
+              Effect.sync(() => {
+                expect(quiesced).toEqual(["providers", "terminals"]);
+                return {
+                  spaceId: SPACE_ID,
+                  spacePath: root,
+                  manifest: manifest(SPACE_ID),
+                  detached: [],
+                  notes: [],
+                };
+              }),
+          },
+        };
+      }),
+    (_, options) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        expect(
+          finishedResult(
+            yield* runToEnd(ops, "detach-after-stop", {
+              kind: "memoryDetach",
+              workspaceRoot: options.root,
+              expectedManifestCreatedAt: CREATED_AT,
+              fate: "destroy",
+            }),
+          ).kind,
+        ).toBe("memoryDetach");
+      }),
+  ),
+);
+
+it.effect("reports an uncertain creation candidate without granting destructive cleanup", () =>
+  scenario(
+    (roots) =>
+      Effect.succeed({
+        cli: {
+          spaceCreate: (input) =>
+            Effect.gen(function* () {
+              if (input.dryRun) return PLAN;
+              yield* roots.fs
+                .makeDirectory(roots.path.join(roots.agentWorkDir, input.id))
+                .pipe(Effect.orDie);
+              return yield* new StaveError({
+                code: "timeout",
+                message: "response lost",
+                verb: "space create",
+                exitCode: null,
+                stderrTail: null,
+                details: null,
+              });
+            }),
+        },
+      } satisfies HarnessOptions),
+    (harness) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        const result = failedError(
+          yield* runToEnd(ops, "uncertain-create", createSpaceOperation()),
+        );
+        expect(result.details?.uncertainPartialSpace).toMatchObject({
+          spaceId: SPACE_ID,
+          spacePath: harness.path.join(harness.agentWorkDir, SPACE_ID),
+        });
+        expect(result.details?.partialSpace).toBeUndefined();
+        expect(result.message).toContain("ownership could not be verified");
+        expect(yield* Ref.get(harness.dispatched)).toEqual([]);
+      }),
+  ),
+);
+
+it.effect("saga review binds archived member conversations and survives coordinator deletion", () =>
+  scenario(
+    (roots) =>
+      Effect.gen(function* () {
+        const fixture = yield* sagaFixture(roots);
+        const anchors = [
+          {
+            threadId: ThreadId.make("archived-member-thread"),
+            createdAt: NOW,
+            updatedAt: NOW,
+            settledAt: null,
+            unsettledAt: null,
+            archivedAt: NOW,
+            deletedAt: null,
+            settledOverride: null,
+          },
+        ];
+        return {
+          ...fixture,
+          anchors,
+          threadAnchors: (projectId: ProjectId) => Effect.succeed(projectId === "a" ? anchors : []),
+        };
+      }),
+    (_, fixture) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        const operation = {
+          kind: "sagaArchive" as const,
+          sagaRoot: fixture.rootsById.get("story")!,
+          expectedManifestCreatedAt: CREATED_AT,
+          force: false,
+          memory: "keep" as const,
+        };
+        const before = yield* ops.dryRun(operation);
+        expect(
+          before.sagaReview?.participants.find((member) => member.spaceId === "a")?.threadIds,
+        ).toEqual(["archived-member-thread"]);
+        fixture.shellProjects.splice(
+          fixture.shellProjects.findIndex((project) => project.id === "story"),
+          1,
+        );
+        const after = yield* ops.dryRun(operation);
+        expect(after.sagaReview?.projectDeletionFingerprint).toBe(
+          before.sagaReview?.projectDeletionFingerprint,
+        );
+        expect(after.sagaReview?.fingerprint).not.toBe(before.sagaReview?.fingerprint);
+        fixture.anchors.push({
+          ...fixture.anchors[0]!,
+          threadId: ThreadId.make("another-archived-thread"),
+        });
+        expect(
+          failedError(
+            yield* collect(ops, {
+              operationId: "archived-thread-scope",
+              operation: { ...operation, expectedSagaReview: before.sagaReview!.fingerprint },
+            }),
+          ).code,
+        ).toBe("incarnation_mismatch");
+        expect(fixture.history).toEqual([]);
+      }),
+  ),
+);
+
+for (const moved of [false, true]) {
+  it.effect(
+    `recovers archive completion ${moved ? "after" : "before"} the project path update`,
+    () =>
+      scenario(
+        (roots) =>
+          Effect.gen(function* () {
+            const live = roots.path.join(roots.agentWorkDir, SPACE_ID);
+            const archive = roots.path.join(roots.agentWorkDir, ".archive", SPACE_ID);
+            yield* roots.fs.makeDirectory(archive, { recursive: true }).pipe(Effect.orDie);
+            const fixture = lifecycleFixture(live, "archiving");
+            return {
+              live,
+              archive,
+              fixture,
+              activeProject: project("p", moved ? archive : live),
+              lifecycle: fixture.service,
+              readerLoad: (root: string) =>
+                Effect.succeed(root === archive ? Option.some(infoFor("archived")) : Option.none()),
+              cliExtra: {
+                spaceList: (input) => Effect.succeed(input?.archived ? [listRow(archive)] : []),
+              } satisfies Partial<StaveCliShape>,
+            };
+          }),
+        (harness, options) =>
+          Effect.gen(function* () {
+            const ops = yield* StaveOperations;
+            yield* ops.reconcileIncomplete;
+            expect(options.fixture.row().disposition).toBe("archived");
+            expect(options.fixture.row().workspaceRoot).toBe(options.archive);
+            expect(
+              (yield* Ref.get(harness.dispatched)).filter(
+                (command) => command.type === "project.meta.update",
+              ),
+            ).toHaveLength(moved ? 0 : 1);
+          }),
+      ),
+  );
+}
+
+it.effect("restore recovery clears the previous expired archive schedule", () =>
+  scenario(
+    (roots) =>
+      Effect.gen(function* () {
+        const live = roots.path.join(roots.agentWorkDir, SPACE_ID);
+        const archive = roots.path.join(roots.agentWorkDir, ".archive", SPACE_ID);
+        yield* roots.fs.makeDirectory(live).pipe(Effect.orDie);
+        const fixture = lifecycleFixture(archive, "restoring");
+        yield* fixture.service.updateDisposition!({
+          projectId: ProjectId.make("p"),
+          leaseEpoch: 0,
+          ownerToken: "seed",
+          now: NOW,
+          patch: { anchorAt: CREATED_AT, scheduledAt: CREATED_AT, archiveDeadlineAt: CREATED_AT },
+        }).pipe(Effect.orDie);
+        return {
+          live,
+          fixture,
+          activeProject: project("p", archive),
+          lifecycle: fixture.service,
+          readerLoad: (root: string) =>
+            Effect.succeed(root === live ? Option.some(infoFor()) : Option.none()),
+          cliExtra: {
+            spaceList: (input) => Effect.succeed(input?.archived ? [] : [listRow(live)]),
+          } satisfies Partial<StaveCliShape>,
+        };
+      }),
+    (_, options) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        yield* ops.reconcileIncomplete;
+        expect(options.fixture.row()).toMatchObject({
+          disposition: "live",
+          workspaceRoot: options.live,
+          anchorAt: null,
+          scheduledAt: null,
+          archiveDeadlineAt: null,
+        });
+      }),
+  ),
+);
+
+it.effect("rejects an explicit saga preview after the coordinator is reimported", () =>
+  scenario(sagaFixture, (_, fixture) =>
+    Effect.gen(function* () {
+      const ops = yield* StaveOperations;
+      const root = fixture.rootsById.get("story")!;
+      const operation = {
+        kind: "sagaArchive" as const,
+        sagaRoot: root,
+        expectedManifestCreatedAt: CREATED_AT,
+        force: false,
+        memory: "keep" as const,
+      };
+      const preview = yield* ops.dryRun(operation);
+      fixture.shellProjects.splice(
+        fixture.shellProjects.findIndex((project) => project.id === "story"),
+        1,
+        projectShell("replacement", root),
+      );
+      const result = yield* collect(ops, {
+        operationId: "replacement-coordinator",
+        operation: { ...operation, expectedSagaReview: preview.sagaReview!.fingerprint },
+      });
+      expect(failedError(result).code).toBe("incarnation_mismatch");
+      expect(fixture.history).toEqual([]);
+    }),
+  ),
+);
+
+it.effect(
+  "durable saga deletion refuses a replacement coordinator despite matching member consent",
+  () =>
+    scenario(
+      (roots) =>
+        Effect.gen(function* () {
+          const fixture = yield* sagaFixture(roots);
+          return {
+            ...fixture,
+            lifecycle: {
+              ...fixture.lifecycle,
+              getByProjectId: (id: ProjectId) =>
+                Effect.sync(() => Option.fromNullishOr(fixture.rows.get(id))),
+              isProjectDeleted: () => Effect.succeed(true),
+            },
+          };
+        }),
+      (harness, fixture) =>
+        Effect.gen(function* () {
+          const ops = yield* StaveOperations;
+          const root = fixture.rootsById.get("story")!;
+          const operation = {
+            kind: "sagaArchive" as const,
+            sagaRoot: root,
+            expectedManifestCreatedAt: CREATED_AT,
+            force: false,
+            memory: "keep" as const,
+          };
+          const preview = yield* ops.dryRun(operation);
+          fixture.rows.set(ProjectId.make("story"), {
+            ...lifecycleFixture(root, "pending_archive").row(),
+            projectId: ProjectId.make("story"),
+            spaceId: "story",
+            deleteIntentSequence: 10,
+          });
+          fixture.shellProjects.splice(
+            fixture.shellProjects.findIndex((project) => project.id === "story"),
+            1,
+            projectShell("replacement", root),
+          );
+          const error = yield* Effect.flip(
+            ops.executeLifecycle({
+              kind: "lifecycleAction",
+              projectId: ProjectId.make("story"),
+              workspaceRoot: root,
+              expectedManifestCreatedAt: CREATED_AT,
+              action: "retry",
+              target: "archive",
+              force: false,
+              memory: "keep",
+              expectedSagaReview: preview.sagaReview!.projectDeletionFingerprint,
+            }),
+          );
+          expect(error.code).toBe("incarnation_mismatch");
+          expect(fixture.history).not.toContain("cli");
+          expect(
+            (yield* Ref.get(harness.dispatched)).filter(
+              (command) => command.type === "project.delete",
+            ),
+          ).toEqual([]);
+        }),
+    ),
 );

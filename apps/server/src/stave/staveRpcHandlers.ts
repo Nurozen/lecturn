@@ -1,3 +1,9 @@
+import { stableStringify } from "@t3tools/shared/relaySigning";
+import * as Schema from "effect/Schema";
+import * as FileSystem from "effect/FileSystem";
+import { StaveExecutionContext } from "./StaveExecutionContext.ts";
+import { StaveExecution } from "./StaveExecution.ts";
+import { sameManifestIncarnation } from "./StaveOperations.ts";
 import { StaveMemoryWiring, noop as noopMemoryWiring } from "./StaveMemoryWiring.ts";
 /**
  * staveRpcHandlers - the `stave.*` RPCs served over the WebSocket group.
@@ -65,7 +71,7 @@ import { ServerSettingsService } from "../serverSettings.ts";
 import { StaveBinary, type StaveBinaryError } from "./StaveBinary.ts";
 import { StaveCli } from "./StaveCli.ts";
 import { StaveConfigReader, type StaveConfigSnapshot } from "./StaveConfigReader.ts";
-import type { StaveError } from "./StaveError.ts";
+import { StaveError } from "./StaveError.ts";
 import { scanStaveMembership } from "./StaveMembership.ts";
 import { StaveReadCache } from "./StaveReadCache.ts";
 import { StaveOperations } from "./StaveOperations.ts";
@@ -262,11 +268,27 @@ export interface StaveRpcRuntimeOptions {
   readonly spaceStatusTtl?: Duration.Input;
 }
 
+const isStaveInvocationError = Schema.is(StaveError);
+
 export const makeRuntime = Effect.fn("StaveRpcRuntime.make")(function* (
   options: StaveRpcRuntimeOptions = {},
 ) {
   const cli = yield* StaveCli;
   const reader = yield* StaveWorkspaceReader;
+  const execution = yield* Effect.serviceOption(StaveExecution);
+  const settings = yield* Effect.serviceOption(ServerSettingsService);
+  const fs = yield* Effect.serviceOption(FileSystem.FileSystem);
+  const inExecution = <A, E, R>(body: Effect.Effect<A, E, R>) =>
+    Option.isSome(execution)
+      ? execution.value
+          .withExecution(body)
+          .pipe(
+            Effect.mapError((error) =>
+              isStaveInvocationError(error) ? toStaveCommandError(error) : error,
+            ),
+          )
+      : body;
+
   const invalidation = yield* Effect.serviceOption(StaveReadCache);
   let seenGeneration = -1;
   const lastFailureRef = yield* Ref.make(Option.none<StaveLastFailure>());
@@ -289,6 +311,7 @@ export const makeRuntime = Effect.fn("StaveRpcRuntime.make")(function* (
   const lookupSpaceStatus = Effect.fn("StaveRpcRuntime.lookupSpaceStatus")(function* (
     workspaceRoot: string,
   ) {
+    yield* reader.invalidate(workspaceRoot);
     const info = yield* reader.load(workspaceRoot);
     if (Option.isNone(info)) {
       return yield* new StaveNotSpaceError({
@@ -296,21 +319,46 @@ export const makeRuntime = Effect.fn("StaveRpcRuntime.make")(function* (
         message: `No Stave space manifest was found at '${workspaceRoot}'.`,
       });
     }
+    if (info.value.state !== "live")
+      return yield* new StaveCommandError({
+        verb: "space status",
+        code: "archived_project",
+        message: "Restore this space before reading its live status.",
+      });
     const json = yield* cli
       .spaceStatus(info.value.spaceId)
       .pipe(Effect.tapError(recordFailure), Effect.mapError(toStaveCommandError));
+    const canonical = (root: string) =>
+      Option.isSome(fs)
+        ? fs.value.realPath(root).pipe(Effect.orElseSucceed(() => root))
+        : Effect.succeed(root);
+    if (
+      (yield* canonical(json.spacePath)) !== (yield* canonical(workspaceRoot)) ||
+      json.spaceId !== info.value.spaceId ||
+      info.value.createdAt === undefined ||
+      !sameManifestIncarnation(json.manifest.createdAt, info.value.createdAt)
+    )
+      return yield* new StaveCommandError({
+        verb: "space status",
+        code: "incarnation_mismatch",
+        message:
+          "The selected Stave configuration resolves a different space. Select this project's configuration before reading live status.",
+      });
     return toSpaceStatusDto(json);
   });
 
   const ttl = options.spaceStatusTtl ?? STAVE_SPACE_STATUS_CACHE_TTL;
-  const cache = yield* Cache.makeWith(lookupSpaceStatus, {
+  const rootFromKey = (key: string) => key.slice(key.indexOf("\0") + 1);
+  const cache = yield* Cache.makeWith((key: string) => lookupSpaceStatus(rootFromKey(key)), {
     capacity: STAVE_SPACE_STATUS_CACHE_CAPACITY,
     // Failures are not remembered: the next call asks Stave again.
     timeToLive: Exit.match({ onSuccess: () => ttl, onFailure: () => Duration.zero }),
   });
 
   const sagaCache = yield* Cache.makeWith(
-    Effect.fn("StaveRpcRuntime.lookupSagaStatus")(function* (sagaRoot: string) {
+    Effect.fn("StaveRpcRuntime.lookupSagaStatus")(function* (key: string) {
+      const sagaRoot = rootFromKey(key);
+      yield* reader.invalidate(sagaRoot);
       const info = yield* reader.load(sagaRoot);
       if (Option.isNone(info) || !info.value.isSaga) {
         return yield* new StaveNotSpaceError({
@@ -325,8 +373,9 @@ export const makeRuntime = Effect.fn("StaveRpcRuntime.make")(function* (
           message: "Restore the saga before reading its live status.",
         });
       }
+      const verified = yield* lookupSpaceStatus(sagaRoot);
       return yield* cli
-        .sagaStatus(info.value.spaceId)
+        .sagaStatus(verified.spaceId)
         .pipe(
           Effect.tapError(recordFailure),
           Effect.mapError(toStaveCommandError),
@@ -338,9 +387,24 @@ export const makeRuntime = Effect.fn("StaveRpcRuntime.make")(function* (
       timeToLive: Exit.match({ onSuccess: () => ttl, onFailure: () => Duration.zero }),
     },
   );
+  const cacheKey = (root: string) =>
+    Effect.gen(function* () {
+      const captured = yield* StaveExecutionContext;
+      const identity =
+        captured === undefined
+          ? Option.isSome(settings)
+            ? stableStringify(
+                yield* settings.value.getSettings.pipe(
+                  Effect.map((current) => current.stave),
+                  Effect.orElseSucceed(() => null),
+                ),
+              )
+            : ""
+          : (captured.configurationIdentity ?? stableStringify(captured));
+      return `${identity}\0${root}`;
+    });
   const refreshGeneration = Effect.gen(function* () {
-    if (Option.isNone(invalidation)) return;
-    const generation = yield* invalidation.value.generation;
+    const generation = Option.isSome(invalidation) ? yield* invalidation.value.generation : -1;
     if (generation === seenGeneration) return;
     yield* Cache.invalidateAll(cache);
     yield* Cache.invalidateAll(sagaCache);
@@ -349,20 +413,35 @@ export const makeRuntime = Effect.fn("StaveRpcRuntime.make")(function* (
 
   return StaveRpcRuntime.of({
     sagaStatus: (sagaRoot) =>
-      refreshGeneration.pipe(Effect.andThen(Cache.get(sagaCache, sagaRoot))),
-    lastFailure: Ref.get(lastFailureRef),
+      inExecution(
+        refreshGeneration.pipe(
+          Effect.andThen(cacheKey(sagaRoot)),
+          Effect.flatMap((key) => Cache.get(sagaCache, key)),
+        ),
+      ),
+    lastFailure: Effect.gen(function* () {
+      const local = yield* Ref.get(lastFailureRef);
+      const invocation =
+        cli.lastFailure === undefined ? Option.none<StaveLastFailure>() : yield* cli.lastFailure;
+      return Option.isSome(invocation) &&
+        (Option.isNone(local) || invocation.value.at >= local.value.at)
+        ? invocation
+        : local;
+    }),
     recordFailure,
     spaceStatus: (workspaceRoot) =>
-      Effect.gen(function* () {
-        yield* refreshGeneration;
-        const status = yield* Cache.get(cache, workspaceRoot);
-        return {
-          ...status,
-          ...(yield* scanStaveMembership(status.spaceId).pipe(
-            Effect.provideService(StaveCli, cli),
-          )),
-        };
-      }),
+      inExecution(
+        Effect.gen(function* () {
+          yield* refreshGeneration;
+          const status = yield* Cache.get(cache, yield* cacheKey(workspaceRoot));
+          return {
+            ...status,
+            ...(yield* scanStaveMembership(status.spaceId).pipe(
+              Effect.provideService(StaveCli, cli),
+            )),
+          };
+        }),
+      ),
   });
 });
 

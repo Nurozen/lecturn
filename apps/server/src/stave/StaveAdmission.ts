@@ -16,6 +16,7 @@
 import type { ProjectId } from "@t3tools/contracts";
 import * as FileSystem from "effect/FileSystem";
 import * as Context from "effect/Context";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -39,6 +40,8 @@ export const StaveAdmissionIntent = Schema.Literals([
   "thread.turn.start",
   "thread.fork",
   "thread.unsettle",
+  "thread.pin",
+  "thread.unarchive",
   "vcs.createWorktree",
   "pr.prepare",
 ]);
@@ -147,7 +150,24 @@ export const make = Effect.fn("StaveAdmission.make")(function* () {
         .pipe(Effect.mapError(transition));
       // A lease belongs to the physical root, even if another project id was
       // re-added while the previous owner was running.
-      if (Option.isSome(rootRow) && rootRow.value.ownerToken !== null) return yield* transition();
+      const now = yield* Clock.currentTimeMillis;
+      if (
+        Option.isSome(rootRow) &&
+        rootRow.value.ownerToken !== null &&
+        rootRow.value.leaseUntil !== null &&
+        Date.parse(rootRow.value.leaseUntil) > now
+      )
+        return yield* transition();
+      if (
+        Option.isSome(rootRow) &&
+        ["archiving", "restoring", "destroying", "destroyed"].includes(rootRow.value.disposition) &&
+        (Option.isNone(space) ||
+          (rootRow.value.spaceId === space.value.spaceId &&
+            (rootRow.value.manifestCreatedAt === null ||
+              space.value.createdAt === undefined ||
+              rootRow.value.manifestCreatedAt === space.value.createdAt)))
+      )
+        return yield* transition();
       const row =
         input.projectId === undefined
           ? rootRow

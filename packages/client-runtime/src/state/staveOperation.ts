@@ -21,6 +21,10 @@ import {
   type StaveProgressOutputStream,
   type StaveRunOperationInput,
   StaveOperationRejectedError,
+  StaveUnavailableError,
+  StaveNotSpaceError,
+  ServerSettingsError,
+  EnvironmentAuthorizationError,
   WS_METHODS,
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
@@ -232,11 +236,20 @@ export interface StaveOperationOutcome<R> {
 
 interface ConsumeInput<R> {
   readonly state: StaveOperationState;
+  readonly starting: boolean;
   readonly onState: ((state: StaveOperationState) => void) | undefined;
   readonly observe: (state: StaveOperationState) => Stream.Stream<StaveProgressEvent, unknown, R>;
 }
 
 const isRejected = Schema.is(StaveOperationRejectedError);
+const isAdmissionFailure = Schema.is(
+  Schema.Union([
+    StaveUnavailableError,
+    StaveNotSpaceError,
+    ServerSettingsError,
+    EnvironmentAuthorizationError,
+  ]),
+);
 
 function describeStreamFailure(error: unknown): string {
   if (error instanceof Error && error.message.length > 0) {
@@ -300,6 +313,17 @@ const consumeStaveOperationStream = <R>(
     if (!isStaveOperationTerminal(current.status)) {
       if (ended !== null && isRejected(ended.failure)) {
         yield* publish(markRejected(current, ended.failure));
+      } else if (
+        ended !== null &&
+        input.starting &&
+        current.lastSequence === null &&
+        isAdmissionFailure(ended.failure)
+      ) {
+        yield* publish({
+          ...current,
+          status: "failed",
+          error: { code: "unknown", message: ended.failure.message, details: null },
+        });
       } else {
         yield* publish(
           markDisconnected(
@@ -314,7 +338,11 @@ const consumeStaveOperationStream = <R>(
     const reattach = (): Effect.Effect<StaveOperationOutcome<R>, never, R> =>
       isStaveOperationTerminal(settled.status)
         ? Effect.succeed({ state: settled, reattach })
-        : consumeStaveOperationStream(input.observe(settled), { ...input, state: settled });
+        : consumeStaveOperationStream(input.observe(settled), {
+            ...input,
+            state: settled,
+            starting: false,
+          });
     return { state: settled, reattach };
   });
 
@@ -358,6 +386,7 @@ export function runStaveOperation<E, R>(
     }),
     {
       state,
+      starting: input.initialState === undefined && input.afterSequence === undefined,
       onState: input.onState,
       observe: observeFrom(input.client, input.environmentId),
     },
@@ -386,6 +415,7 @@ export function reattachStaveOperation<E, R>(
   }
   return consumeStaveOperationStream(observe(input.state), {
     state: input.state,
+    starting: false,
     onState: input.onState,
     observe,
   });

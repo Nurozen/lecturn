@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Result from "effect/Result";
@@ -20,6 +21,8 @@ import * as ProcessRunner from "../processRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as StaveBinary from "./StaveBinary.ts";
 import * as StaveCli from "./StaveCli.ts";
+import { makeRuntime } from "./staveRpcHandlers.ts";
+import { StaveWorkspaceReader } from "./StaveWorkspaceReader.ts";
 import { StaveError } from "./StaveError.ts";
 import { isStaveDryRunPlan } from "./staveJson.ts";
 import {
@@ -975,4 +978,46 @@ it.effect("feature gates exact requested flags before any mutating spawn", () =>
     expect(denied.result.details).toEqual({ missing: ["branch"] });
     expect(denied.result.message).not.toContain("private-branch");
   }),
+);
+
+it.effect(
+  "failed mutations update shared RPC diagnostics and later successful reads retain the failure",
+  () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(Date.parse("2026-09-01T00:00:00.000Z"));
+      const recorder = makeRecorder((command) =>
+        Effect.succeed(
+          makeHandle(
+            command.args.includes("sync")
+              ? { stdout: SAMPLE_ERROR_DIRTY_WORKTREES, code: 1 }
+              : { stdout: SAMPLE_SPACE_STATUS },
+          ),
+        ),
+      );
+      yield* Effect.gen(function* () {
+        const cli = yield* StaveCli.StaveCli;
+        const runtime = yield* makeRuntime();
+        expect(Option.isNone(yield* runtime.lastFailure)).toBe(true);
+        const error = yield* Effect.flip(cli.spaceSync({ id: "s-1" }));
+        expect(error.code).toBe("dirty_worktrees");
+        expect(Option.getOrThrow(yield* runtime.lastFailure)).toMatchObject({
+          at: "2026-09-01T00:00:00.000Z",
+          verb: "space sync",
+          code: "dirty_worktrees",
+          message: error.message,
+        });
+        yield* TestClock.adjust("1 second");
+        yield* cli.spaceStatus("s-1");
+        expect(Option.getOrThrow(yield* runtime.lastFailure)).toMatchObject({
+          at: "2026-09-01T00:00:00.000Z",
+          verb: "space sync",
+          code: "dirty_worktrees",
+        });
+        expect(recorder.spawns).toHaveLength(2);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(cliLayer(recorder.spawner), Layer.mock(StaveWorkspaceReader)({})),
+        ),
+      );
+    }),
 );

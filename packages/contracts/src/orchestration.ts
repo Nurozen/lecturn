@@ -5,7 +5,7 @@ import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as Struct from "effect/Struct";
 import { ProviderOptionSelections } from "./model.ts";
 import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
-import { StaveProjectInfo, StaveProjectNotice } from "./stave.ts";
+import { StaveProjectInfo, StaveProjectNotice, StaveSagaTeardownAuthorization } from "./stave.ts";
 import {
   ApprovalRequestId,
   CheckpointRef,
@@ -880,6 +880,7 @@ const ProjectDeleteCommand = Schema.Struct({
   projectId: ProjectId,
   force: Schema.optional(Schema.Boolean),
   staveSagaRemoveConfirmed: Schema.optional(Schema.Boolean),
+  staveSagaTeardown: Schema.optional(StaveSagaTeardownAuthorization),
   staveSpaceId: Schema.optional(TrimmedNonEmptyString),
   staveCreatedAt: Schema.optional(IsoDateTime),
 });
@@ -1423,6 +1424,7 @@ export const ProjectDeletedPayload = Schema.Struct({
   projectId: ProjectId,
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   staveSagaRemoveConfirmed: Schema.optional(Schema.Boolean),
+  staveSagaTeardown: Schema.optional(StaveSagaTeardownAuthorization),
   staveSpaceId: Schema.optional(TrimmedNonEmptyString),
   staveCreatedAt: Schema.optional(IsoDateTime),
   deletedAt: IsoDateTime,

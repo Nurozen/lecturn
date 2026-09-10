@@ -238,9 +238,34 @@ const fetchLatestStaveTag = Effect.fn("fetchLatestStaveTag")(function* () {
   return yield* parseLatestReleaseResponse(json);
 });
 
-/** Explicit tags pass straight through; only `latest` consults the GitHub API. */
+/** Bundled releases must implement the v0.4 JSON mutation protocol. */
+export class StaveBundleVersionError extends Schema.TaggedErrorClass<StaveBundleVersionError>()(
+  "StaveBundleVersionError",
+  { tag: Schema.String },
+) {
+  override get message(): string {
+    return `Stave ${this.tag} cannot be bundled: Lecturn requires Stave v0.4.0 or newer.`;
+  }
+}
+
+const requireCompatibleBundleTag = (
+  tag: string,
+): Effect.Effect<string, StaveTagInputError | StaveBundleVersionError> => {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?$/.exec(tag);
+  if (!match) return Effect.fail(new StaveTagInputError({ input: tag }));
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  const patch = Number(match[3]);
+  const supported =
+    major > 0 || minor > 4 || (minor === 4 && (patch > 0 || match[4] === undefined));
+  return supported ? Effect.succeed(tag) : Effect.fail(new StaveBundleVersionError({ tag }));
+};
+
+/** Validate the compatibility floor for explicit pins and the resolved latest release. */
 export const resolveStaveTag = (input: StaveTagInput) =>
-  input.kind === "tag" ? Effect.succeed(input.tag) : fetchLatestStaveTag();
+  (input.kind === "tag" ? Effect.succeed(input.tag) : fetchLatestStaveTag()).pipe(
+    Effect.flatMap(requireCompatibleBundleTag),
+  );
 
 /**
  * Parses goreleaser `checksums.txt` lines (`<sha256>  <file>`), tolerating the

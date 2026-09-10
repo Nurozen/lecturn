@@ -1512,7 +1512,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   );
 
   const removeProject = useCallback(
-    async (member: SidebarProjectGroupMember, staveSagaRemoveConfirmed = false) => {
+    async (
+      member: SidebarProjectGroupMember,
+      staveSagaRemoveConfirmed = false,
+      staveSagaTeardown?: Awaited<
+        ReturnType<typeof prepareStaveProjectDeletion>
+      >["staveSagaTeardown"],
+    ) => {
       const memberProjectRef = scopeProjectRef(member.environmentId, member.id);
       const result = await deleteProject({
         environmentId: member.environmentId,
@@ -1520,6 +1526,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           projectId: member.id,
           force: true,
           staveSagaRemoveConfirmed,
+          ...(staveSagaTeardown ? { staveSagaTeardown } : {}),
         },
       });
       if (result._tag === "Failure") {
@@ -1614,6 +1621,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                   const result = await removeProject(
                     member,
                     staveDeletion.staveSagaRemoveConfirmed,
+                    staveDeletion.staveSagaTeardown,
                   );
                   if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
                     const error = squashAtomCommandFailure(result);
@@ -1666,7 +1674,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         return;
       }
 
-      const result = await removeProject(member, staveDeletion.staveSagaRemoveConfirmed);
+      const result = await removeProject(
+        member,
+        staveDeletion.staveSagaRemoveConfirmed,
+        staveDeletion.staveSagaTeardown,
+      );
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         const message = error instanceof Error ? error.message : "Unknown error removing project.";

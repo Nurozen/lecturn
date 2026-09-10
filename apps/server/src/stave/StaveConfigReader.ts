@@ -69,6 +69,8 @@ export class StaveConfigReader extends Context.Service<
   {
     /** Never fails; falls back to reading the YAML when Stave cannot answer. Cached 15s. */
     readonly load: Effect.Effect<StaveConfigSnapshot>;
+    /** Filesystem-only roots, safe on Git hot paths and with integration disabled. */
+    readonly loadFilesystem?: Effect.Effect<StaveConfigSnapshot>;
     /** Drop the cached snapshot so the next `load` asks Stave (or disk) again. */
     readonly invalidate: Effect.Effect<void>;
   }
@@ -360,7 +362,7 @@ export const make = Effect.fn("StaveConfigReader.make")(function* (
     Effect.forkScoped,
   );
 
-  return StaveConfigReader.of({ load, invalidate });
+  return StaveConfigReader.of({ load, loadFilesystem: loadFromDisk(), invalidate });
 });
 
 export const layer = Layer.effect(StaveConfigReader, make());
@@ -369,5 +371,9 @@ export const layer = Layer.effect(StaveConfigReader, make());
 export const layerFixed = (snapshot: StaveConfigSnapshot): Layer.Layer<StaveConfigReader> =>
   Layer.succeed(
     StaveConfigReader,
-    StaveConfigReader.of({ load: Effect.succeed(snapshot), invalidate: Effect.void }),
+    StaveConfigReader.of({
+      load: Effect.succeed(snapshot),
+      loadFilesystem: Effect.succeed(snapshot),
+      invalidate: Effect.void,
+    }),
   );

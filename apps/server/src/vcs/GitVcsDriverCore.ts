@@ -733,17 +733,38 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   // agent-work, so a space directory that is not a repo would masquerade as a
   // worktree of its ancestor. A ceiling at agent-work stops the walk there.
   const staveCeilingEnv = Effect.fn("staveCeilingEnv")(function* (cwd: string) {
-    if (Option.isNone(staveRoots)) {
-      return {};
+    // A manifest is a filesystem boundary even when the selected installation
+    // is disabled, absent, or points at a different collection of spaces.
+    const canonicalCwd = yield* fileSystem
+      .realPath(cwd)
+      .pipe(Effect.orElseSucceed(() => path.resolve(cwd)));
+    let candidate = canonicalCwd;
+    let ceiling: string | undefined;
+    while (true) {
+      if (
+        yield* fileSystem
+          .exists(path.join(candidate, ".stave.yaml"))
+          .pipe(Effect.orElseSucceed(() => false))
+      ) {
+        // Git ignores a ceiling equal to its initial cwd. Its parent
+        // excludes ancestor discovery for both the space root and children.
+        ceiling = path.dirname(candidate);
+        break;
+      }
+      const parent = path.dirname(candidate);
+      if (parent === candidate) break;
+      candidate = parent;
     }
-    const agentWorkDir = yield* staveRoots.value.agentWorkDir;
-    if (Option.isNone(agentWorkDir)) {
-      return {};
+    if (ceiling === undefined && Option.isSome(staveRoots)) {
+      const agentWorkDir = yield* staveRoots.value.agentWorkDir;
+      if (Option.isSome(agentWorkDir)) {
+        const configured = yield* fileSystem
+          .realPath(agentWorkDir.value)
+          .pipe(Effect.orElseSucceed(() => path.resolve(agentWorkDir.value)));
+        if (isPathSegmentDescendant(configured, canonicalCwd)) ceiling = configured;
+      }
     }
-    const ceiling = path.resolve(agentWorkDir.value);
-    if (!isPathSegmentDescendant(ceiling, path.resolve(cwd))) {
-      return {};
-    }
+    if (ceiling === undefined) return {};
     const existing = process.env.GIT_CEILING_DIRECTORIES;
     return {
       GIT_CEILING_DIRECTORIES: existing ? `${ceiling}${pathListDelimiter}${existing}` : ceiling,

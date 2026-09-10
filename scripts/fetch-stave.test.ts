@@ -484,15 +484,59 @@ const configFromEnv = (env: Record<string, string>) =>
 it.effect("passes explicit tags through without touching the network", () =>
   Effect.gen(function* () {
     let requests = 0;
-    const tag = yield* resolveStaveTag({ kind: "tag", tag: "v0.3.1" }).pipe(
+    const tag = yield* resolveStaveTag({ kind: "tag", tag: "v0.4.1" }).pipe(
       Effect.provide(
         latestReleaseClient(() => {
           requests += 1;
         }),
       ),
     );
-    assert.equal(tag, "v0.3.1");
+    assert.equal(tag, "v0.4.1");
     assert.equal(requests, 0);
+  }),
+);
+
+it.effect("rejects bundle pins older than the required JSON mutation protocol", () =>
+  Effect.gen(function* () {
+    for (const tag of ["v0.3.0", "v0.3.99", "v0.4.0-rc.1"]) {
+      const error = yield* resolveStaveTag({ kind: "tag", tag }).pipe(Effect.flip);
+      assert.equal(error._tag, "StaveBundleVersionError");
+      assert.include(error.message, "v0.4.0 or newer");
+    }
+    for (const tag of ["v0.4.0", "v0.4.1", "v0.5.0", "v1.0.0"]) {
+      assert.equal(yield* resolveStaveTag({ kind: "tag", tag }), tag);
+    }
+  }).pipe(
+    Effect.provide(
+      latestReleaseClient(() => assert.fail("explicit pins must not use the network")),
+    ),
+  ),
+);
+
+it.effect("rejects an incompatible latest release before downloading assets", () =>
+  Effect.gen(function* () {
+    const error = yield* resolveStaveTag({ kind: "latest" }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeed(
+            HttpClient.HttpClient,
+            HttpClient.make((request) =>
+              Effect.succeed(
+                HttpClientResponse.fromWeb(
+                  request,
+                  new Response(JSON.stringify({ tag_name: "v0.3.0" }), {
+                    headers: { "content-type": "application/json" },
+                  }),
+                ),
+              ),
+            ),
+          ),
+          configFromEnv({}),
+        ),
+      ),
+      Effect.flip,
+    );
+    assert.equal(error._tag, "StaveBundleVersionError");
   }),
 );
 
@@ -558,6 +602,6 @@ it.effect("surfaces non-success latest release responses as typed errors", () =>
       Effect.flip,
     );
     assert.equal(error._tag, "StaveLatestReleaseError");
-    assert.equal(error.operation, "status");
+    assert.equal(error._tag === "StaveLatestReleaseError" ? error.operation : undefined, "status");
   }),
 );

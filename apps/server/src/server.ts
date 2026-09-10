@@ -436,10 +436,11 @@ const StaveWorkspaceReaderLayerLive = StaveWorkspaceReader.layer.pipe(
 const StaveLifecycleLayerLive = StaveLifecycleRepositoryLive.pipe(
   Layer.provide(PersistenceLayerLive),
 );
+const StaveExecutionLayerLive = StaveExecution.layer.pipe(
+  Layer.provide(Layer.mergeAll(StaveBinaryLayerLive, ServerSettingsLayerLive)),
+);
 const StaveLayerLive = Layer.mergeAll(
-  StaveExecution.layer.pipe(
-    Layer.provide(Layer.mergeAll(StaveBinaryLayerLive, ServerSettingsLayerLive)),
-  ),
+  StaveExecutionLayerLive,
   StaveMemoryWiring.layer.pipe(Layer.provide(ServerSettingsLayerLive)),
   StaveReadCache.layer,
   StaveMergeSignal.layer.pipe(
@@ -470,7 +471,13 @@ const StaveLayerLive = Layer.mergeAll(
   StaveRootsLayerLive,
   StaveRpcHandlers.runtimeLayer.pipe(
     Layer.provide(
-      Layer.mergeAll(StaveCliLayerLive, StaveWorkspaceReaderLayerLive, StaveReadCache.layer),
+      Layer.mergeAll(
+        StaveCliLayerLive,
+        StaveWorkspaceReaderLayerLive,
+        StaveReadCache.layer,
+        StaveExecutionLayerLive,
+        ServerSettingsLayerLive,
+      ),
     ),
   ),
 );

@@ -1,8 +1,8 @@
 /**
  * StaveRootsProvider - where the Stave agent-work directory lives, for callers
  * that must never adopt an ancestor repository from inside it (git spawns
- * whose cwd sits under a space). `layer` answers from `StaveConfigReader`
- * (`stave config show`, or the YAML when Stave cannot answer) and reports none
+ * whose cwd sits under a space). `layer` reads the selected config directly from disk through `StaveConfigReader`
+ * without invoking Stave and reports none
  * until a config file exists; `layerNoop` answers none for hosts and tests
  * without Stave.
  *
@@ -29,13 +29,16 @@ export const layer: Layer.Layer<StaveRootsProvider, never, StaveConfigReader> = 
     const configReader = yield* StaveConfigReader;
     // A config that does not exist yet has only Stave's defaults; nothing
     // lives under that directory, so it must not be treated as a root.
-    const agentWorkDir = configReader.load.pipe(
-      Effect.map((snapshot) =>
-        snapshot.exists && snapshot.agentWorkDir !== undefined
-          ? Option.some(snapshot.agentWorkDir)
-          : Option.none<string>(),
-      ),
-    );
+    const agentWorkDir =
+      configReader.loadFilesystem === undefined
+        ? Effect.succeed(Option.none<string>())
+        : configReader.loadFilesystem.pipe(
+            Effect.map((snapshot) =>
+              snapshot.exists && snapshot.agentWorkDir !== undefined
+                ? Option.some(snapshot.agentWorkDir)
+                : Option.none<string>(),
+            ),
+          );
     return StaveRootsProvider.of({ agentWorkDir });
   }),
 );

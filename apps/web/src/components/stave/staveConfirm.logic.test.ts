@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { StaveOperation } from "@t3tools/contracts";
+import type { StaveOperation, StaveSagaReview } from "@t3tools/contracts";
 import {
+  bindStaveSagaReview,
   canForceStaveOperation,
   forceStaveOperation,
   staveOperationLossCopy,
@@ -76,4 +77,44 @@ it("discloses replacement whenever saga predecessors are supplied", () => {
     "clears all",
   );
   expect(staveOperationLossCopy({ ...operation, after: [] })).toContain("keeping any existing");
+});
+
+describe("saga reviewed scope", () => {
+  const operation = {
+    kind: "sagaDestroy",
+    sagaRoot: "/spaces/saga",
+    expectedManifestCreatedAt: "2026-01-01T00:00:00Z",
+    force: false,
+    memory: "keep",
+  } satisfies StaveOperation;
+  const review = {
+    fingerprint: "roster-a",
+    sagaRoot: operation.sagaRoot,
+    sagaCreatedAt: operation.expectedManifestCreatedAt,
+    target: "destroy",
+    force: false,
+    memory: "keep",
+    participants: [],
+  } satisfies StaveSagaReview;
+  it("attaches the preview fingerprint to the unchanged confirmation payload", () => {
+    expect(bindStaveSagaReview(operation, review)).toEqual({
+      ...operation,
+      expectedSagaReview: "roster-a",
+    });
+  });
+  it("refuses absent, stale-option and different-incarnation previews", () => {
+    expect(bindStaveSagaReview(operation, undefined)).toBeNull();
+    for (const patch of [
+      { force: true },
+      { memory: "destroy" as const },
+      { target: "archive" as const },
+      { sagaRoot: "/spaces/other" },
+      { sagaCreatedAt: "2026-01-02T00:00:00Z" },
+    ]) {
+      expect(bindStaveSagaReview(operation, { ...review, ...patch })).toBeNull();
+    }
+  });
+  it("does not require saga consent for an ordinary space", () => {
+    expect(bindStaveSagaReview(destroy, undefined)).toEqual(destroy);
+  });
 });

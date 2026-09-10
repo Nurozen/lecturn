@@ -41,7 +41,7 @@ make a new space from the app, see [Create a space](#create-a-space).
 - **The first editable repo drives git.** A space root is not a repository itself, so branch
   status, the pull request lookup, and the Git actions in the toolbar target the first `edit`
   repo in the manifest on its manifest branch. Reference checkouts are listed but never
-  targeted.
+  targeted. A space without an editable repo has no Git target; Git status and actions stay unavailable.
 - **Checkpoints are unavailable.** A space spans several repositories, so per-thread checkpoints
   (and the diff and revert built on them) are off in spaces. Use Git in the editable repo
   instead.
@@ -163,8 +163,9 @@ the wizard offers **Remove partial space**. Review its dry-run plan and confirm 
 exactly the space this attempt created. A replacement space with the same id is refused. Dirty
 or dependent-space refusals offer a separate Force confirmation; saga membership needs its own
 explicit combined removal confirmation. Any task store the create made is destroyed with it; dens you attached from
-elsewhere are kept. If Stave itself refused the create, there is no space to remove and the
-button is not offered.
+elsewhere are kept. If the server cannot establish which space this attempt created—for example,
+creation timed out after writing files—it reports the uncertain outcome and leaves removal
+disabled. Inspect the reported directory before importing it or retrying creation.
 
 ## Edit a space
 
@@ -179,7 +180,7 @@ its actions. Each action shows Stave's dry-run plan before you confirm it.
 - **Retarget** changes an editable repo's base. **Sync** refreshes the space, optionally limiting
   the work to references.
 - **Attach memory** accepts `.` for a fresh store or an existing `provider:store`. Detach can
-  keep the store; an owned store also offers an explicit destroy choice.
+  keep the store; an owned store also offers an explicit destroy choice. Detach stops the space's provider sessions first so they release their memory connections.
 
 **Archive space** stops the space's sessions, removes its worktrees, and moves it into the
 archive. The project follows the archived directory. Its manifest, spec, notes, and committed
@@ -203,6 +204,9 @@ root through a symlink. Resolve the overlapping project entry before retrying. I
 restarts during archive or restore, it reconciles the project with the matching live or archived
 space; ambiguous or unreadable results require repair instead of guessing.
 
+PR checkout into a thread is unavailable for Stave-managed repositories. Use the repository
+controls in project settings to manage a space's checkout.
+
 ## Work with sagas
 
 Choose **New Stave saga** in the command palette to create a coordinator with an id, title,
@@ -225,6 +229,13 @@ teardown plan, memory fate, and losses before confirmation. They stop sessions a
 members. A failure may leave some members already archived or destroyed; Lecturn rereads every
 member so their projects follow what actually happened. Force remains a separate explicit
 choice after a refusal. Archived survivors can be restored from their own project settings.
+
+Saga archive and destroy confirmations list every affected space. Destroy also names imported
+member projects and counts the conversations it removes, including archived threads. This
+applies when deleting the saga's project from the sidebar or project settings as well. If the
+roster or affected projects change after review, cleanup stops for another confirmation. If the
+scope cannot be read, deleting the coordinator project leaves saga cleanup pending review in
+Stave settings.
 
 When **settle on saga merge** is enabled, a live member becomes an automatic settlement
 candidate only when every editable repository reports a merged base. A partially merged member

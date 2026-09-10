@@ -61,6 +61,7 @@ import Migration0046 from "./Migrations/046_RepairAutomaticSettlementTimestamps.
 import Migration0047 from "./Migrations/047_ProjectionProjectIcon.ts";
 import Migration0048 from "./Migrations/048_ProjectionThreadForkLineage.ts";
 import Migration0049 from "./Migrations/049_StaveProjectLifecycle.ts";
+import Migration0050 from "./Migrations/050_StaveLifecycleRecovery.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -122,6 +123,7 @@ export const migrationEntries = [
   [47, "ProjectionProjectIcon", Migration0047],
   [48, "ProjectionThreadForkLineage", Migration0048],
   [49, "StaveProjectLifecycle", Migration0049],
+  [50, "StaveLifecycleRecovery", Migration0050],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

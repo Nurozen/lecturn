@@ -1,6 +1,8 @@
 import {
   EnvironmentId,
   StaveOperationRejectedError,
+  StaveUnavailableError,
+  EnvironmentAuthorizationError,
   type StaveObserveOperationInput,
   type StaveOperation,
   type StaveOperationResult,
@@ -279,6 +281,61 @@ describe("runStaveOperation", () => {
       expect(outcome.state.status).toBe("disconnected");
       expect(outcome.state.disconnectReason).toBe("socket closed");
       expect(outcome.state.phases.map((phase) => phase.phase)).toEqual(["pre-flight"]);
+    }),
+  );
+
+  it.effect(
+    "settles unavailable and unauthorized starts without retrying an operation that never began",
+    () =>
+      Effect.gen(function* () {
+        for (const failure of [
+          new StaveUnavailableError({
+            reason: "disabled_in_settings",
+            message: "Stave was disabled",
+          }),
+          new EnvironmentAuthorizationError({
+            requiredScope: "orchestration:operate",
+            message: "Access denied",
+          }),
+        ]) {
+          const calls: FakeClientCalls = { run: [], observe: [] };
+          const outcome = yield* runStaveOperation({
+            client: fakeClient({ run: Stream.fail(failure) }, calls),
+            environmentId,
+            operationId,
+            operation,
+          });
+          expect(outcome.state.status).toBe("failed");
+          expect(outcome.state.error?.message).toBe(failure.message);
+          yield* outcome.reattach();
+          expect(calls.observe).toEqual([]);
+        }
+      }),
+  );
+
+  it.effect("keeps an admitted operation resumable when access to its stream is refused", () =>
+    Effect.gen(function* () {
+      const calls: FakeClientCalls = { run: [], observe: [] };
+      const outcome = yield* runStaveOperation({
+        client: fakeClient(
+          {
+            run: Stream.fromIterable([phaseStarted(0, "create space")]),
+            observe: Stream.fail(
+              new StaveUnavailableError({
+                reason: "disabled_in_settings",
+                message: "Stave was disabled",
+              }),
+            ),
+          },
+          calls,
+        ),
+        environmentId,
+        operationId,
+        operation,
+      });
+      const resumed = yield* outcome.reattach();
+      expect(resumed.state.status).toBe("disconnected");
+      expect(resumed.state.lastSequence).toBe(0);
     }),
   );
 

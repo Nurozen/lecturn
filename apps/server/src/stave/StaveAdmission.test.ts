@@ -38,6 +38,7 @@ const archivedRow: StaveLifecycleRow = {
   leaseUntil: null,
   deleteIntentSequence: null,
   sagaRemoveConfirmed: false,
+  sagaTeardown: null,
   refusalCode: null,
   refusalMessage: null,
   anchorAt: null,
@@ -334,6 +335,7 @@ describe("Stave lifecycle admission", () => {
                       leaseUntil: "2026-09-09T00:00:00Z",
                       deleteIntentSequence: null,
                       sagaRemoveConfirmed: false,
+                      sagaTeardown: null,
                       refusalCode: null,
                       refusalMessage: null,
                       anchorAt: null,
@@ -365,6 +367,7 @@ it.effect("ignores an old project's terminal row after a root is re-added", () =
     leaseUntil: null,
     deleteIntentSequence: null,
     sagaRemoveConfirmed: false,
+    sagaTeardown: null,
     refusalCode: null,
     refusalMessage: null,
     anchorAt: null,
@@ -431,6 +434,7 @@ it.effect(
                       leaseUntil: "2030-01-01T00:00:00Z",
                       deleteIntentSequence: null,
                       sagaRemoveConfirmed: false,
+                      sagaTeardown: null,
                       refusalCode: null,
                       refusalMessage: null,
                       anchorAt: null,
@@ -451,3 +455,45 @@ it.effect(
     );
   },
 );
+
+for (const disposition of ["live", "pending_evaluation", "archiving"] as const) {
+  for (const projectId of [undefined, ProjectId.make("new-project")])
+    it.effect(
+      `expires abandoned owner tokens while preserving ${disposition} transition state (project: ${projectId ?? "root"})`,
+      () => {
+        const row = {
+          ...archivedRow,
+          workspaceRoot: SPACE_ROOT,
+          disposition,
+          ownerToken: "dead-owner",
+          leaseUntil: "1969-12-31T23:59:59Z",
+        };
+        return Effect.gen(function* () {
+          const result = yield* Effect.exit(
+            check({
+              projectRoot: SPACE_ROOT,
+              intent: "thread.create",
+              ...(projectId ? { projectId } : {}),
+            }),
+          );
+          expect(result._tag).toBe(disposition === "archiving" ? "Failure" : "Success");
+        }).pipe(
+          Effect.provide(
+            StaveAdmission.layer.pipe(
+              Layer.provide(
+                Layer.mergeAll(
+                  Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
+                    load: () => Effect.succeed(Option.some(spaceInfo)),
+                  }),
+                  Layer.mock(StaveLifecycleRepository)({
+                    getByWorkspaceRoot: () => Effect.succeed(Option.some(row)),
+                    getByProjectId: () => Effect.succeedNone,
+                  }),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+}

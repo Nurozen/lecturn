@@ -66,7 +66,7 @@ export function PullRequestThreadDialog({
       : null;
   const project = useProject(projectRef);
   const cwd = project ? resolveProjectGitCwd({ project, thread: null }) : cwdProp;
-  const canCreateWorktree = !isStaveProject(project);
+  const canPrepare = !isStaveProject(project);
   const referenceInputRef = useRef<HTMLInputElement>(null);
   const [reference, setReference] = useState(initialReference ?? "");
   const [referenceDirty, setReferenceDirty] = useState(false);
@@ -113,7 +113,7 @@ export function PullRequestThreadDialog({
   );
   const pullRequestResolution = usePullRequestResolution({
     ...sourceControlScope,
-    reference: open ? parsedDebouncedReference : null,
+    reference: open && canPrepare ? parsedDebouncedReference : null,
   });
   const cachedPullRequest = useMemo(() => {
     return (
@@ -153,6 +153,7 @@ export function PullRequestThreadDialog({
 
   const handleConfirm = useCallback(
     async (mode: "local" | "worktree") => {
+      if (!canPrepare) return;
       if (!parsedReference) {
         setReferenceDirty(true);
         return;
@@ -180,6 +181,7 @@ export function PullRequestThreadDialog({
       onOpenChange(false);
     },
     [
+      canPrepare,
       cwd,
       onOpenChange,
       onPrepared,
@@ -207,6 +209,25 @@ export function PullRequestThreadDialog({
           : preparePullRequestThreadAction.error
             ? `Failed to prepare ${terminology.singular} thread.`
             : null)));
+
+  if (!canPrepare) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogPopup className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>PR checkout unavailable</DialogTitle>
+            <DialogDescription>
+              Stave manages this project's repositories. PR checkout into a thread is unavailable
+              for Stave spaces. Use the Stave repository controls in project settings.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => onOpenChange(false)}>Close</Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog
@@ -305,7 +326,7 @@ export function PullRequestThreadDialog({
           >
             {preparingMode === "local" ? "Preparing local..." : "Local"}
           </Button>
-          {canCreateWorktree ? (
+          {canPrepare ? (
             <Button
               type="button"
               size="sm"

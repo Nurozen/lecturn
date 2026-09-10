@@ -119,6 +119,8 @@ export const make = Effect.gen(function* () {
       if (
         Option.isNone(active) ||
         Option.isNone(row) ||
+        active.value.workspaceRoot !== row.value.workspaceRoot ||
+        (yield* repo.isScheduleResetRequested(projectId)) ||
         !["pending_archive", "archiving"].includes(row.value.disposition)
       )
         return yield* refusal("A saga member has no eligible archive schedule.");
@@ -183,6 +185,9 @@ export const make = Effect.gen(function* () {
         force: false,
         memory: target === "archive" ? "keep" : current.stave.lifecycle.memoryFateOnDestroy,
         sagaRemoveConfirmed: row.sagaRemoveConfirmed,
+        ...(row.sagaTeardown === null
+          ? {}
+          : { expectedSagaReview: row.sagaTeardown.expectedSagaReview }),
       };
       const validate = Effect.gen(function* () {
         if (!(yield* enabled)) return yield* refusal("Stave cleanup is disabled.");
@@ -215,6 +220,17 @@ export const make = Effect.gen(function* () {
         const mode = latest.stave.lifecycle.onAllThreadsSettled;
         if (mode !== "archive" && mode !== "archive-after-grace")
           return yield* refusal("Automatic archiving was disabled.");
+        const bound = yield* snapshots
+          .getProjectShellById(row.projectId)
+          .pipe(Effect.mapError((error) => refusal(error.message)));
+        if (
+          Option.isNone(bound) ||
+          bound.value.workspaceRoot !== row.workspaceRoot ||
+          (yield* repo
+            .isScheduleResetRequested(row.projectId)
+            .pipe(Effect.mapError((error) => refusal(error.message))))
+        )
+          return yield* refusal("The project binding or archive schedule changed.");
         const anchors = yield* snapshots
           .listThreadLifecycleAnchorsByProjectId(row.projectId)
           .pipe(Effect.mapError((error) => refusal(error.message)));
@@ -321,8 +337,6 @@ export const make = Effect.gen(function* () {
           false,
         );
     });
-  let resetScheduleGeneration = 0;
-  const resetApplied = new Map<string, number>();
   const processLive = (
     project: Effect.Success<ReturnType<typeof snapshots.getShellSnapshot>>["projects"][number],
   ) =>
@@ -344,14 +358,10 @@ export const make = Effect.gen(function* () {
         ["archiving", "destroying", "restoring"].includes(row.disposition)
       )
         return;
-      const resetGeneration = resetScheduleGeneration;
-      if ((resetApplied.get(project.id) ?? 0) < resetGeneration) {
-        if (row.disposition === "pending_archive") {
-          yield* update(row, { disposition: "live" }, true);
-          row = Option.getOrThrow(yield* repo.getByProjectId(project.id));
-          if (row.disposition === "pending_archive") return;
-        }
-        resetApplied.set(project.id, resetGeneration);
+      if (yield* repo.isScheduleResetRequested(project.id)) {
+        yield* update(row, { disposition: "live" }, true);
+        row = Option.getOrThrow(yield* repo.getByProjectId(project.id));
+        if (yield* repo.isScheduleResetRequested(project.id)) return;
       }
       const anchors = yield* snapshots.listThreadLifecycleAnchorsByProjectId(project.id);
       const decision = resolveArchiveDeadline({
@@ -397,8 +407,16 @@ export const make = Effect.gen(function* () {
             }),
       ),
     );
+  const observePolicy = (current: Effect.Success<typeof settings.getSettings>) =>
+    repo.observePolicy({
+      enabled: config.staveEnabled && current.stave.enabled,
+      archiveMode: current.stave.lifecycle.onAllThreadsSettled,
+    });
   const sweep = Effect.gen(function* () {
+    yield* observePolicy(yield* settings.getSettings);
+    yield* repo.releaseExpiredLeases(yield* nowIso);
     if (!(yield* enabled)) return;
+    yield* safely(operations.reconcileIncomplete);
     for (const row of yield* repo.listPending()) {
       if (!(yield* enabled)) return;
       if (row.deleteIntentSequence !== null) yield* safely(processDeleted(row));
@@ -415,8 +433,7 @@ export const make = Effect.gen(function* () {
     function* () {
       const changes = yield* settings.subscribeChanges;
       const initial = yield* settings.getSettings.pipe(Effect.orDie);
-      let wasEnabled = initial.stave.enabled;
-      let previousMode = initial.stave.lifecycle.onAllThreadsSettled;
+      yield* observePolicy(initial).pipe(Effect.orDie);
       yield* forkParked(
         Effect.gen(function* () {
           yield* worker.enqueue(undefined);
@@ -429,18 +446,9 @@ export const make = Effect.gen(function* () {
         ),
       );
       yield* forkParked(
-        Stream.runForEach(changes, (current) => {
-          const mode = current.stave.lifecycle.onAllThreadsSettled;
-          if (
-            (!wasEnabled && current.stave.enabled) ||
-            ((previousMode === "suggest" || previousMode === "nothing") &&
-              (mode === "archive" || mode === "archive-after-grace"))
-          )
-            resetScheduleGeneration++;
-          wasEnabled = current.stave.enabled;
-          previousMode = mode;
-          return worker.enqueue(undefined);
-        }),
+        Stream.runForEach(changes, (current) =>
+          observePolicy(current).pipe(Effect.andThen(worker.enqueue(undefined)), safely),
+        ),
       );
     },
   );

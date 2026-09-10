@@ -1,5 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off -- same default home as StaveConfigReader
 import * as NodeOS from "node:os";
+import * as NodeCrypto from "node:crypto";
+import { stableStringify } from "@t3tools/shared/relaySigning";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -52,12 +54,16 @@ export const layer = Layer.effect(
               ? defaultStaveConfigPath(NodeOS.homedir(), path.join)
               : expandStavePath(current.stave.configPath, NodeOS.homedir(), path);
           let configPath = sourceConfigPath;
+          let configurationIdentity: string | undefined;
           if (!options?.writableConfig) {
             const raw = yield* fs
               .readFileString(sourceConfigPath)
               .pipe(
                 Effect.mapError(() => fail("The selected Stave configuration cannot be read.")),
               );
+            configurationIdentity = NodeCrypto.createHash("sha256")
+              .update(stableStringify({ sourceConfigPath, binary: selected, raw }))
+              .digest("hex");
             const directory = yield* fs
               .makeTempDirectoryScoped({ prefix: "lecturn-stave-execution-" })
               .pipe(
@@ -84,6 +90,7 @@ export const layer = Layer.effect(
               binary: selected,
               configPath,
               sourceConfigPath,
+              ...(configurationIdentity === undefined ? {} : { configurationIdentity }),
             }),
           );
         }),

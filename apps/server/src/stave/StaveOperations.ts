@@ -49,6 +49,8 @@ import {
   type StaveRemovePartialSpaceOperation,
   type StaveRunOperationInput,
   type StaveSetupOperation,
+  type StaveSagaReview,
+  type StaveDryRunPlan,
 } from "@t3tools/contracts";
 import { stableStringify } from "@t3tools/shared/relaySigning";
 import * as Cause from "effect/Cause";
@@ -91,7 +93,7 @@ import {
 import { StaveReadCache } from "./StaveReadCache.ts";
 import { StaveConfigReader } from "./StaveConfigReader.ts";
 import { StaveError, StaveErrorCode, StaveErrorDetails } from "./StaveError.ts";
-import { isStaveDryRunPlan, type StaveDryRunPlan } from "./staveJson.ts";
+import { isStaveDryRunPlan } from "./staveJson.ts";
 import { STAVE_ARCHIVE_DIRECTORY_NAME, StaveWorkspaceReader } from "./StaveWorkspaceReader.ts";
 
 // ── Limits ────────────────────────────────────────────────────
@@ -727,7 +729,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
         createWorkspaceRootIfMissing: false,
         createdAt: DateTime.formatIso(yield* DateTime.now),
       }).pipe(Effect.provide(normalizerContext));
-      const { sequence } = yield* engine.dispatch(command);
+      const { sequence } = yield* engine.dispatch(command, { staveReconciliation: true });
       return { projectId, sequence };
     }).pipe(
       Effect.mapError((cause) =>
@@ -736,6 +738,32 @@ export const make = Effect.fn("StaveOperations.make")(function* (
         }),
       ),
     );
+
+  const uncertainCreation = (
+    spaceId: string,
+    spacePath: string,
+    error: StaveError | StaveRefusalError,
+  ) =>
+    Effect.gen(function* () {
+      yield* workspaceReader.invalidate(spacePath);
+      const info = yield* workspaceReader.load(spacePath);
+      const exists = yield* fileSystem.exists(spacePath).pipe(Effect.orElseSucceed(() => true));
+      if (!exists) return yield* error;
+      return yield* refuse(
+        error.code,
+        `${error.message} A space may remain at '${spacePath}'. Import and review it before removing it; creation ownership could not be verified.`,
+        {
+          ...error.details,
+          uncertainPartialSpace: {
+            spaceId,
+            spacePath,
+            ...(Option.isSome(info) && info.value.createdAt !== undefined
+              ? { manifestCreatedAt: info.value.createdAt }
+              : {}),
+          },
+        },
+      );
+    });
 
   const runCreateSpace = (entry: RegistryEntry, operation: StaveCreateSpaceOperation) =>
     Effect.gen(function* () {
@@ -776,6 +804,8 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                 buildStaveArgv.spaceCreate(input),
                 (stream) => cli.spaceCreate(input, stream),
                 notesUnlessPlan,
+              ).pipe(
+                Effect.catch((error) => uncertainCreation(operation.spaceId, candidate, error)),
               );
               if (isStaveDryRunPlan(created)) {
                 return yield* unexpectedPlan("space create");
@@ -1088,6 +1118,11 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           "The space incarnation changed or was not supplied. Refresh the project before trying again.",
         );
       }
+      if (operation.kind === "archiveSpace" && info.state !== "live")
+        return yield* refuse(
+          "archived_project",
+          "Only a live space can be archived. Restore this archive first.",
+        );
       const { agentWorkDir } = yield* loadRoots;
       const expected =
         info.state === "archived"
@@ -1173,6 +1208,21 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       const active = yield* snapshotQuery
         .getProjectShellById(row.projectId)
         .pipe(Effect.mapError(asRefusal));
+      if (Option.isSome(active) && active.value.workspaceRoot !== row.workspaceRoot) {
+        // A transition may have committed its path update before its final journal write.
+        const currentInfo = yield* workspaceReader.load(active.value.workspaceRoot);
+        if (
+          Option.isNone(currentInfo) ||
+          currentInfo.value.spaceId !== row.spaceId ||
+          currentInfo.value.createdAt === undefined ||
+          row.manifestCreatedAt === null ||
+          !sameManifestIncarnation(currentInfo.value.createdAt, row.manifestCreatedAt)
+        )
+          return yield* refuse(
+            "incarnation_mismatch",
+            "The project now belongs to another workspace. Recovery will not change it.",
+          );
+      }
       if (row.disposition === "destroyed") {
         if (Option.isSome(active) && active.value.id === row.projectId)
           yield* deleteProject(row.projectId);
@@ -1247,13 +1297,32 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           .normalizeWorkspaceRoot(match.root)
           .pipe(Effect.mapError(asRefusal));
         yield* engine
-          .dispatch({
-            type: "project.meta.update",
-            commandId: CommandId.make(`server:stave:retarget:${NodeCrypto.randomUUID()}`),
+          .dispatch(
+            {
+              type: "project.meta.update",
+              commandId: CommandId.make(`server:stave:retarget:${NodeCrypto.randomUUID()}`),
+              projectId: row.projectId,
+              workspaceRoot,
+            },
+            { staveReconciliation: true },
+          )
+          .pipe(Effect.mapError(asRefusal));
+      }
+      if (row.disposition === "restoring" && !match.archived && row.ownerToken !== null) {
+        const reset = yield* lifecycle
+          .resetScheduleEpisode({
             projectId: row.projectId,
-            workspaceRoot,
+            leaseEpoch: row.leaseEpoch,
+            ownerToken: row.ownerToken,
+            now: yield* nowIso,
+            anchorAt: null,
+            scheduledAt: null,
+            archiveDeadlineAt: null,
+            disposition: "live",
           })
           .pipe(Effect.mapError(asRefusal));
+        if (!reset)
+          return yield* refuse("space_transitioning", "The restore recovery lease was lost.");
       }
       yield* afterMutation(match.root);
       return {
@@ -1370,16 +1439,27 @@ export const make = Effect.fn("StaveOperations.make")(function* (
               });
         const body = Effect.gen(function* () {
           yield* revalidate;
-          if (isLifecycle) {
-            yield* patch({
-              disposition:
-                operation.kind === "archiveSpace"
-                  ? "archiving"
-                  : operation.kind === "restoreSpace"
-                    ? "restoring"
-                    : "destroying",
-              archiveBasename: info.archiveBasename ?? null,
-            });
+          if (isLifecycle || operation.kind === "memoryDetach") {
+            if (isLifecycle)
+              yield* patch({
+                disposition:
+                  operation.kind === "archiveSpace"
+                    ? "archiving"
+                    : operation.kind === "restoreSpace"
+                      ? "restoring"
+                      : "destroying",
+                archiveBasename: info.archiveBasename ?? null,
+              });
+            if (isLifecycle && lease !== undefined)
+              lease = {
+                ...lease,
+                disposition:
+                  operation.kind === "archiveSpace"
+                    ? "archiving"
+                    : operation.kind === "restoreSpace"
+                      ? "restoring"
+                      : "destroying",
+              };
             if (operation.kind === "destroySpace" && info.state === "archived")
               return yield* refuse(
                 "archived_project",
@@ -1508,26 +1588,29 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                 .normalizeWorkspaceRoot(result.archivedPath)
                 .pipe(Effect.mapError(asRefusal));
               if (lease !== undefined) {
+                if (Option.isSome(project))
+                  yield* engine
+                    .dispatch(
+                      {
+                        type: "project.meta.update",
+                        commandId: CommandId.make(
+                          `server:stave:archive:${NodeCrypto.randomUUID()}`,
+                        ),
+                        projectId: lease.projectId,
+                        workspaceRoot: archivedRoot,
+                      },
+                      { staveReconciliation: true },
+                    )
+                    .pipe(Effect.mapError(asRefusal));
                 yield* patch({
-                  disposition: "archived",
                   workspaceRoot: archivedRoot,
                   archiveBasename: path.basename(archivedRoot),
                 });
                 lease = {
                   ...lease,
-                  disposition: "archived",
                   workspaceRoot: archivedRoot,
                   archiveBasename: path.basename(archivedRoot),
                 };
-                if (Option.isSome(project))
-                  yield* engine
-                    .dispatch({
-                      type: "project.meta.update",
-                      commandId: CommandId.make(`server:stave:archive:${NodeCrypto.randomUUID()}`),
-                      projectId: lease.projectId,
-                      workspaceRoot: archivedRoot,
-                    })
-                    .pipe(Effect.mapError(asRefusal));
                 yield* afterMutation(archivedRoot);
               }
               outcome = { kind: operation.kind, result };
@@ -1648,22 +1731,6 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           }
           if (lease !== undefined && operation.kind !== "destroySpace") {
             yield* patch(yield* reconcileRow(lease));
-            if (operation.kind === "restoreSpace") {
-              const reset = yield* lifecycle
-                .resetScheduleEpisode({
-                  projectId: lease.projectId,
-                  leaseEpoch: lease.leaseEpoch,
-                  ownerToken: entry.operationId,
-                  now: yield* nowIso,
-                  anchorAt: null,
-                  scheduledAt: null,
-                  archiveDeadlineAt: null,
-                  disposition: "live",
-                })
-                .pipe(Effect.mapError(asRefusal));
-              if (!reset)
-                return yield* refuse("space_transitioning", "The lifecycle lease was lost.");
-            }
           }
           return outcome;
         });
@@ -1741,7 +1808,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
         Effect.gen(function* () {
           if (row.ownerToken !== null && row.leaseUntil !== null) {
             const remaining = Date.parse(row.leaseUntil) - (yield* Clock.currentTimeMillis);
-            if (remaining > 0) yield* Effect.sleep(Duration.millis(remaining));
+            if (remaining > 0) return;
           }
           const now = yield* nowIso;
           const ownerToken = `startup:${NodeCrypto.randomUUID()}`;
@@ -1818,7 +1885,16 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           );
         }),
       );
-      yield* row.disposition === "destroyed" ? reconcile : execution.withExecution(reconcile);
+      yield* (
+        row.disposition === "destroyed" ? reconcile : execution.withExecution(reconcile)
+      ).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("Stave recovery will retry this row", {
+            projectId: row.projectId,
+            message: error.message,
+          }),
+        ),
+      );
     }
   });
 
@@ -1883,7 +1959,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                 buildStaveArgv.sagaCreate(input),
                 (stream) => cli.sagaCreate(input, stream),
                 notesUnlessPlan,
-              );
+              ).pipe(Effect.catch((error) => uncertainCreation(operation.sagaId, root, error)));
             }),
           );
           if (isStaveDryRunPlan(created)) return yield* unexpectedPlan("saga create");
@@ -2045,6 +2121,70 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       return { info, participants, roster: status.manifest.saga?.members ?? [] };
     });
 
+  const sagaReview = (
+    operation: Extract<SagaOperation, { kind: "sagaArchive" | "sagaDestroy" }>,
+    saga: Effect.Success<ReturnType<typeof discoverSaga>>,
+  ) =>
+    Effect.gen(function* () {
+      const shell = yield* snapshotQuery.getShellSnapshot().pipe(Effect.mapError(asRefusal));
+      const participants = (yield* Effect.forEach(saga.participants, (member) =>
+        Effect.gen(function* () {
+          const project = shell.projects.find((project) => project.workspaceRoot === member.root);
+          const threads =
+            project === undefined
+              ? []
+              : yield* snapshotQuery
+                  .listThreadLifecycleAnchorsByProjectId(project.id)
+                  .pipe(Effect.mapError(asRefusal));
+          return {
+            spaceId: member.info.spaceId,
+            createdAt: member.info.createdAt!,
+            workspaceRoot: member.root,
+            state: member.info.state ?? "live",
+            ...(project === undefined
+              ? {}
+              : { projectId: project.id, projectTitle: project.title }),
+            threadIds: threads
+              .filter((thread) => thread.deletedAt === null)
+              .map((thread) => thread.threadId)
+              .sort(),
+          };
+        }),
+      )).sort((left, right) => left.workspaceRoot.localeCompare(right.workspaceRoot));
+      const scope = {
+        sagaRoot: operation.sagaRoot,
+        sagaCreatedAt: saga.info.createdAt!,
+        target: operation.kind === "sagaArchive" ? ("archive" as const) : ("destroy" as const),
+        force: operation.force,
+        memory: operation.memory,
+        participants,
+      };
+      const fingerprint = (excludeCoordinator: boolean) =>
+        NodeCrypto.createHash("sha256")
+          .update(
+            stableStringify({
+              ...scope,
+              participants: participants.map(
+                ({ projectTitle: _title, projectId, threadIds, ...participant }) => ({
+                  ...participant,
+                  ...(excludeCoordinator && participant.workspaceRoot === operation.sagaRoot
+                    ? {}
+                    : { projectId, threadIds }),
+                }),
+              ),
+              roster: saga.roster
+                .map((member) => ({ ...member, after: [...member.after].sort() }))
+                .sort((a, b) => a.id.localeCompare(b.id)),
+            }),
+          )
+          .digest("hex");
+      return {
+        ...scope,
+        fingerprint: fingerprint(false),
+        projectDeletionFingerprint: fingerprint(true),
+      } satisfies StaveSagaReview;
+    });
+
   const withSaga = <A>(
     operation: SagaOperation,
     body: (
@@ -2105,6 +2245,26 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           return yield* refuse(
             "invalid_arguments",
             "This partial saga now has members. Import it and review the full saga teardown before removing it.",
+          );
+        const reviewed =
+          operation.kind === "sagaArchive" || operation.kind === "sagaDestroy"
+            ? yield* sagaReview(operation, saga)
+            : undefined;
+        if (
+          reviewed !== undefined &&
+          allowMemberTeardown &&
+          revalidateParticipant === undefined &&
+          ("expectedSagaReview" in operation ? operation.expectedSagaReview : undefined) !==
+            reviewed.fingerprint &&
+          !(
+            durableTarget?.deleteIntentSequence != null &&
+            ("expectedSagaReview" in operation ? operation.expectedSagaReview : undefined) ===
+              reviewed.projectDeletionFingerprint
+          )
+        )
+          return yield* refuse(
+            "incarnation_mismatch",
+            "The saga members or affected projects changed, or cascade confirmation is missing. Review the complete saga teardown again.",
           );
         const id = saga.info.spaceId;
         const mutate = Effect.gen(function* () {
@@ -2369,6 +2529,15 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                   `Project '${project.title}' is nested inside saga participant '${member.info.spaceId}'.`,
                 );
             }
+          if (
+            reviewed !== undefined &&
+            (operation.kind === "sagaArchive" || operation.kind === "sagaDestroy") &&
+            (yield* sagaReview(operation, final)).fingerprint !== reviewed.fingerprint
+          )
+            return yield* refuse(
+              "incarnation_mismatch",
+              "The saga teardown scope changed while sessions were stopping. Review it again.",
+            );
           yield* revalidate;
           if (revalidateParticipant)
             for (const row of leases) yield* revalidateParticipant(row.projectId);
@@ -2458,6 +2627,14 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           "invalid_arguments",
           "This cleanup record changed. Refresh before retrying.",
         );
+      const active = yield* snapshotQuery
+        .getProjectShellById(operation.projectId)
+        .pipe(Effect.mapError(asRefusal));
+      if (Option.isSome(active) && active.value.workspaceRoot !== found.value.workspaceRoot)
+        return yield* refuse(
+          "incarnation_mismatch",
+          "The project workspace changed. Review its current space instead.",
+        );
       return found.value;
     });
   const actionDiskOperation = (operation: StaveLifecycleActionOperation, row: LifecycleRow) =>
@@ -2492,10 +2669,17 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           ? {
               kind: "sagaArchive" as const,
               sagaRoot: operation.workspaceRoot,
+              expectedSagaReview: operation.expectedSagaReview,
               ...scope,
               memory: operation.memory as "keep" | "contribute",
             }
-          : { kind: "sagaDestroy" as const, sagaRoot: operation.workspaceRoot, ...scope, memory }
+          : {
+              kind: "sagaDestroy" as const,
+              sagaRoot: operation.workspaceRoot,
+              expectedSagaReview: operation.expectedSagaReview,
+              ...scope,
+              memory,
+            }
         : target === "archive"
           ? {
               kind: "archiveSpace" as const,
@@ -2949,7 +3133,14 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                     force: operation.force,
                     dryRun: true,
                   })
-                  .pipe(Effect.flatMap((value) => expectPlan("saga archive", value)));
+                  .pipe(
+                    Effect.flatMap((value) => expectPlan("saga archive", value)),
+                    Effect.flatMap((plan) =>
+                      sagaReview(operation, saga).pipe(
+                        Effect.map((review) => ({ ...plan, sagaReview: review })),
+                      ),
+                    ),
+                  );
               case "sagaDestroy":
                 return yield* cli
                   .sagaDestroy({
@@ -2958,7 +3149,14 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                     force: operation.force,
                     dryRun: true,
                   })
-                  .pipe(Effect.flatMap((value) => expectPlan("saga destroy", value)));
+                  .pipe(
+                    Effect.flatMap((value) => expectPlan("saga destroy", value)),
+                    Effect.flatMap((plan) =>
+                      sagaReview(operation, saga).pipe(
+                        Effect.map((review) => ({ ...plan, sagaReview: review })),
+                      ),
+                    ),
+                  );
             }
           }),
         ).pipe(

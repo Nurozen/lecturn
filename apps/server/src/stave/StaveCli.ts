@@ -1,3 +1,6 @@
+import type { StaveLastFailure } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
+import * as Ref from "effect/Ref";
 import { StaveExecutionContext } from "./StaveExecutionContext.ts";
 import { missingStaveFeatures } from "./staveFeatures.ts";
 /**
@@ -359,6 +362,7 @@ export type StaveMutationOutcome<A> = A | StaveDryRunPlan;
 // ── Service ───────────────────────────────────────────────────
 
 export interface StaveCliShape {
+  readonly lastFailure?: Effect.Effect<Option.Option<StaveLastFailure>>;
   // Reads
   readonly version: Effect.Effect<StaveVersionInfo, StaveError>;
   readonly configShow: Effect.Effect<StaveConfigShow, StaveError>;
@@ -846,6 +850,7 @@ export const make = Effect.fn("StaveCli.make")(function* () {
   const processRunner = yield* ProcessRunner;
   const serverSettings = yield* ServerSettingsService;
   const hostEnvironment = yield* HostProcessEnvironment;
+  const lastFailure = yield* Ref.make(Option.none<StaveLastFailure>());
 
   const passthroughEnv = (): NodeJS.ProcessEnv | undefined => {
     const env: NodeJS.ProcessEnv = {};
@@ -978,6 +983,21 @@ export const make = Effect.fn("StaveCli.make")(function* () {
         verb,
       });
     }).pipe(
+      Effect.tapError((error) =>
+        DateTime.now.pipe(
+          Effect.flatMap((now) =>
+            Ref.set(
+              lastFailure,
+              Option.some({
+                at: DateTime.formatIso(now),
+                verb: error.verb,
+                code: error.code,
+                message: error.message,
+              }),
+            ),
+          ),
+        ),
+      ),
       Effect.withSpan(`StaveCli.${verb}`, {
         attributes: { "stave.verb": verb, "stave.args_count": spec.args.length },
       }),
@@ -1009,6 +1029,7 @@ export const make = Effect.fn("StaveCli.make")(function* () {
   const setup = method("setup", buildStaveArgv.setup, decodeStaveSetupResult);
 
   return StaveCli.of({
+    lastFailure: Ref.get(lastFailure),
     version: method("version", buildStaveArgv.version, decodeStaveVersion)(undefined),
     configShow: method("config show", buildStaveArgv.configShow, decodeStaveConfigShow)(undefined),
     reposList: method("repos list", buildStaveArgv.reposList, decodeStaveReposList)(undefined),

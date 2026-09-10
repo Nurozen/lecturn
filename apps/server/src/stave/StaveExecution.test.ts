@@ -80,6 +80,29 @@ const makeFixture = Effect.fn("StaveExecution.test.makeFixture")(function* () {
 
 describe("Stave execution snapshots", () => {
   it.effect(
+    "reuses cache identity for identical captures but changes it when the same source file changes",
+    () =>
+      Effect.gen(function* () {
+        const f = yield* makeFixture();
+        const first = yield* f.execution.withExecution(currentSnapshot);
+        const same = yield* f.execution.withExecution(currentSnapshot);
+        expect(first.configurationIdentity).toEqual(expect.any(String));
+        expect(first.configurationIdentity).toBe(same.configurationIdentity);
+        expect(first.configPath).not.toBe(same.configPath);
+        yield* f.fs.writeFileString(f.configA, replacementConfig);
+        const changed = yield* f.execution.withExecution(currentSnapshot);
+        expect(changed.configurationIdentity).not.toBe(first.configurationIdentity);
+        expect(changed.sourceConfigPath).toBe(first.sourceConfigPath);
+        expect(changed.binary).toEqual(first.binary);
+        yield* f.fs.writeFileString(f.configA, originalConfig);
+        const restored = yield* f.execution.withExecution(currentSnapshot);
+        expect(restored.configurationIdentity).toBe(first.configurationIdentity);
+        yield* f.settings.updateSettings({ stave: { binaryPath: f.binaryB } });
+        const binaryChanged = yield* f.execution.withExecution(currentSnapshot);
+        expect(binaryChanged.configurationIdentity).not.toBe(first.configurationIdentity);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+  it.effect(
     "pins configuration bytes and selected binary until completion, then uses new settings",
     () =>
       Effect.gen(function* () {

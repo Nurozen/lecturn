@@ -55,10 +55,11 @@ describe("resolveProjectGitCwd", () => {
     ).toBe("/work/space/app");
   });
 
-  it("falls back to the space root when the manifest has no primary repo", () => {
-    expect(resolveProjectGitCwd({ project: staveProjectWithoutPrimary, thread: null })).toBe(
-      "/work/space",
-    );
+  it("has no Git target without an editable repo, even with legacy thread metadata", () => {
+    for (const thread of [null, { worktreePath: "/legacy/wt", branch: "old" }]) {
+      expect(resolveProjectGitCwd({ project: staveProjectWithoutPrimary, thread })).toBeNull();
+      expect(resolveProjectGitBranch({ project: staveProjectWithoutPrimary, thread })).toBeNull();
+    }
   });
 
   it("returns null without a project", () => {

@@ -42,7 +42,8 @@ export function resolveProjectGitCwd(input: {
 }): string | null {
   const { project, thread } = input;
   if (!project) return null;
-  return project.stave?.primaryRepoPath ?? thread?.worktreePath ?? project.workspaceRoot;
+  if (project.stave) return project.stave.primaryRepoPath ?? null;
+  return thread?.worktreePath ?? project.workspaceRoot;
 }
 
 /**
@@ -54,6 +55,7 @@ export function resolveProjectGitBranch(input: {
   readonly project: ProjectLike | null | undefined;
   readonly thread?: ThreadLike | null | undefined;
 }): string | null {
+  if (input.project?.stave && !input.project.stave.primaryRepoPath) return null;
   return input.thread?.branch ?? input.project?.stave?.primaryBranch ?? null;
 }
 

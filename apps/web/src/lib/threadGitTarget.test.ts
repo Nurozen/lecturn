@@ -21,6 +21,24 @@ const staveInfo: StaveProjectInfo = {
 const staveProject = { workspaceRoot: "/spaces/space-1", stave: staveInfo };
 
 describe("resolveThreadGitTarget", () => {
+  it("preserves no Git target for a reference-only space beneath an ancestor repo", () => {
+    expect(
+      resolveThreadGitTarget({
+        project: {
+          workspaceRoot: "/ancestor/space",
+          stave: {
+            spaceId: "reference-only",
+            isSaga: false,
+            repos: [],
+            memories: [],
+          },
+        },
+        thread: { branch: "old", worktreePath: "/legacy/wt" },
+        fallbackCwd: "/ancestor",
+      }),
+    ).toEqual({ cwd: null, branch: null, isStave: true, statusEnabled: false });
+  });
+
   it("targets the thread worktree on an ordinary project", () => {
     const target = resolveThreadGitTarget({
       project: ordinaryProject,

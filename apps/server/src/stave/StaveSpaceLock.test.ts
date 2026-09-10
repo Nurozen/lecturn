@@ -103,3 +103,41 @@ describe("Stave session root matching", () => {
     }).pipe(Effect.scoped),
   );
 });
+
+it.effect(
+  "workspace admission holds ancestor permits and recognizes missing descendants through aliases",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const parent = yield* fs.makeTempDirectoryScoped();
+      const root = path.join(parent, "space");
+      const alias = path.join(parent, "alias");
+      yield* fs.makeDirectory(root);
+      yield* fs.symlink(parent, alias);
+      const lock = yield* StaveSpaceLock;
+      yield* lock.withSpaceLock(
+        root,
+        Effect.gen(function* () {
+          yield* fs.remove(root, { recursive: true });
+          expect(
+            Option.isNone(
+              yield* lock.tryWithWorkspaceLocks(
+                [path.join(alias, "space", "repo", "missing")],
+                Effect.die("must not commit"),
+              ),
+            ),
+          ).toBe(true);
+        }),
+      );
+      expect(
+        yield* lock.tryWithWorkspaceLocks(
+          [root, path.join(root, "repo")],
+          Effect.gen(function* () {
+            expect(Option.isNone(yield* lock.tryWithSpaceLock(root, Effect.void))).toBe(true);
+            return "committed";
+          }),
+        ),
+      ).toEqual(Option.some("committed"));
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);

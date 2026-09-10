@@ -25,7 +25,9 @@ export function resolveThreadGitTarget(input: {
     | undefined;
 }): ThreadGitTarget {
   return {
-    cwd: resolveProjectGitCwd(input) ?? input.thread?.worktreePath ?? null,
+    cwd: input.project?.stave
+      ? resolveProjectGitCwd(input)
+      : (resolveProjectGitCwd(input) ?? input.thread?.worktreePath ?? null),
     branch: resolveProjectGitBranch(input),
   };
 }
