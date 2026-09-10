@@ -88,8 +88,10 @@ export const make = Effect.gen(function* () {
   const electronApp = yield* ElectronApp.ElectronApp;
 
   // Electron scopes the single-instance lock to the userData directory and
-  // creates that directory when the lock is acquired. The SDK bridge takes
-  // the lock at creation, so userData must already point at the real
+  // creates that directory when the lock is acquired. On Windows and Linux,
+  // the SDK bridge takes the lock at creation; on macOS it does not acquire
+  // one. Set userData before the bridge and any renderer storage initialize.
+  // The profile must already point at the real
   // directory here — under the default productName-derived path, acquiring
   // the lock would create "Lecturn (Alpha)" and make the legacy-install
   // detection in resolveUserDataPath match on fresh installs.

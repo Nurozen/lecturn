@@ -29,11 +29,16 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
-const makeDesktopClerkLayer = (isDevelopment = true, events: string[] = []) => {
+const makeDesktopClerkLayer = (
+  isDevelopment = true,
+  events: string[] = [],
+  userDataPathOverride?: string,
+) => {
   const environment = DesktopEnvironment.DesktopEnvironment.of({
     stateDir: "/tmp/t3-state",
     isDevelopment,
     appDataDirectory: "/tmp/app-data",
+    ...(userDataPathOverride !== undefined ? { userDataPathOverride } : {}),
     userDataDirName: isDevelopment ? "lecturn-dev" : "lecturn",
     legacyUserDataDirName: isDevelopment ? "Lecturn (Dev)" : "Lecturn (Alpha)",
     path: { join: (...parts: ReadonlyArray<string>) => parts.join("/") },
@@ -51,7 +56,14 @@ const makeDesktopClerkLayer = (isDevelopment = true, events: string[] = []) => {
       Layer.mergeAll(
         Layer.succeed(DesktopEnvironment.DesktopEnvironment, environment),
         Layer.succeed(ElectronApp.ElectronApp, electronApp),
-        FileSystem.layerNoop({ exists: () => Effect.succeed(false) }),
+        FileSystem.layerNoop({
+          exists: () => Effect.succeed(false),
+          makeDirectory: (path, options) =>
+            Effect.sync(() => {
+              assert.equal(options?.recursive, true);
+              events.push(`makeDirectory:${path}`);
+            }),
+        }),
       ),
     ),
   );
@@ -96,12 +108,32 @@ describe("DesktopClerk", () => {
         ],
       ]);
       assert.equal(cleanup.mock.calls.length, 1);
-      // The bridge acquires Electron's single-instance lock at creation, and
+      // On Windows/Linux the bridge acquires the single-instance lock, and
       // the lock both lives in and creates the userData directory — so the
       // real path must be set before the bridge exists.
       assert.deepEqual(events, ["setPath:userData:/tmp/app-data/lecturn-dev", "createClerkBridge"]);
       storageMock.mockClear();
       createClerkBridgeMock.mockClear();
+    });
+  });
+
+  it.effect("sets the isolated profile before creating the SDK bridge", () => {
+    const events: string[] = [];
+    storageMock.mockReturnValue(storageAdapter);
+    createClerkBridgeMock.mockImplementation(() => {
+      events.push("createClerkBridge");
+      return { cleanup: vi.fn(), isPrimaryInstance: true };
+    });
+
+    return Effect.gen(function* () {
+      yield* Effect.scoped(
+        Layer.build(makeDesktopClerkLayer(false, events, "/tmp/lecturn/userdata/electron")),
+      );
+      assert.deepEqual(events, [
+        "makeDirectory:/tmp/lecturn/userdata/electron",
+        "setPath:userData:/tmp/lecturn/userdata/electron",
+        "createClerkBridge",
+      ]);
     });
   });
 

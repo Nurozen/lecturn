@@ -18,6 +18,19 @@ the task commands.
   web, different platform layer and UI.
 - `apps/marketing` (`@t3tools/marketing`): Astro marketing site.
 
+### Desktop data directories
+
+An explicit `LECTURN_HOME` selects both the backend state directory
+(`<home>/userdata`) and the Electron profile (`<home>/userdata/electron`). The profile contains
+renderer storage, including IndexedDB, and is selected before Clerk and renderer startup. Use
+distinct homes when running an installed build alongside another Lecturn build. Without an
+override, Electron retains its existing platform application-data profile, including legacy
+profile detection. A blank override is treated as unset.
+
+The Clerk SDK acquires Electron's profile-scoped single-instance lock on Windows and Linux;
+it does not acquire that lock on macOS. Separate application bundles on macOS must therefore
+use distinct homes to avoid opening the same renderer database concurrently.
+
 ## packages
 
 - `packages/contracts` (`@t3tools/contracts`): shared Effect Schema definitions. RPC group,

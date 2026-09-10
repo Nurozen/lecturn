@@ -33,10 +33,25 @@ export class DesktopUserDataPathResolutionError extends Schema.TaggedErrorClass<
 export class DesktopAppIdentity extends Context.Service<
   DesktopAppIdentity,
   {
-    readonly resolveUserDataPath: Effect.Effect<string, DesktopUserDataPathResolutionError>;
+    readonly resolveUserDataPath: Effect.Effect<
+      string,
+      DesktopUserDataPathResolutionError | DesktopUserDataPathCreationError
+    >;
     readonly configure: Effect.Effect<void>;
   }
 >()("@t3tools/desktop/app/DesktopAppIdentity") {}
+
+export class DesktopUserDataPathCreationError extends Schema.TaggedErrorClass<DesktopUserDataPathCreationError>()(
+  "DesktopUserDataPathCreationError",
+  {
+    path: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to create desktop user-data path at "${this.path}".`;
+  }
+}
 
 const normalizeCommitHash = (value: string): Option.Option<string> => {
   const trimmed = value.trim();
@@ -48,6 +63,19 @@ const normalizeCommitHash = (value: string): Option.Option<string> => {
 export const resolveUserDataPath = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
+  const userDataPathOverride = environment.userDataPathOverride;
+  if (userDataPathOverride !== undefined) {
+    yield* fileSystem.makeDirectory(userDataPathOverride, { recursive: true }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new DesktopUserDataPathCreationError({
+            path: userDataPathOverride,
+            cause,
+          }),
+      ),
+    );
+    return userDataPathOverride;
+  }
   const legacyPath = environment.path.join(
     environment.appDataDirectory,
     environment.legacyUserDataDirName,
