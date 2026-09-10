@@ -189,6 +189,16 @@ function SignedBillingAccount({
                   )}
                 </>
               )}
+              {hosted &&
+                status.state === "free" &&
+                !status.hasAccess &&
+                !status.checkoutEnabled && (
+                  <p className="text-sm text-muted-foreground">
+                    Connect subscriptions are being opened to invited accounts. Checkout is not
+                    enabled for this account yet. If you were invited, refresh your status after
+                    your account has been approved.
+                  </p>
+                )}
               {hosted && status.checkoutEnabled && (
                 <>
                   <p className="text-sm">

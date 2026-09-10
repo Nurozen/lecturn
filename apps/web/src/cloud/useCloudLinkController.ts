@@ -33,7 +33,7 @@ export interface CloudLinkDesiredState {
  * changes, so flipping publish alone is cheap.
  */
 export function useCloudLinkController() {
-  const { getToken, isSignedIn } = useAuth();
+  const { getToken, isSignedIn, userId } = useAuth();
   const refreshRelayEnvironments = useAtomCommand(relayEnvironmentDiscovery.refresh, {
     reportFailure: false,
   });
@@ -78,11 +78,21 @@ export function useCloudLinkController() {
   const publishAgentActivity = primaryCloudLinkState.data?.publishAgentActivity ?? false;
   const linked = primaryCloudLinkState.data?.linked ?? false;
 
+  const accountMismatch =
+    linked && isSignedIn && Boolean(userId) && primaryCloudLinkState.data?.cloudUserId !== userId;
+  const accountMismatchMessage = accountMismatch
+    ? "This environment is still published to a different Lecturn account. Signing out does not unpublish it. Sign in to the previous account, open Settings → Connections and unlink the environment, then sign in here again to publish it."
+    : null;
+
   const reconcileCloudState = async (desired: CloudLinkDesiredState): Promise<boolean> => {
     setOperationError(null);
     const target = primaryCloudLinkState.target;
     if (!target) {
       reportUpdateFailure(new Error("Local environment is not ready yet."));
+      return false;
+    }
+    if (accountMismatchMessage) {
+      reportUpdateFailure(new Error(accountMismatchMessage));
       return false;
     }
     const tokenResult = await settlePromise(() => getToken(resolveRelayClerkTokenOptions()));
@@ -159,6 +169,7 @@ export function useCloudLinkController() {
     managedTunnelActive,
     publishAgentActivity,
     operationError,
+    accountMismatchMessage,
     reconcileCloudState,
   };
 }

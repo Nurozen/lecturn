@@ -239,7 +239,7 @@ function ConfiguredConnectOnboardingDialog() {
               exposeEnvironment={exposeEnvironment}
               publishAgentActivity={publishAgentActivity}
               disabled={isApplying}
-              operationError={controller.operationError}
+              operationError={controller.operationError ?? controller.accountMismatchMessage}
               onExposeEnvironmentChange={setExposeEnvironment}
               onPublishAgentActivityChange={setPublishAgentActivity}
             />

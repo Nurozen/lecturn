@@ -1618,10 +1618,13 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     managedTunnelActive,
     publishAgentActivity,
     operationError,
+    linked,
+    accountMismatchMessage,
     reconcileCloudState,
   } = useCloudLinkController();
   const [isUpdating, setIsUpdating] = useState(false);
   const [isUpdatingPreference, setIsUpdatingPreference] = useState(false);
+  const [confirmUnlink, setConfirmUnlink] = useState(false);
 
   const disabledReason = !isSignedIn
     ? "Sign in to Lecturn Connect to manage this environment."
@@ -1678,7 +1681,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
               ? "This environment is available to your other devices through Lecturn Connect."
               : "Make this environment available to your other devices through Lecturn Connect."
           }
-          status={operationError ?? primaryCloudLinkState.error}
+          status={operationError ?? accountMismatchMessage ?? primaryCloudLinkState.error}
           control={
             <CloudLinkSwitch
               checked={managedTunnelActive}
@@ -1689,6 +1692,52 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
           }
         />
       ) : null}
+      {linked && canManageRelay ? (
+        <SettingsRow
+          title="Unlink environment"
+          description={
+            accountMismatchMessage ??
+            "Stop publishing this environment and agent activity to your Lecturn account. Local work stays on this device."
+          }
+          control={
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isBusy || Boolean(accountMismatchMessage)}
+              onClick={() => setConfirmUnlink(true)}
+            >
+              Unlink environment
+            </Button>
+          }
+        />
+      ) : null}
+      <AlertDialog open={confirmUnlink} onOpenChange={setConfirmUnlink}>
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unlink this environment?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Other devices will lose Connect access to this environment. Agent activity publishing
+              will stop. Your local projects and conversations stay on this device.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" disabled={isBusy} />}>
+              Cancel
+            </AlertDialogClose>
+            <Button
+              disabled={isBusy}
+              onClick={async () => {
+                setIsUpdating(true);
+                const ok = await reconcileCloudState({ managedTunnel: false, publish: false });
+                setIsUpdating(false);
+                if (ok) setConfirmUnlink(false);
+              }}
+            >
+              {isBusy ? "Unlinking…" : "Unlink environment"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
       <SettingsRow
         title={searchableSetting("publish-agent-activity").title}
         description="Send activity from this environment to your mobile clients for push notifications and Live Activities. Works without a Lecturn Connect tunnel."

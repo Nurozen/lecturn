@@ -238,3 +238,15 @@ controls remain in **Settings** → **Connections** on web and desktop or **Sett
 - Anyone with a valid pairing credential can create a session until that credential expires or is revoked.
 - Hosted pairing links keep the credential in the URL hash so it is not sent to the hosted app server, but it can still be exposed through browser history, screenshots, logs, or copy/paste.
 - Use `t3 auth` to revoke credentials or sessions you no longer trust.
+
+### Switching your Connect account
+
+Signing out of Lecturn signs out the client; it does not unpublish this computer. A published environment continues to belong to the account that linked it so your other devices can still reach it.
+
+To publish the same computer under another account:
+
+1. Sign in on that computer using the account that originally published it.
+2. Open **Settings → Connections → Unlink environment** and confirm. This stops remote Connect access and agent activity publishing; your local projects and conversations remain on the computer.
+3. Sign out, sign in with the new account, and run Connect setup again.
+
+Connect setup reports an account mismatch instead of claiming success when the computer is still published to another account. Switching accounts does not transfer environment ownership or a subscription.
