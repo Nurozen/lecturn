@@ -119,6 +119,7 @@ function createProviderServiceHarness() {
         conversationFork: "native",
         conversationForkRequiresAnchor: false,
       }),
+    assertConversationRollbackSupported: () => unsupported(),
     getInstanceInfo: (instanceId) => {
       const driverKind = ProviderDriverKind.make(String(instanceId));
       return Effect.succeed({

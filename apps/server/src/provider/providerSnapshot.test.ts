@@ -26,6 +26,9 @@ import { GROK_PRESENTATION } from "./Layers/GrokProvider.ts";
 import { OPENCODE_ADAPTER_CAPABILITIES } from "./Layers/OpenCodeAdapter.ts";
 import { OPENCODE_PRESENTATION } from "./Layers/OpenCodeProvider.ts";
 
+import { ANTIGRAVITY_ADAPTER_CAPABILITIES } from "./Layers/AntigravityAdapter.ts";
+import { ANTIGRAVITY_PRESENTATION } from "./Layers/AntigravityProvider.ts";
+
 const OPENCODE_CUSTOM_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [
     {
@@ -148,6 +151,11 @@ describe("ProviderCommandNotFoundError", () => {
 
 describe("conversationFork capability/presentation parity", () => {
   const drivers = [
+    {
+      driver: "antigravity",
+      capabilities: ANTIGRAVITY_ADAPTER_CAPABILITIES,
+      presentation: ANTIGRAVITY_PRESENTATION,
+    },
     {
       driver: "codex",
       capabilities: CODEX_ADAPTER_CAPABILITIES,

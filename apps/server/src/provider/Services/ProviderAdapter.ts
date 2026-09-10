@@ -50,6 +50,8 @@ export interface ProviderAdapterCapabilities {
    * surfaced on `ServerProvider` presentations.
    */
   readonly conversationForkRequiresAnchor: boolean;
+  /** False when native conversation history cannot be rewound. */
+  readonly supportsConversationRollback?: boolean;
 }
 
 export interface ProviderThreadTurnSnapshot {

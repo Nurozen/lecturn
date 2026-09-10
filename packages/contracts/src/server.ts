@@ -203,6 +203,14 @@ export const ServerProvider = Schema.Struct({
   conversationFork: Schema.optional(TrimmedNonEmptyString),
   // Hide historical fork points when the provider needs an unavailable native anchor.
   conversationForkRequiresAnchor: Schema.optional(Schema.Boolean),
+  supportsConversationRollback: Schema.optional(Schema.Boolean),
+  supportsTextGeneration: Schema.optional(Schema.Boolean),
+  setup: Schema.optional(
+    Schema.Struct({
+      canAuthenticate: Schema.Boolean,
+      canInstall: Schema.Boolean,
+    }),
+  ),
   enabled: Schema.Boolean,
   installed: Schema.Boolean,
   version: Schema.NullOr(TrimmedNonEmptyString),
