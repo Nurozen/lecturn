@@ -51,7 +51,7 @@ export function SettingsProjectGroupingRouteScreen() {
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
-      <ArcaneBackdrop />
+      <ArcaneBackdrop emphasis="sidebar" />
       {Platform.OS === "android" ? (
         <>
           <NativeStackScreenOptions options={{ headerShown: false }} />

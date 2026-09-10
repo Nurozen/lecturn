@@ -3,7 +3,13 @@ import { Animated, StyleSheet } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 
 /** One short fade per interaction; no idle animation or animated shadow. */
-export function ArcaneControlHighlight({ active }: { readonly active: boolean }) {
+export function ArcaneControlHighlight({
+  active,
+  radius = 999,
+}: {
+  readonly active: boolean;
+  readonly radius?: number;
+}) {
   const reduceMotion = useReducedMotion();
   const [opacity] = useState(() => new Animated.Value(0));
   useEffect(() => {
@@ -20,14 +26,13 @@ export function ArcaneControlHighlight({ active }: { readonly active: boolean })
     <Animated.View
       pointerEvents="none"
       accessible={false}
-      style={[StyleSheet.absoluteFill, styles.thread, { opacity }]}
+      style={[StyleSheet.absoluteFill, styles.thread, { opacity, borderRadius: radius }]}
     />
   );
 }
 
 const styles = StyleSheet.create({
   thread: {
-    borderRadius: 999,
     borderWidth: 1,
     borderColor: "rgba(229, 180, 88, 0.8)",
     backgroundColor: "rgba(229, 180, 88, 0.055)",

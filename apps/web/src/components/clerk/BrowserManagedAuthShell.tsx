@@ -2,6 +2,7 @@ import { ClerkProvider } from "@clerk/react";
 import type { ReactNode } from "react";
 
 import { ManagedRelayAuthProvider } from "../../cloud/managedAuth";
+import { ClerkDefaultAvatar } from "./ClerkDefaultAvatar";
 import { clerkAppearance } from "./clerkAppearance";
 
 /**
@@ -19,6 +20,7 @@ export default function BrowserManagedAuthShell({
 }) {
   return (
     <ClerkProvider appearance={clerkAppearance} publishableKey={publishableKey}>
+      <ClerkDefaultAvatar />
       <ManagedRelayAuthProvider>{children}</ManagedRelayAuthProvider>
     </ClerkProvider>
   );

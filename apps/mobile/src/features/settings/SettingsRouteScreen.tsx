@@ -122,7 +122,7 @@ function LocalSettingsRouteScreen() {
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
-      <ArcaneBackdrop />
+      <ArcaneBackdrop emphasis="sidebar" />
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
@@ -457,7 +457,7 @@ function ConfiguredSettingsRouteScreen() {
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
-      <ArcaneBackdrop />
+      <ArcaneBackdrop emphasis="sidebar" />
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}

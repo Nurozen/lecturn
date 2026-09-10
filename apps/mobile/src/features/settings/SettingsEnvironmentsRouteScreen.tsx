@@ -79,7 +79,7 @@ export function SettingsEnvironmentsRouteScreen() {
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
-      <ArcaneBackdrop />
+      <ArcaneBackdrop emphasis="sidebar" />
       {Platform.OS === "android" ? (
         <>
           {/* Android renders its own in-screen header instead of the native bar. */}
@@ -125,7 +125,7 @@ export function SettingsEnvironmentsRouteScreen() {
         }}
       >
         {hasLocalEnvironments ? (
-          <View collapsable={false} className="overflow-hidden rounded-[24px] bg-card">
+          <View collapsable={false} className="overflow-hidden rounded-[24px] bg-card/55">
             {localEnvironments.map((environment, index) => (
               <View
                 key={environment.environmentId}
@@ -144,7 +144,10 @@ export function SettingsEnvironmentsRouteScreen() {
             ))}
           </View>
         ) : (
-          <View collapsable={false} className="items-center gap-3 rounded-[24px] bg-card px-6 py-8">
+          <View
+            collapsable={false}
+            className="items-center gap-3 rounded-[24px] bg-card/55 px-6 py-8"
+          >
             <View className="h-12 w-12 items-center justify-center rounded-[16px] bg-subtle">
               <SymbolView
                 name="point.3.connected.trianglepath.dotted"

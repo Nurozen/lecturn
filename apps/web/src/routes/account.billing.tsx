@@ -6,7 +6,7 @@ import { BillingSettingsDialog } from "../components/cloud/BillingSettingsDialog
 function BillingRoute() {
   const navigate = useNavigate();
   return (
-    <main className="min-h-dvh bg-background">
+    <main className="lecturn-settings-surface min-h-dvh bg-background">
       <div aria-hidden="true" className="p-8 font-heading text-xl text-muted-foreground">
         Lecturn
       </div>

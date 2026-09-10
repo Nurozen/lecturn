@@ -1,5 +1,6 @@
 import { useNavigation } from "@react-navigation/native";
-import type { ComponentProps } from "react";
+import { useState, type ComponentProps } from "react";
+import { ArcaneControlHighlight } from "../../../components/ArcaneControlHighlight";
 import { Pressable, View } from "react-native";
 
 import { SymbolView } from "../../../components/AppSymbol";
@@ -19,6 +20,9 @@ export function SettingsRow(props: {
   readonly onPress?: () => void;
 }) {
   const navigation = useNavigation();
+  const [pressed, setPressed] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
   const content = (
     <View
       className={
@@ -58,41 +62,36 @@ export function SettingsRow(props: {
     </View>
   );
 
-  const target = props.target;
-  if (target) {
-    return (
-      <Pressable
-        accessibilityLabel={props.label}
-        accessibilityRole="button"
-        disabled={props.disabled}
-        onPress={() =>
-          navigation.navigate("SettingsSheet", {
-            screen: "SettingsContent",
-            params: { screen: target },
-          })
-        }
-      >
-        {content}
-      </Pressable>
-    );
-  }
-
-  const fullScreenTarget = props.fullScreenTarget;
-  if (fullScreenTarget) {
-    return (
-      <Pressable
-        accessibilityLabel={props.label}
-        accessibilityRole="button"
-        disabled={props.disabled}
-        onPress={() => navigation.navigate(fullScreenTarget)}
-      >
-        {content}
-      </Pressable>
-    );
-  }
+  const handlePress = () => {
+    if (props.target) {
+      navigation.navigate("SettingsSheet", {
+        screen: "SettingsContent",
+        params: { screen: props.target },
+      });
+    } else if (props.fullScreenTarget) {
+      navigation.navigate(props.fullScreenTarget);
+    } else {
+      props.onPress?.();
+    }
+  };
 
   return (
-    <Pressable accessibilityRole="button" disabled={props.disabled} onPress={props.onPress}>
+    <Pressable
+      accessibilityLabel={props.label}
+      accessibilityRole="button"
+      disabled={props.disabled}
+      onPress={handlePress}
+      onPressIn={() => setPressed(true)}
+      onPressOut={() => setPressed(false)}
+      onHoverIn={() => setHovered(true)}
+      onHoverOut={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+    >
+      <ArcaneControlHighlight
+        active={!props.disabled && (pressed || hovered || focused)}
+        radius={12}
+      />
       {content}
     </Pressable>
   );

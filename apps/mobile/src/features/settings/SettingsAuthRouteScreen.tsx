@@ -39,7 +39,7 @@ function ConfiguredSettingsAuthRouteScreen() {
 
   return (
     <View collapsable={false} className="flex-1 overflow-hidden bg-sheet">
-      <ArcaneBackdrop />
+      <ArcaneBackdrop emphasis="sidebar" />
       {isLoaded ? (
         hasBeenSignedIn.current ? (
           <UserProfileView isDismissible={false} onHostBack={handleHostBack} />

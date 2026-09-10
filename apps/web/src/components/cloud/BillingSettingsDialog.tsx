@@ -19,7 +19,7 @@ export function BillingSettingsDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPopup
-        className="h-[min(760px,85dvh)] max-w-4xl overflow-hidden bg-background"
+        className="lecturn-settings-surface h-[min(760px,85dvh)] max-w-4xl overflow-hidden bg-background"
         bottomStickOnMobile={false}
       >
         <DialogTitle className="sr-only">Account settings</DialogTitle>
@@ -27,7 +27,7 @@ export function BillingSettingsDialog({
           Manage your Lecturn Connect subscription and payment settings.
         </DialogDescription>
         <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
-          <aside className="shrink-0 border-b bg-sidebar/70 p-4 sm:w-52 sm:border-e sm:border-b-0 sm:p-5">
+          <aside className="lecturn-celestial-sidebar shrink-0 border-b bg-sidebar/70 p-4 sm:w-52 sm:border-e sm:border-b-0 sm:p-5">
             <p className="mb-4 pe-8 font-heading text-lg font-semibold">Account settings</p>
             <nav aria-label="Account settings" className="flex gap-2 sm:flex-col">
               <div
@@ -39,6 +39,7 @@ export function BillingSettingsDialog({
               </div>
               <button
                 type="button"
+                data-lecturn-hover
                 className="flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
                 onClick={() => {
                   if (onConnections) onConnections();

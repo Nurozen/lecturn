@@ -73,7 +73,7 @@ export function SettingsClientStorageRouteScreen() {
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
-      <ArcaneBackdrop />
+      <ArcaneBackdrop emphasis="sidebar" />
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         contentInset={{ bottom: Math.max(insets.bottom, 18) }}
