@@ -97,8 +97,11 @@ export function memoryAvailableFrom(providers: ReadonlyArray<StaveMemoryProvider
   return providers !== null && providers.some((provider) => provider.available);
 }
 
-export function createInitialWizardState(): StaveSpaceWizardState {
-  return {
+export function createInitialWizardState(
+  context: StaveWizardContext = EMPTY_WIZARD_CONTEXT,
+  sagaRoot?: string,
+): StaveSpaceWizardState {
+  const state: StaveSpaceWizardState = {
     step: "identity",
     spaceId: "",
     title: "",
@@ -107,7 +110,7 @@ export function createInitialWizardState(): StaveSpaceWizardState {
     specText: "",
     specPath: "",
     emptySpace: false,
-    repos: [],
+    repos: syncRepoRows([], context.repos),
     common: false,
     includeWeak: false,
     noLearn: false,
@@ -115,6 +118,7 @@ export function createInitialWizardState(): StaveSpaceWizardState {
     sagaId: null,
     after: [],
   };
+  return preselectSaga(state, context.sagas, sagaRoot);
 }
 
 export function updateWizardState(
@@ -594,8 +598,16 @@ export interface StaveSagaWizardState {
   readonly memory: ReadonlyArray<string>;
 }
 
-export function createInitialSagaWizardState(): StaveSagaWizardState {
-  return { sagaId: "", title: "", specText: "", references: [], memory: [] };
+export function createInitialSagaWizardState(
+  registry: ReadonlyArray<StaveRepoRow> = [],
+): StaveSagaWizardState {
+  return {
+    sagaId: "",
+    title: "",
+    specText: "",
+    references: syncRepoRows([], registry),
+    memory: [],
+  };
 }
 
 export function validateSagaWizard(

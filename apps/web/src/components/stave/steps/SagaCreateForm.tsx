@@ -52,7 +52,9 @@ export function SagaCreateForm(props: {
   const { environmentId, onBusyChange } = props;
   const data = useStaveWizardData(environmentId);
   const { context } = data;
-  const [state, setState] = useState<StaveSagaWizardState>(createInitialSagaWizardState);
+  const [state, setState] = useState<StaveSagaWizardState>(() =>
+    createInitialSagaWizardState(context.repos),
+  );
   const [operationId, setOperationId] = useState<string | null>(null);
   const runOperation = useAtomCommand(staveOperations.run, { reportFailure: false });
   const operation = useAtomValue(staveOperations.stateAtom(operationId ?? IDLE_OPERATION_ID));

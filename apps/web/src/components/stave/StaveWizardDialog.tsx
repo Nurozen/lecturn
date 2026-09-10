@@ -144,7 +144,8 @@ function SpaceWizard(props: {
   const handleNewThread = useNewThreadHandler();
   const data = useStaveWizardData(environmentId);
   const { context } = data;
-  const [state, setState] = useState(createInitialWizardState);
+  // Reopening can read a warm query cache without any subsequent data change.
+  const [state, setState] = useState(() => createInitialWizardState(context, request.saga?.root));
   const [operationId, setOperationId] = useState<string | null>(null);
   const [dryRunPending, setDryRunPending] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);

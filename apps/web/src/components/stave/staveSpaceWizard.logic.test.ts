@@ -123,6 +123,76 @@ function contextWith(patch: Partial<StaveWizardContext> = {}): StaveWizardContex
   return { ...EMPTY_WIZARD_CONTEXT, ...patch };
 }
 
+describe("wizard initialization with cached data", () => {
+  const cached = contextWith({
+    repos: [repoRow("web"), repoRow("api")],
+    sagas: [sagaRow("epic-dir", { logicalId: "epic" })],
+  });
+
+  it("reopens with the same repo choices as a first open that loaded asynchronously", () => {
+    const initial = createInitialWizardState();
+    const loaded = { ...initial, repos: syncRepoRows(initial.repos, cached.repos) };
+    const selected = setRepoBase(setRepoMode(loaded, "web", "edit"), "web", "feature");
+
+    const reopened = createInitialWizardState(cached);
+    expect(reopened.repos).toEqual([wizardRepo("web", "none"), wizardRepo("api", "none")]);
+    expect(reopened).toEqual(loaded);
+    expect(selected.repos[0]).toEqual(wizardRepo("web", "edit", { base: "feature" }));
+    expect(canAdvance({ ...reopened, step: "repos" }, cached).ok).toBe(false);
+    expect(canAdvance({ ...setRepoMode(reopened, "web", "edit"), step: "repos" }, cached).ok).toBe(
+      true,
+    );
+  });
+
+  it("preselects the requested saga whether its list is cached or arrives later", () => {
+    const root = "/work/epic-dir";
+    const loaded = preselectSaga(
+      createInitialWizardState(EMPTY_WIZARD_CONTEXT, root),
+      cached.sagas,
+      root,
+    );
+    const reopened = createInitialWizardState(cached, root);
+    expect(reopened.sagaId).toBe("epic");
+    expect(reopened.sagaId).toBe(loaded.sagaId);
+    expect(createInitialWizardState(cached).sagaId).toBeNull();
+    expect(createInitialWizardState(cached, "/work/missing").sagaId).toBeNull();
+  });
+
+  it("keeps edits when the registry refreshes after a cached open", () => {
+    const selected = setRepoBase(
+      setRepoMode(createInitialWizardState(cached), "web", "edit"),
+      "web",
+      "space:base",
+    );
+    const refreshed = syncRepoRows(selected.repos, [...cached.repos, repoRow("docs")]);
+    expect(refreshed).toEqual([
+      wizardRepo("web", "edit", { base: "space:base" }),
+      wizardRepo("api", "none"),
+      wizardRepo("docs", "none"),
+    ]);
+  });
+
+  it("reopens saga creation with all cached references and no previous selections", () => {
+    const initial = createInitialSagaWizardState();
+    const loaded = { ...initial, references: syncRepoRows(initial.references, cached.repos) };
+    const selected = {
+      ...loaded,
+      references: [wizardRepo("web", "reference", { ref: "v1" }), wizardRepo("api", "none")],
+    };
+    const reopened = createInitialSagaWizardState(cached.repos);
+    expect(reopened.references).toEqual([wizardRepo("web", "none"), wizardRepo("api", "none")]);
+    expect(reopened).toEqual(loaded);
+    expect(buildCreateSagaOperation({ ...selected, sagaId: "epic" }).references).toEqual([
+      { repo: "web", ref: "v1" },
+    ]);
+    expect(buildCreateSagaOperation({ ...reopened, sagaId: "epic" }).references).toEqual([]);
+    expect(syncRepoRows(selected.references, [...cached.repos, repoRow("docs")])).toEqual([
+      ...selected.references,
+      wizardRepo("docs", "none"),
+    ]);
+  });
+});
+
 // ── Identity ──────────────────────────────────────────────────
 
 describe("validateSpaceId", () => {
