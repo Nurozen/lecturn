@@ -1,0 +1,74 @@
+name: Deploy Production Web
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Do not interrupt a publisher or let an older CI completion roll production back.
+concurrency:
+  group: web-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check that the tested commit is still main
+        id: current
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { data } = await github.rest.git.getRef({
+              ...context.repo,
+              ref: 'heads/main',
+            });
+            const tested = context.payload.workflow_run.head_sha;
+            core.setOutput('deploy', data.object.sha === tested ? 'true' : 'false');
+            if (data.object.sha !== tested) core.notice(`Skipping superseded commit ${tested}`);
+
+      - name: Checkout the commit that passed CI
+        if: steps.current.outputs.deploy == 'true'
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Node
+        if: steps.current.outputs.deploy == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Build and deploy production web
+        if: steps.current.outputs.deploy == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          : "${VERCEL_TOKEN:?Missing VERCEL_TOKEN}"
+          : "${VERCEL_ORG_ID:?Missing VERCEL_ORG_ID}"
+          : "${VERCEL_PROJECT_ID:?Missing VERCEL_PROJECT_ID}"
+          npx --yes vercel@59.11.7 deploy --prod --yes --archive=tgz \
+            --token "$VERCEL_TOKEN" \
+            --scope "${VERCEL_TEAM_SLUG:-$VERCEL_ORG_ID}" \
+            --meta "githubCommitSha=$TESTED_SHA"
+          echo "Production web deployed from CI-tested commit $TESTED_SHA." >> "$GITHUB_STEP_SUMMARY"
