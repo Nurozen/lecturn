@@ -1,3 +1,4 @@
+import { StaveMemoryWiring } from "../../stave/StaveMemoryWiring.ts";
 /**
  * OpenCodeDriver — `ProviderDriver` for the OpenCode runtime.
  *
@@ -79,6 +80,7 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
 });
 
 export type OpenCodeDriverEnv =
+  | StaveMemoryWiring
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
@@ -124,6 +126,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       });
 
       const adapter = yield* makeOpenCodeAdapter(effectiveConfig, {
+        staveMemoryWiring: yield* StaveMemoryWiring,
         instanceId,
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),

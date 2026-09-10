@@ -1,3 +1,4 @@
+import * as StaveMemoryWiring from "./stave/StaveMemoryWiring.ts";
 import { EnvironmentHttpApi } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
@@ -431,6 +432,7 @@ const StaveLifecycleLayerLive = StaveLifecycleRepositoryLive.pipe(
   Layer.provide(PersistenceLayerLive),
 );
 const StaveLayerLive = Layer.mergeAll(
+  StaveMemoryWiring.layer.pipe(Layer.provide(ServerSettingsLayerLive)),
   StaveReadCache.layer,
   StaveMergeSignal.layer.pipe(
     Layer.provide(Layer.mergeAll(StaveCliLayerLive, StaveBinaryLayerLive, ServerSettingsLayerLive)),

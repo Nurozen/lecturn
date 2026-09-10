@@ -6,7 +6,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { notifyStaveMutation } from "../../staveMutation";
 import { randomUUID } from "../../lib/utils";
-import { staveDryRun, staveSpaceStatusRead } from "../../state/stave";
+import { staveOperationUnavailableReason } from "./staveCompatibility.logic";
+import { staveDryRun, staveSpaceStatusRead, useStaveStatus } from "../../state/stave";
 import { staveOperations } from "../../state/staveOperations";
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
@@ -38,6 +39,7 @@ export function StaveConfirmDialog({
   onClose,
   onFinished,
   membershipWorkspaceRoot,
+  lifecycleIsSaga,
 }: {
   environmentId: EnvironmentId;
   operation: StaveOperation;
@@ -45,6 +47,7 @@ export function StaveConfirmDialog({
   onClose: () => void;
   onFinished: () => void;
   membershipWorkspaceRoot?: string | undefined;
+  lifecycleIsSaga?: boolean | undefined;
 }) {
   const [forced, setForced] = useState("force" in initial && initial.force);
   const [sagaConfirmed, setSagaConfirmed] = useState(false);
@@ -87,7 +90,13 @@ export function StaveConfirmDialog({
     }
     return forced ? forceStaveOperation(next) : next;
   }, [initial, memory, forced, sagaConfirmed]);
-  const key = JSON.stringify([environmentId, operation, attempt]);
+  const status = useStaveStatus(environmentId);
+  const unavailableReason = staveOperationUnavailableReason(
+    status.data,
+    operation,
+    lifecycleIsSaga,
+  );
+  const key = JSON.stringify([environmentId, operation, attempt, unavailableReason]);
   const state = useAtomValue(staveOperations.stateAtom(operationId));
   const dryRun = useAtomCommand(staveDryRun, { reportFailure: false });
   const run = useAtomCommand(staveOperations.run, { reportFailure: false });
@@ -97,6 +106,7 @@ export function StaveConfirmDialog({
   useEffect(() => {
     let stale = false;
     if (started) return;
+    if (unavailableReason) return;
     void dryRun({ environmentId, input: { operation } }).then((result) => {
       if (stale) return;
       if (result._tag === "Success") setPreview({ key, plan: result.value.plan });
@@ -114,7 +124,7 @@ export function StaveConfirmDialog({
     return () => {
       stale = true;
     };
-  }, [environmentId, operation, key, dryRun, started]);
+  }, [environmentId, operation, key, dryRun, started, unavailableReason]);
 
   useEffect(() => {
     if (
@@ -127,7 +137,11 @@ export function StaveConfirmDialog({
     }
   }, [state.status, operationId, onFinished, environmentId]);
 
-  const currentPreview = preview?.key === key ? preview : null;
+  const currentPreview = unavailableReason
+    ? { key, error: unavailableReason }
+    : preview?.key === key
+      ? preview
+      : null;
   const busy =
     started &&
     (state.status === "idle" || state.status === "running" || state.status === "disconnected");
@@ -290,7 +304,7 @@ export function StaveConfirmDialog({
                   ? "default"
                   : "destructive"
               }
-              disabled={currentPreview?.plan === undefined}
+              disabled={currentPreview?.plan === undefined || unavailableReason !== null}
               onClick={() => {
                 setStarted(true);
                 void run({ environmentId, operationId, operation });

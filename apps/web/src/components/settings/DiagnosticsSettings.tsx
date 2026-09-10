@@ -1,3 +1,4 @@
+import { StaveCompatibilityNotice, StaveMemoryProviderSupport } from "../stave/StaveCompatibility";
 import {
   AlertTriangleIcon,
   ChevronDownIcon,
@@ -195,6 +196,12 @@ function StaveDiagnosticsSection({ status }: { status: StaveStatusView }) {
         />
       </StatsGrid>
       <DiagnosticsErrorStrip messages={[data?.runnableError?.message ?? null, error]} />
+      <div className="space-y-3 px-4 py-3 sm:px-5">
+        <StaveCompatibilityNotice status={data} />
+        {data?.memoryWiringProviders ? (
+          <StaveMemoryProviderSupport providers={data.memoryWiringProviders} />
+        ) : null}
+      </div>
       <DiagnosticsTable
         headers={["Setting", "Value"]}
         minTableWidth="min-w-[480px]"

@@ -17,6 +17,7 @@ import * as TestClock from "effect/testing/TestClock";
 
 import {
   ApprovalRequestId,
+  EnvironmentId,
   GrokSettings,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -26,6 +27,8 @@ import {
 } from "@t3tools/contracts";
 
 import { ServerConfig } from "../../config.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { StaveMemoryWiring, type StaveMemoryResolution } from "../../stave/StaveMemoryWiring.ts";
 import {
   grokPromptSettlementBelongsToContext,
   isGrokEnterPlanModeToolCall,
@@ -213,6 +216,116 @@ it("requires a settlement to match the live Grok turn", () => {
 });
 
 it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
+  for (const scenario of [
+    { name: "configured with t3-code", state: "configured", withT3: true },
+    { name: "configured without t3-code or env", state: "configured", withT3: false },
+    { name: "absent with t3-code", state: "absent", withT3: true },
+    { name: "absent without t3-code", state: "absent", withT3: false },
+    { name: "missing config with t3-code", state: "missing_config", withT3: true },
+    { name: "invalid config without t3-code", state: "invalid_config", withT3: false },
+  ] as const) {
+    it.effect(`preserves ACP MCP servers on start and resume: ${scenario.name}`, () =>
+      Effect.gen(function* () {
+        const workspace = yield* Effect.promise(() =>
+          NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "grok-stave-mcp-")),
+        );
+        yield* Effect.addFinalizer(() =>
+          Effect.promise(() => NodeFSP.rm(workspace, { recursive: true, force: true })),
+        );
+        const requestLogPath = NodePath.join(workspace, "requests.ndjson");
+        const wrapperPath = yield* Effect.promise(() =>
+          makeMockGrokWrapper({ T3_ACP_REQUEST_LOG_PATH: requestLogPath }),
+        );
+        const threadId = ThreadId.make(`grok-stave-${scenario.name}`);
+        if (scenario.withT3) {
+          McpProviderSession.setMcpProviderSession({
+            environmentId: EnvironmentId.make("stave-test-environment"),
+            threadId,
+            providerSessionId: "stave-test-session",
+            providerInstanceId: ProviderInstanceId.make("grok"),
+            endpoint: "http://127.0.0.1:3999/mcp",
+            authorizationHeader: "Bearer t3-test-token",
+          });
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
+          );
+        }
+        const resolution: StaveMemoryResolution =
+          scenario.state === "configured"
+            ? {
+                state: "configured",
+                config: {
+                  command: '/opt/Memory Tools/marmot "雪"',
+                  args: ["serve", "--den", 'den with "quotes" and \u2603'],
+                  ...(scenario.withT3 ? { env: { MARMOT_HOME: 'C:\\Memory\\雪 "home"' } } : {}),
+                },
+              }
+            : scenario.state === "absent"
+              ? { state: "absent" }
+              : { state: "unavailable", code: scenario.state };
+        const resolvedCwds: string[] = [];
+        const adapter = yield* makeGrokAdapter(decodeGrokSettings({ binaryPath: wrapperPath }), {
+          staveMemoryWiring: StaveMemoryWiring.of({
+            resolve: (cwd) =>
+              Effect.sync(() => {
+                resolvedCwds.push(cwd);
+                return resolution;
+              }),
+          }),
+        });
+        const input = {
+          threadId,
+          provider: ProviderDriverKind.make("grok"),
+          cwd: NodePath.join(workspace, "child", ".."),
+          runtimeMode: "full-access" as const,
+        };
+        const started = yield* adapter.startSession(input);
+        yield* adapter.stopSession(threadId);
+        yield* adapter.startSession({ ...input, resumeCursor: started.resumeCursor });
+        yield* adapter.stopSession(threadId);
+        const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
+        const sessionRequests = requests.filter(
+          (request) => request.method === "session/new" || request.method === "session/load",
+        );
+        const expectedServers = [
+          ...(scenario.withT3
+            ? [
+                {
+                  type: "http",
+                  name: "t3-code",
+                  url: "http://127.0.0.1:3999/mcp",
+                  headers: [{ name: "Authorization", value: "Bearer t3-test-token" }],
+                },
+              ]
+            : []),
+          ...(scenario.state === "configured"
+            ? [
+                {
+                  name: "context-marmot",
+                  command: '/opt/Memory Tools/marmot "雪"',
+                  args: ["serve", "--den", 'den with "quotes" and \u2603'],
+                  env: scenario.withT3
+                    ? [{ name: "MARMOT_HOME", value: 'C:\\Memory\\雪 "home"' }]
+                    : [],
+                },
+              ]
+            : []),
+        ];
+        assert.deepStrictEqual(resolvedCwds, [workspace, workspace]);
+        assert.deepStrictEqual(
+          sessionRequests.map(({ method, params }) => ({ method, params })),
+          [
+            { method: "session/new", params: { cwd: workspace, mcpServers: expectedServers } },
+            {
+              method: "session/load",
+              params: { cwd: workspace, mcpServers: expectedServers, sessionId: "mock-session-1" },
+            },
+          ],
+        );
+      }),
+    );
+  }
+
   it.effect("starts a session and maps mock ACP prompt flow to runtime events", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("grok-mock-thread");

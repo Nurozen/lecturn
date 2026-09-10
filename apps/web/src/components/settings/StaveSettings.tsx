@@ -1,3 +1,5 @@
+import { StaveCompatibilityNotice, StaveMemoryProviderSupport } from "../stave/StaveCompatibility";
+import { staveOperationUnavailableReason } from "../stave/staveCompatibility.logic";
 import { StaveLifecycleSettings } from "./StaveLifecycleSettings";
 import { StavePendingCleanups } from "./StavePendingCleanups";
 import { useAtomValue } from "@effect/atom-react";
@@ -121,7 +123,12 @@ function StaveStatusRow() {
             <Button
               size="sm"
               variant="outline"
-              disabled={!settings.stave.enabled || setupBusy || environmentId === null}
+              disabled={
+                !settings.stave.enabled ||
+                setupBusy ||
+                environmentId === null ||
+                staveOperationUnavailableReason(status.data, "setup") !== null
+              }
               title={!settings.stave.enabled ? "Enable Stave before setting it up." : undefined}
               onClick={() => {
                 if (environmentId === null) return;
@@ -158,6 +165,12 @@ function StaveStatusRow() {
         </>
       }
     >
+      <div className="space-y-3 pb-3">
+        <StaveCompatibilityNotice status={status.data} />
+        {status.data?.memoryWiringProviders ? (
+          <StaveMemoryProviderSupport providers={status.data.memoryWiringProviders} />
+        ) : null}
+      </div>
       {setupStarted && setupEnvironmentId !== null ? (
         <div className="pb-3">
           <StaveOperationProgress environmentId={setupEnvironmentId} operationId={setupId} />

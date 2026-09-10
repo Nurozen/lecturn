@@ -7,6 +7,8 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { StaveSagaActions, StaveSpaceMembership } from "../stave/StaveSagaActions";
+import { StaveMemoryProviderSupport, StaveCompatibilityNotice } from "../stave/StaveCompatibility";
+import { staveMemoryConfigurationText } from "../stave/staveCompatibility.logic";
 import { StaveSpaceActions } from "../stave/StaveSpaceActions";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { formatStaveRepoStatus } from "./StaveProjectSection.logic";
@@ -28,7 +30,7 @@ export function StaveProjectSection({
   environmentId: EnvironmentId;
   workspaceRoot: string;
 }) {
-  const { available } = useStaveFeatureAvailable(environmentId);
+  const { available, status } = useStaveFeatureAvailable(environmentId);
   const live = useStaveSpaceStatus({
     environmentId,
     workspaceRoot,
@@ -54,6 +56,9 @@ export function StaveProjectSection({
             (live.error instanceof Error ? live.error.message : "Live status unavailable.")}
         </p>
       ) : null}
+      <div className="px-3 sm:px-4">
+        <StaveCompatibilityNotice status={status.data} />
+      </div>
       <SettingsRow title="Space id" control={<ManifestValue>{stave.spaceId}</ManifestValue>} />
       <SettingsRow title="Kind" control={<ManifestValue>{kind}</ManifestValue>} />
       <SettingsRow
@@ -127,6 +132,22 @@ export function StaveProjectSection({
           />
         ) : null}
       </SettingsRow>
+      {stave.memories.some((memory) => memory.provider === "marmot") ? (
+        <SettingsRow
+          title="Provider memory"
+          description={
+            archived
+              ? "Unarchive this space before starting a provider session with its memory."
+              : !available
+                ? "Enable Stave with a runnable binary to inspect memory wiring."
+                : staveMemoryConfigurationText(live.data?.memoryWiring)
+          }
+        >
+          <div className="pb-3">
+            <StaveMemoryProviderSupport providers={status.data?.memoryWiringProviders} />
+          </div>
+        </SettingsRow>
+      ) : null}
       {available && (stave.isSaga || stave.kind === "saga") ? (
         <StaveSagaActions
           key={`${environmentId}:${workspaceRoot}:${stave.createdAt}`}

@@ -7,7 +7,8 @@ import type {
 import { useState } from "react";
 
 import { isValidStaveSpaceId } from "@t3tools/shared/stave";
-import { staveRepos, staveSpaces } from "../../state/stave";
+import { staveOperationUnavailableReason } from "./staveCompatibility.logic";
+import { staveRepos, staveSpaces, useStaveStatus } from "../../state/stave";
 import { useEnvironmentQuery } from "../../state/query";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
@@ -39,6 +40,9 @@ export function StaveSpaceActions({
   const [referencesOnly, setReferencesOnly] = useState(false);
   const scope = { workspaceRoot, expectedManifestCreatedAt: stave.createdAt };
   const bound = stave.createdAt !== undefined;
+  const status = useStaveStatus(environmentId);
+  const unsupported = (kind: StaveOperation["kind"]) =>
+    staveOperationUnavailableReason(status.data, kind) !== null;
   const archived = stave.state === "archived";
   const confirm = (title: string, operation: StaveOperation) =>
     setConfirmation({ title, operation });
@@ -57,7 +61,7 @@ export function StaveSpaceActions({
           </p>
           <Button
             size="sm"
-            disabled={!bound || !stave.archiveBasename}
+            disabled={!bound || !stave.archiveBasename || unsupported("restoreSpace")}
             onClick={() => {
               if (stave.archiveBasename)
                 confirm("Unarchive space", {
@@ -76,7 +80,7 @@ export function StaveSpaceActions({
             <Button
               size="sm"
               variant="outline"
-              disabled={!bound}
+              disabled={!bound || unsupported("addRepo")}
               onClick={() => setEditor({ kind: "add" })}
             >
               Add repo
@@ -84,7 +88,7 @@ export function StaveSpaceActions({
             <Button
               size="sm"
               variant="outline"
-              disabled={!bound}
+              disabled={!bound || unsupported("syncSpace")}
               onClick={() => confirm("Sync space", { kind: "syncSpace", ...scope, referencesOnly })}
             >
               Sync
@@ -109,7 +113,7 @@ export function StaveSpaceActions({
                 <Button
                   size="xs"
                   variant="outline"
-                  disabled={!bound}
+                  disabled={!bound || unsupported("retarget")}
                   onClick={() => setEditor({ kind: "retarget", repo })}
                 >
                   Retarget
@@ -118,7 +122,7 @@ export function StaveSpaceActions({
               <Button
                 size="xs"
                 variant="destructive-outline"
-                disabled={!bound}
+                disabled={!bound || unsupported("removeRepo")}
                 onClick={() =>
                   confirm(`Remove ${repo.name} (${repo.mode})`, {
                     kind: "removeRepo",
@@ -138,7 +142,7 @@ export function StaveSpaceActions({
               className="self-start"
               size="sm"
               variant="outline"
-              disabled={!bound}
+              disabled={!bound || unsupported("memoryAttach")}
               onClick={() => setEditor({ kind: "memory" })}
             >
               Attach memory
@@ -149,7 +153,7 @@ export function StaveSpaceActions({
                 <Button
                   size="xs"
                   variant="outline"
-                  disabled={!bound}
+                  disabled={!bound || unsupported("memoryDetach")}
                   onClick={() =>
                     confirm(`Detach ${memory.name}`, {
                       kind: "memoryDetach",
@@ -165,7 +169,7 @@ export function StaveSpaceActions({
                   <Button
                     size="xs"
                     variant="destructive-outline"
-                    disabled={!bound}
+                    disabled={!bound || unsupported("memoryDetach")}
                     onClick={() =>
                       confirm(`Destroy ${memory.name}`, {
                         kind: "memoryDetach",
@@ -185,7 +189,7 @@ export function StaveSpaceActions({
             <Button
               size="sm"
               variant="outline"
-              disabled={!bound}
+              disabled={!bound || unsupported("archiveSpace")}
               onClick={() =>
                 confirm("Archive space", {
                   kind: "archiveSpace",
@@ -200,7 +204,7 @@ export function StaveSpaceActions({
             <Button
               size="sm"
               variant="destructive-outline"
-              disabled={!bound}
+              disabled={!bound || unsupported("destroySpace")}
               onClick={() =>
                 confirm("Destroy space", {
                   kind: "destroySpace",

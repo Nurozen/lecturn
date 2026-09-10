@@ -1,3 +1,5 @@
+import { useStaveStatus } from "../../../state/stave";
+import { staveOperationUnavailableReason } from "../staveCompatibility.logic";
 import type { EnvironmentId, StaveRepoRow } from "@t3tools/contracts";
 import { useState } from "react";
 
@@ -136,7 +138,9 @@ function RegisterRepoForm(props: {
   const [submitting, setSubmitting] = useState(false);
   const runOperation = useAtomCommand(staveOperations.run, { reportFailure: false });
   const gate = validateRegisterRepoForm(form, registry);
-  const canRegister = gate.ok && !submitting;
+  const compatibility = useStaveStatus(environmentId);
+  const unavailableReason = staveOperationUnavailableReason(compatibility.data, "registerRepo");
+  const canRegister = gate.ok && !submitting && unavailableReason === null;
 
   const register = async () => {
     if (!canRegister) return;
@@ -158,6 +162,9 @@ function RegisterRepoForm(props: {
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-dashed border-border/70 p-2.5">
       <p className="text-sm font-medium">Register a repo</p>
+      {unavailableReason ? (
+        <p className="text-xs text-muted-foreground">{unavailableReason}</p>
+      ) : null}
       <div
         className="flex flex-wrap items-center gap-2"
         onKeyDown={(event) => {

@@ -41,6 +41,7 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { StaveMemoryWiring, noop as noopStaveMemoryWiring } from "../../stave/StaveMemoryWiring.ts";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
@@ -108,6 +109,7 @@ function encodeJsonStringForDiagnostics(input: unknown): string | undefined {
 }
 
 export interface GrokAdapterLiveOptions {
+  readonly staveMemoryWiring?: StaveMemoryWiring["Service"];
   readonly environment?: NodeJS.ProcessEnv;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
@@ -1000,6 +1002,27 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           });
 
           const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+          const memory = yield* (options?.staveMemoryWiring ?? noopStaveMemoryWiring).resolve(cwd);
+          const mcpServers: Array<EffectAcpSchema.McpServer> = [];
+          if (mcpSession) {
+            mcpServers.push({
+              type: "http",
+              name: "t3-code",
+              url: mcpSession.endpoint,
+              headers: [{ name: "Authorization", value: mcpSession.authorizationHeader }],
+            });
+          }
+          if (memory.state === "configured") {
+            mcpServers.push({
+              name: "context-marmot",
+              command: memory.config.command,
+              args: memory.config.args,
+              env: Object.entries(memory.config.env ?? {}).map(([name, value]) => ({
+                name,
+                value,
+              })),
+            });
+          }
           const acp = yield* makeGrokAcpRuntime({
             grokSettings,
             ...(options?.environment ? { environment: options.environment } : {}),
@@ -1008,23 +1031,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             runtimeMode: input.runtimeMode,
             ...(resumeSessionId ? { resumeSessionId } : {}),
             clientInfo: { name: "t3-code", version: "0.0.0" },
-            ...(mcpSession
-              ? {
-                  mcpServers: [
-                    {
-                      type: "http" as const,
-                      name: "t3-code",
-                      url: mcpSession.endpoint,
-                      headers: [
-                        {
-                          name: "Authorization",
-                          value: mcpSession.authorizationHeader,
-                        },
-                      ],
-                    },
-                  ],
-                }
-              : {}),
+            ...(mcpServers.length > 0 ? { mcpServers } : {}),
             ...acpNativeLoggers,
           }).pipe(
             Effect.provideService(Crypto.Crypto, crypto),

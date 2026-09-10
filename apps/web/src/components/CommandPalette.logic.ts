@@ -178,11 +178,17 @@ export function buildProjectActionItems(input: {
 export function buildStaveAddProjectItems(input: {
   readonly environmentId: string;
   readonly available: boolean;
+  readonly unsupportedOperations?: readonly string[];
   readonly icons: Record<AddProjectStaveSource, ReactNode>;
   readonly launch: (source: AddProjectStaveSource) => void;
 }): CommandPaletteActionItem[] {
   if (!input.available) return [];
-  return ADD_PROJECT_STAVE_SOURCES.map((source) => ({
+  return ADD_PROJECT_STAVE_SOURCES.filter(
+    (source) =>
+      !input.unsupportedOperations?.includes(
+        source === "stave-space" ? "createSpace" : "createSaga",
+      ),
+  ).map((source) => ({
     kind: "action",
     value: `action:add-project:${input.environmentId}:${source}`,
     searchTerms: ["stave", "new", source === "stave-space" ? "space" : "saga", "workspace"],

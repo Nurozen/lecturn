@@ -1,3 +1,10 @@
+import type { StaveFeatures } from "@t3tools/contracts";
+import {
+  STAVE_FEATURE_VERBS,
+  bundledStaveFeatures,
+  makeStaveFeatures,
+  parseStaveCommandHelp,
+} from "./staveFeatures.ts";
 /**
  * StaveBinary - Effect service that locates the `stave` executable the server
  * shells out to, and reports which of the candidate sources supplied it.
@@ -9,14 +16,16 @@
  *   executable fails naming that path rather than silently falling back to a
  *   different binary than the user asked for.
  * - `resolveRunnable` skips settings entirely. It answers "could Stave run on
- *   this machine at all" for the live status/capability probe (deviation 5),
- *   so a bad user override never hides the bundled or PATH binary.
+ *   this machine at all" for settings-independent inventory only,
+ *   while status and all execution gates use the authoritative `resolve`.
  *
  * After settings, the order is `T3CODE_STAVE_PATH` → the desktop bootstrap
  * `stavePath` → binaries bundled next to the server build → `stave` on PATH.
  * Each hit is probed with `stave version`; a failed probe leaves `version`
  * null and does not fail resolution. Successful resolutions are memoised per
- * settings key and dropped on any settings change or explicit `invalidate`.
+ * settings key. Cached file identity is checked cheaply on every resolution;
+ * replacement/removal refreshes version and features without re-running help on
+ * unchanged files. Settings changes and explicit `invalidate` clear all caches.
  *
  * @module StaveBinary
  */
@@ -25,7 +34,7 @@ import {
   HostProcessEnvironment,
   HostProcessPlatform,
 } from "@t3tools/shared/hostProcess";
-import { resolveCommandPath } from "@t3tools/shared/shell";
+import { CommandResolutionCache, resolveCommandPath } from "@t3tools/shared/shell";
 import { isStavePlatformKey, parseStaveVersionOutput } from "@t3tools/shared/stave";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -82,7 +91,18 @@ export class StaveBinaryNotExecutable extends Schema.TaggedErrorClass<StaveBinar
   }
 }
 
-export type StaveBinaryError = StaveBinaryNotFound | StaveBinaryNotExecutable;
+export class StaveBinaryUnsupportedWrapper extends Schema.TaggedErrorClass<StaveBinaryUnsupportedWrapper>()(
+  "StaveBinaryUnsupportedWrapper",
+  { path: Schema.String },
+) {
+  override get message(): string {
+    return "Stave .cmd and .bat wrappers are unsupported; select the native stave.exe executable.";
+  }
+}
+export type StaveBinaryError =
+  | StaveBinaryNotFound
+  | StaveBinaryNotExecutable
+  | StaveBinaryUnsupportedWrapper;
 
 export interface StaveBinaryShape {
   /**
@@ -93,9 +113,12 @@ export interface StaveBinaryShape {
   readonly resolve: Effect.Effect<StaveBinaryResolution, StaveBinaryError>;
   /**
    * Same candidate walk WITHOUT `settings.stave.binaryPath` — the
-   * settings-independent "runnable" probe used by status and capability.
+   * settings-independent inventory probe; status and execution use `resolve`.
    */
   readonly resolveRunnable: Effect.Effect<StaveBinaryResolution, StaveBinaryError>;
+  readonly features: Effect.Effect<StaveFeatures, StaveBinaryError>;
+  /** Probe the same resolution the caller will execute, even across settings changes. */
+  readonly featuresFor: (resolution: StaveBinaryResolution) => Effect.Effect<StaveFeatures>;
   /** Drop memoised resolutions so the next call re-probes disk and `stave version`. */
   readonly invalidate: Effect.Effect<void>;
 }
@@ -182,18 +205,27 @@ export const make = Effect.fn("StaveBinary.make")(function* (options: StaveBinar
    */
   const probeCandidate = Effect.fn("StaveBinary.probeCandidate")(function* (
     candidatePath: string,
-  ): Effect.fn.Return<Option.Option<string>, StaveBinaryNotExecutable> {
+  ): Effect.fn.Return<
+    Option.Option<string>,
+    StaveBinaryNotExecutable | StaveBinaryUnsupportedWrapper
+  > {
     const stat = yield* fileSystem.stat(candidatePath).pipe(Effect.option);
     if (Option.isNone(stat) || stat.value.type !== "File") {
       return Option.none();
     }
+    if (platform === "win32" && /\.(?:cmd|bat)$/i.test(candidatePath))
+      return yield* new StaveBinaryUnsupportedWrapper({ path: candidatePath });
     if (platform !== "win32" && (stat.value.mode & 0o111) === 0) {
       return yield* new StaveBinaryNotExecutable({ path: candidatePath });
     }
     return Option.some(candidatePath);
   });
 
-  const resolveOnPath = resolveCommandPath(STAVE_COMMAND_NAME, { env: environment }).pipe(
+  const resolveOnPath = Effect.suspend(() =>
+    resolveCommandPath(STAVE_COMMAND_NAME, { env: environment }).pipe(
+      Effect.provideService(CommandResolutionCache, new Map()),
+    ),
+  ).pipe(
     Effect.option,
     Effect.provideService(FileSystem.FileSystem, fileSystem),
     Effect.provideService(Path.Path, path),
@@ -231,12 +263,30 @@ export const make = Effect.fn("StaveBinary.make")(function* (options: StaveBinar
     return { version: parsed.version, commit: parsed.commit ?? null };
   });
 
+  const resolutionFingerprints = new WeakMap<StaveBinaryResolution, string>();
+  const fileFingerprint = Effect.fn("StaveBinary.fileFingerprint")(function* (binaryPath: string) {
+    const stat = yield* fileSystem.stat(binaryPath).pipe(Effect.option);
+    if (Option.isNone(stat) || stat.value.type !== "File") return null;
+    const info = stat.value;
+    return `${info.dev}:${Option.getOrNull(info.ino)}:${info.size}:${info.mode}:${Option.match(info.mtime, { onNone: () => "", onSome: (date) => String(date.getTime()) })}`;
+  });
+  const resolutionIsFresh = Effect.fn("StaveBinary.resolutionIsFresh")(function* (
+    resolution: StaveBinaryResolution,
+  ) {
+    const fingerprint = yield* fileFingerprint(resolution.path);
+    return fingerprint !== null && resolutionFingerprints.get(resolution) === fingerprint;
+  });
+
   const toResolution = Effect.fn("StaveBinary.toResolution")(function* (
     binaryPath: string,
     source: StaveBinarySource,
   ) {
+    const fingerprint = yield* fileFingerprint(binaryPath);
+    if (fingerprint === null) return yield* new StaveBinaryNotFound({ candidates: [binaryPath] });
     const probed = yield* probeVersion(binaryPath);
-    return { path: binaryPath, source, ...probed } satisfies StaveBinaryResolution;
+    const resolution = { path: binaryPath, source, ...probed } satisfies StaveBinaryResolution;
+    resolutionFingerprints.set(resolution, fingerprint);
+    return resolution;
   });
 
   const walkRunnableCandidates = Effect.fn("StaveBinary.walkRunnableCandidates")(function* () {
@@ -248,7 +298,8 @@ export const make = Effect.fn("StaveBinary.make")(function* (options: StaveBinar
     }
     const onPath = yield* resolveOnPath;
     if (Option.isSome(onPath)) {
-      return yield* toResolution(onPath.value, "path");
+      const found = yield* probeCandidate(onPath.value);
+      if (Option.isSome(found)) return yield* toResolution(found.value, "path");
     }
     return yield* new StaveBinaryNotFound({
       candidates: [...runnableCandidates.map((candidate) => candidate.path), STAVE_COMMAND_NAME],
@@ -287,7 +338,7 @@ export const make = Effect.fn("StaveBinary.make")(function* (options: StaveBinar
 
   const resolveRunnable: StaveBinaryShape["resolveRunnable"] = Effect.gen(function* () {
     const cached = yield* Ref.get(runnableCache);
-    if (Option.isSome(cached)) {
+    if (Option.isSome(cached) && (yield* resolutionIsFresh(cached.value))) {
       return cached.value;
     }
     const resolution = yield* walkRunnableCandidates();
@@ -301,7 +352,11 @@ export const make = Effect.fn("StaveBinary.make")(function* (options: StaveBinar
       return yield* resolveRunnable;
     }
     const cached = yield* Ref.get(configuredCache);
-    if (Option.isSome(cached) && cached.value.key === configuredPath) {
+    if (
+      Option.isSome(cached) &&
+      cached.value.key === configuredPath &&
+      (yield* resolutionIsFresh(cached.value.resolution))
+    ) {
       return cached.value.resolution;
     }
     const resolution = yield* resolveConfiguredPath(configuredPath);
@@ -309,8 +364,53 @@ export const make = Effect.fn("StaveBinary.make")(function* (options: StaveBinar
     return resolution;
   }).pipe(Effect.withSpan("StaveBinary.resolve"));
 
+  const featureCache = yield* Ref.make(
+    Option.none<{ readonly key: string; readonly value: StaveFeatures }>(),
+  );
+  const featuresFor = Effect.fn("StaveBinary.featuresFor")(function* (
+    selected: StaveBinaryResolution,
+  ) {
+    const fingerprint = yield* fileFingerprint(selected.path);
+    const key = `${selected.source}:${selected.path}:${fingerprint}`;
+    const cached = yield* Ref.get(featureCache);
+    if (Option.isSome(cached) && cached.value.key === key) return cached.value.value;
+    const value =
+      selected.source === "bundled" || selected.source === "bootstrap"
+        ? bundledStaveFeatures()
+        : makeStaveFeatures(
+            "help",
+            yield* Effect.forEach(
+              STAVE_FEATURE_VERBS,
+              (verb) =>
+                processRunner
+                  .run({
+                    command: selected.path,
+                    args: [...verb.split(" "), "--help"],
+                    stdin: "",
+                    timeout: STAVE_VERSION_PROBE_TIMEOUT,
+                    timeoutBehavior: "timedOutResult",
+                  })
+                  .pipe(
+                    Effect.map((output) =>
+                      output.timedOut
+                        ? { verb, available: false, flags: [] }
+                        : parseStaveCommandHelp(verb, `${output.stdout}\n${output.stderr}`),
+                    ),
+                    Effect.orElseSucceed(() => ({ verb, available: false, flags: [] })),
+                  ),
+              { concurrency: 4 },
+            ),
+          );
+    yield* Ref.set(featureCache, Option.some({ key, value }));
+    return value;
+  });
+  const features = resolve.pipe(Effect.flatMap(featuresFor));
   const invalidate = Effect.all(
-    [Ref.set(runnableCache, Option.none()), Ref.set(configuredCache, Option.none())],
+    [
+      Ref.set(runnableCache, Option.none()),
+      Ref.set(configuredCache, Option.none()),
+      Ref.set(featureCache, Option.none()),
+    ],
     { discard: true },
   );
 
@@ -322,18 +422,23 @@ export const make = Effect.fn("StaveBinary.make")(function* (options: StaveBinar
     Effect.forkScoped,
   );
 
-  return StaveBinary.of({ resolve, resolveRunnable, invalidate });
+  return StaveBinary.of({ resolve, resolveRunnable, features, featuresFor, invalidate });
 });
 
 export const layer = Layer.effect(StaveBinary, make());
 
 /** Binary that resolves to a known location without touching disk — for tests. */
-export const layerFixed = (resolution: StaveBinaryResolution) =>
+export const layerFixed = (
+  resolution: StaveBinaryResolution,
+  features: StaveFeatures = bundledStaveFeatures(),
+) =>
   Layer.succeed(
     StaveBinary,
     StaveBinary.of({
       resolve: Effect.succeed(resolution),
       resolveRunnable: Effect.succeed(resolution),
+      features: Effect.succeed(features),
+      featuresFor: () => Effect.succeed(features),
       invalidate: Effect.void,
     }),
   );

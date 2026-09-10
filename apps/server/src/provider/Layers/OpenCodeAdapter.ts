@@ -33,6 +33,7 @@ import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { StaveMemoryWiring, noop as noopStaveMemoryWiring } from "../../stave/StaveMemoryWiring.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import {
   ProviderAdapterProcessError,
@@ -414,6 +415,7 @@ interface OpenCodeSessionContext {
 }
 
 export interface OpenCodeAdapterLiveOptions {
+  readonly staveMemoryWiring?: StaveMemoryWiring["Service"];
   readonly instanceId?: ProviderInstanceId;
   readonly environment?: NodeJS.ProcessEnv;
   readonly nativeEventLogPath?: string;
@@ -2498,6 +2500,29 @@ export function makeOpenCodeAdapter(
                       oauth: false,
                     },
                   }),
+                );
+              }
+              const memory = yield* (options?.staveMemoryWiring ?? noopStaveMemoryWiring).resolve(
+                directory,
+              );
+              if (memory.state === "configured" && !server.external) {
+                yield* Effect.acquireRelease(
+                  runOpenCodeSdk("mcp.add", () =>
+                    client.mcp.add({
+                      name: "context-marmot",
+                      directory,
+                      config: {
+                        type: "local",
+                        command: [memory.config.command, ...memory.config.args],
+                        ...(memory.config.env ? { environment: memory.config.env } : {}),
+                        enabled: true,
+                      },
+                    }),
+                  ),
+                  () =>
+                    runOpenCodeSdk("mcp.disconnect", () =>
+                      client.mcp.disconnect({ name: "context-marmot", directory }),
+                    ).pipe(Effect.ignore),
                 );
               }
               // Resume: re-adopt the session named by the durable cursor —

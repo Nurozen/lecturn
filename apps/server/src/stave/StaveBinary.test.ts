@@ -55,6 +55,7 @@ const makeFakeRunner = (
 
 interface HarnessOptions {
   readonly env?: NodeJS.ProcessEnv;
+  readonly platform?: NodeJS.Platform;
   readonly stavePath?: string;
   readonly settingsBinaryPath?: string;
   readonly bundledBaseDir?: string;
@@ -83,7 +84,7 @@ const makeHarness = Effect.fn(function* (baseDir: string, options: HarnessOption
     ...(options.bundledBaseDir === undefined ? {} : { bundledBaseDir: options.bundledBaseDir }),
   }).pipe(
     Effect.provide(context),
-    Effect.provideService(HostProcessPlatform, "linux"),
+    Effect.provideService(HostProcessPlatform, options.platform ?? "linux"),
     Effect.provideService(HostProcessArchitecture, "x64"),
     Effect.provideService(HostProcessEnvironment, options.env ?? {}),
     Effect.provideService(CommandResolutionCache, new Map()),
@@ -549,6 +550,141 @@ it.layer(NodeServices.layer)("StaveBinary", (it) => {
       assert.deepEqual(yield* service.resolve, resolution);
       assert.deepEqual(yield* service.resolveRunnable, resolution);
       yield* service.invalidate;
+    }),
+  );
+});
+
+it.layer(NodeServices.layer)("StaveBinary features and Windows", (it) => {
+  it.effect("probes the authoritative binary nested help on stderr, caches and invalidates", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const selected = yield* writeExecutable(`${root}/selected-stave`);
+      const runner = makeFakeRunner((input) =>
+        input.args?.[0] === "version"
+          ? versionOutput(STAVE_VERSION_OUTPUT)
+          : {
+              ...versionOutput("", 1),
+              stderr: `Usage:\n  stave ${input.args?.slice(0, -1).join(" ")} [flags]\nFlags:\n --json bool\n --config string\n --dry-run bool\n`,
+            },
+      );
+      const { service } = yield* makeHarness(root, { settingsBinaryPath: selected, runner });
+      const first = yield* service.features;
+      assert.equal(first.source, "help");
+      assert.isTrue(first.commands.find((entry) => entry.verb === "space archive")?.available);
+      assert.include(
+        first.commands.find((entry) => entry.verb === "space archive")?.flags ?? [],
+        "dry-run",
+      );
+      assert.include(first.unsupportedOperations, "createSpace");
+      const count = runner.calls.length;
+      assert.isAbove(count, 2);
+      yield* service.features;
+      assert.equal(runner.calls.length, count);
+      assert.isTrue(
+        runner.calls.every(
+          (call) =>
+            call.command === selected &&
+            (call.args?.[0] === "version" || call.args?.at(-1) === "--help"),
+        ),
+      );
+      yield* service.invalidate;
+      yield* service.features;
+      assert.equal(runner.calls.length, count * 2);
+    }),
+  );
+  it.effect("uses guaranteed bundled capabilities without help subprocesses", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped();
+      yield* writeExecutable(`${root}/dist/stave/linux-x64/stave`);
+      const { service, runner } = yield* makeHarness(root, { bundledBaseDir: `${root}/dist` });
+      const features = yield* service.features;
+      assert.equal(features.source, "bundled");
+      assert.deepEqual(features.unsupportedOperations, []);
+      assert.equal(runner.calls.length, 1);
+    }),
+  );
+  it.effect("rejects parent help and timed out command probes", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const selected = yield* writeExecutable(`${root}/stave`);
+      const runner = makeFakeRunner((input) =>
+        input.args?.[0] === "version"
+          ? versionOutput(STAVE_VERSION_OUTPUT)
+          : {
+              ...versionOutput("Usage:\n stave space [command]\n --json bool\n"),
+              timedOut: input.args?.[1] === "archive",
+            },
+      );
+      const { service } = yield* makeHarness(root, { settingsBinaryPath: selected, runner });
+      const features = yield* service.features;
+      assert.isTrue(features.commands.every((command) => !command.available));
+    }),
+  );
+  it.effect("accepts Windows exe without executable bits and refuses cmd wrappers", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const exe = yield* writeExecutable(`${root}/stave.exe`, 0o644);
+      const cmd = yield* writeExecutable(`${root}/stave.cmd`, 0o644);
+      const native = yield* makeHarness(root, { settingsBinaryPath: exe, platform: "win32" });
+      assert.equal((yield* native.service.resolve).path, exe);
+      const wrapper = yield* makeHarness(root, { settingsBinaryPath: cmd, platform: "win32" });
+      const failure = yield* wrapper.service.resolve.pipe(Effect.flip);
+      assert.equal(failure._tag, "StaveBinaryUnsupportedWrapper");
+      assert.include(failure.message, "stave.exe");
+      assert.equal(wrapper.runner.calls.length, 0);
+    }),
+  );
+});
+
+it.layer(NodeServices.layer)("StaveBinary live file changes", (it) => {
+  it.effect(
+    "refreshes version and help after in-place replacement, and rejects a removed override",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* fs.makeTempDirectoryScoped();
+        const selected = yield* writeExecutable(`${root}/stave`);
+        let version = "0.4.0";
+        const runner = makeFakeRunner((input) =>
+          input.args?.[0] === "version"
+            ? versionOutput(`stave v${version}\n`)
+            : versionOutput(
+                `Usage:\n stave ${input.args?.slice(0, -1).join(" ")} [flags]\n --json bool\n --config string\n`,
+              ),
+        );
+        const { service } = yield* makeHarness(root, { settingsBinaryPath: selected, runner });
+        assert.equal((yield* service.resolve).version, "0.4.0");
+        yield* service.features;
+        const count = runner.calls.length;
+        yield* service.resolve;
+        yield* service.features;
+        assert.equal(runner.calls.length, count);
+        version = "0.5.0";
+        yield* fs.writeFileString(selected, "replacement native executable with a different size");
+        assert.equal((yield* service.resolve).version, "0.5.0");
+        yield* service.features;
+        assert.equal(runner.calls.length, count * 2);
+        yield* fs.remove(selected);
+        assert.instanceOf(yield* Effect.flip(service.resolve), StaveBinary.StaveBinaryNotFound);
+        assert.equal(runner.calls.length, count * 2);
+      }),
+  );
+  it.effect("reselects PATH after a cached binary disappears", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const first = yield* writeExecutable(`${root}/first/stave`);
+      const second = yield* writeExecutable(`${root}/second/stave`);
+      const { service } = yield* makeHarness(root, {
+        env: { PATH: `${root}/first:${root}/second` },
+      });
+      assert.equal((yield* service.resolve).path, first);
+      yield* fs.remove(first);
+      assert.equal((yield* service.resolve).path, second);
     }),
   );
 });

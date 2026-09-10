@@ -1,3 +1,5 @@
+import { useStaveStatus } from "../../state/stave";
+import { staveOperationUnavailableReason } from "./staveCompatibility.logic";
 import type {
   EnvironmentId,
   StaveOperation,
@@ -57,6 +59,9 @@ export function StaveSagaActions({
     ...(stave.createdAt ? { expectedManifestCreatedAt: stave.createdAt } : {}),
   };
   const bound = !!stave.createdAt;
+  const compatibility = useStaveStatus(environmentId);
+  const unsupported = (kind: StaveOperation["kind"]) =>
+    staveOperationUnavailableReason(compatibility.data, kind) !== null;
   const review = (title: string, operation: StaveOperation) =>
     setConfirmation({ title, operation });
   const roster =
@@ -98,7 +103,7 @@ export function StaveSagaActions({
           <Button
             size="sm"
             variant="outline"
-            disabled={!bound}
+            disabled={!bound || unsupported("createSpace")}
             onClick={() =>
               openStaveWizard({ environmentId, kind: "space", saga: { root: sagaRoot } })
             }
@@ -108,7 +113,7 @@ export function StaveSagaActions({
           <Button
             size="sm"
             variant="outline"
-            disabled={!bound}
+            disabled={!bound || unsupported("sagaAdd")}
             onClick={() => setEditor({ after: [] })}
           >
             Adopt existing space
@@ -116,7 +121,7 @@ export function StaveSagaActions({
           <Button
             size="sm"
             variant="outline"
-            disabled={!bound}
+            disabled={!bound || unsupported("sagaSync")}
             onClick={() => review("Sync saga", { kind: "sagaSync", ...scope })}
           >
             Sync saga
@@ -149,7 +154,7 @@ export function StaveSagaActions({
               <Button
                 size="xs"
                 variant="outline"
-                disabled={!bound || !stamp || archived || space?.archived}
+                disabled={!bound || !stamp || archived || space?.archived || unsupported("sagaAdd")}
                 onClick={() => {
                   if (space) setEditor({ member: space, after: member.after });
                 }}
@@ -159,7 +164,7 @@ export function StaveSagaActions({
               <Button
                 size="xs"
                 variant="destructive-outline"
-                disabled={!bound || !stamp || archived}
+                disabled={!bound || !stamp || archived || unsupported("sagaRemove")}
                 onClick={() => {
                   if (space && stamp)
                     review(`Remove ${member.id} from saga`, {
@@ -194,7 +199,7 @@ export function StaveSagaActions({
           <Button
             size="sm"
             variant="outline"
-            disabled={!bound}
+            disabled={!bound || unsupported("sagaArchive")}
             onClick={() =>
               review("Archive saga", {
                 kind: "sagaArchive",
@@ -209,7 +214,7 @@ export function StaveSagaActions({
           <Button
             size="sm"
             variant="destructive-outline"
-            disabled={!bound}
+            disabled={!bound || unsupported("sagaDestroy")}
             onClick={() =>
               review("Destroy saga", {
                 kind: "sagaDestroy",
@@ -227,7 +232,7 @@ export function StaveSagaActions({
         <Button
           size="sm"
           className="self-start"
-          disabled={!bound || !stave.archiveBasename}
+          disabled={!bound || !stave.archiveBasename || unsupported("restoreSpace")}
           onClick={() => {
             if (stave.archiveBasename)
               review("Unarchive saga space", {

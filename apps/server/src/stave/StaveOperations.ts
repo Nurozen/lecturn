@@ -1,3 +1,5 @@
+import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
+import { staveTelemetryEvent } from "./StaveTelemetry.ts";
 /**
  * StaveOperations - application-lifetime runner for the long Stave mutations
  * behind `stave.runOperation` / `stave.observeOperation` (deviation 26).
@@ -310,6 +312,21 @@ export const make = Effect.fn("StaveOperations.make")(function* (
   limits: StaveOperationsLimits = {},
 ) {
   const cli = yield* StaveCli;
+  const analytics = yield* AnalyticsService;
+  const recordOutcome = (
+    operation: StaveOperation,
+    trigger: "interactive" | "automatic",
+    exit: Exit.Exit<OperationOutcome, StaveError | StaveRefusalError>,
+  ) => {
+    const event = staveTelemetryEvent(
+      operation,
+      trigger,
+      Exit.isSuccess(exit)
+        ? { state: "success" }
+        : { state: "failure", code: toOperationError(exit.cause).code },
+    );
+    return event === null ? Effect.void : analytics.record(event.event, event.properties);
+  };
   const configReader = yield* StaveConfigReader;
   const workspaceReader = yield* StaveWorkspaceReader;
   const readCache = yield* Effect.serviceOption(StaveReadCache);
@@ -2573,6 +2590,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
         pubsub: yield* PubSub.unbounded<StaveProgressEvent>(),
       };
       yield* runLifecycleAction(entry, operation, revalidate, revalidateParticipant).pipe(
+        Effect.onExit((exit) => recordOutcome(operation, "automatic", exit)),
         Effect.ensuring(
           Effect.gen(function* () {
             registryBytes -= entry.bytes;
@@ -2660,7 +2678,9 @@ export const make = Effect.fn("StaveOperations.make")(function* (
     Effect.forkIn(
       runOperationBody(entry, operation).pipe(
         Effect.exit,
-        Effect.flatMap((exit) => finish(entry, exit)),
+        Effect.flatMap((exit) =>
+          recordOutcome(operation, "interactive", exit).pipe(Effect.andThen(finish(entry, exit))),
+        ),
       ),
       serviceScope,
     );

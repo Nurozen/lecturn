@@ -1,3 +1,4 @@
+import { missingStaveFeatures } from "./staveFeatures.ts";
 /**
  * StaveCli - the ONLY place Lecturn spawns `stave`.
  *
@@ -892,6 +893,16 @@ export const make = Effect.fn("StaveCli.make")(function* () {
           ),
         ),
       );
+      if (verb !== "version") {
+        const features = yield* staveBinary.featuresFor(binary);
+        const missing = missingStaveFeatures(features, verb, spec.args);
+        if (missing.length > 0)
+          return yield* hostError(
+            "unsupported_feature",
+            `The selected Stave binary does not support ${verb} with the requested flags. Update Stave or choose another binary.`,
+            { missing },
+          );
+      }
       const settings = yield* serverSettings.getSettings.pipe(
         Effect.mapError((error) => hostError("unknown", error.message)),
       );

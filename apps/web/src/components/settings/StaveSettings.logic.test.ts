@@ -1,11 +1,7 @@
 import type { StaveStatus } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  STAVE_SETUP_COMMAND,
-  formatStaveBinarySource,
-  summarizeStaveStatus,
-} from "./StaveSettings.logic";
+import { formatStaveBinarySource, summarizeStaveStatus } from "./StaveSettings.logic";
 
 function makeStatus(overrides: Partial<StaveStatus> = {}): StaveStatus {
   return {
@@ -119,9 +115,5 @@ describe("summarizeStaveStatus", () => {
     expect(
       summarizeStaveStatus({ status: makeStatus(), error: "timed out", isPending: false }),
     ).toMatchObject({ text: "stave 0.4.1 (on PATH)", detail: "timed out", detailIsPath: false });
-  });
-
-  it("copies the literal setup command", () => {
-    expect(STAVE_SETUP_COMMAND).toBe("stave setup");
   });
 });

@@ -156,7 +156,36 @@ export const StavePendingCleanup = Schema.Struct({
 });
 export type StavePendingCleanup = typeof StavePendingCleanup.Type;
 
+/** Adapter configuration support; this is not a report of an active MCP connection. */
+export const StaveMemoryWiringProvider = Schema.Struct({
+  provider: Schema.String,
+  supported: Schema.Boolean,
+  limitation: Schema.optionalKey(Schema.String),
+});
+export type StaveMemoryWiringProvider = typeof StaveMemoryWiringProvider.Type;
+export const StaveFeatureCommand = Schema.Struct({
+  verb: Schema.String,
+  available: Schema.Boolean,
+  flags: Schema.Array(Schema.String),
+});
+export type StaveFeatureCommand = typeof StaveFeatureCommand.Type;
+export const StaveFeatures = Schema.Struct({
+  source: Schema.Literals(["bundled", "help"]),
+  commands: Schema.Array(StaveFeatureCommand),
+  /** Conservative UI gate: an operation is listed when any supported option is unavailable. */
+  unsupportedOperations: Schema.Array(Schema.String),
+});
+export type StaveFeatures = typeof StaveFeatures.Type;
+export const StaveMemoryWiringStatus = Schema.Struct({
+  state: ForwardCompatibleOptional(Schema.Literals(["absent", "configured", "unavailable"])),
+  code: Schema.optionalKey(Schema.String),
+});
+export type StaveMemoryWiringStatus = typeof StaveMemoryWiringStatus.Type;
+
 export const StaveStatus = Schema.Struct({
+  features: Schema.optionalKey(StaveFeatures),
+  diagnostics: Schema.optionalKey(Schema.Array(StaveStatusFailure)),
+  memoryWiringProviders: Schema.optionalKey(Schema.Array(StaveMemoryWiringProvider)),
   /** The binary the server would run, or null with `runnableError` set. */
   runnable: Schema.NullOr(StaveBinaryStatus),
   runnableError: Schema.NullOr(StaveStatusFailure),
@@ -216,6 +245,7 @@ export const StaveSagaMembership = Schema.Struct({
 export type StaveSagaMembership = typeof StaveSagaMembership.Type;
 
 export const StaveSpaceStatus = Schema.Struct({
+  memoryWiring: Schema.optionalKey(StaveMemoryWiringStatus),
   sagaMembership: Schema.optional(Schema.NullOr(StaveSagaMembership)),
   membershipUnknown: Schema.optional(Schema.Boolean),
   spaceId: Schema.String,
@@ -956,6 +986,7 @@ export const STAVE_CLI_ERROR_CODES = [
 
 /** Codes Lecturn synthesises around the spawn and the operation registry. */
 export const STAVE_HOST_ERROR_CODES = [
+  "unsupported_feature",
   "binary_missing",
   "not_setup",
   "disabled",

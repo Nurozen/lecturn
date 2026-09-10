@@ -481,6 +481,18 @@ describe("filterPinnedBrowseEntries", () => {
 });
 
 describe("buildStaveAddProjectItems", () => {
+  it("keeps supported creation sources when one binary feature is unavailable", () => {
+    const items = buildStaveAddProjectItems({
+      environmentId: "env",
+      available: true,
+      unsupportedOperations: ["createSaga"],
+      icons: { "stave-space": null, "stave-saga": null },
+      launch: () => {},
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]?.value).toContain("stave-space");
+  });
+
   const environmentId = EnvironmentId.make("env-1");
 
   it("renders nothing until the Stave feature gate passes", () => {

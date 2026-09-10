@@ -718,7 +718,9 @@ function OpenCommandPaletteDialog(props: {
   const [addProjectEnvironmentId, setAddProjectEnvironmentId] = useState<EnvironmentId | null>(
     null,
   );
-  const staveAvailable = useStaveFeatureAvailable(addProjectEnvironmentId).available;
+  const staveFeature = useStaveFeatureAvailable(addProjectEnvironmentId);
+  const staveAvailable = staveFeature.available;
+  const staveUnsupportedOperations = staveFeature.status.data?.features?.unsupportedOperations;
   const [isPickingProjectFolder, setIsPickingProjectFolder] = useState(false);
   const [addProjectCloneFlow, setAddProjectCloneFlow] = useState<AddProjectCloneFlow | null>(null);
   const [isRemoteProjectLookingUp, setIsRemoteProjectLookingUp] = useState(false);
@@ -1440,6 +1442,9 @@ function OpenCommandPaletteDialog(props: {
         ...buildStaveAddProjectItems({
           environmentId,
           available: staveAvailable,
+          ...(staveUnsupportedOperations
+            ? { unsupportedOperations: staveUnsupportedOperations }
+            : {}),
           icons: {
             "stave-space": <BoxesIcon className={ITEM_ICON_CLASS} />,
             "stave-saga": <LayersIcon className={ITEM_ICON_CLASS} />,
@@ -1462,6 +1467,7 @@ function OpenCommandPaletteDialog(props: {
       startAddProjectBrowse,
       startAddProjectClone,
       staveAvailable,
+      staveUnsupportedOperations,
     ],
   );
 

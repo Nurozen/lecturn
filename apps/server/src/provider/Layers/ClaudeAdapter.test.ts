@@ -14,6 +14,7 @@ import type {
 import {
   ApprovalRequestId,
   ClaudeSettings,
+  EnvironmentId,
   ProviderDriverKind,
   ProviderItemId,
   ProviderRuntimeEvent,
@@ -35,6 +36,7 @@ import * as TestClock from "effect/testing/TestClock";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import {
   SYNTHETIC_CLAUDE_CAPABLE_MODEL,
@@ -419,6 +421,46 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(createInput?.options.permissionMode, undefined);
       assert.equal(createInput?.options.allowDangerouslySkipPermissions, undefined);
     }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("keeps Stave project settings pickup and T3 MCP together in Claude SDK options", () => {
+    const harness = makeHarness();
+    const threadId = ThreadId.make("claude-stave-memory");
+    const cwd = "/work/stave space/雪";
+    return Effect.gen(function* () {
+      McpProviderSession.setMcpProviderSession({
+        environmentId: EnvironmentId.make("environment-memory-test"),
+        threadId,
+        providerSessionId: "session-memory-test",
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        endpoint: "http://localhost:1234/mcp",
+        authorizationHeader: "Bearer test-token",
+      });
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
+      );
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId,
+        cwd,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "approval-required",
+      });
+      const options = harness.getLastCreateQueryInput()?.options;
+      assert.equal(options?.cwd, cwd);
+      assert.deepEqual(options?.settingSources, ["user", "project", "local"]);
+      assert.deepEqual(options?.mcpServers, {
+        "t3-code": {
+          type: "http",
+          url: "http://localhost:1234/mcp",
+          headers: { Authorization: "Bearer test-token" },
+        },
+      });
+    }).pipe(
+      Effect.scoped,
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
     );

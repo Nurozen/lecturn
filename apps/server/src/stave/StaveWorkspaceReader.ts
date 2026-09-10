@@ -199,7 +199,7 @@ export function withPrimaryRepositoryIdentity(
  * mismatch) resolves to `Option.none` with a debug log — a non-Stave project
  * must never surface a warning.
  */
-const readManifest = Effect.fn("StaveWorkspaceReader.readManifest")(function* (
+export const readManifest = Effect.fn("StaveWorkspaceReader.readManifest")(function* (
   workspaceRoot: string,
 ): Effect.fn.Return<Option.Option<StaveManifest>, never, FileSystem.FileSystem | Path.Path> {
   const fileSystem = yield* FileSystem.FileSystem;

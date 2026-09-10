@@ -1,3 +1,4 @@
+import { staveOperationUnavailableReason } from "./staveCompatibility.logic";
 import { useState } from "react";
 import type {
   EnvironmentId,
@@ -43,7 +44,11 @@ export function StaveLifecycleNotice({
     action: "keep",
     policy: settings.stave.lifecycle,
   })!;
-  const mutable = feature.available && stave.state !== "archived";
+  const mutable =
+    feature.available &&
+    stave.state !== "archived" &&
+    archive !== null &&
+    staveOperationUnavailableReason(feature.status.data, archive, stave.isSaga) === null;
   return (
     <div
       className="mx-3 mb-3 space-y-2 rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm"
@@ -93,6 +98,7 @@ export function StaveLifecycleNotice({
         <StaveConfirmDialog
           environmentId={environmentId}
           operation={operation}
+          lifecycleIsSaga={stave.isSaga}
           title={operation.action === "keep" ? "Keep space" : "Archive space"}
           onClose={() => setOperation(null)}
           onFinished={() => {}}

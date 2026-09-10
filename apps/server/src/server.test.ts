@@ -88,6 +88,7 @@ import * as Socket from "effect/unstable/socket/Socket";
 import { vi } from "vite-plus/test";
 
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
+const encodePrivacyCheckJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeTransferThreadSnapshot = Schema.decodeUnknownEffect(
   Schema.fromJsonString(OrchestrationThreadDetailSnapshot),
 );
@@ -151,6 +152,8 @@ import { StaveLifecycleRepositoryLive } from "./persistence/Layers/StaveLifecycl
 import * as StaveSpaceLock from "./stave/StaveSpaceLock.ts";
 import * as StaveAdmission from "./stave/StaveAdmission.ts";
 import * as StaveBinary from "./stave/StaveBinary.ts";
+import { bundledStaveFeatures, makeStaveFeatures } from "./stave/staveFeatures.ts";
+import { StaveMemoryWiring, type StaveMemoryResolution } from "./stave/StaveMemoryWiring.ts";
 import * as StaveCli from "./stave/StaveCli.ts";
 import * as StaveConfigReader from "./stave/StaveConfigReader.ts";
 import { StaveError } from "./stave/StaveError.ts";
@@ -513,6 +516,7 @@ const buildAppUnderTest = (options?: {
     staveLifecycle?: Partial<StaveLifecycleRepository["Service"]>;
     staveWorkspaceReader?: Partial<StaveWorkspaceReader.StaveWorkspaceReader["Service"]>;
     staveBinary?: Partial<StaveBinary.StaveBinary["Service"]>;
+    staveMemoryWiring?: Partial<StaveMemoryWiring["Service"]>;
     staveCli?: Partial<StaveCli.StaveCli["Service"]>;
     staveConfigReader?: Partial<StaveConfigReader.StaveConfigReader["Service"]>;
   };
@@ -741,6 +745,8 @@ const buildAppUnderTest = (options?: {
     const staveBinaryLayer = Layer.mock(StaveBinary.StaveBinary)({
       resolve: staveBinaryMissing,
       resolveRunnable: staveBinaryMissing,
+      features: Effect.succeed(bundledStaveFeatures()),
+      featuresFor: () => Effect.succeed(bundledStaveFeatures()),
       invalidate: Effect.void,
       ...options?.layers?.staveBinary,
     });
@@ -760,6 +766,10 @@ const buildAppUnderTest = (options?: {
     });
     const staveRpcLayer = Layer.mergeAll(
       staveBinaryLayer,
+      Layer.mock(StaveMemoryWiring)({
+        resolve: () => Effect.succeed({ state: "absent" }),
+        ...options?.layers?.staveMemoryWiring,
+      }),
       staveCliLayer,
       staveConfigReaderLayer,
       StaveRpcHandlers.runtimeLayer.pipe(
@@ -4567,7 +4577,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("stave.getStatus reports the runnable binary, roots and marmot", () =>
+  it.effect("stave.getStatus reports the selected binary, roots and marmot", () =>
     Effect.gen(function* () {
       const resolution = {
         path: "/opt/stave/bin/stave",
@@ -4577,7 +4587,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       };
       yield* buildAppUnderTest({
         layers: {
-          staveBinary: { resolveRunnable: Effect.succeed(resolution) },
+          staveBinary: { resolve: Effect.succeed(resolution) },
           staveConfigReader: {
             load: Effect.succeed({
               configPath: "/home/tester/.config/stave/config.yaml",
@@ -4623,6 +4633,119 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect(
+    "stave.getStatus reports selected override features, diagnostics and provider support",
+    () =>
+      Effect.gen(function* () {
+        const selected = {
+          path: "/custom/stave",
+          source: "settings" as const,
+          version: "0.3.0",
+          commit: null,
+        };
+        const features = makeStaveFeatures(
+          "help",
+          bundledStaveFeatures().commands.filter((entry) => entry.verb !== "space create"),
+        );
+        yield* buildAppUnderTest({
+          layers: {
+            serverSettings: {
+              getSettings: Effect.succeed({
+                ...DEFAULT_SERVER_SETTINGS,
+                stave: {
+                  ...DEFAULT_SERVER_SETTINGS.stave,
+                  enabled: true,
+                  binaryPath: selected.path,
+                },
+              }),
+            },
+            staveBinary: {
+              resolve: Effect.succeed(selected),
+              resolveRunnable: Effect.die("status must not inspect a different fallback binary"),
+              features: Effect.die("status must probe features for the same selected resolution"),
+              featuresFor: (resolution) =>
+                Effect.sync(() => {
+                  assert.deepEqual(resolution, selected);
+                  return features;
+                }),
+            },
+          },
+        });
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const status = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) => client[WS_METHODS.staveGetStatus]({})),
+        );
+        assert.deepEqual(status.runnable, selected);
+        assert.isNull(status.runnableError);
+        assert.deepEqual(status.features, features);
+        assert.deepEqual(status.features?.unsupportedOperations, ["createSpace"]);
+        assert.deepEqual(
+          status.diagnostics?.map(({ code }) => code),
+          ["unsupported_features"],
+        );
+        assert.include(status.diagnostics?.[0]?.message ?? "", "selected Stave binary");
+        assert.deepEqual(status.memoryWiringProviders, [
+          { provider: "claude", supported: true },
+          { provider: "codex", supported: true },
+          { provider: "cursor", supported: true },
+          { provider: "grok", supported: true },
+          { provider: "opencode", supported: true, limitation: "external_server_unsupported" },
+        ]);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "stave status and execution reject a bad override even when a fallback is runnable",
+    () =>
+      Effect.gen(function* () {
+        const selectedPath = "/missing/custom-stave";
+        yield* buildAppUnderTest({
+          layers: {
+            serverSettings: {
+              getSettings: Effect.succeed({
+                ...DEFAULT_SERVER_SETTINGS,
+                stave: {
+                  ...DEFAULT_SERVER_SETTINGS.stave,
+                  enabled: true,
+                  binaryPath: selectedPath,
+                },
+              }),
+            },
+            staveBinary: {
+              resolve: Effect.fail(
+                new StaveBinary.StaveBinaryNotFound({ candidates: [selectedPath] }),
+              ),
+              resolveRunnable: Effect.succeed({
+                path: "/bundled/stave",
+                source: "bundled",
+                version: "0.4.0",
+                commit: null,
+              }),
+              features: Effect.die("unresolved selected binaries cannot provide features"),
+              featuresFor: () => Effect.die("unresolved selected binaries cannot provide features"),
+            },
+            staveCli: { reposList: Effect.die("bad overrides must block execution") },
+          },
+        });
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const status = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) => client[WS_METHODS.staveGetStatus]({})),
+        );
+        assert.isNull(status.runnable);
+        assert.equal(status.runnableError?.code, "binary_missing");
+        assert.include(status.runnableError?.message ?? "", selectedPath);
+        assert.isUndefined(status.features);
+        const error = yield* Effect.flip(
+          Effect.scoped(withWsRpcClient(wsUrl, (client) => client[WS_METHODS.staveListRepos]({}))),
+        );
+        assert.equal(error._tag, "StaveUnavailableError");
+        if (error._tag === "StaveUnavailableError") {
+          assert.equal(error.reason, "binary_missing");
+          assert.include(error.message, selectedPath);
+        }
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("stave.spaceStatus requires the setting and a runnable binary", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
@@ -4655,7 +4778,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             }),
           },
           staveBinary: {
-            resolveRunnable: Effect.succeed({
+            resolve: Effect.succeed({
               path: "/bin/stave",
               source: "path",
               version: "0.4.0",
@@ -4715,6 +4838,15 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
   it.effect("stave.spaceStatus runs space status once per root within the TTL", () =>
     Effect.gen(function* () {
       const spaceStatusCalls = yield* Ref.make<Array<string>>([]);
+      const memoryRoots: string[] = [];
+      const memory = yield* Ref.make<StaveMemoryResolution>({
+        state: "configured",
+        config: {
+          command: "/private/secret-marmot-executable",
+          args: ["serve", "--den", "secret-den-identifier"],
+          env: { MARMOT_HOME: "/private/secret-memory-home", SECRET_TOKEN: "secret-memory-token" },
+        },
+      });
       const spaceStatusJson: StaveSpaceStatusJson = {
         spaceId: "demo",
         spacePath: "/home/tester/stave/agent-work/demo",
@@ -4750,12 +4882,18 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             }),
           },
           staveBinary: {
-            resolveRunnable: Effect.succeed({
+            resolve: Effect.succeed({
               path: "/usr/local/bin/stave",
               source: "path" as const,
               version: "0.4.0",
               commit: null,
             }),
+          },
+          staveMemoryWiring: {
+            resolve: (cwd) =>
+              Effect.sync(() => {
+                memoryRoots.push(cwd);
+              }).pipe(Effect.andThen(Ref.get(memory))),
           },
           staveWorkspaceReader: {
             load: (workspaceRoot) =>
@@ -4791,6 +4929,27 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const second = yield* call("/tmp/space");
       assert.deepEqual(yield* Ref.get(spaceStatusCalls), ["demo"]);
       assert.deepEqual(second, first);
+      assert.deepEqual(first.memoryWiring, { state: "configured" });
+      assert.deepEqual(memoryRoots, ["/tmp/space", "/tmp/space"]);
+      const serialized = encodePrivacyCheckJson(first);
+      for (const secret of [
+        "secret-marmot-executable",
+        "secret-den-identifier",
+        "secret-memory-home",
+        "secret-memory-token",
+        "MARMOT_HOME",
+        "SECRET_TOKEN",
+      ]) {
+        assert.notInclude(serialized, secret);
+      }
+      yield* Ref.set(memory, { state: "unavailable", code: "invalid_config" });
+      assert.deepEqual((yield* call("/tmp/space")).memoryWiring, {
+        state: "unavailable",
+        code: "invalid_config",
+      });
+      yield* Ref.set(memory, { state: "absent" });
+      assert.deepEqual((yield* call("/tmp/space")).memoryWiring, { state: "absent" });
+      assert.deepEqual(yield* Ref.get(spaceStatusCalls), ["demo"]);
       assert.equal(first.spaceId, "demo");
       assert.equal(first.createdAt, "2026-09-01T07:32:05.38559Z");
       assert.isUndefined(first.kind);
@@ -4828,7 +4987,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }),
     },
     staveBinary: {
-      resolveRunnable: Effect.succeed({
+      resolve: Effect.succeed({
         path: "/usr/local/bin/stave",
         source: "path" as const,
         version: "0.4.0",

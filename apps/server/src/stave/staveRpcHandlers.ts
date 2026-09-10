@@ -1,3 +1,4 @@
+import { StaveMemoryWiring, noop as noopMemoryWiring } from "./StaveMemoryWiring.ts";
 /**
  * staveRpcHandlers - the `stave.*` RPCs served over the WebSocket group.
  *
@@ -96,6 +97,8 @@ export function runnableErrorCode(error: StaveBinaryError): string {
       return "binary_missing";
     case "StaveBinaryNotExecutable":
       return "binary_not_executable";
+    case "StaveBinaryUnsupportedWrapper":
+      return "unsupported_wrapper";
   }
 }
 
@@ -394,6 +397,10 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
   const runtime = yield* StaveRpcRuntime;
   const operations = yield* StaveOperations;
   const lifecycle = yield* Effect.serviceOption(StaveLifecycleRepository);
+  const memoryWiring = Option.getOrElse(
+    yield* Effect.serviceOption(StaveMemoryWiring),
+    () => noopMemoryWiring,
+  );
 
   // `T3CODE_STAVE=false` is the unbypassable kill switch: the capability is
   // absent AND every stave RPC refuses, like thread forking.
@@ -415,7 +422,7 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
 
   const getStatus = Effect.gen(function* () {
     yield* requireKillSwitchOn;
-    const probe = yield* binary.resolveRunnable.pipe(
+    const probe = yield* binary.resolve.pipe(
       Effect.match({
         onFailure: (error) => ({
           runnable: null,
@@ -424,6 +431,8 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
         onSuccess: (resolution) => ({ runnable: resolution, runnableError: null }),
       }),
     );
+    const features =
+      probe.runnable === null ? undefined : yield* binary.featuresFor(probe.runnable);
     const snapshot = yield* configReader.load;
     // Read verbs construct Stave's service, which needs the config on disk;
     // without a runnable binary or a config there is nothing to ask.
@@ -431,6 +440,24 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
       probe.runnable !== null && snapshot.exists ? yield* probeMarmot(snapshot) : NO_MARMOT;
     const lastFailure = yield* runtime.lastFailure;
     return {
+      ...(features === undefined ? {} : { features }),
+      diagnostics:
+        features !== undefined && features.unsupportedOperations.length > 0
+          ? [
+              {
+                code: "unsupported_features",
+                message:
+                  "The selected Stave binary lacks commands or flags required by some actions. Update Stave or choose another binary.",
+              },
+            ]
+          : [],
+      memoryWiringProviders: [
+        { provider: "claude", supported: true },
+        { provider: "codex", supported: true },
+        { provider: "cursor", supported: true },
+        { provider: "grok", supported: true },
+        { provider: "opencode", supported: true, limitation: "external_server_unsupported" },
+      ],
       runnable: probe.runnable,
       runnableError: probe.runnableError,
       configPath: snapshot.configPath,
@@ -467,7 +494,7 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
         message: "The Stave integration is turned off in server settings.",
       });
     }
-    yield* binary.resolveRunnable.pipe(
+    yield* binary.resolve.pipe(
       Effect.mapError(
         (error) => new StaveUnavailableError({ reason: "binary_missing", message: error.message }),
       ),
@@ -475,7 +502,21 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
   });
 
   const spaceStatus = (workspaceRoot: string) =>
-    requireEnabled.pipe(Effect.flatMap(() => runtime.spaceStatus(workspaceRoot)));
+    requireEnabled.pipe(
+      Effect.flatMap(() =>
+        Effect.gen(function* () {
+          const status = yield* runtime.spaceStatus(workspaceRoot);
+          const wiring = yield* memoryWiring.resolve(workspaceRoot);
+          return {
+            ...status,
+            memoryWiring:
+              wiring.state === "unavailable"
+                ? { state: wiring.state, code: wiring.code }
+                : { state: wiring.state },
+          };
+        }),
+      ),
+    );
 
   /** One gated read verb, its failure remembered for diagnostics and mapped to the wire error. */
   const gatedRead = <A>(read: Effect.Effect<A, StaveError>) =>

@@ -4,6 +4,8 @@ import * as Schema from "effect/Schema";
 
 import {
   STAVE_OPERATION_ERROR_CODES,
+  StaveStatus,
+  StaveSpaceStatus,
   type StaveManifest,
   StaveName,
   StaveSagaStatus,
@@ -441,5 +443,54 @@ describe("saga status wire compatibility", () => {
       expectedManifestCreatedAt: stamp,
       expectedMemberCreatedAt: stamp,
     });
+  });
+});
+
+describe("Stave compatibility status", () => {
+  it("accepts old server status and additive capability details", () => {
+    const base = {
+      runnable: null,
+      runnableError: null,
+      configPath: "/config",
+      configExists: false,
+      roots: null,
+      marmot: { available: false, version: null },
+      lastFailure: null,
+      pendingCleanups: [],
+    };
+    const decode = Schema.decodeUnknownSync(StaveStatus);
+    expect(decode(base)).toEqual(base);
+    const updated = {
+      ...base,
+      features: {
+        source: "help",
+        commands: [{ verb: "space create", available: false, flags: [] }],
+        unsupportedOperations: ["createSpace"],
+      },
+      diagnostics: [{ code: "unsupported_features", message: "Update Stave." }],
+      memoryWiringProviders: [
+        { provider: "opencode", supported: true, limitation: "external_server_unsupported" },
+      ],
+    };
+    expect(decode(updated)).toEqual(updated);
+  });
+  it("strips MCP transport fields and tolerates future memory status", () => {
+    const decode = Schema.decodeUnknownSync(StaveSpaceStatus);
+    const base = { spaceId: "demo", spacePath: "/demo", repos: [], memories: [] };
+    expect(decode(base)).toEqual(base);
+    expect(
+      decode({
+        ...base,
+        memoryWiring: {
+          state: "configured",
+          command: "private-command",
+          args: ["private-den"],
+          env: { SECRET: "private-token" },
+        },
+      }).memoryWiring,
+    ).toEqual({ state: "configured" });
+    expect(
+      decode({ ...base, memoryWiring: { state: "future", code: "future-code" } }).memoryWiring,
+    ).toEqual({ code: "future-code" });
   });
 });

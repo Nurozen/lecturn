@@ -1,9 +1,5 @@
 import type { StaveBinarySource, StaveStatus } from "@t3tools/contracts";
 
-/** Copied to the clipboard by the Status row's "Set up" button until the
-    real `stave.setup` RPC lands (Phase 3). */
-export const STAVE_SETUP_COMMAND = "stave setup";
-
 const BINARY_SOURCE_LABELS: Readonly<Record<StaveBinarySource, string>> = {
   settings: "from settings",
   env: "from T3CODE_STAVE_PATH",

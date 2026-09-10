@@ -5,8 +5,6 @@
 > Fork framing and release differences live in
 > [docs/operations/lecturn-release.md](../operations/lecturn-release.md).
 
-Status: in progress — Phase 6 (lifecycle automation; provider memory wiring follows)
-
 ## What a Stave space is to Lecturn
 
 - **Project = space.** A Stave space is a Lecturn project whose `workspaceRoot` is the space
@@ -123,12 +121,10 @@ Defined in `packages/contracts/src/orchestration.ts`. `project.refresh` is a mem
 reader. `check(input)` succeeds or fails with a typed refusal; it never fails for a non-Stave
 root.
 
-- **Worktree rule (now).** `intentUsesWorktree` is pure: an intent uses a worktree when it is
-  `vcs.createWorktree` or `pr.prepare`, when `prepareWorktree` is true, or when `worktreePath`
-  is non-null. Only then is the manifest read; if the root is a space the check fails with
-  `StaveWorktreeForbiddenError { projectRoot, intent, message }` (message
-  `STAVE_WORKTREE_FORBIDDEN_MESSAGE`). Intents: `thread.create`, `thread.meta.update`,
-  `thread.turn.start`, `thread.fork`, `vcs.createWorktree`, `pr.prepare`.
+- **Worktree rule.** `intentUsesWorktree` detects `vcs.createWorktree`, generic `pr.prepare`,
+  `prepareWorktree: true`, or a non-null worktree path. Admission reads the manifest for local
+  thread activity too, so archived and leased spaces cannot accept work through a local-mode
+  bypass. Intents include create, metadata update, turn start, fork, and unsettle.
 - **Lease/archived rules.** `StaveArchivedProjectError` and
   `StaveSpaceTransitioningError` fence archived spaces and active lifecycle leases.
   Admission resolves roots and primary-repo paths and rechecks at engine commit.
@@ -144,23 +140,17 @@ Where it is invoked:
 
 Details per path:
 
-- **Normalizer.** `describeWorktreeIntent(command)` maps a client command to an intent, or
-  `null` when it never binds a worktree (then neither admission nor the projection read
-  happens): `thread.create` with non-null `worktreePath`; `thread.meta.update` setting a
-  non-null `worktreePath`; `thread.turn.start` whose bootstrap creates a thread with a
-  `worktreePath` or carries `prepareWorktree`. `enforceStaveWorktreeRule` resolves the project
-  root from the command's project id, or via the thread shell when only a thread id is present,
-  or from `bootstrap.prepareWorktree.projectCwd` as a fallback; unknown projects/threads are
-  left to the decider's own error. On the HTTP transport (`apps/server/src/orchestration/http.ts`)
-  every normalization failure collapses to `invalid_command`, so the typed refusal is only
-  visible on the WebSocket path.
+- **Normalizer.** `describeWorktreeIntent` identifies relevant thread activity and worktree
+  requests. `enforceStaveWorktreeRule` resolves the owning project, or bootstrap project cwd,
+  before attachments are claimed. Unknown projects/threads are left to the decider. The engine
+  repeats admission under the canonical-root lock immediately before commit. On the HTTP
+  transport, normalization failures use the existing `invalid_command` envelope.
 - **Fork.** Forks skip the normalizer and the materialized command inherits the source's
   `worktreePath` (`threadFork.ts`), so `dispatchThreadFork` checks `thread.fork` with that path:
   a Stave-owned source that still runs in a worktree cannot be forked.
 - **Git RPCs.** `ws.gitPreparePullRequestThread` and `ws.vcsCreateWorktree` carry only a cwd, so
-  the owning project is the active project at exactly that root
-  (`getActiveProjectByWorkspaceRoot`); a primary-repo reverse lookup is a later phase. A cwd
-  with no project passes.
+  the owning project is resolved by exact root first, then by Stave primary-repo path.
+  Generic PR preparation is refused in both worktree and local modes for those projects.
 
 Client rendering (`packages/client-runtime/src/errors/stave.ts`): `staveAdmissionErrorTag`
 matches `_tag` first, then a wire `code` (`stave_worktree_forbidden`, `archived_project`,
@@ -197,9 +187,9 @@ and reports which source supplied it: `{ path, source, version, commit }` with `
   no silent fallback to a different binary than the one the user named. The same executable-bit
   rule applies to every candidate except on Windows.
 - **`resolve` vs `resolveRunnable`.** `resolve` is what `StaveCli` uses and includes the settings
-  path. `resolveRunnable` walks the same list _without_ settings and answers "could Stave run on
-  this machine at all" for `stave.getStatus` (deviation 5), so a bad user override never hides
-  the bundled or PATH binary from the status line. Both fail with `StaveBinaryError`.
+  path. Live status and command gates use that same configured selection, so an invalid override
+  reports its own error. `resolveRunnable` remains the internal settings-independent fallback
+  candidate walk; it does not determine which binary the status line describes.
 - **Version probe.** Each hit runs `stave version` (`STAVE_VERSION_PROBE_TIMEOUT` = 10s,
   `timeoutBehavior: "timedOutResult"`) and parses the three-line output
   (`stave v<semver>` / `commit:` / `date:`) with `parseStaveVersionOutput`; the `v` is stripped. A
@@ -337,7 +327,7 @@ pieces that must outlive a connection: the last CLI failure and the space-status
 live in `packages/contracts/src/stave.ts`.
 
 - **`stave.getStatus` → `StaveStatus`** (no input; never runs a mutating verb, deviation 21):
-  - `runnable: { path, source, version, commit } | null` from `resolveRunnable`, with
+  - `runnable: { path, source, version, commit } | null` from the authoritative `resolve`, with
     `runnableError: { code: "binary_missing" | "binary_not_executable", message } | null`.
   - `configPath`, `configExists`, `roots: { root, bareReposDir, agentWorkDir } | null` from the
     config reader (`roots` is null when the snapshot lacks any of the three).
@@ -348,7 +338,7 @@ live in `packages/contracts/src/stave.ts`.
   - `lastFailure: { at, verb, code, message } | null` — the most recent failed `StaveCli` call
     (every handler taps its CLI errors through `recordFailure`).
   - `pendingCleanups` — durable refused or pending lifecycle rows whose projects are deleted;
-    Phase 6 adds the recurring cleanup sweep and settings actions.
+    the recurring sweep and settings actions share those durable records.
 - **`stave.spaceStatus { workspaceRoot }` → `StaveSpaceStatus`**: the workspace root is resolved
   to a space id through `StaveWorkspaceReader.load` (no manifest → `StaveNotSpaceError`), then
   `stave space status <id> --json` is mapped by `toSpaceStatusDto` to camelCase minus the
@@ -375,14 +365,14 @@ implements `createSpace`, `registerRepo`, `removePartialSpace`, and `setup`. Pha
 per server process in `apps/server/src/server.ts` (`StaveOperations.layer`, over
 `ProcessRunner`) and handed to every per-socket RPC layer in `ws.ts` with `Layer.succeed`, so an
 operation is owned by the service's scope and outlives the WebSocket that started it (a
-socket-bound fiber would die with the tab). Shape: `run`, `observe`, `dryRun`, `withSpaceLock`,
-`summary`.
+socket-bound fiber would die with the tab). Its public shape provides `run`, `observe`,
+`dryRun`, `summary`, and the internal automatic `executeLifecycle` bridge.
 
-- **Keyed mutex.** `withSpaceLock(root, effect)` takes one `Semaphore(1)` per `path.resolve(root)`,
-  created on demand and never dropped. `createSpace` and `removePartialSpace` lock
-  `<agentWorkDir>/<spaceId>`; `registerRepo` and `setup` lock the config path. Admission and the
-  lifecycle sweep are meant to share these locks later (deviation 25), so two creates of one id
-  cannot both pass pre-flight.
+- **Keyed mutex.** `StaveSpaceLock.withSpaceLock(root, effect)` canonicalizes an existing
+  root, or its existing parent for a new space, and shares one semaphore across operations and
+  admission. Saga operations acquire all participant roots in deterministic order. Repository
+  registration and setup serialize on the config path. The runtime shares this lock service with
+  the lifecycle sweep, closing preflight-to-commit races.
 - **Registry.** A `Map` keyed by the client-supplied `operationId`. An entry holds `kind`,
   `fingerprint` (sha256 of `stableStringify(operation)`), `state` (`running | finished | failed`),
   the event ring buffer with its byte count, `nextSequence` (1-based), `terminalAtMs`,
@@ -627,13 +617,12 @@ Rules built on them:
   files and terminals keep the workspace cwd.
 - **Checkpoints unavailable.** `resolveCheckpointsUnavailableReason` in `threadGitTarget.ts`
   returns `STAVE_CHECKPOINTS_UNAVAILABLE_REASON` for a space; `ChatView` and `DiffPanel` gate
-  checkpoint/diff UI on it. The server already reports checkpoints unavailable for non-git
-  roots, so this is presentation only.
+  checkpoint/diff UI on it. Server checkpoint diff and revert handlers also refuse Stave roots.
 - **Disabled env-mode control.** `ProjectSettingsPanel.tsx` treats a project group with any
   Stave member as `isStaveGroup`: the default-env-mode control shows `local`, is disabled, and
-  explains "Stave spaces always run in the space root". The panel also renders the read-only
-  `StaveProjectSection` (space id, kind, state, member-of, repos, memories) when the selected
-  checkout or its representative carries `stave`.
+  explains "Stave spaces always run in the space root". The panel renders
+  `StaveProjectSection` (space id, kind, state, member-of, repos, memories, and available actions)
+  for the selected checkout's Stave metadata, without borrowing another checkout's identity.
 - **Hidden worktree affordances.** `PullRequestThreadDialog` sets `canCreateWorktree` false for
   a space; `BranchToolbar` receives the same flag; mobile's git actions toast the worktree
   message instead of dispatching.
@@ -682,7 +671,7 @@ Rules built on them:
   24h retention is crossed with `TestClock.adjust`. Covered: phase order, title default, temp
   spec file cleanup, fingerprint mismatch, unknown/expired ids, root lock, every pre-flight
   refusal and warning, partial space reporting, `removePartialSpace` stamp binding and refresh,
-  URL redaction, `setup`, `dryRun` per kind, and unimplemented kinds.
+  URL redaction, `setup`, `dryRun` per kind, lifecycle cancellation, and saga participant fencing.
 - **Client consumer** (`packages/client-runtime/src/state/staveOperation.test.ts`): the reducer
   is exercised with hand-built events (retention per phase, replay/foreign/out-of-order
   rejection, lazy phase open, `reset`, terminal settling); `runStaveOperation` runs against
@@ -816,3 +805,47 @@ Derived project notices are refreshed after lifecycle changes; a durable refresh
 a later sweep to repair an interrupted notification. Web settings poll deleted cleanups while
 mounted. Project banners and sidebar badges show live notices; mobile exposes read-only badges
 and directs cleanup management to web or desktop.
+
+## Provider memory and compatibility (Phase 8)
+
+`StaveMemoryWiring.resolve(cwd)` is a read-only per-session resolver. It requires enabled Stave,
+a valid live manifest at exactly that root, and a Marmot attachment before reading that root's
+`.mcp.json`. It selects only the `mcpServers.context-marmot` entry, requiring an absolute command,
+string arguments, and optional string-valued environment. It does not walk ancestors, invent one
+server per den, or rewrite provider configuration. Missing/invalid generated configuration is an
+unavailable result; non-Stave, archived, and disabled roots produce an absent result.
+
+Provider drivers receive this service in the production graph. Codex adds per-session
+`-c mcp_servers.context-marmot.*` arguments with safe TOML value encoding. Cursor and Grok append
+an ACP stdio MCP entry for both new and loaded sessions. OpenCode registers a local MCP entry
+before readiness and disconnects it with the session scope, including failed startup and
+unexpected exit. Existing T3 MCP entries are preserved. External OpenCode servers are excluded:
+the local absolute binary/home configuration is not meaningful on an arbitrary remote server,
+and mutating shared external MCP state would require a separate ownership contract. Claude keeps
+its project cwd and user/project/local settings sources; its SDK test establishes that
+configuration, not actual executable pickup or connectivity.
+
+Optional status fields preserve older-server compatibility: `features` reports command/flag
+support and conservative `unsupportedOperations`; `diagnostics` reports compatibility issues;
+`memoryWiringProviders` reports adapter support and limitations. Per-space `memoryWiring`
+contains only state/diagnostic, never command, arguments, or environment. Clients distinguish
+support and configured state from a verified live connection.
+
+Nonbundled executables are probed with read-only nested command help, consuming stdout and
+stderr and checking the command's usage and relevant flags. Feature results are cached and
+invalidated with binary resolution. Cached executables are cheaply checked for file identity,
+modification time, size, and mode; replacement/removal refreshes resolution and help results,
+while unchanged polling does not spawn new probes. Each command gates against features for
+the same selected binary snapshot. Bundled binaries have the known feature set. The CLI boundary
+refuses unsupported requested commands/flags, covering old clients and the automatic sweep as
+well as web controls. Windows candidates use `.exe` and do not require POSIX executable bits;
+`.cmd` and `.bat` wrappers receive an explicit unsupported diagnostic. CLI notes stay verbatim in
+the existing progress stream.
+
+`StaveTelemetry` constructs the four closed event names `stave.space.created`, `.archived`,
+`.destroyed`, and `.failed`. Properties are operation/trigger enums, a numeric count, and a
+normalized closed error code on failure. It never spreads payloads, manifests, commands, or CLI
+output into analytics. Interactive events are recorded once for a new operation's terminal
+outcome; observing or attaching to that operation does not record again. Automatic lifecycle
+execution records once at its own completion boundary. Delivery uses the existing AnalyticsService
+and its opt-out behavior. This guarantee concerns analytics properties, not every diagnostic log.

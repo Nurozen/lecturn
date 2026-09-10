@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 import {
   ApprovalRequestId,
   CodexSettings,
+  EnvironmentId,
   EventId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -26,6 +27,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
@@ -36,6 +38,8 @@ import * as TestClock from "effect/testing/TestClock";
 import * as CodexErrors from "effect-codex-app-server/errors";
 
 import { ServerConfig } from "../../config.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { StaveMemoryWiring, type StaveMemoryResolution } from "../../stave/StaveMemoryWiring.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { CodexAdapterShape } from "../Services/CodexAdapter.ts";
@@ -232,6 +236,128 @@ const providerSessionDirectoryTestLayer = Layer.succeed(ProviderSessionDirectory
   listThreadIds: () => Effect.succeed([]),
   listBindings: () => Effect.succeed([]),
 });
+
+const memoryResolutions: ReadonlyArray<StaveMemoryResolution> = [
+  {
+    state: "configured",
+    config: {
+      command: 'C:\\Program Files\\雪\\marmot "test".exe',
+      args: ["serve", "--den", 'den "雪"\\path\n\t\u0000\u007f'],
+      env: { 'MARMOT.HOME"': "C:\\Memory\\雪\r\n" },
+    },
+  },
+  { state: "absent" },
+  { state: "unavailable", code: "missing_config" },
+  { state: "unavailable", code: "invalid_config" },
+];
+
+for (const memory of memoryResolutions) {
+  for (const withT3 of [false, true]) {
+    const state = memory.state === "unavailable" ? memory.code : memory.state;
+    it.effect(`starts Codex with ${state} Stave memory and T3 MCP ${withT3}`, () =>
+      Effect.gen(function* () {
+        const runtimeFactory = makeRuntimeFactory();
+        const threadId = asThreadId(`memory-${state}-${withT3}`);
+        const cwd = "/work/stave space/雪";
+        const resolve = vi.fn((_cwd: string) => Effect.succeed(memory));
+        if (withT3) {
+          McpProviderSession.setMcpProviderSession({
+            environmentId: EnvironmentId.make("environment-memory-test"),
+            threadId,
+            providerSessionId: "session-memory-test",
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            endpoint: "http://localhost:1234/mcp",
+            authorizationHeader: "Bearer test-token",
+          });
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
+          );
+        }
+        const adapter = yield* makeCodexAdapter(decodeCodexSettings({}), {
+          makeRuntime: runtimeFactory.factory,
+          environment: { KEEP_ME: "preserved" },
+          staveMemoryWiring: StaveMemoryWiring.of({ resolve }),
+        });
+        yield* adapter.startSession({ threadId, cwd, runtimeMode: "full-access" });
+        const runtimeOptions = runtimeFactory.lastRuntime?.options;
+        NodeAssert.deepStrictEqual(resolve.mock.calls, [[cwd]]);
+        NodeAssert.equal(runtimeOptions?.cwd, cwd);
+        NodeAssert.deepStrictEqual(runtimeOptions?.environment, {
+          KEEP_ME: "preserved",
+          ...(withT3 ? { T3_MCP_BEARER_TOKEN: "test-token" } : {}),
+        });
+        const expectedArgs = withT3
+          ? [
+              "-c",
+              "mcp_servers.t3-code.url=http://localhost:1234/mcp",
+              "-c",
+              'mcp_servers.t3-code.bearer_token_env_var="T3_MCP_BEARER_TOKEN"',
+            ]
+          : [];
+        if (memory.state === "configured") {
+          expectedArgs.push(
+            "-c",
+            "mcp_servers.context-marmot.enabled=true",
+            "-c",
+            String.raw`mcp_servers.context-marmot.command="C:\\Program Files\\雪\\marmot \"test\".exe"`,
+            "-c",
+            String.raw`mcp_servers.context-marmot.args=["serve","--den","den \"雪\"\\path\n\t\u0000\u007f"]`,
+            "-c",
+            String.raw`mcp_servers.context-marmot.env={"MARMOT.HOME\""="C:\\Memory\\雪\r\n"}`,
+          );
+        }
+        NodeAssert.deepStrictEqual(
+          runtimeOptions?.appServerArgs,
+          expectedArgs.length > 0 ? expectedArgs : undefined,
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          ServerConfig.layerTest(process.cwd(), process.cwd()).pipe(
+            Layer.provideMerge(NodeServices.layer),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+it.effect("resolves the effective Codex cwd without accessing provider configuration files", () =>
+  Effect.gen(function* () {
+    const runtimeFactory = makeRuntimeFactory();
+    const resolve = vi.fn((_cwd: string) =>
+      Effect.succeed({
+        state: "configured" as const,
+        config: { command: "/bin/marmot", args: [] },
+      }),
+    );
+    const adapter = yield* makeCodexAdapter(decodeCodexSettings({}), {
+      makeRuntime: runtimeFactory.factory,
+      staveMemoryWiring: StaveMemoryWiring.of({ resolve }),
+    }).pipe(Effect.provideService(FileSystem.FileSystem, FileSystem.makeNoop({})));
+    yield* adapter.startSession({
+      threadId: asThreadId("memory-default-cwd"),
+      runtimeMode: "full-access",
+    });
+    NodeAssert.deepStrictEqual(resolve.mock.calls, [[process.cwd()]]);
+    NodeAssert.deepStrictEqual(runtimeFactory.lastRuntime?.options.appServerArgs, [
+      "-c",
+      "mcp_servers.context-marmot.enabled=true",
+      "-c",
+      'mcp_servers.context-marmot.command="/bin/marmot"',
+      "-c",
+      "mcp_servers.context-marmot.args=[]",
+    ]);
+    NodeAssert.equal(runtimeFactory.lastRuntime?.options.environment, undefined);
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(
+      ServerConfig.layerTest(process.cwd(), process.cwd()).pipe(
+        Layer.provideMerge(NodeServices.layer),
+      ),
+    ),
+  ),
+);
 
 const validationRuntimeFactory = makeRuntimeFactory();
 const validationLayer = it.layer(

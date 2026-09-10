@@ -1,3 +1,4 @@
+import { staveOperationUnavailableReason } from "../stave/staveCompatibility.logic";
 import { useEffect, useState } from "react";
 import type {
   EnvironmentId,
@@ -103,7 +104,11 @@ export function StavePendingCleanups() {
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={!available || retry === null}
+                  disabled={
+                    !available ||
+                    retry === null ||
+                    staveOperationUnavailableReason(status.data, retry) !== null
+                  }
                   onClick={() => choose(row, "retry")}
                 >
                   {row.refusalCode === "saga_member" && retry?.target === "destroy"
@@ -114,7 +119,9 @@ export function StavePendingCleanups() {
                   <Button
                     size="sm"
                     variant="destructive-outline"
-                    disabled={!available}
+                    disabled={
+                      !available || staveOperationUnavailableReason(status.data, retry) !== null
+                    }
                     onClick={() => choose(row, "retry", true)}
                   >
                     Review forced cleanup

@@ -1,3 +1,5 @@
+import { useStaveStatus } from "../../state/stave";
+import { staveOperationUnavailableReason } from "./staveCompatibility.logic";
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
@@ -83,6 +85,14 @@ export function StaveWizardDialog() {
   }
   const [busy, setBusy] = useState(false);
   const shown = request ?? tracked.request;
+  const compatibility = useStaveStatus(shown?.environmentId ?? null);
+  const unavailableReason =
+    shown === null
+      ? null
+      : staveOperationUnavailableReason(
+          compatibility.data,
+          shown.kind === "saga" ? "createSaga" : "createSpace",
+        );
 
   return (
     <Dialog
@@ -93,7 +103,19 @@ export function StaveWizardDialog() {
       }}
     >
       <DialogPopup className="max-w-2xl" showCloseButton={!busy}>
-        {shown === null ? null : shown.kind === "saga" ? (
+        {shown === null ? null : unavailableReason && !busy ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>Stave action unavailable</DialogTitle>
+              <DialogDescription>{unavailableReason}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={closeStaveWizard}>
+                Close
+              </Button>
+            </DialogFooter>
+          </>
+        ) : shown.kind === "saga" ? (
           <SagaCreateForm
             key={tracked.key}
             environmentId={shown.environmentId}

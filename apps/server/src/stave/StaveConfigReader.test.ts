@@ -1,3 +1,4 @@
+import { bundledStaveFeatures } from "./staveFeatures.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -54,6 +55,8 @@ const binaryMissing = Effect.fail(new StaveBinary.StaveBinaryNotFound({ candidat
 const binaryMissingLayer = Layer.mock(StaveBinary.StaveBinary)({
   resolve: binaryMissing,
   resolveRunnable: binaryMissing,
+  features: Effect.succeed(bundledStaveFeatures()),
+  featuresFor: () => Effect.succeed(bundledStaveFeatures()),
   invalidate: Effect.void,
 });
 

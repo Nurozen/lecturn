@@ -1,3 +1,4 @@
+import { bundledStaveFeatures } from "./staveFeatures.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -729,6 +730,8 @@ describe("StaveCli spawn failures", () => {
       const missing = Layer.succeed(
         StaveBinary.StaveBinary,
         StaveBinary.StaveBinary.of({
+          features: Effect.succeed(bundledStaveFeatures()),
+          featuresFor: () => Effect.succeed(bundledStaveFeatures()),
           resolve: Effect.fail(new StaveBinary.StaveBinaryNotFound({ candidates: ["stave"] })),
           resolveRunnable: Effect.fail(
             new StaveBinary.StaveBinaryNotFound({ candidates: ["stave"] }),
@@ -935,3 +938,39 @@ it.layer(NodeServices.layer)("StaveCli real process", (it) => {
       }),
   );
 });
+
+it.effect("feature gates exact requested flags before any mutating spawn", () =>
+  Effect.gen(function* () {
+    const limited = bundledStaveFeatures();
+    const binary = StaveBinary.layerFixed(
+      { path: FAKE_BINARY, source: "settings", version: "0.1.0", commit: null },
+      {
+        ...limited,
+        source: "help",
+        commands: limited.commands.map((command) =>
+          command.verb === "space add"
+            ? { ...command, flags: command.flags.filter((flag) => flag !== "branch") }
+            : command,
+        ),
+      },
+    );
+    const allowed = yield* withCli(
+      canned({ stdout: SAMPLE_SPACE_ADD }),
+      (cli) => cli.spaceAdd({ id: "s-1", repo: "api", mode: "edit" }),
+      { binary },
+    );
+    expect(allowed.spawns).toHaveLength(1);
+    const denied = yield* withCli(
+      canned({ stdout: SAMPLE_SPACE_ADD }),
+      (cli) =>
+        cli
+          .spaceAdd({ id: "s-1", repo: "api", mode: "edit", branch: "private-branch" })
+          .pipe(Effect.flip),
+      { binary },
+    );
+    expect(denied.spawns).toHaveLength(0);
+    expect(denied.result.code).toBe("unsupported_feature");
+    expect(denied.result.details).toEqual({ missing: ["branch"] });
+    expect(denied.result.message).not.toContain("private-branch");
+  }),
+);

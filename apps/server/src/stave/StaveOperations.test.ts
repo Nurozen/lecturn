@@ -1,3 +1,4 @@
+import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 import {
   type StaveLifecycleRow,
   type StaveLifecycleRepositoryShape,
@@ -66,7 +67,10 @@ const NOW = "2026-09-07T00:00:00.000Z";
 const CONFIG_PATH = "/cfg/stave/config.yaml";
 const PLAN: StaveDryRunPlan = { dryRun: true, plan: ["would create space demo"] };
 const ENGINE_SEQUENCE = 42;
-const CREATE_NOTES = ["cloned api", "wrote .stave.yaml"];
+const CREATE_NOTES = [
+  "Windows: symlink unavailable; copied reference verbatim. C:\\work\\notes",
+  "wrote .stave.yaml",
+];
 
 const manifest = (id: string, createdAt: string = CREATED_AT) => ({
   id,
@@ -199,6 +203,10 @@ interface HarnessOptions {
 }
 
 interface Harness extends Roots {
+  readonly analytics: Array<{
+    event: string;
+    properties: Readonly<Record<string, unknown>> | undefined;
+  }>;
   readonly layer: Layer.Layer<StaveOperations>;
   readonly cliCalls: Ref.Ref<ReadonlyArray<CliCall>>;
   readonly dispatched: Ref.Ref<ReadonlyArray<OrchestrationCommand>>;
@@ -240,6 +248,10 @@ const makeGates = Effect.gen(function* () {
 
 const makeHarness = (roots: Roots, options: HarnessOptions) =>
   Effect.gen(function* () {
+    const analytics: Array<{
+      event: string;
+      properties: Readonly<Record<string, unknown>> | undefined;
+    }> = [];
     const cliCalls = yield* Ref.make<ReadonlyArray<CliCall>>([]);
     const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
     const invalidated = yield* Ref.make<ReadonlyArray<string>>([]);
@@ -301,6 +313,16 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
     const layer = layerWith(options.limits ?? {}).pipe(
       Layer.provide(
         Layer.mergeAll(
+          Layer.succeed(
+            AnalyticsService,
+            AnalyticsService.of({
+              record: (event, properties) =>
+                Effect.sync(() => {
+                  analytics.push({ event, properties });
+                }),
+              flush: Effect.void,
+            }),
+          ),
           Layer.mock(StaveCli)({
             sagaList: Effect.succeed([]),
             spaceCreate: record("spaceCreate", fakes.spaceCreate),
@@ -375,7 +397,16 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
       Layer.orDie,
     );
 
-    const harness: Harness = { fs, path, agentWorkDir, layer, cliCalls, dispatched, invalidated };
+    const harness: Harness = {
+      fs,
+      path,
+      agentWorkDir,
+      layer,
+      analytics,
+      cliCalls,
+      dispatched,
+      invalidated,
+    };
     return harness;
   });
 
@@ -1446,6 +1477,12 @@ describe("StaveOperations lifecycle and edits", () => {
             ).kind,
           ).toBe("destroySpace");
           expect(options.fixture.history).toEqual(["lease", "destroying", "destroyed", "release"]);
+          expect(harness.analytics).toEqual([
+            {
+              event: "stave.space.destroyed",
+              properties: { operationKind: "destroySpace", trigger: "interactive", count: 1 },
+            },
+          ]);
           expect(
             (yield* Ref.get(harness.dispatched)).some(
               (command) => command.type === "project.delete" && command.force,
@@ -2881,6 +2918,12 @@ it.effect(
             memory: "keep",
           });
           expect(options.fixture.history).toEqual(["lease", "destroying", "destroyed", "release"]);
+          expect(harness.analytics).toEqual([
+            {
+              event: "stave.space.destroyed",
+              properties: { operationKind: "lifecycleAction", trigger: "automatic", count: 1 },
+            },
+          ]);
           expect(
             (yield* Ref.get(harness.cliCalls)).filter((call) => call.method === "spaceDestroy"),
           ).toHaveLength(1);
@@ -3047,4 +3090,63 @@ it.effect(
           expect(fixture.history).not.toContain("cli");
         }),
     ),
+);
+
+it.effect("records a terminal result only once across start-or-attach and observe replay", () =>
+  scenario({}, (harness) =>
+    Effect.gen(function* () {
+      const ops = yield* StaveOperations;
+      const operation = createSpaceOperation({
+        title: "secret title",
+        edits: [{ repo: "secret-repo", base: "secret-base" }],
+        memory: [{ spec: "secret-den" }],
+      });
+      yield* runToEnd(ops, "private-operation-id", operation);
+      yield* runToEnd(ops, "private-operation-id", operation);
+      yield* Stream.runCollect(ops.observe({ operationId: "private-operation-id" }));
+      expect(harness.analytics).toEqual([
+        {
+          event: "stave.space.created",
+          properties: { operationKind: "createSpace", trigger: "interactive", count: 1 },
+        },
+      ]);
+    }),
+  ),
+);
+
+it.effect("failure telemetry excludes raw stderr, details and command text", () =>
+  scenario(
+    {
+      cli: {
+        spaceCreate: () =>
+          Effect.fail(
+            new StaveError({
+              code: "unknown",
+              message: "secret message",
+              verb: "secret command",
+              stderrTail: "secret stderr",
+              details: { path: "secret path", den: "secret den" },
+              exitCode: 1,
+            }),
+          ),
+      },
+    },
+    (harness) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        const events = yield* runToEnd(ops, "secret-operation-id", createSpaceOperation());
+        expect(terminal(events).kind).toBe("failed");
+        expect(harness.analytics).toEqual([
+          {
+            event: "stave.space.failed",
+            properties: {
+              operationKind: "createSpace",
+              trigger: "interactive",
+              count: 1,
+              code: "unknown",
+            },
+          },
+        ]);
+      }),
+  ),
 );

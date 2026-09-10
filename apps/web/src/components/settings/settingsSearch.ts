@@ -246,7 +246,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "stave-status",
     title: "Stave status",
     to: "/settings/general",
-    searchTerms: ["stave binary version set up install"],
+    searchTerms: ["stave binary version set up install compatibility MCP memory provider support"],
     requiresStave: true,
   },
   {
