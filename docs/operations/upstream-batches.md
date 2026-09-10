@@ -91,6 +91,22 @@ are PR evidence, not repository assets. An upload failure leaves the batch
 blocked with evidence retained; the controller cannot substitute a local path
 or claim an image was attached. Reviewers judge whether UI evidence applies.
 
+Builders upload authorized screenshots and videos before PR creation using
+authenticated `gh`; no browser sign-in is required. The trusted
+[`BATCH_PROMPT.md`](../../.github/upstream-integration/BATCH_PROMPT.md) includes
+the upload command for `https://uploads.github.com/user-attachments/assets`,
+using the destination repository's numeric ID from `gh api repos/OWNER/REPO`.
+This is the endpoint used by the
+[GitHub CLI attachment client](https://github.com/cli/cli/blob/v2.100.0/internal/attachments/client.go).
+Keep each upload's JSON receipt, actual returned URL and file SHA-256 with the
+external evidence. Builders return URLs for review and never create or edit
+PRs. Builders and reviewers verify authenticated retrieval with `gh api` and
+matching SHA-256 hashes. Unlinked pre-PR assets can return anonymous HTTP 404;
+that response alone does not prove upload failure. For an already-created PR,
+an authorized operator can prefer
+[`gh pr edit --attach`](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli)
+when the installed CLI supports it; this does not change the builder boundary.
+
 The controller binds the commit to the approved tree and exact parent list.
 It publishes one unique branch, creates or updates its one PR, and waits for
 both nonempty successful check results and a completed successful `ci.yml` run

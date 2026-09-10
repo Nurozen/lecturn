@@ -53,6 +53,30 @@ global settings. Launch an isolated browser or dev server only when the caller e
 provides user authorization. With that authorization, UI behavior changes require
 before/after GitHub attachment evidence; never commit PR-only images.
 
+Upload only the authorized screenshots and videos using authenticated `gh`;
+browser sign-in and an existing PR are not prerequisites. Read the numeric
+repository ID with `gh api repos/OWNER/REPO --jq .id`, then upload each external
+file through the endpoint used by GitHub CLI's attachment client:
+
+```bash
+gh api 'https://uploads.github.com/user-attachments/assets?name=before.png&content_type=image%2Fpng&repository_id=REPOSITORY_ID' \
+  --method POST --input /absolute/external/before.png \
+  -H 'Content-Type: application/octet-stream' \
+  -H 'Accept: application/vnd.github+json' > /absolute/external/before-upload.json
+```
+
+Substitute the actual repository ID and URL-encode the filename and media type
+for each file. Preserve the returned JSON receipt, its actual `url`, and the
+uploaded file's SHA-256 in the external report directory. Never invent attachment
+URLs or upload unrelated files. Retrieve each returned URL using authenticated
+`gh api "$URL" > /absolute/external/retrieved-before.png`, compare the retrieved
+file's SHA-256 with the uploaded file, and record successful retrieval and both
+hashes externally. An unlinked attachment can return anonymous HTTP 404 before
+PR creation; that alone is not an upload failure. Authenticated retrieval and
+matching hashes are required. Return these URLs for review; do not create or
+edit a PR to attach evidence. If upload fails, retain the evidence and report
+the failure without claiming readiness.
+
 Install dependencies when required. Regenerate affected lockfiles and generated
 files from their resolved source. Run focused behavioral tests, lint, and
 affected-package typechecks as appropriate. Investigate failures, fix defects
