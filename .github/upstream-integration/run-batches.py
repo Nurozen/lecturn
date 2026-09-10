@@ -150,11 +150,22 @@ CHECK = schema({'argv': {'type': 'array', 'items': STRING, 'minItems': 1}, 'cwd'
 BUILD_SCHEMA = schema({'ready': {'type': 'boolean'}, 'tree': STRING, 'summary': STRING,
                        'checks': {'type': 'array', 'items': CHECK, 'minItems': 1},
                        'ui_changed': {'type': 'boolean'}, 'before_url': STRING, 'after_url': STRING,
+                       'motion_changed': {'type': 'boolean'}, 'video_urls': {'type': 'array', 'items': STRING},
                        'ci_retry': {'type': 'boolean'}})
 REVIEW_SCHEMA = schema({'verdict': {'type': 'string', 'enum': ['approve', 'changes', 'blocked']},
                         'tree': STRING, 'findings': STRING, 'ui_evidence_valid': {'type': 'boolean'},
                         'ci_retry_safe': {'type': 'boolean'}})
 PLAN_SCHEMA = schema({'target': STRING, 'reason': STRING, 'oversized_reason': STRING})
+
+
+def validate_ui_evidence(build):
+    if build['ui_changed']:
+        for field in ('before_url', 'after_url'):
+            require(build[field].startswith('https://github.com/user-attachments/'), 'UI evidence is not a GitHub attachment')
+    if build['motion_changed']:
+        require(build['ui_changed'] and build['video_urls'], 'Motion/timing changes require UI evidence and a video')
+    for url in build['video_urls']:
+        require(url.startswith('https://github.com/user-attachments/'), 'Video evidence is not a GitHub attachment')
 
 
 class Runner:
@@ -328,6 +339,8 @@ Inspect clean merges as carefully as conflicts. Preserve all fork behavior. Run 
 Inspect package scripts before executing. No live application data, global settings, deploys or unrelated resources.
 User explicitly authorized isolated browser/dev-server validation, capture BEFORE/AFTER UI evidence when applicable.
 Upload PR-only screenshots to GitHub, never commit assets. Return actual GitHub user-attachments URLs (never invented).
+Set motion_changed for motion/timing changes and return every required verified video attachment in video_urls, including on repairs.
+Return motion_changed false and video_urls [] when no motion/timing evidence is required; summary text does not replace structured URLs.
 Upload authorized screenshots/videos before PR creation using authenticated gh and the BATCH_PROMPT endpoint instructions.
 Use the verified origin OWNER/REPO and derive its numeric ID with gh api repos/OWNER/REPO --jq .id.
 Browser sign-in is not required. Retain upload JSON receipts, returned URLs and file SHA-256 hashes in {folder}.
@@ -335,12 +348,15 @@ If upload unavailable, report not ready with retained evidence; no waiver. Follo
 Any published migration collision requires a designed compatible upgrade, and existing/fresh database tests, not mechanical renumbering.
 Stage source deliberately. Return ready only if complete, exact git write-tree, concise PR summary, focused check argv arrays
 (no shell interpolation), cwd relative to worktree, and UI evidence assessment. Include docs changes for behavior.
+When ready, summary is the final PR description: lead with the concrete problem and result for a reviewer without this conversation.
+Omit round numbers, preserved-staging notes and handoff history. When blocked, summary must explain the actual blocking reason.
 Checks will be rerun by controller and independent reviewer judges their adequacy. Return at least one meaningful check.
 Set ci_retry true only when CI failed for a verified transient infrastructure reason and the correct repair is no source changes.
 Explain the actual failed job/log evidence; do not use ci_retry to dismiss a source defect or cancelled run without investigation.
 '''
         build = self.agent(repo, folder, prefix + '-builder', prompt, BUILD_SCHEMA)
         require(build['ready'] is True, f"Builder blocked: {build['summary']}")
+        validate_ui_evidence(build)
         tree = staged_tree(repo, m['expected_head'], m['merge_parent'])
         require(build['tree'] == tree, 'Builder evidence refers to a different tree')
         for index, check in enumerate(build['checks']):
@@ -399,9 +415,6 @@ transient infrastructure failure that should be rerun. Otherwise return ci_retry
             require(holistic['verdict'] == 'approve', holistic['findings'])
             reviews.append(holistic)
         require(all(review['ui_evidence_valid'] is True for review in reviews), 'Reviewers did not approve UI evidence applicability')
-        if build['ui_changed']:
-            for field in ('before_url', 'after_url'):
-                require(build[field].startswith('https://github.com/user-attachments/'), 'UI evidence is not a GitHub attachment')
         m.update(phase='reviewed', tree=tree, build=build, reviews=reviews)
         self.save(folder, m)
 
@@ -445,6 +458,8 @@ transient infrastructure failure that should be rerun. Otherwise return ci_retry
         body += f"Fresh independent review approved tree `{m['tree']}` after controller-rerun focused checks. Merge commit required; no squash/rebase.\n"
         if m['build']['ui_changed']:
             body += f"\nBefore:\n![Before]({m['build']['before_url']})\n\nAfter:\n![After]({m['build']['after_url']})\n"
+        for url in m['build'].get('video_urls', []):
+            body += f'\n{url}\n'
         body += '\nImplemented and independently reviewed by fresh Codex CLI agents using the locally configured model.\n'
         (folder / 'pr-body.md').write_text(body)
         if prs:

@@ -201,6 +201,28 @@ class GitSafetyTests(unittest.TestCase):
             runner.publish(self.folder, m)
         self.assertTrue(self.git('ls-remote', 'origin', m['branch']).startswith(self.accepted))
 
+    def test_publish_preserves_structured_video_urls_and_old_receipts(self):
+        runner, m = self.runner_manifest()
+        runner.commit(self.folder, m)
+        remote = Path(self.temp.name) / 'remote.git'
+        subprocess.run(['git', 'init', '--bare', str(remote)], check=True, capture_output=True)
+        self.git('remote', 'add', 'origin', str(remote))
+        videos = ['https://github.com/user-attachments/assets/video-before',
+                  'https://github.com/user-attachments/assets/video-after']
+        m.update(branch='upstream/batch-test', count=1, reason='UI checkpoint',
+                 build={'summary': 'Fix resizing', 'ui_changed': True, 'before_url': 'before',
+                        'after_url': 'after', 'motion_changed': True, 'video_urls': videos})
+        runner.gh = Mock(side_effect=lambda *args: '[{"number":1,"state":"OPEN"}]'
+                         if args[:2] == ('pr', 'list') else '')
+        runner.publish(self.folder, m)
+        body = (self.folder / 'pr-body.md').read_text()
+        for url in videos:
+            self.assertIn('\n\n' + url + '\n', body)
+        del m['build']['motion_changed']
+        del m['build']['video_urls']
+        runner.publish(self.folder, m)
+        self.assertEqual(m['phase'], 'published')
+
     def test_cleanup_does_not_follow_external_dependency_symlink(self):
         runner = batches.Runner.__new__(batches.Runner)
         spaces = Path(self.temp.name)
@@ -296,6 +318,34 @@ class GitSafetyTests(unittest.TestCase):
             batches.command([sys.executable, '-c', 'print("retained evidence", flush=True); raise SystemExit(3)'],
                             self.repo, log=log)
         self.assertIn('retained evidence', log.read_text())
+
+
+class UIEvidenceGates(unittest.TestCase):
+    def build(self):
+        return dict(ui_changed=True, before_url='https://github.com/user-attachments/assets/before',
+                    after_url='https://github.com/user-attachments/assets/after',
+                    motion_changed=True, video_urls=[])
+
+    def test_motion_requires_video_and_ui_evidence(self):
+        build = self.build()
+        with self.assertRaisesRegex(batches.Blocked, 'require UI evidence and a video'):
+            batches.validate_ui_evidence(build)
+        build.update(ui_changed=False, video_urls=['https://github.com/user-attachments/assets/video'])
+        with self.assertRaisesRegex(batches.Blocked, 'require UI evidence and a video'):
+            batches.validate_ui_evidence(build)
+
+    def test_video_urls_must_be_github_attachments(self):
+        build = self.build()
+        build['video_urls'] = ['https://github.com/user-attachments/assets/video', '/local/video.mp4']
+        with self.assertRaisesRegex(batches.Blocked, 'Video evidence is not a GitHub attachment'):
+            batches.validate_ui_evidence(build)
+
+    def test_nonmotion_changes_allow_empty_videos(self):
+        build = self.build()
+        build.update(motion_changed=False, video_urls=[])
+        batches.validate_ui_evidence(build)
+        build.update(ui_changed=False, before_url='', after_url='')
+        batches.validate_ui_evidence(build)
 
 
 class CIGates(unittest.TestCase):

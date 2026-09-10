@@ -52,6 +52,9 @@ state, never live user data. Do not deploy, publish, send messages, or modify
 global settings. Launch an isolated browser or dev server only when the caller explicitly
 provides user authorization. With that authorization, UI behavior changes require
 before/after GitHub attachment evidence; never commit PR-only images.
+Motion or timing changes also require a short video. Report `motion_changed`
+and all verified `video_urls` in the structured result, including unchanged
+repairs; mentioning video only in a prose summary is insufficient.
 
 Upload only the authorized screenshots and videos using authenticated `gh`;
 browser sign-in and an existing PR are not prerequisites. Read the numeric

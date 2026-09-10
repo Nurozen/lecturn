@@ -97,7 +97,11 @@ requires it on the exact published head before merging.
 
 UI behavior changes require authorized isolated client validation and real
 before/after GitHub attachment URLs. The current operator has authorized browser
-and computer use. Follow `test-t3-app`; never write live T3 state. Screenshots
+and computer use. Motion or timing changes also require short video evidence;
+builders return `motion_changed` and `video_urls` on every round, including
+repairs. The controller requires videos for motion changes and renders their
+actual attachment URLs as separate PR paragraphs. Follow `test-t3-app`; never
+write live T3 state. Screenshots
 are PR evidence, not repository assets. An upload failure leaves the batch
 blocked with evidence retained; the controller cannot substitute a local path
 or claim an image was attached. Reviewers judge whether UI evidence applies.
