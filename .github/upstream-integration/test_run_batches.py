@@ -61,6 +61,30 @@ class GitSafetyTests(unittest.TestCase):
         with self.assertRaisesRegex(batches.Blocked, 'commits'):
             batches.check_selection(self.repo, self.base, self.accepted, self.target, self.target, 0, 100)
 
+    def test_resumed_builder_receives_local_branch_and_accepted_provenance(self):
+        self.git('branch', '-m', 'stave/example/lecturn')
+        runner = batches.Runner.__new__(batches.Runner)
+        runner.args = SimpleNamespace(max_rounds=8)
+        runner.progress = {'bootstrap_note': 'Prior PR merged', 'accepted_receipt': '/prior/manifest'}
+        m = dict(worktree=str(self.repo), round=1, space='example', accepted=self.accepted,
+                 base=self.base, expected_head=self.base, merge_parent=self.target,
+                 branch='upstream/batch-example')
+        (self.folder / 'BATCH_PROMPT.md').write_text('Verify the assigned branch and accepted provenance.')
+
+        def builder(repo, folder, name, prompt, output_schema):
+            manifest = json.loads((folder / 'manifest.json').read_text())
+            self.assertEqual(manifest['local_branch'], self.git('branch', '--show-current'))
+            self.assertNotEqual(manifest['local_branch'], manifest['branch'])
+            self.assertEqual(manifest['accepted_provenance']['prior_accepted_batch'], '/prior/manifest')
+            self.assertIn('only the eventual REMOTE PR destination', prompt)
+            return {'ready': False, 'summary': 'Stopped after checking the handoff'}
+
+        runner.agent = Mock(side_effect=builder)
+        with self.assertRaisesRegex(batches.Blocked, 'Stopped after checking the handoff'):
+            runner.build_review(self.folder, m)
+        runner.agent.assert_called_once()
+        self.assertEqual(self.git('rev-parse', 'HEAD'), self.base)
+
     def test_rewritten_accepted_ancestry_is_rejected(self):
         with self.assertRaisesRegex(batches.Blocked, 'Accepted ancestry'):
             batches.check_selection(self.repo, self.base, self.base, self.target, self.target, 10, 100)
@@ -165,6 +189,7 @@ class GitSafetyTests(unittest.TestCase):
         runner.cleanup_dependencies.assert_called_once()
         self.assertIsNone(runner.progress['active'])
         self.assertEqual(runner.progress['accepted'], self.target)
+        self.assertEqual(runner.progress['accepted_receipt'], str(self.folder))
 
     def test_verified_no_source_ci_repair_reuses_head_and_reruns_failed_jobs(self):
         runner, m = self.runner_manifest()

@@ -291,6 +291,14 @@ class Runner:
     def build_review(self, folder, m):
         repo = Path(m['worktree'])
         require(m['round'] < self.args.max_rounds, 'Repair limit reached; work and evidence retained')
+        m.setdefault('local_branch', f"stave/{m['space']}/lecturn")
+        m.setdefault('accepted_provenance', {
+            'accepted_upstream_sha': m['accepted'],
+            'prior_accepted_batch': self.progress.get('accepted_receipt'),
+            'bootstrap_note': self.progress.get('bootstrap_note'),
+            'verified_fork_base': m['base'],
+        })
+        require(git(repo, 'branch', '--show-current') == m['local_branch'], 'Unexpected local Stave branch')
         m['round'] += 1
         self.save(folder, m)
         prefix = f"round-{m['round']}"
@@ -300,6 +308,9 @@ class Runner:
 Delivery mode prepare. User authorizes sequential automatic PR delivery by CONTROLLER only.
 You own source integration and focused checks. Do not commit, push, create/merge PRs, reset, abort or expand target.
 Expected HEAD={m['expected_head']}; expected MERGE_HEAD={m['merge_parent']}.
+Expected LOCAL branch is {m['local_branch']}. Stay on this Stave-owned branch.
+The manifest's branch field ({m['branch']}) is only the eventual REMOTE PR destination, not the local branch.
+accepted_provenance records the bootstrap or prior accepted batch; inspect that evidence and Git ancestry without requesting it again.
 If no merge is active and merge_parent is set, run git merge --no-commit --no-ff with that parent.
 If this is a repair, preserve existing work and address feedback in manifest/previous reports; do not repeat initial clean-state check.
 If merge_parent is null, this is a repair atop the existing commit; leave MERGE_HEAD absent.
@@ -574,7 +585,7 @@ Return ci_retry_safe false; this final review does not authorize CI reruns.
             if m['phase'] == 'accepted':
                 if not (folder / 'dependency-cleanup.json').exists():
                     self.cleanup_dependencies(folder, m)
-                self.progress.update(accepted=m['target'], active=None)
+                self.progress.update(accepted=m['target'], accepted_receipt=str(folder), active=None)
                 self.save_progress()
                 if self.args.target or self.args.once:
                     return
