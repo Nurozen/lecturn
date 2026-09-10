@@ -73,6 +73,12 @@ export const staveDryRun = createEnvironmentRpcCommand(connectionAtomRuntime, {
   tag: WS_METHODS.staveDryRun,
 });
 
+/** Bypasses client query caching when a confirmation needs the current saga roster. */
+export const staveSpaceStatusRead = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:stave:space-status-fresh",
+  tag: WS_METHODS.staveSpaceStatus,
+});
+
 const EMPTY_SPACE_STATUS_ATOM = Atom.make(AsyncResult.initial<StaveSpaceStatus, never>(false)).pipe(
   Atom.withLabel("web-stave-space-status:empty"),
 );

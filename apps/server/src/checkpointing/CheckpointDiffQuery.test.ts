@@ -5,6 +5,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { describe, expect } from "vite-plus/test";
 
+import { StaveWorkspaceReader } from "../stave/StaveWorkspaceReader.ts";
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { checkpointRefForThreadTurn } from "./Utils.ts";
 import * as CheckpointDiffQuery from "./CheckpointDiffQuery.ts";
@@ -76,6 +77,8 @@ describe("CheckpointDiffQuery.layer", () => {
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+            listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
+            listActiveProjectRootsUnder: () => Effect.succeed([]),
             getCommandReadModel: () =>
               Effect.die("CheckpointDiffQuery should not request the command read model"),
             getSnapshot: () =>
@@ -191,6 +194,8 @@ describe("CheckpointDiffQuery.layer", () => {
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+            listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
+            listActiveProjectRootsUnder: () => Effect.succeed([]),
             getCommandReadModel: () =>
               Effect.die("CheckpointDiffQuery should not request the command read model"),
             getSnapshot: () =>
@@ -281,6 +286,8 @@ describe("CheckpointDiffQuery.layer", () => {
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+            listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
+            listActiveProjectRootsUnder: () => Effect.succeed([]),
             getCommandReadModel: () =>
               Effect.die("CheckpointDiffQuery should not request the command read model"),
             getSnapshot: () =>
@@ -356,6 +363,8 @@ describe("CheckpointDiffQuery.layer", () => {
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+            listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
+            listActiveProjectRootsUnder: () => Effect.succeed([]),
             getCommandReadModel: () =>
               Effect.die("CheckpointDiffQuery should not request the command read model"),
             getSnapshot: () =>
@@ -416,6 +425,8 @@ describe("CheckpointDiffQuery.layer", () => {
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+            listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
+            listActiveProjectRootsUnder: () => Effect.succeed([]),
             getCommandReadModel: () =>
               Effect.die("CheckpointDiffQuery should not request the command read model"),
             getSnapshot: () =>
@@ -462,5 +473,68 @@ describe("CheckpointDiffQuery.layer", () => {
         "Checkpoint invariant violation in CheckpointDiffQuery.getTurnDiff: Thread 'thread-missing' not found.",
       );
     }),
+  );
+});
+
+it.effect("refuses checkpoint diffs for a Stave project even with a legacy worktree", () => {
+  const threadId = ThreadId.make("space-thread");
+  const projectId = ProjectId.make("space-project");
+  const checkpointRef = checkpointRefForThreadTurn(threadId, 1);
+  const context = makeThreadCheckpointContext({
+    projectId,
+    threadId,
+    workspaceRoot: "/spaces/demo",
+    worktreePath: "/legacy/worktree",
+    checkpointTurnCount: 1,
+    checkpointRef,
+  });
+  return Effect.gen(function* () {
+    const query = yield* CheckpointDiffQuery.CheckpointDiffQuery;
+    const error = yield* Effect.flip(
+      query.getTurnDiff({ threadId, fromTurnCount: 0, toTurnCount: 1 }),
+    );
+    expect(error._tag).toBe("CheckpointStaveUnavailableError");
+    const fullError = yield* Effect.flip(query.getFullThreadDiff({ threadId, toTurnCount: 1 }));
+    expect(fullError._tag).toBe("CheckpointStaveUnavailableError");
+  }).pipe(
+    Effect.provide(
+      CheckpointDiffQuery.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(CheckpointStore.CheckpointStore)({
+              diffCheckpoints: () => Effect.die("Space diff must not reach Git"),
+            }),
+            Layer.mock(StaveWorkspaceReader)({
+              load: (root) => {
+                expect(root).toBe("/spaces/demo");
+                return Effect.succeed(
+                  Option.some({
+                    spaceId: "demo",
+                    isSaga: false,
+                    repos: [],
+                    memories: [],
+                    state: "live",
+                  }),
+                );
+              },
+            }),
+            Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
+              getThreadCheckpointContext: () => Effect.succeed(Option.some(context)),
+              getFullThreadDiffContext: () =>
+                Effect.succeed(
+                  Option.some({
+                    threadId,
+                    projectId,
+                    workspaceRoot: "/spaces/demo",
+                    worktreePath: "/legacy/worktree",
+                    latestCheckpointTurnCount: 1,
+                    toCheckpointRef: checkpointRef,
+                  }),
+                ),
+            }),
+          ),
+        ),
+      ),
+    ),
   );
 });

@@ -71,6 +71,8 @@ import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
 import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
+import { StaveLifecycleRepositoryLive } from "./persistence/Layers/StaveLifecycleRepository.ts";
+import * as StaveSpaceLock from "./stave/StaveSpaceLock.ts";
 import * as StaveAdmission from "./stave/StaveAdmission.ts";
 import * as StaveBinary from "./stave/StaveBinary.ts";
 import * as StaveCli from "./stave/StaveCli.ts";
@@ -419,9 +421,18 @@ const ServerEnvironmentLayerLive = ServerEnvironment.layer.pipe(
 const StaveWorkspaceReaderLayerLive = StaveWorkspaceReader.layer.pipe(
   Layer.provide(RepositoryIdentityResolver.layer),
 );
+const StaveLifecycleLayerLive = StaveLifecycleRepositoryLive.pipe(
+  Layer.provide(PersistenceLayerLive),
+);
 const StaveLayerLive = Layer.mergeAll(
+  StaveSpaceLock.layer,
+  StaveLifecycleLayerLive,
   StaveWorkspaceReaderLayerLive,
-  StaveAdmission.layer.pipe(Layer.provide(StaveWorkspaceReaderLayerLive)),
+  StaveAdmission.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(StaveWorkspaceReaderLayerLive, StaveSpaceLock.layer, StaveLifecycleLayerLive),
+    ),
+  ),
   RepositoryIdentityResolver.layer,
   StaveBinaryLayerLive,
   StaveCliLayerLive,

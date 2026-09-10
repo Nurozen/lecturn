@@ -275,7 +275,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "project.delete": {
-      yield* requireProject({
+      const project = yield* requireProject({
         readModel,
         command,
         projectId: command.projectId,
@@ -304,6 +304,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               type: "project.delete",
               commandId: command.commandId,
               projectId: command.projectId,
+              ...(command.staveSpaceId !== undefined ? { staveSpaceId: command.staveSpaceId } : {}),
+              ...(command.staveCreatedAt !== undefined
+                ? { staveCreatedAt: command.staveCreatedAt }
+                : {}),
+              ...(command.staveSagaRemoveConfirmed !== undefined
+                ? { staveSagaRemoveConfirmed: command.staveSagaRemoveConfirmed }
+                : {}),
             },
           ],
         });
@@ -320,6 +327,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: "project.deleted" as const,
         payload: {
           projectId: command.projectId,
+          workspaceRoot: project.workspaceRoot,
+          ...(command.staveSpaceId !== undefined ? { staveSpaceId: command.staveSpaceId } : {}),
+          ...(command.staveCreatedAt !== undefined
+            ? { staveCreatedAt: command.staveCreatedAt }
+            : {}),
+          ...(command.staveSagaRemoveConfirmed !== undefined
+            ? { staveSagaRemoveConfirmed: command.staveSagaRemoveConfirmed }
+            : {}),
           deletedAt: occurredAt,
         },
       };

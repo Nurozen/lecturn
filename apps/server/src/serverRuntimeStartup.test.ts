@@ -126,6 +126,8 @@ it.effect("launchStartupHeartbeat does not block the caller while counts are loa
 
       yield* ServerRuntimeStartup.launchStartupHeartbeat.pipe(
         Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+          listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
+          listActiveProjectRootsUnder: () => Effect.succeed([]),
           getCommandReadModel: () => Effect.die("unused"),
           getSnapshot: () => Effect.die("unused"),
           getShellSnapshot: () => Effect.die("unused"),
@@ -197,6 +199,8 @@ it.effect("resolveAutoBootstrapWelcomeTargets returns existing project and threa
         autoBootstrapProjectFromCwd: true,
       } as never),
       Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+        listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
+        listActiveProjectRootsUnder: () => Effect.succeed([]),
         getCommandReadModel: () => Effect.die("unused"),
         getSnapshot: () => Effect.die("unused"),
         getShellSnapshot: () => Effect.die("unused"),
@@ -266,6 +270,8 @@ it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when 
         autoBootstrapProjectFromCwd: true,
       } as never),
       Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+        listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
+        listActiveProjectRootsUnder: () => Effect.succeed([]),
         getCommandReadModel: () => Effect.die("unused"),
         getSnapshot: () => Effect.die("unused"),
         getShellSnapshot: () => Effect.die("unused"),
@@ -332,6 +338,8 @@ it.effect("resolveAutoBootstrapWelcomeTargets preserves typed UUID generation fa
         autoBootstrapProjectFromCwd: true,
       } as never),
       Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+        listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
+        listActiveProjectRootsUnder: () => Effect.succeed([]),
         getCommandReadModel: () => Effect.die("unused"),
         getSnapshot: () => Effect.die("unused"),
         getShellSnapshot: () => Effect.die("unused"),

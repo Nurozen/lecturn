@@ -1379,6 +1379,7 @@ const makeWsRpcLayer = (
             yield* staveAdmission
               .check({
                 projectRoot: project.value.workspaceRoot,
+                projectId: project.value.id,
                 intent: "thread.fork",
                 worktreePath: assembly.command.thread.worktreePath,
               })
@@ -1650,6 +1651,19 @@ const makeWsRpcLayer = (
         cwd: string,
       ) =>
         projectionSnapshotQuery.getActiveProjectByWorkspaceRoot(cwd).pipe(
+          Effect.flatMap((found) =>
+            Option.isSome(found)
+              ? Effect.succeed(found)
+              : projectionSnapshotQuery
+                  .getShellSnapshot()
+                  .pipe(
+                    Effect.map((snapshot) =>
+                      Option.fromUndefinedOr(
+                        snapshot.projects.find((project) => project.stave?.primaryRepoPath === cwd),
+                      ),
+                    ),
+                  ),
+          ),
           Effect.mapError(
             (cause) =>
               new GitCommandError({
@@ -1664,18 +1678,20 @@ const makeWsRpcLayer = (
             Option.match({
               onNone: () => Effect.void,
               onSome: (project) =>
-                staveAdmission.check({ projectRoot: project.workspaceRoot, intent }).pipe(
-                  Effect.mapError(
-                    (error) =>
-                      new GitCommandError({
-                        operation,
-                        command: "git",
-                        cwd,
-                        detail: error.message,
-                        cause: error,
-                      }),
+                staveAdmission
+                  .check({ projectRoot: project.workspaceRoot, projectId: project.id, intent })
+                  .pipe(
+                    Effect.mapError(
+                      (error) =>
+                        new GitCommandError({
+                          operation,
+                          command: "git",
+                          cwd,
+                          detail: error.message,
+                          cause: error,
+                        }),
+                    ),
                   ),
-                ),
             }),
           ),
         );

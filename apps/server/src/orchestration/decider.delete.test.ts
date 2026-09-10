@@ -215,3 +215,30 @@ it.layer(NodeServices.layer)("decider deletion flows", (it) => {
     }),
   );
 });
+
+it.effect(
+  "preserves the deleted workspace incarnation and saga confirmation through forced thread deletion",
+  () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedReadModel;
+      const decision = yield* decideOrchestrationCommand({
+        readModel,
+        command: {
+          type: "project.delete",
+          commandId: asCommandId("cmd-stave-delete"),
+          projectId: asProjectId("project-delete"),
+          force: true,
+          staveSpaceId: "space",
+          staveCreatedAt: "2026-01-01T00:00:00.000Z",
+          staveSagaRemoveConfirmed: true,
+        },
+      });
+      const events = Array.isArray(decision) ? decision : [decision];
+      expect(events.find((event) => event.type === "project.deleted")?.payload).toMatchObject({
+        workspaceRoot: "/tmp/project-delete",
+        staveSpaceId: "space",
+        staveCreatedAt: "2026-01-01T00:00:00.000Z",
+        staveSagaRemoveConfirmed: true,
+      });
+    }).pipe(Effect.provide(NodeServices.layer)),
+);

@@ -24,6 +24,12 @@ export function isStaveProject(project: ProjectLike | null | undefined): boolean
   return project?.stave != null;
 }
 
+export function staveThreadStartMessage(project: ProjectLike | null | undefined): string | null {
+  return project?.stave?.state === "archived"
+    ? "Unarchive this Stave space in project settings to start a thread."
+    : null;
+}
+
 /**
  * Directory git commands should run in for a thread on this project.
  * Stave spaces always target the primary repo (threads never get their own

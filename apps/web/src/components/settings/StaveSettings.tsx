@@ -1,21 +1,24 @@
 import { useAtomValue } from "@effect/atom-react";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts";
+import { DEFAULT_UNIFIED_SETTINGS, type EnvironmentId } from "@t3tools/contracts";
 import { RefreshCwIcon } from "lucide-react";
 
-import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { useEffect, useState } from "react";
+import { staveOperations } from "../../state/staveOperations";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { StaveOperationProgress } from "../stave/StaveOperationProgress";
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
-import { cn } from "../../lib/utils";
+import { cn, randomUUID } from "../../lib/utils";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { primaryServerConfigAtom } from "../../state/server";
-import { useStaveStatus } from "../../state/stave";
+import { useStaveStatus, staveStatus } from "../../state/stave";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
 import { Switch } from "../ui/switch";
-import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
-import { STAVE_SETUP_COMMAND, summarizeStaveStatus } from "./StaveSettings.logic";
+import { summarizeStaveStatus } from "./StaveSettings.logic";
 
 /**
  * Stave block of Settings → General. Only server builds that advertise
@@ -73,23 +76,22 @@ function StaveStatusRow() {
     error: status.error,
     isPending: status.isPending,
   });
-  // Phase 3 replaces the clipboard hand-off with a real `stave.setup` call.
-  const { copyToClipboard } = useCopyToClipboard({
-    target: "setup command",
-    onCopy: () => {
-      toastManager.add({
-        type: "success",
-        title: `Copied \`${STAVE_SETUP_COMMAND}\` — run it in a terminal`,
-      });
-    },
-    onError: (error) => {
-      toastManager.add({
-        type: "error",
-        title: "Failed to copy setup command",
-        description: error.message,
-      });
-    },
-  });
+  const settings = usePrimarySettings();
+  const run = useAtomCommand(staveOperations.run, { reportFailure: false });
+  const [setupId, setSetupId] = useState(randomUUID);
+  const [setupStarted, setSetupStarted] = useState(false);
+  const [setupEnvironmentId, setSetupEnvironmentId] = useState<EnvironmentId | null>(null);
+  const operation = useAtomValue(staveOperations.stateAtom(setupId));
+  const setupBusy =
+    setupStarted &&
+    (operation.status === "idle" ||
+      operation.status === "running" ||
+      operation.status === "disconnected");
+  useEffect(() => {
+    if (operation.status === "finished" && setupEnvironmentId !== null) {
+      appAtomRegistry.refresh(staveStatus({ environmentId: setupEnvironmentId, input: {} }));
+    }
+  }, [operation.status, setupEnvironmentId]);
 
   return (
     <SettingsRow
@@ -109,7 +111,20 @@ function StaveStatusRow() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => copyToClipboard(STAVE_SETUP_COMMAND)}
+              disabled={!settings.stave.enabled || setupBusy || environmentId === null}
+              title={!settings.stave.enabled ? "Enable Stave before setting it up." : undefined}
+              onClick={() => {
+                if (environmentId === null) return;
+                const operationId = randomUUID();
+                setSetupId(operationId);
+                setSetupEnvironmentId(environmentId);
+                setSetupStarted(true);
+                void run({
+                  environmentId,
+                  operationId,
+                  operation: { kind: "setup", force: false },
+                });
+              }}
             >
               Set up
             </Button>
@@ -132,7 +147,13 @@ function StaveStatusRow() {
           </Tooltip>
         </>
       }
-    />
+    >
+      {setupStarted && setupEnvironmentId !== null ? (
+        <div className="pb-3">
+          <StaveOperationProgress environmentId={setupEnvironmentId} operationId={setupId} />
+        </div>
+      ) : null}
+    </SettingsRow>
   );
 }
 

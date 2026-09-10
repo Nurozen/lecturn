@@ -1,3 +1,4 @@
+import { prepareStaveProjectDeletion } from "../../lib/staveProjectDeletion";
 import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
@@ -728,6 +729,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
       const isWholeGroup = members.length === group.memberProjects.length;
       const singleMember = members.length === 1 ? members[0]! : null;
       const targetLabel = singleMember?.title ?? group.displayName;
+      const staveDeletions = await Promise.all(members.map(prepareStaveProjectDeletion));
       const confirmed = await settlePromise(() =>
         api.dialogs.confirm(
           [
@@ -747,9 +749,15 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
                   "This permanently clears conversation history for those threads and any archived threads.",
                 ]
               : ["This permanently clears any archived conversation history."]),
-            isWholeGroup
-              ? "This removes only the project entries, not the files on disk."
-              : "Other entries in this grouped project are unaffected.",
+            ...(staveDeletions.some((preview) => preview.lines.length > 0)
+              ? staveDeletions.flatMap((preview, index) =>
+                  preview.lines.map((line) => `${members[index]!.title}: ${line}`),
+                )
+              : [
+                  isWholeGroup
+                    ? "This removes only the project entries, not the files on disk."
+                    : "Other entries in this grouped project are unaffected.",
+                ]),
             "This action cannot be undone.",
           ].join("\n"),
           { variant: "destructive" },
@@ -769,6 +777,8 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
             input: {
               projectId: member.id,
               force: true,
+              staveSagaRemoveConfirmed:
+                staveDeletions[members.indexOf(member)]?.staveSagaRemoveConfirmed ?? false,
             },
           }),
           () => undefined,
@@ -1258,8 +1268,12 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
             }
             description={
               group.memberProjects.length > 1
-                ? `Deletes all ${group.memberProjects.length} checkout entries and their threads on every machine. Files on disk are not touched.`
-                : "Deletes the project entry and its threads. Files on disk are not touched."
+                ? group.memberProjects.some((member) => member.stave != null)
+                  ? `Deletes all ${group.memberProjects.length} project entries and their threads. Stave cleanup follows each environment’s lifecycle policy; review the confirmation for file and memory changes.`
+                  : `Deletes all ${group.memberProjects.length} checkout entries and their threads on every machine. Files on disk are not touched.`
+                : staveInfo
+                  ? "Deletes the project and its threads. Stave cleanup follows this environment’s lifecycle policy; review the confirmation for file and memory changes."
+                  : "Deletes the project entry and its threads. Files on disk are not touched."
             }
             control={
               <Button

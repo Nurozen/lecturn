@@ -3987,3 +3987,21 @@ it.effect("names the signed-in account in the detail, and says nothing where the
     assert.strictEqual(unnamed.viewer, undefined);
   }),
 );
+
+it("routes Stave PR identity and cwd to its primary repository", () => {
+  const space = {
+    workspaceRoot: "/spaces/task",
+    repositoryIdentity: null,
+    stave: {
+      primaryRepoPath: "/spaces/task/web",
+      primaryRepositoryIdentity: {
+        provider: "github",
+        displayName: "acme/web",
+        owner: "acme",
+        name: "web",
+      },
+    },
+  } as never;
+  assert.strictEqual(PullRequestService.repositoryIdentityOf(space), "acme/web");
+  assert.strictEqual(PullRequestService.pullRequestCwd(space), "/spaces/task/web");
+});

@@ -1,3 +1,11 @@
+import {
+  type StaveLifecycleRow,
+  type StaveLifecycleRepositoryShape,
+  StaveLifecycleRepository,
+} from "../persistence/Services/StaveLifecycleRepository.ts";
+import { ProviderService } from "../provider/Services/ProviderService.ts";
+import { TerminalManager } from "../terminal/Manager.ts";
+import * as StaveSpaceLock from "./StaveSpaceLock.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import {
@@ -6,6 +14,7 @@ import {
   type OrchestrationProjectShell,
   ProjectId,
   type StaveCreateSpaceOperation,
+  type StaveProjectInfo,
   type StaveOperation,
   type StaveProgressEvent,
   type StaveRunOperationInput,
@@ -44,6 +53,7 @@ import {
   StaveOperations,
   type StaveOperationsLimits,
   type StaveOperationsShape,
+  sameManifestIncarnation,
 } from "./StaveOperations.ts";
 import { STAVE_ARCHIVE_DIRECTORY_NAME, StaveWorkspaceReader } from "./StaveWorkspaceReader.ts";
 
@@ -173,6 +183,10 @@ interface HarnessOptions {
   readonly configExists?: boolean;
   readonly limits?: StaveOperationsLimits;
   readonly cli?: Partial<CliFakes>;
+  readonly cliExtra?: Partial<StaveCliShape>;
+  readonly readerLoad?: StaveWorkspaceReader["Service"]["load"];
+  readonly lifecycle?: Partial<StaveLifecycleRepositoryShape>;
+  readonly quiesced?: Array<string>;
   /** Stdout the fake `git` answers with; defaults to nothing. */
   readonly processStdout?: (input: ProcessRunInput) => string;
   readonly shellProjects?: ReadonlyArray<OrchestrationProjectShell>;
@@ -286,15 +300,32 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(StaveCli)({
+            sagaList: Effect.succeed([]),
             spaceCreate: record("spaceCreate", fakes.spaceCreate),
             spaceStatus: record("spaceStatus", fakes.spaceStatus),
             spaceDestroy: record("spaceDestroy", fakes.spaceDestroy),
             reposAdd: record("reposAdd", fakes.reposAdd),
             setup: record("setup", fakes.setup),
+            ...options.cliExtra,
           }),
           configReader,
+          Layer.mock(StaveLifecycleRepository)({ ...options.lifecycle }),
+          Layer.mock(ProviderService)({
+            listSessions: () => Effect.succeed([]),
+            stopSessionsUnder: () =>
+              Effect.sync(() => {
+                options.quiesced?.push("providers");
+              }),
+          }),
+          Layer.mock(TerminalManager)({
+            closeSessionsUnder: () =>
+              Effect.sync(() => {
+                options.quiesced?.push("terminals");
+              }),
+          }),
+          StaveSpaceLock.layer,
           Layer.mock(StaveWorkspaceReader)({
-            load: () => Effect.succeed(Option.none()),
+            load: options.readerLoad ?? (() => Effect.succeed(Option.none())),
             invalidate: (workspaceRoot) =>
               Ref.update(invalidated, (roots) => [...roots, workspaceRoot]),
           }),
@@ -315,6 +346,7 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
                 threads: [],
                 updatedAt: NOW,
               }),
+            getProjectShellById: () => Effect.succeed(Option.fromNullishOr(options.activeProject)),
             getActiveProjectByWorkspaceRoot: () =>
               Effect.succeed(Option.fromNullishOr(options.activeProject)),
           }),
@@ -345,10 +377,10 @@ const scenario = <Options extends HarnessOptions, A, E>(
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "stave-operations-" });
-    const roots: Roots = { fs, path, agentWorkDir: tempDir };
+    const roots: Roots = { fs, path, agentWorkDir: yield* fs.realPath(tempDir) };
     const resolved = typeof options === "function" ? yield* options(roots) : options;
     const harness = yield* makeHarness(
-      { ...roots, agentWorkDir: resolved.agentWorkDir ?? tempDir },
+      { ...roots, agentWorkDir: resolved.agentWorkDir ?? roots.agentWorkDir },
       resolved,
     );
     return yield* body(harness, resolved).pipe(Effect.provide(harness.layer));
@@ -965,13 +997,10 @@ describe("StaveOperations partial spaces", () => {
     ),
   );
 
-  it.effect("removePartialSpace destroys a matching space and refreshes the project on it", () =>
-    scenario(
-      (roots) =>
-        Effect.succeed({
-          activeProject: project("on-space", roots.path.join(roots.agentWorkDir, SPACE_ID)),
-        }),
-      (harness) =>
+  it.effect(
+    "removePartialSpace destroys a matching bare partial without automatically forcing",
+    () =>
+      scenario({}, (harness) =>
         Effect.gen(function* () {
           const ops = yield* StaveOperations;
           const spacePath = harness.path.join(harness.agentWorkDir, SPACE_ID);
@@ -993,21 +1022,18 @@ describe("StaveOperations partial spaces", () => {
           );
           const destroy = phaseStarted(events, "space destroy").commandLine;
           expect(destroy?.startsWith("stave space destroy --json")).toBe(true);
-          expect(destroy).toContain("--force");
+          expect(destroy).not.toContain("--force");
           expect(destroy).toContain("--memory=destroy");
           expect(finishedResult(events).kind).toBe("removePartialSpace");
 
           const calls = yield* Ref.get(harness.cliCalls);
           expect(methodsCalled(calls)).toEqual(["spaceStatus", "spaceDestroy"]);
-          expect(calls[1]?.input).toEqual({ id: SPACE_ID, force: true, memory: "destroy" });
+          expect(calls[1]?.input).toEqual({ id: SPACE_ID, force: false, memory: "destroy" });
           expect(yield* Ref.get(harness.invalidated)).toEqual([spacePath]);
 
-          const dispatched = yield* Ref.get(harness.dispatched);
-          expect(dispatched.map((command) => command.type)).toEqual(["project.refresh"]);
-          const refresh = dispatched[0];
-          expect(refresh?.type === "project.refresh" ? refresh.projectId : null).toBe("on-space");
+          expect(yield* Ref.get(harness.dispatched)).toEqual([]);
         }),
-    ),
+      ),
   );
 
   it.effect("removePartialSpace skips the refresh when no project sits on the root", () =>
@@ -1130,11 +1156,11 @@ describe("StaveOperations dryRun", () => {
         Effect.gen(function* () {
           const ops = yield* StaveOperations;
           const noDryRun = yield* Effect.flip(
-            ops.dryRun({ kind: "syncSpace", workspaceRoot: "/spaces/demo", referencesOnly: false }),
+            ops.dryRun({ kind: "sagaSync", sagaRoot: "/spaces/demo" }),
           );
           expect(noDryRun).toBeInstanceOf(StaveError);
           expect(noDryRun.code).toBe("invalid_arguments");
-          expect(noDryRun.verb).toBe("space sync");
+          expect(noDryRun.verb).toBe("saga sync");
 
           const notAPlan = yield* Effect.flip(ops.dryRun(createSpaceOperation()));
           expect(notAPlan.code).toBe("unreadable");
@@ -1150,12 +1176,8 @@ describe("StaveOperations unimplemented kinds", () => {
       Effect.gen(function* () {
         const ops = yield* StaveOperations;
         const events = yield* runToEnd(ops, "op-add", {
-          kind: "addRepo",
-          workspaceRoot: "/spaces/demo",
-          repo: "api",
-          mode: "edit",
-          noFetch: false,
-          linkMemory: false,
+          kind: "sagaSync",
+          sagaRoot: "/spaces/demo",
         });
         expect(outline(events)).toEqual(["failed"]);
         const error = failedError(events);
@@ -1167,3 +1189,684 @@ describe("StaveOperations unimplemented kinds", () => {
     ),
   );
 });
+
+const infoFor = (state: "live" | "archived" = "live"): StaveProjectInfo => ({
+  spaceId: SPACE_ID,
+  createdAt: CREATED_AT,
+  isSaga: false,
+  repos: [],
+  memories: [],
+  state,
+  ...(state === "archived" ? { archiveBasename: SPACE_ID } : {}),
+});
+const lifecycleFixture = (root: string, disposition: StaveLifecycleRow["disposition"] = "live") => {
+  let row: StaveLifecycleRow = {
+    projectId: ProjectId.make("p"),
+    workspaceRoot: root,
+    spaceId: SPACE_ID,
+    manifestCreatedAt: CREATED_AT,
+    disposition,
+    deleteIntentSequence: null,
+    sagaRemoveConfirmed: false,
+    refusalCode: null,
+    refusalMessage: null,
+    anchorAt: null,
+    scheduledAt: null,
+    archiveDeadlineAt: null,
+    archiveBasename: null,
+    leaseEpoch: 0,
+    ownerToken: null,
+    leaseUntil: null,
+    updatedAt: NOW,
+    refreshedAt: null,
+  };
+  const history: Array<string> = [];
+  const service: Partial<StaveLifecycleRepositoryShape> = {
+    ensure: () => Effect.succeed(row),
+    listIncomplete: () => Effect.succeed([row]),
+    acquireLease: (input) =>
+      Effect.sync(() => {
+        row = {
+          ...row,
+          leaseEpoch: row.leaseEpoch + 1,
+          ownerToken: input.ownerToken,
+          leaseUntil: input.leaseUntil,
+        };
+        history.push("lease");
+        return Option.some(row);
+      }),
+    updateDisposition: (input) =>
+      Effect.sync(() => {
+        row = { ...row, ...input.patch };
+        if (input.patch.disposition) history.push(input.patch.disposition);
+        return true;
+      }),
+    releaseLease: () =>
+      Effect.sync(() => {
+        row = { ...row, ownerToken: null, leaseUntil: null };
+        history.push("release");
+        return true;
+      }),
+  };
+  return { service, history, row: () => row };
+};
+const listRow = (root: string) => ({
+  id: SPACE_ID,
+  logicalId: SPACE_ID,
+  path: root,
+  isSaga: false,
+  repos: [],
+  archived: false,
+  manifestVersion: 1,
+  memories: [],
+});
+
+describe("StaveOperations lifecycle and edits", () => {
+  it("compares full precision manifest instants", () => {
+    expect(
+      sameManifestIncarnation("2026-09-01T00:00:00.000000001Z", "2026-09-01T00:00:00.000000002Z"),
+    ).toBe(false);
+    expect(sameManifestIncarnation(CREATED_AT, "2026-08-31T16:00:00.000-08:00")).toBe(true);
+  });
+  it.effect("runs space edits and refreshes the owning project", () =>
+    scenario(
+      (roots) =>
+        Effect.gen(function* () {
+          const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+          yield* roots.fs.makeDirectory(root).pipe(Effect.orDie);
+          const seen: Array<string> = [];
+          const result = mutationResult(SPACE_ID, root);
+          return {
+            root,
+            seen,
+            activeProject: project("p", root),
+            readerLoad: () => Effect.succeed(Option.some(infoFor())),
+            cliExtra: {
+              spaceAdd: () =>
+                Effect.sync(() => {
+                  seen.push("add");
+                  return result;
+                }),
+              spaceRemove: () =>
+                Effect.sync(() => {
+                  seen.push("remove");
+                  return result;
+                }),
+              spaceRetarget: () =>
+                Effect.sync(() => {
+                  seen.push("retarget");
+                  return result;
+                }),
+              spaceSync: () =>
+                Effect.sync(() => {
+                  seen.push("sync");
+                  return {
+                    spaceId: SPACE_ID,
+                    spacePath: root,
+                    manifest: manifest(SPACE_ID),
+                    repos: [],
+                    notes: [],
+                  };
+                }),
+              memoryAttach: () =>
+                Effect.sync(() => {
+                  seen.push("attach");
+                  return { ...result, attachments: [] };
+                }),
+              memoryDetach: () =>
+                Effect.sync(() => {
+                  seen.push("detach");
+                  return { ...result, detached: [] };
+                }),
+            },
+          };
+        }),
+      (harness, options) =>
+        Effect.gen(function* () {
+          const ops = yield* StaveOperations;
+          const common = { workspaceRoot: options.root, expectedManifestCreatedAt: CREATED_AT };
+          const operations: Array<StaveOperation> = [
+            {
+              ...common,
+              kind: "addRepo",
+              repo: "api",
+              mode: "edit",
+              noFetch: false,
+              linkMemory: true,
+            },
+            { ...common, kind: "removeRepo", repo: "api", mode: "reference", force: false },
+            { ...common, kind: "retarget", repo: "api", base: "main" },
+            { ...common, kind: "syncSpace", referencesOnly: true },
+            { ...common, kind: "memoryAttach", specs: [{ spec: "marmot:den" }] },
+            { ...common, kind: "memoryDetach", fate: "keep" },
+          ];
+          for (const operation of operations)
+            expect(finishedResult(yield* runToEnd(ops, operation.kind, operation)).kind).toBe(
+              operation.kind,
+            );
+          expect(options.seen).toEqual(["add", "remove", "retarget", "sync", "attach", "detach"]);
+          expect(
+            (yield* Ref.get(harness.dispatched)).filter(
+              (command) => command.type === "project.refresh",
+            ),
+          ).toHaveLength(6);
+        }),
+    ),
+  );
+  it.effect("refuses missing incarnation before invoking a destructive command", () =>
+    scenario(
+      (roots) =>
+        Effect.gen(function* () {
+          const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+          yield* roots.fs.makeDirectory(root).pipe(Effect.orDie);
+          return { root, readerLoad: () => Effect.succeed(Option.some(infoFor())) };
+        }),
+      (harness, options) =>
+        Effect.gen(function* () {
+          const ops = yield* StaveOperations;
+          const events = yield* runToEnd(ops, "destroy", {
+            kind: "destroySpace",
+            workspaceRoot: options.root,
+            force: true,
+            memory: "destroy",
+          });
+          expect(failedError(events).code).toBe("incarnation_mismatch");
+          expect(yield* Ref.get(harness.cliCalls)).toEqual([]);
+        }),
+    ),
+  );
+  it.effect("journals and quiesces before destroy then marks terminal before deleting", () =>
+    scenario(
+      (roots) =>
+        Effect.gen(function* () {
+          const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+          yield* roots.fs.makeDirectory(root).pipe(Effect.orDie);
+          const fixture = lifecycleFixture(root);
+          const quiesced: Array<string> = [];
+          return {
+            root,
+            fixture,
+            quiesced,
+            lifecycle: fixture.service,
+            activeProject: project("p", root),
+            readerLoad: () => Effect.succeed(Option.some(infoFor())),
+            cliExtra: {
+              sagaList: Effect.succeed([]),
+              spaceDestroy: () =>
+                Effect.sync(() => {
+                  expect(fixture.row().disposition).toBe("destroying");
+                  expect(quiesced).toEqual(["providers", "terminals"]);
+                  return destroyResult(SPACE_ID, root);
+                }),
+            },
+          };
+        }),
+      (harness, options) =>
+        Effect.gen(function* () {
+          const ops = yield* StaveOperations;
+          expect(
+            finishedResult(
+              yield* runToEnd(ops, "destroy", {
+                kind: "destroySpace",
+                workspaceRoot: options.root,
+                expectedManifestCreatedAt: CREATED_AT,
+                force: false,
+                memory: "keep",
+              }),
+            ).kind,
+          ).toBe("destroySpace");
+          expect(options.fixture.history).toEqual(["lease", "destroying", "destroyed", "release"]);
+          expect(
+            (yield* Ref.get(harness.dispatched)).some(
+              (command) => command.type === "project.delete" && command.force,
+            ),
+          ).toBe(true);
+        }),
+    ),
+  );
+  it.effect("startup reconciles a crashed archive by manifest incarnation", () =>
+    scenario(
+      (roots) =>
+        Effect.gen(function* () {
+          const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+          const archived = roots.path.join(roots.agentWorkDir, ".archive", SPACE_ID);
+          yield* roots.fs.makeDirectory(archived, { recursive: true }).pipe(Effect.orDie);
+          const fixture = lifecycleFixture(root, "archiving");
+          return {
+            root,
+            archived,
+            fixture,
+            lifecycle: fixture.service,
+            activeProject: project("p", root),
+            readerLoad: (candidate: string) =>
+              Effect.succeed(
+                candidate === archived ? Option.some(infoFor("archived")) : Option.none(),
+              ),
+            cliExtra: {
+              spaceList: (input?: { archived?: boolean | undefined }) =>
+                Effect.succeed(input?.archived ? [listRow(archived)] : []),
+            },
+          };
+        }),
+      (harness, options) =>
+        Effect.gen(function* () {
+          const ops = yield* StaveOperations;
+          yield* ops.reconcileIncomplete;
+          expect(options.fixture.row().disposition).toBe("archived");
+          expect(options.fixture.row().workspaceRoot).toBe(options.archived);
+          expect(
+            (yield* Ref.get(harness.dispatched)).some(
+              (command) =>
+                command.type === "project.meta.update" &&
+                command.workspaceRoot === options.archived,
+            ),
+          ).toBe(true);
+        }),
+    ),
+  );
+  it.effect("startup refuses unreadable list rows without deleting the project", () =>
+    scenario(
+      (roots) =>
+        Effect.sync(() => {
+          const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+          const fixture = lifecycleFixture(root, "destroying");
+          return {
+            root,
+            fixture,
+            lifecycle: fixture.service,
+            activeProject: project("p", root),
+            cliExtra: {
+              spaceList: () => Effect.succeed([{ ...listRow(root), error: "corrupt manifest" }]),
+            },
+          };
+        }),
+      (harness, options) =>
+        Effect.gen(function* () {
+          const ops = yield* StaveOperations;
+          yield* ops.reconcileIncomplete;
+          expect(options.fixture.row().disposition).toBe("refused");
+          expect(options.fixture.row().refusalCode).toBe("unreadable");
+          expect(
+            (yield* Ref.get(harness.dispatched)).some(
+              (command) => command.type === "project.delete",
+            ),
+          ).toBe(false);
+        }),
+    ),
+  );
+});
+
+it.effect("renews the lifecycle lease while Stave is running", () =>
+  scenario(
+    (roots) =>
+      Effect.gen(function* () {
+        const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+        yield* roots.fs.makeDirectory(root).pipe(Effect.orDie);
+        const fixture = lifecycleFixture(root);
+        const started = yield* Deferred.make<void>();
+        const finish = yield* Deferred.make<void>();
+        const renewed = yield* Deferred.make<void>();
+        return {
+          root,
+          fixture,
+          started,
+          finish,
+          renewed,
+          activeProject: project("p", root),
+          readerLoad: () => Effect.succeed(Option.some(infoFor())),
+          lifecycle: {
+            ...fixture.service,
+            renewLease: () => Deferred.succeed(renewed, undefined).pipe(Effect.as(true)),
+          },
+          cliExtra: {
+            sagaList: Effect.succeed([]),
+            spaceDestroy: () =>
+              Deferred.succeed(started, undefined).pipe(
+                Effect.andThen(Deferred.await(finish)),
+                Effect.as(destroyResult(SPACE_ID, root)),
+              ),
+          },
+        };
+      }),
+    (_harness, options) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        const running = yield* runToEnd(ops, "lease-renewal", {
+          kind: "destroySpace",
+          workspaceRoot: options.root,
+          expectedManifestCreatedAt: CREATED_AT,
+          force: false,
+          memory: "keep",
+        }).pipe(Effect.forkChild);
+        yield* Deferred.await(options.started);
+        yield* TestClock.adjust("20 seconds");
+        yield* Deferred.await(options.renewed);
+        yield* Deferred.succeed(options.finish, undefined);
+        expect(finishedResult(yield* Fiber.join(running)).kind).toBe("destroySpace");
+      }),
+  ),
+);
+
+it.effect("fails closed when a saga roster is unreadable", () =>
+  scenario(
+    (roots) =>
+      Effect.gen(function* () {
+        const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+        yield* roots.fs.makeDirectory(root).pipe(Effect.orDie);
+        const fixture = lifecycleFixture(root);
+        return {
+          root,
+          fixture,
+          activeProject: project("p", root),
+          readerLoad: () => Effect.succeed(Option.some(infoFor())),
+          lifecycle: fixture.service,
+          cliExtra: {
+            sagaList: Effect.succeed([
+              {
+                id: "saga",
+                path: roots.path.join(roots.agentWorkDir, "saga"),
+                logicalId: "saga",
+                isSaga: true,
+                members: [],
+                error: "bad manifest",
+              },
+            ]),
+            spaceList: () => Effect.succeed([listRow(root)]),
+          },
+        };
+      }),
+    (harness, options) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        const events = yield* runToEnd(ops, "unknown-membership", {
+          kind: "destroySpace",
+          workspaceRoot: options.root,
+          expectedManifestCreatedAt: CREATED_AT,
+          sagaRemoveConfirmed: true,
+          force: true,
+          memory: "destroy",
+        });
+        expect(failedError(events).code).toBe("membership_unknown");
+        expect(
+          (yield* Ref.get(harness.cliCalls)).some((call) => call.method === "spaceDestroy"),
+        ).toBe(false);
+        expect(options.fixture.row().disposition).toBe("refused");
+      }),
+  ),
+);
+
+it.effect(
+  "retargets a successful archive before an unrelated unreadable listing refuses reconciliation",
+  () =>
+    scenario(
+      (roots) =>
+        Effect.gen(function* () {
+          const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+          const archived = roots.path.join(roots.agentWorkDir, ".archive", SPACE_ID);
+          yield* roots.fs.makeDirectory(root).pipe(Effect.orDie);
+          yield* roots.fs.makeDirectory(archived, { recursive: true }).pipe(Effect.orDie);
+          const fixture = lifecycleFixture(root);
+          return {
+            root,
+            archived,
+            fixture,
+            activeProject: project("p", root),
+            readerLoad: (candidate: string) =>
+              Effect.succeed(Option.some(infoFor(candidate === archived ? "archived" : "live"))),
+            lifecycle: fixture.service,
+            cliExtra: {
+              spaceArchive: () =>
+                Effect.succeed({
+                  spaceId: SPACE_ID,
+                  archivedPath: archived,
+                  memory: "keep" as const,
+                  notes: [],
+                }),
+              spaceList: () =>
+                Effect.succeed([{ ...listRow(root), error: "unrelated unreadable manifest" }]),
+            },
+          };
+        }),
+      (harness, options) =>
+        Effect.gen(function* () {
+          const ops = yield* StaveOperations;
+          const events = yield* runToEnd(ops, "archive-retarget", {
+            kind: "archiveSpace",
+            workspaceRoot: options.root,
+            expectedManifestCreatedAt: CREATED_AT,
+            force: false,
+            memory: "keep",
+          });
+          expect(failedError(events).code).toBe("unreadable");
+          expect(options.fixture.row().workspaceRoot).toBe(options.archived);
+          expect(
+            (yield* Ref.get(harness.dispatched)).some(
+              (command) =>
+                command.type === "project.meta.update" &&
+                command.workspaceRoot === options.archived,
+            ),
+          ).toBe(true);
+          expect(
+            (yield* Ref.get(harness.dispatched)).some(
+              (command) => command.type === "project.delete",
+            ),
+          ).toBe(false);
+        }),
+    ),
+);
+
+it.effect("previews confirmed saga removal and guarded destroy without mutating or forcing", () =>
+  scenario(
+    (roots) =>
+      Effect.gen(function* () {
+        const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+        yield* roots.fs.makeDirectory(root).pipe(Effect.orDie);
+        const previewed: Array<boolean | undefined> = [];
+        return {
+          root,
+          previewed,
+          readerLoad: () => Effect.succeed(Option.some(infoFor())),
+          cliExtra: {
+            sagaList: Effect.succeed([
+              {
+                id: "saga",
+                path: roots.path.join(roots.agentWorkDir, "saga"),
+                logicalId: "saga",
+                isSaga: true,
+                members: [SPACE_ID],
+              },
+            ]),
+            spaceStatus: () =>
+              Effect.succeed({
+                ...statusResult("saga", roots.path.join(roots.agentWorkDir, "saga")),
+                manifest: {
+                  ...manifest("saga"),
+                  saga: { members: [{ id: SPACE_ID, createdAt: CREATED_AT, after: [], prs: [] }] },
+                },
+              }),
+            sagaRemove: (input: { dryRun?: boolean | undefined }) =>
+              Effect.sync(() => {
+                previewed.push(input.dryRun);
+                return { dryRun: true as const, plan: ["Remove demo from saga"] };
+              }),
+          },
+        };
+      }),
+    (harness, options) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        const result = yield* ops.dryRun({
+          kind: "destroySpace",
+          workspaceRoot: options.root,
+          expectedManifestCreatedAt: CREATED_AT,
+          sagaRemoveConfirmed: true,
+          force: false,
+          memory: "keep",
+        });
+        expect(options.previewed).toEqual([true]);
+        expect(result.plan.join(" ")).toContain("guarded destruction");
+        expect(result.plan.join(" ")).toContain("manual repair");
+        expect(
+          (yield* Ref.get(harness.cliCalls)).some((call) => call.method === "spaceDestroy"),
+        ).toBe(false);
+        expect(yield* Ref.get(harness.dispatched)).toEqual([]);
+      }),
+  ),
+);
+
+it.effect("uses durable lifecycle cleanup when a partial already has a project", () =>
+  scenario(
+    (roots) =>
+      Effect.gen(function* () {
+        const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+        yield* roots.fs.makeDirectory(root).pipe(Effect.orDie);
+        const fixture = lifecycleFixture(root);
+        return {
+          root,
+          fixture,
+          activeProject: project("p", root),
+          readerLoad: () => Effect.succeed(Option.some(infoFor())),
+          lifecycle: fixture.service,
+        };
+      }),
+    (harness, options) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        expect(
+          finishedResult(
+            yield* runToEnd(ops, "registered-partial", {
+              kind: "removePartialSpace",
+              spaceId: SPACE_ID,
+              expectedManifestCreatedAt: CREATED_AT,
+            }),
+          ).kind,
+        ).toBe("removePartialSpace");
+        expect(options.fixture.row().disposition).toBe("destroyed");
+        expect(
+          (yield* Ref.get(harness.dispatched)).some((command) => command.type === "project.delete"),
+        ).toBe(true);
+        expect(
+          (yield* Ref.get(harness.cliCalls)).find((call) => call.method === "spaceDestroy")?.input,
+        ).toMatchObject({ force: false });
+      }),
+  ),
+);
+
+it.effect("reconciles a restore that renamed the archive before failing", () =>
+  scenario(
+    (roots) =>
+      Effect.gen(function* () {
+        const live = roots.path.join(roots.agentWorkDir, SPACE_ID);
+        const archived = roots.path.join(roots.agentWorkDir, ".archive", SPACE_ID);
+        yield* roots.fs.makeDirectory(archived, { recursive: true }).pipe(Effect.orDie);
+        const fixture = lifecycleFixture(archived, "archived");
+        return {
+          live,
+          archived,
+          fixture,
+          activeProject: project("p", archived),
+          readerLoad: (candidate: string) =>
+            Effect.succeed(Option.some(infoFor(candidate === archived ? "archived" : "live"))),
+          lifecycle: fixture.service,
+          cliExtra: {
+            spaceRestore: (input: { from?: string | undefined }) =>
+              Effect.gen(function* () {
+                expect(input.from).toBe(SPACE_ID);
+                yield* roots.fs.rename(archived, live).pipe(Effect.orDie);
+                return yield* new StaveError({
+                  code: "unknown",
+                  message: "worktree reconstruction failed",
+                  details: null,
+                  verb: "space restore",
+                  exitCode: 1,
+                  stderrTail: null,
+                });
+              }),
+            spaceList: (input?: { archived?: boolean | undefined }) =>
+              Effect.succeed(input?.archived ? [] : [listRow(live)]),
+          },
+        };
+      }),
+    (harness, options) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        const events = yield* runToEnd(ops, "partial-restore", {
+          kind: "restoreSpace",
+          workspaceRoot: options.archived,
+          from: SPACE_ID,
+          expectedManifestCreatedAt: CREATED_AT,
+        });
+        expect(failedError(events).message).toBe("worktree reconstruction failed");
+        expect(options.fixture.row().workspaceRoot).toBe(options.live);
+        expect(options.fixture.row().disposition).toBe("refused");
+        expect(
+          (yield* Ref.get(harness.dispatched)).some(
+            (command) =>
+              command.type === "project.meta.update" && command.workspaceRoot === options.live,
+          ),
+        ).toBe(true);
+        expect(
+          (yield* Ref.get(harness.dispatched)).some((command) => command.type === "project.delete"),
+        ).toBe(false);
+      }),
+  ),
+);
+
+for (const retained of [true, false]) {
+  it.effect(
+    `startup reconciliation ${retained ? "renews its lease while CLI reads run" : "stops without project mutation after lease loss"}`,
+    () =>
+      scenario(
+        (roots) =>
+          Effect.gen(function* () {
+            const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+            yield* roots.fs.makeDirectory(root).pipe(Effect.orDie);
+            const fixture = lifecycleFixture(root, "archiving");
+            const started = yield* Deferred.make<void>();
+            const finish = yield* Deferred.make<void>();
+            const renewed = yield* Deferred.make<void>();
+            return {
+              root,
+              fixture,
+              started,
+              finish,
+              renewed,
+              activeProject: project("p", root),
+              readerLoad: () => Effect.succeed(Option.some(infoFor())),
+              lifecycle: {
+                ...fixture.service,
+                renewLease: () => Deferred.succeed(renewed, undefined).pipe(Effect.as(retained)),
+              },
+              cliExtra: {
+                spaceList: (input?: { archived?: boolean | undefined }) =>
+                  input?.archived
+                    ? Effect.succeed([])
+                    : Deferred.succeed(started, undefined).pipe(
+                        Effect.andThen(Deferred.await(finish)),
+                        Effect.as([listRow(root)]),
+                      ),
+              },
+            };
+          }),
+        (harness, options) =>
+          Effect.gen(function* () {
+            const ops = yield* StaveOperations;
+            const fiber = yield* (
+              retained ? ops.reconcileIncomplete : Effect.flip(ops.reconcileIncomplete)
+            ).pipe(Effect.forkChild);
+            yield* Deferred.await(options.started);
+            yield* TestClock.adjust("20 seconds");
+            yield* Deferred.await(options.renewed);
+            if (retained) {
+              yield* Deferred.succeed(options.finish, undefined);
+              yield* Fiber.join(fiber);
+              expect(options.fixture.row().disposition).toBe("live");
+            } else {
+              const result = yield* Fiber.join(fiber);
+              expect(result).toMatchObject({ code: "space_transitioning" });
+              expect(yield* Ref.get(harness.dispatched)).toEqual([]);
+            }
+          }),
+      ),
+  );
+}

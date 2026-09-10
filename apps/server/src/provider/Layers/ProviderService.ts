@@ -37,6 +37,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import * as Stream from "effect/Stream";
 
+import { isPathUnder } from "../../stave/StaveSpaceLock.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
 import {
@@ -1264,6 +1265,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     respondToRequest,
     respondToUserInput,
     stopSession,
+    stopSessionsUnder: (root: string) =>
+      Effect.gen(function* () {
+        const sessions = yield* listSessions();
+        for (const session of sessions) {
+          if (session.cwd !== undefined && (yield* isPathUnder(root, session.cwd))) {
+            yield* stopSession({ threadId: session.threadId });
+          }
+        }
+      }),
     listSessions,
     getCapabilities,
     getInstanceInfo,

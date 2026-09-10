@@ -5,7 +5,7 @@
 > Fork framing and release differences live in
 > [docs/operations/lecturn-release.md](../operations/lecturn-release.md).
 
-Status: in progress — Phase 3 (create a space: operations, registry, wizard)
+Status: in progress — Phase 4 (lifecycle fencing and space edits; saga/lifecycle automation follow)
 
 ## What a Stave space is to Lecturn
 
@@ -72,8 +72,8 @@ absent rather than failing the row.
   `apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts`.
 - **One base mapper.** `mapProjectRowBase` maps the stored columns; `mapProjectShellRow` is the
   single place `repositoryIdentity`, `stave`, and `notice` are attached, and `mapProjectRow`
-  adds `deletedAt` on top. `notice` is always `null` in Phase 1; lifecycle notices
-  (`archive_scheduled`, `refused`, `pending_cleanup`) are planned (Phase 4). The only producer
+  adds `deletedAt` on top. Lifecycle notices (`archive_scheduled`, `refused`,
+  `pending_cleanup`) are derived from the lifecycle repository. The only producer
   that uses `mapProjectRowBase` directly is `getCommandReadModel`, the decider's view, which
   skips derived fields.
 - **Outside the SQL transaction, batched.** `resolveDerivedFieldsForRoot` runs the identity
@@ -112,10 +112,10 @@ Defined in `packages/contracts/src/orchestration.ts`. `project.refresh` is a mem
   `projectUpsertOrRemove`, so shell subscribers receive a project upsert whose `stave`/`notice`
   were freshly derived (after an `invalidate`, from disk). This is the mechanism for pushing
   derived-state changes without a projection write.
-- The one production caller is `afterMutation` in [`StaveOperations`](#staveoperations): after a
-  mutation on a root that an active project sits on (today `removePartialSpace`), it invalidates
-  the reader and dispatches `project.refresh` with a `server:stave:refresh:<uuid>` command id.
-  Lifecycle operations (archive, destroy, sync) will use the same path — planned (Phase 4).
+- `afterMutation` in [`StaveOperations`](#staveoperations) invalidates the reader after
+  every space mutation and dispatches `project.refresh` for active projects with a
+  `server:stave:refresh:<uuid>` command id. Lifecycle reconciliation also refreshes projects
+  after retargeting their workspace roots.
 
 ## `StaveAdmission`
 
@@ -129,9 +129,9 @@ root.
   `StaveWorktreeForbiddenError { projectRoot, intent, message }` (message
   `STAVE_WORKTREE_FORBIDDEN_MESSAGE`). Intents: `thread.create`, `thread.meta.update`,
   `thread.turn.start`, `thread.fork`, `vcs.createWorktree`, `pr.prepare`.
-- **Lease/archived rules — planned (Phase 4).** `StaveArchivedProjectError` and
-  `StaveSpaceTransitioningError` are reserved names; they will join the `StaveAdmissionError`
-  union beside the worktree rule once the lifecycle table exists.
+- **Lease/archived rules.** `StaveArchivedProjectError` and
+  `StaveSpaceTransitioningError` fence archived spaces and active lifecycle leases.
+  Admission resolves roots and primary-repo paths and rechecks at engine commit.
 - `layer` is live (wired in `server.ts` over the live reader); `layerNoop` admits everything.
 
 Where it is invoked:
@@ -176,9 +176,8 @@ usual message. Web consumers: `useThreadActions`, `useThreadActionMenu`, `useFor
 Everything below `apps/server/src/stave/` that touches the CLI is built once per server process
 in `apps/server/src/server.ts` (`StaveBinaryLayerLive` → `StaveCliLayerLive` →
 `StaveConfigReaderLayerLive` → `StaveRootsLayerLive`, merged into `StaveLayerLive`). The only
-caller of the mutating verbs is [`StaveOperations`](#staveoperations) (Phase 3: `space create`,
-`space destroy` for partial spaces, `repos add`, `setup`); the remaining mutations (add, remove,
-sync, retarget, archive, restore, memory, saga) are planned (Phases 4–5).
+caller of the mutating verbs is [`StaveOperations`](#staveoperations), including space edits,
+archive, restore, destroy, and memory actions. Saga operations follow in Phase 5.
 
 ### `StaveBinary`
 
@@ -271,7 +270,7 @@ synthesises (`STAVE_HOST_ERROR_CODES`: `binary_missing`, `not_setup`, `disabled`
 `incarnation_mismatch`, `membership_unknown`, `unreadable`, `operation_expired`). Phase 3 uses
 `not_setup`, `incarnation_mismatch`, `unreadable`, and `operation_expired` from the operation
 registry and its pre-flight refusals; `nested_project`, `archived_project`, and
-`membership_unknown` are reserved for lifecycle work — planned (Phase 4+).
+`membership_unknown` are used by lifecycle admission and reconciliation.
 
 ### `StaveConfigReader` and `StaveRootsProvider`
 
@@ -348,7 +347,8 @@ live in `packages/contracts/src/stave.ts`.
     service, which needs the config on disk. Otherwise `{ available: false, version: null }`.
   - `lastFailure: { at, verb, code, message } | null` — the most recent failed `StaveCli` call
     (every handler taps its CLI errors through `recordFailure`).
-  - `pendingCleanups: []` — placeholder until the lifecycle table exists (planned, Phase 4).
+  - `pendingCleanups` — durable refused or pending lifecycle rows whose projects are deleted;
+    Phase 6 adds the recurring cleanup sweep and settings actions.
 - **`stave.spaceStatus { workspaceRoot }` → `StaveSpaceStatus`**: the workspace root is resolved
   to a space id through `StaveWorkspaceReader.load` (no manifest → `StaveNotSpaceError`), then
   `stave space status <id> --json` is mapped by `toSpaceStatusDto` to camelCase minus the
@@ -365,11 +365,9 @@ live in `packages/contracts/src/stave.ts`.
 Long Stave mutations are _operations_: one discriminated payload (`StaveOperation` in
 `packages/contracts/src/stave.ts`, deviation 1) run by an application-lifetime service and
 streamed back as sequence-numbered progress events (deviations 18, 22, 25, 26). Phase 3
-implements `createSpace`, `registerRepo`, `removePartialSpace`, and `setup`; every other kind in
-the union (`addRepo`, `removeRepo`, `syncSpace`, `retarget`, `archiveSpace`, `destroySpace`,
-`restoreSpace`, `memoryAttach`, `memoryDetach`, `createSaga`, `sagaAdd`, `sagaRemove`,
-`sagaSync`, `sagaArchive`, `sagaDestroy`) is typed and listed in the server's switch but fails
-`invalid_arguments` ("not implemented yet") without touching Stave — planned (Phases 4–5).
+implements `createSpace`, `registerRepo`, `removePartialSpace`, and `setup`. Phase 4 adds
+`addRepo`, `removeRepo`, `syncSpace`, `retarget`, `archiveSpace`, `destroySpace`,
+`restoreSpace`, `memoryAttach`, and `memoryDetach`. Saga operation kinds follow in Phase 5.
 
 ### `StaveOperations`
 
@@ -460,8 +458,10 @@ manifestCreatedAt }` is recorded. There is no separate "attach memory" phase: me
 - **`removePartialSpace { spaceId, expectedManifestCreatedAt }`** is the explicit recovery, under
   the same root lock: `pre-flight` runs `space status` and refuses `incarnation_mismatch` unless
   `manifest.createdAt === expectedManifestCreatedAt`, so a replayed or late request can never
-  destroy a space recreated under the same id; then `space destroy --force --memory destroy`
-  (Stave applies the `destroy` fate only to owned stores and keeps shared dens), then
+  destroy a space recreated under the same id; then guarded `space destroy --memory destroy`
+  (Stave applies the `destroy` fate only to owned stores and keeps shared dens). Force defaults
+  to false and requires an explicit retry after a coded refusal. Saga removal needs separate
+  confirmation; the dry-run plan explains that destruction can refuse after removal. Finally,
   `afterMutation(spacePath)`. Result: `StaveDestroyResult`.
 - **`registerRepo { name, url, adopt }`** runs `repos add` under the config-path lock and
   invalidates `StaveConfigReader` (the registry is read from config). **`setup { force }`** runs
@@ -689,6 +689,52 @@ Rules built on them:
   rejection, lazy phase open, `reset`, terminal settling); `runStaveOperation` runs against
   scripted streams to cover rejection, disconnect, and `reattach`; the manager test checks the
   atom family is keyed by id.
+
+## Lifecycle fencing and edits (Phase 4)
+
+Migration `049_StaveProjectLifecycle` creates `stave_project_lifecycle`. It stores the project,
+canonical root, manifest `(id, createdAt)`, disposition, durable delete intent and saga-removal
+confirmation, refusal, archive/schedule metadata, and a lease epoch, owner token, and expiry.
+The lifecycle projector upserts delete intent inside the event's SQL transaction, preserving
+an existing terminal disposition. Historical events without roots are ignored. Migration seeds
+the projector at the current event sequence; a separate operational cursor survives projection
+resets so rebuilding read models cannot revive historical cleanup intents. Both lifecycle tables
+are excluded from resets. This is lifecycle recovery state, not an operation replay ledger.
+
+`StaveLifecycleRepository` lives under persistence `Services/` and `Layers/`. Lease acquisition,
+renewal, terminal writes, and release compare the epoch and owner. Ordinary lease updates do
+not slide `scheduled_at`. Phase 6 supplies the recurring policy sweep; Phase 4 stores deletion
+intents without automatically destroying spaces.
+
+`StaveSpaceLock` supplies the canonical-root mutex shared by operations and admission.
+The engine rechecks relevant thread commands under that lock immediately before committing,
+closing the normalization-to-dispatch race. Archived roots reject thread starts; leased roots
+reject new work. Internal lifecycle refresh/meta/delete and turn-interrupt commands can complete
+while an operation owns the lock. Generic PR preparation is refused for Stave-owned repos in
+both modes; PR resolution uses the primary repo identity and effective branch. Checkpoint diff
+and revert are explicitly unavailable for spaces.
+
+Space-scoped edits carry `expectedManifestCreatedAt`; destructive execution refuses missing
+or mismatching incarnations. Archive, restore, and destroy persist intent before quiescing
+provider and terminal sessions, then reconcile live and archived roots after the CLI outcome.
+Restore always uses the exact archive basename. Symlink aliases and nested active projects
+are refused at pre-flight. Reconciliation uses the full manifest timestamp rather than an id
+alone; unreadable or ambiguous matches remain repairable refusals. No operation writes Stave's
+manifest directly or automatically forces a failed command.
+
+`spaceStatus` adds a fresh `sagaMembership` scan and `membershipUnknown` flag. Both web delete
+entry points request it immediately before confirmation. The prompt names the saga and dropped
+dependent ordering edges, then sets `staveSagaRemoveConfirmed` on the delete command. A failed
+or older-server read never authorizes roster changes. Explicit destroy has a separate
+`sagaRemoveConfirmed` payload field and a combined removal confirmation after `saga_member`.
+
+`StaveSpaceActions` and `StaveConfirmDialog` supply edits, per-mode removal, sync, retarget,
+memory fate, archive/destroy, and Unarchive. Confirmation is tied to the exact payload whose
+dry-run plan is displayed. Only coded dirty/dependent refusals offer Force, with a second
+plan and confirmation. The dialog is scoped to environment, root, and incarnation. Its progress
+uses the existing replayable operation consumer. New-thread affordances explain that archived
+spaces must be restored; mobile restores remain a web/desktop action. Setup now invokes the
+existing server operation directly and refreshes status when it completes.
 
 ## Related
 

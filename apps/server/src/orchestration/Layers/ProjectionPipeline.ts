@@ -55,6 +55,8 @@ import {
   toSafeThreadAttachmentSegment,
 } from "../../attachmentStore.ts";
 
+import { STAVE_LIFECYCLE_PROJECTOR } from "../../persistence/Migrations/049_StaveProjectLifecycle.ts";
+
 export const ORCHESTRATION_PROJECTOR_NAMES = {
   projects: "projection.projects",
   threads: "projection.threads",
@@ -65,6 +67,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   threadTurns: "projection.thread-turns",
   checkpoints: "projection.checkpoints",
   pendingApprovals: "projection.pending-approvals",
+  staveLifecycle: STAVE_LIFECYCLE_PROJECTOR,
 } as const;
 
 type ProjectorName =
@@ -1857,7 +1860,32 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       }
     });
 
+    const applyStaveLifecycleProjection = Effect.fn("applyStaveLifecycleProjection")(
+      function* (event: OrchestrationEvent) {
+        const cursor = yield* sql<{
+          last_applied_sequence: number;
+        }>`SELECT last_applied_sequence FROM stave_lifecycle_cursor WHERE singleton = 1`;
+        if (event.sequence <= (cursor[0]?.last_applied_sequence ?? Number.MAX_SAFE_INTEGER)) return;
+        if (event.type === "project.deleted" && event.payload.workspaceRoot !== undefined) {
+          yield* sql`INSERT INTO stave_project_lifecycle
+          (project_id, workspace_root, space_id, manifest_created_at, disposition, delete_intent_sequence, saga_remove_confirmed, updated_at)
+          VALUES (${event.payload.projectId}, ${event.payload.workspaceRoot}, ${event.payload.staveSpaceId ?? null}, ${event.payload.staveCreatedAt ?? null}, 'pending_evaluation', ${event.sequence}, ${event.payload.staveSagaRemoveConfirmed === true ? 1 : 0}, ${event.occurredAt})
+          ON CONFLICT(project_id) DO UPDATE SET
+            delete_intent_sequence = excluded.delete_intent_sequence,
+            workspace_root = excluded.workspace_root,
+            space_id = excluded.space_id,
+            manifest_created_at = excluded.manifest_created_at,
+            saga_remove_confirmed = excluded.saga_remove_confirmed,
+            updated_at = excluded.updated_at,
+            refreshed_at = NULL`;
+        }
+        yield* sql`UPDATE stave_lifecycle_cursor SET last_applied_sequence = ${event.sequence} WHERE singleton = 1`;
+      },
+      Effect.mapError(toPersistenceSqlError("ProjectionPipeline.staveLifecycle")),
+    );
+
     const projectors: ReadonlyArray<ProjectorDefinition> = [
+      { name: ORCHESTRATION_PROJECTOR_NAMES.staveLifecycle, apply: applyStaveLifecycleProjection },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.projects,
         apply: applyProjectsProjection,

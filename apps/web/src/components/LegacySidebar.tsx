@@ -1,3 +1,4 @@
+import { prepareStaveProjectDeletion } from "../lib/staveProjectDeletion";
 import {
   ArchiveIcon,
   ArrowUpDownIcon,
@@ -1492,13 +1493,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   );
 
   const removeProject = useCallback(
-    async (member: SidebarProjectGroupMember) => {
+    async (member: SidebarProjectGroupMember, staveSagaRemoveConfirmed = false) => {
       const memberProjectRef = scopeProjectRef(member.environmentId, member.id);
       const result = await deleteProject({
         environmentId: member.environmentId,
         input: {
           projectId: member.id,
           force: true,
+          staveSagaRemoveConfirmed,
         },
       });
       if (result._tag === "Failure") {
@@ -1556,6 +1558,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                       thread.environmentId === memberProjectRef.environmentId &&
                       thread.projectId === memberProjectRef.projectId,
                   );
+                  const staveDeletion = await prepareStaveProjectDeletion(member);
                   const confirmed = await api.dialogs.confirm(
                     latestProjectThreads.length > 0
                       ? [
@@ -1567,7 +1570,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                             ? [`Environment: ${member.environmentLabel}`]
                             : []),
                           "This permanently clears conversation history for those threads and any archived threads.",
-                          "This removes only this project entry.",
+                          ...(staveDeletion.lines.length > 0
+                            ? staveDeletion.lines
+                            : ["This removes only this project entry."]),
                           "This action cannot be undone.",
                         ].join("\n")
                       : [
@@ -1577,7 +1582,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                             ? [`Environment: ${member.environmentLabel}`]
                             : []),
                           "This permanently clears any archived conversation history.",
-                          "This removes only this project entry.",
+                          ...(staveDeletion.lines.length > 0
+                            ? staveDeletion.lines
+                            : ["This removes only this project entry."]),
                         ].join("\n"),
                     { variant: "destructive" },
                   );
@@ -1585,7 +1592,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                     return;
                   }
 
-                  const result = await removeProject(member);
+                  const result = await removeProject(
+                    member,
+                    staveDeletion.staveSagaRemoveConfirmed,
+                  );
                   if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
                     const error = squashAtomCommandFailure(result);
                     toastManager.add(
@@ -1622,19 +1632,22 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         return;
       }
 
+      const staveDeletion = await prepareStaveProjectDeletion(member);
       const message = [
         `Remove project "${member.title}"?`,
         `Path: ${member.workspaceRoot}`,
         ...(member.environmentLabel ? [`Environment: ${member.environmentLabel}`] : []),
         "This permanently clears any archived conversation history.",
-        "This removes only this project entry.",
+        ...(staveDeletion.lines.length > 0
+          ? staveDeletion.lines
+          : ["This removes only this project entry."]),
       ].join("\n");
       const confirmed = await api.dialogs.confirm(message, { variant: "destructive" });
       if (!confirmed) {
         return;
       }
 
-      const result = await removeProject(member);
+      const result = await removeProject(member, staveDeletion.staveSagaRemoveConfirmed);
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         const message = error instanceof Error ? error.message : "Unknown error removing project.";
@@ -2000,7 +2013,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           api.contextMenu.show(
             project.memberProjects.map((member) => ({
               id: member.physicalProjectKey,
-              label: formatProjectMemberActionLabel(member, project.groupedProjectCount),
+              label:
+                member.stave?.state === "archived"
+                  ? `${formatProjectMemberActionLabel(member, project.groupedProjectCount)} — Unarchive to start a thread`
+                  : formatProjectMemberActionLabel(member, project.groupedProjectCount),
+              disabled: member.stave?.state === "archived",
             })),
             {
               x: event.clientX,
@@ -2429,7 +2446,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               <div className="pointer-events-none absolute top-[calc(50%+1px)] right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
                 <button
                   type="button"
-                  aria-label={`Create new thread in ${project.displayName}`}
+                  aria-label={
+                    project.memberProjects.every((member) => member.stave?.state === "archived")
+                      ? "Unarchive to start a thread"
+                      : `Create new thread in ${project.displayName}`
+                  }
+                  disabled={project.memberProjects.every(
+                    (member) => member.stave?.state === "archived",
+                  )}
                   data-testid="new-thread-button"
                   className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
                   onClick={handleCreateThreadClick}
@@ -2440,7 +2464,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             }
           />
           <TooltipPopup side="top">
-            {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
+            {project.memberProjects.every((member) => member.stave?.state === "archived")
+              ? "Unarchive to start a thread"
+              : newThreadShortcutLabel
+                ? `New thread (${newThreadShortcutLabel})`
+                : "New thread"}
           </TooltipPopup>
         </Tooltip>
       </div>

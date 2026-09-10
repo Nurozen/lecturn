@@ -22,6 +22,7 @@ import {
 } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
 import { parseBase64DataUrl } from "../imageMime.ts";
+import { StaveWorkspaceReader } from "../stave/StaveWorkspaceReader.ts";
 import { StaveAdmission, type StaveAdmissionInput } from "../stave/StaveAdmission.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
@@ -64,23 +65,20 @@ interface WorktreeIntent extends Omit<StaveAdmissionInput, "projectRoot"> {
 }
 
 /**
- * Which client commands can bind a thread to a per-thread worktree, and how
- * to find the project each one targets. `null` means the command never
- * touches worktrees, so admission (and the projection read it needs) is
- * skipped entirely.
+ * Commands that require Stave worktree or lifecycle admission, and how to
+ * find their project. Local thread creation and every turn start also check
+ * lifecycle state; unrelated commands skip the lookup.
  */
 export const describeWorktreeIntent = (
   command: ClientOrchestrationCommand,
 ): WorktreeIntent | null => {
   switch (command.type) {
     case "thread.create":
-      return command.worktreePath === null
-        ? null
-        : {
-            intent: "thread.create",
-            worktreePath: command.worktreePath,
-            projectId: command.projectId,
-          };
+      return {
+        intent: "thread.create",
+        worktreePath: command.worktreePath,
+        projectId: command.projectId,
+      };
     case "thread.meta.update":
       return command.worktreePath === undefined || command.worktreePath === null
         ? null
@@ -93,9 +91,6 @@ export const describeWorktreeIntent = (
       const bootstrap = command.bootstrap;
       const worktreePath = bootstrap?.createThread?.worktreePath ?? null;
       const prepareWorktree = bootstrap?.prepareWorktree !== undefined;
-      if (worktreePath === null && !prepareWorktree) {
-        return null;
-      }
       return {
         intent: "thread.turn.start",
         worktreePath,
@@ -107,6 +102,8 @@ export const describeWorktreeIntent = (
           : {}),
       };
     }
+    case "thread.unsettle":
+      return { intent: "thread.unsettle", threadId: command.threadId };
     default:
       return null;
   }
@@ -119,7 +116,7 @@ export const describeWorktreeIntent = (
  * `StaveAdmission`. A project or thread the projection does not know is left
  * to the decider, which rejects it with its own error.
  */
-const enforceStaveWorktreeRule = Effect.fn("Normalizer.enforceStaveWorktreeRule")(function* (
+export const enforceStaveWorktreeRule = Effect.fn("Normalizer.enforceStaveWorktreeRule")(function* (
   command: ClientOrchestrationCommand,
 ) {
   const request = describeWorktreeIntent(command);
@@ -134,15 +131,15 @@ const enforceStaveWorktreeRule = Effect.fn("Normalizer.enforceStaveWorktreeRule"
       cause,
     });
 
-  const projectId =
-    request.projectId ??
-    (request.threadId === undefined
+  const thread =
+    request.threadId === undefined
       ? undefined
       : Option.getOrUndefined(
           yield* projectionSnapshotQuery
             .getThreadShellById(request.threadId)
             .pipe(Effect.mapError(readError)),
-        )?.projectId);
+        );
+  const projectId = request.projectId ?? thread?.projectId;
   const project =
     projectId === undefined
       ? undefined
@@ -163,7 +160,14 @@ const enforceStaveWorktreeRule = Effect.fn("Normalizer.enforceStaveWorktreeRule"
     ...input
   } = request;
   yield* admission
-    .check({ ...input, projectRoot })
+    .check({
+      ...input,
+      projectRoot,
+      ...(projectId === undefined ? {} : { projectId }),
+      ...(command.type === "thread.turn.start" && thread?.worktreePath != null
+        ? { worktreePath: thread.worktreePath }
+        : {}),
+    })
     .pipe(
       Effect.mapError(
         (error) => new OrchestrationDispatchCommandError({ message: error.message, cause: error }),
@@ -264,6 +268,32 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
     // Before any attachment side effect: a refused command must leave no
     // claimed copies behind.
     yield* enforceStaveWorktreeRule(canonicalCommand);
+
+    if (canonicalCommand.type === "project.delete") {
+      const reader = yield* Effect.serviceOption(StaveWorkspaceReader);
+      const query = yield* ProjectionSnapshotQuery;
+      const project = yield* query.getProjectShellById(canonicalCommand.projectId).pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestrationDispatchCommandError({
+              message: "Failed to bind Stave deletion identity.",
+              cause,
+            }),
+        ),
+      );
+      if (Option.isSome(reader) && Option.isSome(project)) {
+        yield* reader.value.invalidate(project.value.workspaceRoot);
+        const space = yield* reader.value.load(project.value.workspaceRoot);
+        if (Option.isSome(space))
+          return {
+            ...canonicalCommand,
+            staveSpaceId: space.value.spaceId,
+            ...(space.value.createdAt === undefined
+              ? {}
+              : { staveCreatedAt: space.value.createdAt }),
+          } as OrchestrationCommand;
+      }
+    }
 
     if (canonicalCommand.type !== "thread.turn.start") {
       return canonicalCommand as OrchestrationCommand;

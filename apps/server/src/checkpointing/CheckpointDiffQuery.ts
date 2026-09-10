@@ -24,6 +24,7 @@ import * as Schema from "effect/Schema";
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
   CheckpointDiffResultInvalidError,
+  CheckpointStaveUnavailableError,
   CheckpointRefUnavailableError,
   CheckpointThreadNotFoundError,
   CheckpointTurnRangeUnavailableError,
@@ -31,6 +32,7 @@ import {
 } from "./Errors.ts";
 import type { CheckpointServiceError } from "./Errors.ts";
 import { checkpointRefForThreadTurn } from "./Utils.ts";
+import { StaveWorkspaceReader } from "../stave/StaveWorkspaceReader.ts";
 import * as CheckpointStore from "./CheckpointStore.ts";
 
 /** Service tag for checkpoint diff queries. */
@@ -78,6 +80,17 @@ function buildTurnDiffResult(
 export const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const checkpointStore = yield* CheckpointStore.CheckpointStore;
+  const reader = yield* Effect.serviceOption(StaveWorkspaceReader);
+  const guardSpace = (
+    workspaceRoot: string,
+    threadId: ThreadId,
+    operation: "CheckpointDiffQuery.getTurnDiff" | "CheckpointDiffQuery.getFullThreadDiff",
+  ) =>
+    Effect.gen(function* () {
+      if (Option.isSome(reader) && Option.isSome(yield* reader.value.load(workspaceRoot))) {
+        return yield* new CheckpointStaveUnavailableError({ operation, threadId });
+      }
+    });
 
   const getTurnDiff: CheckpointDiffQuery["Service"]["getTurnDiff"] = Effect.fn("getTurnDiff")(
     function* (input) {
@@ -129,6 +142,7 @@ export const make = Effect.gen(function* () {
         });
       }
 
+      yield* guardSpace(threadContext.value.workspaceRoot, input.threadId, operation);
       const workspaceCwd = threadContext.value.worktreePath ?? threadContext.value.workspaceRoot;
       if (!workspaceCwd) {
         return yield* new CheckpointWorkspacePathMissingError({
@@ -237,6 +251,7 @@ export const make = Effect.gen(function* () {
       });
     }
 
+    yield* guardSpace(threadContext.value.workspaceRoot, input.threadId, operation);
     const workspaceCwd = threadContext.value.worktreePath ?? threadContext.value.workspaceRoot;
     if (!workspaceCwd) {
       return yield* new CheckpointWorkspacePathMissingError({

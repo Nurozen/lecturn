@@ -144,6 +144,18 @@ export const StaveLastFailure = Schema.Struct({
 });
 export type StaveLastFailure = typeof StaveLastFailure.Type;
 
+export const StavePendingCleanup = Schema.Struct({
+  projectId: ProjectId,
+  workspaceRoot: Schema.String,
+  spaceId: Schema.NullOr(Schema.String),
+  manifestCreatedAt: Schema.NullOr(Schema.String),
+  disposition: Schema.String,
+  refusalCode: Schema.NullOr(Schema.String),
+  refusalMessage: Schema.NullOr(Schema.String),
+  scheduledAt: Schema.NullOr(IsoDateTime),
+});
+export type StavePendingCleanup = typeof StavePendingCleanup.Type;
+
 export const StaveStatus = Schema.Struct({
   /** The binary the server would run, or null with `runnableError` set. */
   runnable: Schema.NullOr(StaveBinaryStatus),
@@ -153,8 +165,7 @@ export const StaveStatus = Schema.Struct({
   roots: Schema.NullOr(StaveRootsStatus),
   marmot: StaveMarmotStatus,
   lastFailure: Schema.NullOr(StaveLastFailure),
-  /** Placeholder until the lifecycle table lands (Phase 3); always empty today. */
-  pendingCleanups: Schema.Array(Schema.Unknown),
+  pendingCleanups: Schema.Array(StavePendingCleanup),
 });
 export type StaveStatus = typeof StaveStatus.Type;
 
@@ -197,7 +208,16 @@ export const StaveSpaceStatusMemory = Schema.Struct({
 });
 export type StaveSpaceStatusMemory = typeof StaveSpaceStatusMemory.Type;
 
+export const StaveSagaMembership = Schema.Struct({
+  sagaId: Schema.String,
+  sagaRoot: Schema.String,
+  dependentEdges: Schema.Array(Schema.Struct({ memberId: Schema.String, after: Schema.String })),
+});
+export type StaveSagaMembership = typeof StaveSagaMembership.Type;
+
 export const StaveSpaceStatus = Schema.Struct({
+  sagaMembership: Schema.optional(Schema.NullOr(StaveSagaMembership)),
+  membershipUnknown: Schema.optional(Schema.Boolean),
   spaceId: Schema.String,
   spacePath: Schema.String,
   kind: Schema.optionalKey(Schema.String),
@@ -303,6 +323,7 @@ export type StaveMemorySpec = typeof StaveMemorySpec.Type;
 const SpaceScoped = Schema.Struct({
   /** Root of the Lecturn project that carries the space's `.stave.yaml`. */
   workspaceRoot: TrimmedNonEmptyString,
+  expectedManifestCreatedAt: Schema.optional(IsoDateTime),
 });
 
 export const StaveCreateSpaceOperation = Schema.Struct({
@@ -397,6 +418,7 @@ export const StaveDestroySpaceOperation = Schema.Struct({
   /** The manifest `createdAt` the caller saw; the server refuses when the
       space on disk carries another stamp (deviation 26). */
   expectedManifestCreatedAt: Schema.optional(IsoDateTime),
+  sagaRemoveConfirmed: Schema.optional(Schema.Boolean),
 });
 export type StaveDestroySpaceOperation = typeof StaveDestroySpaceOperation.Type;
 
@@ -414,6 +436,8 @@ export const StaveRemovePartialSpaceOperation = Schema.Struct({
   kind: Schema.Literal("removePartialSpace"),
   spaceId: StaveName,
   expectedManifestCreatedAt: IsoDateTime,
+  sagaRemoveConfirmed: Schema.optional(Schema.Boolean),
+  force: Schema.optional(Schema.Boolean),
 });
 export type StaveRemovePartialSpaceOperation = typeof StaveRemovePartialSpaceOperation.Type;
 
@@ -868,6 +892,9 @@ export const STAVE_HOST_ERROR_CODES = [
   "incarnation_mismatch",
   "membership_unknown",
   "unreadable",
+  "space_transitioning",
+  "turn_running",
+  "stave_worktree_forbidden",
   /** The operation id is unknown, or its tombstone has been reaped. */
   "operation_expired",
 ] as const;

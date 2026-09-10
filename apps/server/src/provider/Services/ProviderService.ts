@@ -86,6 +86,8 @@ export interface ProviderServiceShape {
    *
    * Aggregates runtime session lists from all registered adapters.
    */
+  readonly stopSessionsUnder?: (root: string) => Effect.Effect<void, ProviderServiceError>;
+
   readonly listSessions: () => Effect.Effect<ReadonlyArray<ProviderSession>>;
 
   /**

@@ -29,6 +29,8 @@ import {
   orchestrationCommandsTotal,
   orchestrationCommandDuration,
 } from "../../observability/Metrics.ts";
+import { StaveAdmission, type StaveAdmissionInput } from "../../stave/StaveAdmission.ts";
+import { StaveSpaceLock } from "../../stave/StaveSpaceLock.ts";
 import { toPersistenceSqlError } from "../../persistence/Errors.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepository } from "../../persistence/Services/OrchestrationCommandReceipts.ts";
@@ -88,6 +90,70 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const commandReceiptRepository = yield* OrchestrationCommandReceiptRepository;
   const projectionPipeline = yield* OrchestrationProjectionPipeline;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const staveAdmission = yield* Effect.serviceOption(StaveAdmission);
+  const staveLock = yield* Effect.serviceOption(StaveSpaceLock);
+  const commitAdmissionInput = (command: OrchestrationCommand): StaveAdmissionInput | null => {
+    if (
+      ![
+        "thread.create",
+        "thread.meta.update",
+        "thread.turn.start",
+        "thread.fork",
+        "thread.unsettle",
+      ].includes(command.type)
+    )
+      return null;
+    const thread =
+      "threadId" in command
+        ? commandReadModel.threads.find((t) => t.id === command.threadId)
+        : undefined;
+    const projectId =
+      command.type === "thread.fork"
+        ? command.thread.projectId
+        : "projectId" in command
+          ? command.projectId
+          : command.type === "thread.turn.start"
+            ? (command.bootstrap?.createThread?.projectId ?? thread?.projectId)
+            : thread?.projectId;
+    const project = commandReadModel.projects.find((p) => p.id === projectId);
+    if (project === undefined) return null;
+    return {
+      projectRoot: project.workspaceRoot,
+      projectId: project.id,
+      intent: command.type as StaveAdmissionInput["intent"],
+      worktreePath:
+        (command.type === "thread.fork"
+          ? command.thread.worktreePath
+          : "worktreePath" in command
+            ? command.worktreePath
+            : thread?.worktreePath) ?? null,
+      ...(command.type === "thread.turn.start"
+        ? { prepareWorktree: command.bootstrap?.prepareWorktree !== undefined }
+        : {}),
+      lockHeld: true,
+    };
+  };
+  const withCommitAdmission = <A, E, R>(
+    command: OrchestrationCommand,
+    effect: Effect.Effect<A, E, R>,
+  ) => {
+    const input = commitAdmissionInput(command);
+    if (input === null || Option.isNone(staveAdmission)) return effect;
+    const checked = staveAdmission.value.check(input).pipe(
+      Effect.mapError(
+        (cause) =>
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: cause.message,
+            cause,
+          }),
+      ),
+      Effect.andThen(effect),
+    );
+    return Option.isSome(staveLock)
+      ? staveLock.value.withSpaceLock(input.projectRoot, checked)
+      : checked;
+  };
   const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
   const crypto = yield* Crypto.Crypto;
 
@@ -221,54 +287,59 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                 ...planned,
                 metadata: { ...planned.metadata, origin: envelope.origin },
               }));
-        const committedCommand = yield* sql
-          .withTransaction(
-            Effect.gen(function* () {
-              const committedEvents: OrchestrationEvent[] = [];
-              const attachmentCleanups: Effect.Effect<void>[] = [];
-              let nextCommandReadModel = commandReadModel;
+        const committedCommand = yield* withCommitAdmission(
+          envelope.command,
+          sql
+            .withTransaction(
+              Effect.gen(function* () {
+                const committedEvents: OrchestrationEvent[] = [];
+                const attachmentCleanups: Effect.Effect<void>[] = [];
+                let nextCommandReadModel = commandReadModel;
 
-              for (const nextEvent of eventBases) {
-                const savedEvent = yield* eventStore.append(nextEvent);
-                nextCommandReadModel = yield* projectEvent(nextCommandReadModel, savedEvent);
-                const cleanup = yield* projectionPipeline.projectEventDeferred(savedEvent);
-                attachmentCleanups.push(cleanup);
-                committedEvents.push(savedEvent);
-              }
+                for (const nextEvent of eventBases) {
+                  const savedEvent = yield* eventStore.append(nextEvent);
+                  nextCommandReadModel = yield* projectEvent(nextCommandReadModel, savedEvent);
+                  const cleanup = yield* projectionPipeline.projectEventDeferred(savedEvent);
+                  attachmentCleanups.push(cleanup);
+                  committedEvents.push(savedEvent);
+                }
 
-              const lastSavedEvent = committedEvents.at(-1) ?? null;
-              if (lastSavedEvent === null) {
-                return yield* new OrchestrationCommandInvariantError({
-                  commandType: envelope.command.type,
-                  detail: "Command produced no events.",
+                const lastSavedEvent = committedEvents.at(-1) ?? null;
+                if (lastSavedEvent === null) {
+                  return yield* new OrchestrationCommandInvariantError({
+                    commandType: envelope.command.type,
+                    detail: "Command produced no events.",
+                  });
+                }
+
+                yield* commandReceiptRepository.upsert({
+                  commandId: envelope.command.commandId,
+                  aggregateKind: lastSavedEvent.aggregateKind,
+                  aggregateId: lastSavedEvent.aggregateId,
+                  acceptedAt: lastSavedEvent.occurredAt,
+                  resultSequence: lastSavedEvent.sequence,
+                  status: "accepted",
+                  error: null,
                 });
-              }
 
-              yield* commandReceiptRepository.upsert({
-                commandId: envelope.command.commandId,
-                aggregateKind: lastSavedEvent.aggregateKind,
-                aggregateId: lastSavedEvent.aggregateId,
-                acceptedAt: lastSavedEvent.occurredAt,
-                resultSequence: lastSavedEvent.sequence,
-                status: "accepted",
-                error: null,
-              });
-
-              return {
-                committedEvents,
-                attachmentCleanups,
-                lastSequence: lastSavedEvent.sequence,
-                nextCommandReadModel,
-              } as const;
-            }),
-          )
-          .pipe(
-            Effect.catchTag("SqlError", (sqlError) =>
-              Effect.fail(
-                toPersistenceSqlError("OrchestrationEngine.processEnvelope:transaction")(sqlError),
+                return {
+                  committedEvents,
+                  attachmentCleanups,
+                  lastSequence: lastSavedEvent.sequence,
+                  nextCommandReadModel,
+                } as const;
+              }),
+            )
+            .pipe(
+              Effect.catchTag("SqlError", (sqlError) =>
+                Effect.fail(
+                  toPersistenceSqlError("OrchestrationEngine.processEnvelope:transaction")(
+                    sqlError,
+                  ),
+                ),
               ),
             ),
-          );
+        );
 
         commandReadModel = committedCommand.nextCommandReadModel;
         for (const cleanup of committedCommand.attachmentCleanups) {

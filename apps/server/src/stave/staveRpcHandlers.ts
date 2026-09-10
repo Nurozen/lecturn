@@ -56,12 +56,14 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 
+import { StaveLifecycleRepository } from "../persistence/Services/StaveLifecycleRepository.ts";
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { StaveBinary, type StaveBinaryError } from "./StaveBinary.ts";
 import { StaveCli } from "./StaveCli.ts";
 import { StaveConfigReader, type StaveConfigSnapshot } from "./StaveConfigReader.ts";
 import type { StaveError } from "./StaveError.ts";
+import { scanStaveMembership } from "./StaveMembership.ts";
 import { StaveOperations } from "./StaveOperations.ts";
 import type {
   StaveMemoryProviders,
@@ -294,7 +296,16 @@ export const makeRuntime = Effect.fn("StaveRpcRuntime.make")(function* (
   return StaveRpcRuntime.of({
     lastFailure: Ref.get(lastFailureRef),
     recordFailure,
-    spaceStatus: (workspaceRoot) => Cache.get(cache, workspaceRoot),
+    spaceStatus: (workspaceRoot) =>
+      Effect.gen(function* () {
+        const status = yield* Cache.get(cache, workspaceRoot);
+        return {
+          ...status,
+          ...(yield* scanStaveMembership(status.spaceId).pipe(
+            Effect.provideService(StaveCli, cli),
+          )),
+        };
+      }),
   });
 });
 
@@ -328,6 +339,7 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
   const configReader = yield* StaveConfigReader;
   const runtime = yield* StaveRpcRuntime;
   const operations = yield* StaveOperations;
+  const lifecycle = yield* Effect.serviceOption(StaveLifecycleRepository);
 
   // `T3CODE_STAVE=false` is the unbypassable kill switch: the capability is
   // absent AND every stave RPC refuses, like thread forking.
@@ -372,7 +384,23 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
       roots: rootsFromSnapshot(snapshot),
       marmot,
       lastFailure: Option.getOrNull(lastFailure),
-      pendingCleanups: [],
+      pendingCleanups: Option.isNone(lifecycle)
+        ? []
+        : yield* lifecycle.value.listPending().pipe(
+            Effect.map((rows) =>
+              rows.map((row) => ({
+                projectId: row.projectId,
+                workspaceRoot: row.workspaceRoot,
+                spaceId: row.spaceId,
+                manifestCreatedAt: row.manifestCreatedAt,
+                disposition: row.disposition,
+                refusalCode: row.refusalCode,
+                refusalMessage: row.refusalMessage,
+                scheduledAt: row.scheduledAt,
+              })),
+            ),
+            Effect.orElseSucceed(() => []),
+          ),
     } satisfies StaveStatus;
   });
 

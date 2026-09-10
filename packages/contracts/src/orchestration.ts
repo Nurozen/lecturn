@@ -879,6 +879,9 @@ const ProjectDeleteCommand = Schema.Struct({
   commandId: CommandId,
   projectId: ProjectId,
   force: Schema.optional(Schema.Boolean),
+  staveSagaRemoveConfirmed: Schema.optional(Schema.Boolean),
+  staveSpaceId: Schema.optional(TrimmedNonEmptyString),
+  staveCreatedAt: Schema.optional(IsoDateTime),
 });
 
 const ThreadCreateCommand = Schema.Struct({
@@ -1418,6 +1421,10 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
 
 export const ProjectDeletedPayload = Schema.Struct({
   projectId: ProjectId,
+  workspaceRoot: Schema.optional(TrimmedNonEmptyString),
+  staveSagaRemoveConfirmed: Schema.optional(Schema.Boolean),
+  staveSpaceId: Schema.optional(TrimmedNonEmptyString),
+  staveCreatedAt: Schema.optional(IsoDateTime),
   deletedAt: IsoDateTime,
 });
 

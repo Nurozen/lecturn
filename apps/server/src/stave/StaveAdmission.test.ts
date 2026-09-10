@@ -1,12 +1,13 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
-import type { StaveProjectInfo } from "@t3tools/contracts";
+import { ProjectId, type StaveProjectInfo } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
+import { StaveLifecycleRepository } from "../persistence/Services/StaveLifecycleRepository.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as StaveAdmission from "./StaveAdmission.ts";
 import { STAVE_MANIFEST_FILE_NAME } from "./staveManifest.ts";
@@ -121,7 +122,7 @@ describe("StaveAdmission worktree rule", () => {
     }).pipe(Effect.provide(makeAdmissionLayer())),
   );
 
-  it.effect("never reads the manifest for intents that stay in the project root", () => {
+  it.effect("checks manifest lifecycle for intents that stay in the project root", () => {
     const loads: string[] = [];
     return Effect.gen(function* () {
       yield* check({ projectRoot: SPACE_ROOT, intent: "thread.create", worktreePath: null });
@@ -132,7 +133,7 @@ describe("StaveAdmission worktree rule", () => {
         worktreePath: null,
         prepareWorktree: false,
       });
-      expect(loads).toEqual([]);
+      expect(loads).toEqual([SPACE_ROOT, SPACE_ROOT, SPACE_ROOT]);
     }).pipe(Effect.provide(makeAdmissionLayer(loads)));
   });
 
@@ -202,3 +203,166 @@ it.layer(NodeServices.layer)("StaveAdmission with the real reader", (it) => {
     }),
   );
 });
+
+describe("Stave lifecycle admission", () => {
+  it.effect("refuses a local thread in an archived space", () =>
+    Effect.gen(function* () {
+      const result = yield* Effect.flip(
+        check({ projectRoot: SPACE_ROOT, intent: "thread.create", worktreePath: null }),
+      );
+      expect(result._tag).toBe("StaveArchivedProjectError");
+    }).pipe(
+      Effect.provide(
+        StaveAdmission.layer.pipe(
+          Layer.provide(
+            Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
+              load: () => Effect.succeed(Option.some({ ...spaceInfo, state: "archived" })),
+            }),
+          ),
+        ),
+      ),
+    ),
+  );
+  it.effect("fails closed while a lifecycle owner holds the lease", () =>
+    Effect.gen(function* () {
+      const result = yield* Effect.flip(
+        check({ projectRoot: SPACE_ROOT, intent: "thread.turn.start" }),
+      );
+      expect(result._tag).toBe("StaveSpaceTransitioningError");
+    }).pipe(
+      Effect.provide(
+        StaveAdmission.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              makeRecordingReader([]),
+              Layer.mock(StaveLifecycleRepository)({
+                getByWorkspaceRoot: () =>
+                  Effect.succeed(
+                    Option.some({
+                      projectId: ProjectId.make("p"),
+                      workspaceRoot: SPACE_ROOT,
+                      spaceId: "alpha",
+                      manifestCreatedAt: null,
+                      disposition: "archiving",
+                      ownerToken: "owner",
+                      leaseEpoch: 1,
+                      leaseUntil: "2026-09-09T00:00:00Z",
+                      deleteIntentSequence: null,
+                      sagaRemoveConfirmed: false,
+                      refusalCode: null,
+                      refusalMessage: null,
+                      anchorAt: null,
+                      scheduledAt: null,
+                      archiveDeadlineAt: null,
+                      archiveBasename: null,
+                      updatedAt: "2026-09-09T00:00:00Z",
+                      refreshedAt: null,
+                    }),
+                  ),
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+});
+
+it.effect("ignores an old project's terminal row after a root is re-added", () => {
+  const oldRow = {
+    projectId: ProjectId.make("old"),
+    workspaceRoot: SPACE_ROOT,
+    spaceId: "old-space",
+    manifestCreatedAt: "2020-01-01T00:00:00Z",
+    disposition: "destroyed" as const,
+    ownerToken: null,
+    leaseEpoch: 1,
+    leaseUntil: null,
+    deleteIntentSequence: null,
+    sagaRemoveConfirmed: false,
+    refusalCode: null,
+    refusalMessage: null,
+    anchorAt: null,
+    scheduledAt: null,
+    archiveDeadlineAt: null,
+    archiveBasename: null,
+    updatedAt: "2020-01-01T00:00:00Z",
+    refreshedAt: null,
+  };
+  return Effect.gen(function* () {
+    yield* check({
+      projectRoot: SPACE_ROOT,
+      projectId: ProjectId.make("new"),
+      intent: "thread.create",
+    });
+    // A caller without a project id must still bind the lifecycle incarnation.
+    yield* check({ projectRoot: SPACE_ROOT, intent: "thread.create" });
+  }).pipe(
+    Effect.provide(
+      StaveAdmission.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            makeRecordingReader([]),
+            Layer.mock(StaveLifecycleRepository)({
+              getByWorkspaceRoot: () => Effect.succeed(Option.some(oldRow)),
+              getByProjectId: () => Effect.succeed(Option.none()),
+            }),
+          ),
+        ),
+      ),
+    ),
+  );
+});
+
+it.effect(
+  "blocks a lease held by the previous project even when the new project has no row",
+  () => {
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        check({
+          projectRoot: SPACE_ROOT,
+          projectId: ProjectId.make("new"),
+          intent: "thread.create",
+        }),
+      );
+      expect(error._tag).toBe("StaveSpaceTransitioningError");
+    }).pipe(
+      Effect.provide(
+        StaveAdmission.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              makeRecordingReader([]),
+              Layer.mock(StaveLifecycleRepository)({
+                getByWorkspaceRoot: () =>
+                  Effect.succeed(
+                    Option.some({
+                      projectId: ProjectId.make("old"),
+                      workspaceRoot: SPACE_ROOT,
+                      spaceId: "alpha",
+                      manifestCreatedAt: null,
+                      disposition: "archiving",
+                      ownerToken: "old-owner",
+                      leaseEpoch: 2,
+                      leaseUntil: "2030-01-01T00:00:00Z",
+                      deleteIntentSequence: null,
+                      sagaRemoveConfirmed: false,
+                      refusalCode: null,
+                      refusalMessage: null,
+                      anchorAt: null,
+                      scheduledAt: null,
+                      archiveDeadlineAt: null,
+                      archiveBasename: null,
+                      updatedAt: "2026-01-01T00:00:00Z",
+                      refreshedAt: null,
+                    }),
+                  ),
+                getByProjectId: () =>
+                  Effect.die("A root lease must refuse before looking up the new project"),
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+  },
+);

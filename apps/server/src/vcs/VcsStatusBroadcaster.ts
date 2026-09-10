@@ -154,12 +154,10 @@ interface AutoPullCandidate {
   readonly stave?: { readonly primaryRepoPath?: string | undefined } | null | undefined;
 }
 
-// Auto-pull applies to the checkout the project row actually describes: the
-// workspace root for plain projects, and only the primary repo worktree for
-// Stave spaces (the space root itself is never a repo).
-function autoPullEnabledFor(cwd: string, project: AutoPullCandidate): boolean {
+// Stave owns its edit branches and synchronisation; automatic Git pulls are disabled.
+function autoPullEnabledFor(project: AutoPullCandidate): boolean {
   if (project.autoPull !== true) return false;
-  if (project.stave != null) return project.stave.primaryRepoPath === cwd;
+  if (project.stave != null) return false;
   return true;
 }
 
@@ -192,7 +190,7 @@ export const autoPullPolicyLayer = Layer.effect(
               onSome: (project) => Effect.succeed(Option.some<AutoPullCandidate>(project)),
             }),
           ),
-          Effect.map(Option.exists((project) => autoPullEnabledFor(cwd, project))),
+          Effect.map(Option.exists((project) => autoPullEnabledFor(project))),
           Effect.orElseSucceed(() => false),
         ),
     };

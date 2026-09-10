@@ -1,3 +1,4 @@
+import { isPathUnder } from "../stave/StaveSpaceLock.ts";
 /**
  * TerminalManager - Terminal session orchestration service interface.
  *
@@ -175,6 +176,8 @@ export class TerminalManager extends Context.Service<
      *
      * When `terminalId` is omitted, closes all sessions for the thread.
      */
+    readonly closeSessionsUnder?: (root: string) => Effect.Effect<void, TerminalError>;
+
     readonly close: (input: TerminalCloseInput) => Effect.Effect<void, TerminalError>;
 
     /**
@@ -2661,6 +2664,15 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     clear,
     restart,
     close,
+    closeSessionsUnder: (root: string) =>
+      Effect.gen(function* () {
+        const state = yield* readManagerState;
+        for (const session of state.sessions.values()) {
+          if (yield* isPathUnder(root, session.cwd)) {
+            yield* close({ threadId: session.threadId, terminalId: session.terminalId });
+          }
+        }
+      }),
     subscribe,
     subscribeMetadata,
   });

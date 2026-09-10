@@ -3654,8 +3654,21 @@ export default function Sidebar() {
                         type="button"
                         className="relative focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                         onClick={handleNewThreadClick}
-                        disabled={projects.length === 0}
-                        aria-label="New thread"
+                        disabled={
+                          projects.length === 0 ||
+                          (projectGroups.length === 1 &&
+                            projectGroups[0]?.memberProjects.every(
+                              (member) => member.stave?.state === "archived",
+                            ))
+                        }
+                        aria-label={
+                          projectGroups.length === 1 &&
+                          projectGroups[0]?.memberProjects.every(
+                            (member) => member.stave?.state === "archived",
+                          )
+                            ? "Unarchive to start a thread"
+                            : "New thread"
+                        }
                       />
                     }
                   >
@@ -3666,7 +3679,12 @@ export default function Sidebar() {
                     />
                   </TooltipTrigger>
                   <TooltipPopup side="right">
-                    {projectGroups.length > 1 ? (
+                    {projectGroups.length === 1 &&
+                    projectGroups[0]?.memberProjects.every(
+                      (member) => member.stave?.state === "archived",
+                    ) ? (
+                      "Unarchive to start a thread"
+                    ) : projectGroups.length > 1 ? (
                       <span className="flex flex-col gap-0.5">
                         <span>
                           {newThreadShortcutLabel

@@ -11,6 +11,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 
 import * as ServerConfig from "../config.ts";
@@ -23,7 +24,10 @@ const testLayer = Layer.mergeAll(
   WorkspacePaths.layer,
   ServerConfig.layerTest(process.cwd(), { prefix: "t3-normalizer-attachments-" }),
   StaveAdmission.layerNoop,
-  Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({}),
+  Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
+    getThreadShellById: () => Effect.succeed(Option.none()),
+    getProjectShellById: () => Effect.succeed(Option.none()),
+  }),
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
 const attachmentUuid = "00000000-0000-4000-8000-0000000000aa";

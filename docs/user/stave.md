@@ -3,7 +3,7 @@
 [Stave](https://github.com/Nurozen/stave) is a command-line tool for agent workspaces. A
 _space_ is a directory that Stave fills with checkouts of the repositories a task needs — some
 editable on their own branch, some read-only for context — plus any memory stores the task
-should carry. Stave is a separate install; the app talks to the `stave` command on your server
+should carry. The app includes Stave and can also use your own installation. It runs the `stave` command on your server
 and never edits a space behind its back. This page covers what the integration does today.
 
 ## Enable Stave
@@ -23,9 +23,8 @@ missing, your server was started with the integration switched off (`T3CODE_STAV
   nothing else: a wrong path shows as an error rather than silently falling back.
 - **Config path** passes `--config` to every Stave command. Leave it empty to use Stave's own
   default location (`~/.config/stave/config.yaml`).
-- **Set up** appears when no config file exists. For now it copies the command to run in a
-  terminal (`stave setup`, with `--config` when you set one); running it from the app is coming
-  later.
+- **Set up** appears when no config file exists. Enable Stave, then select **Set up** to create
+  its directories and config on this server. Progress appears beneath the status row.
 
 Saving any of these fields makes the server look again, so you do not need to restart after
 installing Stave or editing its config.
@@ -159,18 +158,54 @@ while you were away can still be read for 24 hours after it ended.
 
 **When a create fails, nothing is undone for you.** If the failure came after Stave wrote the
 space (the verify or project step failed), the space stays on disk so you can inspect it, and
-the wizard offers **Remove partial space**. That runs `stave space destroy` with force against
-exactly the space this attempt created and refuses if the directory now holds a space made by a
-later create. Any task store the create made is destroyed with it; dens you attached from
+the wizard offers **Remove partial space**. Review its dry-run plan and confirm removal of
+exactly the space this attempt created. A replacement space with the same id is refused. Dirty
+or dependent-space refusals offer a separate Force confirmation; saga membership needs its own
+explicit combined removal confirmation. Any task store the create made is destroyed with it; dens you attached from
 elsewhere are kept. If Stave itself refused the create, there is no space to remove and the
 button is not offered.
 
+## Edit a space
+
+Open the project's settings and find **Stave space**. Enable Stave on that environment to use
+its actions. Each action shows Stave's dry-run plan before you confirm it.
+
+- **Add repo** chooses a registered repo, editable or reference mode, and an optional base or
+  ref. Use `space:<id>` to stack on another live space. You can choose a branch for an editable
+  repo and use cached refs without fetching.
+- **Remove** targets the row's exact mode, so an editable and reference checkout with the same
+  repo name stay distinct. Committed branches survive removal.
+- **Retarget** changes an editable repo's base. **Sync** refreshes the space, optionally limiting
+  the work to references.
+- **Attach memory** accepts `.` for a fresh store or an existing `provider:store`. Detach can
+  keep the store; an owned store also offers an explicit destroy choice.
+
+**Archive space** stops the space's sessions, removes its worktrees, and moves it into the
+archive. The project follows the archived directory. Its manifest, spec, notes, and committed
+branches survive. **Unarchive** restores that exact archive and allows new threads again.
+
+**Destroy space** stops sessions and permanently removes the space directory and project.
+Specs and notes are lost; committed branches survive in Stave's repository cache. The dialog
+lets you keep memory, contribute and keep it, or destroy owned stores. Read the plan before
+confirming. When a space belongs to a saga, the explicit combined action names the saga and
+counts the dependent ordering edges it will remove. Partial failure reports what needs repair.
+
+Dirty worktrees and dependent spaces can refuse an operation. Only after such a refusal does
+**Review forced operation** appear. It shows a new plan and requires a second confirmation;
+Force may discard uncommitted changes. It never bypasses memory-in-use, identity, or nested
+project guards. Changes are bound to the space's creation timestamp, so a stale request cannot
+act on a replacement space with the same id. Legacy manifests without that timestamp need
+repair through Stave before they can be changed here.
+
+The app refuses cleanup when another project uses a directory inside the space or aliases its
+root through a symlink. Resolve the overlapping project entry before retrying. If the server
+restarts during archive or restore, it reconciles the project with the matching live or archived
+space; ambiguous or unreadable results require repair instead of guessing.
+
 ## Coming soon
 
-Running **Set up** directly, creating sagas from the wizard, archiving and restoring spaces, and
-saga members nested under their saga in the sidebar are in progress. Until then, make those
-changes with the `stave` command; the app picks up the result the next time it reads the
-manifest.
+Creating sagas from the wizard, saga nesting, and automatic lifecycle cleanup are still being
+integrated. Until then, manage saga structure with the Stave command.
 
 ## Related
 

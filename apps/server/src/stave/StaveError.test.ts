@@ -66,6 +66,9 @@ const LECTURN_CODES = [
   "incarnation_mismatch",
   "membership_unknown",
   "unreadable",
+  "space_transitioning",
+  "turn_running",
+  "stave_worktree_forbidden",
   "operation_expired",
 ] as const;
 
@@ -78,13 +81,13 @@ function expectEnvelope(stdout: string): StaveErrorEnvelope {
 }
 
 describe("STAVE_ERROR_CODES", () => {
-  it("lists exactly Stave's 21 codes and Lecturn's 12, with no duplicates", () => {
+  it("lists exactly Stave's 21 codes and Lecturn's 15, with no duplicates", () => {
     const staveCodes = [...STAVE_SPACE_CODES, ...STAVE_REGISTRY_CODES];
     expect(staveCodes).toHaveLength(21);
-    expect(LECTURN_CODES).toHaveLength(12);
+    expect(LECTURN_CODES).toHaveLength(15);
     expect(new Set(STAVE_CLI_ERROR_CODES)).toEqual(new Set(staveCodes));
     expect(new Set(STAVE_HOST_ERROR_CODES)).toEqual(new Set(LECTURN_CODES));
-    expect(STAVE_ERROR_CODES).toHaveLength(33);
+    expect(STAVE_ERROR_CODES).toHaveLength(36);
     expect(new Set(STAVE_ERROR_CODES).size).toBe(STAVE_ERROR_CODES.length);
   });
 

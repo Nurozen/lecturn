@@ -6,6 +6,7 @@ import { useStaveFeatureAvailable, useStaveSpaceStatus } from "../../state/stave
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { StaveSpaceActions } from "../stave/StaveSpaceActions";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { formatStaveRepoStatus } from "./StaveProjectSection.logic";
 
@@ -27,10 +28,16 @@ export function StaveProjectSection({
   workspaceRoot: string;
 }) {
   const { available } = useStaveFeatureAvailable(environmentId);
-  const live = useStaveSpaceStatus({ environmentId, workspaceRoot, enabled: available });
+  const live = useStaveSpaceStatus({
+    environmentId,
+    workspaceRoot,
+    enabled: available && stave.state !== "archived",
+  });
   const kind = stave.isSaga || stave.kind === "saga" ? "saga" : (stave.kind ?? "space");
   const archived = stave.state === "archived";
-  const liveRepoByName = new Map(live.data?.repos.map((repo) => [repo.name, repo]) ?? []);
+  const liveRepoByName = new Map(
+    live.data?.repos.map((repo) => [`${repo.mode}:${repo.name}`, repo]) ?? [],
+  );
   const liveMemoryByName = new Map(
     live.data?.memories.map((memory) => [memory.name, memory]) ?? [],
   );
@@ -85,7 +92,8 @@ export function StaveProjectSection({
                 repo.base ?? null,
                 repo.ref ?? null,
               ];
-              if (showLive) cells.push(repoStatusCell(liveRepoByName.get(repo.name)));
+              if (showLive)
+                cells.push(repoStatusCell(liveRepoByName.get(`${repo.mode}:${repo.name}`)));
               return cells;
             })}
           />
@@ -118,6 +126,15 @@ export function StaveProjectSection({
           />
         ) : null}
       </SettingsRow>
+      {available && !stave.isSaga ? (
+        <StaveSpaceActions
+          key={`${environmentId}:${workspaceRoot}:${stave.createdAt ?? "legacy"}`}
+          environmentId={environmentId}
+          workspaceRoot={workspaceRoot}
+          stave={stave}
+          onFinished={live.refresh}
+        />
+      ) : null}
     </SettingsSection>
   );
 }

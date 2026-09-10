@@ -30,6 +30,7 @@ import {
   CommandId,
   ProjectId,
   type StaveCreateSpaceOperation,
+  type StaveMemoryAttachResult,
   type StaveObserveOperationInput,
   type StaveOperation,
   type StaveOperationError,
@@ -58,7 +59,11 @@ import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import * as Semaphore from "effect/Semaphore";
+import { StaveLifecycleRepository } from "../persistence/Services/StaveLifecycleRepository.ts";
+import { ProviderService } from "../provider/Services/ProviderService.ts";
+import { TerminalManager } from "../terminal/Manager.ts";
+import { WorkspacePaths } from "../workspace/WorkspacePaths.ts";
+import { isPathUnder, StaveSpaceLock } from "./StaveSpaceLock.ts";
 import * as Stream from "effect/Stream";
 import * as NodeCrypto from "node:crypto";
 
@@ -112,6 +117,20 @@ const refuse = (code: StaveErrorCode, message: string, details: StaveErrorDetail
   new StaveRefusalError({ code, message, details });
 
 // ── Pure helpers ──────────────────────────────────────────────
+
+/** Compare RFC3339 instants without discarding the manifest's nanoseconds. */
+export function sameManifestIncarnation(left: string, right: string): boolean {
+  const epoch = (value: string) => {
+    const match = /^(.*T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+    if (match === null) return null;
+    const seconds = Date.parse(`${match[1]}${match[3]}`);
+    return Number.isFinite(seconds)
+      ? BigInt(seconds) * 1_000_000n + BigInt((match[2] ?? "").padEnd(9, "0"))
+      : null;
+  };
+  const first = epoch(left);
+  return first !== null && first === epoch(right);
+}
 
 /** Stable identity of an operation payload; equal payloads may share an id. */
 export function fingerprintOperation(operation: StaveOperation): string {
@@ -227,6 +246,7 @@ interface RegistryEntry {
   lastAccessMs: number;
   /** Set as soon as `space create` returns, before verify/project.create can still fail. */
   partialSpace: PartialSpace | null;
+  partialCleanupEdges: unknown | null;
   readonly pubsub: PubSub.PubSub<StaveProgressEvent>;
 }
 
@@ -262,6 +282,7 @@ export interface StaveOperationsShape {
     root: string,
     effect: Effect.Effect<A, E, R>,
   ) => Effect.Effect<A, E, R>;
+  readonly reconcileIncomplete: Effect.Effect<void, StaveError | StaveRefusalError>;
   readonly summary: (operationId: string) => Effect.Effect<Option.Option<StaveOperationSummary>>;
 }
 
@@ -282,6 +303,10 @@ export const make = Effect.fn("StaveOperations.make")(function* (
   const snapshotQuery = yield* ProjectionSnapshotQuery;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const lifecycle = yield* StaveLifecycleRepository;
+  const providers = yield* ProviderService;
+  const terminals = yield* TerminalManager;
+  const workspacePaths = yield* WorkspacePaths;
   const serviceScope = yield* Effect.scope;
   const normalizerContext =
     yield* Effect.context<Effect.Services<ReturnType<typeof normalizeDispatchCommand>>>();
@@ -304,16 +329,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
 
   // ── keyed mutex ─────────────────────────────────────────────
 
-  const locks = new Map<string, Semaphore.Semaphore>();
-  const withSpaceLock = <A, E, R>(root: string, effect: Effect.Effect<A, E, R>) => {
-    const key = path.resolve(root);
-    let semaphore = locks.get(key);
-    if (semaphore === undefined) {
-      semaphore = Semaphore.makeUnsafe(1);
-      locks.set(key, semaphore);
-    }
-    return semaphore.withPermits(1)(effect);
-  };
+  const { withSpaceLock } = yield* StaveSpaceLock;
 
   // ── ring buffer ─────────────────────────────────────────────
 
@@ -785,6 +801,26 @@ export const make = Effect.fn("StaveOperations.make")(function* (
   ) =>
     Effect.gen(function* () {
       const { agentWorkDir } = yield* loadRoots;
+      const root = path.join(agentWorkDir, operation.spaceId);
+      const project = yield* snapshotQuery
+        .getActiveProjectByWorkspaceRoot(root)
+        .pipe(Effect.mapError((cause) => refuse("unknown", cause.message)));
+      if (Option.isSome(project)) {
+        const outcome = yield* runSpaceOperation(entry, {
+          kind: "destroySpace",
+          workspaceRoot: root,
+          expectedManifestCreatedAt: operation.expectedManifestCreatedAt,
+          sagaRemoveConfirmed: operation.sagaRemoveConfirmed,
+          force: operation.force === true,
+          memory: "destroy",
+        });
+        if (outcome.kind !== "destroySpace")
+          return yield* refuse(
+            "unknown",
+            "Partial cleanup returned an unexpected operation result.",
+          );
+        return { kind: "removePartialSpace" as const, result: outcome.result };
+      }
       return yield* withSpaceLock(
         path.join(agentWorkDir, operation.spaceId),
         Effect.gen(function* () {
@@ -794,25 +830,88 @@ export const make = Effect.fn("StaveOperations.make")(function* (
             commandLineOf("space status", buildStaveArgv.spaceStatus(operation.spaceId)),
             cli.spaceStatus(operation.spaceId),
           );
-          if (status.manifest.createdAt !== operation.expectedManifestCreatedAt) {
+          if (
+            !sameManifestIncarnation(status.manifest.createdAt, operation.expectedManifestCreatedAt)
+          ) {
             return yield* refuse(
               "incarnation_mismatch",
               `The space at '${status.spacePath}' is not the one the failed create produced (${status.manifest.createdAt} vs ${operation.expectedManifestCreatedAt}).`,
               { expected: operation.expectedManifestCreatedAt, actual: status.manifest.createdAt },
             );
           }
-          const input = { id: operation.spaceId, force: true, memory: "destroy" as const };
+          const candidate = path.join(agentWorkDir, operation.spaceId);
+          if (
+            path.resolve(status.spacePath) !== path.resolve(candidate) ||
+            (yield* canonicalPath(candidate)) !== path.resolve(candidate)
+          )
+            return yield* refuse(
+              "invalid_arguments",
+              "Symlink-aliased partial spaces cannot be removed.",
+            );
+          const shell = yield* snapshotQuery
+            .getShellSnapshot()
+            .pipe(Effect.mapError((cause) => refuse("unknown", cause.message)));
+          for (const project of shell.projects) {
+            if (yield* isPathUnder(candidate, project.workspaceRoot))
+              return yield* refuse(
+                "nested_project",
+                "A project now uses this partial space. Delete it from project settings.",
+              );
+          }
+          const memberships = yield* membership(operation.spaceId, status.manifest.createdAt);
+          if (memberships.length > 0 && operation.sagaRemoveConfirmed !== true)
+            return yield* refuse(
+              "saga_member",
+              "Remove this partial space from its saga before destroying it.",
+              {
+                sagaId: memberships[0]?.sagaId,
+                dependentEdges: memberships.flatMap((member) =>
+                  member.removedEdges.flatMap((edge) =>
+                    edge.after
+                      .filter((after) => after === operation.spaceId)
+                      .map((after) => ({ memberId: edge.memberId, after })),
+                  ),
+                ),
+                memberships,
+              },
+            );
+          if (
+            providers.stopSessionsUnder === undefined ||
+            terminals.closeSessionsUnder === undefined
+          )
+            return yield* refuse("unknown", "Session quiescence is unavailable.");
+          yield* providers
+            .stopSessionsUnder(candidate)
+            .pipe(Effect.mapError((cause) => refuse("unknown", cause.message)));
+          yield* terminals
+            .closeSessionsUnder(candidate)
+            .pipe(Effect.mapError((cause) => refuse("unknown", cause.message)));
+          entry.partialCleanupEdges = memberships.length > 0 ? memberships : null;
+          for (const member of memberships) {
+            const removal = { sagaId: member.sagaId, spaceId: operation.spaceId };
+            yield* invoke(
+              entry,
+              "saga remove",
+              buildStaveArgv.sagaRemove(removal),
+              (stream) => cli.sagaRemove(removal, stream),
+              notesUnlessPlan,
+            ).pipe(Effect.ensuring(afterMutation(member.sagaRoot)));
+          }
+          const input = {
+            id: operation.spaceId,
+            force: operation.force === true,
+            memory: "destroy" as const,
+          };
           const destroyed = yield* invoke(
             entry,
             "space destroy",
             buildStaveArgv.spaceDestroy(input),
             (stream) => cli.spaceDestroy(input, stream),
             notesUnlessPlan,
-          );
+          ).pipe(Effect.ensuring(afterMutation(status.spacePath)));
           if (isStaveDryRunPlan(destroyed)) {
             return yield* unexpectedPlan("space destroy");
           }
-          yield* afterMutation(status.spacePath);
           return { kind: "removePartialSpace", result: destroyed } satisfies OperationOutcome;
         }),
       );
@@ -859,6 +958,721 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       );
     });
 
+  // ── space edits and durable lifecycle ──────────────────────
+
+  type SpaceOperation = Extract<StaveOperation, { workspaceRoot: string }>;
+  const asRefusal = (cause: { readonly message: string }) => refuse("unknown", cause.message);
+  const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
+  const freshInfo = (root: string) =>
+    Effect.gen(function* () {
+      yield* workspaceReader.invalidate(root);
+      const info = yield* workspaceReader.load(root);
+      if (Option.isNone(info))
+        return yield* refuse("unreadable", `Cannot read the Stave manifest at '${root}'.`);
+      return info.value;
+    });
+  const checkSpace = (operation: SpaceOperation) =>
+    Effect.gen(function* () {
+      const info = yield* freshInfo(operation.workspaceRoot);
+      if (
+        operation.expectedManifestCreatedAt === undefined ||
+        info.createdAt === undefined ||
+        !sameManifestIncarnation(info.createdAt, operation.expectedManifestCreatedAt)
+      ) {
+        return yield* refuse(
+          "incarnation_mismatch",
+          "The space incarnation changed or was not supplied. Refresh the project before trying again.",
+        );
+      }
+      const { agentWorkDir } = yield* loadRoots;
+      const expected =
+        info.state === "archived"
+          ? path.join(agentWorkDir, STAVE_ARCHIVE_DIRECTORY_NAME, info.archiveBasename ?? "")
+          : path.join(agentWorkDir, info.spaceId);
+      if (
+        path.resolve(operation.workspaceRoot) !== path.resolve(expected) ||
+        (yield* canonicalPath(operation.workspaceRoot)) !== path.resolve(operation.workspaceRoot)
+      ) {
+        return yield* refuse(
+          "invalid_arguments",
+          "Symlink-aliased or noncanonical space roots cannot be mutated.",
+        );
+      }
+      const shell = yield* snapshotQuery.getShellSnapshot().pipe(Effect.mapError(asRefusal));
+      for (const project of shell.projects) {
+        if (
+          project.workspaceRoot !== operation.workspaceRoot &&
+          (yield* canonicalPath(project.workspaceRoot)) ===
+            (yield* canonicalPath(operation.workspaceRoot))
+        ) {
+          return yield* refuse("invalid_arguments", "Another project aliases this physical space.");
+        }
+      }
+      return info;
+    });
+
+  const membership = (spaceId: string, stamp: string) =>
+    Effect.gen(function* () {
+      const sagas = yield* cli.sagaList.pipe(
+        Effect.mapError(() => refuse("membership_unknown", "Saga membership could not be read.")),
+      );
+      const found: Array<{
+        sagaId: string;
+        sagaRoot: string;
+        removedEdges: Array<{ memberId: string; after: ReadonlyArray<string> }>;
+      }> = [];
+      for (const saga of sagas) {
+        if (saga.error !== undefined)
+          return yield* refuse(
+            "membership_unknown",
+            "A saga manifest is unreadable; membership cannot be established.",
+          );
+        const status = yield* cli
+          .spaceStatus(saga.logicalId ?? saga.id)
+          .pipe(
+            Effect.mapError(() => refuse("membership_unknown", `Cannot read saga '${saga.id}'.`)),
+          );
+        const members = status.manifest.saga?.members ?? [];
+        if (
+          members.some(
+            (member) =>
+              member.id === spaceId &&
+              (member.createdAt === undefined || sameManifestIncarnation(member.createdAt, stamp)),
+          )
+        ) {
+          found.push({
+            sagaId: status.spaceId,
+            sagaRoot: saga.path,
+            removedEdges: members
+              .filter((member) => member.id === spaceId || member.after.includes(spaceId))
+              .map((member) => ({ memberId: member.id, after: member.after })),
+          });
+        }
+      }
+      return found;
+    });
+
+  const deleteProject = (projectId: ProjectId) =>
+    engine
+      .dispatch({
+        type: "project.delete",
+        commandId: CommandId.make(`server:stave:delete:${NodeCrypto.randomUUID()}`),
+        projectId,
+        force: true,
+      })
+      .pipe(Effect.mapError(asRefusal), Effect.asVoid);
+
+  type LifecycleRow = NonNullable<
+    ReturnType<typeof lifecycle.listIncomplete> extends Effect.Effect<infer A, infer _E>
+      ? A extends ReadonlyArray<infer B>
+        ? B
+        : never
+      : never
+  >;
+  const reconcileRow = (row: LifecycleRow) =>
+    Effect.gen(function* () {
+      const active = yield* snapshotQuery
+        .getProjectShellById(row.projectId)
+        .pipe(Effect.mapError(asRefusal));
+      if (row.disposition === "destroyed") {
+        if (Option.isSome(active) && active.value.id === row.projectId)
+          yield* deleteProject(row.projectId);
+        return { disposition: "destroyed" as const, workspaceRoot: row.workspaceRoot };
+      }
+      const live = yield* cli.spaceList({});
+      const archives = yield* cli.spaceList({ archived: true });
+      const matches: Array<{ root: string; archived: boolean; basename: string | null }> = [];
+      for (const item of [...live, ...archives]) {
+        if (item.error !== undefined)
+          return yield* refuse(
+            "unreadable",
+            "A space manifest is unreadable; lifecycle reconciliation needs repair.",
+          );
+        const info = yield* freshInfo(item.path);
+        if (
+          info.spaceId === row.spaceId &&
+          info.createdAt !== undefined &&
+          row.manifestCreatedAt !== null &&
+          sameManifestIncarnation(info.createdAt, row.manifestCreatedAt)
+        ) {
+          matches.push({
+            root: item.path,
+            archived: info.state === "archived",
+            basename: info.archiveBasename ?? null,
+          });
+        }
+      }
+      if (matches.length > 1)
+        return yield* refuse(
+          "ambiguous_archive",
+          "More than one root has this space incarnation; repair the duplicate before retrying.",
+        );
+      const match = matches[0];
+      if (match === undefined) {
+        if (row.ownerToken !== null) {
+          const terminal = yield* lifecycle
+            .updateDisposition({
+              projectId: row.projectId,
+              leaseEpoch: row.leaseEpoch,
+              ownerToken: row.ownerToken,
+              now: yield* nowIso,
+              patch: { disposition: "destroyed" },
+            })
+            .pipe(Effect.mapError(asRefusal));
+          if (!terminal)
+            return yield* refuse("space_transitioning", "The lifecycle lease was lost.");
+        }
+        if (Option.isSome(active) && active.value.id === row.projectId)
+          yield* deleteProject(row.projectId);
+        return { disposition: "destroyed" as const, workspaceRoot: row.workspaceRoot };
+      }
+      if (
+        Option.isSome(active) &&
+        active.value.id === row.projectId &&
+        active.value.workspaceRoot !== match.root
+      ) {
+        const workspaceRoot = yield* workspacePaths
+          .normalizeWorkspaceRoot(match.root)
+          .pipe(Effect.mapError(asRefusal));
+        yield* engine
+          .dispatch({
+            type: "project.meta.update",
+            commandId: CommandId.make(`server:stave:retarget:${NodeCrypto.randomUUID()}`),
+            projectId: row.projectId,
+            workspaceRoot,
+          })
+          .pipe(Effect.mapError(asRefusal));
+      }
+      yield* afterMutation(match.root);
+      return {
+        disposition: match.archived ? ("archived" as const) : ("live" as const),
+        workspaceRoot: match.root,
+        archiveBasename: match.basename,
+      };
+    });
+
+  const runSpaceOperation = (
+    entry: RegistryEntry,
+    operation: SpaceOperation,
+  ): Effect.Effect<OperationOutcome, StaveError | StaveRefusalError> =>
+    withSpaceLock(
+      operation.workspaceRoot,
+      Effect.gen(function* () {
+        const info = yield* checkSpace(operation);
+        const id = info.spaceId;
+        const isLifecycle =
+          operation.kind === "archiveSpace" ||
+          operation.kind === "destroySpace" ||
+          operation.kind === "restoreSpace";
+        if (!isLifecycle && info.state !== "live")
+          return yield* refuse("archived_project", "Restore this space before editing it.");
+        const project = yield* snapshotQuery
+          .getActiveProjectByWorkspaceRoot(operation.workspaceRoot)
+          .pipe(Effect.mapError(asRefusal));
+        let lease: LifecycleRow | undefined;
+        let removedEdges: unknown = null;
+        if (isLifecycle) {
+          if (Option.isNone(project))
+            return yield* refuse(
+              "invalid_arguments",
+              "Lifecycle operations require an active project.",
+            );
+          const shell = yield* snapshotQuery.getShellSnapshot().pipe(Effect.mapError(asRefusal));
+          for (const other of shell.projects) {
+            if (
+              other.id !== project.value.id &&
+              (yield* isPathUnder(operation.workspaceRoot, other.workspaceRoot))
+            )
+              return yield* refuse(
+                "nested_project",
+                `Project '${other.title}' is nested inside this space.`,
+              );
+          }
+          const now = yield* nowIso;
+          const row = yield* lifecycle
+            .ensure({
+              projectId: project.value.id,
+              workspaceRoot: operation.workspaceRoot,
+              spaceId: id,
+              manifestCreatedAt: info.createdAt ?? null,
+              now,
+            })
+            .pipe(Effect.mapError(asRefusal));
+          if (
+            row.manifestCreatedAt !== null &&
+            info.createdAt !== undefined &&
+            !sameManifestIncarnation(row.manifestCreatedAt, info.createdAt)
+          )
+            return yield* refuse(
+              "incarnation_mismatch",
+              "The lifecycle record belongs to an earlier incarnation. Re-import the recreated space.",
+            );
+          const acquired = yield* lifecycle
+            .acquireLease({
+              projectId: row.projectId,
+              expectedEpoch: row.leaseEpoch,
+              ownerToken: entry.operationId,
+              now,
+              leaseUntil: DateTime.formatIso(
+                DateTime.add(DateTime.makeUnsafe(now), { minutes: 1 }),
+              ),
+            })
+            .pipe(Effect.mapError(asRefusal));
+          if (Option.isNone(acquired))
+            return yield* refuse(
+              "space_transitioning",
+              "Another lifecycle operation owns this space.",
+            );
+          lease = acquired.value;
+        }
+        const patch = (changes: Parameters<typeof lifecycle.updateDisposition>[0]["patch"]) =>
+          lease === undefined
+            ? Effect.void
+            : Effect.gen(function* () {
+                const updated = yield* lifecycle
+                  .updateDisposition({
+                    projectId: lease!.projectId,
+                    leaseEpoch: lease!.leaseEpoch,
+                    ownerToken: entry.operationId,
+                    now: yield* nowIso,
+                    patch: changes,
+                  })
+                  .pipe(Effect.mapError(asRefusal));
+                if (!updated)
+                  return yield* refuse("space_transitioning", "The lifecycle lease was lost.");
+              });
+        const body = Effect.gen(function* () {
+          if (isLifecycle) {
+            yield* patch({
+              disposition:
+                operation.kind === "archiveSpace"
+                  ? "archiving"
+                  : operation.kind === "restoreSpace"
+                    ? "restoring"
+                    : "destroying",
+              archiveBasename: info.archiveBasename ?? null,
+            });
+            if (operation.kind === "destroySpace" && info.state === "archived")
+              return yield* refuse(
+                "archived_project",
+                "Restore the archive before explicitly destroying it.",
+              );
+            const shell = yield* snapshotQuery.getShellSnapshot().pipe(Effect.mapError(asRefusal));
+            const ownThreads = shell.threads.filter(
+              (thread) => Option.isSome(project) && thread.projectId === project.value.id,
+            );
+            for (const thread of ownThreads) {
+              if (thread.session?.activeTurnId != null) {
+                const command = yield* normalizeDispatchCommand({
+                  type: "thread.turn.interrupt",
+                  commandId: CommandId.make(`server:stave:interrupt:${NodeCrypto.randomUUID()}`),
+                  threadId: thread.id,
+                  createdAt: yield* nowIso,
+                }).pipe(Effect.provide(normalizerContext), Effect.mapError(asRefusal));
+                yield* engine.dispatch(command).pipe(Effect.mapError(asRefusal));
+              }
+            }
+            const sessions = yield* providers.listSessions();
+            for (const session of sessions) {
+              if (
+                !ownThreads.some((thread) => thread.id === session.threadId) &&
+                session.cwd !== undefined &&
+                (yield* isPathUnder(operation.workspaceRoot, session.cwd)) &&
+                session.activeTurnId !== undefined &&
+                session.activeTurnId !== null
+              ) {
+                const command = yield* normalizeDispatchCommand({
+                  type: "thread.turn.interrupt",
+                  commandId: CommandId.make(`server:stave:interrupt:${NodeCrypto.randomUUID()}`),
+                  threadId: session.threadId,
+                  createdAt: yield* nowIso,
+                }).pipe(Effect.provide(normalizerContext), Effect.mapError(asRefusal));
+                yield* engine.dispatch(command).pipe(Effect.mapError(asRefusal));
+              }
+            }
+            if (
+              providers.stopSessionsUnder === undefined ||
+              terminals.closeSessionsUnder === undefined
+            )
+              return yield* refuse("unknown", "Session quiescence is unavailable.");
+            for (const session of sessions) {
+              if (
+                session.cwd === undefined &&
+                ownThreads.some((thread) => thread.id === session.threadId)
+              )
+                yield* providers
+                  .stopSession({ threadId: session.threadId })
+                  .pipe(Effect.mapError(asRefusal));
+            }
+            yield* providers
+              .stopSessionsUnder(operation.workspaceRoot)
+              .pipe(Effect.mapError(asRefusal));
+            yield* terminals
+              .closeSessionsUnder(operation.workspaceRoot)
+              .pipe(Effect.mapError(asRefusal));
+          }
+          let outcome: OperationOutcome;
+          switch (operation.kind) {
+            case "addRepo": {
+              const input = { ...operation, id };
+              const result = yield* invoke(
+                entry,
+                "space add",
+                buildStaveArgv.spaceAdd(input),
+                (stream) => cli.spaceAdd(input, stream),
+                notesUnlessPlan,
+              );
+              if (isStaveDryRunPlan(result)) return yield* unexpectedPlan("space add");
+              outcome = { kind: operation.kind, result };
+              break;
+            }
+            case "removeRepo": {
+              const input = { ...operation, id };
+              const result = yield* invoke(
+                entry,
+                "space remove",
+                buildStaveArgv.spaceRemove(input),
+                (stream) => cli.spaceRemove(input, stream),
+                notesUnlessPlan,
+              );
+              if (isStaveDryRunPlan(result)) return yield* unexpectedPlan("space remove");
+              outcome = { kind: operation.kind, result };
+              break;
+            }
+            case "retarget": {
+              const input = { ...operation, id };
+              const result = yield* invoke(
+                entry,
+                "space retarget",
+                buildStaveArgv.spaceRetarget(input),
+                (stream) => cli.spaceRetarget(input, stream),
+                notesUnlessPlan,
+              );
+              if (isStaveDryRunPlan(result)) return yield* unexpectedPlan("space retarget");
+              outcome = { kind: operation.kind, result };
+              break;
+            }
+            case "syncSpace": {
+              const input = { ...operation, id };
+              const result = yield* invoke(
+                entry,
+                "space sync",
+                buildStaveArgv.spaceSync(input),
+                (stream) => cli.spaceSync(input, stream),
+                notesUnlessPlan,
+              );
+              yield* cli.spaceStatus(id);
+              outcome = { kind: operation.kind, result };
+              break;
+            }
+            case "archiveSpace": {
+              const input = { ...operation, id };
+              const result = yield* invoke(
+                entry,
+                "space archive",
+                buildStaveArgv.spaceArchive(input),
+                (stream) => cli.spaceArchive(input, stream),
+                notesUnlessPlan,
+              );
+              if (isStaveDryRunPlan(result)) return yield* unexpectedPlan("space archive");
+              const archivedRoot = yield* workspacePaths
+                .normalizeWorkspaceRoot(result.archivedPath)
+                .pipe(Effect.mapError(asRefusal));
+              if (lease !== undefined) {
+                yield* patch({
+                  disposition: "archived",
+                  workspaceRoot: archivedRoot,
+                  archiveBasename: path.basename(archivedRoot),
+                });
+                lease = {
+                  ...lease,
+                  disposition: "archived",
+                  workspaceRoot: archivedRoot,
+                  archiveBasename: path.basename(archivedRoot),
+                };
+                yield* engine
+                  .dispatch({
+                    type: "project.meta.update",
+                    commandId: CommandId.make(`server:stave:archive:${NodeCrypto.randomUUID()}`),
+                    projectId: lease.projectId,
+                    workspaceRoot: archivedRoot,
+                  })
+                  .pipe(Effect.mapError(asRefusal));
+                yield* afterMutation(archivedRoot);
+              }
+              outcome = { kind: operation.kind, result };
+              break;
+            }
+            case "restoreSpace": {
+              if (operation.from !== info.archiveBasename)
+                return yield* refuse(
+                  "incarnation_mismatch",
+                  "The selected archive no longer matches this project.",
+                );
+              const input = { ...operation, id };
+              const result = yield* invoke(
+                entry,
+                "space restore",
+                buildStaveArgv.spaceRestore(input),
+                (stream) => cli.spaceRestore(input, stream),
+                notesUnlessPlan,
+              );
+              if (isStaveDryRunPlan(result)) return yield* unexpectedPlan("space restore");
+              outcome = { kind: operation.kind, result };
+              break;
+            }
+            case "destroySpace": {
+              const memberships = yield* membership(id, info.createdAt!);
+              if (memberships.length > 0 && operation.sagaRemoveConfirmed !== true)
+                return yield* refuse(
+                  "saga_member",
+                  "Deleting this space also removes its saga membership and dependent ordering edges. Confirm that combined action.",
+                  {
+                    sagaId: memberships[0]?.sagaId,
+                    dependentEdges: memberships.flatMap((member) =>
+                      member.removedEdges.flatMap((edge) =>
+                        edge.after
+                          .filter((after) => after === id)
+                          .map((after) => ({ memberId: edge.memberId, after })),
+                      ),
+                    ),
+                    memberships,
+                  },
+                );
+              removedEdges = memberships;
+              if (memberships.length > 0)
+                yield* patch({ refusalMessage: stableStringify({ removedEdges: memberships }) });
+              for (const member of memberships) {
+                const input = { sagaId: member.sagaId, spaceId: id };
+                yield* invoke(
+                  entry,
+                  "saga remove",
+                  buildStaveArgv.sagaRemove(input),
+                  (stream) => cli.sagaRemove(input, stream),
+                  notesUnlessPlan,
+                ).pipe(Effect.ensuring(afterMutation(member.sagaRoot)));
+              }
+              const input = { ...operation, id };
+              const result = yield* invoke(
+                entry,
+                "space destroy",
+                buildStaveArgv.spaceDestroy(input),
+                (stream) => cli.spaceDestroy(input, stream),
+                notesUnlessPlan,
+              );
+              if (isStaveDryRunPlan(result)) return yield* unexpectedPlan("space destroy");
+              yield* patch({ disposition: "destroyed" });
+              if (Option.isSome(project)) yield* deleteProject(project.value.id);
+              outcome = { kind: operation.kind, result };
+              break;
+            }
+            case "memoryAttach": {
+              let result: StaveMemoryAttachResult | undefined;
+              for (const spec of operation.specs) {
+                const separator = spec.spec.indexOf(":");
+                const provider = separator >= 0 ? spec.spec.slice(0, separator) : undefined;
+                const value = separator >= 0 ? spec.spec.slice(separator + 1) : spec.spec;
+                const input = {
+                  id,
+                  provider,
+                  use: value === "." ? undefined : value,
+                  edit: [],
+                  link: [],
+                  opt: [],
+                };
+                const attached = yield* invoke(
+                  entry,
+                  "memory attach",
+                  buildStaveArgv.memoryAttach(input),
+                  (stream) => cli.memoryAttach(input, stream),
+                  notesUnlessPlan,
+                );
+                if (isStaveDryRunPlan(attached)) return yield* unexpectedPlan("memory attach");
+                result =
+                  result === undefined
+                    ? attached
+                    : {
+                        ...attached,
+                        attachments: [...result.attachments, ...attached.attachments],
+                        notes: [...result.notes, ...attached.notes],
+                      };
+              }
+              if (result === undefined)
+                return yield* refuse("invalid_arguments", "Select at least one memory store.");
+              outcome = { kind: operation.kind, result };
+              break;
+            }
+            case "memoryDetach": {
+              const input = { ...operation, id };
+              const result = yield* invoke(
+                entry,
+                "memory detach",
+                buildStaveArgv.memoryDetach(input),
+                (stream) => cli.memoryDetach(input, stream),
+                notesUnlessPlan,
+              );
+              if (isStaveDryRunPlan(result)) return yield* unexpectedPlan("memory detach");
+              outcome = { kind: operation.kind, result };
+              break;
+            }
+          }
+          if (lease !== undefined && operation.kind !== "destroySpace")
+            yield* patch(yield* reconcileRow(lease));
+          return outcome;
+        });
+        const renewLease = Effect.forever(
+          Effect.gen(function* () {
+            yield* Effect.sleep(Duration.seconds(20));
+            if (lease === undefined) return;
+            const now = yield* nowIso;
+            const renewed = yield* lifecycle
+              .renewLease({
+                projectId: lease.projectId,
+                leaseEpoch: lease.leaseEpoch,
+                ownerToken: entry.operationId,
+                now,
+                leaseUntil: DateTime.formatIso(
+                  DateTime.add(DateTime.makeUnsafe(now), { minutes: 1 }),
+                ),
+              })
+              .pipe(Effect.mapError(asRefusal));
+            if (!renewed)
+              return yield* refuse(
+                "space_transitioning",
+                "The lifecycle lease was lost; the operation was stopped.",
+              );
+          }),
+        );
+        const recoverableBody = body.pipe(
+          Effect.catchCause((cause) =>
+            Effect.gen(function* () {
+              if (Cause.hasInterruptsOnly(cause)) return yield* Effect.failCause(cause);
+              const error = toOperationError(cause);
+              if (lease !== undefined) {
+                const reconciled = yield* reconcileRow(lease).pipe(Effect.option);
+                if (Option.isSome(reconciled)) yield* patch(reconciled.value);
+                yield* patch({
+                  ...(Option.isSome(reconciled) && reconciled.value.disposition === "destroyed"
+                    ? {}
+                    : { disposition: "refused" as const }),
+                  refusalCode: error.code,
+                  refusalMessage: stableStringify({ message: error.message, removedEdges }),
+                });
+              }
+              if (removedEdges !== null)
+                return yield* refuse(error.code, error.message, { ...error.details, removedEdges });
+              return yield* Effect.failCause(cause);
+            }),
+          ),
+        );
+        return yield* (
+          lease === undefined ? recoverableBody : Effect.raceFirst(recoverableBody, renewLease)
+        ).pipe(
+          Effect.ensuring(
+            Effect.gen(function* () {
+              yield* afterMutation(operation.workspaceRoot);
+              if (lease !== undefined)
+                yield* lifecycle
+                  .releaseLease({
+                    projectId: lease.projectId,
+                    leaseEpoch: lease.leaseEpoch,
+                    ownerToken: entry.operationId,
+                    now: yield* nowIso,
+                  })
+                  .pipe(Effect.ignore);
+            }),
+          ),
+        );
+      }),
+    );
+
+  const reconcileIncomplete = Effect.gen(function* () {
+    const rows = yield* lifecycle.listIncomplete().pipe(Effect.mapError(asRefusal));
+    for (const row of rows)
+      yield* withSpaceLock(
+        row.workspaceRoot,
+        Effect.gen(function* () {
+          if (row.ownerToken !== null && row.leaseUntil !== null) {
+            const remaining = Date.parse(row.leaseUntil) - (yield* Clock.currentTimeMillis);
+            if (remaining > 0) yield* Effect.sleep(Duration.millis(remaining));
+          }
+          const now = yield* nowIso;
+          const ownerToken = `startup:${NodeCrypto.randomUUID()}`;
+          const acquired = yield* lifecycle
+            .acquireLease({
+              projectId: row.projectId,
+              expectedEpoch: row.leaseEpoch,
+              ownerToken,
+              now,
+              leaseUntil: DateTime.formatIso(
+                DateTime.add(DateTime.makeUnsafe(now), { minutes: 1 }),
+              ),
+            })
+            .pipe(Effect.mapError(asRefusal));
+          if (Option.isNone(acquired)) return;
+          const current = acquired.value;
+          const recover = Effect.gen(function* () {
+            const reconciled = yield* reconcileRow(current).pipe(
+              Effect.catch((error) =>
+                Effect.succeed({
+                  disposition: "refused" as const,
+                  refusalCode: error.code,
+                  refusalMessage: error.message,
+                }),
+              ),
+            );
+            const patched = yield* lifecycle
+              .updateDisposition({
+                projectId: row.projectId,
+                leaseEpoch: current.leaseEpoch,
+                ownerToken,
+                now: yield* nowIso,
+                patch: reconciled,
+              })
+              .pipe(Effect.mapError(asRefusal));
+            if (!patched)
+              return yield* refuse("space_transitioning", "Startup reconciliation lost its lease.");
+          });
+          const renewal = Effect.forever(
+            Effect.gen(function* () {
+              yield* Effect.sleep(Duration.seconds(20));
+              const now = yield* nowIso;
+              const renewed = yield* lifecycle
+                .renewLease({
+                  projectId: row.projectId,
+                  leaseEpoch: current.leaseEpoch,
+                  ownerToken,
+                  now,
+                  leaseUntil: DateTime.formatIso(
+                    DateTime.add(DateTime.makeUnsafe(now), { minutes: 1 }),
+                  ),
+                })
+                .pipe(Effect.mapError(asRefusal));
+              if (!renewed)
+                return yield* refuse(
+                  "space_transitioning",
+                  "Startup reconciliation lost its lease.",
+                );
+            }),
+          );
+          yield* Effect.raceFirst(recover, renewal).pipe(
+            Effect.ensuring(
+              Effect.gen(function* () {
+                yield* lifecycle
+                  .releaseLease({
+                    projectId: row.projectId,
+                    leaseEpoch: current.leaseEpoch,
+                    ownerToken,
+                    now: yield* nowIso,
+                  })
+                  .pipe(Effect.ignore);
+              }),
+            ),
+          );
+        }),
+      );
+  });
+
   // ── dispatch ────────────────────────────────────────────────
 
   const notImplemented = (kind: StaveOperationKind) =>
@@ -877,7 +1691,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
         return runSetup(entry, operation);
       case "registerRepo":
         return runRegisterRepo(entry, operation);
-      // Phases 4-5 fill these in; listing every kind keeps the switch exhaustive.
+      // Space operations share lifecycle guards; saga orchestration follows in Phase 5.
       case "addRepo":
       case "removeRepo":
       case "syncSpace":
@@ -887,6 +1701,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       case "restoreSpace":
       case "memoryAttach":
       case "memoryDetach":
+        return runSpaceOperation(entry, operation);
       case "createSaga":
       case "sagaAdd":
       case "sagaRemove":
@@ -920,7 +1735,17 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       yield* emit(entry, (base) => {
         entry.state = "failed";
         entry.terminalAtMs = terminalAtMs;
-        return { ...base, kind: "failed", error: { ...error, details } };
+        return {
+          ...base,
+          kind: "failed",
+          error: {
+            ...error,
+            details:
+              entry.partialCleanupEdges === null
+                ? details
+                : { ...details, removedEdges: entry.partialCleanupEdges },
+          },
+        };
       });
     });
 
@@ -968,6 +1793,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           terminalAtMs: null,
           lastAccessMs: now,
           partialSpace: null,
+          partialCleanupEdges: null,
           pubsub: yield* PubSub.unbounded<StaveProgressEvent>(),
         };
         entries.set(entry.operationId, entry);
@@ -1019,6 +1845,30 @@ export const make = Effect.fn("StaveOperations.make")(function* (
             }),
           );
     switch (operation.kind) {
+      case "removePartialSpace":
+        return loadRoots.pipe(
+          Effect.mapError(
+            (error) =>
+              new StaveError({
+                code: error.code,
+                message: error.message,
+                details: error.details,
+                exitCode: null,
+                stderrTail: null,
+                verb: "space destroy",
+              }),
+          ),
+          Effect.flatMap(({ agentWorkDir }) =>
+            dryRun({
+              kind: "destroySpace",
+              workspaceRoot: path.join(agentWorkDir, operation.spaceId),
+              expectedManifestCreatedAt: operation.expectedManifestCreatedAt,
+              sagaRemoveConfirmed: operation.sagaRemoveConfirmed,
+              force: operation.force === true,
+              memory: "destroy",
+            }),
+          ),
+        );
       case "createSpace":
         return Effect.scoped(
           spaceCreateInput(operation, true).pipe(
@@ -1046,6 +1896,121 @@ export const make = Effect.fn("StaveOperations.make")(function* (
             dryRun: true,
           })
           .pipe(Effect.flatMap((outcome) => expectPlan("repos add", outcome)));
+      case "addRepo":
+      case "removeRepo":
+      case "retarget":
+      case "archiveSpace":
+      case "restoreSpace":
+      case "destroySpace":
+      case "memoryAttach":
+      case "memoryDetach":
+        return withSpaceLock(
+          operation.workspaceRoot,
+          Effect.gen(function* () {
+            const info = yield* checkSpace(operation).pipe(
+              Effect.mapError(
+                (error) =>
+                  new StaveError({
+                    code: error.code,
+                    message: error.message,
+                    details: error.details,
+                    exitCode: null,
+                    stderrTail: null,
+                    verb: STAVE_OPERATION_VERB[operation.kind],
+                  }),
+              ),
+            );
+            switch (operation.kind) {
+              case "addRepo":
+                return yield* cli
+                  .spaceAdd({ ...operation, id: info.spaceId, dryRun: true })
+                  .pipe(Effect.flatMap((value) => expectPlan("space add", value)));
+              case "removeRepo":
+                return yield* cli
+                  .spaceRemove({ ...operation, id: info.spaceId, dryRun: true })
+                  .pipe(Effect.flatMap((value) => expectPlan("space remove", value)));
+              case "retarget":
+                return yield* cli
+                  .spaceRetarget({ ...operation, id: info.spaceId, dryRun: true })
+                  .pipe(Effect.flatMap((value) => expectPlan("space retarget", value)));
+              case "archiveSpace":
+                return yield* cli
+                  .spaceArchive({ ...operation, id: info.spaceId, dryRun: true })
+                  .pipe(Effect.flatMap((value) => expectPlan("space archive", value)));
+              case "restoreSpace":
+                return yield* cli
+                  .spaceRestore({ ...operation, id: info.spaceId, dryRun: true })
+                  .pipe(Effect.flatMap((value) => expectPlan("space restore", value)));
+              case "destroySpace": {
+                if (operation.sagaRemoveConfirmed === true) {
+                  const memberships = yield* membership(info.spaceId, info.createdAt!).pipe(
+                    Effect.mapError(
+                      (error) =>
+                        new StaveError({
+                          code: error.code,
+                          message: error.message,
+                          details: error.details,
+                          exitCode: null,
+                          stderrTail: null,
+                          verb: "space destroy",
+                        }),
+                    ),
+                  );
+                  if (memberships.length > 0) {
+                    const plan: Array<string> = [];
+                    for (const member of memberships) {
+                      const removal = yield* cli
+                        .sagaRemove({ sagaId: member.sagaId, spaceId: info.spaceId, dryRun: true })
+                        .pipe(Effect.flatMap((value) => expectPlan("saga remove", value)));
+                      plan.push(...removal.plan);
+                    }
+                    plan.push(
+                      `Then attempt ${operation.force ? "forced" : "guarded"} destruction of space '${info.spaceId}' with memory=${operation.memory}.`,
+                      "Destroy guards are checked after saga removal. A refusal can leave the space removed from its saga; retained ordering edges are available for manual repair.",
+                    );
+                    return { dryRun: true as const, plan };
+                  }
+                }
+                return yield* cli
+                  .spaceDestroy({ ...operation, id: info.spaceId, dryRun: true })
+                  .pipe(Effect.flatMap((value) => expectPlan("space destroy", value)));
+              }
+              case "memoryDetach":
+                return yield* cli
+                  .memoryDetach({ ...operation, id: info.spaceId, dryRun: true })
+                  .pipe(Effect.flatMap((value) => expectPlan("memory detach", value)));
+              case "memoryAttach": {
+                const plan: Array<string> = [];
+                for (const spec of operation.specs) {
+                  const separator = spec.spec.indexOf(":");
+                  const value = separator >= 0 ? spec.spec.slice(separator + 1) : spec.spec;
+                  const result = yield* cli
+                    .memoryAttach({
+                      id: info.spaceId,
+                      provider: separator >= 0 ? spec.spec.slice(0, separator) : undefined,
+                      use: value === "." ? undefined : value,
+                      edit: [],
+                      link: [],
+                      opt: [],
+                      dryRun: true,
+                    })
+                    .pipe(Effect.flatMap((value) => expectPlan("memory attach", value)));
+                  plan.push(...result.plan);
+                }
+                return { dryRun: true as const, plan };
+              }
+            }
+          }),
+        );
+      case "syncSpace":
+        return Effect.succeed({
+          dryRun: true,
+          plan: [
+            operation.referencesOnly
+              ? "Sync reference repositories in this space."
+              : "Sync repositories in this space.",
+          ],
+        });
       default:
         return Effect.fail(notDryRunnable);
     }
@@ -1067,10 +2032,23 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           });
     });
 
-  return StaveOperations.of({ run, observe, dryRun, withSpaceLock, summary });
+  return StaveOperations.of({ run, observe, dryRun, withSpaceLock, summary, reconcileIncomplete });
 });
 
-export const layer = Layer.effect(StaveOperations, make());
+export const layer = Layer.effect(
+  StaveOperations,
+  make().pipe(
+    Effect.tap((service) =>
+      service.reconcileIncomplete.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("stave: startup reconciliation failed; durable rows retained", {
+            cause,
+          }),
+        ),
+      ),
+    ),
+  ),
+);
 
 export const layerWith = (limits: StaveOperationsLimits) =>
   Layer.effect(StaveOperations, make(limits));

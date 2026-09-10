@@ -1,4 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
+import { staveThreadStartMessage } from "@t3tools/client-runtime/state/projectGit";
+import { toastManager } from "../components/ui/toast";
 import {
   scopedProjectKey,
   scopeProjectRef,
@@ -135,6 +137,15 @@ export function useNewThreadHandler() {
           candidate.id === projectRef.projectId &&
           candidate.environmentId === projectRef.environmentId,
       );
+      const staveStartMessage = staveThreadStartMessage(project);
+      if (staveStartMessage !== null) {
+        toastManager.add({
+          type: "warning",
+          title: "Unarchive to start a thread",
+          description: staveStartMessage,
+        });
+        return Promise.resolve(null);
+      }
       const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
         resolveNewThreadModelSelectionOverride({
           projectDefaultSelection: project?.defaultModelSelection ?? null,

@@ -31,6 +31,8 @@ import {
   type OrchestrationEventStoreShape,
 } from "../../persistence/Services/OrchestrationEventStore.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
+import * as StaveAdmission from "../../stave/StaveAdmission.ts";
+import * as StaveSpaceLock from "../../stave/StaveSpaceLock.ts";
 import * as StaveWorkspaceReader from "../../stave/StaveWorkspaceReader.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
@@ -50,7 +52,9 @@ const asMessageId = (value: string): MessageId => MessageId.make(value);
 const asTurnId = (value: string): TurnId => TurnId.make(value);
 const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.make(value);
 
-function makeOrchestrationLayer() {
+function makeOrchestrationLayer(
+  admission: StaveAdmission.StaveAdmission["Service"] = { check: () => Effect.void },
+) {
   const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
     prefix: "t3-orchestration-engine-test-",
   });
@@ -62,6 +66,8 @@ function makeOrchestrationLayer() {
     OrchestrationProjectionSnapshotQueryLive,
   ).pipe(
     Layer.provideMerge(ThreadBackgroundLiveness.layer),
+    Layer.provide(Layer.succeed(StaveAdmission.StaveAdmission, admission)),
+    Layer.provide(StaveSpaceLock.layer),
     Layer.provide(ThreadPlanProgress.layer),
     Layer.provide(OrchestrationEventStoreLive),
     Layer.provideMerge(OrchestrationCommandReceiptRepositoryLive),
@@ -185,6 +191,8 @@ describe("OrchestrationEngine", () => {
     const layer = OrchestrationEngineLive.pipe(
       Layer.provide(
         Layer.succeed(ProjectionSnapshotQuery, {
+          listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
+          listActiveProjectRootsUnder: () => Effect.succeed([]),
           getCommandReadModel: () => Effect.succeed(commandReadModel),
           getSnapshot: () =>
             Effect.sync(() => {
@@ -1701,4 +1709,58 @@ describe("OrchestrationEngine", () => {
       });
     }).pipe(Effect.provide(makeOrchestrationLayer())),
   );
+});
+
+effectIt.effect("rechecks local-thread admission at commit and persists no refused thread", () => {
+  const calls: StaveAdmission.StaveAdmissionInput[] = [];
+  const layer = makeOrchestrationLayer({
+    check: (input) => {
+      calls.push(input);
+      return Effect.fail(
+        new StaveAdmission.StaveSpaceTransitioningError({
+          ...input,
+          message: "Space is archiving",
+        }),
+      );
+    },
+  });
+  return Effect.gen(function* () {
+    const engine = yield* OrchestrationEngineService;
+    const projectId = ProjectId.make("p-lease");
+    yield* engine.dispatch({
+      type: "project.create",
+      commandId: CommandId.make("p-lease-create"),
+      projectId,
+      title: "Space",
+      workspaceRoot: "/spaces/lease",
+      createdAt: now(),
+    });
+    const result = yield* Effect.flip(
+      engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("t-lease-create"),
+        projectId,
+        threadId: ThreadId.make("t-lease"),
+        title: "Thread",
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "full-access",
+        branch: null,
+        worktreePath: null,
+        createdAt: now(),
+      }),
+    );
+    expect(result.message).toContain("Space is archiving");
+    expect(calls).toEqual([
+      {
+        projectRoot: "/spaces/lease",
+        projectId,
+        intent: "thread.create",
+        worktreePath: null,
+        lockHeld: true,
+      },
+    ]);
+    const query = yield* ProjectionSnapshotQuery;
+    expect((yield* query.getSnapshot()).threads).toEqual([]);
+  }).pipe(Effect.provide(layer));
 });

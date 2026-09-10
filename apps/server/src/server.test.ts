@@ -141,6 +141,8 @@ import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolve
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
+import { StaveLifecycleRepositoryLive } from "./persistence/Layers/StaveLifecycleRepository.ts";
+import * as StaveSpaceLock from "./stave/StaveSpaceLock.ts";
 import * as StaveAdmission from "./stave/StaveAdmission.ts";
 import * as StaveBinary from "./stave/StaveBinary.ts";
 import * as StaveCli from "./stave/StaveCli.ts";
@@ -710,7 +712,15 @@ const buildAppUnderTest = (options?: {
           ...options.layers.staveWorkspaceReader,
         })
       : StaveWorkspaceReader.layer.pipe(Layer.provide(repositoryIdentityResolverLayer));
-    const staveLayer = StaveAdmission.layer.pipe(Layer.provideMerge(staveWorkspaceReaderLayer));
+    const staveLayer = StaveAdmission.layer.pipe(
+      Layer.provideMerge(
+        Layer.mergeAll(
+          staveWorkspaceReaderLayer,
+          StaveSpaceLock.layer,
+          StaveLifecycleRepositoryLive.pipe(Layer.provide(SqlitePersistenceMemory)),
+        ),
+      ),
+    );
     // No binary, no config by default: `stave.getStatus` then reports both as
     // missing without touching disk, and `stave.spaceStatus` refuses.
     const staveBinaryMissing = Effect.fail(
@@ -722,7 +732,10 @@ const buildAppUnderTest = (options?: {
       invalidate: Effect.void,
       ...options?.layers?.staveBinary,
     });
-    const staveCliLayer = Layer.mock(StaveCli.StaveCli)({ ...options?.layers?.staveCli });
+    const staveCliLayer = Layer.mock(StaveCli.StaveCli)({
+      sagaList: Effect.succeed([]),
+      ...options?.layers?.staveCli,
+    });
     const staveConfigReaderLayer = Layer.mock(StaveConfigReader.StaveConfigReader)({
       load: Effect.succeed({
         configPath: "/tmp/stave-test/config.yaml",
@@ -5004,19 +5017,15 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.deepEqual(inputs[0]?.edits, ["api", "docs:release"]);
       assert.deepEqual(inputs[0]?.references, ["shared"]);
 
-      const unsupported = yield* Effect.flip(
-        Effect.scoped(
-          withWsRpcClient(wsUrl, (client) =>
-            client[WS_METHODS.staveDryRun]({
-              operation: { kind: "syncSpace", workspaceRoot: "/tmp/space", referencesOnly: false },
-            }),
-          ),
+      const syncPlan = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.staveDryRun]({
+            operation: { kind: "syncSpace", workspaceRoot: "/tmp/space", referencesOnly: false },
+          }),
         ),
       );
-      assert.equal(unsupported._tag, "StaveCommandError");
-      if (unsupported._tag === "StaveCommandError") {
-        assert.equal(unsupported.code, "invalid_arguments");
-      }
+      assert.equal(syncPlan.dryRun, true);
+      assert.ok(syncPlan.plan.length > 0);
 
       const cliFailure = yield* Effect.flip(
         Effect.scoped(
@@ -5161,7 +5170,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("stave.runOperation ends an unimplemented kind with a failed event", () =>
+  it.effect("stave.runOperation refuses a missing space before editing it", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest({ layers: staveEnabledLayers });
       const wsUrl = yield* getWsServerUrl("/ws");
@@ -5189,8 +5198,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(failed?.kind, "failed");
       if (failed?.kind === "failed") {
         assert.equal(failed.sequence, 1);
-        assert.equal(failed.error.code, "invalid_arguments");
-        assertInclude(failed.error.message, "not implemented");
+        assert.equal(failed.error.code, "unreadable");
+        assertInclude(failed.error.message, "manifest");
       }
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

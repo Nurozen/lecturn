@@ -82,9 +82,20 @@ export class CheckpointRefUnavailableError extends Schema.TaggedErrorClass<Check
   }
 }
 
+/** A space can contain several repositories; single-repository checkpoints are unsafe. */
+export class CheckpointStaveUnavailableError extends Schema.TaggedErrorClass<CheckpointStaveUnavailableError>()(
+  "CheckpointStaveUnavailableError",
+  { operation: CheckpointDiffOperation, threadId: ThreadId },
+) {
+  override get message(): string {
+    return "Checkpoints are unavailable for Stave spaces.";
+  }
+}
+
 export type CheckpointStoreError = VcsError;
 
 export type CheckpointServiceError =
+  | CheckpointStaveUnavailableError
   | CheckpointStoreError
   | ProjectionRepositoryError
   | CheckpointDiffResultInvalidError

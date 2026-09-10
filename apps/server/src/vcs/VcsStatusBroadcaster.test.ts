@@ -955,32 +955,34 @@ describe("autoPullPolicyLayer", () => {
     ),
   );
 
-  it.effect("resolves a Stave project's primary repo path to its autoPull setting", () =>
-    Effect.gen(function* () {
-      const policy = yield* VcsStatusBroadcaster.VcsAutoPullPolicy;
-      assert.isTrue(yield* policy.isEnabled(stavePrimaryRepo));
-      assert.isFalse(yield* policy.isEnabled("/spaces/other/other"));
-    }).pipe(
-      Effect.provide(
-        makePolicyLayer({
-          getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-          getShellSnapshot: () =>
-            Effect.succeed(
-              shellSnapshot([
-                toShell(plainProject),
-                toShell(staveProject),
-                toShell({
-                  ...staveProject,
-                  id: ProjectId.make("project-stave-disabled"),
-                  workspaceRoot: "/spaces/other",
-                  autoPull: false,
-                  stave: { ...staveProject.stave!, primaryRepoPath: "/spaces/other/other" },
-                }),
-              ]),
-            ),
-        }),
+  it.effect(
+    "skips auto-pull for a Stave primary repo even when the project setting is enabled",
+    () =>
+      Effect.gen(function* () {
+        const policy = yield* VcsStatusBroadcaster.VcsAutoPullPolicy;
+        assert.isFalse(yield* policy.isEnabled(stavePrimaryRepo));
+        assert.isFalse(yield* policy.isEnabled("/spaces/other/other"));
+      }).pipe(
+        Effect.provide(
+          makePolicyLayer({
+            getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+            getShellSnapshot: () =>
+              Effect.succeed(
+                shellSnapshot([
+                  toShell(plainProject),
+                  toShell(staveProject),
+                  toShell({
+                    ...staveProject,
+                    id: ProjectId.make("project-stave-disabled"),
+                    workspaceRoot: "/spaces/other",
+                    autoPull: false,
+                    stave: { ...staveProject.stave!, primaryRepoPath: "/spaces/other/other" },
+                  }),
+                ]),
+              ),
+          }),
+        ),
       ),
-    ),
   );
 
   it.effect("never enables auto-pull for the Stave space root itself", () =>
@@ -1038,7 +1040,7 @@ describe("autoPullPolicyLayer", () => {
     }),
   );
 
-  it.effect("pulls a behind Stave primary repo when status is refreshed for its path", () => {
+  it.effect("leaves a behind Stave primary repo unchanged when status refreshes", () => {
     let remoteStatus: VcsStatusRemoteResult = { ...baseRemoteStatus, behindCount: 1 };
     let pullCalls = 0;
     const testLayer = VcsStatusBroadcaster.layer.pipe(
@@ -1071,8 +1073,8 @@ describe("autoPullPolicyLayer", () => {
     return Effect.gen(function* () {
       const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
       const status = yield* broadcaster.refreshStatus(stavePrimaryRepo);
-      assert.equal(pullCalls, 1);
-      assert.equal(status.behindCount, 0);
+      assert.equal(pullCalls, 0);
+      assert.equal(status.behindCount, 1);
     }).pipe(Effect.provide(testLayer));
   });
 });

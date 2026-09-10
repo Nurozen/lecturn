@@ -173,12 +173,12 @@ describe("normalizeDispatchCommand Stave worktree rule", () => {
     }).pipe(Effect.provide(makeTestLayer(reads)));
   });
 
-  it.effect("passes thread.create in the space root without reading the projection", () => {
+  it.effect("checks lifecycle admission for thread.create in the space root", () => {
     const reads: string[] = [];
     return Effect.gen(function* () {
       const normalized = yield* normalizeDispatchCommand(createThread(spaceProjectId, null));
       expect(normalized.type).toBe("thread.create");
-      expect(reads).toEqual([]);
+      expect(reads).toEqual([`project:${spaceProjectId}`, `manifest:${SPACE_ROOT}`]);
     }).pipe(Effect.provide(makeTestLayer(reads)));
   });
 
@@ -227,7 +227,11 @@ describe("normalizeDispatchCommand Stave worktree rule", () => {
           prepareWorktree: { projectCwd: SPACE_ROOT, baseBranch: "main" },
         }),
       );
-      expect(reads).toEqual([`project:${spaceProjectId}`, `manifest:${SPACE_ROOT}`]);
+      expect(reads).toEqual([
+        "thread:thread-bootstrap",
+        `project:${spaceProjectId}`,
+        `manifest:${SPACE_ROOT}`,
+      ]);
     }).pipe(Effect.provide(makeTestLayer(reads)));
   });
 
@@ -265,14 +269,20 @@ describe("normalizeDispatchCommand Stave worktree rule", () => {
     return Effect.gen(function* () {
       const normalized = yield* normalizeDispatchCommand(turnStart(spaceThreadId));
       expect(normalized.type).toBe("thread.turn.start");
-      expect(reads).toEqual([]);
+      expect(reads).toEqual([
+        `thread:${spaceThreadId}`,
+        `project:${spaceProjectId}`,
+        `manifest:${SPACE_ROOT}`,
+      ]);
     }).pipe(Effect.provide(makeTestLayer(reads)));
   });
 
   it("describeWorktreeIntent ignores commands that never bind a worktree", () => {
-    expect(describeWorktreeIntent(createThread(spaceProjectId, null))).toBeNull();
+    expect(describeWorktreeIntent(createThread(spaceProjectId, null))?.intent).toBe(
+      "thread.create",
+    );
     expect(describeWorktreeIntent(metaUpdate(spaceThreadId, { title: "x" }))).toBeNull();
-    expect(describeWorktreeIntent(turnStart(spaceThreadId))).toBeNull();
+    expect(describeWorktreeIntent(turnStart(spaceThreadId))?.intent).toBe("thread.turn.start");
     expect(
       describeWorktreeIntent({
         type: "thread.archive",
@@ -282,3 +292,13 @@ describe("normalizeDispatchCommand Stave worktree rule", () => {
     ).toBeNull();
   });
 });
+
+it.effect("refuses legacy per-thread worktree on a normal turn start", () =>
+  Effect.gen(function* () {
+    const old = threads.get(spaceThreadId)!;
+    threads.set(spaceThreadId, { ...old, worktreePath: "/legacy/worktree" });
+    yield* expectRefused(turnStart(spaceThreadId)).pipe(
+      Effect.ensuring(Effect.sync(() => threads.set(spaceThreadId, old))),
+    );
+  }).pipe(Effect.provide(makeTestLayer([]))),
+);
