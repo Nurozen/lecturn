@@ -219,6 +219,7 @@ describe("buildProjectGroups", () => {
 describe("buildSagaProjectTree", () => {
   const stave = (spaceId: string, isSaga = false) => ({
     spaceId,
+    createdAt: "2026-09-01T00:00:00Z",
     isSaga,
     state: "live" as const,
     repos: [],
@@ -226,6 +227,8 @@ describe("buildSagaProjectTree", () => {
   });
   const member = (id: string) => ({
     id,
+    workspaceRoot: `/work/${id}`,
+    createdAt: "2026-09-01T00:00:00Z",
     after: [],
     state: "live" as const,
     dirty: false,
@@ -244,7 +247,12 @@ describe("buildSagaProjectTree", () => {
     {
       environmentId,
       sagaRoot: "/work/saga",
-      status: { sagaId: "saga", members: [member("a"), member("b")], notes: [] },
+      status: {
+        sagaId: "saga",
+        sagaCreatedAt: "2026-09-01T00:00:00Z",
+        members: [member("a"), member("b")],
+        notes: [],
+      },
     },
   ];
 
@@ -271,6 +279,61 @@ describe("buildSagaProjectTree", () => {
     expect(buildSagaProjectTree(withoutParent, index()).map((node) => node.group)).toEqual(
       withoutParent,
     );
+  });
+
+  it("keeps other installations and archived incarnations with the same ID outside the saga", () => {
+    const otherInstallation = makeProject("other-a", "/other-work/a", {
+      repositoryIdentity: null,
+      stave: stave("a"),
+    });
+    const oldArchive = makeProject("old-a", "/work/.archive/a-old", {
+      repositoryIdentity: null,
+      stave: { ...stave("a"), state: "archived", createdAt: "2026-08-01T00:00:00Z" },
+    });
+    const tree = buildSagaProjectTree(
+      groupsFor([...projects(), otherInstallation, oldArchive]),
+      index(),
+    );
+    expect(
+      tree
+        .find((node) => node.group.representative.id === "saga")
+        ?.children.map((node) => node.group.representative.id),
+    ).toEqual(["a", "b"]);
+    expect(
+      tree
+        .filter((node) => ["other-a", "old-a"].includes(node.group.representative.id))
+        .map((node) => node.memberStatus),
+    ).toEqual([null, null]);
+  });
+
+  it("does not guess membership when identity is missing or the root was recreated", () => {
+    const roster = index();
+    roster[0]!.status.members[0]!.createdAt = "2026-08-01T00:00:00Z";
+    const tree = buildSagaProjectTree(groupsFor(), roster);
+    expect(
+      tree
+        .find((node) => node.group.representative.id === "saga")
+        ?.children.map((node) => node.group.representative.id),
+    ).toEqual(["b"]);
+    const legacy = [
+      {
+        ...roster[0]!,
+        status: {
+          sagaId: "saga",
+          members: roster[0]!.status.members.map(
+            ({ workspaceRoot: _root, createdAt: _stamp, ...member }) => member,
+          ),
+          notes: [],
+        },
+      },
+    ];
+    expect(
+      buildSagaProjectTree(groupsFor(), legacy).every((node) => node.children.length === 0),
+    ).toBe(true);
+    roster[0]!.status.sagaCreatedAt = "2026-08-01T00:00:00Z";
+    expect(
+      buildSagaProjectTree(groupsFor(), roster).every((node) => node.children.length === 0),
+    ).toBe(true);
   });
 
   it("keeps a same-id member from another environment outside the saga", () => {

@@ -361,6 +361,8 @@ export function buildSagaProjectTree<TProject extends EnvironmentProject>(
           project.environmentId === entry.environmentId &&
           project.stave?.isSaga === true &&
           project.stave.spaceId === entry.status.sagaId &&
+          entry.status.sagaCreatedAt !== undefined &&
+          project.stave.createdAt === entry.status.sagaCreatedAt &&
           normalizeProjectPathForComparison(project.workspaceRoot) ===
             normalizeProjectPathForComparison(entry.sagaRoot),
       ),
@@ -382,7 +384,13 @@ export function buildSagaProjectTree<TProject extends EnvironmentProject>(
       const matches = parents.flatMap((parent) => {
         if (project.environmentId !== parent.entry.environmentId || !project.stave) return [];
         const order = parent.entry.status.members.findIndex(
-          (member) => member.id === project.stave?.spaceId,
+          (member) =>
+            member.id === project.stave?.spaceId &&
+            member.workspaceRoot !== undefined &&
+            member.createdAt !== undefined &&
+            member.createdAt === project.stave?.createdAt &&
+            normalizeProjectPathForComparison(member.workspaceRoot) ===
+              normalizeProjectPathForComparison(project.workspaceRoot),
         );
         return order < 0 ? [] : [{ parent, order, status: parent.entry.status.members[order]! }];
       });

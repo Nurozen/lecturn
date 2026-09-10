@@ -529,6 +529,29 @@ describe("runProcess line callbacks", () => {
 });
 
 describe("runProcess unsetEnv", () => {
+  for (const unsetEnv of [undefined, ["DROP"]]) {
+    it.effect(`uses only explicit env with extendEnv=false and unsetEnv=${String(unsetEnv)}`, () =>
+      Effect.gen(function* () {
+        const spawner = makeSpawner((command) =>
+          Effect.sync(() => {
+            expect(command.options.extendEnv).toBe(false);
+            expect(command.options.env).toEqual(
+              unsetEnv ? { KEEP: "yes" } : { KEEP: "yes", DROP: "value" },
+            );
+            return makeHandle({ stdout: "ok" });
+          }),
+        );
+        yield* runWith(spawner)({
+          command: "fake",
+          args: [],
+          env: { KEEP: "yes", DROP: "value" },
+          extendEnv: false,
+          unsetEnv,
+        }).pipe(Effect.provideService(HostProcessEnvironment, { HOST_SECRET: "absent" }));
+      }),
+    );
+  }
+
   it.effect("removes merged-in variables and passes a fully resolved environment", () =>
     Effect.gen(function* () {
       const spawner = makeSpawner((command) =>

@@ -26,6 +26,7 @@ import * as Schema from "effect/Schema";
 import { StaveLifecycleRepository } from "../persistence/Services/StaveLifecycleRepository.ts";
 import { StaveSpaceLock } from "./StaveSpaceLock.ts";
 import { StaveWorkspaceReader } from "./StaveWorkspaceReader.ts";
+import { sameManifestIncarnation } from "./staveIncarnation.ts";
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -68,16 +69,22 @@ export class StaveSpaceTransitioningError extends Schema.TaggedErrorClass<StaveS
   "StaveSpaceTransitioningError",
   { projectRoot: Schema.String, intent: StaveAdmissionIntent, message: Schema.String },
 ) {}
+export class StaveProjectIncarnationMismatchError extends Schema.TaggedErrorClass<StaveProjectIncarnationMismatchError>()(
+  "StaveProjectIncarnationMismatchError",
+  { projectRoot: Schema.String, intent: StaveAdmissionIntent, message: Schema.String },
+) {}
 export type StaveAdmissionError =
   | StaveWorktreeForbiddenError
   | StaveArchivedProjectError
-  | StaveSpaceTransitioningError;
+  | StaveSpaceTransitioningError
+  | StaveProjectIncarnationMismatchError;
 
 export const isStaveAdmissionError: (cause: unknown) => cause is StaveAdmissionError = Schema.is(
   Schema.Union([
     StaveWorktreeForbiddenError,
     StaveArchivedProjectError,
     StaveSpaceTransitioningError,
+    StaveProjectIncarnationMismatchError,
   ]),
 );
 
@@ -140,7 +147,9 @@ export const make = Effect.fn("StaveAdmission.make")(function* () {
         intent: input.intent,
         message: "This Stave space is transitioning. Try again after the operation finishes.",
       });
-    let space = yield* reader.load(input.projectRoot);
+    let bindingSpace = yield* reader.load(input.projectRoot);
+    let space = bindingSpace;
+    let ancestorSpace: typeof space = Option.none();
     // A Stave checkout stays managed after its parent project is removed from
     // Lecturn. Resolve physical ancestors before admitting worktree/PR writes.
     if (
@@ -165,7 +174,10 @@ export const make = Effect.fn("StaveAdmission.make")(function* () {
       while (true) {
         yield* reader.invalidate(candidate);
         space = yield* reader.load(candidate);
-        if (Option.isSome(space)) break;
+        if (Option.isSome(space)) {
+          ancestorSpace = space;
+          break;
+        }
         const parent = path.value.dirname(candidate);
         if (parent === candidate) break;
         candidate = parent;
@@ -180,6 +192,16 @@ export const make = Effect.fn("StaveAdmission.make")(function* () {
       const rootRow = yield* lifecycle.value
         .getByWorkspaceRoot(canonicalRoot)
         .pipe(Effect.mapError(transition));
+      let refreshedBinding = false;
+      if (
+        Option.isSome(rootRow) &&
+        (rootRow.value.spaceId !== null || rootRow.value.manifestCreatedAt !== null)
+      ) {
+        yield* reader.invalidate(input.projectRoot);
+        bindingSpace = yield* reader.load(input.projectRoot);
+        space = Option.isSome(bindingSpace) ? bindingSpace : ancestorSpace;
+        refreshedBinding = true;
+      }
       // A lease belongs to the physical root, even if another project id was
       // re-added while the previous owner was running.
       const now = yield* Clock.currentTimeMillis;
@@ -192,12 +214,17 @@ export const make = Effect.fn("StaveAdmission.make")(function* () {
         return yield* transition();
       if (
         Option.isSome(rootRow) &&
-        ["archiving", "restoring", "destroying", "destroyed"].includes(rootRow.value.disposition) &&
-        (Option.isNone(space) ||
-          (rootRow.value.spaceId === space.value.spaceId &&
+        (["archiving", "restoring", "destroying"].includes(rootRow.value.disposition) ||
+          (rootRow.value.disposition === "destroyed" &&
+            (input.projectId === undefined || input.projectId === rootRow.value.projectId))) &&
+        (Option.isNone(bindingSpace) ||
+          (rootRow.value.spaceId === bindingSpace.value.spaceId &&
             (rootRow.value.manifestCreatedAt === null ||
-              space.value.createdAt === undefined ||
-              rootRow.value.manifestCreatedAt === space.value.createdAt)))
+              bindingSpace.value.createdAt === undefined ||
+              sameManifestIncarnation(
+                rootRow.value.manifestCreatedAt,
+                bindingSpace.value.createdAt,
+              ))))
       )
         return yield* transition();
       const row =
@@ -207,18 +234,50 @@ export const make = Effect.fn("StaveAdmission.make")(function* () {
               .getByProjectId(input.projectId)
               .pipe(Effect.mapError(transition));
       if (Option.isSome(row)) {
+        const boundRoot = Option.isSome(fs)
+          ? yield* fs.value
+              .realPath(row.value.workspaceRoot)
+              .pipe(Effect.orElseSucceed(() => row.value.workspaceRoot))
+          : row.value.workspaceRoot;
+        if (
+          input.projectId !== undefined &&
+          boundRoot === canonicalRoot &&
+          (row.value.spaceId !== null || row.value.manifestCreatedAt !== null)
+        ) {
+          if (!refreshedBinding) {
+            yield* reader.invalidate(input.projectRoot);
+            bindingSpace = yield* reader.load(input.projectRoot);
+            space = Option.isSome(bindingSpace) ? bindingSpace : ancestorSpace;
+          }
+          if (
+            Option.isSome(bindingSpace) &&
+            ((row.value.spaceId !== null && row.value.spaceId !== bindingSpace.value.spaceId) ||
+              (row.value.manifestCreatedAt !== null &&
+                (bindingSpace.value.createdAt === undefined ||
+                  !sameManifestIncarnation(
+                    row.value.manifestCreatedAt,
+                    bindingSpace.value.createdAt,
+                  ))))
+          )
+            return yield* new StaveProjectIncarnationMismatchError({
+              projectRoot: input.projectRoot,
+              intent: input.intent,
+              message:
+                "This project belongs to an earlier Stave space incarnation. Re-import the current space before starting new work.",
+            });
+        }
         const sameIncarnation =
-          Option.isNone(space) ||
-          (row.value.spaceId === space.value.spaceId &&
+          Option.isNone(bindingSpace) ||
+          (row.value.spaceId === bindingSpace.value.spaceId &&
             (row.value.manifestCreatedAt === null ||
-              space.value.createdAt === undefined ||
-              row.value.manifestCreatedAt === space.value.createdAt));
+              bindingSpace.value.createdAt === undefined ||
+              sameManifestIncarnation(row.value.manifestCreatedAt, bindingSpace.value.createdAt)));
         if (
           sameIncarnation &&
           ["archiving", "restoring", "destroying", "destroyed"].includes(row.value.disposition)
         )
           return yield* transition();
-        if (Option.isNone(space) && row.value.disposition === "archived")
+        if (Option.isNone(bindingSpace) && row.value.disposition === "archived")
           return yield* new StaveArchivedProjectError({
             projectRoot: input.projectRoot,
             intent: input.intent,

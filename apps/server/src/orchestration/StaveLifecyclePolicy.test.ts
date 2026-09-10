@@ -171,18 +171,14 @@ describe("archive deadlines", () => {
     expect(deadline([{ ...thread, settledOverride: "settled", settledAt: null }])).not.toBeNull();
     expect(deadline([{ ...thread, unsettledAt: OLD, settledAt: NOW }])?.anchorAt).toBe(NOW);
   });
-  it.each([
-    "createdAt",
-    "updatedAt",
-    "settledAt",
-    "unsettledAt",
-    "archivedAt",
-    "deletedAt",
-  ] as const)("anchors to latest %s across all rows", (field) => {
-    expect(
-      deadline([thread, { ...thread, settledOverride: "settled", [field]: LATER }])?.anchorAt,
-    ).toBe(LATER);
-  });
+  it.each(["createdAt", "settledAt", "unsettledAt", "archivedAt", "deletedAt"] as const)(
+    "anchors to latest %s across all rows",
+    (field) => {
+      expect(
+        deadline([thread, { ...thread, settledOverride: "settled", [field]: LATER }])?.anchorAt,
+      ).toBe(LATER);
+    },
+  );
   it("preserves the original schedule despite lease/refresh updates and changed grace", () => {
     const existing = { ...row, anchorAt: OLD, scheduledAt: NOW, updatedAt: LATER };
     expect(deadline([thread], existing, LATER)).toMatchObject({
@@ -191,6 +187,35 @@ describe("archive deadlines", () => {
       reset: false,
     });
     expect(deadline([thread], existing, LATER, 2)?.deadlineAt).toBe("2026-09-03T00:00:00.000Z");
+  });
+  it("ignores passive session and metadata updates in the activity anchor", () => {
+    const existing = { ...row, disposition: "kept" as const, anchorAt: OLD, scheduledAt: NOW };
+    expect(deadline([{ ...thread, updatedAt: LATER }], existing, LATER)).toEqual({
+      anchorAt: OLD,
+      scheduledAt: NOW,
+      deadlineAt: "2026-09-08T00:00:00.000Z",
+      reset: false,
+      kept: true,
+    });
+  });
+  it("preserves older persisted Keep and schedules whose baseline included passive updates", () => {
+    for (const disposition of ["kept", "pending_archive"] as const) {
+      const existing = { ...row, disposition, anchorAt: NOW, scheduledAt: NOW };
+      expect(deadline([{ ...thread, updatedAt: LATER }], existing, LATER)).toEqual({
+        anchorAt: NOW,
+        scheduledAt: NOW,
+        deadlineAt: "2026-09-08T00:00:00.000Z",
+        reset: false,
+        kept: disposition === "kept",
+      });
+      expect(deadline([{ ...thread, unsettledAt: LATER }], existing, LATER)).toBeNull();
+      expect(deadline([{ ...thread, settledAt: LATER }], existing, LATER)).toMatchObject({
+        anchorAt: LATER,
+        scheduledAt: LATER,
+        reset: true,
+        kept: false,
+      });
+    }
   });
   it("suppresses a kept episode only until an anchor changes", () => {
     const existing = { ...row, disposition: "kept" as const, anchorAt: OLD, scheduledAt: NOW };

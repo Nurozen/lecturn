@@ -33,6 +33,7 @@ import {
   HostProcessArchitecture,
   HostProcessEnvironment,
   HostProcessPlatform,
+  HostProcessWorkingDirectory,
 } from "@t3tools/shared/hostProcess";
 import { CommandResolutionCache, resolveCommandPath } from "@t3tools/shared/shell";
 import { isStavePlatformKey, parseStaveVersionOutput } from "@t3tools/shared/stave";
@@ -188,11 +189,16 @@ export const make = Effect.fn("StaveBinary.make")(function* (options: StaveBinar
   const platform = yield* HostProcessPlatform;
   const architecture = yield* HostProcessArchitecture;
   const environment = yield* HostProcessEnvironment;
+  const workingDirectory = yield* HostProcessWorkingDirectory;
 
   const envOverride = environment[STAVE_BINARY_ENV_VAR]?.trim();
   const runnableCandidates: ReadonlyArray<StaveBinaryCandidate> = [
-    ...(envOverride ? [{ path: envOverride, source: "env" as const }] : []),
-    ...(config.stavePath ? [{ path: config.stavePath, source: "bootstrap" as const }] : []),
+    ...(envOverride
+      ? [{ path: path.resolve(workingDirectory, envOverride), source: "env" as const }]
+      : []),
+    ...(config.stavePath
+      ? [{ path: path.resolve(workingDirectory, config.stavePath), source: "bootstrap" as const }]
+      : []),
     ...bundledStaveCandidates({
       baseDir: options.bundledBaseDir ?? import.meta.dirname,
       platform,
@@ -315,9 +321,12 @@ export const make = Effect.fn("StaveBinary.make")(function* (options: StaveBinar
     const expanded = yield* expandHomePath(configuredPath).pipe(
       Effect.provideService(Path.Path, path),
     );
-    const found = yield* probeCandidate(expanded);
+    // A bare filename must execute the same local file that was validated,
+    // rather than asking the process spawner to search PATH again.
+    const absolutePath = path.resolve(workingDirectory, expanded);
+    const found = yield* probeCandidate(absolutePath);
     if (Option.isNone(found)) {
-      return yield* new StaveBinaryNotFound({ candidates: [expanded] });
+      return yield* new StaveBinaryNotFound({ candidates: [absolutePath] });
     }
     return yield* toResolution(found.value, "settings");
   });

@@ -9,6 +9,8 @@ interface OpenDiffFilePrimaryActionInput {
   readonly filePath: string;
   readonly activeCwd: string | undefined;
   readonly repositoryRoot?: string | undefined;
+  /** Internal file viewer root, which differs from the Git cwd for Stave spaces. */
+  readonly workspaceRoot?: string | undefined;
   readonly openInEditor: (targetPath: string) => void;
 }
 
@@ -55,6 +57,14 @@ export function resolveDiffPathForWorkspace(input: {
   const fileSegments = normalizedRelativePathSegments(input.filePath);
   if (!fileSegments) return null;
 
+  const repositorySegments = repositoryRelativeWorkspaceSegments(
+    input.repositoryRoot,
+    input.workspaceRoot,
+  );
+  if (repositorySegments && repositorySegments.length > 0) {
+    return [...repositorySegments, ...fileSegments].join("/");
+  }
+
   const workspaceSegments = repositoryRelativeWorkspaceSegments(
     input.workspaceRoot,
     input.repositoryRoot,
@@ -82,11 +92,12 @@ export function openDiffFilePrimaryAction({
   filePath,
   activeCwd,
   repositoryRoot,
+  workspaceRoot = activeCwd,
   openInEditor,
 }: OpenDiffFilePrimaryActionInput): void {
   const workspaceFilePath = resolveDiffPathForWorkspace({
     filePath,
-    workspaceRoot: activeCwd,
+    workspaceRoot,
     repositoryRoot,
   });
   if (!workspaceFilePath) return;
@@ -96,5 +107,7 @@ export function openDiffFilePrimaryAction({
     return;
   }
 
-  openInEditor(activeCwd ? resolvePathLinkTarget(workspaceFilePath, activeCwd) : workspaceFilePath);
+  openInEditor(
+    workspaceRoot ? resolvePathLinkTarget(workspaceFilePath, workspaceRoot) : workspaceFilePath,
+  );
 }

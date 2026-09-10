@@ -84,7 +84,7 @@ export interface ArchiveSchedule {
   readonly kept: boolean;
 }
 
-/** Schedule each inactive episode once; lease writes never move its grace window. */
+/** Lifecycle stamps identify activity episodes; provider/session metadata does not. */
 export function resolveArchiveDeadline(input: {
   readonly anchors: ReadonlyArray<ProjectionThreadLifecycleAnchor>;
   readonly row: StaveLifecycleRow | null;
@@ -106,23 +106,20 @@ export function resolveArchiveDeadline(input: {
       }
     }
   }
-  const anchorMillis = Math.max(
+  const activityMillis = Math.max(
     ...anchors.flatMap((thread) =>
-      [
-        thread.createdAt,
-        thread.updatedAt,
-        thread.settledAt,
-        thread.unsettledAt,
-        thread.archivedAt,
-        thread.deletedAt,
-      ]
+      [thread.createdAt, thread.settledAt, thread.unsettledAt, thread.archivedAt, thread.deletedAt]
         .filter((stamp): stamp is string => stamp !== null)
         .map((stamp) => Date.parse(stamp)),
     ),
   );
-  const anchorAt = DateTime.formatIso(DateTime.makeUnsafe(anchorMillis));
+  const previousAnchor = row?.anchorAt == null ? null : Date.parse(row.anchorAt);
   const reset =
-    row?.anchorAt == null || Date.parse(row.anchorAt) !== anchorMillis || row.scheduledAt === null;
+    previousAnchor === null || activityMillis > previousAnchor || row?.scheduledAt == null;
+  // Older persisted episodes included generic updatedAt. Keep their baseline until
+  // actual activity advances it, rather than undoing Keep when that timestamp is removed.
+  const anchorMillis = reset ? activityMillis : Math.max(activityMillis, previousAnchor!);
+  const anchorAt = DateTime.formatIso(DateTime.makeUnsafe(anchorMillis));
   const scheduledAt = reset ? now : row.scheduledAt!;
   const deadlineAt = DateTime.formatIso(
     DateTime.makeUnsafe(Math.max(anchorMillis, Date.parse(scheduledAt)) + graceDays * 86_400_000),

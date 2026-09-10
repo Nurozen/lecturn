@@ -487,3 +487,90 @@ for (const method of ["spaceStatus", "sagaStatus"] as const) {
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 }
+
+it.effect("enriches saga members only with a uniquely verified enrolled incarnation", () =>
+  Effect.gen(function* () {
+    const stamp = "2026-09-01T00:00:00.000000001Z";
+    const oldStamp = "2026-09-01T00:00:00.000000000Z";
+    const readerSagaStamp = "2026-09-01T01:00:00.000000001+01:00";
+    const statusMember = (id: string) => ({
+      id,
+      after: [],
+      state: "live" as const,
+      dirty: false,
+      repos: [],
+      prs: [],
+    });
+    const manifest = {
+      id: "s",
+      createdAt: stamp,
+      repos: [],
+      memories: [],
+      saga: {
+        members: ["a", "b", "c"].map((id) => ({ id, createdAt: stamp, after: [], prs: [] })),
+      },
+    };
+    const row = (id: string, path: string, manifestCreatedAt = stamp) => ({
+      id,
+      path,
+      isSaga: false,
+      repos: [],
+      archived: false,
+      logicalId: id,
+      manifestCreatedAt,
+      manifestVersion: 2,
+      memories: [],
+    });
+    const runtime = yield* makeRuntime().pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.mock(StaveWorkspaceReader)({
+            invalidate: () => Effect.void,
+            load: (root) =>
+              Effect.succeed(
+                Option.some({
+                  spaceId: root === "/selected/s" ? "s" : "a",
+                  createdAt: root === "/selected/s" ? readerSagaStamp : stamp,
+                  isSaga: root === "/selected/s",
+                  state: "live",
+                  repos: [],
+                  memories: [],
+                }),
+              ),
+          }),
+          Layer.mock(StaveCli)({
+            spaceStatus: () =>
+              Effect.succeed({
+                spaceId: "s",
+                spacePath: "/selected/s",
+                manifest,
+                repos: [],
+                memories: [],
+              }),
+            sagaStatus: () =>
+              Effect.succeed({
+                sagaId: "s",
+                members: ["a", "b", "c"].map(statusMember),
+                notes: [],
+              }),
+            spaceList: () =>
+              Effect.succeed([
+                row("a", "/selected/a"),
+                row("b", "/selected/b", oldStamp),
+                row("c", "/selected/c"),
+                row("c", "/other/c"),
+              ]),
+          }),
+        ),
+      ),
+    );
+    const result = yield* runtime.sagaStatus("/selected/s");
+    const decoded = yield* decodeSagaStatus(result);
+    expect(decoded.sagaCreatedAt).toBe(readerSagaStamp);
+    expect(decoded.members).toEqual([
+      { ...statusMember("a"), workspaceRoot: "/selected/a", createdAt: stamp },
+      statusMember("b"),
+      statusMember("c"),
+    ]);
+  }),
+);

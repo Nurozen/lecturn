@@ -24,6 +24,8 @@ export interface ProcessRunInput {
   readonly spawnCwd?: string | undefined;
   readonly timeout?: Duration.Input | undefined;
   readonly env?: NodeJS.ProcessEnv | undefined;
+  /** Defaults to inheriting the host environment; false uses only `env`. */
+  readonly extendEnv?: boolean | undefined;
   /**
    * Variable names removed from the child's environment after `env` has been
    * merged over the host environment (e.g. `["STAVE_CD_FD"]` so a child never
@@ -372,15 +374,19 @@ function finalizeRunProcess<R>(
 // Without `unsetEnv` the spawner merges `env` over the host environment itself;
 // with it, the merge happens here so the named variables can be dropped.
 const resolveEnvOptions = Effect.fnUntraced(function* (
-  input: Pick<ProcessRunInput, "env" | "unsetEnv">,
+  input: Pick<ProcessRunInput, "env" | "unsetEnv" | "extendEnv">,
 ): Effect.fn.Return<{ readonly env?: NodeJS.ProcessEnv; readonly extendEnv?: boolean }> {
   const unsetEnv = input.unsetEnv ?? [];
   if (unsetEnv.length === 0) {
+    if (input.extendEnv === false) return { env: input.env ?? {}, extendEnv: false };
     return input.env === undefined ? {} : { env: input.env, extendEnv: true };
   }
 
   const hostEnvironment = yield* HostProcessEnvironment;
-  const env: NodeJS.ProcessEnv = { ...hostEnvironment, ...input.env };
+  const env: NodeJS.ProcessEnv = {
+    ...(input.extendEnv === false ? {} : hostEnvironment),
+    ...input.env,
+  };
   for (const name of unsetEnv) {
     delete env[name];
   }

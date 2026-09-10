@@ -307,52 +307,55 @@ export const makeRuntime = Effect.fn("StaveRpcRuntime.make")(function* (
       ),
     );
 
-  const lookupSpaceStatus = Effect.fn("StaveRpcRuntime.lookupSpaceStatus")(function* (
-    workspaceRoot: string,
-  ) {
-    yield* reader.invalidate(workspaceRoot);
-    const info = yield* reader.load(workspaceRoot);
-    if (Option.isNone(info)) {
-      return yield* new StaveNotSpaceError({
-        workspaceRoot,
-        message: `No Stave space manifest was found at '${workspaceRoot}'.`,
-      });
-    }
-    if (info.value.state !== "live")
-      return yield* new StaveCommandError({
-        verb: "space status",
-        code: "archived_project",
-        message: "Restore this space before reading its live status.",
-      });
-    const json = yield* cli
-      .spaceStatus(info.value.spaceId)
-      .pipe(Effect.tapError(recordFailure), Effect.mapError(toStaveCommandError));
-    const canonical = (root: string) =>
-      Option.isSome(fs)
-        ? fs.value.realPath(root).pipe(Effect.orElseSucceed(() => root))
-        : Effect.succeed(root);
-    if (
-      (yield* canonical(json.spacePath)) !== (yield* canonical(workspaceRoot)) ||
-      json.spaceId !== info.value.spaceId ||
-      info.value.createdAt === undefined ||
-      !sameManifestIncarnation(json.manifest.createdAt, info.value.createdAt)
-    )
-      return yield* new StaveCommandError({
-        verb: "space status",
-        code: "incarnation_mismatch",
-        message:
-          "The selected Stave configuration resolves a different space. Select this project's configuration before reading live status.",
-      });
-    return toSpaceStatusDto(json);
-  });
+  const lookupVerifiedSpaceStatus = Effect.fn("StaveRpcRuntime.lookupVerifiedSpaceStatus")(
+    function* (workspaceRoot: string) {
+      yield* reader.invalidate(workspaceRoot);
+      const info = yield* reader.load(workspaceRoot);
+      if (Option.isNone(info)) {
+        return yield* new StaveNotSpaceError({
+          workspaceRoot,
+          message: `No Stave space manifest was found at '${workspaceRoot}'.`,
+        });
+      }
+      if (info.value.state !== "live")
+        return yield* new StaveCommandError({
+          verb: "space status",
+          code: "archived_project",
+          message: "Restore this space before reading its live status.",
+        });
+      const json = yield* cli
+        .spaceStatus(info.value.spaceId)
+        .pipe(Effect.tapError(recordFailure), Effect.mapError(toStaveCommandError));
+      const canonical = (root: string) =>
+        Option.isSome(fs)
+          ? fs.value.realPath(root).pipe(Effect.orElseSucceed(() => root))
+          : Effect.succeed(root);
+      if (
+        (yield* canonical(json.spacePath)) !== (yield* canonical(workspaceRoot)) ||
+        json.spaceId !== info.value.spaceId ||
+        info.value.createdAt === undefined ||
+        !sameManifestIncarnation(json.manifest.createdAt, info.value.createdAt)
+      )
+        return yield* new StaveCommandError({
+          verb: "space status",
+          code: "incarnation_mismatch",
+          message:
+            "The selected Stave configuration resolves a different space. Select this project's configuration before reading live status.",
+        });
+      return { ...json, verifiedCreatedAt: info.value.createdAt };
+    },
+  );
 
   const ttl = options.spaceStatusTtl ?? STAVE_SPACE_STATUS_CACHE_TTL;
   const rootFromKey = (key: string) => key.slice(key.indexOf("\0") + 1);
-  const cache = yield* Cache.makeWith((key: string) => lookupSpaceStatus(rootFromKey(key)), {
-    capacity: STAVE_SPACE_STATUS_CACHE_CAPACITY,
-    // Failures are not remembered: the next call asks Stave again.
-    timeToLive: Exit.match({ onSuccess: () => ttl, onFailure: () => Duration.zero }),
-  });
+  const cache = yield* Cache.makeWith(
+    (key: string) => lookupVerifiedSpaceStatus(rootFromKey(key)).pipe(Effect.map(toSpaceStatusDto)),
+    {
+      capacity: STAVE_SPACE_STATUS_CACHE_CAPACITY,
+      // Failures are not remembered: the next call asks Stave again.
+      timeToLive: Exit.match({ onSuccess: () => ttl, onFailure: () => Duration.zero }),
+    },
+  );
 
   const sagaCache = yield* Cache.makeWith(
     Effect.fn("StaveRpcRuntime.lookupSagaStatus")(function* (key: string) {
@@ -372,14 +375,54 @@ export const makeRuntime = Effect.fn("StaveRpcRuntime.make")(function* (
           message: "Restore the saga before reading its live status.",
         });
       }
-      const verified = yield* lookupSpaceStatus(sagaRoot);
-      return yield* cli
+      const verified = yield* lookupVerifiedSpaceStatus(sagaRoot);
+      const status = yield* cli
         .sagaStatus(verified.spaceId)
-        .pipe(
-          Effect.tapError(recordFailure),
-          Effect.mapError(toStaveCommandError),
-          Effect.map(toSagaStatusDto),
-        );
+        .pipe(Effect.tapError(recordFailure), Effect.mapError(toStaveCommandError));
+      const roster = verified.manifest.saga?.members ?? [];
+      const hasStampedMembers = roster.some((member) => member.createdAt !== undefined);
+      const inventory = hasStampedMembers
+        ? yield* cli
+            .spaceList()
+            .pipe(Effect.tapError(recordFailure), Effect.mapError(toStaveCommandError))
+        : [];
+      const archived =
+        hasStampedMembers && status.members.some((member) => member.state === "archived")
+          ? yield* cli
+              .spaceList({ archived: true })
+              .pipe(Effect.tapError(recordFailure), Effect.mapError(toStaveCommandError))
+          : [];
+      const members = yield* Effect.forEach(
+        status.members,
+        (member) =>
+          Effect.gen(function* () {
+            const enrolled = roster.filter((row) => row.id === member.id);
+            const stamp = enrolled.length === 1 ? enrolled[0]?.createdAt : undefined;
+            if (!stamp || (member.state !== "live" && member.state !== "archived")) return member;
+            const matches = [...inventory, ...archived].filter(
+              (row) =>
+                !row.error &&
+                (row.logicalId ?? row.id) === member.id &&
+                row.archived === (member.state === "archived") &&
+                row.manifestCreatedAt !== undefined &&
+                sameManifestIncarnation(row.manifestCreatedAt, stamp),
+            );
+            if (matches.length !== 1) return member;
+            const root = matches[0]!.path;
+            yield* reader.invalidate(root);
+            const current = yield* reader.load(root);
+            if (
+              Option.isNone(current) ||
+              current.value.spaceId !== member.id ||
+              current.value.createdAt === undefined ||
+              !sameManifestIncarnation(current.value.createdAt, stamp)
+            )
+              return member;
+            return { ...member, workspaceRoot: root, createdAt: current.value.createdAt };
+          }),
+        { concurrency: 4 },
+      );
+      return { ...status, sagaCreatedAt: verified.verifiedCreatedAt, members };
     }),
     {
       capacity: STAVE_SPACE_STATUS_CACHE_CAPACITY,

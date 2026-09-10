@@ -742,8 +742,11 @@ existing server operation directly and refreshes status when it completes.
 
 ## Sagas (Phase 5)
 
-`stave.sagaStatus { sagaRoot }` returns the frozen CLI status shape in camelCase. Its
-15-second success cache shares an invalidation generation with mutation paths. The manifest
+`stave.sagaStatus { sagaRoot }` returns the CLI status shape in camelCase plus optional verified
+`sagaCreatedAt` and member `workspaceRoot`/`createdAt` fields. Member identities require an enrolled
+stamp, one matching inventory row from the captured configuration, and a fresh matching manifest.
+Missing, corrupt, ambiguous, or legacy unstamped members remain visible in the roster but cannot
+claim a project for nesting. Its 15-second success cache shares an invalidation generation with mutation paths. The manifest
 reader stays binary-independent; a separate best-effort display enrichment supplies `memberOf`.
 Destructive decisions use fresh authoritative roster and manifest reads, never the display cache.
 
@@ -755,8 +758,9 @@ and reconciles every participant after success or partial failure. Durable per-p
 support restart recovery without persisting the streamed operation registry.
 
 `buildSagaProjectTree(groups, sagaIndex)` adds one level over existing `ProjectGroup` objects.
-Index entries are scoped by environment and saga root; children retain their original group
-keys and navigation targets. Stave's status order overrides drag order. Ambiguous membership
+Index entries are scoped by environment, saga root and incarnation; children also require an
+exact physical path and creation-stamp match. They retain their original group keys and navigation
+targets. Stave's status order overrides drag order. Ambiguous membership
 or mixed physical groups stay flat; no group is dropped or duplicated. Web isolates its new
 section in `SagaSidebarSection`; the legacy sidebar excludes nested children from drag sorting.
 Mobile preserves flat thread-list semantics with a separate tablet saga roster and nests headers
@@ -789,7 +793,9 @@ For live spaces, `StaveLifecyclePolicy.resolveArchiveDeadline` considers every t
 including archived and deleted rows as inactive timestamp anchors. No threads, or any active
 thread, means no archive schedule. A schedule uses the later of the thread anchor and immutable
 `scheduledAt`, plus the configured grace. Ordinary lease updates cannot move that deadline.
-Keep suppresses the current inactive episode; a changed anchor starts another episode.
+Keep suppresses the current inactive episode; a new activity stamp starts another episode.
+Generic thread updatedAt is excluded so passive provider/session updates do not restart cleanup.
+Legacy stored anchors remain until meaningful activity advances them.
 Re-enabling automatic cleanup starts a fresh grace period. Generation tracking retains that
 reset for a project temporarily skipped because another operation holds its lease.
 `archive` uses zero grace, `archive-after-grace` uses the configured days, `suggest` only shows a
@@ -823,8 +829,18 @@ string arguments, and optional string-valued environment. It does not walk ances
 server per den, or rewrite provider configuration. Missing/invalid generated configuration is an
 unavailable result; non-Stave, archived, and disabled roots produce an absent result.
 
-Provider drivers receive this service in the production graph. Codex adds per-session
-`-c mcp_servers.context-marmot.*` arguments with safe TOML value encoding. Cursor and Grok append
+Provider drivers receive this service in the production graph. Codex creates a short unique
+`sm_<12 hex>` MCP entry for each session with safe TOML value encoding and disables the inherited
+`context-marmot` entry only in that session. Codex recursively merges configuration tables, so an
+empty env table or same-name replacement would retain prior environment and transport fields.
+The isolated entry carries only the generated command, args and env; process environment and
+unrelated MCP servers remain unchanged. Before starting a configured-memory session, a bounded,
+read-only `codex mcp list --json` checks whether the canonical entry exists, using the session's
+executable, working directory, home, environment and configuration launch arguments. App-server
+transport flags are excluded from this inventory command. An absent canonical entry receives a
+valid disabled placeholder; an existing entry retains its transport and is disabled. Inventory
+failure refuses startup with a diagnostic that omits inventory contents. No shared Codex
+configuration is written. Cursor and Grok append
 an ACP stdio MCP entry for both new and loaded sessions. OpenCode registers a local MCP entry
 before readiness and disconnects it with the session scope, including failed startup and
 unexpected exit. MCP additions have a 10-second bound and Stave disconnection a 1-second bound;
@@ -903,3 +919,15 @@ resets. Completed archive disposition is written only after the project path fol
 restore recovery resets its schedule episode before marking it live. Recovery retries incomplete
 rows independently, so a temporarily unavailable execution configuration does not permanently
 strand unrelated rows.
+
+Recovery retains its incomplete disposition when configuration or inventory reads temporarily fail,
+so correcting the condition permits retry. A surviving directory without a readable matching
+manifest cannot establish destruction. Terminal recovery checks same-root incarnation bindings
+before changing project metadata; stale bound projects refuse new work until explicitly re-imported.
+Failed retries preserve previous saga-removal edges alongside the latest refusal for manual repair.
+Creation checks candidate filesystem entries, including case aliases and dangling symlinks, before
+claiming a new space or saga directory. Explicit binary candidates resolve to absolute paths before
+validation, probing, cache fingerprinting and launch.
+
+Diff actions keep Git cwd and file-viewer root separate. A file relative to a Stave primary checkout
+is prefixed with that checkout's path within the space before entering the internal file viewer.

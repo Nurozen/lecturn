@@ -62,6 +62,8 @@ import {
 import { type CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { make as makeProcessRunner, type ProcessRunner } from "../../processRunner.ts";
+import { hasCanonicalMarmotServer } from "./codexMcpInventory.ts";
 import {
   CodexResumeCursorSchema,
   CodexSessionRuntimeThreadIdMissingError,
@@ -96,6 +98,7 @@ export interface CodexAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
   readonly environment?: NodeJS.ProcessEnv;
   readonly staveMemoryWiring?: StaveMemoryWiring["Service"];
+  readonly processRunner?: ProcessRunner["Service"];
   readonly makeRuntime?: (
     options: CodexSessionRuntimeOptions,
   ) => Effect.Effect<
@@ -1982,6 +1985,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const crypto = yield* Crypto.Crypto;
+  const processRunner = options?.processRunner ?? (yield* makeProcessRunner());
   const serverConfig = yield* Effect.service(ServerConfig);
   const nativeEventLogger =
     options?.nativeEventLogger ??
@@ -2043,22 +2047,6 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               'mcp_servers.t3-code.bearer_token_env_var="T3_MCP_BEARER_TOKEN"',
             ]
           : [];
-        if (memory.state === "configured") {
-          appServerArgs.push(
-            "-c",
-            "mcp_servers.context-marmot.enabled=true",
-            "-c",
-            `mcp_servers.context-marmot.command=${encodeTomlString(memory.config.command)}`,
-            "-c",
-            `mcp_servers.context-marmot.args=[${memory.config.args.map(encodeTomlString).join(",")}]`,
-          );
-          if (memory.config.env !== undefined) {
-            const env = Object.entries(memory.config.env)
-              .map(([key, value]) => `${encodeTomlString(key)}=${encodeTomlString(value)}`)
-              .join(",");
-            appServerArgs.push("-c", `mcp_servers.context-marmot.env={${env}}`);
-          }
-        }
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
@@ -2089,8 +2077,55 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                 },
               }
             : {}),
-          ...(appServerArgs.length > 0 ? { appServerArgs } : {}),
+          ...(appServerArgs.length > 0 || memory.state === "configured" ? { appServerArgs } : {}),
         };
+        if (memory.state === "configured") {
+          const canonicalExists = yield* hasCanonicalMarmotServer(runtimeInput, processRunner).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderAdapterProcessError({
+                  provider: PROVIDER,
+                  threadId: input.threadId,
+                  detail: cause.message,
+                  cause,
+                }),
+            ),
+          );
+          if (!canonicalExists) {
+            // Disabled MCP entries still require a valid transport. A concurrent
+            // conflicting HTTP entry then fails validation instead of running.
+            appServerArgs.push(
+              "-c",
+              `mcp_servers.context-marmot.command=${encodeTomlString(memory.config.command)}`,
+            );
+          }
+          // Codex recursively merges MCP tables across config layers. Use a
+          // session-local name so old env and transport fields cannot survive.
+          const memoryId = yield* crypto.randomUUIDv4.pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderAdapterProcessError({
+                  provider: PROVIDER,
+                  threadId: input.threadId,
+                  detail: "Failed to allocate a Stave memory MCP server name.",
+                  cause,
+                }),
+            ),
+          );
+          const memoryServer = `mcp_servers.sm_${memoryId.replaceAll("-", "").slice(0, 12)}`;
+          appServerArgs.push(
+            "-c",
+            "mcp_servers.context-marmot.enabled=false",
+            "-c",
+            `${memoryServer}.command=${encodeTomlString(memory.config.command)}`,
+            "-c",
+            `${memoryServer}.args=[${memory.config.args.map(encodeTomlString).join(",")}]`,
+          );
+          const env = Object.entries(memory.config.env ?? {})
+            .map(([key, value]) => `${encodeTomlString(key)}=${encodeTomlString(value)}`)
+            .join(",");
+          appServerArgs.push("-c", `${memoryServer}.env={${env}}`);
+        }
         const sessionScope = yield* Scope.make("sequential");
         let sessionScopeTransferred = false;
         yield* Effect.addFinalizer(() =>

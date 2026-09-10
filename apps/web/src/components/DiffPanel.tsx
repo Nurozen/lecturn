@@ -151,16 +151,15 @@ export default function DiffPanel({
         }
       : null,
   );
-  // Git surfaces follow the thread's git target: a Stave space diffs its
-  // primary repo, so editor links resolve against that repo's identity rather
-  // than the space root's. Stave never records checkpoints, so turn diffs are
-  // replaced by the reason text instead.
+  // Git queries target the primary repo while the file viewer remains rooted
+  // at the space. File actions translate between those roots. Stave has no
+  // checkpoints, so turn diffs show the reason instead.
   const activeCwd =
     resolveThreadGitTarget({ project: activeProject, thread: activeThread }).cwd ?? undefined;
-  const activeRepositoryRoot = resolveThreadGitRepositoryRoot({
-    project: activeProject,
-    thread: activeThread,
-  });
+  const fileViewerRoot = activeProject?.stave ? activeProject.workspaceRoot : activeCwd;
+  const activeRepositoryRoot = activeProject?.stave
+    ? activeCwd
+    : resolveThreadGitRepositoryRoot({ project: activeProject, thread: activeThread });
   const checkpointsUnavailableReason = resolveCheckpointsUnavailableReason(activeProject);
   const serverConfig = useAtomValue(
     serverEnvironment.configValueAtom(activeThread?.environmentId ?? null),
@@ -493,7 +492,8 @@ export default function DiffPanel({
         threadRef: routeThreadRef,
         filePath,
         activeCwd,
-        repositoryRoot: activeRepositoryRoot,
+        workspaceRoot: fileViewerRoot,
+        repositoryRoot: activeRepositoryRoot ?? activeCwd,
         openInEditor: (targetPath) => {
           void (async () => {
             const result = await openInPreferredEditor(targetPath);
@@ -513,7 +513,7 @@ export default function DiffPanel({
         },
       });
     },
-    [activeCwd, activeRepositoryRoot, openInPreferredEditor, routeThreadRef],
+    [activeCwd, activeRepositoryRoot, fileViewerRoot, openInPreferredEditor, routeThreadRef],
   );
   const toggleDiffFileCollapsed = useCallback(
     (fileKey: string) => {

@@ -24,6 +24,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, vi } from "@effect/vitest";
 
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import type { ProcessRunner } from "../../processRunner.ts";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -45,6 +48,7 @@ import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
 import {
+  hasConfiguredMcpServer,
   type CodexSessionRuntimeOptions,
   type CodexSessionRuntimeSendTurnInput,
   type CodexSessionRuntimeShape,
@@ -52,6 +56,7 @@ import {
 } from "./CodexSessionRuntime.ts";
 import { makeCodexAdapter } from "./CodexAdapter.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
+const encodeInventoryFixture = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 // Test-local service tag so the rest of the file can keep using `yield* CodexAdapter`.
 class CodexAdapter extends Context.Service<CodexAdapter, CodexAdapterShape>()(
@@ -237,6 +242,28 @@ const providerSessionDirectoryTestLayer = Layer.succeed(ProviderSessionDirectory
   listBindings: () => Effect.succeed([]),
 });
 
+const mcpInventoryRunner = (
+  servers: ReadonlyArray<unknown> = [
+    {
+      name: "context-marmot",
+      enabled: true,
+      transport: { type: "stdio", command: "/old/marmot", env: { MARMOT_HOME: "/old" } },
+    },
+  ],
+): ProcessRunner["Service"] => ({
+  run: () =>
+    Effect.succeed({
+      stdout: JSON.stringify(servers),
+      stderr: "",
+      code: ChildProcessSpawner.ExitCode(0),
+      timedOut: false,
+      stdoutTruncated: false,
+      stderrTruncated: false,
+      stdoutInvalidUtf8: false,
+      stderrInvalidUtf8: false,
+    }),
+});
+
 const memoryResolutions: ReadonlyArray<StaveMemoryResolution> = [
   {
     state: "configured",
@@ -257,6 +284,7 @@ for (const memory of memoryResolutions) {
     it.effect(`starts Codex with ${state} Stave memory and T3 MCP ${withT3}`, () =>
       Effect.gen(function* () {
         const runtimeFactory = makeRuntimeFactory();
+        const inventory = vi.fn(mcpInventoryRunner().run);
         const threadId = asThreadId(`memory-${state}-${withT3}`);
         const cwd = "/work/stave space/雪";
         const resolve = vi.fn((_cwd: string) => Effect.succeed(memory));
@@ -276,10 +304,12 @@ for (const memory of memoryResolutions) {
         const adapter = yield* makeCodexAdapter(decodeCodexSettings({}), {
           makeRuntime: runtimeFactory.factory,
           environment: { KEEP_ME: "preserved" },
+          processRunner: { run: inventory },
           staveMemoryWiring: StaveMemoryWiring.of({ resolve }),
         });
         yield* adapter.startSession({ threadId, cwd, runtimeMode: "full-access" });
         const runtimeOptions = runtimeFactory.lastRuntime?.options;
+        NodeAssert.equal(inventory.mock.calls.length, memory.state === "configured" ? 1 : 0);
         NodeAssert.deepStrictEqual(resolve.mock.calls, [[cwd]]);
         NodeAssert.equal(runtimeOptions?.cwd, cwd);
         NodeAssert.deepStrictEqual(runtimeOptions?.environment, {
@@ -295,15 +325,19 @@ for (const memory of memoryResolutions) {
             ]
           : [];
         if (memory.state === "configured") {
+          const memoryServer = runtimeOptions?.appServerArgs
+            ?.find((arg) => /^mcp_servers\.sm_[a-f0-9]{12}\.command=/.test(arg))
+            ?.split(".command=")[0];
+          NodeAssert.ok(memoryServer);
           expectedArgs.push(
             "-c",
-            "mcp_servers.context-marmot.enabled=true",
+            "mcp_servers.context-marmot.enabled=false",
             "-c",
-            String.raw`mcp_servers.context-marmot.command="C:\\Program Files\\雪\\marmot \"test\".exe"`,
+            String.raw`${memoryServer}.command="C:\\Program Files\\雪\\marmot \"test\".exe"`,
             "-c",
-            String.raw`mcp_servers.context-marmot.args=["serve","--den","den \"雪\"\\path\n\t\u0000\u007f"]`,
+            String.raw`${memoryServer}.args=["serve","--den","den \"雪\"\\path\n\t\u0000\u007f"]`,
             "-c",
-            String.raw`mcp_servers.context-marmot.env={"MARMOT.HOME\""="C:\\Memory\\雪\r\n"}`,
+            String.raw`${memoryServer}.env={"MARMOT.HOME\""="C:\\Memory\\雪\r\n"}`,
           );
         }
         NodeAssert.deepStrictEqual(
@@ -333,6 +367,7 @@ it.effect("resolves the effective Codex cwd without accessing provider configura
     );
     const adapter = yield* makeCodexAdapter(decodeCodexSettings({}), {
       makeRuntime: runtimeFactory.factory,
+      processRunner: mcpInventoryRunner(),
       staveMemoryWiring: StaveMemoryWiring.of({ resolve }),
     }).pipe(Effect.provideService(FileSystem.FileSystem, FileSystem.makeNoop({})));
     yield* adapter.startSession({
@@ -340,13 +375,19 @@ it.effect("resolves the effective Codex cwd without accessing provider configura
       runtimeMode: "full-access",
     });
     NodeAssert.deepStrictEqual(resolve.mock.calls, [[process.cwd()]]);
+    const memoryServer = runtimeFactory.lastRuntime?.options.appServerArgs
+      ?.find((arg) => /^mcp_servers\.sm_[a-f0-9]{12}\.command=/.test(arg))
+      ?.split(".command=")[0];
+    NodeAssert.ok(memoryServer);
     NodeAssert.deepStrictEqual(runtimeFactory.lastRuntime?.options.appServerArgs, [
       "-c",
-      "mcp_servers.context-marmot.enabled=true",
+      "mcp_servers.context-marmot.enabled=false",
       "-c",
-      'mcp_servers.context-marmot.command="/bin/marmot"',
+      `${memoryServer}.command="/bin/marmot"`,
       "-c",
-      "mcp_servers.context-marmot.args=[]",
+      `${memoryServer}.args=[]`,
+      "-c",
+      `${memoryServer}.env={}`,
     ]);
     NodeAssert.equal(runtimeFactory.lastRuntime?.options.environment, undefined);
   }).pipe(
@@ -358,6 +399,129 @@ it.effect("resolves the effective Codex cwd without accessing provider configura
     ),
   ),
 );
+
+it.effect("isolates generated memory from inherited transport and env in each Codex session", () =>
+  Effect.gen(function* () {
+    const runtimeFactory = makeRuntimeFactory();
+    const crypto = yield* Crypto.Crypto;
+    const inheritedServers = {
+      "context-marmot": {
+        enabled: true,
+        transport: { type: "streamable_http", url: "https://old-memory.invalid/mcp" },
+      },
+      unrelated: { command: "/other-mcp" },
+    };
+    let sessionNumber = 0;
+    const adapter = yield* makeCodexAdapter(decodeCodexSettings({}), {
+      makeRuntime: runtimeFactory.factory,
+      processRunner: {
+        run: (input) =>
+          mcpInventoryRunner(
+            sessionNumber === 1
+              ? []
+              : sessionNumber === 2
+                ? [{ name: "context-marmot", ...inheritedServers["context-marmot"] }]
+                : undefined,
+          ).run(input),
+      },
+      environment: { MARMOT_HOME: "/inherited-process-home" },
+      staveMemoryWiring: StaveMemoryWiring.of({
+        resolve: () =>
+          Effect.succeed({
+            state: "configured",
+            config: {
+              command: "/bin/marmot",
+              args: ["serve", "--den", "current-den"],
+              ...(sessionNumber === 3 ? { env: { MARMOT_HOME: "/generated-home" } } : {}),
+            },
+          }),
+      }),
+    }).pipe(
+      Effect.provideService(Crypto.Crypto, {
+        ...crypto,
+        randomUUIDv4: Effect.sync(() => String(sessionNumber).repeat(32)),
+      }),
+    );
+    for (sessionNumber = 1; sessionNumber <= 3; sessionNumber++) {
+      yield* adapter.startSession({
+        threadId: asThreadId(`memory-isolation-${sessionNumber}`),
+        runtimeMode: "full-access",
+      });
+      const name = `sm_${String(sessionNumber).repeat(12)}`;
+      const args = runtimeFactory.lastRuntime?.options.appServerArgs;
+      // No lower config layer in this fixture has this session's namespace.
+      // Codex can merge only the three generated fields into the new entry.
+      NodeAssert.equal(Object.hasOwn(inheritedServers, name), false);
+      NodeAssert.deepStrictEqual(args, [
+        ...(sessionNumber === 1 ? ["-c", 'mcp_servers.context-marmot.command="/bin/marmot"'] : []),
+        "-c",
+        "mcp_servers.context-marmot.enabled=false",
+        "-c",
+        `mcp_servers.${name}.command="/bin/marmot"`,
+        "-c",
+        `mcp_servers.${name}.args=["serve","--den","current-den"]`,
+        "-c",
+        `mcp_servers.${name}.env=${sessionNumber === 3 ? '{"MARMOT_HOME"="/generated-home"}' : "{}"}`,
+      ]);
+      NodeAssert.equal(hasConfiguredMcpServer(args), true);
+      NodeAssert.deepStrictEqual(runtimeFactory.lastRuntime?.options.environment, {
+        MARMOT_HOME: "/inherited-process-home",
+      });
+    }
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(
+      ServerConfig.layerTest(process.cwd(), process.cwd()).pipe(
+        Layer.provideMerge(NodeServices.layer),
+      ),
+    ),
+  ),
+);
+
+for (const failure of ["timeout", "unsupported", "invalid"] as const) {
+  it.effect(`does not launch a Codex session when memory inventory is ${failure}`, () =>
+    Effect.gen(function* () {
+      const runtimeFactory = makeRuntimeFactory();
+      const adapter = yield* makeCodexAdapter(decodeCodexSettings({}), {
+        makeRuntime: runtimeFactory.factory,
+        processRunner: {
+          run: (input) =>
+            mcpInventoryRunner()
+              .run(input)
+              .pipe(
+                Effect.map((result) => ({
+                  ...result,
+                  stdout: "private inventory contents",
+                  timedOut: failure === "timeout",
+                  code: ChildProcessSpawner.ExitCode(failure === "unsupported" ? 2 : 0),
+                })),
+              ),
+        },
+        staveMemoryWiring: StaveMemoryWiring.of({
+          resolve: () =>
+            Effect.succeed({
+              state: "configured",
+              config: { command: "/bin/marmot", args: [] },
+            }),
+        }),
+      });
+      const error = yield* adapter
+        .startSession({ threadId: asThreadId(`inventory-${failure}`), runtimeMode: "full-access" })
+        .pipe(Effect.flip);
+      NodeAssert.equal(error._tag, "ProviderAdapterProcessError");
+      NodeAssert.match(error.message, /mcp list --json/);
+      NodeAssert.doesNotMatch(encodeInventoryFixture(error), /private inventory contents/);
+      NodeAssert.equal(runtimeFactory.lastRuntime, undefined);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        ServerConfig.layerTest(process.cwd(), process.cwd()).pipe(
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+}
 
 const validationRuntimeFactory = makeRuntimeFactory();
 const validationLayer = it.layer(

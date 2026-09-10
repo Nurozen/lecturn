@@ -246,7 +246,14 @@ describe("saga list layout", () => {
     const group = makeGroup(id, 1);
     const project = {
       ...group.representative,
-      stave: { spaceId: id, isSaga, state: "live" as const, repos: [], memories: [] },
+      stave: {
+        spaceId: id,
+        createdAt: "2026-09-01T00:00:00Z",
+        isSaga,
+        state: "live" as const,
+        repos: [],
+        memories: [],
+      },
     };
     return { ...group, representative: project, projects: [project] };
   };
@@ -256,9 +263,28 @@ describe("saga list layout", () => {
       sagaRoot: "/workspaces/saga",
       status: {
         sagaId: "saga",
+        sagaCreatedAt: "2026-09-01T00:00:00Z",
         members: [
-          { id: "a", after: [], state: "live" as const, dirty: false, repos: [], prs: [] },
-          { id: "b", after: ["a"], state: "live" as const, dirty: true, repos: [], prs: [] },
+          {
+            id: "a",
+            workspaceRoot: "/workspaces/a",
+            createdAt: "2026-09-01T00:00:00Z",
+            after: [],
+            state: "live" as const,
+            dirty: false,
+            repos: [],
+            prs: [],
+          },
+          {
+            id: "b",
+            workspaceRoot: "/workspaces/b",
+            createdAt: "2026-09-01T00:00:00Z",
+            after: ["a"],
+            state: "live" as const,
+            dirty: true,
+            repos: [],
+            prs: [],
+          },
         ],
         notes: [],
       },

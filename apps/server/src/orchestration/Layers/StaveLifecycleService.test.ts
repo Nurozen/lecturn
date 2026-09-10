@@ -598,12 +598,67 @@ describe("StaveLifecycleService", () => {
       yield* TestClock.adjust("8 days");
       yield* h.service.sweep;
       assert.equal((yield* h.row).disposition, "kept");
-      yield* Ref.set(h.anchors, [{ ...ANCHOR, updatedAt: "2026-09-09T00:00:00.000Z" }]);
+      yield* Ref.set(h.anchors, [
+        { ...ANCHOR, settledAt: "2026-09-09T00:00:00.000Z", updatedAt: "2026-09-09T00:00:00.000Z" },
+      ]);
       yield* h.service.sweep;
       assert.equal((yield* h.row).disposition, "pending_archive");
       assert.equal((yield* h.row).scheduledAt, "2026-09-09T00:00:00.000Z");
     }),
   );
+  for (const legacyAnchor of [false, true])
+    test(
+      `passive session shutdown preserves durable Keep across restart with ${legacyAnchor ? "legacy" : "activity"} anchor`,
+      Effect.gen(function* () {
+        const h = yield* harness();
+        yield* h.service.sweep;
+        yield* h.patch({ disposition: "kept", ...(legacyAnchor ? { anchorAt: NOW } : {}) });
+        const kept = yield* h.row;
+        yield* TestClock.adjust("8 days");
+        // session.exited changes projection updatedAt without an unsettled event.
+        yield* Ref.set(h.anchors, [{ ...ANCHOR, updatedAt: "2026-09-09T00:00:00.000Z" }]);
+        const restarted = yield* h.freshService;
+        yield* restarted.sweep;
+        const retained = yield* h.row;
+        assert.equal(retained.disposition, "kept");
+        assert.equal(retained.anchorAt, kept.anchorAt);
+        assert.equal(retained.scheduledAt, kept.scheduledAt);
+        assert.isFalse((yield* Ref.get(h.calls)).some((call) => call.startsWith("disk:")));
+        // Real user work clears inactivity, even if an older metadata baseline was later.
+        yield* Ref.set(h.anchors, [{ ...ANCHOR, settledAt: null, unsettledAt: OLD }]);
+        yield* restarted.sweep;
+        assert.equal((yield* h.row).disposition, "live");
+        assert.isNull((yield* h.row).scheduledAt);
+        yield* Ref.set(h.anchors, [
+          {
+            ...ANCHOR,
+            settledAt: "2026-09-09T00:00:00.000Z",
+            updatedAt: "2026-09-09T00:00:00.000Z",
+          },
+        ]);
+        yield* restarted.sweep;
+        assert.equal((yield* h.row).disposition, "pending_archive");
+        assert.equal((yield* h.row).scheduledAt, "2026-09-09T00:00:00.000Z");
+      }),
+    );
+  for (const legacyAnchor of [false, true])
+    test(
+      `automatic archive survives provider shutdown during quiescence with ${legacyAnchor ? "legacy" : "activity"} anchor`,
+      Effect.gen(function* () {
+        const h = yield* harness();
+        yield* h.service.sweep;
+        if (legacyAnchor) yield* h.patch({ anchorAt: NOW });
+        yield* TestClock.adjust("8 days");
+        yield* Ref.set(
+          h.beforeValidate,
+          Ref.set(h.anchors, [{ ...ANCHOR, updatedAt: "2026-09-09T00:00:00.000Z" }]),
+        );
+        yield* h.service.sweep;
+        assert.include(yield* Ref.get(h.calls), "disk:archive:false:false");
+        assert.equal((yield* h.row).disposition, "archived");
+        assert.isNull((yield* h.row).refusalCode);
+      }),
+    );
   test(
     "revalidates activity under the operation lease before touching disk",
     Effect.gen(function* () {

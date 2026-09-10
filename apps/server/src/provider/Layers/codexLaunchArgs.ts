@@ -23,9 +23,22 @@ export const codexExecLaunchArgs = (launchArgs?: string) => {
     const arg = args[index];
     if (arg === undefined) continue;
 
-    if (arg === "--strict-config" || arg.startsWith("--config=") || arg.startsWith("-c=")) {
+    if (
+      arg === "--strict-config" ||
+      arg.startsWith("--config=") ||
+      (arg.startsWith("-c") && arg.length > 2) ||
+      arg.startsWith("--profile=") ||
+      (arg.startsWith("-p") && arg.length > 2)
+    ) {
       execArgs.push(arg);
-    } else if (arg === "--config" || arg === "-c" || arg === "--enable" || arg === "--disable") {
+    } else if (
+      arg === "--config" ||
+      arg === "-c" ||
+      arg === "--enable" ||
+      arg === "--disable" ||
+      arg === "--profile" ||
+      arg === "-p"
+    ) {
       const value = args[index + 1];
       if (value !== undefined && !value.startsWith("-")) {
         execArgs.push(arg, value);

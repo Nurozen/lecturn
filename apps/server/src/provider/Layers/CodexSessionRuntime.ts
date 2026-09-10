@@ -38,7 +38,7 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
 import { buildCodexInitializeParams } from "./CodexProvider.ts";
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
-import { expandHomePath } from "../../pathExpansion.ts";
+import { codexSpawnEnvironment } from "./codexMcpInventory.ts";
 import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
 
@@ -1203,15 +1203,7 @@ export const makeCodexSessionRuntime = (
     const suppressMemoryConsolidationNotification = makeMemoryConsolidationNotificationFilter();
     const closedRef = yield* Ref.make(false);
 
-    // `~` is not shell-expanded when env vars are set via
-    // `child_process.spawn`; `expandHomePath` lets a configured
-    // `CODEX_HOME=~/.codex_work` reach codex as an absolute path.
-    const resolvedHomePath = options.homePath ? expandHomePath(options.homePath) : undefined;
-    const env = {
-      ...options.environment,
-      ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
-    };
-    const extendEnv = options.environment === undefined;
+    const { env, extendEnv } = codexSpawnEnvironment(options);
     const appServerArgs = codexSessionAppServerArgs(options.appServerArgs, options.launchArgs);
     const spawnCommand = yield* resolveSpawnCommand(options.binaryPath, appServerArgs, {
       env,

@@ -7,6 +7,7 @@ import {
   HostProcessArchitecture,
   HostProcessEnvironment,
   HostProcessPlatform,
+  HostProcessWorkingDirectory,
 } from "@t3tools/shared/hostProcess";
 import { CommandResolutionCache } from "@t3tools/shared/shell";
 import * as Context from "effect/Context";
@@ -54,6 +55,7 @@ const makeFakeRunner = (
 };
 
 interface HarnessOptions {
+  readonly workingDirectory?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly platform?: NodeJS.Platform;
   readonly stavePath?: string;
@@ -80,13 +82,14 @@ const makeHarness = Effect.fn(function* (baseDir: string, options: HarnessOption
   // Built once so the returned settings handle is the same instance the
   // service reads; a second `Effect.provide` would construct a fresh one.
   const context = yield* Layer.build(Layer.mergeAll(configLayer, settingsLayer, runner.layer));
-  const service = yield* StaveBinary.make({
-    ...(options.bundledBaseDir === undefined ? {} : { bundledBaseDir: options.bundledBaseDir }),
-  }).pipe(
+  const service = yield* StaveBinary.make(
+    options.bundledBaseDir === undefined ? {} : { bundledBaseDir: options.bundledBaseDir },
+  ).pipe(
     Effect.provide(context),
     Effect.provideService(HostProcessPlatform, options.platform ?? "linux"),
     Effect.provideService(HostProcessArchitecture, "x64"),
     Effect.provideService(HostProcessEnvironment, options.env ?? {}),
+    Effect.provideService(HostProcessWorkingDirectory, options.workingDirectory ?? process.cwd()),
     Effect.provideService(CommandResolutionCache, new Map()),
   );
   const settings = Context.get(context, ServerSettings.ServerSettingsService);
@@ -109,6 +112,57 @@ it.layer(NodeServices.layer)("StaveBinary", (it) => {
   });
 
   describe("candidate order", () => {
+    for (const source of ["settings", "env", "bootstrap"] as const) {
+      for (const candidate of ["stave", "tools/stave"]) {
+        it.effect(`executes and refreshes the local ${source} candidate ${candidate}`, () =>
+          Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            const path = yield* Path.Path;
+            const root = yield* withTempDir();
+            const selected = yield* writeExecutable(path.join(root, candidate));
+            const pathDir = path.join(root, "path-bin");
+            yield* writeExecutable(path.join(pathDir, "stave"));
+            let localVersion = "0.4.0";
+            const runner = makeFakeRunner((input) =>
+              versionOutput(`stave v${input.command === selected ? localVersion : "9.9.9"}\n`),
+            );
+            const { service } = yield* makeHarness(root, {
+              workingDirectory: root,
+              ...(source === "settings" ? { settingsBinaryPath: candidate } : {}),
+              ...(source === "bootstrap" ? { stavePath: candidate } : {}),
+              env: {
+                PATH: pathDir,
+                ...(source === "env" ? { T3CODE_STAVE_PATH: candidate } : {}),
+              },
+              bundledBaseDir: path.join(root, "dist"),
+              runner,
+            });
+
+            const first = yield* service.resolve;
+            assert.deepEqual(first, {
+              path: selected,
+              source,
+              version: "0.4.0",
+              commit: null,
+            });
+            yield* service.featuresFor(first);
+            const firstCallCount = runner.calls.length;
+            assert.isAbove(firstCallCount, 1);
+            assert.strictEqual(yield* service.resolve, first);
+            yield* service.features;
+            assert.equal(runner.calls.length, firstCallCount);
+
+            localVersion = "0.5.0";
+            yield* fs.writeFileString(selected, "replacement executable of a different size");
+            assert.equal((yield* service.resolve).version, "0.5.0");
+            yield* service.features;
+            assert.equal(runner.calls.length, firstCallCount * 2);
+            assert.isTrue(runner.calls.every((call) => call.command === selected));
+          }).pipe(Effect.scoped),
+        );
+      }
+    }
+
     it.effect("settings.binaryPath wins over every other source", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;

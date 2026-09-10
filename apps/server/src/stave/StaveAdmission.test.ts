@@ -67,6 +67,7 @@ for (const withProjectId of [false, true]) {
             Layer.provide(
               Layer.mergeAll(
                 Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
+                  invalidate: () => Effect.void,
                   load: () => Effect.succeed(Option.none()),
                 }),
                 Layer.mock(StaveLifecycleRepository)({
@@ -94,6 +95,7 @@ it.effect("admits a live manifest restored externally despite its stale archived
         Layer.provide(
           Layer.mergeAll(
             Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
+              invalidate: () => Effect.void,
               load: () =>
                 Effect.succeed(
                   Option.some({ ...spaceInfo, createdAt: archivedRow.manifestCreatedAt! }),
@@ -113,6 +115,7 @@ it.effect("admits a live manifest restored externally despite its stale archived
 /** Reader that knows exactly one space and counts every manifest read. */
 const makeRecordingReader = (loads: string[]) =>
   Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
+    invalidate: () => Effect.void,
     load: (root) =>
       Effect.sync(() => {
         loads.push(root);
@@ -302,6 +305,7 @@ describe("Stave lifecycle admission", () => {
         StaveAdmission.layer.pipe(
           Layer.provide(
             Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
+              invalidate: () => Effect.void,
               load: () => Effect.succeed(Option.some({ ...spaceInfo, state: "archived" })),
             }),
           ),
@@ -483,6 +487,7 @@ for (const disposition of ["live", "pending_evaluation", "archiving"] as const) 
               Layer.provide(
                 Layer.mergeAll(
                   Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
+                    invalidate: () => Effect.void,
                     load: () => Effect.succeed(Option.some(spaceInfo)),
                   }),
                   Layer.mock(StaveLifecycleRepository)({
@@ -497,3 +502,167 @@ for (const disposition of ["live", "pending_evaluation", "archiving"] as const) 
       },
     );
 }
+
+for (const disposition of ["live", "refused", "destroyed"] as const) {
+  it.effect(
+    `refuses a recreated incarnation in the existing ${disposition} project but admits an explicit re-import`,
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.realPath(yield* fs.makeTempDirectoryScoped());
+        const oldStamp = "2026-09-01T00:00:00.000000001Z";
+        const newStamp = "2026-09-01T00:00:00.000000002Z";
+        const manifest = (stamp: string) =>
+          `version: 2\nid: same-space\ncreatedAt: '${stamp}'\nrepos: []\nmemories: []\n`;
+        yield* fs.writeFileString(path.join(root, STAVE_MANIFEST_FILE_NAME), manifest(oldStamp));
+        const row: StaveLifecycleRow = {
+          ...archivedRow,
+          projectId: ProjectId.make("surviving-project"),
+          workspaceRoot: root,
+          spaceId: "same-space",
+          manifestCreatedAt: oldStamp,
+          disposition,
+        };
+        yield* Effect.gen(function* () {
+          const reader = yield* StaveWorkspaceReader.StaveWorkspaceReader;
+          const admission = yield* StaveAdmission.StaveAdmission;
+          // Prime the cache with the doomed incarnation, then recreate it at
+          // the same path without a Stave operation/cache invalidation event.
+          expect(Option.getOrThrow(yield* reader.load(root)).createdAt).toBe(oldStamp);
+          yield* fs.writeFileString(path.join(root, STAVE_MANIFEST_FILE_NAME), manifest(newStamp));
+          for (const intent of [
+            "thread.create",
+            "thread.turn.start",
+            "thread.fork",
+            "thread.pin",
+            "thread.unarchive",
+            "thread.unsettle",
+          ] as const) {
+            const refused = yield* admission
+              .check({ projectRoot: root, projectId: row.projectId, intent })
+              .pipe(Effect.flip);
+            expect(refused._tag).toBe("StaveProjectIncarnationMismatchError");
+            expect(refused.message).toContain("Re-import");
+            expect(StaveAdmission.isStaveAdmissionError(refused)).toBe(true);
+          }
+          yield* admission.check({
+            projectRoot: root,
+            projectId: ProjectId.make("explicit-reimport"),
+            intent: "thread.create",
+          });
+          expect(Option.getOrThrow(yield* reader.load(root)).createdAt).toBe(newStamp);
+        }).pipe(
+          Effect.provide(
+            StaveAdmission.layer.pipe(
+              Layer.provideMerge(StaveWorkspaceReader.layer),
+              Layer.provide(
+                Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+                  resolve: () => Effect.succeed(null),
+                }),
+              ),
+              Layer.provide(
+                Layer.mock(StaveLifecycleRepository)({
+                  getByWorkspaceRoot: () => Effect.succeed(Option.some(row)),
+                  getByProjectId: (id) =>
+                    Effect.succeed(id === row.projectId ? Option.some(row) : Option.none()),
+                }),
+              ),
+            ),
+          ),
+        );
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+}
+
+it.effect(
+  "accepts equivalent nanosecond stamps and an explicit retarget to a different root",
+  () => {
+    const row = {
+      ...archivedRow,
+      disposition: "live" as const,
+      workspaceRoot: SPACE_ROOT,
+      spaceId: "alpha",
+      manifestCreatedAt: "2026-09-01T00:00:00.1Z",
+    };
+    return Effect.gen(function* () {
+      yield* check({ projectRoot: SPACE_ROOT, projectId: row.projectId, intent: "thread.create" });
+      yield* check({
+        projectRoot: "/spaces/retargeted",
+        projectId: row.projectId,
+        intent: "thread.create",
+      });
+    }).pipe(
+      Effect.provide(
+        StaveAdmission.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
+                invalidate: () => Effect.void,
+                load: (root) =>
+                  Effect.succeed(
+                    Option.some({
+                      ...spaceInfo,
+                      createdAt:
+                        root === SPACE_ROOT
+                          ? "2026-08-31T20:00:00.100000000-04:00"
+                          : "2026-09-02T00:00:00Z",
+                    }),
+                  ),
+              }),
+              Layer.mock(StaveLifecycleRepository)({
+                getByWorkspaceRoot: (root) =>
+                  Effect.succeed(root === SPACE_ROOT ? Option.some(row) : Option.none()),
+                getByProjectId: () => Effect.succeed(Option.some(row)),
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+  },
+);
+
+it.effect(
+  "does not attach an unrelated terminal cleanup to an explicitly re-imported project",
+  () => {
+    const row = {
+      ...archivedRow,
+      disposition: "destroyed" as const,
+      workspaceRoot: SPACE_ROOT,
+      spaceId: "alpha",
+    };
+    return Effect.gen(function* () {
+      yield* check({
+        projectRoot: SPACE_ROOT,
+        projectId: ProjectId.make("explicit-reimport"),
+        intent: "thread.create",
+      });
+      const refused = yield* check({
+        projectRoot: SPACE_ROOT,
+        projectId: row.projectId,
+        intent: "thread.create",
+      }).pipe(Effect.flip);
+      expect(refused._tag).toBe("StaveSpaceTransitioningError");
+    }).pipe(
+      Effect.provide(
+        StaveAdmission.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
+                invalidate: () => Effect.void,
+                load: () =>
+                  Effect.succeed(Option.some({ ...spaceInfo, createdAt: row.manifestCreatedAt! })),
+              }),
+              Layer.mock(StaveLifecycleRepository)({
+                getByWorkspaceRoot: () => Effect.succeed(Option.some(row)),
+                getByProjectId: (id) =>
+                  Effect.succeed(id === row.projectId ? Option.some(row) : Option.none()),
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+  },
+);

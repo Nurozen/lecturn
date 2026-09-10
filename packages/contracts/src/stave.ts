@@ -911,6 +911,9 @@ export const StaveSagaPrStatus = Schema.Struct({
 export type StaveSagaPrStatus = typeof StaveSagaPrStatus.Type;
 export const StaveSagaMemberStatus = Schema.Struct({
   id: Schema.String,
+  /** Verified physical member identity; absent when missing, corrupt, or ambiguous. */
+  workspaceRoot: Schema.optionalKey(Schema.String),
+  createdAt: Schema.optionalKey(IsoDateTime),
   after: Schema.Array(Schema.String),
   state: StaveSagaMemberState,
   error: Schema.optionalKey(Schema.String),
@@ -928,6 +931,7 @@ export type StaveSagaNote = typeof StaveSagaNote.Type;
 /** Members retain the CLI's topological order. */
 export const StaveSagaStatus = Schema.Struct({
   sagaId: Schema.String,
+  sagaCreatedAt: Schema.optionalKey(IsoDateTime),
   members: Schema.Array(StaveSagaMemberStatus),
   notes: Schema.Array(StaveSagaNote),
 });

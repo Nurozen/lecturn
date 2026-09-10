@@ -1,5 +1,7 @@
 import { StaveRuntimeFence } from "./StaveRuntimeFence.ts";
 import { StaveExecution } from "./StaveExecution.ts";
+import { sameManifestIncarnation } from "./staveIncarnation.ts";
+export { sameManifestIncarnation } from "./staveIncarnation.ts";
 import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 import { staveTelemetryEvent } from "./StaveTelemetry.ts";
 /**
@@ -130,19 +132,18 @@ const refuse = (code: StaveErrorCode, message: string, details: StaveErrorDetail
 
 // ── Pure helpers ──────────────────────────────────────────────
 
-/** Compare RFC3339 instants without discarding the manifest's nanoseconds. */
-export function sameManifestIncarnation(left: string, right: string): boolean {
-  const epoch = (value: string) => {
-    const match = /^(.*T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
-    if (match === null) return null;
-    const seconds = Date.parse(`${match[1]}${match[3]}`);
-    return Number.isFinite(seconds)
-      ? BigInt(seconds) * 1_000_000n + BigInt((match[2] ?? "").padEnd(9, "0"))
-      : null;
-  };
-  const first = epoch(left);
-  return first !== null && first === epoch(right);
-}
+const decodeRemovalEvidence = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ removedEdges: Schema.Array(Schema.Unknown) })),
+);
+const priorRemovalEvidence = (message: string | null): ReadonlyArray<unknown> =>
+  Option.match(decodeRemovalEvidence(message), {
+    onNone: () => [],
+    onSome: (value) => value.removedEdges,
+  });
+const recoveryFailureMessage = (previous: string | null, message: string): string => {
+  const removedEdges = priorRemovalEvidence(previous);
+  return removedEdges.length === 0 ? message : stableStringify({ message, removedEdges });
+};
 
 /** Stable identity of an operation payload; equal payloads may share an id. */
 export function fingerprintOperation(operation: StaveOperation): string {
@@ -632,6 +633,22 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       verb,
     });
 
+  // The filesystem resolves case aliases; readLink also detects dangling links.
+  const pathEntryExists = (root: string) =>
+    fileSystem.exists(root).pipe(
+      Effect.flatMap((exists) =>
+        exists
+          ? Effect.succeed(true)
+          : fileSystem.readLink(root).pipe(
+              Effect.as(true),
+              Effect.catch((error) =>
+                error.reason._tag === "NotFound" ? Effect.succeed(false) : Effect.fail(error),
+              ),
+            ),
+      ),
+      Effect.mapError(asRefusal),
+    );
+
   // ── createSpace ─────────────────────────────────────────────
 
   const preflightCreateSpace = (
@@ -648,10 +665,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       }
       // Anything at the exact candidate path, dangling symlinks included:
       // Stave would create inside a manifest-less directory.
-      const siblings = yield* fileSystem
-        .readDirectory(agentWorkDir)
-        .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
-      if (siblings.includes(operation.spaceId)) {
+      if (yield* pathEntryExists(candidate)) {
         return yield* refuse("space_exists", `Something already exists at '${candidate}'.`, {
           spaceId: operation.spaceId,
           path: candidate,
@@ -1208,11 +1222,20 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       const active = yield* snapshotQuery
         .getProjectShellById(row.projectId)
         .pipe(Effect.mapError(asRefusal));
-      if (Option.isSome(active) && active.value.workspaceRoot !== row.workspaceRoot) {
+      if (
+        Option.isSome(active) &&
+        (active.value.workspaceRoot !== row.workspaceRoot ||
+          (yield* pathEntryExists(active.value.workspaceRoot)))
+      ) {
         // A transition may have committed its path update before its final journal write.
+        yield* workspaceReader.invalidate(active.value.workspaceRoot);
         const currentInfo = yield* workspaceReader.load(active.value.workspaceRoot);
+        if (Option.isNone(currentInfo))
+          return yield* refuse(
+            "unreadable",
+            "The project's surviving directory has no readable Stave manifest. Recovery will not delete its work.",
+          );
         if (
-          Option.isNone(currentInfo) ||
           currentInfo.value.spaceId !== row.spaceId ||
           currentInfo.value.createdAt === undefined ||
           row.manifestCreatedAt === null ||
@@ -1224,6 +1247,11 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           );
       }
       if (row.disposition === "destroyed") {
+        if (yield* pathEntryExists(row.workspaceRoot))
+          return yield* refuse(
+            "unreadable",
+            "The recorded destroyed space still exists. Recovery needs its files to be reviewed.",
+          );
         if (Option.isSome(active) && active.value.id === row.projectId)
           yield* deleteProject(row.projectId);
         return { disposition: "destroyed" as const, workspaceRoot: row.workspaceRoot };
@@ -1271,6 +1299,11 @@ export const make = Effect.fn("StaveOperations.make")(function* (
         );
       const match = matches[0];
       if (match === undefined) {
+        if (yield* pathEntryExists(row.workspaceRoot))
+          return yield* refuse(
+            "unreadable",
+            "The recorded space directory still exists without an identifiable inventory entry. Recovery will not delete its project.",
+          );
         if (row.ownerToken !== null) {
           const terminal = yield* lifecycle
             .updateDisposition({
@@ -1453,6 +1486,8 @@ export const make = Effect.fn("StaveOperations.make")(function* (
               "Another lifecycle operation owns this space.",
             );
           lease = acquired.value;
+          const previousRemoval = priorRemovalEvidence(lease.refusalMessage);
+          if (previousRemoval.length > 0) removedEdges = previousRemoval;
         }
         const patch = (changes: Parameters<typeof lifecycle.updateDisposition>[0]["patch"]) =>
           lease === undefined
@@ -1685,9 +1720,15 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                     memberships,
                   },
                 );
-              removedEdges = memberships;
+              removedEdges = [
+                ...new Map(
+                  [...priorRemovalEvidence(lease?.refusalMessage ?? null), ...memberships].map(
+                    (member) => [stableStringify(member), member],
+                  ),
+                ).values(),
+              ];
               if (memberships.length > 0)
-                yield* patch({ refusalMessage: stableStringify({ removedEdges: memberships }) });
+                yield* patch({ refusalMessage: stableStringify({ removedEdges }) });
               for (const member of memberships) {
                 const input = { sagaId: member.sagaId, spaceId: id };
                 yield* invoke(
@@ -1707,7 +1748,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                 notesUnlessPlan,
               );
               if (isStaveDryRunPlan(result)) return yield* unexpectedPlan("space destroy");
-              yield* patch({ disposition: "destroyed" });
+              yield* patch({ disposition: "destroyed", refusalCode: null, refusalMessage: null });
               if (Option.isSome(project)) yield* deleteProject(project.value.id);
               outcome = { kind: operation.kind, result };
               break;
@@ -1799,9 +1840,9 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                 const reconciled = yield* reconcileRow(lease).pipe(Effect.option);
                 if (Option.isSome(reconciled)) yield* patch(reconciled.value);
                 yield* patch({
-                  ...(Option.isSome(reconciled) && reconciled.value.disposition === "destroyed"
-                    ? {}
-                    : { disposition: "refused" as const }),
+                  ...(Option.isSome(reconciled) && reconciled.value.disposition !== "destroyed"
+                    ? { disposition: "refused" as const }
+                    : {}),
                   refusalCode: error.code,
                   refusalMessage: stableStringify({ message: error.message, removedEdges }),
                 });
@@ -1871,9 +1912,8 @@ export const make = Effect.fn("StaveOperations.make")(function* (
             const reconciled = yield* reconcileRow(current).pipe(
               Effect.catch((error) =>
                 Effect.succeed({
-                  disposition: "refused" as const,
                   refusalCode: error.code,
-                  refusalMessage: error.message,
+                  refusalMessage: recoveryFailureMessage(current.refusalMessage, error.message),
                 }),
               ),
             );
@@ -1977,10 +2017,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       return yield* withSpaceLock(
         root,
         Effect.gen(function* () {
-          const siblings = yield* fileSystem
-            .readDirectory(agentWorkDir)
-            .pipe(Effect.mapError(asRefusal));
-          if (siblings.includes(operation.sagaId))
+          if (yield* pathEntryExists(root))
             return yield* refuse("space_exists", "The saga root already exists.");
           if ((yield* canonicalPath(root)) !== path.resolve(root))
             return yield* refuse(
@@ -2614,9 +2651,8 @@ export const make = Effect.fn("StaveOperations.make")(function* (
               const error = toOperationError(reconcile.cause);
               failures.push({ projectId: row.projectId, message: error.message });
               yield* patch(row, {
-                disposition: "refused",
                 refusalCode: error.code,
-                refusalMessage: error.message,
+                refusalMessage: recoveryFailureMessage(row.refusalMessage, error.message),
               }).pipe(Effect.ignore);
             }
           }
