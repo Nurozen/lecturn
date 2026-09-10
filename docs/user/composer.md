@@ -82,7 +82,8 @@ still come from the provider's own configuration.
 On web and desktop, select text in an assistant response, then choose **Cite in composer** from the
 menu that appears when you release the selection. This inserts an inline quote chip at your cursor
 and opens an optional comment bubble beside the selected text; press `Enter` or choose **Save** to
-attach the comment, or leave it blank to keep just the quote. You can type before and after the
+attach the comment, or leave it blank to keep just the quote. Press `Command+Enter` on macOS or
+`Ctrl+Enter` on Windows and Linux to save the comment and send the message. You can type before and after the
 chip, such as a quote followed by "what do you mean?". A selection must stay within one response
 and fit in 8,000 characters.
 
