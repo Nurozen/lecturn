@@ -1,3 +1,4 @@
+import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useNavigation } from "@react-navigation/native";
 import type { SidebarProjectGroupingMode } from "@t3tools/contracts";
@@ -50,6 +51,7 @@ export function SettingsProjectGroupingRouteScreen() {
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
+      <ArcaneBackdrop />
       {Platform.OS === "android" ? (
         <>
           <NativeStackScreenOptions options={{ headerShown: false }} />

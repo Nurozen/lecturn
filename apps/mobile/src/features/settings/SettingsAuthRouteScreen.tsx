@@ -1,3 +1,4 @@
+import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { useAuth } from "@clerk/expo";
 import { AuthView, UserProfileView } from "@clerk/expo/native";
 import { StackActions, useNavigation } from "@react-navigation/native";
@@ -38,6 +39,7 @@ function ConfiguredSettingsAuthRouteScreen() {
 
   return (
     <View collapsable={false} className="flex-1 overflow-hidden bg-sheet">
+      <ArcaneBackdrop />
       {isLoaded ? (
         hasBeenSignedIn.current ? (
           <UserProfileView isDismissible={false} onHostBack={handleHostBack} />

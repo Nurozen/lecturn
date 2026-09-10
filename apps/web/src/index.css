@@ -2127,3 +2127,80 @@ code {
     transform: scaleX(0.9);
   }
 }
+
+/* Static celestial texture sits in the painted background, never above text or
+   scrolling content. Theme-colored veils preserve custom and light palettes. */
+body,
+.surface-grain,
+.lecturn-chat-surface {
+  --celestial-veil: color-mix(in srgb, var(--background) 94%, transparent);
+  background-image:
+    linear-gradient(var(--celestial-veil), var(--celestial-veil)),
+    url("./assets/lecturn-night-sky.webp");
+  background-size:
+    auto,
+    1536px 512px;
+  background-position:
+    center,
+    left top;
+  background-repeat: repeat;
+}
+
+[data-slot="sidebar-inner"],
+[data-slot="sidebar"].surface-grain {
+  --celestial-veil: color-mix(in srgb, var(--sidebar) 84%, transparent);
+  background-size:
+    auto,
+    900px 300px;
+}
+
+/* One brief thread of light per interaction; no idle or looping animation.
+   Fine pointers only: buttons reserve ::after for their larger touch target. */
+@media (hover: hover) and (pointer: fine) {
+  :is([data-slot="button"], [data-lecturn-thread-surface]):not(:disabled):not(
+      [aria-disabled="true"]
+    )::after {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+    inset-inline: 12%;
+    bottom: 1px;
+    height: 1px;
+    border-radius: 100%;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      #dca64e 30%,
+      #ffe1a0 50%,
+      #dca64e 70%,
+      transparent
+    );
+    box-shadow: 0 0 5px 1px #dca64e55;
+    opacity: 0;
+    transform-origin: left center;
+  }
+
+  :is([data-slot="button"], [data-lecturn-thread-surface]):not(:disabled):not(
+      [aria-disabled="true"]
+    ):is(:hover, :focus-visible)::after {
+    opacity: 0.8;
+    animation: lecturn-thread-arrive 650ms ease-out both;
+  }
+}
+
+@keyframes lecturn-thread-arrive {
+  from {
+    opacity: 0;
+    transform: scaleX(0.12);
+  }
+  to {
+    opacity: 0.8;
+    transform: scaleX(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is([data-slot="button"], [data-lecturn-thread-surface])::after {
+    animation: none !important;
+  }
+}

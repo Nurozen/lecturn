@@ -1,3 +1,4 @@
+import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { NativeHeaderToolbar } from "../../native/StackHeader";
 import { useNavigation } from "@react-navigation/native";
 import { SymbolView } from "../../components/AppSymbol";
@@ -29,6 +30,7 @@ export function ConnectionsRouteScreen() {
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
+      <ArcaneBackdrop />
       {Platform.OS === "android" ? (
         <AndroidScreenHeader
           title="Environments"

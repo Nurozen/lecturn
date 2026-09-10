@@ -1,3 +1,4 @@
+import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { LECTURN_LEGAL_NOTICES } from "@t3tools/shared/legalNotices";
 import { useAuth, useUser } from "@clerk/expo";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
@@ -121,6 +122,7 @@ function LocalSettingsRouteScreen() {
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
+      <ArcaneBackdrop />
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
@@ -455,6 +457,7 @@ function ConfiguredSettingsRouteScreen() {
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
+      <ArcaneBackdrop />
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}

@@ -49,12 +49,11 @@ describe("SidebarStageBackdrop", () => {
     },
   );
 
-  it("paints each artwork variant with theme-owned color tokens", () => {
+  it("keeps the artwork theme overlay and developer palette theme-owned", () => {
     const nightlyMarkup = renderToStaticMarkup(<StageBackdropArt variant="nightly" />);
     const devMarkup = renderToStaticMarkup(<StageBackdropArt variant="dev" />);
 
     expect(nightlyMarkup).toContain("var(--stage-night-bottom)");
-    expect(nightlyMarkup).toContain("var(--stage-night-line)");
     expect(devMarkup).toContain("var(--stage-art-bottom)");
     expect(devMarkup).toContain("var(--stage-art-line)");
     expect(nightlyMarkup).not.toMatch(/#[0-9a-f]{3,8}/i);

@@ -1,3 +1,4 @@
+import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { type EnvironmentMachineKind, resolveEnvironmentMachineKind } from "@t3tools/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
@@ -72,6 +73,7 @@ export function SettingsClientStorageRouteScreen() {
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
+      <ArcaneBackdrop />
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         contentInset={{ bottom: Math.max(insets.bottom, 18) }}

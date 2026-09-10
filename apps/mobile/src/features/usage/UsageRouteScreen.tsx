@@ -1,3 +1,4 @@
+import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { useNavigation } from "@react-navigation/native";
 import type { DailyTotals, MergedUsage } from "@t3tools/shared/usageMerge";
 import {
@@ -95,6 +96,7 @@ export function UsageRouteScreen() {
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
+      <ArcaneBackdrop />
       {Platform.OS === "android" ? (
         <>
           <NativeStackScreenOptions options={{ headerShown: false }} />

@@ -1,3 +1,4 @@
+import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -633,6 +634,7 @@ export function ArchivedThreadsScreen(props: {
 
   return (
     <View className="flex-1 bg-sheet">
+      <ArcaneBackdrop />
       <ArchivedThreadsHeader
         environments={props.environments}
         searchQuery={props.searchQuery}

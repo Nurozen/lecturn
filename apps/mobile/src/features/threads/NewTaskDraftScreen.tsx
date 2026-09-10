@@ -1,3 +1,4 @@
+import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { useAtomValue } from "@effect/atom-react";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import {
@@ -1023,6 +1024,7 @@ export function NewTaskDraftScreen(props: {
   if (!selectedProject) {
     return (
       <View className="flex-1 bg-sheet" collapsable={false}>
+        <ArcaneBackdrop />
         {Platform.OS === "android" ? (
           <>
             <NativeStackScreenOptions options={{ headerShown: false }} />
@@ -1370,6 +1372,7 @@ export function NewTaskDraftScreen(props: {
   if (isAndroid) {
     return (
       <View className="flex-1 bg-sheet" collapsable={false}>
+        <ArcaneBackdrop />
         <NativeStackScreenOptions options={{ headerShown: false }} />
         <AndroidScreenHeader title="New task" onBack={closeNewTask} />
         {heroViewport}
@@ -1386,6 +1389,7 @@ export function NewTaskDraftScreen(props: {
 
   return (
     <View className="flex-1 bg-sheet" collapsable={false}>
+      <ArcaneBackdrop />
       <NativeStackScreenOptions
         options={{
           headerBackVisible: false,

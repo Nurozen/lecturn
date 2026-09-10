@@ -1,3 +1,4 @@
+import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -1207,6 +1208,7 @@ function ThreadNavigationSidebarPane(
           }}
         />
         <View className="flex-1">
+          <ArcaneBackdrop emphasis="sidebar" />
           <SwipeableScrollGateProvider enabled={swipeEnabled}>
             <GestureDetector gesture={sidebarScrollGesture}>
               <LegendList
@@ -1251,6 +1253,7 @@ function ThreadNavigationSidebarPane(
       className="flex-1 border-r border-border bg-drawer"
       style={{ width: props.width }}
     >
+      <ArcaneBackdrop emphasis="sidebar" />
       <View className="flex-1" style={{ paddingBottom: insets.bottom }}>
         <SwipeableScrollGateProvider enabled={swipeEnabled}>
           <GestureDetector gesture={sidebarScrollGesture}>

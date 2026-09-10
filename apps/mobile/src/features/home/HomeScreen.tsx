@@ -1,3 +1,4 @@
+import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import {
   LegendList,
   type LegendListRef,
@@ -1096,6 +1097,7 @@ export function HomeScreen(props: HomeScreenProps) {
           paddingTop: NATIVE_LIQUID_GLASS_SUPPORTED ? insets.top + 72 : 0,
         }}
       >
+        <ArcaneBackdrop emphasis="sidebar" />
         <View className="w-full max-w-[430px]">
           <EmptyState
             title={emptyState.title}
@@ -1156,6 +1158,7 @@ export function HomeScreen(props: HomeScreenProps) {
   if (threadListV2Enabled) {
     return (
       <View className="flex-1 bg-screen">
+        <ArcaneBackdrop emphasis="sidebar" />
         <SwipeableScrollGateProvider enabled={swipeEnabled}>
           <FlatList
             data={threadListV2Items}
@@ -1201,6 +1204,7 @@ export function HomeScreen(props: HomeScreenProps) {
 
   return (
     <View className="flex-1 bg-screen">
+      <ArcaneBackdrop emphasis="sidebar" />
       {/* Sticky headers are deliberately not wired up: LegendList's JS sticky
           implementation mispositions pinned headers at mount under iOS
           automatic content insets (headers render one nav-inset too low until

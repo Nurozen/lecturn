@@ -1,3 +1,4 @@
+import { ArcaneControlHighlight } from "./ArcaneControlHighlight";
 import { MenuView } from "@react-native-menu/menu";
 import * as Haptics from "expo-haptics";
 import {
@@ -8,6 +9,7 @@ import {
   type ReactNode,
   useMemo,
   useRef,
+  useState,
 } from "react";
 import { Platform, Pressable, View, type ColorValue, type PressableProps } from "react-native";
 import { withUniwind } from "uniwind";
@@ -59,6 +61,9 @@ export function ControlPill(props: {
   readonly className?: string;
 }) {
   const variant = props.variant ?? "circle";
+  const [pressed, setPressed] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
   const activatedOnPressInRef = useRef(false);
 
   const handlePressIn = () => {
@@ -119,11 +124,24 @@ export function ControlPill(props: {
       accessibilityLabel={props.accessibilityLabel ?? props.label}
       accessibilityRole="button"
       onPress={props.activateOnPressIn ? handlePress : props.onPress}
-      onPressIn={props.activateOnPressIn ? handlePressIn : undefined}
-      onPressOut={props.activateOnPressIn ? handlePressOut : undefined}
+      onPressIn={() => {
+        setPressed(true);
+        if (props.activateOnPressIn) handlePressIn();
+      }}
+      onPressOut={() => {
+        setPressed(false);
+        if (props.activateOnPressIn) handlePressOut();
+      }}
+      onHoverIn={() => setHovered(true)}
+      onHoverOut={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
       disabled={props.disabled}
       className={containerClassName}
     >
+      <ArcaneControlHighlight
+        active={!props.disabled && variant !== "danger" && (pressed || hovered || focused)}
+      />
       {props.iconNode ? (
         <View className="h-4 w-4 items-center justify-center">{props.iconNode}</View>
       ) : props.icon ? (
