@@ -1,65 +1,28 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  Nightly local upstream integration.
-
-  Install:
-    mkdir -p ~/Library/LaunchAgents ~/Library/Logs
-    sed -e "s|__REPO__|$PWD|g" -e "s|__LOGS__|$HOME/Library/Logs|g" \
-      .github/upstream-integration/com.lecturn.upstream-integrate.plist \
-      > ~/Library/LaunchAgents/com.lecturn.upstream-integrate.plist
-    launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.lecturn.upstream-integrate.plist
-
-  Run it now without waiting for the schedule:
-    launchctl kickstart -p gui/$UID/com.lecturn.upstream-integrate
-
-  Remove:
-    launchctl bootout gui/$UID/com.lecturn.upstream-integrate
-
-  This is a laptop that sleeps, and the whole design depends on batches staying
-  small (one night is ~30 conflicted files, five nights is ~114 and harder).
-  launchd runs a missed StartCalendarInterval job on the next wake, but that
-  only helps if the machine wakes. Schedule a wake a couple of minutes early:
-
-    sudo pmset repeat wakeorpoweron MTWRFSU 08:10:00
-
-  08:12 local is chosen so the run lands before the working day and well after
-  t3mirror-sync.yml, which fires at 09:23 UTC (01:23 Anchorage).
--->
+<!-- Template only. Install after a verified caught-up run. Substitute absolute
+     paths; __PATH__ must contain the authorized Node, Codex, gh and Stave CLIs.
+     Preserve __STATE__ across runs. No bootstrap SHA belongs in the schedule:
+     progress.json must already contain verified accepted ancestry. -->
 <plist version="1.0">
 <dict>
-  <key>Label</key>
-  <string>com.lecturn.upstream-integrate</string>
-
+  <key>Label</key><string>com.lecturn.upstream-integrate</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/bash</string>
-    <string>__REPO__/.github/upstream-integration/integrate-local.sh</string>
+    <string>__PYTHON__</string>
+    <string>__REPO__/.github/upstream-integration/run-batches.py</string>
+    <string>--repo</string><string>__REPO__</string>
+    <string>--state-dir</string><string>__STATE__</string>
+    <string>--spaces-dir</string><string>__SPACES__</string>
+    <string>--refresh-mirror</string>
   </array>
-
-  <key>WorkingDirectory</key>
-  <string>__REPO__</string>
-
-  <key>StartCalendarInterval</key>
-  <dict>
-    <key>Hour</key><integer>8</integer>
-    <key>Minute</key><integer>12</integer>
-  </dict>
-
-  <!-- Do not fire on every login; the schedule is the only trigger. -->
-  <key>RunAtLoad</key>
-  <false/>
-
-  <!-- Never restart on exit: a failed run should wait for the next schedule
-       rather than loop against the same conflict. -->
-  <key>KeepAlive</key>
-  <false/>
-
-  <key>ProcessType</key>
-  <string>Background</string>
-
-  <key>StandardOutPath</key>
-  <string>__LOGS__/lecturn-upstream-integrate.log</string>
-  <key>StandardErrorPath</key>
-  <string>__LOGS__/lecturn-upstream-integrate.log</string>
+  <key>WorkingDirectory</key><string>__REPO__</string>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>__PATH__</string></dict>
+  <key>StartInterval</key><integer>10800</integer>
+  <key>RunAtLoad</key><false/>
+  <key>KeepAlive</key><false/>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>__LOGS__/lecturn-upstream-integrate.log</string>
+  <key>StandardErrorPath</key><string>__LOGS__/lecturn-upstream-integrate.log</string>
 </dict>
 </plist>
