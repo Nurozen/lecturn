@@ -91,6 +91,14 @@ checks and both reviews. Refuted findings receive a fresh holistic assessment.
 Each review session is a bounded assignment: it inspects source directly without
 recursively launching another review workflow or requiring an unrelated provider
 subscription. The controller owns the independent review and verification stages.
+
+Blocked staged reviews with an explanation persist their exact verdict and
+unresolved findings in the manifest, then return to a fresh builder and fresh
+reviews. The builder must investigate those findings; a blocked review is neither
+a confirmed defect nor approval. Empty blocked feedback stops for investigation.
+Every attempted repair consumes the same bounded round limit, including evidence
+or infrastructure gaps that remain unresolved.
+
 A bounded repair limit prevents an unattended loop from silently running forever.
 Hosted CI is expected to be pending during staged pre-PR review; the controller
 requires it on the exact published head before merging.
