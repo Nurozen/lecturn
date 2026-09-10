@@ -410,7 +410,7 @@ function useLabelsOverflow(element: HTMLDivElement | null): boolean {
 export const BranchToolbar = memo(function BranchToolbar({
   environmentId,
   threadId,
-  showGitControls,
+  showGitControls: requestedGitControls,
   draftId,
   onEnvModeChange,
   effectiveEnvModeOverride,
@@ -442,6 +442,8 @@ export const BranchToolbar = memo(function BranchToolbar({
       : null;
   const activeProject = useProject(activeProjectRef);
   const staveContext = describeStaveWorkspace(activeProject);
+  const showGitControls =
+    requestedGitControls && (!staveContext || staveContext.primaryRepoPath !== null);
   const hasActiveThread = serverThread !== null || draftThread !== null;
   const activeWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
   // A Stave space's repos are already worktrees: the mode is pinned to local
