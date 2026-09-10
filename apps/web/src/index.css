@@ -2133,6 +2133,7 @@ code {
 body,
 .surface-grain,
 .lecturn-chat-surface,
+.lecturn-page-surface,
 .lecturn-settings-surface,
 .lecturn-celestial-sidebar {
   --celestial-veil: color-mix(in srgb, var(--background) 94%, transparent);

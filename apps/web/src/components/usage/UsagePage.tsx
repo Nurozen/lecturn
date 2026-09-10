@@ -131,7 +131,7 @@ export function UsagePage() {
           }}
         >
           {(["cost", "tokens"] as const).map((option) => (
-            <Toggle key={option} value={option}>
+            <Toggle data-lecturn-hover key={option} value={option}>
               {option === "cost" ? "Cost" : "Tokens"}
             </Toggle>
           ))}
@@ -146,7 +146,7 @@ export function UsagePage() {
           }}
         >
           {WINDOW_OPTIONS.map((option) => (
-            <Toggle key={option.days} value={String(option.days)}>
+            <Toggle data-lecturn-hover key={option.days} value={String(option.days)}>
               {option.label}
             </Toggle>
           ))}
@@ -203,7 +203,7 @@ export function UsagePage() {
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background lecturn-page-surface text-foreground">
         <WorkspacePageHeader electron={isElectron}>{topbarContent}</WorkspacePageHeader>
 
         <ScrollArea className="min-h-0 flex-1">
@@ -335,7 +335,7 @@ export function UsagePage() {
                           { value: "time", label: isPast24Hours ? "Hour" : "Day" },
                         ] as const
                       ).map((option) => (
-                        <Toggle key={option.value} value={option.value}>
+                        <Toggle data-lecturn-hover key={option.value} value={option.value}>
                           {option.label}
                         </Toggle>
                       ))}
