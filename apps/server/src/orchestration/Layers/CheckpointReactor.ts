@@ -758,6 +758,8 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    yield* providerService.assertConversationRollbackSupported(event.payload.threadId);
+
     const restored = yield* checkpointStore.restoreCheckpoint({
       cwd: sessionRuntime.value.cwd,
       checkpointRef: targetCheckpointRef,

@@ -6,7 +6,7 @@
 
 Lecturn brings coding agents into one workspace on desktop, web, and mobile. Keep your projects and conversations close, explore another direction with a fork, and return to your work from another device. Its midnight blue, parchment, and brass palette shares a world with [Stave](https://github.com/Nurozen/stave/tree/weirwood), with a library of its own.
 
-Use the coding-agent subscriptions and credentials you already have: Claude Code, Codex, Cursor, Grok Build, or OpenCode. Install and authenticate at least one provider on the computer that hosts your work.
+Use the coding-agent subscriptions and credentials you already have: Claude Code, Codex, Cursor, Grok Build, OpenCode, or Google Antigravity. Install and authenticate at least one provider on the computer that hosts your work. For Antigravity, enable it in Settings, then use **Install Antigravity** and **Sign in with Google**.
 
 [Download desktop](https://github.com/Nurozen/lecturn/releases) · [Open Lecturn](https://lecturn.cloudgatherer.net) · [Installation guide](./docs/user/lecturn-installation.md)
 
@@ -24,7 +24,7 @@ Fork a completed reply to explore another approach without replacing the origina
 
 ![A forked Lecturn conversation with its inherited messages and a marker at the fork point.](./docs/images/lecturn-fork.webp)
 
-_Forking is available for Codex, Claude, and OpenCode. Cursor and Grok do not yet expose fork actions in Lecturn. Forks share the original working folder; they do not automatically isolate file edits. [Read the forking guide](./docs/user/forking-threads.md)._
+_Forking is available for Codex, Claude, and OpenCode. Cursor, Grok, and Antigravity do not yet expose fork actions in Lecturn. Forks share the original working folder; they do not automatically isolate file edits. [Read the forking guide](./docs/user/forking-threads.md)._
 
 ## Take your place with you
 
