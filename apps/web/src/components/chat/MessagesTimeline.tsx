@@ -1739,7 +1739,12 @@ const WorkGroupSection = memo(function WorkGroupSection({
   isExpandedToolGroup: boolean;
   displayLabel?: string | undefined;
 }) {
-  const { workspaceRoot, routeThreadKey } = use(TimelineRowCtx);
+  const { workspaceRoot, routeThreadKey, workGroupViewState, onToggleWorkEntry } =
+    use(TimelineRowCtx);
+  const groupView = useMemo(
+    () => ({ state: workGroupViewState, onToggleEntry: () => onToggleWorkEntry(anchorKey) }),
+    [anchorKey, onToggleWorkEntry, workGroupViewState],
+  );
   const nonEmptyEntries = useMemo(
     () => groupedEntries.filter((entry) => workEntryIsVisibleInGroup(entry, isExpandedToolGroup)),
     [groupedEntries, isExpandedToolGroup],
@@ -1758,19 +1763,21 @@ const WorkGroupSection = memo(function WorkGroupSection({
   }
 
   return (
-    <section className="-mx-1 space-y-0.5 px-1 py-0.5" aria-label="Activity">
-      <div className="space-y-px">
-        {nonEmptyEntries.map((workEntry) => (
-          <SimpleWorkEntryRow
-            key={workEntry.id}
-            workEntry={workEntry}
-            workspaceRoot={workspaceRoot}
-            isExpandedToolGroupEntry={false}
-            displayLabel={displayLabel}
-          />
-        ))}
-      </div>
-    </section>
+    <WorkGroupViewCtx value={groupView}>
+      <section className="-mx-1 space-y-0.5 px-1 py-0.5" aria-label="Activity">
+        <div className="space-y-px">
+          {nonEmptyEntries.map((workEntry) => (
+            <SimpleWorkEntryRow
+              key={workEntry.id}
+              workEntry={workEntry}
+              workspaceRoot={workspaceRoot}
+              isExpandedToolGroupEntry={false}
+              displayLabel={displayLabel}
+            />
+          ))}
+        </div>
+      </section>
+    </WorkGroupViewCtx>
   );
 });
 

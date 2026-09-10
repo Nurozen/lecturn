@@ -657,6 +657,8 @@ function attachTrailingToolGroupsToAssistant(
   rows: ReadonlyArray<MessagesTimelineRow>,
 ): MessagesTimelineRow[] {
   const messageRowsWithoutMeta = new Set<string>();
+  const deferredDividers = new Map<number, MessagesTimelineRow>();
+  const deferredDividerIds = new Set<string>();
   const metaRowsAfterIndex = new Map<
     number,
     Extract<MessagesTimelineRow, { kind: "assistant-meta" }>
@@ -709,6 +711,13 @@ function attachTrailingToolGroupsToAssistant(
       continue;
     }
 
+    // The fork anchor is a message, but its inherited trailing tools and footer
+    // belong before the boundary too. Keep subsequent child content after it.
+    const divider = rows[messageIndex + 1];
+    if (divider?.kind === "fork-divider") {
+      deferredDividerIds.add(divider.id);
+      deferredDividers.set(lastTrailingWorkIndex, divider);
+    }
     messageRowsWithoutMeta.add(row.id);
     metaRowsAfterIndex.set(lastTrailingWorkIndex, {
       kind: "assistant-meta",
@@ -723,6 +732,7 @@ function attachTrailingToolGroupsToAssistant(
 
   const result: MessagesTimelineRow[] = [];
   for (const [index, row] of rows.entries()) {
+    if (deferredDividerIds.has(row.id)) continue;
     if (row.kind === "message" && messageRowsWithoutMeta.has(row.id)) {
       result.push({ ...row, showAssistantMeta: false, showAssistantCopyButton: false });
     } else {
@@ -732,6 +742,8 @@ function attachTrailingToolGroupsToAssistant(
     if (metaRow) {
       result.push(metaRow);
     }
+    const divider = deferredDividers.get(index);
+    if (divider) result.push(divider);
   }
   return result;
 }

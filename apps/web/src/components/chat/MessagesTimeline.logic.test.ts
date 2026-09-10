@@ -758,6 +758,88 @@ describe("deriveMessagesTimelineRows", () => {
     expect(changed.result.at(-1)).toMatchObject({ forkTurnId: undefined });
   });
 
+  it.each([false, true])(
+    "keeps inherited trailing tools and metadata before the fork boundary (expanded: %s)",
+    (expanded) => {
+      const inheritedTurn = TurnId.make("inherited-turn");
+      const childTurn = TurnId.make("child-turn");
+      const assistantEntry = (id: string, turnId: TurnId, createdAt: string) => ({
+        kind: "message" as const,
+        id,
+        createdAt,
+        message: {
+          id: id as never,
+          role: "assistant" as const,
+          text: "Done",
+          turnId,
+          createdAt,
+          updatedAt: createdAt,
+          streaming: false,
+        },
+      });
+      const toolEntry = (id: string, turnId: TurnId, createdAt: string) => ({
+        kind: "work" as const,
+        id,
+        createdAt,
+        entry: {
+          id,
+          createdAt,
+          turnId,
+          label: "Ran command",
+          tone: "tool" as const,
+          itemType: "command_execution" as const,
+          toolLifecycleStatus: "completed" as const,
+        },
+      });
+      const input = {
+        timelineEntries: [
+          assistantEntry("inherited-answer", inheritedTurn, "2026-01-01T00:00:01Z"),
+          toolEntry("inherited-tool-1", inheritedTurn, "2026-01-01T00:00:02Z"),
+          toolEntry("inherited-tool-2", inheritedTurn, "2026-01-01T00:00:03Z"),
+          assistantEntry("child-answer", childTurn, "2026-01-01T00:00:04Z"),
+          toolEntry("child-tool", childTurn, "2026-01-01T00:00:05Z"),
+        ],
+        forkDividerAfterMessageId: "inherited-answer" as never,
+        isWorking: false,
+        activeTurnStartedAt: null,
+        turnDiffSummaryByAssistantMessageId: new Map(),
+        revertTurnCountByUserMessageId: new Map(),
+      };
+      const collapsed = deriveMessagesTimelineRows(input);
+      const group = collapsed.find((row) => row.kind === "work-toggle");
+      expect(group?.kind).toBe("work-toggle");
+      const rows = deriveMessagesTimelineRows({
+        ...input,
+        expandedWorkGroupIds: new Set(
+          group?.kind === "work-toggle" && expanded ? [group.groupId] : [],
+        ),
+      });
+      expect(rows.map((row) => row.kind)).toEqual([
+        "message",
+        "work-toggle",
+        ...(expanded ? ["work"] : []),
+        "assistant-meta",
+        "fork-divider",
+        "message",
+        "work",
+        "assistant-meta",
+      ]);
+      const dividerIndex = rows.findIndex((row) => row.kind === "fork-divider");
+      expect(rows[dividerIndex - 1]).toMatchObject({
+        kind: "assistant-meta",
+        message: { id: "inherited-answer" },
+      });
+      expect(rows[dividerIndex + 1]).toMatchObject({
+        kind: "message",
+        message: { id: "child-answer" },
+      });
+      expect(rows.at(-1)).toMatchObject({
+        kind: "assistant-meta",
+        message: { id: "child-answer" },
+      });
+    },
+  );
+
   it("emits the fork divider immediately after its anchor message row", () => {
     const timelineEntries = [
       {
