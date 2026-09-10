@@ -147,7 +147,9 @@ function SignedBillingAccount({
                   ? "Subscription billing is not enabled"
                   : status.state === "unavailable"
                     ? "Subscription status unavailable"
-                    : `Subscription: ${status.state.replaceAll("_", " ")}`}
+                    : status.state === "free"
+                      ? "No active Connect subscription"
+                      : `Subscription: ${status.state.replaceAll("_", " ")}`}
               </p>
               {status.state !== "disabled" && (
                 <p className="text-sm" role="status">
