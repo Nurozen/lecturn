@@ -42,7 +42,6 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-          persist-credentials: false
           sparse-checkout: |
             /*
             !/.repos/
