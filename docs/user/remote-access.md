@@ -239,14 +239,14 @@ controls remain in **Settings** → **Connections** on web and desktop or **Sett
 - Hosted pairing links keep the credential in the URL hash so it is not sent to the hosted app server, but it can still be exposed through browser history, screenshots, logs, or copy/paste.
 - Use `t3 auth` to revoke credentials or sessions you no longer trust.
 
-### Switching your Connect account
+### Signing out and switching your Connect account
 
-Signing out of Lecturn signs out the client; it does not unpublish this computer. A published environment continues to belong to the account that linked it so your other devices can still reach it.
+Desktop sign-out asks for confirmation before unpublishing this computer. Confirming stops its remote Connect access, notifications and Live Activities, then signs out. Your local projects and conversations stay on the computer. If cleanup fails, Lecturn keeps you signed in and offers a retry.
 
-To publish the same computer under another account:
+Browser sign-out affects that client only; it does not unpublish a remote computer you are viewing.
 
-1. Sign in on that computer using the account that originally published it.
-2. Open **Settings → Connections → Unlink environment** and confirm. This stops remote Connect access and agent activity publishing; your local projects and conversations remain on the computer.
-3. Sign out, sign in with the new account, and run Connect setup again.
+After signing out on desktop, sign in with the new account and run Connect setup again. Account switching does not transfer a subscription.
 
-Connect setup reports an account mismatch instead of claiming success when the computer is still published to another account. Switching accounts does not transfer environment ownership or a subscription.
+If this computer was already published to another account, the sign-out dialog explains that it will stop the local relay, while the previous account may retain an offline registration. Sign in to the previous account to remove that registration. Lecturn does not revoke another account's registration using your current account.
+
+You can also stop publication explicitly from **Settings → Connections → Unlink environment** while signed in to the account that published it.

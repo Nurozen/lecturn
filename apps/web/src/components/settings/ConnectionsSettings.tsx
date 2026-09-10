@@ -125,6 +125,7 @@ import {
 } from "~/versionSkew";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { useCloudLinkController } from "~/cloud/useCloudLinkController";
+import { ConnectSubscriptionGate } from "../cloud/ConnectSubscriptionGate";
 import { authEnvironment } from "~/state/auth";
 import { environmentCatalog } from "~/connection/catalog";
 import {
@@ -1621,6 +1622,8 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     linked,
     accountMismatchMessage,
     reconcileCloudState,
+    subscriptionRequired,
+    checkSubscription,
   } = useCloudLinkController();
   const [isUpdating, setIsUpdating] = useState(false);
   const [isUpdatingPreference, setIsUpdatingPreference] = useState(false);
@@ -1673,6 +1676,9 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
 
   return (
     <>
+      {subscriptionRequired ? (
+        <ConnectSubscriptionGate onRefresh={checkSubscription} preserveChoices={false} />
+      ) : null}
       {window.desktopBridge ? (
         <SettingsRow
           title={searchableSetting("t3-connect").title}

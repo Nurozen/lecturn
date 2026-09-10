@@ -33,6 +33,7 @@ import {
   readPrimaryCloudLinkState,
   type CloudLinkTarget,
   unlinkPrimaryEnvironmentFromCloud,
+  unpublishPrimaryEnvironmentBeforeSignOut,
   updatePrimaryCloudPreferences,
 } from "./linkEnvironment";
 
@@ -435,6 +436,108 @@ describe("web cloud link environment client", () => {
       expect(String(fetchMock.mock.calls[1]?.[0])).toContain(
         `/v1/client/environment-links/${TARGET.environmentId}`,
       );
+    }),
+  );
+});
+
+describe("sign-out publication cleanup", () => {
+  const linked = () =>
+    Response.json({
+      linked: true,
+      cloudUserId: "owner",
+      relayUrl: "https://relay.example.test",
+      relayIssuer: "https://relay.example.test",
+      managedTunnelActive: true,
+      publishAgentActivity: true,
+    });
+  const localSuccess = () =>
+    Response.json({ ok: true, endpointRuntimeStatus: { status: "disabled" } });
+
+  it.effect("revokes remotely before removing local credentials", () =>
+    Effect.gen(function* () {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(linked())
+        .mockResolvedValueOnce(Response.json({ ok: true }))
+        .mockResolvedValueOnce(localSuccess());
+      vi.stubGlobal("fetch", fetchMock);
+      yield* withServices(
+        unpublishPrimaryEnvironmentBeforeSignOut({
+          target: TARGET,
+          clerkToken: "token",
+          userId: "owner",
+        }),
+      );
+      expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/v1/client/environment-links/");
+      expect(String(fetchMock.mock.calls[2]?.[0])).toContain("/api/connect/unlink");
+    }),
+  );
+
+  it.effect("preserves local publication on revocation failure and retries cleanup", () =>
+    Effect.gen(function* () {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(linked())
+        .mockResolvedValueOnce(new Response("unavailable", { status: 503 }));
+      vi.stubGlobal("fetch", fetchMock);
+      const cleanup = unpublishPrimaryEnvironmentBeforeSignOut({
+        target: TARGET,
+        clerkToken: "token",
+        userId: "owner",
+      });
+      yield* withServices(cleanup).pipe(Effect.flip);
+      expect(
+        fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/connect/unlink")),
+      ).toBe(false);
+      fetchMock
+        .mockResolvedValueOnce(linked())
+        .mockResolvedValueOnce(Response.json({ ok: true }))
+        .mockResolvedValueOnce(localSuccess());
+      yield* withServices(cleanup);
+      expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("/api/connect/unlink");
+    }),
+  );
+
+  it.effect("retries local cleanup after the relay registration was already revoked", () =>
+    Effect.gen(function* () {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(linked())
+        .mockResolvedValueOnce(Response.json({ ok: true }))
+        .mockResolvedValueOnce(new Response("local cleanup failed", { status: 500 }));
+      vi.stubGlobal("fetch", fetchMock);
+      const cleanup = unpublishPrimaryEnvironmentBeforeSignOut({
+        target: TARGET,
+        clerkToken: "token",
+        userId: "owner",
+      });
+      yield* withServices(cleanup).pipe(Effect.flip);
+      // The relay's idempotent DELETE returns ok:false for an absent link.
+      fetchMock
+        .mockResolvedValueOnce(linked())
+        .mockResolvedValueOnce(Response.json({ ok: false }))
+        .mockResolvedValueOnce(localSuccess());
+      yield* withServices(cleanup);
+      expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("/api/connect/unlink");
+    }),
+  );
+
+  it.effect("stops a mismatched local host without revoking another owner's registration", () =>
+    Effect.gen(function* () {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(linked())
+        .mockResolvedValueOnce(localSuccess());
+      vi.stubGlobal("fetch", fetchMock);
+      yield* withServices(
+        unpublishPrimaryEnvironmentBeforeSignOut({
+          target: TARGET,
+          clerkToken: null,
+          userId: "other",
+        }),
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/api/connect/unlink");
     }),
   );
 });

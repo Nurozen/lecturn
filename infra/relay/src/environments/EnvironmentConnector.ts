@@ -1,3 +1,4 @@
+import { ManagedGatewayHttpClient } from "./ManagedGatewayHttpClient.ts";
 import {
   EnvironmentHttpBadRequestError,
   EnvironmentHttpConflictError,
@@ -296,7 +297,10 @@ const make = Effect.gen(function* () {
   const links = yield* EnvironmentLinks.EnvironmentLinks;
   const allocations = yield* ManagedEndpointAllocations.ManagedEndpointAllocations;
   const settings = yield* RelayConfiguration.RelayConfiguration;
-  const httpClient = yield* HttpClient.HttpClient;
+  const gatewayClient = yield* Effect.serviceOption(ManagedGatewayHttpClient);
+  const httpClient = Option.isSome(gatewayClient)
+    ? gatewayClient.value
+    : yield* HttpClient.HttpClient;
   const crypto = yield* Crypto.Crypto;
   const relayIssuer = normalizeRelayIssuer(settings.relayIssuer);
   const makeEnvironmentClient = (httpBaseUrl: string) =>

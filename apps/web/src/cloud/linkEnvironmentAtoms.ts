@@ -9,6 +9,7 @@ import {
   type CloudLinkMode,
   type CloudLinkTarget,
   unlinkPrimaryEnvironmentFromCloud,
+  unpublishPrimaryEnvironmentBeforeSignOut,
   updatePrimaryCloudPreferences,
 } from "./linkEnvironment";
 
@@ -43,4 +44,15 @@ export const updatePrimaryEnvironmentPreferences = createRuntimeCommand(connecti
   concurrency: cloudLinkConcurrency,
   execute: (input: { readonly target: CloudLinkTarget; readonly publishAgentActivity: boolean }) =>
     updatePrimaryCloudPreferences(input),
+});
+
+export const unpublishBeforeSignOut = createRuntimeCommand(connectionAtomRuntime, {
+  label: "web:cloud:unpublish-before-sign-out",
+  scheduler: cloudLinkScheduler,
+  concurrency: cloudLinkConcurrency,
+  execute: (input: {
+    readonly target: CloudLinkTarget;
+    readonly clerkToken: string | null;
+    readonly userId: string;
+  }) => unpublishPrimaryEnvironmentBeforeSignOut(input),
 });

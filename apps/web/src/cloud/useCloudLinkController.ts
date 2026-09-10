@@ -5,7 +5,9 @@ import {
   settlePromise,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createBillingClient } from "@t3tools/client-runtime/relay";
+import { isConnectSubscriptionRequired } from "./connectSubscriptionGate";
 
 import { toastManager } from "../components/ui/toast";
 import { relayEnvironmentDiscovery } from "../state/relay";
@@ -16,7 +18,7 @@ import {
   updatePrimaryEnvironmentPreferences as updatePrimaryEnvironmentPreferencesAtom,
 } from "./linkEnvironmentAtoms";
 import { usePrimaryCloudLinkState } from "./primaryCloudLinkState";
-import { resolveRelayClerkTokenOptions } from "./publicConfig";
+import { resolveCloudPublicConfig, resolveRelayClerkTokenOptions } from "./publicConfig";
 
 export interface CloudLinkDesiredState {
   readonly managedTunnel: boolean;
@@ -48,9 +50,23 @@ export function useCloudLinkController() {
     { reportFailure: false },
   );
   const primaryCloudLinkState = usePrimaryCloudLinkState();
+  const accountRef = useRef(userId);
+  useEffect(() => {
+    accountRef.current = userId;
+    return () => {
+      accountRef.current = undefined;
+    };
+  }, [userId]);
+  const [subscriptionRequiredFor, setSubscriptionRequiredFor] = useState<string | null>(null);
+  const subscriptionRequired = Boolean(userId && subscriptionRequiredFor === userId);
   const [operationError, setOperationError] = useState<string | null>(null);
 
   const reportUpdateFailure = (cause: unknown) => {
+    if (isConnectSubscriptionRequired(cause)) {
+      setSubscriptionRequiredFor(userId ?? null);
+      setOperationError(null);
+      return;
+    }
     const message =
       cause instanceof Error ? cause.message : "Could not update Lecturn Connect access.";
     const traceId = findErrorTraceId(cause);
@@ -81,8 +97,30 @@ export function useCloudLinkController() {
   const accountMismatch =
     linked && isSignedIn && Boolean(userId) && primaryCloudLinkState.data?.cloudUserId !== userId;
   const accountMismatchMessage = accountMismatch
-    ? "This environment is still published to a different Lecturn account. Signing out does not unpublish it. Sign in to the previous account, open Settings → Connections and unlink the environment, then sign in here again to publish it."
+    ? "This environment is still published to a different Lecturn account. Sign out to stop its local relay, then sign in to the account you want to use. The previous owner can remove the offline environment from their account."
     : null;
+
+  const checkSubscription = async (clerkToken?: string): Promise<boolean> => {
+    const account = userId;
+    try {
+      const status = await createBillingClient({
+        relayUrl: resolveCloudPublicConfig().relayUrl ?? "",
+        getToken: () =>
+          clerkToken ? Promise.resolve(clerkToken) : getToken(resolveRelayClerkTokenOptions()),
+      }).getStatus();
+      if (!account || accountRef.current !== account) return false;
+      if (status.state === "unavailable")
+        throw new Error("Your subscription could not be checked. Refresh to try again.");
+      // A disabled billing service does not impose a purchase requirement.
+      const allowed = status.state === "disabled" || status.hasAccess;
+      setSubscriptionRequiredFor(allowed ? null : account);
+      setOperationError(null);
+      return allowed;
+    } catch (cause) {
+      if (accountRef.current === account) reportUpdateFailure(cause);
+      return false;
+    }
+  };
 
   const reconcileCloudState = async (desired: CloudLinkDesiredState): Promise<boolean> => {
     setOperationError(null);
@@ -126,6 +164,7 @@ export function useCloudLinkController() {
         reportUpdateFailure(new Error("Sign in to Lecturn Connect before enabling this."));
         return false;
       }
+      if (!(await checkSubscription(clerkToken))) return false;
       if (!linked || managedTunnelActive !== desired.managedTunnel) {
         const linkResult = await linkPrimaryEnvironment({
           target,
@@ -169,6 +208,8 @@ export function useCloudLinkController() {
     managedTunnelActive,
     publishAgentActivity,
     operationError,
+    subscriptionRequired,
+    checkSubscription,
     accountMismatchMessage,
     reconcileCloudState,
   };

@@ -300,6 +300,45 @@ export function unlinkPrimaryEnvironmentFromCloud(input: {
   }).pipe(Effect.provide(primaryEnvironmentHttpLayer));
 }
 
+/** Sign-out keeps local credentials until cloud revocation succeeds, so a failed
+ * attempt can be retried without losing the registration that needs cleanup. */
+export function unpublishPrimaryEnvironmentBeforeSignOut(input: {
+  readonly target: CloudLinkTarget;
+  readonly userId: string;
+  readonly clerkToken: string | null;
+}) {
+  return Effect.gen(function* () {
+    const state = yield* readPrimaryCloudLinkState({ target: input.target });
+    if (!state)
+      return yield* new CloudEnvironmentLinkError({
+        message: "Could not verify this computer's Connect publication. Retry before signing out.",
+      });
+    if (!state.linked) return;
+    if (state.cloudUserId !== input.userId) {
+      // A switched account cannot revoke the previous owner's cloud record.
+      // Explicit sign-out still stops this local host without trapping the user.
+      yield* unlinkPrimaryEnvironmentFromCloud({ target: input.target, clerkToken: null });
+      return;
+    }
+    if (!input.clerkToken)
+      return yield* new CloudEnvironmentLinkError({
+        message: "Could not authenticate Connect cleanup. Retry before signing out.",
+      });
+    const relayClient = yield* ManagedRelay.ManagedRelayClient;
+    yield* relayClient
+      .unlinkEnvironment({
+        clerkToken: input.clerkToken,
+        environmentId: EnvironmentId.make(input.target.environmentId),
+      })
+      .pipe(
+        Effect.mapError(
+          decodedRelayClientError("Could not revoke this environment before signing out"),
+        ),
+      );
+    yield* unlinkPrimaryEnvironmentFromCloud({ target: input.target, clerkToken: null });
+  });
+}
+
 // "publish_only" links the environment to the relay for agent-activity
 // publishing alone: no managed tunnel is provisioned, so it can be toggled
 // independently of Lecturn Connect while clients reach the environment out of band.

@@ -1,3 +1,8 @@
+import {
+  ManagedGatewayHttpClient,
+  makeManagedGatewayHttpClient,
+} from "./environments/ManagedGatewayHttpClient.ts";
+import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as Alchemy from "alchemy";
 import * as Cloudflare from "alchemy/Cloudflare";
 import * as Drizzle from "alchemy/Drizzle";
@@ -404,12 +409,35 @@ export const ApiLive = Api.make(
       }).pipe(Effect.map(makeRelayTraceLayer)),
     );
 
+    const gatewayHttpClientLayer = Layer.effect(
+      ManagedGatewayHttpClient,
+      Effect.gen(function* () {
+        const fallback = yield* HttpClient.HttpClient;
+        const { store, sync } = yield* ManagedGatewayRuntime;
+        const baseDomain = yield* managedEndpointZoneName;
+        return makeManagedGatewayHttpClient({
+          fallback,
+          hostnameSuffix: `-g-${relayStageSlug(stage)}.${baseDomain}`,
+          dispatch: (request) =>
+            Effect.gen(function* () {
+              const mapping = yield* store.lookupPublicHostname(new URL(request.url).hostname);
+              if (!mapping) return new Response("Unknown managed environment", { status: 404 });
+              yield* sync(mapping.userId);
+              const response = yield* gatewayNamespace
+                .getByName(mapping.userId)
+                .fetch(HttpServerRequest.fromWeb(request));
+              return HttpServerResponse.toWeb(mutableGatewayBindingResponse(response));
+            }).pipe(Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext)),
+        });
+      }),
+    ).pipe(Layer.provide(gatewayRuntimeLayer));
+
     const runtimeLayer = Layer.empty.pipe(
       Layer.provideMerge(
         Layer.merge(BillingService.layer(billingConfig), MobileRegistrations.layer),
       ),
       Layer.provideMerge(AgentActivityPublisher.layer),
-      Layer.provideMerge(EnvironmentConnector.layer),
+      Layer.provideMerge(EnvironmentConnector.layer.pipe(Layer.provide(gatewayHttpClientLayer))),
       Layer.provideMerge(EnvironmentLinker.layer),
       Layer.provideMerge(EnvironmentPublishSignatures.layer),
       Layer.provideMerge(

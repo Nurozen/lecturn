@@ -14,6 +14,7 @@ import { usePrimarySessionState } from "~/environments/primary";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { cn } from "~/lib/utils";
 import { useEnvironments, usePrimaryEnvironment } from "~/state/environments";
+import { ConnectSubscriptionGate } from "./ConnectSubscriptionGate";
 import { CloudEnvironmentConnectRows } from "./CloudEnvironmentConnectList";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
@@ -234,16 +235,21 @@ function ConfiguredConnectOnboardingDialog() {
             />
           ) : null}
         </DialogHeader>
-        <DialogPanel>
+        <DialogPanel className="space-y-3">
           {step === "publish" ? (
-            <PublishStep
-              exposeEnvironment={exposeEnvironment}
-              publishAgentActivity={publishAgentActivity}
-              disabled={isApplying}
-              operationError={controller.operationError ?? controller.accountMismatchMessage}
-              onExposeEnvironmentChange={setExposeEnvironment}
-              onPublishAgentActivityChange={setPublishAgentActivity}
-            />
+            <>
+              <PublishStep
+                exposeEnvironment={exposeEnvironment}
+                publishAgentActivity={publishAgentActivity}
+                disabled={isApplying}
+                operationError={controller.operationError ?? controller.accountMismatchMessage}
+                onExposeEnvironmentChange={setExposeEnvironment}
+                onPublishAgentActivityChange={setPublishAgentActivity}
+              />
+              {controller.subscriptionRequired ? (
+                <ConnectSubscriptionGate onRefresh={controller.checkSubscription} />
+              ) : null}
+            </>
           ) : (
             <DevicesStep />
           )}
@@ -268,7 +274,11 @@ function ConfiguredConnectOnboardingDialog() {
                   }
                   onClick={() => void applyPublishSelection()}
                 >
-                  {isApplying ? "Enabling…" : "Continue"}
+                  {isApplying
+                    ? "Checking and enabling…"
+                    : controller.subscriptionRequired
+                      ? "Refresh and continue"
+                      : "Continue"}
                 </Button>
               </>
             ) : (

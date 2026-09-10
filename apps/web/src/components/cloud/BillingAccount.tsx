@@ -6,6 +6,7 @@ import { resolveCloudPublicConfig, resolveRelayClerkTokenOptions } from "../../c
 import { configuredHostedAppUrl, isHostedStaticApp } from "../../hostedPairing";
 import { CreditCardIcon, RadioTowerIcon } from "lucide-react";
 import { Button } from "../ui/button";
+import { useConnectSignOut } from "../clerk/useConnectSignOut";
 import { useT3ConnectAuthPrompt } from "../clerk/useT3ConnectAuthPrompt";
 import { createBillingStatusLoader } from "./billingStatusLoader";
 
@@ -42,6 +43,9 @@ function SignedBillingAccount({
 }) {
   const { getToken } = useAuth();
   const clerk = useClerk();
+  const { requestSignOut, signOutDialog } = useConnectSignOut(
+    hosted ? `${window.location.origin}/account/billing` : undefined,
+  );
   const { authPrompt, openAuthPrompt } = useT3ConnectAuthPrompt();
   const { user } = useUser();
   const [status, setStatus] = useState<RelayBillingStatus | null>(null);
@@ -108,6 +112,7 @@ function SignedBillingAccount({
   return (
     <section className="mx-auto w-full max-w-2xl space-y-7 px-6 py-8 sm:px-8">
       {authPrompt}
+      {signOutDialog}
       <header>
         <div className="mb-4 flex size-11 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary">
           <RadioTowerIcon className="size-5" />
@@ -248,14 +253,7 @@ function SignedBillingAccount({
             >
               Refresh status
             </Button>
-            <Button
-              variant="ghost"
-              onClick={() =>
-                void clerk.signOut(
-                  hosted ? { redirectUrl: `${window.location.origin}/account/billing` } : undefined,
-                )
-              }
-            >
+            <Button variant="ghost" onClick={requestSignOut}>
               Sign out
             </Button>
           </div>

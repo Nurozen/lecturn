@@ -623,9 +623,9 @@ export const clientApi = HttpApiBuilder.group(
                 traceId,
               }),
             ManagedAccessUnavailable: (_error, traceId) =>
-              new RelayInternalError({
-                code: "internal_error",
-                reason: "persistence_failed",
+              new RelayEnvironmentLinkUnavailableError({
+                code: "environment_link_unavailable",
+                reason: "managed_endpoint_provisioning_failed",
                 traceId,
               }),
             EnvironmentLinkProofExpired: (_error, traceId) =>
