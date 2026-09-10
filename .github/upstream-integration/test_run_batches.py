@@ -7,7 +7,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location('batches', Path(__file__).with_name('run-batches.py'))
 batches = importlib.util.module_from_spec(spec)
@@ -60,6 +60,53 @@ class GitSafetyTests(unittest.TestCase):
         self.assertEqual(result, (self.accepted, 1, 1))
         with self.assertRaisesRegex(batches.Blocked, 'commits'):
             batches.check_selection(self.repo, self.base, self.accepted, self.target, self.target, 0, 100)
+
+    def test_review_agent_has_network_and_only_external_report_writes(self):
+        runner = batches.Runner.__new__(batches.Runner)
+        runner.lock_fd = None
+        schema = {'required': ['verdict']}
+
+        def launch(argv, cwd, **kwargs):
+            self.assertNotIn('-s', argv)
+            config = [argv[i + 1] for i, arg in enumerate(argv) if arg == '-c']
+            self.assertEqual(config, [
+                'default_permissions="lecturn_review"',
+                'permissions.lecturn_review={filesystem={":root"="read",'
+                + json.dumps(str(self.folder.resolve())) + '="write"},network={enabled=true}}',
+                'shell_environment_policy.set={TMPDIR=' + json.dumps(str(self.folder.resolve()))
+                + ',TMPPREFIX=' + json.dumps(str(self.folder.resolve() / 'zsh')) + '}',
+                'approval_policy="never"',
+            ])
+            self.assertIn('--ephemeral', argv)
+            self.assertNotIn('--add-dir', argv)
+            Path(argv[argv.index('-o') + 1]).write_text('{"verdict":"approve"}')
+
+        with patch.object(batches, 'command', side_effect=launch) as command:
+            result = runner.agent(self.repo, self.folder, 'review', 'Review source', schema, readonly=True)
+        command.assert_called_once()
+        self.assertEqual(result, {'verdict': 'approve'})
+
+    def test_review_agent_rejects_report_write_grant_covering_source(self):
+        runner = batches.Runner.__new__(batches.Runner)
+        for folder in (self.repo, self.repo / 'reports', self.repo.parent):
+            with self.subTest(folder=folder), patch.object(batches, 'command') as command:
+                with self.assertRaisesRegex(batches.Blocked, 'separate from source'):
+                    runner.agent(self.repo, folder, 'review', 'Review source', {}, readonly=True)
+                command.assert_not_called()
+
+    def test_builder_keeps_existing_host_access(self):
+        runner = batches.Runner.__new__(batches.Runner)
+        runner.lock_fd = None
+
+        def launch(argv, cwd, **kwargs):
+            self.assertEqual(argv[argv.index('-s') + 1], 'danger-full-access')
+            self.assertEqual(argv[argv.index('--add-dir') + 1], str(self.folder))
+            self.assertFalse(any('lecturn_review' in arg for arg in argv))
+            Path(argv[argv.index('-o') + 1]).write_text('{"ready":true}')
+
+        with patch.object(batches, 'command', side_effect=launch):
+            self.assertEqual(runner.agent(self.repo, self.folder, 'builder', 'Build', {'required': ['ready']}),
+                             {'ready': True})
 
     def test_resumed_builder_receives_local_branch_and_accepted_provenance(self):
         self.git('branch', '-m', 'stave/example/lecturn')
@@ -153,6 +200,28 @@ class GitSafetyTests(unittest.TestCase):
         with self.assertRaisesRegex(batches.Blocked, 'Remote branch changed'):
             runner.publish(self.folder, m)
         self.assertTrue(self.git('ls-remote', 'origin', m['branch']).startswith(self.accepted))
+
+    def test_publish_preserves_structured_video_urls_and_old_receipts(self):
+        runner, m = self.runner_manifest()
+        runner.commit(self.folder, m)
+        remote = Path(self.temp.name) / 'remote.git'
+        subprocess.run(['git', 'init', '--bare', str(remote)], check=True, capture_output=True)
+        self.git('remote', 'add', 'origin', str(remote))
+        videos = ['https://github.com/user-attachments/assets/video-before',
+                  'https://github.com/user-attachments/assets/video-after']
+        m.update(branch='upstream/batch-test', count=1, reason='UI checkpoint',
+                 build={'summary': 'Fix resizing', 'ui_changed': True, 'before_url': 'before',
+                        'after_url': 'after', 'motion_changed': True, 'video_urls': videos})
+        runner.gh = Mock(side_effect=lambda *args: '[{"number":1,"state":"OPEN"}]'
+                         if args[:2] == ('pr', 'list') else '')
+        runner.publish(self.folder, m)
+        body = (self.folder / 'pr-body.md').read_text()
+        for url in videos:
+            self.assertIn('\n\n' + url + '\n', body)
+        del m['build']['motion_changed']
+        del m['build']['video_urls']
+        runner.publish(self.folder, m)
+        self.assertEqual(m['phase'], 'published')
 
     def test_cleanup_does_not_follow_external_dependency_symlink(self):
         runner = batches.Runner.__new__(batches.Runner)
@@ -249,6 +318,34 @@ class GitSafetyTests(unittest.TestCase):
             batches.command([sys.executable, '-c', 'print("retained evidence", flush=True); raise SystemExit(3)'],
                             self.repo, log=log)
         self.assertIn('retained evidence', log.read_text())
+
+
+class UIEvidenceGates(unittest.TestCase):
+    def build(self):
+        return dict(ui_changed=True, before_url='https://github.com/user-attachments/assets/before',
+                    after_url='https://github.com/user-attachments/assets/after',
+                    motion_changed=True, video_urls=[])
+
+    def test_motion_requires_video_and_ui_evidence(self):
+        build = self.build()
+        with self.assertRaisesRegex(batches.Blocked, 'require UI evidence and a video'):
+            batches.validate_ui_evidence(build)
+        build.update(ui_changed=False, video_urls=['https://github.com/user-attachments/assets/video'])
+        with self.assertRaisesRegex(batches.Blocked, 'require UI evidence and a video'):
+            batches.validate_ui_evidence(build)
+
+    def test_video_urls_must_be_github_attachments(self):
+        build = self.build()
+        build['video_urls'] = ['https://github.com/user-attachments/assets/video', '/local/video.mp4']
+        with self.assertRaisesRegex(batches.Blocked, 'Video evidence is not a GitHub attachment'):
+            batches.validate_ui_evidence(build)
+
+    def test_nonmotion_changes_allow_empty_videos(self):
+        build = self.build()
+        build.update(motion_changed=False, video_urls=[])
+        batches.validate_ui_evidence(build)
+        build.update(ui_changed=False, before_url='', after_url='')
+        batches.validate_ui_evidence(build)
 
 
 class CIGates(unittest.TestCase):

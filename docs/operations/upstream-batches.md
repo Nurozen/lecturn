@@ -14,7 +14,13 @@ and package-manager tools on PATH. The controller inherits configured Codex
 model selection and authentication. It does not install or change credentials.
 Builder execution uses the explicitly authorized local host access; worktrees
 isolate source and application state, not credentials or execution. Reviewers
-run read-only. Approval prompts are disabled for these unattended sessions.
+use the `lecturn_review` Codex permission profile: source remains read-only,
+only the separate external report directory is writable, and network access
+allows authenticated evidence retrieval. The installed Codex must support named
+permission profiles. Reviewer shell `TMPDIR` and `TMPPREFIX` use that report
+directory so temporary files and zsh heredocs work without granting global
+temporary-directory writes. Approval prompts are disabled for these unattended
+sessions.
 
 Bootstrap accepted upstream ancestry explicitly after inspecting the prior real
 integration merge and its acceptance on fork main:
@@ -82,14 +88,39 @@ correctness, security, testing, performance, collateral effects and API/migratio
 compatibility. A separate fresh adversarial verifier assesses candidate findings.
 Confirmed findings return to a new builder session; repairs invalidate previous
 checks and both reviews. Refuted findings receive a fresh holistic assessment.
+Each review session is a bounded assignment: it inspects source directly without
+recursively launching another review workflow or requiring an unrelated provider
+subscription. The controller owns the independent review and verification stages.
 A bounded repair limit prevents an unattended loop from silently running forever.
+Hosted CI is expected to be pending during staged pre-PR review; the controller
+requires it on the exact published head before merging.
 
 UI behavior changes require authorized isolated client validation and real
 before/after GitHub attachment URLs. The current operator has authorized browser
-and computer use. Follow `test-t3-app`; never write live T3 state. Screenshots
+and computer use. Motion or timing changes also require short video evidence;
+builders return `motion_changed` and `video_urls` on every round, including
+repairs. The controller requires videos for motion changes and renders their
+actual attachment URLs as separate PR paragraphs. Follow `test-t3-app`; never
+write live T3 state. Screenshots
 are PR evidence, not repository assets. An upload failure leaves the batch
 blocked with evidence retained; the controller cannot substitute a local path
 or claim an image was attached. Reviewers judge whether UI evidence applies.
+
+Builders upload authorized screenshots and videos before PR creation using
+authenticated `gh`; no browser sign-in is required. The trusted
+[`BATCH_PROMPT.md`](../../.github/upstream-integration/BATCH_PROMPT.md) includes
+the upload command for `https://uploads.github.com/user-attachments/assets`,
+using the destination repository's numeric ID from `gh api repos/OWNER/REPO`.
+This is the endpoint used by the
+[GitHub CLI attachment client](https://github.com/cli/cli/blob/v2.100.0/internal/attachments/client.go).
+Keep each upload's JSON receipt, actual returned URL and file SHA-256 with the
+external evidence. Builders return URLs for review and never create or edit
+PRs. Builders and reviewers verify authenticated retrieval with `gh api` and
+matching SHA-256 hashes. Unlinked pre-PR assets can return anonymous HTTP 404;
+that response alone does not prove upload failure. For an already-created PR,
+an authorized operator can prefer
+[`gh pr edit --attach`](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli)
+when the installed CLI supports it; this does not change the builder boundary.
 
 The controller binds the commit to the approved tree and exact parent list.
 It publishes one unique branch, creates or updates its one PR, and waits for
