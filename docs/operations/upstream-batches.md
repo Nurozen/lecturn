@@ -88,6 +88,9 @@ correctness, security, testing, performance, collateral effects and API/migratio
 compatibility. A separate fresh adversarial verifier assesses candidate findings.
 Confirmed findings return to a new builder session; repairs invalidate previous
 checks and both reviews. Refuted findings receive a fresh holistic assessment.
+Each review session is a bounded assignment: it inspects source directly without
+recursively launching another review workflow or requiring an unrelated provider
+subscription. The controller owns the independent review and verification stages.
 A bounded repair limit prevents an unattended loop from silently running forever.
 Hosted CI is expected to be pending during staged pre-PR review; the controller
 requires it on the exact published head before merging.
