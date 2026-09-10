@@ -3,9 +3,15 @@
 Open a tool-group summary in the conversation to see its individual calls. Each row has an icon;
 select a row to inspect its details. Select the group summary again to collapse it.
 
+A single completed call appears directly in the conversation; select it to open its details.
+Calls that arrive after an assistant response stay visible below that response, followed by
+its copy, fork (when available), and timestamp controls. In a forked conversation, inherited
+calls and response controls remain above the fork divider.
+
 Long groups scroll inside a bounded area without expanding the whole conversation. Faded edges
 indicate more calls above or below. Short groups use only the space they need.
 Collapsing and reopening a group preserves your reading position and any open call details.
+Open details also survive collapsing and reopening the turn's "Worked for" section.
 
 Recognized T3 tools use descriptive labels in both the running summary and individual rows.
 The latest live activity stays in the present tense while the turn continues, such as

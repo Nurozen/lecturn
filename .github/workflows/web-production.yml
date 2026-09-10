@@ -42,17 +42,21 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-          persist-credentials: false
           sparse-checkout: |
             /*
             !/.repos/
           sparse-checkout-cone-mode: false
 
-      - name: Setup Node
+      - name: Setup Vite+ and web dependencies
         if: steps.current.outputs.deploy == 'true'
-        uses: actions/setup-node@v6
+        uses: voidzero-dev/setup-vp@v1
         with:
-          node-version: "24"
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=@t3tools/scripts...
+              - --filter=@t3tools/web...
 
       - name: Build and deploy production web
         if: steps.current.outputs.deploy == 'true'
@@ -60,15 +64,15 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG }}
           TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
           : "${VERCEL_TOKEN:?Missing VERCEL_TOKEN}"
           : "${VERCEL_ORG_ID:?Missing VERCEL_ORG_ID}"
           : "${VERCEL_PROJECT_ID:?Missing VERCEL_PROJECT_ID}"
+          # Explicit --scope requires user-profile access; the project-scoped token
+          # resolves its team/project through VERCEL_ORG_ID and VERCEL_PROJECT_ID.
           npx --yes vercel@59.11.7 deploy --prod --yes --archive=tgz \
             --token "$VERCEL_TOKEN" \
-            --scope "${VERCEL_TEAM_SLUG:-$VERCEL_ORG_ID}" \
             --meta "githubCommitSha=$TESTED_SHA"
           echo "Production web deployed from CI-tested commit $TESTED_SHA." >> "$GITHUB_STEP_SUMMARY"
