@@ -111,6 +111,9 @@ export interface StaveBinaryShape {
    * Memoised; invalidated on settings change or `invalidate`.
    */
   readonly resolve: Effect.Effect<StaveBinaryResolution, StaveBinaryError>;
+  readonly resolveForPath: (
+    configuredPath: string,
+  ) => Effect.Effect<StaveBinaryResolution, StaveBinaryError>;
   /**
    * Same candidate walk WITHOUT `settings.stave.binaryPath` — the
    * settings-independent inventory probe; status and execution use `resolve`.
@@ -346,8 +349,8 @@ export const make = Effect.fn("StaveBinary.make")(function* (options: StaveBinar
     return resolution;
   }).pipe(Effect.withSpan("StaveBinary.resolveRunnable"));
 
-  const resolve: StaveBinaryShape["resolve"] = Effect.gen(function* () {
-    const configuredPath = yield* readConfiguredPath;
+  const resolveForPath = Effect.fn("StaveBinary.resolveForPath")(function* (input: string) {
+    const configuredPath = input.trim();
     if (configuredPath.length === 0) {
       return yield* resolveRunnable;
     }
@@ -362,7 +365,8 @@ export const make = Effect.fn("StaveBinary.make")(function* (options: StaveBinar
     const resolution = yield* resolveConfiguredPath(configuredPath);
     yield* Ref.set(configuredCache, Option.some({ key: configuredPath, resolution }));
     return resolution;
-  }).pipe(Effect.withSpan("StaveBinary.resolve"));
+  });
+  const resolve = readConfiguredPath.pipe(Effect.flatMap(resolveForPath));
 
   const featureCache = yield* Ref.make(
     Option.none<{ readonly key: string; readonly value: StaveFeatures }>(),
@@ -375,7 +379,7 @@ export const make = Effect.fn("StaveBinary.make")(function* (options: StaveBinar
     const cached = yield* Ref.get(featureCache);
     if (Option.isSome(cached) && cached.value.key === key) return cached.value.value;
     const value =
-      selected.source === "bundled" || selected.source === "bootstrap"
+      selected.source === "bundled"
         ? bundledStaveFeatures()
         : makeStaveFeatures(
             "help",
@@ -422,7 +426,14 @@ export const make = Effect.fn("StaveBinary.make")(function* (options: StaveBinar
     Effect.forkScoped,
   );
 
-  return StaveBinary.of({ resolve, resolveRunnable, features, featuresFor, invalidate });
+  return StaveBinary.of({
+    resolve,
+    resolveForPath,
+    resolveRunnable,
+    features,
+    featuresFor,
+    invalidate,
+  });
 });
 
 export const layer = Layer.effect(StaveBinary, make());
@@ -436,6 +447,7 @@ export const layerFixed = (
     StaveBinary,
     StaveBinary.of({
       resolve: Effect.succeed(resolution),
+      resolveForPath: () => Effect.succeed(resolution),
       resolveRunnable: Effect.succeed(resolution),
       features: Effect.succeed(features),
       featuresFor: () => Effect.succeed(features),

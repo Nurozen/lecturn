@@ -1,3 +1,5 @@
+import { StaveRuntimeFence } from "./StaveRuntimeFence.ts";
+import { StaveExecution } from "./StaveExecution.ts";
 import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 import { staveTelemetryEvent } from "./StaveTelemetry.ts";
 /**
@@ -312,6 +314,14 @@ export const make = Effect.fn("StaveOperations.make")(function* (
   limits: StaveOperationsLimits = {},
 ) {
   const cli = yield* StaveCli;
+  const execution = yield* StaveExecution;
+  const withExecution = <A, E, R>(operation: StaveOperation, effect: Effect.Effect<A, E, R>) =>
+    operation.kind === "lifecycleAction" &&
+    (operation.action === "keep" || operation.action === "dismiss")
+      ? effect
+      : execution.withExecution(effect, {
+          writableConfig: operation.kind === "setup" || operation.kind === "registerRepo",
+        });
   const analytics = yield* AnalyticsService;
   const recordOutcome = (
     operation: StaveOperation,
@@ -362,7 +372,10 @@ export const make = Effect.fn("StaveOperations.make")(function* (
 
   // ── keyed mutex ─────────────────────────────────────────────
 
-  const { withSpaceLock } = yield* StaveSpaceLock;
+  const spaceLock = yield* StaveSpaceLock;
+  const runtimeFence = yield* StaveRuntimeFence;
+  const withSpaceLock = <A, E, R>(root: string, effect: Effect.Effect<A, E, R>) =>
+    runtimeFence.withFence(root, spaceLock.withSpaceLock(root, effect));
 
   // ── ring buffer ─────────────────────────────────────────────
 
@@ -1165,6 +1178,19 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           yield* deleteProject(row.projectId);
         return { disposition: "destroyed" as const, workspaceRoot: row.workspaceRoot };
       }
+      // An empty inventory is only evidence about the captured installation.
+      // A durable row from another configuration must remain repairable.
+      const { agentWorkDir } = yield* loadRoots;
+      const liveParent = yield* canonicalPath(agentWorkDir);
+      const archiveParent = yield* canonicalPath(
+        path.join(agentWorkDir, STAVE_ARCHIVE_DIRECTORY_NAME),
+      );
+      const rowParent = yield* canonicalPath(path.dirname(row.workspaceRoot));
+      if (rowParent !== liveParent && rowParent !== archiveParent)
+        return yield* refuse(
+          "invalid_arguments",
+          "This lifecycle record belongs to another Stave configuration. Select its configuration before retrying recovery.",
+        );
       const live = yield* cli.spaceList({});
       const archives = yield* cli.spaceList({ archived: true });
       const matches: Array<{ root: string; archived: boolean; basename: string | null }> = [];
@@ -1709,8 +1735,8 @@ export const make = Effect.fn("StaveOperations.make")(function* (
 
   const reconcileIncomplete = Effect.gen(function* () {
     const rows = yield* lifecycle.listIncomplete().pipe(Effect.mapError(asRefusal));
-    for (const row of rows)
-      yield* withSpaceLock(
+    for (const row of rows) {
+      const reconcile = withSpaceLock(
         row.workspaceRoot,
         Effect.gen(function* () {
           if (row.ownerToken !== null && row.leaseUntil !== null) {
@@ -1792,6 +1818,8 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           );
         }),
       );
+      yield* row.disposition === "destroyed" ? reconcile : execution.withExecution(reconcile);
+    }
   });
 
   // ── dispatch ────────────────────────────────────────────────
@@ -2676,7 +2704,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
 
   const start = (entry: RegistryEntry, operation: StaveOperation) =>
     Effect.forkIn(
-      runOperationBody(entry, operation).pipe(
+      withExecution(operation, runOperationBody(entry, operation)).pipe(
         Effect.exit,
         Effect.flatMap((exit) =>
           recordOutcome(operation, "interactive", exit).pipe(Effect.andThen(finish(entry, exit))),
@@ -3107,11 +3135,12 @@ export const make = Effect.fn("StaveOperations.make")(function* (
   return StaveOperations.of({
     run,
     observe,
-    dryRun,
+    dryRun: (operation) => withExecution(operation, dryRun(operation)),
     withSpaceLock,
     summary,
     reconcileIncomplete,
-    executeLifecycle,
+    executeLifecycle: (operation, revalidate, revalidateParticipant) =>
+      withExecution(operation, executeLifecycle(operation, revalidate, revalidateParticipant)),
   });
 });
 

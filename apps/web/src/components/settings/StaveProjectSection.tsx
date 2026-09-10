@@ -164,7 +164,7 @@ export function StaveProjectSection({
           stave={stave}
         />
       ) : null}
-      {available && !stave.isSaga && stave.kind !== "saga" ? (
+      {available && (!archived || kind !== "saga") ? (
         <StaveSpaceActions
           key={`${environmentId}:${workspaceRoot}:${stave.createdAt ?? "legacy"}`}
           environmentId={environmentId}

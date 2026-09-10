@@ -166,6 +166,12 @@ export const make = Effect.fn("StaveAdmission.make")(function* () {
           ["archiving", "restoring", "destroying", "destroyed"].includes(row.value.disposition)
         )
           return yield* transition();
+        if (Option.isNone(space) && row.value.disposition === "archived")
+          return yield* new StaveArchivedProjectError({
+            projectRoot: input.projectRoot,
+            intent: input.intent,
+            message: "Unarchive this Stave space before starting a thread.",
+          });
         // The manifest's location determines archived state. A completed
         // external restore may legitimately leave an old archived row.
       }

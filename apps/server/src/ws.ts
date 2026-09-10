@@ -1641,60 +1641,16 @@ const makeWsRpcLayer = (
           .refreshStatus(cwd)
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
 
-      // Git RPCs carry only a cwd, so the owning project is the active project
-      // at exactly that root (a primary-repo reverse lookup is a later phase).
-      // A refusal is reported as GitCommandError, the failure these handlers
-      // already return, so clients render its message as-is.
       const admitStaveWorktreeRpc = (
         operation: string,
         intent: Extract<StaveAdmission.StaveAdmissionIntent, "vcs.createWorktree" | "pr.prepare">,
         cwd: string,
       ) =>
-        projectionSnapshotQuery.getActiveProjectByWorkspaceRoot(cwd).pipe(
-          Effect.flatMap((found) =>
-            Option.isSome(found)
-              ? Effect.succeed(found)
-              : projectionSnapshotQuery
-                  .getShellSnapshot()
-                  .pipe(
-                    Effect.map((snapshot) =>
-                      Option.fromUndefinedOr(
-                        snapshot.projects.find((project) => project.stave?.primaryRepoPath === cwd),
-                      ),
-                    ),
-                  ),
-          ),
-          Effect.mapError(
-            (cause) =>
-              new GitCommandError({
-                operation,
-                command: "git",
-                cwd,
-                detail: `failed to resolve the project owning ${cwd}`,
-                cause,
-              }),
-          ),
-          Effect.flatMap(
-            Option.match({
-              onNone: () => Effect.void,
-              onSome: (project) =>
-                staveAdmission
-                  .check({ projectRoot: project.workspaceRoot, projectId: project.id, intent })
-                  .pipe(
-                    Effect.mapError(
-                      (error) =>
-                        new GitCommandError({
-                          operation,
-                          command: "git",
-                          cwd,
-                          detail: error.message,
-                          cause: error,
-                        }),
-                    ),
-                  ),
-            }),
-          ),
-        );
+        checkStaveWorktreeRpcOwnership(projectionSnapshotQuery, staveAdmission, {
+          operation,
+          intent,
+          cwd,
+        });
 
       // Stave reads live in their own module; they share this connection's
       // auth/tracing wrapper so scope enforcement stays in one place.
@@ -3176,4 +3132,59 @@ export const websocketRpcRouteLayer = Layer.unwrap(
       ),
     );
   }),
+);
+
+/** A separately imported primary repository still belongs to its Stave space. */
+export const checkStaveWorktreeRpcOwnership = Effect.fn("checkStaveWorktreeRpcOwnership")(
+  function* (
+    projection: Pick<
+      ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"],
+      "getShellSnapshot" | "getActiveProjectByWorkspaceRoot"
+    >,
+    admission: StaveAdmission.StaveAdmission["Service"],
+    input: {
+      readonly operation: string;
+      readonly intent: "vcs.createWorktree" | "pr.prepare";
+      readonly cwd: string;
+    },
+  ) {
+    const { operation, intent, cwd } = input;
+    const owner = yield* projection.getShellSnapshot().pipe(
+      Effect.flatMap((snapshot) => {
+        const stave = snapshot.projects.find(
+          (project) =>
+            project.stave != null &&
+            (project.stave.primaryRepoPath === cwd || project.workspaceRoot === cwd),
+        );
+        return stave === undefined
+          ? projection.getActiveProjectByWorkspaceRoot(cwd)
+          : Effect.succeed(Option.some(stave));
+      }),
+      Effect.mapError(
+        (cause) =>
+          new GitCommandError({
+            operation,
+            command: "git",
+            cwd,
+            detail: `failed to resolve the project owning ${cwd}`,
+            cause,
+          }),
+      ),
+    );
+    if (Option.isNone(owner)) return;
+    yield* admission
+      .check({ projectRoot: owner.value.workspaceRoot, projectId: owner.value.id, intent })
+      .pipe(
+        Effect.mapError(
+          (error) =>
+            new GitCommandError({
+              operation,
+              command: "git",
+              cwd,
+              detail: error.message,
+              cause: error,
+            }),
+        ),
+      );
+  },
 );

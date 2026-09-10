@@ -1,3 +1,4 @@
+import { StaveExecutionContext } from "./StaveExecutionContext.ts";
 /**
  * StaveConfigReader - Effect service that answers "where does Stave keep its
  * things on this machine": the config file, the root, the bare-repo and
@@ -263,9 +264,16 @@ export const make = Effect.fn("StaveConfigReader.make")(function* (
   );
 
   const loadFromDisk = Effect.fn("StaveConfigReader.loadFromDisk")(function* () {
-    const configPath = yield* resolveConfigPath;
+    const execution = yield* StaveExecutionContext;
+    const configPath = execution?.configPath ?? (yield* resolveConfigPath);
     const fromDefaults = (exists: boolean, document: unknown) =>
-      snapshotFromYaml({ configPath, exists, document, homeDir, path: pathOps });
+      snapshotFromYaml({
+        configPath: execution?.sourceConfigPath ?? configPath,
+        exists,
+        document,
+        homeDir,
+        path: pathOps,
+      });
 
     const raw = yield* fileSystem.readFileString(configPath).pipe(
       Effect.map(Option.some),
@@ -300,13 +308,21 @@ export const make = Effect.fn("StaveConfigReader.make")(function* (
   });
 
   const loadFromStave = Effect.fn("StaveConfigReader.loadFromStave")(function* () {
-    const binary = yield* staveBinary.resolve.pipe(Effect.option);
+    const execution = yield* StaveExecutionContext;
+    const binary = yield* (
+      execution === undefined ? staveBinary.resolve : Effect.succeed(execution.binary)
+    ).pipe(Effect.option);
     if (Option.isNone(binary)) {
       yield* Effect.logDebug("Stave binary unavailable; reading config from disk");
       return Option.none<StaveConfigSnapshot>();
     }
     return yield* staveCli.configShow.pipe(
-      Effect.map((show) => Option.some(snapshotFromConfigShow(show))),
+      Effect.map((show) =>
+        Option.some({
+          ...snapshotFromConfigShow(show),
+          ...(execution === undefined ? {} : { configPath: execution.sourceConfigPath }),
+        }),
+      ),
       Effect.catch((error) =>
         Effect.logDebug("stave config show failed; reading config from disk").pipe(
           Effect.annotateLogs({ code: error.code, verb: error.verb, reason: error.message }),
@@ -324,6 +340,7 @@ export const make = Effect.fn("StaveConfigReader.make")(function* (
   const cache = yield* Ref.make(Option.none<CachedSnapshot>());
 
   const load: StaveConfigReader["Service"]["load"] = Effect.gen(function* () {
+    if ((yield* StaveExecutionContext) !== undefined) return yield* loadUncached();
     const now = yield* Clock.currentTimeMillis;
     const cached = yield* Ref.get(cache);
     if (Option.isSome(cached) && now - cached.value.loadedAtMillis < cacheTtlMillis) {

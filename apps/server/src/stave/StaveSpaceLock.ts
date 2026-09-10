@@ -2,7 +2,7 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 /** Shared process-lifetime fence for Stave admission and filesystem mutations. */
-import { Context, Effect, FileSystem, Layer, Path, Semaphore } from "effect";
+import { Context, Effect, FileSystem, Layer, Option, Path, Semaphore } from "effect";
 
 export class StaveSpaceLock extends Context.Service<
   StaveSpaceLock,
@@ -11,6 +11,11 @@ export class StaveSpaceLock extends Context.Service<
       root: string,
       effect: Effect.Effect<A, E, R>,
     ) => Effect.Effect<A, E, R>;
+    /** Refuse contention without parking a worker needed by the lock holder. */
+    readonly tryWithSpaceLock: <A, E, R>(
+      root: string,
+      effect: Effect.Effect<A, E, R>,
+    ) => Effect.Effect<Option.Option<A>, E, R>;
   }
 >()("t3/stave/StaveSpaceLock") {}
 
@@ -20,24 +25,27 @@ export const layer = Layer.effect(
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const locks = new Map<string, Semaphore.Semaphore>();
+    const getLock = Effect.fn("StaveSpaceLock.getLock")(function* (root: string) {
+      const key = yield* fs.realPath(root).pipe(
+        Effect.catch(() =>
+          fs
+            .realPath(path.dirname(root))
+            .pipe(Effect.map((parent) => path.join(parent, path.basename(root)))),
+        ),
+        Effect.orElseSucceed(() => path.resolve(root)),
+      );
+      let lock = locks.get(key);
+      if (lock === undefined) {
+        lock = Semaphore.makeUnsafe(1);
+        locks.set(key, lock);
+      }
+      return lock;
+    });
     const withSpaceLock = <A, E, R>(root: string, effect: Effect.Effect<A, E, R>) =>
-      Effect.gen(function* () {
-        const key = yield* fs.realPath(root).pipe(
-          Effect.catch(() =>
-            fs
-              .realPath(path.dirname(root))
-              .pipe(Effect.map((parent) => path.join(parent, path.basename(root)))),
-          ),
-          Effect.orElseSucceed(() => path.resolve(root)),
-        );
-        let lock = locks.get(key);
-        if (lock === undefined) {
-          lock = Semaphore.makeUnsafe(1);
-          locks.set(key, lock);
-        }
-        return yield* lock.withPermits(1)(effect);
-      });
-    return StaveSpaceLock.of({ withSpaceLock });
+      getLock(root).pipe(Effect.flatMap((lock) => lock.withPermits(1)(effect)));
+    const tryWithSpaceLock = <A, E, R>(root: string, effect: Effect.Effect<A, E, R>) =>
+      getLock(root).pipe(Effect.flatMap((lock) => lock.withPermitsIfAvailable(1)(effect)));
+    return StaveSpaceLock.of({ withSpaceLock, tryWithSpaceLock });
   }),
 );
 

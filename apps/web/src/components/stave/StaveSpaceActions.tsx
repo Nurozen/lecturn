@@ -44,6 +44,7 @@ export function StaveSpaceActions({
   const unsupported = (kind: StaveOperation["kind"]) =>
     staveOperationUnavailableReason(status.data, kind) !== null;
   const archived = stave.state === "archived";
+  const saga = stave.isSaga || stave.kind === "saga";
   const confirm = (title: string, operation: StaveOperation) =>
     setConfirmation({ title, operation });
   return (
@@ -83,23 +84,29 @@ export function StaveSpaceActions({
               disabled={!bound || unsupported("addRepo")}
               onClick={() => setEditor({ kind: "add" })}
             >
-              Add repo
+              {saga ? "Add reference repo" : "Add repo"}
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!bound || unsupported("syncSpace")}
-              onClick={() => confirm("Sync space", { kind: "syncSpace", ...scope, referencesOnly })}
-            >
-              Sync
-            </Button>
-            <Label className="flex items-center gap-2 text-xs">
-              <Checkbox
-                checked={referencesOnly}
-                onCheckedChange={(value) => setReferencesOnly(value === true)}
-              />
-              References only
-            </Label>
+            {!saga ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!bound || unsupported("syncSpace")}
+                  onClick={() =>
+                    confirm("Sync space", { kind: "syncSpace", ...scope, referencesOnly })
+                  }
+                >
+                  Sync
+                </Button>
+                <Label className="flex items-center gap-2 text-xs">
+                  <Checkbox
+                    checked={referencesOnly}
+                    onCheckedChange={(value) => setReferencesOnly(value === true)}
+                  />
+                  References only
+                </Label>
+              </>
+            ) : null}
           </div>
           {stave.repos.map((repo) => (
             <div
@@ -185,38 +192,40 @@ export function StaveSpaceActions({
               </div>
             ))}
           </div>
-          <div className="flex flex-wrap gap-2 border-t pt-3">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!bound || unsupported("archiveSpace")}
-              onClick={() =>
-                confirm("Archive space", {
-                  kind: "archiveSpace",
-                  ...scope,
-                  force: false,
-                  memory: "keep",
-                })
-              }
-            >
-              Archive space
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive-outline"
-              disabled={!bound || unsupported("destroySpace")}
-              onClick={() =>
-                confirm("Destroy space", {
-                  kind: "destroySpace",
-                  ...scope,
-                  force: false,
-                  memory: "keep",
-                })
-              }
-            >
-              Destroy space
-            </Button>
-          </div>
+          {!saga ? (
+            <div className="flex flex-wrap gap-2 border-t pt-3">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!bound || unsupported("archiveSpace")}
+                onClick={() =>
+                  confirm("Archive space", {
+                    kind: "archiveSpace",
+                    ...scope,
+                    force: false,
+                    memory: "keep",
+                  })
+                }
+              >
+                Archive space
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive-outline"
+                disabled={!bound || unsupported("destroySpace")}
+                onClick={() =>
+                  confirm("Destroy space", {
+                    kind: "destroySpace",
+                    ...scope,
+                    force: false,
+                    memory: "keep",
+                  })
+                }
+              >
+                Destroy space
+              </Button>
+            </div>
+          ) : null}
         </>
       )}
       {editor ? (
@@ -225,6 +234,7 @@ export function StaveSpaceActions({
           scope={scope}
           environmentId={environmentId}
           editor={editor}
+          referencesOnly={saga}
           onClose={() => setEditor(null)}
           onReview={(operation, title) => {
             setEditor(null);
@@ -249,12 +259,14 @@ function SpaceEditDialog({
   environmentId,
   scope,
   editor,
+  referencesOnly,
   onClose,
   onReview,
 }: {
   environmentId: EnvironmentId;
   scope: { workspaceRoot: string; expectedManifestCreatedAt: string | undefined };
   editor: Editor;
+  referencesOnly: boolean;
   onClose: () => void;
   onReview: (operation: StaveOperation, title: string) => void;
 }) {
@@ -267,7 +279,7 @@ function SpaceEditDialog({
       : staveSpaces({ environmentId, input: { includeArchived: false } }),
   );
   const [repo, setRepo] = useState(editor.kind === "retarget" ? editor.repo.name : "");
-  const [mode, setMode] = useState<"edit" | "reference">("edit");
+  const [mode, setMode] = useState<"edit" | "reference">(referencesOnly ? "reference" : "edit");
   const [base, setBase] = useState("");
   const [branch, setBranch] = useState("");
   const [memory, setMemory] = useState(".");
@@ -329,14 +341,15 @@ function SpaceEditDialog({
                     <Select
                       value={mode}
                       onValueChange={(value) => {
-                        if (value === "edit" || value === "reference") setMode(value);
+                        if (value === "reference" || (value === "edit" && !referencesOnly))
+                          setMode(value);
                       }}
                     >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectPopup>
-                        <SelectItem value="edit">Editable</SelectItem>
+                        {!referencesOnly ? <SelectItem value="edit">Editable</SelectItem> : null}
                         <SelectItem value="reference">Reference</SelectItem>
                       </SelectPopup>
                     </Select>

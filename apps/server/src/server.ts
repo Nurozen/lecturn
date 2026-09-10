@@ -1,3 +1,5 @@
+import * as StaveExecution from "./stave/StaveExecution.ts";
+import * as StaveRuntimeFence from "./stave/StaveRuntimeFence.ts";
 import * as StaveMemoryWiring from "./stave/StaveMemoryWiring.ts";
 import { EnvironmentHttpApi } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
@@ -129,7 +131,10 @@ import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts
 import * as ResourceMonitorBinary from "./resourceTelemetry/ResourceMonitorBinary.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
-import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
+import {
+  OrchestrationLayerLive,
+  OrchestrationInfrastructureLayerLive,
+} from "./orchestration/runtimeLayer.ts";
 import {
   clearPersistedServerRuntimeState,
   makePersistedServerRuntimeState,
@@ -432,6 +437,9 @@ const StaveLifecycleLayerLive = StaveLifecycleRepositoryLive.pipe(
   Layer.provide(PersistenceLayerLive),
 );
 const StaveLayerLive = Layer.mergeAll(
+  StaveExecution.layer.pipe(
+    Layer.provide(Layer.mergeAll(StaveBinaryLayerLive, ServerSettingsLayerLive)),
+  ),
   StaveMemoryWiring.layer.pipe(Layer.provide(ServerSettingsLayerLive)),
   StaveReadCache.layer,
   StaveMergeSignal.layer.pipe(
@@ -465,6 +473,14 @@ const StaveLayerLive = Layer.mergeAll(
       Layer.mergeAll(StaveCliLayerLive, StaveWorkspaceReaderLayerLive, StaveReadCache.layer),
     ),
   ),
+);
+
+// One fence instance protects providers, terminals and Stave operations. The
+// read-only projection infrastructure avoids a dependency on runtime reactors.
+const StaveRuntimeFenceLayerLive = StaveRuntimeFence.layer.pipe(
+  Layer.provide(OrchestrationInfrastructureLayerLive),
+  Layer.provide(StaveLayerLive),
+  Layer.provide(PersistenceLayerLive),
 );
 
 const AuthLayerLive = EnvironmentAuth.layer.pipe(
@@ -527,7 +543,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(Layer.mergeAll(NativeAppIconResolver.layer, ProjectFaviconResolverLayerLive)),
   // Folded into one step: this pipe is at Effect's 20-argument ceiling. Layer
   // memoisation keeps a single resolver instance for the reader and the rest.
-  Layer.provideMerge(StaveLayerLive),
+  Layer.provideMerge(Layer.mergeAll(StaveLayerLive, StaveRuntimeFenceLayerLive)),
   Layer.provideMerge(ServerEnvironmentLayerLive),
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(ServerSecretStore.layer),

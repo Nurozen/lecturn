@@ -1,3 +1,4 @@
+import * as StaveRuntimeFence from "../src/stave/StaveRuntimeFence.ts";
 import { StaveLifecycleService } from "../src/orchestration/Services/StaveLifecycleService.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeChildProcess from "node:child_process";
@@ -408,6 +409,7 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(orchestrationReactorLayer),
       Layer.provideMerge(providerRegistryLayer),
       Layer.provide(persistenceLayer),
+      Layer.provide(StaveRuntimeFence.layerNoop),
       Layer.provideMerge(StaveWorkspaceReader.layer),
       Layer.provideMerge(RepositoryIdentityResolver.layer),
       Layer.provideMerge(ServerSettingsService.layerTest()),

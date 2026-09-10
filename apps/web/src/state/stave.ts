@@ -205,6 +205,11 @@ export function useStaveSpaceStatus(target: {
       }),
     [target.enabled, target.environmentId, refresh],
   );
+  useEffect(() => {
+    if (atom === EMPTY_SPACE_STATUS_ATOM) return;
+    const timer = setInterval(refresh, 15_000);
+    return () => clearInterval(timer);
+  }, [atom, refresh]);
   return {
     data: Option.getOrNull(AsyncResult.value(result)),
     error: result._tag === "Failure" ? Cause.squash(result.cause) : null,

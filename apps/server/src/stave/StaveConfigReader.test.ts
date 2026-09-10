@@ -54,6 +54,7 @@ const binaryFoundLayer = StaveBinary.layerFixed({
 const binaryMissing = Effect.fail(new StaveBinary.StaveBinaryNotFound({ candidates: ["stave"] }));
 const binaryMissingLayer = Layer.mock(StaveBinary.StaveBinary)({
   resolve: binaryMissing,
+  resolveForPath: () => binaryMissing,
   resolveRunnable: binaryMissing,
   features: Effect.succeed(bundledStaveFeatures()),
   featuresFor: () => Effect.succeed(bundledStaveFeatures()),

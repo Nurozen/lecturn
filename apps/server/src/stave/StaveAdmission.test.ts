@@ -7,7 +7,10 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
-import { StaveLifecycleRepository } from "../persistence/Services/StaveLifecycleRepository.ts";
+import {
+  StaveLifecycleRepository,
+  type StaveLifecycleRow,
+} from "../persistence/Services/StaveLifecycleRepository.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as StaveAdmission from "./StaveAdmission.ts";
 import { STAVE_MANIFEST_FILE_NAME } from "./staveManifest.ts";
@@ -23,6 +26,88 @@ const spaceInfo: StaveProjectInfo = {
   memories: [],
   state: "live",
 };
+
+const archivedRow: StaveLifecycleRow = {
+  projectId: ProjectId.make("archived-project"),
+  workspaceRoot: "/spaces/.archive/alpha",
+  spaceId: "alpha",
+  manifestCreatedAt: "2026-01-01T00:00:00Z",
+  disposition: "archived",
+  ownerToken: null,
+  leaseEpoch: 1,
+  leaseUntil: null,
+  deleteIntentSequence: null,
+  sagaRemoveConfirmed: false,
+  refusalCode: null,
+  refusalMessage: null,
+  anchorAt: null,
+  scheduledAt: null,
+  archiveDeadlineAt: null,
+  archiveBasename: "alpha",
+  updatedAt: "2026-01-01T00:00:00Z",
+  refreshedAt: null,
+};
+
+for (const withProjectId of [false, true]) {
+  it.effect(
+    `refuses an archived space whose old manifest is missing (project id: ${withProjectId})`,
+    () =>
+      Effect.gen(function* () {
+        const error = yield* check({
+          projectRoot: SPACE_ROOT,
+          intent: "thread.turn.start",
+          lockHeld: true,
+          ...(withProjectId ? { projectId: archivedRow.projectId } : {}),
+        }).pipe(Effect.flip);
+        expect(error._tag).toBe("StaveArchivedProjectError");
+      }).pipe(
+        Effect.provide(
+          StaveAdmission.layer.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
+                  load: () => Effect.succeed(Option.none()),
+                }),
+                Layer.mock(StaveLifecycleRepository)({
+                  getByWorkspaceRoot: () =>
+                    Effect.succeed(withProjectId ? Option.none() : Option.some(archivedRow)),
+                  getByProjectId: () => Effect.succeed(Option.some(archivedRow)),
+                }),
+              ),
+            ),
+          ),
+        ),
+      ),
+  );
+}
+
+it.effect("admits a live manifest restored externally despite its stale archived row", () =>
+  check({
+    projectRoot: SPACE_ROOT,
+    projectId: archivedRow.projectId,
+    intent: "thread.turn.start",
+    lockHeld: true,
+  }).pipe(
+    Effect.provide(
+      StaveAdmission.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
+              load: () =>
+                Effect.succeed(
+                  Option.some({ ...spaceInfo, createdAt: archivedRow.manifestCreatedAt! }),
+                ),
+            }),
+            Layer.mock(StaveLifecycleRepository)({
+              getByWorkspaceRoot: () => Effect.succeed(Option.none()),
+              getByProjectId: () => Effect.succeed(Option.some(archivedRow)),
+            }),
+          ),
+        ),
+      ),
+    ),
+  ),
+);
 
 /** Reader that knows exactly one space and counts every manifest read. */
 const makeRecordingReader = (loads: string[]) =>

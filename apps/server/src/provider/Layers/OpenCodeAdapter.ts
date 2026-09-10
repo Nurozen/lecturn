@@ -2488,41 +2488,47 @@ export function makeOpenCodeAdapter(
               });
               const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
               if (mcpSession && !server.external) {
-                yield* runOpenCodeSdk("mcp.add", () =>
-                  client.mcp.add({
-                    name: "t3-code",
-                    config: {
-                      type: "remote",
-                      url: mcpSession.endpoint,
-                      headers: {
-                        Authorization: mcpSession.authorizationHeader,
+                yield* runOpenCodeSdk("mcp.add", (signal) =>
+                  client.mcp.add(
+                    {
+                      name: "t3-code",
+                      config: {
+                        type: "remote",
+                        url: mcpSession.endpoint,
+                        headers: {
+                          Authorization: mcpSession.authorizationHeader,
+                        },
+                        oauth: false,
                       },
-                      oauth: false,
                     },
-                  }),
-                );
+                    { signal },
+                  ),
+                ).pipe(Effect.timeout("10 seconds"), Effect.interruptible);
               }
               const memory = yield* (options?.staveMemoryWiring ?? noopStaveMemoryWiring).resolve(
                 directory,
               );
               if (memory.state === "configured" && !server.external) {
                 yield* Effect.acquireRelease(
-                  runOpenCodeSdk("mcp.add", () =>
-                    client.mcp.add({
-                      name: "context-marmot",
-                      directory,
-                      config: {
-                        type: "local",
-                        command: [memory.config.command, ...memory.config.args],
-                        ...(memory.config.env ? { environment: memory.config.env } : {}),
-                        enabled: true,
+                  runOpenCodeSdk("mcp.add", (signal) =>
+                    client.mcp.add(
+                      {
+                        name: "context-marmot",
+                        directory,
+                        config: {
+                          type: "local",
+                          command: [memory.config.command, ...memory.config.args],
+                          ...(memory.config.env ? { environment: memory.config.env } : {}),
+                          enabled: true,
+                        },
                       },
-                    }),
-                  ),
+                      { signal },
+                    ),
+                  ).pipe(Effect.timeout("10 seconds"), Effect.interruptible),
                   () =>
-                    runOpenCodeSdk("mcp.disconnect", () =>
-                      client.mcp.disconnect({ name: "context-marmot", directory }),
-                    ).pipe(Effect.ignore),
+                    runOpenCodeSdk("mcp.disconnect", (signal) =>
+                      client.mcp.disconnect({ name: "context-marmot", directory }, { signal }),
+                    ).pipe(Effect.timeout("1 second"), Effect.ignore),
                 );
               }
               // Resume: re-adopt the session named by the durable cursor —
@@ -2678,7 +2684,10 @@ export function makeOpenCodeAdapter(
                 openCodeSession: resolved.openCodeSession,
                 created: resolved.created,
               };
-            }).pipe(Effect.provideService(Scope.Scope, sessionScope)),
+            }).pipe(
+              Effect.provideService(Scope.Scope, sessionScope),
+              Effect.onInterrupt(() => Scope.close(sessionScope, Exit.void).pipe(Effect.ignore)),
+            ),
           );
           if (Exit.isFailure(startedExit)) {
             yield* Scope.close(sessionScope, Exit.void).pipe(Effect.ignore);

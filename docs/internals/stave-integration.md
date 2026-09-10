@@ -202,8 +202,8 @@ and reports which source supplied it: `{ path, source, version, commit }` with `
 
 ### `StaveCli`
 
-`apps/server/src/stave/StaveCli.ts` (service `t3/stave/StaveCli`) is the **only** place the
-server spawns `stave`. Every verb is a typed method (`version`, `configShow`, `reposList`,
+`apps/server/src/stave/StaveCli.ts` (service `t3/stave/StaveCli`) owns typed Stave command execution.
+`StaveBinary` separately probes executable versions and command help. Every command is a typed method (`version`, `configShow`, `reposList`,
 `spaceList`, `spaceStatus`, `sagaList`, `sagaStatus`, `memoryProviders`, `memoryList`, and the
 mutation methods `setup`, `reposAdd`, `spaceInit/Create/Add/Remove/Sync/Retarget/Archive/Restore/Destroy`,
 `sagaCreate/Add/Remove/Sync/Archive/Destroy`, `memoryAttach/Detach`); there is no argv
@@ -696,8 +696,9 @@ not slide `scheduled_at`. An explicit lease-checked schedule reset starts or can
 episode. The recurring lifecycle sweep consumes persisted deletion intents.
 
 `StaveSpaceLock` supplies the canonical-root mutex shared by operations and admission.
-The engine rechecks relevant thread commands under that lock immediately before committing,
-closing the normalization-to-dispatch race. Archived roots reject thread starts; leased roots
+The engine tries to acquire that lock without waiting, rejects contention, and rechecks relevant
+thread commands while holding it through commit. A blocked command cannot stall the single
+worker that an operation needs for refresh and quiescence. This closes the normalization-to-dispatch race. Archived roots reject thread starts; leased roots
 reject new work. Internal lifecycle refresh/meta/delete and turn-interrupt commands can complete
 while an operation owns the lock. Generic PR preparation is refused for Stave-owned repos in
 both modes; PR resolution uses the primary repo identity and effective branch. Checkpoint diff
@@ -706,6 +707,9 @@ and revert are explicitly unavailable for spaces.
 Space-scoped edits carry `expectedManifestCreatedAt`; destructive execution refuses missing
 or mismatching incarnations. Archive, restore, and destroy persist intent before quiescing
 provider and terminal sessions, then reconcile live and archived roots after the CLI outcome.
+A shared `StaveRuntimeFence` rejects new starts and drains admitted starts under every participant
+root before session enumeration. Provider start/resume and terminal open/restart participate;
+the fence remains held through teardown, including descendant and canonical aliases.
 Restore always uses the exact archive basename. Symlink aliases and nested active projects
 are refused at pre-flight. Reconciliation uses the full manifest timestamp rather than an id
 alone; unreadable or ambiguous matches remain repairable refusals. No operation writes Stave's
@@ -819,7 +823,8 @@ Provider drivers receive this service in the production graph. Codex adds per-se
 `-c mcp_servers.context-marmot.*` arguments with safe TOML value encoding. Cursor and Grok append
 an ACP stdio MCP entry for both new and loaded sessions. OpenCode registers a local MCP entry
 before readiness and disconnects it with the session scope, including failed startup and
-unexpected exit. Existing T3 MCP entries are preserved. External OpenCode servers are excluded:
+unexpected exit. MCP additions have a 10-second bound and Stave disconnection a 1-second bound;
+requests receive abort signals, and interruption still closes the owned server. Existing T3 MCP entries are preserved. External OpenCode servers are excluded:
 the local absolute binary/home configuration is not meaningful on an arbitrary remote server,
 and mutating shared external MCP state would require a separate ownership contract. Claude keeps
 its project cwd and user/project/local settings sources; its SDK test establishes that
@@ -836,7 +841,8 @@ stderr and checking the command's usage and relevant flags. Feature results are 
 invalidated with binary resolution. Cached executables are cheaply checked for file identity,
 modification time, size, and mode; replacement/removal refreshes resolution and help results,
 while unchanged polling does not spawn new probes. Each command gates against features for
-the same selected binary snapshot. Bundled binaries have the known feature set. The CLI boundary
+the same selected binary snapshot. Bundled binaries have the known feature set. Desktop
+bootstrap paths are probed because they may point to developer-installed executables. The CLI boundary
 refuses unsupported requested commands/flags, covering old clients and the automatic sweep as
 well as web controls. Windows candidates use `.exe` and do not require POSIX executable bits;
 `.cmd` and `.bat` wrappers receive an explicit unsupported diagnostic. CLI notes stay verbatim in
@@ -849,3 +855,20 @@ output into analytics. Interactive events are recorded once for a new operation'
 outcome; observing or attaching to that operation does not record again. Automatic lifecycle
 execution records once at its own completion boundary. Delivery uses the existing AnalyticsService
 and its opt-out behavior. This guarantee concerns analytics properties, not every diagnostic log.
+
+## Operation execution configuration
+
+`StaveExecution` captures one settings selection and executable for an operation. Workspace
+operations read a private configuration snapshot for preflight, CLI commands, and reconciliation,
+so switching the configured root mid-operation cannot redirect a mutation by space id to another
+installation. The temporary directory/file use restrictive permissions and are removed with the
+operation scope. Configuration reads bypass their shared cache under that execution context,
+while diagnostics retain the original configuration path. Setup and repo registration retain the
+captured original file because those operations intentionally write configuration. Metadata-only
+Keep and Dismiss require neither a binary nor a configuration snapshot.
+
+Recovery verifies that a journaled workspace belongs directly to the selected agent-work or
+archive directory before interpreting its CLI inventory. A row belonging to another configured
+installation remains a refusal with its project intact. Already-recorded destruction and empty
+recovery do not require binary/config capture, so metadata cleanup still works when Stave is
+unavailable.

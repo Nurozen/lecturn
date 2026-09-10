@@ -1,3 +1,4 @@
+import * as StaveRuntimeFence from "../src/stave/StaveRuntimeFence.ts";
 import type { ProviderRuntimeEvent } from "@t3tools/contracts";
 import { ProviderDriverKind, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts/settings";
@@ -92,6 +93,7 @@ const makeIntegrationFixture = (options?: { readonly analytics?: Layer.Layer<Ana
     );
 
     const shared = Layer.mergeAll(
+      StaveRuntimeFence.layerNoop,
       directoryLayer,
       Layer.succeed(ProviderAdapterRegistry, registry),
       ServerConfig.layerTest(cwd, cwd).pipe(Layer.provide(NodeServices.layer)),

@@ -1,3 +1,4 @@
+import { StaveExecutionContext } from "./StaveExecutionContext.ts";
 import { missingStaveFeatures } from "./staveFeatures.ts";
 /**
  * StaveCli - the ONLY place Lecturn spawns `stave`.
@@ -882,7 +883,10 @@ export const make = Effect.fn("StaveCli.make")(function* () {
     };
 
     return Effect.gen(function* () {
-      const binary = yield* staveBinary.resolve.pipe(
+      const execution = yield* StaveExecutionContext;
+      const binary = yield* (
+        execution === undefined ? staveBinary.resolve : Effect.succeed(execution.binary)
+      ).pipe(
         Effect.mapError((error) =>
           hostError(
             "binary_missing",
@@ -903,14 +907,17 @@ export const make = Effect.fn("StaveCli.make")(function* () {
             { missing },
           );
       }
-      const settings = yield* serverSettings.getSettings.pipe(
-        Effect.mapError((error) => hostError("unknown", error.message)),
-      );
+      const configPath =
+        execution === undefined
+          ? (yield* serverSettings.getSettings.pipe(
+              Effect.mapError((error) => hostError("unknown", error.message)),
+            )).stave.configPath
+          : execution.configPath;
       const onLine = spec.stream?.onLine;
       const env = passthroughEnv();
       const input: ProcessRunInput = {
         command: binary.path,
-        args: [...staveGlobalArgs(settings.stave.configPath), ...spec.args],
+        args: [...staveGlobalArgs(configPath), ...spec.args],
         stdin: "",
         unsetEnv: [...STAVE_UNSET_ENV],
         ...(env === undefined ? {} : { env }),

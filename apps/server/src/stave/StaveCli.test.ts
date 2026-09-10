@@ -730,6 +730,8 @@ describe("StaveCli spawn failures", () => {
       const missing = Layer.succeed(
         StaveBinary.StaveBinary,
         StaveBinary.StaveBinary.of({
+          resolveForPath: () =>
+            Effect.fail(new StaveBinary.StaveBinaryNotFound({ candidates: [] })),
           features: Effect.succeed(bundledStaveFeatures()),
           featuresFor: () => Effect.succeed(bundledStaveFeatures()),
           resolve: Effect.fail(new StaveBinary.StaveBinaryNotFound({ candidates: ["stave"] })),

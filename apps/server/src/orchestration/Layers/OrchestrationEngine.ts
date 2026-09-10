@@ -151,7 +151,18 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       Effect.andThen(effect),
     );
     return Option.isSome(staveLock)
-      ? staveLock.value.withSpaceLock(input.projectRoot, checked)
+      ? staveLock.value.tryWithSpaceLock(input.projectRoot, checked).pipe(
+          Effect.flatMap((result) =>
+            Option.isSome(result)
+              ? Effect.succeed(result.value)
+              : Effect.fail(
+                  new OrchestrationCommandInvariantError({
+                    commandType: command.type,
+                    detail: "A Stave operation is changing this space. Retry when it finishes.",
+                  }),
+                ),
+          ),
+        )
       : checked;
   };
   const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;

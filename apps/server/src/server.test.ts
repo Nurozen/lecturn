@@ -1,3 +1,13 @@
+import * as Context from "effect/Context";
+import { OrchestrationEngineLive } from "./orchestration/Layers/OrchestrationEngine.ts";
+import { OrchestrationProjectionPipelineLive } from "./orchestration/Layers/ProjectionPipeline.ts";
+import { OrchestrationProjectionSnapshotQueryLive } from "./orchestration/Layers/ProjectionSnapshotQuery.ts";
+import * as ThreadBackgroundLiveness from "./orchestration/ThreadBackgroundLiveness.ts";
+import * as ThreadPlanProgress from "./orchestration/ThreadPlanProgress.ts";
+import { OrchestrationEventStoreLive } from "./persistence/Layers/OrchestrationEventStore.ts";
+import { OrchestrationCommandReceiptRepositoryLive } from "./persistence/Layers/OrchestrationCommandReceipts.ts";
+import * as StaveExecution from "./stave/StaveExecution.ts";
+import * as StaveRuntimeFence from "./stave/StaveRuntimeFence.ts";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -744,6 +754,7 @@ const buildAppUnderTest = (options?: {
     );
     const staveBinaryLayer = Layer.mock(StaveBinary.StaveBinary)({
       resolve: staveBinaryMissing,
+      resolveForPath: () => staveBinaryMissing,
       resolveRunnable: staveBinaryMissing,
       features: Effect.succeed(bundledStaveFeatures()),
       featuresFor: () => Effect.succeed(bundledStaveFeatures()),
@@ -779,7 +790,17 @@ const buildAppUnderTest = (options?: {
 
     const servedRoutesLayer = HttpRouter.serve(
       makeRoutesLayer.pipe(
-        Layer.provide(StaveOperations.layer.pipe(Layer.provide(staveTestProcessRunnerLayer))),
+        Layer.provide(
+          StaveOperations.layer.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                staveTestProcessRunnerLayer,
+                StaveExecution.layerNoop,
+                StaveRuntimeFence.layerNoop,
+              ),
+            ),
+          ),
+        ),
         Layer.provide(serviceLauncherClientLayer),
       ),
       {
@@ -5491,6 +5512,212 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(unknown.code, "invalid_arguments");
         assert.equal(unknown.operationId, "op-missing");
       }
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("stave creation survives its originating socket and reattaches before completion", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const agentWorkDir = yield* fs.makeTempDirectoryScoped({ prefix: "stave-reconnect-" });
+      const spacePath = path.join(agentWorkDir, "reconnect");
+      const core = OrchestrationEngineLive.pipe(
+        Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
+        Layer.provide(OrchestrationProjectionPipelineLive),
+        Layer.provideMerge(ThreadBackgroundLiveness.layer),
+        Layer.provide(ThreadPlanProgress.layer),
+        Layer.provide(OrchestrationEventStoreLive),
+        Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+        Layer.provide(StaveWorkspaceReader.layer),
+        Layer.provide(
+          Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+            resolve: () => Effect.succeed(null),
+          }),
+        ),
+        Layer.provide(SqlitePersistenceMemory),
+        Layer.provide(
+          ServerConfig.ServerConfig.layerTest(agentWorkDir, { prefix: "stave-reconnect-engine-" }),
+        ),
+        Layer.provide(NodeServices.layer),
+      );
+      const context = yield* Layer.build(core);
+      const engine = Context.get(context, OrchestrationEngine.OrchestrationEngineService);
+      const snapshotQuery = Context.get(context, ProjectionSnapshotQuery.ProjectionSnapshotQuery);
+      const manifest = {
+        id: "reconnect",
+        createdAt: "2026-09-01T00:00:00.123456789Z",
+        repos: [],
+        memories: [],
+      };
+      const mutation = { spaceId: manifest.id, spacePath, manifest, notes: ["created"] };
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const reattached = yield* Deferred.make<void>();
+      const calls = yield* Ref.make(0);
+      const creates = yield* Ref.make<
+        Array<Extract<OrchestrationCommand, { type: "project.create" }>>
+      >([]);
+      yield* buildAppUnderTest({
+        layers: {
+          ...staveEnabledLayers,
+          staveConfigReader: {
+            load: Effect.succeed({
+              configPath: path.join(agentWorkDir, "config.yaml"),
+              exists: true,
+              agentWorkDir,
+              repos: [],
+              source: "fs-fallback",
+            }),
+          },
+          staveCli: {
+            spaceCreate: () =>
+              Effect.gen(function* () {
+                yield* Ref.update(calls, (count) => count + 1);
+                yield* Deferred.succeed(entered, undefined);
+                yield* Deferred.await(release);
+                yield* fs.makeDirectory(spacePath);
+                yield* fs.writeFileString(
+                  path.join(spacePath, ".stave.yaml"),
+                  "version: 2\nid: reconnect\ncreatedAt: '2026-09-01T00:00:00.123456789Z'\nrepos: []\nmemories: []\n",
+                );
+                return mutation;
+              }).pipe(Effect.orDie),
+            spaceStatus: () => Effect.succeed({ ...mutation, repos: [], memories: [] }),
+          },
+          projectionSnapshotQuery: snapshotQuery,
+          orchestrationEngine: {
+            ...engine,
+            dispatch: (command) =>
+              Effect.gen(function* () {
+                if (command.type === "project.create")
+                  yield* Ref.update(creates, (rows) => [...rows, command]);
+                return yield* engine.dispatch(command);
+              }),
+          },
+        },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const operation = {
+        kind: "createSpace" as const,
+        spaceId: "reconnect",
+        edits: [],
+        references: [],
+        memory: [],
+        after: [],
+        common: false,
+        includeWeak: false,
+        noLearn: false,
+      };
+      const original = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.staveRunOperation]({ operationId: "op-reconnect", operation }).pipe(
+            Stream.runCollect,
+          ),
+        ),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.raceFirst(
+        Deferred.await(entered),
+        Fiber.join(original).pipe(Effect.flatMap((events) => Effect.die(events))),
+      );
+      // Interrupting the scoped RPC client closes its transport while the CLI is held.
+      yield* Fiber.interrupt(original);
+      assert.equal((yield* Ref.get(creates)).length, 0);
+      const attached = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.staveRunOperation]({ operationId: "op-reconnect", operation }).pipe(
+            Stream.tap(() => Deferred.succeed(reattached, undefined)),
+            Stream.runCollect,
+          ),
+        ),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.raceFirst(
+        Deferred.await(reattached),
+        Fiber.join(attached).pipe(Effect.flatMap((events) => Effect.die(events))),
+      );
+      assert.equal(yield* Ref.get(calls), 1);
+      assert.equal((yield* Ref.get(creates)).length, 0);
+      yield* Deferred.succeed(release, undefined);
+      const events = Array.from(yield* Fiber.join(attached));
+      assert.deepEqual(
+        events.map((event) => event.sequence),
+        events.map((_, index) => index + 1),
+      );
+      const last = events.at(-1);
+      assert.equal(last?.kind, "finished");
+      assert.ok(last?.kind === "finished" && last.result.kind === "createSpace");
+      if (last?.kind !== "finished" || last.result.kind !== "createSpace") return;
+      const projects = yield* Ref.get(creates);
+      assert.equal(projects.length, 1);
+      assert.equal(projects[0]?.workspaceRoot, spacePath);
+      assert.equal(last.result.result.projectId, projects[0]?.projectId);
+      const snapshot = yield* snapshotQuery.getShellSnapshot();
+      assert.equal(snapshot.projects.length, 1);
+      assert.equal(snapshot.projects[0]?.id, last.result.result.projectId);
+      assert.equal(snapshot.projects[0]?.workspaceRoot, spacePath);
+      assert.equal(snapshot.snapshotSequence, last.result.result.sequence);
+      assert.equal(yield* Ref.get(calls), 1);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("Stave primary ownership refuses PR preparation even when imported separately", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "stave-pr-owner-" });
+      const repo = path.join(root, "api");
+      yield* fs.makeDirectory(repo);
+      yield* fs.writeFileString(
+        path.join(root, ".stave.yaml"),
+        "version: 2\nid: owner\ncreatedAt: '2026-09-01T00:00:00Z'\nrepos:\n  - name: api\n    mode: edit\n    path: api\n    branch: stave/owner/api\nmemories: []\n",
+      );
+      const project = makeDefaultOrchestrationReadModel().projects[0]!;
+      const imported = { ...project, id: ProjectId.make("imported-repo"), workspaceRoot: repo };
+      const owner = {
+        ...project,
+        workspaceRoot: root,
+        stave: {
+          spaceId: "owner",
+          state: "live" as const,
+          isSaga: false,
+          repos: [],
+          memories: [],
+          primaryRepoPath: repo,
+        },
+      };
+      const prepares = yield* Ref.make(0);
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.some(imported)),
+            getShellSnapshot: () =>
+              Effect.succeed({
+                snapshotSequence: 0,
+                projects: [imported, owner],
+                threads: [],
+                updatedAt: project.updatedAt,
+              }),
+          },
+          gitManager: {
+            preparePullRequestThread: () =>
+              Ref.update(prepares, (count) => count + 1).pipe(
+                Effect.andThen(Effect.die("Stave PR preparation reached Git")),
+              ),
+          },
+        },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+      for (const mode of ["local", "worktree"] as const) {
+        const error = yield* Effect.flip(
+          Effect.scoped(
+            withWsRpcClient(wsUrl, (client) =>
+              client[WS_METHODS.gitPreparePullRequestThread]({ cwd: repo, reference: "1", mode }),
+            ),
+          ),
+        );
+        assert.equal(error._tag, "GitCommandError");
+        if (error._tag === "GitCommandError") assert.match(error.detail, /Stave/);
+      }
+      assert.equal(yield* Ref.get(prepares), 0);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

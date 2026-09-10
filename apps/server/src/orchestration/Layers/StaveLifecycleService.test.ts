@@ -247,7 +247,10 @@ const harness = Effect.fn(function* (
           yield* Ref.set(projects, []);
         }),
     }),
-    Layer.succeed(StaveSpaceLock, { withSpaceLock: (_root, effect) => effect }),
+    Layer.succeed(StaveSpaceLock, {
+      withSpaceLock: (_root, effect) => effect,
+      tryWithSpaceLock: (_root, effect) => Effect.map(effect, Option.some),
+    }),
     FileSystem.layerNoop({ exists: () => Effect.succeed(true) }),
     Layer.succeed(ServerActivation, Deferred.await(activation)),
   );

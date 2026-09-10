@@ -1,3 +1,11 @@
+import type * as Scope from "effect/Scope";
+import * as Context from "effect/Context";
+import * as Schema from "effect/Schema";
+import * as ServerSettings from "../serverSettings.ts";
+import * as StaveBinary from "./StaveBinary.ts";
+import { layer as cliLive } from "./StaveCli.ts";
+import * as StaveRuntimeFence from "./StaveRuntimeFence.ts";
+import * as StaveExecution from "./StaveExecution.ts";
 import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 import {
   type StaveLifecycleRow,
@@ -183,6 +191,9 @@ interface CliCall {
 }
 
 interface HarnessOptions {
+  readonly executionLayer?: Layer.Layer<StaveExecution.StaveExecution>;
+  readonly cliLayer?: Layer.Layer<StaveCli>;
+  readonly configReaderLayer?: Layer.Layer<StaveConfigReader.StaveConfigReader>;
   /** Replaces the scenario's temp directory (the alias test points at a symlinked root). */
   readonly agentWorkDir?: string;
   readonly configExists?: boolean;
@@ -313,6 +324,8 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
     const layer = layerWith(options.limits ?? {}).pipe(
       Layer.provide(
         Layer.mergeAll(
+          options.executionLayer ?? StaveExecution.layerNoop,
+          StaveRuntimeFence.layerNoop,
           Layer.succeed(
             AnalyticsService,
             AnalyticsService.of({
@@ -323,16 +336,17 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
               flush: Effect.void,
             }),
           ),
-          Layer.mock(StaveCli)({
-            sagaList: Effect.succeed([]),
-            spaceCreate: record("spaceCreate", fakes.spaceCreate),
-            spaceStatus: record("spaceStatus", fakes.spaceStatus),
-            spaceDestroy: record("spaceDestroy", fakes.spaceDestroy),
-            reposAdd: record("reposAdd", fakes.reposAdd),
-            setup: record("setup", fakes.setup),
-            ...options.cliExtra,
-          }),
-          configReader,
+          options.cliLayer ??
+            Layer.mock(StaveCli)({
+              sagaList: Effect.succeed([]),
+              spaceCreate: record("spaceCreate", fakes.spaceCreate),
+              spaceStatus: record("spaceStatus", fakes.spaceStatus),
+              spaceDestroy: record("spaceDestroy", fakes.spaceDestroy),
+              reposAdd: record("reposAdd", fakes.reposAdd),
+              setup: record("setup", fakes.setup),
+              ...options.cliExtra,
+            }),
+          options.configReaderLayer ?? configReader,
           Layer.mock(StaveLifecycleRepository)({
             getByWorkspaceRoot: () => Effect.succeed(Option.none()),
             ...options.lifecycle,
@@ -417,7 +431,7 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
  * resolved options are handed back so a body can reach the gates it built.
  */
 const scenario = <Options extends HarnessOptions, A, E>(
-  options: Options | ((roots: Roots) => Effect.Effect<Options>),
+  options: Options | ((roots: Roots) => Effect.Effect<Options, never, Scope.Scope>),
   body: (harness: Harness, options: Options) => Effect.Effect<A, E, StaveOperations>,
 ) =>
   Effect.gen(function* () {
@@ -1436,6 +1450,167 @@ describe("StaveOperations lifecycle and edits", () => {
         }),
     ),
   );
+  it.effect(
+    "keeps captured config and binary through quiescence, destructive CLI and failure reconciliation",
+    () =>
+      scenario(
+        (roots) =>
+          Effect.gen(function* () {
+            const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+            const rootB = roots.path.join(roots.agentWorkDir, "other", SPACE_ID);
+            yield* roots.fs.makeDirectory(root, { recursive: true }).pipe(Effect.orDie);
+            yield* roots.fs.makeDirectory(rootB, { recursive: true }).pipe(Effect.orDie);
+            const encode = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+            yield* roots.fs
+              .writeFileString(
+                roots.path.join(root, ".stave.yaml"),
+                yield* encode(manifest(SPACE_ID)),
+              )
+              .pipe(Effect.orDie);
+            yield* roots.fs
+              .writeFileString(
+                roots.path.join(rootB, ".stave.yaml"),
+                yield* encode(manifest(SPACE_ID, "2026-09-02T00:00:00Z")),
+              )
+              .pipe(Effect.orDie);
+            const configA = roots.path.join(roots.agentWorkDir, "config-a.yaml");
+            const configB = roots.path.join(roots.agentWorkDir, "config-b.yaml");
+            const config = (work: string) => ({
+              root: roots.agentWorkDir,
+              agentWorkDir: work,
+              bareReposDir: roots.path.join(roots.agentWorkDir, "bare"),
+              repos: {},
+            });
+            const bytesA = yield* encode(config(roots.agentWorkDir));
+            const bytesB = yield* encode(config(roots.path.dirname(rootB)));
+            yield* roots.fs.writeFileString(configA, bytesA).pipe(Effect.orDie);
+            yield* roots.fs.writeFileString(configB, bytesB).pipe(Effect.orDie);
+            const settingsContext = yield* Layer.build(
+              ServerSettings.layerTest({ stave: { configPath: configA, binaryPath: "/binary-a" } }),
+            );
+            const settings = Context.get(settingsContext, ServerSettings.ServerSettingsService);
+            const settingsLayer = Layer.succeed(ServerSettings.ServerSettingsService, settings);
+            const binaryLayer = StaveBinary.layerFixed({
+              path: "/binary-a",
+              source: "settings",
+              version: "0.4.0",
+              commit: null,
+            });
+            const calls: Array<{
+              command: string;
+              configPath: string;
+              verb: string;
+              bytes: string;
+            }> = [];
+            const runner = Layer.mock(ProcessRunner)({
+              run: (input) =>
+                Effect.gen(function* () {
+                  const args = input.args ?? [];
+                  const configPath = args[args.indexOf("--config") + 1]!;
+                  const bytes = yield* roots.fs.readFileString(configPath).pipe(Effect.orDie);
+                  const verb = args
+                    .filter(
+                      (arg, index) => arg !== "--config" && index !== args.indexOf("--config") + 1,
+                    )
+                    .slice(0, 2)
+                    .join(" ");
+                  calls.push({ command: input.command, configPath, verb, bytes });
+                  if (verb === "config show")
+                    return {
+                      ...processOutput(
+                        '{"error":{"code":"unknown","message":"use disk fallback"}}',
+                      ),
+                      code: ChildProcessSpawner.ExitCode(1),
+                    };
+                  if (verb === "space status")
+                    return processOutput(
+                      yield* encode(
+                        statusResult(
+                          SPACE_ID,
+                          bytes === bytesA ? root : rootB,
+                          bytes === bytesA ? CREATED_AT : "2026-09-02T00:00:00Z",
+                        ),
+                      ),
+                    );
+                  if (verb === "space destroy") {
+                    yield* roots.fs
+                      .remove(bytes === bytesA ? root : rootB, { recursive: true })
+                      .pipe(Effect.orDie);
+                    return {
+                      ...processOutput(
+                        '{"error":{"code":"unknown","message":"response lost after disk mutation"}}',
+                      ),
+                      code: ChildProcessSpawner.ExitCode(1),
+                    };
+                  }
+                  if (verb === "saga list" || verb === "space list") return processOutput("[]");
+                  return yield* Effect.die(`Unexpected Stave command: ${verb}`);
+                }).pipe(Effect.orDie),
+            });
+            const cliLayer = cliLive.pipe(
+              Layer.provide(Layer.mergeAll(binaryLayer, settingsLayer, runner)),
+            );
+            const configReaderLayer = StaveConfigReader.layer.pipe(
+              Layer.provide(Layer.mergeAll(binaryLayer, settingsLayer, cliLayer)),
+              Layer.provide(NodeServices.layer),
+            );
+            const executionLayer = StaveExecution.layer.pipe(
+              Layer.provide(Layer.mergeAll(binaryLayer, settingsLayer)),
+              Layer.provide(NodeServices.layer),
+            );
+            const fixture = lifecycleFixture(root);
+            return {
+              root,
+              rootB,
+              calls,
+              bytesA,
+              configA,
+              configB,
+              fixture,
+              cliLayer,
+              configReaderLayer,
+              executionLayer,
+              lifecycle: fixture.service,
+              activeProject: project("p", root),
+              readerLoad: () => Effect.succeed(Option.some(infoFor())),
+              onQuiesce: settings
+                .updateSettings({ stave: { configPath: configB, binaryPath: "/binary-b" } })
+                .pipe(
+                  Effect.andThen(roots.fs.writeFileString(configA, bytesB)),
+                  Effect.asVoid,
+                  Effect.orDie,
+                ),
+            };
+          }).pipe(Effect.orDie),
+        (harness, options) =>
+          Effect.gen(function* () {
+            const ops = yield* StaveOperations;
+            const events = yield* runToEnd(ops, "captured-destroy", {
+              kind: "destroySpace",
+              workspaceRoot: options.root,
+              expectedManifestCreatedAt: CREATED_AT,
+              force: true,
+              memory: "keep",
+            });
+            expect(failedError(events).message).toContain("response lost");
+            expect(options.fixture.row().disposition).toBe("destroyed");
+            expect(yield* harness.fs.exists(options.root)).toBe(false);
+            expect(yield* harness.fs.exists(options.rootB)).toBe(true);
+            expect(options.calls.some((call) => call.verb === "space list")).toBe(true);
+            expect(
+              options.calls.every(
+                (call) => call.command === "/binary-a" && call.bytes === options.bytesA,
+              ),
+            ).toBe(true);
+            const paths = new Set(options.calls.map((call) => call.configPath));
+            expect(paths.size).toBe(1);
+            const captured = options.calls[0]!.configPath;
+            expect(captured).not.toBe(options.configA);
+            expect(captured).not.toBe(options.configB);
+            expect(yield* harness.fs.exists(captured)).toBe(false);
+          }),
+      ),
+  );
   it.effect("journals and quiesces before destroy then marks terminal before deleting", () =>
     scenario(
       (roots) =>
@@ -1530,6 +1705,94 @@ describe("StaveOperations lifecycle and edits", () => {
           ).toBe(true);
         }),
     ),
+  );
+  it.effect("startup preserves a surviving row from another selected configuration", () =>
+    scenario(
+      (roots) =>
+        Effect.gen(function* () {
+          const root = roots.path.join(roots.agentWorkDir, "installation-a", SPACE_ID);
+          yield* roots.fs.makeDirectory(root, { recursive: true }).pipe(Effect.orDie);
+          const fixture = lifecycleFixture(root, "destroying");
+          const inventoryCalls: string[] = [];
+          return {
+            root,
+            fixture,
+            inventoryCalls,
+            lifecycle: fixture.service,
+            activeProject: project("p", root),
+            cliExtra: {
+              spaceList: () =>
+                Effect.sync(() => {
+                  inventoryCalls.push("list");
+                  return [];
+                }),
+            },
+          };
+        }),
+      (harness, options) =>
+        Effect.gen(function* () {
+          yield* (yield* StaveOperations).reconcileIncomplete;
+          expect(options.fixture.row().disposition).toBe("refused");
+          expect(options.fixture.row().refusalMessage).toContain("another Stave configuration");
+          expect(options.fixture.row().workspaceRoot).toBe(options.root);
+          expect(yield* harness.fs.exists(options.root)).toBe(true);
+          expect(options.inventoryCalls).toEqual([]);
+          expect(yield* Ref.get(harness.dispatched)).toEqual([]);
+        }),
+    ),
+  );
+  it.effect(
+    "startup completes already destroyed metadata without an available execution configuration",
+    () =>
+      scenario(
+        (roots) =>
+          Effect.sync(() => {
+            const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+            const fixture = lifecycleFixture(root, "destroyed");
+            const captures: string[] = [];
+            const executionLayer = Layer.succeed(
+              StaveExecution.StaveExecution,
+              StaveExecution.StaveExecution.of({
+                withExecution: () =>
+                  Effect.sync(() => {
+                    captures.push("capture");
+                  }).pipe(
+                    Effect.andThen(
+                      new StaveError({
+                        code: "binary_missing",
+                        message: "binary unavailable",
+                        details: null,
+                        exitCode: null,
+                        stderrTail: null,
+                        verb: "execution",
+                      }),
+                    ),
+                  ),
+              }),
+            );
+            return {
+              root,
+              fixture,
+              captures,
+              executionLayer,
+              lifecycle: fixture.service,
+              activeProject: project("p", root),
+              configExists: false,
+            };
+          }),
+        (harness, options) =>
+          Effect.gen(function* () {
+            yield* (yield* StaveOperations).reconcileIncomplete;
+            expect(options.captures).toEqual([]);
+            expect(options.fixture.row().disposition).toBe("destroyed");
+            expect(
+              (yield* Ref.get(harness.dispatched)).filter(
+                (command) => command.type === "project.delete",
+              ),
+            ).toHaveLength(1);
+            expect(yield* Ref.get(harness.cliCalls)).toEqual([]);
+          }),
+      ),
   );
   it.effect("startup refuses unreadable list rows without deleting the project", () =>
     scenario(
@@ -2944,8 +3207,10 @@ it.effect("revalidates automatic eligibility after quiescence and prevents the d
         yield* roots.fs.makeDirectory(root).pipe(Effect.orDie);
         const fixture = lifecycleFixture(root, "pending_archive");
         let eligible = true;
+        const archiveCalls: string[] = [];
         return {
           root,
+          archiveCalls,
           fixture,
           lifecycle: fixture.service,
           readerLoad: () => Effect.succeed(Option.some(infoFor())),
@@ -2961,7 +3226,14 @@ it.effect("revalidates automatic eligibility after quiescence and prevents the d
                   details: null,
                 }),
           ),
-          cliExtra: { spaceList: () => Effect.succeed([listRow(root)]) },
+          cliExtra: {
+            spaceList: () => Effect.succeed([listRow(root)]),
+            spaceArchive: (input) =>
+              Effect.sync(() => {
+                archiveCalls.push(input.id);
+                throw new Error("archive must not be invoked");
+              }),
+          },
         };
       }),
     (harness, options) =>
@@ -2986,6 +3258,7 @@ it.effect("revalidates automatic eligibility after quiescence and prevents the d
         expect(
           (yield* Ref.get(harness.cliCalls)).filter((call) => call.method === "spaceDestroy"),
         ).toEqual([]);
+        expect(options.archiveCalls).toEqual([]);
         expect(options.fixture.row().disposition).toBe("refused");
       }),
   ),

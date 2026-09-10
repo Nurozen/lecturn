@@ -593,6 +593,30 @@ it.layer(NodeServices.layer)("StaveBinary features and Windows", (it) => {
       assert.equal(runner.calls.length, count * 2);
     }),
   );
+  it.effect(
+    "probes bootstrap binaries because bootstrap also selects developer installations",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* fs.makeTempDirectoryScoped();
+        const selected = yield* writeExecutable(`${root}/gobin/stave`);
+        const runner = makeFakeRunner((input) =>
+          input.args?.[0] === "version"
+            ? versionOutput(STAVE_VERSION_OUTPUT)
+            : versionOutput("unknown command", 1),
+        );
+        const { service } = yield* makeHarness(root, {
+          stavePath: selected,
+          runner,
+          bundledBaseDir: `${root}/no-bundle`,
+        });
+        assert.equal((yield* service.resolve).source, "bootstrap");
+        const features = yield* service.features;
+        assert.equal(features.source, "help");
+        assert.include(features.unsupportedOperations, "destroySpace");
+        assert.isAbove(runner.calls.filter((call) => call.args?.at(-1) === "--help").length, 0);
+      }),
+  );
   it.effect("uses guaranteed bundled capabilities without help subprocesses", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

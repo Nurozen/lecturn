@@ -67,6 +67,10 @@ const runtimeMock = {
     mcpAddCalls: [] as Array<NonNullable<Parameters<OpencodeClient["mcp"]["add"]>[0]>>,
     mcpDisconnectCalls: [] as Array<Parameters<OpencodeClient["mcp"]["disconnect"]>[0]>,
     mcpAddError: null as Error | null,
+    mcpAddImplementation: null as (() => Promise<void>) | null,
+    mcpDisconnectImplementation: null as (() => Promise<void>) | null,
+    mcpAddSignals: [] as AbortSignal[],
+    mcpDisconnectSignals: [] as AbortSignal[],
     sessionCreateError: null as Error | null,
     serverExitCode: null as Effect.Effect<number> | null,
     serverCloseObserved: null as (() => void) | null,
@@ -131,6 +135,10 @@ const runtimeMock = {
     this.state.mcpAddCalls.length = 0;
     this.state.mcpDisconnectCalls.length = 0;
     this.state.mcpAddError = null;
+    this.state.mcpAddImplementation = null;
+    this.state.mcpDisconnectImplementation = null;
+    this.state.mcpAddSignals.length = 0;
+    this.state.mcpDisconnectSignals.length = 0;
     this.state.sessionCreateError = null;
     this.state.serverExitCode = null;
     this.state.serverCloseObserved = null;
@@ -208,7 +216,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
     }),
   connectToOpenCodeServer: ({ serverUrl, serverPassword }) =>
     Effect.gen(function* () {
-      const url = serverUrl ?? "http://127.0.0.1:4301";
+      const url = serverUrl || "http://127.0.0.1:4301";
       // Always register a finalizer so the closeCalls/closeError probes fire;
       // production attaches none for external servers.
       yield* Effect.addFinalizer(() =>
@@ -233,13 +241,23 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
   createOpenCodeSdkClient: ({ baseUrl, serverPassword }) =>
     ({
       mcp: {
-        add: async (input: NonNullable<Parameters<OpencodeClient["mcp"]["add"]>[0]>) => {
+        add: async (
+          input: NonNullable<Parameters<OpencodeClient["mcp"]["add"]>[0]>,
+          options?: { signal?: AbortSignal },
+        ) => {
+          if (options?.signal) runtimeMock.state.mcpAddSignals.push(options.signal);
+          await runtimeMock.state.mcpAddImplementation?.();
           runtimeMock.state.mcpAddCalls.push(input);
           runtimeMock.state.lifecycleCalls.push(`mcp.add:${input.name}`);
           if (runtimeMock.state.mcpAddError) throw runtimeMock.state.mcpAddError;
           return { data: {} };
         },
-        disconnect: async (input: Parameters<OpencodeClient["mcp"]["disconnect"]>[0]) => {
+        disconnect: async (
+          input: Parameters<OpencodeClient["mcp"]["disconnect"]>[0],
+          options?: { signal?: AbortSignal },
+        ) => {
+          if (options?.signal) runtimeMock.state.mcpDisconnectSignals.push(options.signal);
+          await runtimeMock.state.mcpDisconnectImplementation?.();
           runtimeMock.state.mcpDisconnectCalls.push(input);
           runtimeMock.state.lifecycleCalls.push(`mcp.disconnect:${input.name}`);
           return { data: true };
@@ -582,6 +600,115 @@ const makeStaveTestAdapter = (resolution: StaveMemoryResolution, external = fals
   );
 
 it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
+  it.effect("bounds a held Stave MCP disconnect and still closes the owned server", () =>
+    Effect.gen(function* () {
+      const adapter = yield* makeStaveTestAdapter(configuredStaveMemory);
+      const threadId = asThreadId("stave-held-disconnect");
+      yield* adapter.startSession({
+        threadId,
+        cwd: "/workspace/stave",
+        runtimeMode: "full-access",
+      });
+      const requested = promiseWithResolvers<void>();
+      runtimeMock.state.mcpDisconnectImplementation = async () => {
+        requested.resolve(undefined);
+        await new Promise<void>(() => {});
+      };
+      const stop = yield* adapter.stopSession(threadId).pipe(Effect.forkChild);
+      yield* Effect.promise(() => requested.promise);
+      yield* advanceTestClock(999);
+      NodeAssert.deepEqual(runtimeMock.state.closeCalls, []);
+      yield* advanceTestClock(1);
+      yield* Fiber.join(stop);
+      NodeAssert.equal(runtimeMock.state.mcpDisconnectSignals[0]?.aborted, true);
+      NodeAssert.deepEqual(runtimeMock.state.closeCalls, ["http://127.0.0.1:4301"]);
+    }),
+  );
+  it.effect("bounds a held Stave MCP acquisition and forwards cancellation", () =>
+    Effect.gen(function* () {
+      const adapter = yield* makeStaveTestAdapter(configuredStaveMemory);
+      const requested = promiseWithResolvers<void>();
+      runtimeMock.state.mcpAddImplementation = async () => {
+        requested.resolve(undefined);
+        await new Promise<void>(() => {});
+      };
+      const start = yield* adapter
+        .startSession({
+          threadId: asThreadId("stave-held-add"),
+          cwd: "/workspace/stave",
+          runtimeMode: "full-access",
+        })
+        .pipe(Effect.exit, Effect.forkChild);
+      yield* Effect.promise(() => requested.promise);
+      yield* advanceTestClock(10_000);
+      NodeAssert.equal((yield* Fiber.join(start))._tag, "Failure");
+      NodeAssert.equal(runtimeMock.state.mcpAddSignals[0]?.aborted, true);
+      NodeAssert.deepEqual(runtimeMock.state.closeCalls, ["http://127.0.0.1:4301"]);
+    }),
+  );
+  it.effect("interrupted MCP acquisition releases startup before its deadline", () =>
+    Effect.gen(function* () {
+      const adapter = yield* makeStaveTestAdapter(configuredStaveMemory);
+      const requested = promiseWithResolvers<void>();
+      runtimeMock.state.mcpAddImplementation = async () => {
+        requested.resolve(undefined);
+        await new Promise<void>(() => {});
+      };
+      const start = yield* adapter
+        .startSession({
+          threadId: asThreadId("stave-cancel-add"),
+          cwd: "/workspace/stave",
+          runtimeMode: "full-access",
+        })
+        .pipe(Effect.forkChild);
+      yield* Effect.promise(() => requested.promise);
+      yield* Fiber.interrupt(start);
+      NodeAssert.equal(runtimeMock.state.mcpAddSignals[0]?.aborted, true);
+      NodeAssert.deepEqual(runtimeMock.state.closeCalls, ["http://127.0.0.1:4301"]);
+      NodeAssert.deepEqual(runtimeMock.state.mcpDisconnectCalls, []);
+      NodeAssert.equal(runtimeMock.state.lifecycleCalls.includes("session.create"), false);
+    }),
+  );
+
+  it.effect("bounds T3 MCP registration before Stave or session startup", () =>
+    Effect.gen(function* () {
+      const threadId = asThreadId("t3-held-mcp-add");
+      McpProviderSession.setMcpProviderSession({
+        environmentId: EnvironmentId.make("mcp-timeout-environment"),
+        threadId,
+        providerSessionId: "mcp-timeout-session",
+        providerInstanceId: ProviderInstanceId.make("opencode"),
+        endpoint: "http://127.0.0.1:3999/mcp",
+        authorizationHeader: "Bearer test-token",
+      });
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
+      );
+      const requested = promiseWithResolvers<void>();
+      runtimeMock.state.mcpAddImplementation = async () => {
+        requested.resolve(undefined);
+        await new Promise<void>(() => {});
+      };
+      const adapter = yield* makeStaveTestAdapter(configuredStaveMemory);
+      const start = yield* adapter
+        .startSession({
+          threadId,
+          cwd: "/workspace/stave",
+          runtimeMode: "full-access",
+        })
+        .pipe(Effect.exit, Effect.forkChild);
+      yield* Effect.promise(() => requested.promise);
+      yield* advanceTestClock(9_999);
+      NodeAssert.deepEqual(runtimeMock.state.closeCalls, []);
+      yield* advanceTestClock(1);
+      NodeAssert.equal((yield* Fiber.join(start))._tag, "Failure");
+      NodeAssert.equal(runtimeMock.state.mcpAddSignals.length, 1);
+      NodeAssert.equal(runtimeMock.state.mcpAddSignals[0]?.aborted, true);
+      NodeAssert.deepEqual(runtimeMock.state.lifecycleCalls, ["server.close"]);
+      NodeAssert.deepEqual(runtimeMock.state.closeCalls, ["http://127.0.0.1:4301"]);
+    }),
+  );
+
   it.effect(
     "installs Stave memory alongside t3-code before readiness and disconnects on stop",
     () =>

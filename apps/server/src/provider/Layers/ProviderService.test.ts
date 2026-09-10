@@ -60,7 +60,18 @@ import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "../Services/ProviderAdapterRegistry.ts";
 import * as ProviderService from "../Services/ProviderService.ts";
 import * as ProviderSessionDirectory from "../Services/ProviderSessionDirectory.ts";
-import { makeProviderServiceLive } from "./ProviderService.ts";
+import { makeProviderServiceLive as makeProviderServiceLiveImpl } from "./ProviderService.ts";
+import * as StaveRuntimeFence from "../../stave/StaveRuntimeFence.ts";
+import * as FileSystem from "effect/FileSystem";
+const makeProviderServiceLive = (options?: Parameters<typeof makeProviderServiceLiveImpl>[0]) =>
+  makeProviderServiceLiveImpl(options).pipe(
+    Layer.provide(
+      Layer.succeed(
+        StaveRuntimeFence.StaveRuntimeFence,
+        options?.runtimeFence ?? StaveRuntimeFence.noop,
+      ),
+    ),
+  );
 import * as ProviderEventLoggers from "./ProviderEventLoggers.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -2698,4 +2709,110 @@ describe("startSession fork", () => {
       assert.equal(started?.properties?.forked, false);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
+});
+
+describe("Stave provider runtime quiescence", () => {
+  for (const recover of [false, true]) {
+    it.effect(
+      `drains a pending ${recover ? "recovery" : "start"} before root quiescence and refuses replacement starts`,
+      () =>
+        Effect.gen(function* () {
+          const fence = yield* StaveRuntimeFence.makeWithOptions().pipe(
+            Effect.provideService(
+              FileSystem.FileSystem,
+              FileSystem.makeNoop({ realPath: (path) => Effect.succeed(path) }),
+            ),
+          );
+          const codex = makeFakeCodexAdapter();
+          const registry = makeAdapterRegistryMock({ [CODEX_DRIVER]: codex.adapter });
+          const directoryLayer = ProviderSessionDirectoryLive.pipe(
+            Layer.provide(
+              ProviderSessionRuntime.layer.pipe(Layer.provide(SqlitePersistenceMemory)),
+            ),
+          );
+          const providerLayer = makeProviderServiceLive({ runtimeFence: fence }).pipe(
+            Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
+            Layer.provide(directoryLayer),
+            Layer.provide(defaultServerSettingsLayer),
+            Layer.provide(serverConfigTestLayer),
+            Layer.provide(AnalyticsService.layerTest),
+            Layer.provide(
+              Layer.succeed(
+                ProviderEventLoggers.ProviderEventLoggers,
+                ProviderEventLoggers.NoOpProviderEventLoggers,
+              ),
+            ),
+          );
+          yield* Effect.gen(function* () {
+            const provider = yield* ProviderService.ProviderService;
+            const threadId = asThreadId(`stave-pending-${recover}`);
+            const input = {
+              threadId,
+              provider: CODEX_DRIVER,
+              providerInstanceId: codexInstanceId,
+              runtimeMode: "full-access" as const,
+              cwd: "/spaces/one/repo",
+            };
+            const sibling = asThreadId(`stave-sibling-${recover}`);
+            yield* provider.startSession(sibling, {
+              ...input,
+              threadId: sibling,
+              cwd: "/spaces/one-more",
+            });
+            if (recover) {
+              yield* provider.startSession(threadId, input);
+              yield* codex.stopSession(threadId);
+            }
+            codex.stopSession.mockClear();
+            const entered = yield* Deferred.make<void>();
+            const release = yield* Deferred.make<void>();
+            const quiesced = yield* Deferred.make<void>();
+            const keepFence = yield* Deferred.make<void>();
+            const originalStart = codex.startSession.getMockImplementation()!;
+            codex.startSession.mockImplementationOnce((next) =>
+              Deferred.succeed(entered, undefined).pipe(
+                Effect.andThen(Deferred.await(release)),
+                Effect.andThen(originalStart(next)),
+              ),
+            );
+            const pending = yield* (
+              recover
+                ? provider.sendTurn({ threadId, input: "resume" }).pipe(Effect.asVoid)
+                : provider.startSession(threadId, input).pipe(Effect.asVoid)
+            ).pipe(Effect.result, Effect.forkChild);
+            yield* Deferred.await(entered);
+            const cleanup = Effect.gen(function* () {
+              yield* provider.stopSessionsUnder!("/spaces/one");
+              yield* Deferred.succeed(quiesced, undefined);
+              yield* Deferred.await(keepFence);
+            });
+            const teardown = yield* (
+              recover ? fence.withFence("/spaces/one", cleanup) : cleanup
+            ).pipe(Effect.forkChild);
+            yield* Effect.yieldNow;
+            assert.isFalse(yield* Deferred.isDone(quiesced));
+            assert.equal(codex.stopSession.mock.calls.length, 0);
+            const refused = yield* provider
+              .startSession(asThreadId("blocked"), { ...input, threadId: asThreadId("blocked") })
+              .pipe(Effect.result);
+            assert.equal(refused._tag, "Failure");
+            if (refused._tag === "Failure")
+              assert.equal(refused.failure._tag, "ProviderValidationError");
+            yield* Deferred.succeed(release, undefined);
+            yield* Fiber.join(pending);
+            yield* Deferred.await(quiesced);
+            assert.deepEqual(
+              (yield* provider.listSessions()).map((session) => session.threadId),
+              [sibling],
+            );
+            assert.deepEqual(
+              codex.stopSession.mock.calls.map(([id]) => id),
+              [threadId],
+            );
+            yield* Deferred.succeed(keepFence, undefined);
+            yield* Fiber.join(teardown);
+          }).pipe(Effect.provide(providerLayer));
+        }).pipe(Effect.provide(NodeServices.layer)),
+    );
+  }
 });

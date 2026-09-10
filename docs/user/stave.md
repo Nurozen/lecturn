@@ -45,20 +45,21 @@ make a new space from the app, see [Create a space](#create-a-space).
 - **Checkpoints are unavailable.** A space spans several repositories, so per-thread checkpoints
   (and the diff and revert built on them) are off in spaces. Use Git in the editable repo
   instead.
-- **Archived spaces** show as archived in the project's Stave section. Restoring them from the
-  app is coming later; for now use `stave space restore`.
+- **Archived spaces** show as archived in the project's Stave section. Choose **Unarchive**
+  there to review and restore the selected archive before resuming work.
 
 ## The Stave section in project settings
 
 Open **Settings**, select **Projects**, and pick the space. The **Stave space** section is
-read-only; Stave owns everything in it.
+where you can inspect the manifest, edit repos and memory attachments, and review lifecycle
+actions. Stave applies each change after you confirm its plan.
 
 - **Space id**, **Kind** (`space` or `saga`), and **State** (live or archived) come from the
   manifest.
 - **Repos** lists each checkout with its mode, branch, base, and ref. With Stave enabled and
   runnable, the row also shows the live state Stave reports: how many commits the branch is
   ahead of or behind its base, whether the checkout has uncommitted changes, and a warning when a
-  read-only reference checkout has been edited. Live figures refresh every few seconds while the
+  read-only reference checkout has been edited. Live figures refresh every 15 seconds while the
   panel is open.
 - **Memories** lists the memory stores the space owns or has attached, with the provider and,
   when Stave can reach it, a short freshness note such as unpushed changes or stale.
