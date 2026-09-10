@@ -71,6 +71,7 @@ function StaveEnabledSetting() {
       }
       control={
         <Switch
+          data-lecturn-hover
           checked={settings.stave.enabled}
           onCheckedChange={(checked) => updateSettings({ stave: { enabled: Boolean(checked) } })}
           aria-label="Enable Stave"
@@ -257,6 +258,7 @@ function StaveSagaNestingSetting() {
       description="Group member projects under their saga in dependency order in this client's sidebars."
       control={
         <Switch
+          data-lecturn-hover
           checked={enabled}
           onCheckedChange={(checked) => update({ sidebarNestSagas: checked })}
           aria-label="Nest saga members"

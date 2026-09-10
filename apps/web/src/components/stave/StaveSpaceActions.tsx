@@ -100,6 +100,7 @@ export function StaveSpaceActions({
                 </Button>
                 <Label className="flex items-center gap-2 text-xs">
                   <Checkbox
+                    data-lecturn-hover
                     checked={referencesOnly}
                     onCheckedChange={(value) => setReferencesOnly(value === true)}
                   />
@@ -345,12 +346,18 @@ function SpaceEditDialog({
                           setMode(value);
                       }}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger data-lecturn-hover>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectPopup>
-                        {!referencesOnly ? <SelectItem value="edit">Editable</SelectItem> : null}
-                        <SelectItem value="reference">Reference</SelectItem>
+                        {!referencesOnly ? (
+                          <SelectItem data-lecturn-hover value="edit">
+                            Editable
+                          </SelectItem>
+                        ) : null}
+                        <SelectItem data-lecturn-hover value="reference">
+                          Reference
+                        </SelectItem>
                       </SelectPopup>
                     </Select>
                   </Label>
@@ -384,6 +391,7 @@ function SpaceEditDialog({
                   ) : (
                     <Label className="flex items-center gap-2">
                       <Checkbox
+                        data-lecturn-hover
                         checked={linkMemory}
                         onCheckedChange={(value) => setLinkMemory(value === true)}
                       />
@@ -392,6 +400,7 @@ function SpaceEditDialog({
                   )}
                   <Label className="flex items-center gap-2">
                     <Checkbox
+                      data-lecturn-hover
                       checked={noFetch}
                       onCheckedChange={(value) => setNoFetch(value === true)}
                     />

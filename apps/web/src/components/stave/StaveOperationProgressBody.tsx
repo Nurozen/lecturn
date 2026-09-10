@@ -11,6 +11,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { GoldThreadSpinner } from "../ui/gold-thread-spinner";
 import {
   describeOperationError,
   formatPhaseDuration,
@@ -47,7 +48,11 @@ export function StaveOperationProgress({
   return (
     <div className={cn("flex flex-col", compact ? "gap-2" : "gap-3")}>
       {compact ? null : (
-        <p aria-live="polite" className="text-sm font-medium text-foreground">
+        <p
+          aria-live="polite"
+          className="flex items-center gap-3 text-sm font-medium text-foreground"
+        >
+          {state.status === "running" ? <GoldThreadSpinner /> : null}
           {overallStatusLabel(state)}
         </p>
       )}

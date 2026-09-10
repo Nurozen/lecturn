@@ -233,6 +233,7 @@ export function SagaCreateForm(props: {
                   <div key={row.repo} className="flex flex-wrap items-center gap-2">
                     <Label className="min-w-40 gap-1.5 font-normal">
                       <Checkbox
+                        data-lecturn-hover
                         checked={row.mode === "reference"}
                         onCheckedChange={(checked) =>
                           setState({

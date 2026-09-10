@@ -2165,7 +2165,7 @@ body,
       [data-lecturn-thread-surface],
       [data-slot="sidebar-menu-button"],
       [data-lecturn-hover]
-    ):not(:disabled):not([aria-disabled="true"])::after {
+    ):not(:disabled):not([aria-disabled="true"]):not([data-disabled])::after {
     content: "";
     position: absolute;
     pointer-events: none;
@@ -2191,7 +2191,11 @@ body,
       [data-lecturn-thread-surface],
       [data-slot="sidebar-menu-button"],
       [data-lecturn-hover]
-    ):not(:disabled):not([aria-disabled="true"]):is(:hover, :focus-visible)::after {
+    ):not(:disabled):not([aria-disabled="true"]):not([data-disabled]):is(
+      :hover,
+      :focus-visible,
+      [data-highlighted]
+    )::after {
     opacity: 0.8;
     animation: lecturn-thread-arrive 650ms ease-out both;
   }
@@ -2208,7 +2212,24 @@ body,
   }
 }
 
+/* A small, stepped orbit while work is pending: capped at ten updates/second
+   regardless of display refresh rate. The gold tracks and star stay still. */
+.lecturn-thread-orbit {
+  transform-origin: 24px 24px;
+  animation: lecturn-thread-orbit 3.6s steps(36) infinite;
+}
+
+@keyframes lecturn-thread-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .lecturn-thread-orbit {
+    animation: none;
+  }
+
   :is(
     [data-slot="button"],
     [data-lecturn-thread-surface],

@@ -92,6 +92,7 @@ export function SagaSidebarSection({
                 {closed ? <ChevronRightIcon /> : <ChevronDownIcon />}
               </Button>
               <button
+                data-lecturn-hover
                 className="min-w-0 flex-1 truncate text-left text-xs"
                 onClick={() => onOpen(project)}
                 onContextMenu={(event) => {
@@ -129,6 +130,7 @@ export function SagaSidebarSection({
                   )!;
                   return (
                     <button
+                      data-lecturn-hover
                       key={child.group.key}
                       className="flex w-full flex-wrap items-center gap-1 rounded px-1 py-1.5 text-left text-xs hover:bg-accent"
                       onClick={() => onOpen(target)}

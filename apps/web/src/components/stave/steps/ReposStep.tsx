@@ -72,7 +72,7 @@ function RepoRow(props: {
           }}
         >
           {REPO_MODES.map((mode) => (
-            <Toggle key={mode.value} value={mode.value} className="px-2">
+            <Toggle data-lecturn-hover key={mode.value} value={mode.value} className="px-2">
               {mode.label}
             </Toggle>
           ))}
@@ -96,12 +96,17 @@ function RepoRow(props: {
                 if (typeof value === "string") onBase(value);
               }}
             >
-              <SelectTrigger size="sm" className="w-44" aria-label={`Stack ${row.repo} on a space`}>
+              <SelectTrigger
+                data-lecturn-hover
+                size="sm"
+                className="w-44"
+                aria-label={`Stack ${row.repo} on a space`}
+              >
                 <SelectValue>{selectedBase?.label ?? "Stack on space…"}</SelectValue>
               </SelectTrigger>
               <SelectPopup alignItemWithTrigger={false}>
                 {baseOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
+                  <SelectItem data-lecturn-hover key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>
                 ))}
@@ -195,6 +200,7 @@ function RegisterRepoForm(props: {
         />
         <Label className="gap-1.5 font-normal">
           <Checkbox
+            data-lecturn-hover
             checked={form.adopt}
             onCheckedChange={(checked) => setForm({ ...form, adopt: checked === true })}
           />
@@ -247,6 +253,7 @@ export function ReposStep(props: {
         )}
         <Label className="gap-1.5 font-normal">
           <Checkbox
+            data-lecturn-hover
             checked={state.emptySpace}
             onCheckedChange={(checked) =>
               onChange(updateWizardState(state, { emptySpace: checked === true }))
@@ -262,6 +269,7 @@ export function ReposStep(props: {
             Include commonly paired references (-c)
           </Label>
           <Switch
+            data-lecturn-hover
             id="stave-wizard-common"
             size="sm"
             checked={state.common}
@@ -273,6 +281,7 @@ export function ReposStep(props: {
             Include weak tethers
           </Label>
           <Switch
+            data-lecturn-hover
             id="stave-wizard-include-weak"
             size="sm"
             disabled={!state.common}
@@ -287,6 +296,7 @@ export function ReposStep(props: {
             Skip tether learning (--no-learn)
           </Label>
           <Switch
+            data-lecturn-hover
             id="stave-wizard-no-learn"
             size="sm"
             checked={state.noLearn}

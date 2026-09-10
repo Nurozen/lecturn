@@ -354,6 +354,7 @@ function SagaMemberEditor({
           </Label>
           <Label className="flex items-center gap-2">
             <Checkbox
+              data-lecturn-hover
               checked={clearAfter}
               disabled={after.length > 0}
               onCheckedChange={(checked) => setClearAfter(checked === true)}

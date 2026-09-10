@@ -75,7 +75,7 @@ export function IdentityStep(props: {
             }}
           >
             {STAVE_SPACE_KIND_CHIPS.map((chip) => (
-              <Toggle key={chip} value={chip} className="px-2.5 capitalize">
+              <Toggle data-lecturn-hover key={chip} value={chip} className="px-2.5 capitalize">
                 {chip}
               </Toggle>
             ))}

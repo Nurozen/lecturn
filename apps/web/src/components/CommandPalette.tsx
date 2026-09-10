@@ -1369,6 +1369,27 @@ function OpenCommandPaletteDialog(props: {
         },
       ];
 
+      sourceItems.push(
+        ...buildStaveAddProjectItems({
+          environmentId,
+          available: staveAvailable,
+          ...(staveUnsupportedOperations
+            ? { unsupportedOperations: staveUnsupportedOperations }
+            : {}),
+          icons: {
+            "stave-space": <BoxesIcon className={ITEM_ICON_CLASS} />,
+            "stave-saga": <LayersIcon className={ITEM_ICON_CLASS} />,
+          },
+          launch: (source) => {
+            setOpen(false);
+            openStaveWizard({
+              environmentId,
+              kind: source === "stave-space" ? "space" : "saga",
+            });
+          },
+        }),
+      );
+
       const orderedSources: ReadonlyArray<AddProjectRemoteSource> = [
         "url",
         ...sortAddProjectProviderSources(readinessBySource),
@@ -1437,27 +1458,6 @@ function OpenCommandPaletteDialog(props: {
           },
         });
       }
-
-      sourceItems.push(
-        ...buildStaveAddProjectItems({
-          environmentId,
-          available: staveAvailable,
-          ...(staveUnsupportedOperations
-            ? { unsupportedOperations: staveUnsupportedOperations }
-            : {}),
-          icons: {
-            "stave-space": <BoxesIcon className={ITEM_ICON_CLASS} />,
-            "stave-saga": <LayersIcon className={ITEM_ICON_CLASS} />,
-          },
-          launch: (source) => {
-            setOpen(false);
-            openStaveWizard({
-              environmentId,
-              kind: source === "stave-space" ? "space" : "saga",
-            });
-          },
-        }),
-      );
 
       return [{ value: `sources:${environmentId}`, label: "Sources", items: sourceItems }];
     },

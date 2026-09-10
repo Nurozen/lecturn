@@ -61,6 +61,7 @@ export function MemoryStep(props: {
         <div className="flex flex-wrap gap-1.5" aria-label="Chosen memory specs">
           {memory.map((spec) => (
             <Badge
+              data-lecturn-hover
               key={spec}
               variant="outline"
               size="control"

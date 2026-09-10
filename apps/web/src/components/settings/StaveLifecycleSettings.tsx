@@ -36,13 +36,19 @@ export function StaveLifecycleSettings() {
                 update({ stave: { lifecycle: { onProjectDelete: value } } });
             }}
           >
-            <SelectTrigger>
+            <SelectTrigger data-lecturn-hover>
               <SelectValue />
             </SelectTrigger>
             <SelectPopup>
-              <SelectItem value="destroy">Destroy space</SelectItem>
-              <SelectItem value="archive">Archive space</SelectItem>
-              <SelectItem value="keep">Keep space</SelectItem>
+              <SelectItem data-lecturn-hover value="destroy">
+                Destroy space
+              </SelectItem>
+              <SelectItem data-lecturn-hover value="archive">
+                Archive space
+              </SelectItem>
+              <SelectItem data-lecturn-hover value="keep">
+                Keep space
+              </SelectItem>
             </SelectPopup>
           </Select>
         }
@@ -76,14 +82,22 @@ export function StaveLifecycleSettings() {
                 update({ stave: { lifecycle: { onAllThreadsSettled: value } } });
             }}
           >
-            <SelectTrigger>
+            <SelectTrigger data-lecturn-hover>
               <SelectValue />
             </SelectTrigger>
             <SelectPopup>
-              <SelectItem value="archive-after-grace">Archive after grace period</SelectItem>
-              <SelectItem value="archive">Archive immediately</SelectItem>
-              <SelectItem value="suggest">Suggest archiving</SelectItem>
-              <SelectItem value="nothing">Do nothing</SelectItem>
+              <SelectItem data-lecturn-hover value="archive-after-grace">
+                Archive after grace period
+              </SelectItem>
+              <SelectItem data-lecturn-hover value="archive">
+                Archive immediately
+              </SelectItem>
+              <SelectItem data-lecturn-hover value="suggest">
+                Suggest archiving
+              </SelectItem>
+              <SelectItem data-lecturn-hover value="nothing">
+                Do nothing
+              </SelectItem>
             </SelectPopup>
           </Select>
         }
@@ -146,13 +160,19 @@ export function StaveLifecycleSettings() {
                   update({ stave: { lifecycle: { memoryFateOnDestroy: value } } });
               }}
             >
-              <SelectTrigger>
+              <SelectTrigger data-lecturn-hover>
                 <SelectValue />
               </SelectTrigger>
               <SelectPopup>
-                <SelectItem value="keep">Keep</SelectItem>
-                <SelectItem value="contribute">Contribute and keep</SelectItem>
-                <SelectItem value="destroy">Destroy owned memory</SelectItem>
+                <SelectItem data-lecturn-hover value="keep">
+                  Keep
+                </SelectItem>
+                <SelectItem data-lecturn-hover value="contribute">
+                  Contribute and keep
+                </SelectItem>
+                <SelectItem data-lecturn-hover value="destroy">
+                  Destroy owned memory
+                </SelectItem>
               </SelectPopup>
             </Select>
           }
@@ -174,6 +194,7 @@ export function StaveLifecycleSettings() {
         }
         control={
           <Switch
+            data-lecturn-hover
             checked={policy.settleOnSagaMerge}
             aria-label="Settle threads on saga merge"
             onCheckedChange={(value) =>

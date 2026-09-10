@@ -32,15 +32,17 @@ export function SagaStep(props: {
             onChange(setSaga(state, value === NONE ? null : value));
           }}
         >
-          <SelectTrigger size="sm" aria-labelledby="stave-wizard-saga-label">
+          <SelectTrigger data-lecturn-hover size="sm" aria-labelledby="stave-wizard-saga-label">
             <SelectValue>{state.sagaId ?? "None"}</SelectValue>
           </SelectTrigger>
           <SelectPopup alignItemWithTrigger={false}>
-            <SelectItem value={NONE}>None</SelectItem>
+            <SelectItem data-lecturn-hover value={NONE}>
+              None
+            </SelectItem>
             {context.sagas.map((row) => {
               const id = sagaIdOf(row);
               return (
-                <SelectItem key={id} value={id}>
+                <SelectItem data-lecturn-hover key={id} value={id}>
                   {id}
                 </SelectItem>
               );
@@ -62,6 +64,7 @@ export function SagaStep(props: {
               {members.map((member) => (
                 <Label key={member} className="gap-1.5 font-normal">
                   <Checkbox
+                    data-lecturn-hover
                     checked={state.after.includes(member)}
                     onCheckedChange={() => onChange(toggleAfterMember(state, member))}
                   />

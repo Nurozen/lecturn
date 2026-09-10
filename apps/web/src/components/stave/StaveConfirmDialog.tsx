@@ -229,14 +229,20 @@ export function StaveConfirmDialog({
                     setMemory(value);
                 }}
               >
-                <SelectTrigger className="w-44">
+                <SelectTrigger data-lecturn-hover className="w-44">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectPopup>
-                  <SelectItem value="keep">Keep</SelectItem>
-                  <SelectItem value="contribute">Contribute and keep</SelectItem>
+                  <SelectItem data-lecturn-hover value="keep">
+                    Keep
+                  </SelectItem>
+                  <SelectItem data-lecturn-hover value="contribute">
+                    Contribute and keep
+                  </SelectItem>
                   {canDestroyMemory ? (
-                    <SelectItem value="destroy">Destroy owned memory</SelectItem>
+                    <SelectItem data-lecturn-hover value="destroy">
+                      Destroy owned memory
+                    </SelectItem>
                   ) : null}
                 </SelectPopup>
               </Select>
