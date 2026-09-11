@@ -1,6 +1,12 @@
 name: CI
 
 on:
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: Pull request to use for changed-file detection (optional)
+        required: false
+        type: string
   pull_request:
   push:
     branches:
@@ -11,8 +17,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event.pull_request.number || inputs.pull_request_number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || inputs.pull_request_number != '' }}
 
 jobs:
   check:
@@ -202,7 +208,7 @@ jobs:
         id: detect
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pull_request_number }}
           BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -uo pipefail

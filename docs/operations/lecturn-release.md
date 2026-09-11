@@ -12,6 +12,12 @@ The [release runbook](./release.md) describes packaging and publishing. This pag
 
 The workflow uses GitHub-hosted runners and publishes desktop artifacts and the `lecturn` CLI package. Hosted-app, relay, and Clerk configuration comes from repository variables and the production environment. Review `.github/workflows/release.yml` for required configuration before dispatching a release.
 
+## Stable release finalization
+
+After publishing a stable release, finalization opens or reuses a `release/version-<tag>` pull request for the package version bump. It explicitly dispatches the normal CI workflow on that branch because pushes made with `GITHUB_TOKEN` do not start push workflows. The release summary links the pull request; merge it after the required checks pass. Branch protection stays enabled, and publishing does not wait for this bookkeeping PR to merge.
+
+Rerunning finalization succeeds without a PR when `main` already has the released versions. An existing version branch is reused only when its changes and generated file contents match; finalization never force-pushes it. If it has diverged, inspect and reconcile that branch before retrying. CI's optional `pull_request_number` dispatch input lets its native-change detector inspect the PR; without a resolvable diff, native checks run as a precaution.
+
 ## Mobile production builds
 
 `mobile-eas-production.yml` builds both mobile platforms on relevant pushes to `main` and publishes OTA updates only when a finished production binary matches the current platform fingerprint. An existing version, including a queued build, prevents duplicate automatic builds. Native changes without a matching binary require a manual build dispatch even if the app version is unchanged.
