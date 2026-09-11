@@ -26,7 +26,10 @@ class LecturnComposerEditorModule : Module() {
       Prop("lineHeight") { view: LecturnComposerEditorView, lineHeight: Double ->
         view.setLineHeight(lineHeight.toFloat())
       }
-      Prop("contentInsetVertical") { view: LecturnComposerEditorView, contentInsetVertical: Double ->
+      Prop("contentInsetVertical") {
+          view: LecturnComposerEditorView,
+          contentInsetVertical: Double
+        ->
         view.setContentInsetVertical(contentInsetVertical.toInt())
       }
 
