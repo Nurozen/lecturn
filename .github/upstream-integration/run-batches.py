@@ -40,8 +40,8 @@ def write_json(path, value):
         os.close(fd)
 
 
-def command(argv, cwd, *, log=None, stdin=None, allow_failure=False, lock_fd=None):
-    kwargs = dict(cwd=cwd, input=stdin, text=True, stderr=subprocess.STDOUT,
+def command(argv, cwd, *, log=None, stdin=None, allow_failure=False, lock_fd=None, env=None):
+    kwargs = dict(cwd=cwd, input=stdin, text=True, stderr=subprocess.STDOUT, env=env,
                   pass_fds=(() if lock_fd is None else (lock_fd,)))
     if log:
         # Persist incrementally: a long agent run or controller crash must not lose its evidence.
@@ -61,6 +61,50 @@ def command(argv, cwd, *, log=None, stdin=None, allow_failure=False, lock_fd=Non
                 tail = output.read().decode(errors='replace')
         raise Blocked(f'Command failed ({result.returncode}): {argv!r}\n{tail}')
     return result
+
+
+# Agent model policy: every top-level agent (planner, builder, reviewer, verifier, repair,
+# final review) runs on Fable 5.1; any subagents/workers those agents spawn run on Opus 5.
+TOP_MODEL = 'claude-fable-5-1'
+WORKER_MODEL = 'claude-opus-5'
+# Read-only GitHub CLI subcommands a sandboxed reviewer may run outside the OS sandbox: gh is a Go
+# binary that does not trust the sandbox TLS proxy, so it fails inside. Nothing here writes files.
+REVIEW_GH_COMMANDS = ('gh api', 'gh run view', 'gh run list', 'gh pr view', 'gh pr list',
+                      'gh pr checks', 'gh pr diff', 'gh issue view')
+REVIEW_ENVIRONMENT_NOTE = '''Environment: shell commands run in a read-only OS sandbox (source and git data are
+read-only; only your report folder is writable). The gh CLI cannot use the sandbox network proxy, so
+for read-only gh subcommands (api, run view/list, pr view/list/checks/diff, issue view) set the Bash
+tool parameter dangerouslyDisableSandbox to true and run gh as a single plain command: no pipes,
+`;`, `&&` or appended echo (use gh --jq/--json for filtering). Other unsandboxed commands are denied.
+
+'''
+
+
+def path_rule(tool, path):
+    """Claude Code permission rule for one tool under one absolute directory."""
+    return f"{tool}(//{str(path).lstrip('/')}/**)"
+
+
+def agent_result(log_path):
+    """Structured result of a Claude Code stream-json run; the event log is the durable evidence."""
+    result = None
+    with Path(log_path).open(errors='replace') as events:
+        for line in events:
+            if not line.startswith('{'):
+                continue
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if event.get('type') == 'result':
+                result = event
+    require(result is not None, 'Agent produced no result event')
+    require(result.get('subtype') == 'success' and not result.get('is_error'),
+            f"Agent run failed: {result.get('subtype')}")
+    require(TOP_MODEL in (result.get('modelUsage') or {}), f'Agent did not run on the required model {TOP_MODEL}')
+    value = result.get('structured_output')
+    require(isinstance(value, dict), 'Agent returned no structured output')
+    return value
 
 
 def git(repo, *args):
@@ -218,26 +262,46 @@ class Runner:
         return git(self.repo, 'rev-parse', 'origin/main'), git(self.repo, 'rev-parse', 'origin/upstream-mirror')
 
     def agent(self, repo, folder, name, prompt, output_schema, readonly=False):
-        permissions = ['-s', 'danger-full-access', '--add-dir', str(folder)]
+        access = ['--permission-mode', 'bypassPermissions', '--dangerously-skip-permissions',
+                  '--add-dir', str(folder)]
         if readonly:
             source, reports = repo.resolve(), folder.resolve()
             require(source != reports and source not in reports.parents and reports not in source.parents,
                     'Reviewer report directory must be separate from source')
-            permissions = ['-c', 'default_permissions="lecturn_review"', '-c',
-                           'permissions.lecturn_review={filesystem={":root"="read",'
-                           + json.dumps(str(reports)) + '="write"},network={enabled=true}}', '-c',
-                           'shell_environment_policy.set={TMPDIR=' + json.dumps(str(reports))
-                           + ',TMPPREFIX=' + json.dumps(str(reports / 'zsh')) + '}']
+            # Shell runs inside the OS sandbox: the worktree, its git common dir and everything outside
+            # the report folder are read-only; network stays open. Tool permissions allow only read
+            # tools, read-only gh subcommands (unsandboxed, see REVIEW_GH_COMMANDS) and Write/Edit
+            # inside the report folder; anything else is auto-denied in print mode. Subagents
+            # inherit the same mode and sandbox. Rules match the literal path an agent uses, so cover
+            # both the given and the symlink-resolved spelling (macOS /tmp vs /private/tmp).
+            common = Path(git(repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'))
+            report_dirs = sorted({str(folder), str(reports)})
+            source_dirs = sorted({str(repo), str(source), str(common), str(common.resolve())})
+            sandbox = {'sandbox': {'enabled': True, 'autoAllowBashIfSandboxed': True,
+                                   'allowUnsandboxedCommands': True,
+                                   'filesystem': {'denyWrite': source_dirs, 'allowWrite': report_dirs},
+                                   'network': {'allowedDomains': ['*']}}}
+            access = ['--permission-mode', 'default', '--add-dir', *report_dirs,
+                      '--settings', json.dumps(sandbox),
+                      '--allowedTools', 'Read', 'Glob', 'Grep', 'WebFetch', 'Agent',
+                      *[f'Bash({name} *)' for name in REVIEW_GH_COMMANDS],
+                      *[path_rule(tool, d) for d in report_dirs for tool in ('Write', 'Edit')]]
+            prompt = REVIEW_ENVIRONMENT_NOTE + prompt
         schema_path, output_path = folder / f'{name}.schema.json', folder / f'{name}.json'
+        log_path = folder / f'{name}.events.log'
         write_json(schema_path, output_schema)
         (folder / f'{name}.prompt.md').write_text(prompt)
-        # Each exec is a new session; never resume/fork a builder into its reviewer.
-        command(['codex', 'exec', '-C', str(repo), *permissions,
-                 '-c', 'approval_policy="never"',
-                 '--ephemeral', '--json', '--output-schema', str(schema_path),
-                 '-o', str(output_path), '-'], repo, log=folder / f'{name}.events.log',
-                stdin=prompt, lock_fd=self.lock_fd)
-        value = json.loads(output_path.read_text())
+        # Each run is a fresh session; never resume/fork a builder into its reviewer.
+        # --strict-mcp-config: never start MCP servers from the reviewed tree's .mcp.json (upstream
+        # text would otherwise run as host code before any sandbox applies) or from user config.
+        command(['claude', '--print', '--model', TOP_MODEL, *access,
+                 '--output-format', 'stream-json', '--verbose', '--no-session-persistence',
+                 '--strict-mcp-config',
+                 '--json-schema', json.dumps(output_schema)], repo, log=log_path,
+                stdin=prompt, lock_fd=self.lock_fd,
+                env={**os.environ, 'CLAUDE_CODE_SUBAGENT_MODEL': WORKER_MODEL})
+        value = agent_result(log_path)
+        write_json(output_path, value)
         require(set(value) == set(output_schema['required']), 'Incomplete structured agent response')
         return value
 
@@ -484,7 +548,8 @@ transient infrastructure failure that should be rerun. Otherwise return ci_retry
             body += f"\nBefore:\n![Before]({m['build']['before_url']})\n\nAfter:\n![After]({m['build']['after_url']})\n"
         for url in m['build'].get('video_urls', []):
             body += f'\n{url}\n'
-        body += '\nImplemented and independently reviewed by fresh Codex CLI agents using the locally configured model.\n'
+        body += ('\nImplemented and independently reviewed by fresh Claude Code agents '
+                 f'({TOP_MODEL} top-level, {WORKER_MODEL} subagents).\n')
         (folder / 'pr-body.md').write_text(body)
         if prs:
             require(prs[0]['state'] != 'CLOSED', 'PR closed without merge; do not reopen automatically')

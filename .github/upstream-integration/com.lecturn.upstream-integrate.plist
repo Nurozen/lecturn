@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Template only. Install after a verified caught-up run. Substitute absolute
-     paths; __PATH__ must contain the authorized Node, Codex, gh and Stave CLIs.
+     paths; __PATH__ must contain the authorized Node, Claude Code, gh and Stave CLIs.
      Preserve __STATE__ across runs. No bootstrap SHA belongs in the schedule:
      progress.json must already contain verified accepted ancestry. -->
 <plist version="1.0">

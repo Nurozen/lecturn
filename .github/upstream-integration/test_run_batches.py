@@ -84,30 +84,61 @@ class GitSafetyTests(unittest.TestCase):
         with self.assertRaisesRegex(batches.Blocked, 'commits'):
             batches.check_selection(self.repo, self.base, self.accepted, self.target, self.target, 0, 100)
 
-    def test_review_agent_has_network_and_only_external_report_writes(self):
+    def write_events(self, log, value, model=batches.TOP_MODEL):
+        Path(log).write_text('["claude"]\n' + json.dumps({'type': 'system'}) + '\n' + json.dumps(
+            {'type': 'result', 'subtype': 'success', 'is_error': False, 'structured_output': value,
+             'modelUsage': {model: {}}}) + '\n')
+
+    def test_review_agent_is_sandboxed_read_only_with_external_report_writes(self):
         runner = batches.Runner.__new__(batches.Runner)
         runner.lock_fd = None
         schema = {'required': ['verdict']}
+        reports = str(self.folder.resolve())
+        real_command = batches.command
 
         def launch(argv, cwd, **kwargs):
-            self.assertNotIn('-s', argv)
-            config = [argv[i + 1] for i, arg in enumerate(argv) if arg == '-c']
-            self.assertEqual(config, [
-                'default_permissions="lecturn_review"',
-                'permissions.lecturn_review={filesystem={":root"="read",'
-                + json.dumps(str(self.folder.resolve())) + '="write"},network={enabled=true}}',
-                'shell_environment_policy.set={TMPDIR=' + json.dumps(str(self.folder.resolve()))
-                + ',TMPPREFIX=' + json.dumps(str(self.folder.resolve() / 'zsh')) + '}',
-                'approval_policy="never"',
-            ])
-            self.assertIn('--ephemeral', argv)
-            self.assertNotIn('--add-dir', argv)
-            Path(argv[argv.index('-o') + 1]).write_text('{"verdict":"approve"}')
+            if argv[0] == 'git':
+                return real_command(argv, cwd, **kwargs)
+            self.assertEqual(argv[:2], ['claude', '--print'])
+            self.assertEqual(cwd, self.repo)
+            self.assertEqual(argv[argv.index('--model') + 1], 'claude-fable-5-1')
+            self.assertEqual(kwargs['env']['CLAUDE_CODE_SUBAGENT_MODEL'], 'claude-opus-5')
+            self.assertEqual(argv[argv.index('--permission-mode') + 1], 'default')
+            self.assertNotIn('--dangerously-skip-permissions', argv)
+            report_dirs = sorted({str(self.folder), reports})
+            common = Path(self.git('rev-parse', '--path-format=absolute', '--git-common-dir'))
+            source_dirs = sorted({str(self.repo), str(self.repo.resolve()), str(common), str(common.resolve())})
+            self.assertEqual(argv[argv.index('--add-dir') + 1:argv.index('--settings')], report_dirs)
+            sandbox = json.loads(argv[argv.index('--settings') + 1])['sandbox']
+            self.assertTrue(sandbox['enabled'])
+            self.assertTrue(sandbox['autoAllowBashIfSandboxed'])
+            self.assertTrue(sandbox['allowUnsandboxedCommands'])
+            self.assertEqual(sandbox['filesystem'], {'denyWrite': source_dirs, 'allowWrite': report_dirs})
+            self.assertEqual(sandbox['network'], {'allowedDomains': ['*']})
+            tools = argv[argv.index('--allowedTools') + 1:argv.index('--output-format')]
+            self.assertEqual(tools[:5], ['Read', 'Glob', 'Grep', 'WebFetch', 'Agent'])
+            gh_rules = [rule for rule in tools if rule.startswith('Bash(')]
+            self.assertEqual(gh_rules, [f'Bash({name} *)' for name in batches.REVIEW_GH_COMMANDS])
+            self.assertTrue(all(rule.startswith('Bash(gh ') for rule in gh_rules))
+            self.assertNotIn('Bash(gh run download *)', gh_rules)
+            self.assertNotIn('Bash(gh pr checkout *)', gh_rules)
+            self.assertEqual(sorted(tools[5 + len(gh_rules):]), sorted(
+                f"{tool}(//{d.lstrip('/')}/**)" for d in report_dirs for tool in ('Write', 'Edit')))
+            self.assertNotIn('Bash', tools)
+            self.assertTrue(kwargs['stdin'].startswith(batches.REVIEW_ENVIRONMENT_NOTE))
+            self.assertTrue(kwargs['stdin'].endswith('Review source'))
+            self.assertFalse(any(rule.startswith('Write(///') for rule in tools))
+            self.assertIn('--no-session-persistence', argv)
+            self.assertIn('--strict-mcp-config', argv)
+            self.assertEqual(json.loads(argv[argv.index('--json-schema') + 1]), schema)
+            self.write_events(kwargs['log'], {'verdict': 'approve'})
 
         with patch.object(batches, 'command', side_effect=launch) as command:
             result = runner.agent(self.repo, self.folder, 'review', 'Review source', schema, readonly=True)
-        command.assert_called_once()
+        self.assertEqual([call.args[0][0] for call in command.call_args_list].count('claude'), 1)
         self.assertEqual(result, {'verdict': 'approve'})
+        self.assertEqual(json.loads((self.folder / 'review.json').read_text()), {'verdict': 'approve'})
+        self.assertEqual((self.folder / 'review.prompt.md').read_text(), batches.REVIEW_ENVIRONMENT_NOTE + 'Review source')
 
     def test_review_agent_rejects_report_write_grant_covering_source(self):
         runner = batches.Runner.__new__(batches.Runner)
@@ -117,19 +148,56 @@ class GitSafetyTests(unittest.TestCase):
                     runner.agent(self.repo, folder, 'review', 'Review source', {}, readonly=True)
                 command.assert_not_called()
 
-    def test_builder_keeps_existing_host_access(self):
+    def test_builder_runs_unsandboxed_on_top_model_with_opus_subagents(self):
         runner = batches.Runner.__new__(batches.Runner)
         runner.lock_fd = None
 
         def launch(argv, cwd, **kwargs):
-            self.assertEqual(argv[argv.index('-s') + 1], 'danger-full-access')
+            self.assertEqual(argv[argv.index('--model') + 1], 'claude-fable-5-1')
+            self.assertEqual(kwargs['env']['CLAUDE_CODE_SUBAGENT_MODEL'], 'claude-opus-5')
+            self.assertEqual(argv[argv.index('--permission-mode') + 1], 'bypassPermissions')
+            self.assertIn('--dangerously-skip-permissions', argv)
             self.assertEqual(argv[argv.index('--add-dir') + 1], str(self.folder))
-            self.assertFalse(any('lecturn_review' in arg for arg in argv))
-            Path(argv[argv.index('-o') + 1]).write_text('{"ready":true}')
+            self.assertNotIn('--settings', argv)
+            self.assertNotIn('--allowedTools', argv)
+            self.assertEqual(kwargs['stdin'], 'Build')
+            self.assertEqual((self.folder / 'builder.prompt.md').read_text(), 'Build')
+            self.assertEqual(argv[argv.index('--output-format') + 1], 'stream-json')
+            self.assertIn('--strict-mcp-config', argv)
+            self.assertEqual(kwargs['stdin'], 'Build')
+            self.write_events(kwargs['log'], {'ready': True})
 
         with patch.object(batches, 'command', side_effect=launch):
             self.assertEqual(runner.agent(self.repo, self.folder, 'builder', 'Build', {'required': ['ready']}),
                              {'ready': True})
+
+    def test_agent_rejects_incomplete_or_off_model_results(self):
+        runner = batches.Runner.__new__(batches.Runner)
+        runner.lock_fd = None
+        with patch.object(batches, 'command', side_effect=lambda argv, cwd, **kw: self.write_events(kw['log'], {'ready': True}, model='claude-opus-5')):
+            with self.assertRaisesRegex(batches.Blocked, 'required model'):
+                runner.agent(self.repo, self.folder, 'builder', 'Build', {'required': ['ready']})
+        with patch.object(batches, 'command', side_effect=lambda argv, cwd, **kw: self.write_events(kw['log'], {'ready': True, 'extra': 1})):
+            with self.assertRaisesRegex(batches.Blocked, 'Incomplete structured'):
+                runner.agent(self.repo, self.folder, 'builder', 'Build', {'required': ['ready']})
+
+    def test_agent_result_requires_successful_result_event(self):
+        log = self.folder / 'x.events.log'
+        success = {'type': 'result', 'subtype': 'success', 'is_error': False,
+                   'structured_output': {'a': 1}, 'modelUsage': {'claude-fable-5-1': {}}}
+        cases = [
+            ('["claude"]\n' + json.dumps({'type': 'assistant'}) + '\n', 'no result event'),
+            (json.dumps({**success, 'subtype': 'error_max_turns', 'is_error': True}) + '\n', 'failed: error_max_turns'),
+            (json.dumps({**success, 'structured_output': None}) + '\n', 'no structured output'),
+        ]
+        for text, message in cases:
+            log.write_text(text)
+            with self.subTest(message=message), self.assertRaisesRegex(batches.Blocked, message):
+                batches.agent_result(log)
+        # Last result event wins; argv header, non-JSON noise and partial lines are ignored.
+        log.write_text('["claude"]\nnot json\n{broken\n' + json.dumps({**success, 'subtype': 'error', 'is_error': True})
+                       + '\n' + json.dumps(success) + '\n')
+        self.assertEqual(batches.agent_result(log), {'a': 1})
 
     def test_resumed_builder_receives_local_branch_and_accepted_provenance(self):
         self.git('branch', '-m', 'stave/example/lecturn')
