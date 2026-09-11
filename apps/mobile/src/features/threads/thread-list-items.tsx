@@ -1,3 +1,4 @@
+import type { StaveSagaMemberStatus } from "@lecturn/contracts";
 import { useRecyclingState } from "@legendapp/list/react-native";
 import type {
   EnvironmentProject,
@@ -22,6 +23,7 @@ import { HOME_HORIZONTAL_INSET } from "../../lib/layoutMetrics";
 import { relativeTime } from "../../lib/time";
 import { themeColorWithAlpha } from "../../lib/mobileTheme";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
+import { useProject } from "../../state/entities";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import { useThreadPr, type ThreadPr } from "../../state/use-thread-pr";
 import type { HomeGroupDisplayAction } from "../home/homeListItems";
@@ -85,6 +87,10 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
   readonly collapsed: boolean;
   readonly isFirst: boolean;
   readonly groupKey: string;
+  readonly depth?: number;
+  readonly memberStatus?: StaveSagaMemberStatus | null;
+  readonly firstThread?: EnvironmentThreadShell;
+  readonly onSelectThread?: (thread: EnvironmentThreadShell) => void;
   readonly onGroupAction: (key: string, action: HomeGroupDisplayAction) => void;
   /** Project a quick new thread should target; null hides the button. */
   readonly newThreadTarget?: EnvironmentProject | null;
@@ -98,7 +104,7 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
     [groupKey, onGroupAction],
   );
   const handleNewThread = useCallback(() => {
-    if (newThreadTarget) {
+    if (newThreadTarget && newThreadTarget.stave?.state !== "archived") {
       onNewThread?.(newThreadTarget);
     }
   }, [newThreadTarget, onNewThread]);
@@ -115,7 +121,7 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
       className={compact ? "flex-row items-center bg-screen" : "flex-row items-center"}
       style={{
         minHeight: compact ? 44 : 36,
-        paddingLeft: compact ? 20 : 12,
+        paddingLeft: (compact ? 20 : 12) + (props.depth ?? 0) * 18,
         // Compact right padding centers the 20pt plus glyph on the thread
         // rows' trailing chevron column (18 + 13/2 ≈ 24.5 from the edge).
         paddingRight: compact ? 14 : 12,
@@ -123,16 +129,46 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
         paddingTop: props.isFirst ? (compact ? 8 : 4) : compact ? 24 : 20,
       }}
     >
+      {Array.from({ length: props.depth ?? 0 }, (_, level) => (
+        <View
+          key={level}
+          pointerEvents="none"
+          accessible={false}
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: level * 18 + 8,
+            width: 1,
+            backgroundColor: "#b9893f",
+          }}
+        />
+      ))}
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded: !props.collapsed }}
-        accessibilityLabel={`${props.title}, ${props.threadCount} threads`}
+        accessibilityLabel={`${props.collapsed ? "Expand" : "Collapse"} ${props.title}`}
         accessibilityHint={props.collapsed ? "Expands the project" : "Collapses the project"}
-        className={
-          compact ? "flex-1 flex-row items-center gap-2.5" : "flex-1 flex-row items-center gap-2"
-        }
+        className={"flex-row items-center pr-2"}
         hitSlop={{ ...verticalHitSlop, left: compact ? 20 : 12 }}
         onPress={handleToggle}
+      >
+        <Text className="text-foreground-muted">{props.collapsed ? "▸" : "▾"}</Text>
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${props.title}, ${props.threadCount} threads`}
+        accessibilityHint={
+          props.firstThread
+            ? "Opens the most recent project thread"
+            : "Expands or collapses the project"
+        }
+        className="flex-1 flex-row items-center gap-2"
+        hitSlop={verticalHitSlop}
+        onPress={() => {
+          if (props.firstThread && props.onSelectThread) props.onSelectThread(props.firstThread);
+          else handleToggle();
+        }}
       >
         <ProjectFavicon
           environmentId={props.project.environmentId}
@@ -152,6 +188,24 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
         >
           {props.title}
         </Text>
+        {props.project.stave ? (
+          <Text className="max-w-[150px] text-xs text-foreground-tertiary" numberOfLines={2}>
+            {props.project.stave.isSaga ? "Saga" : "Space"} {props.project.stave.spaceId}
+            {props.project.stave.kind && !props.project.stave.isSaga
+              ? ` · ${props.project.stave.kind}`
+              : ""}
+            {` · ${props.memberStatus?.state ?? props.project.stave.state ?? "unknown"}`}
+            {props.memberStatus?.dirty ? " · dirty" : ""}
+            {props.project.notice?.kind === "archive_scheduled" ? " · archive reminder" : ""}
+            {props.project.notice?.kind === "refused" ? " · cleanup needs attention" : ""}
+            {props.project.notice?.kind === "pending_cleanup" ? " · cleanup pending" : ""}
+            {props.memberStatus?.state === "live" &&
+            props.memberStatus.repos.length > 0 &&
+            props.memberStatus.repos.every((repo) => repo.baseHealth === "merged")
+              ? " · merged"
+              : ""}
+          </Text>
+        ) : null}
         <Text
           className={
             compact
@@ -164,7 +218,13 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
       </Pressable>
       {showNewThreadButton ? (
         <Pressable
-          accessibilityLabel={`Create new thread in ${props.title}`}
+          accessibilityLabel={
+            newThreadTarget?.stave?.state === "archived"
+              ? "Unarchive to start a thread"
+              : `Create new thread in ${props.title}`
+          }
+          disabled={newThreadTarget?.stave?.state === "archived"}
+          accessibilityState={{ disabled: newThreadTarget?.stave?.state === "archived" }}
           accessibilityRole="button"
           hitSlop={{ ...verticalHitSlop, left: 10, right: 14 }}
           onPress={handleNewThread}
@@ -458,7 +518,20 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
     onRegenerateThreadTitle,
   } = props;
   const status = resolveThreadStatus(thread);
-  const pr = useThreadPr(thread, props.projectCwd);
+  // The row only receives the project cwd; the shell is needed so Stave
+  // spaces look up PRs on their primary repo rather than the space root.
+  const projectRef = useMemo(
+    () => ({ environmentId: thread.environmentId, projectId: thread.projectId }),
+    [thread.environmentId, thread.projectId],
+  );
+  const project = useProject(projectRef);
+  const prProject = useMemo(
+    () =>
+      project ??
+      (props.projectCwd !== null ? { workspaceRoot: props.projectCwd, stave: null } : null),
+    [project, props.projectCwd],
+  );
+  const pr = useThreadPr(thread, prProject);
   const timestamp = relativeTime(
     thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
   );

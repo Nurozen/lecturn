@@ -69,6 +69,29 @@ describe("openDiffFilePrimaryAction", () => {
     expect(openInEditor).not.toHaveBeenCalled();
   });
 
+  it.each([true, false])(
+    "translates Stave primary-repo paths for viewer context %s",
+    (withThread) => {
+      const openInEditor = vi.fn();
+      openDiffFilePrimaryAction({
+        threadRef: withThread ? THREAD_REF : null,
+        filePath: "src/main.ts",
+        activeCwd: "/work/ticket/repo",
+        repositoryRoot: "/work/ticket/repo",
+        workspaceRoot: "/work/ticket",
+        openInEditor,
+      });
+      if (withThread) {
+        expect(
+          selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
+        ).toMatchObject({ activeSurfaceId: "file:repo/src/main.ts" });
+        expect(openInEditor).not.toHaveBeenCalled();
+      } else {
+        expect(openInEditor).toHaveBeenCalledWith("/work/ticket/repo/src/main.ts");
+      }
+    },
+  );
+
   it("preserves repository-relative paths in a separate worktree", () => {
     expect(
       resolveDiffPathForWorkspace({

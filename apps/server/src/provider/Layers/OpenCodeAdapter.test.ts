@@ -15,10 +15,11 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { beforeEach } from "vite-plus/test";
-import type { PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2";
+import type { OpencodeClient, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2";
 
 import {
   ApprovalRequestId,
+  EnvironmentId,
   OpenCodeSettings,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -27,6 +28,8 @@ import {
 } from "@lecturn/contracts";
 import { createModelSelection } from "@lecturn/shared/model";
 import { ServerConfig } from "../../config.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { StaveMemoryWiring, type StaveMemoryResolution } from "../../stave/StaveMemoryWiring.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
 import type { OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
@@ -61,6 +64,17 @@ type MessageEntry = {
 const runtimeMock = {
   state: {
     startCalls: [] as string[],
+    mcpAddCalls: [] as Array<NonNullable<Parameters<OpencodeClient["mcp"]["add"]>[0]>>,
+    mcpDisconnectCalls: [] as Array<Parameters<OpencodeClient["mcp"]["disconnect"]>[0]>,
+    mcpAddError: null as Error | null,
+    mcpAddImplementation: null as (() => Promise<void>) | null,
+    mcpDisconnectImplementation: null as (() => Promise<void>) | null,
+    mcpAddSignals: [] as AbortSignal[],
+    mcpDisconnectSignals: [] as AbortSignal[],
+    sessionCreateError: null as Error | null,
+    serverExitCode: null as Effect.Effect<number> | null,
+    serverCloseObserved: null as (() => void) | null,
+    lifecycleCalls: [] as string[],
     sessionCreateUrls: [] as string[],
     sessionCreateInputs: [] as Array<Record<string, unknown>>,
     createdSessionIds: [] as string[],
@@ -118,6 +132,17 @@ const runtimeMock = {
   },
   reset() {
     this.state.startCalls.length = 0;
+    this.state.mcpAddCalls.length = 0;
+    this.state.mcpDisconnectCalls.length = 0;
+    this.state.mcpAddError = null;
+    this.state.mcpAddImplementation = null;
+    this.state.mcpDisconnectImplementation = null;
+    this.state.mcpAddSignals.length = 0;
+    this.state.mcpDisconnectSignals.length = 0;
+    this.state.sessionCreateError = null;
+    this.state.serverExitCode = null;
+    this.state.serverCloseObserved = null;
+    this.state.lifecycleCalls.length = 0;
     this.state.sessionCreateUrls.length = 0;
     this.state.sessionCreateInputs.length = 0;
     this.state.createdSessionIds.length = 0;
@@ -174,6 +199,8 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
           runtimeMock.state.closeCalls.push(url);
+          runtimeMock.state.lifecycleCalls.push("server.close");
+          runtimeMock.state.serverCloseObserved?.();
           if (runtimeMock.state.closeError) {
             throw runtimeMock.state.closeError;
           }
@@ -189,12 +216,14 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
     }),
   connectToOpenCodeServer: ({ serverUrl, serverPassword }) =>
     Effect.gen(function* () {
-      const url = serverUrl ?? "http://127.0.0.1:4301";
+      const url = serverUrl || "http://127.0.0.1:4301";
       // Always register a finalizer so the closeCalls/closeError probes fire;
       // production attaches none for external servers.
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
           runtimeMock.state.closeCalls.push(url);
+          runtimeMock.state.lifecycleCalls.push("server.close");
+          runtimeMock.state.serverCloseObserved?.();
           if (runtimeMock.state.closeError) {
             throw runtimeMock.state.closeError;
           }
@@ -204,15 +233,40 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
         url,
         version: "1.15.13",
         ...(serverPassword ? { serverPassword } : {}),
-        exitCode: null,
+        exitCode: runtimeMock.state.serverExitCode,
         external: Boolean(serverUrl),
       };
     }),
   runOpenCodeCommand: () => Effect.succeed({ stdout: "", stderr: "", code: 0 }),
   createOpenCodeSdkClient: ({ baseUrl, serverPassword }) =>
     ({
+      mcp: {
+        add: async (
+          input: NonNullable<Parameters<OpencodeClient["mcp"]["add"]>[0]>,
+          options?: { signal?: AbortSignal },
+        ) => {
+          if (options?.signal) runtimeMock.state.mcpAddSignals.push(options.signal);
+          await runtimeMock.state.mcpAddImplementation?.();
+          runtimeMock.state.mcpAddCalls.push(input);
+          runtimeMock.state.lifecycleCalls.push(`mcp.add:${input.name}`);
+          if (runtimeMock.state.mcpAddError) throw runtimeMock.state.mcpAddError;
+          return { data: {} };
+        },
+        disconnect: async (
+          input: Parameters<OpencodeClient["mcp"]["disconnect"]>[0],
+          options?: { signal?: AbortSignal },
+        ) => {
+          if (options?.signal) runtimeMock.state.mcpDisconnectSignals.push(options.signal);
+          await runtimeMock.state.mcpDisconnectImplementation?.();
+          runtimeMock.state.mcpDisconnectCalls.push(input);
+          runtimeMock.state.lifecycleCalls.push(`mcp.disconnect:${input.name}`);
+          return { data: true };
+        },
+      },
       session: {
         create: async (input: Record<string, unknown>) => {
+          runtimeMock.state.lifecycleCalls.push("session.create");
+          if (runtimeMock.state.sessionCreateError) throw runtimeMock.state.sessionCreateError;
           runtimeMock.state.sessionCreateUrls.push(baseUrl);
           runtimeMock.state.sessionCreateInputs.push(input);
           runtimeMock.state.authHeaders.push(
@@ -453,7 +507,8 @@ const providerSessionDirectoryTestLayer = Layer.succeed(ProviderSessionDirectory
 // the layer graph reach for it — but the routing values the assertions
 // probe (serverUrl, serverPassword) must be threaded directly through the
 // decoded `OpenCodeSettings`.
-const openCodeAdapterTestSettings = Schema.decodeSync(OpenCodeSettings)({
+const decodeOpenCodeSettings = Schema.decodeSync(OpenCodeSettings);
+const openCodeAdapterTestSettings = decodeOpenCodeSettings({
   binaryPath: "fake-opencode",
   serverUrl: "http://127.0.0.1:9999",
   serverPassword: "secret-password",
@@ -526,7 +581,361 @@ const forkSourceHistory = (): MessageEntry[] => [
   { info: { id: "msg-a2", role: "assistant" }, parts: [] },
 ];
 
+const configuredStaveMemory = {
+  state: "configured",
+  config: {
+    command: '/opt/Memory Tools/marmot "雪"',
+    args: ["serve", "--den", 'den with "quotes"'],
+    env: { MARMOT_HOME: 'C:\\Memory\\雪 "home"' },
+  },
+} satisfies StaveMemoryResolution;
+
+const makeStaveTestAdapter = (resolution: StaveMemoryResolution, external = false) =>
+  makeOpenCodeAdapter(
+    decodeOpenCodeSettings({
+      binaryPath: "fake-opencode",
+      ...(external ? { serverUrl: "http://127.0.0.1:9999" } : {}),
+    }),
+    { staveMemoryWiring: StaveMemoryWiring.of({ resolve: () => Effect.succeed(resolution) }) },
+  );
+
 it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
+  it.effect("bounds a held Stave MCP disconnect and still closes the owned server", () =>
+    Effect.gen(function* () {
+      const adapter = yield* makeStaveTestAdapter(configuredStaveMemory);
+      const threadId = asThreadId("stave-held-disconnect");
+      yield* adapter.startSession({
+        threadId,
+        cwd: "/workspace/stave",
+        runtimeMode: "full-access",
+      });
+      const requested = promiseWithResolvers<void>();
+      runtimeMock.state.mcpDisconnectImplementation = async () => {
+        requested.resolve(undefined);
+        await new Promise<void>(() => {});
+      };
+      const stop = yield* adapter.stopSession(threadId).pipe(Effect.forkChild);
+      yield* Effect.promise(() => requested.promise);
+      yield* advanceTestClock(999);
+      NodeAssert.deepEqual(runtimeMock.state.closeCalls, []);
+      yield* advanceTestClock(1);
+      yield* Fiber.join(stop);
+      NodeAssert.equal(runtimeMock.state.mcpDisconnectSignals[0]?.aborted, true);
+      NodeAssert.deepEqual(runtimeMock.state.closeCalls, ["http://127.0.0.1:4301"]);
+    }),
+  );
+  it.effect("bounds a held Stave MCP acquisition and forwards cancellation", () =>
+    Effect.gen(function* () {
+      const adapter = yield* makeStaveTestAdapter(configuredStaveMemory);
+      const requested = promiseWithResolvers<void>();
+      runtimeMock.state.mcpAddImplementation = async () => {
+        requested.resolve(undefined);
+        await new Promise<void>(() => {});
+      };
+      const start = yield* adapter
+        .startSession({
+          threadId: asThreadId("stave-held-add"),
+          cwd: "/workspace/stave",
+          runtimeMode: "full-access",
+        })
+        .pipe(Effect.exit, Effect.forkChild);
+      yield* Effect.promise(() => requested.promise);
+      yield* advanceTestClock(10_000);
+      NodeAssert.equal((yield* Fiber.join(start))._tag, "Failure");
+      NodeAssert.equal(runtimeMock.state.mcpAddSignals[0]?.aborted, true);
+      NodeAssert.deepEqual(runtimeMock.state.closeCalls, ["http://127.0.0.1:4301"]);
+    }),
+  );
+  it.effect("interrupted MCP acquisition releases startup before its deadline", () =>
+    Effect.gen(function* () {
+      const adapter = yield* makeStaveTestAdapter(configuredStaveMemory);
+      const requested = promiseWithResolvers<void>();
+      runtimeMock.state.mcpAddImplementation = async () => {
+        requested.resolve(undefined);
+        await new Promise<void>(() => {});
+      };
+      const start = yield* adapter
+        .startSession({
+          threadId: asThreadId("stave-cancel-add"),
+          cwd: "/workspace/stave",
+          runtimeMode: "full-access",
+        })
+        .pipe(Effect.forkChild);
+      yield* Effect.promise(() => requested.promise);
+      yield* Fiber.interrupt(start);
+      NodeAssert.equal(runtimeMock.state.mcpAddSignals[0]?.aborted, true);
+      NodeAssert.deepEqual(runtimeMock.state.closeCalls, ["http://127.0.0.1:4301"]);
+      NodeAssert.deepEqual(runtimeMock.state.mcpDisconnectCalls, []);
+      NodeAssert.equal(runtimeMock.state.lifecycleCalls.includes("session.create"), false);
+    }),
+  );
+
+  it.effect("bounds T3 MCP registration before Stave or session startup", () =>
+    Effect.gen(function* () {
+      const threadId = asThreadId("t3-held-mcp-add");
+      McpProviderSession.setMcpProviderSession({
+        environmentId: EnvironmentId.make("mcp-timeout-environment"),
+        threadId,
+        providerSessionId: "mcp-timeout-session",
+        providerInstanceId: ProviderInstanceId.make("opencode"),
+        endpoint: "http://127.0.0.1:3999/mcp",
+        authorizationHeader: "Bearer test-token",
+      });
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
+      );
+      const requested = promiseWithResolvers<void>();
+      runtimeMock.state.mcpAddImplementation = async () => {
+        requested.resolve(undefined);
+        await new Promise<void>(() => {});
+      };
+      const adapter = yield* makeStaveTestAdapter(configuredStaveMemory);
+      const start = yield* adapter
+        .startSession({
+          threadId,
+          cwd: "/workspace/stave",
+          runtimeMode: "full-access",
+        })
+        .pipe(Effect.exit, Effect.forkChild);
+      yield* Effect.promise(() => requested.promise);
+      yield* advanceTestClock(9_999);
+      NodeAssert.deepEqual(runtimeMock.state.closeCalls, []);
+      yield* advanceTestClock(1);
+      NodeAssert.equal((yield* Fiber.join(start))._tag, "Failure");
+      NodeAssert.equal(runtimeMock.state.mcpAddSignals.length, 1);
+      NodeAssert.equal(runtimeMock.state.mcpAddSignals[0]?.aborted, true);
+      NodeAssert.deepEqual(runtimeMock.state.lifecycleCalls, ["server.close"]);
+      NodeAssert.deepEqual(runtimeMock.state.closeCalls, ["http://127.0.0.1:4301"]);
+    }),
+  );
+
+  it.effect(
+    "installs Stave memory alongside Lecturn before readiness and disconnects on stop",
+    () =>
+      Effect.gen(function* () {
+        const threadId = asThreadId("opencode-stave-both");
+        const directory = "/workspace/stave-space";
+        const resolvedCwds: string[] = [];
+        McpProviderSession.setMcpProviderSession({
+          environmentId: EnvironmentId.make("stave-environment"),
+          threadId,
+          providerSessionId: "stave-session",
+          providerInstanceId: ProviderInstanceId.make("opencode"),
+          endpoint: "http://127.0.0.1:3999/mcp",
+          authorizationHeader: "Bearer t3-test-token",
+        });
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
+        );
+        const adapter = yield* makeOpenCodeAdapter(
+          decodeOpenCodeSettings({ binaryPath: "fake-opencode" }),
+          {
+            staveMemoryWiring: StaveMemoryWiring.of({
+              resolve: (cwd) =>
+                Effect.sync(() => {
+                  resolvedCwds.push(cwd);
+                  return configuredStaveMemory;
+                }),
+            }),
+          },
+        );
+        const session = yield* adapter.startSession({
+          threadId,
+          cwd: directory,
+          runtimeMode: "full-access",
+        });
+        NodeAssert.equal(session.status, "ready");
+        NodeAssert.deepEqual(resolvedCwds, [directory]);
+        NodeAssert.deepEqual(runtimeMock.state.mcpAddCalls, [
+          {
+            name: "lecturn",
+            config: {
+              type: "remote",
+              url: "http://127.0.0.1:3999/mcp",
+              headers: { Authorization: "Bearer t3-test-token" },
+              oauth: false,
+            },
+          },
+          {
+            name: "context-marmot",
+            directory,
+            config: {
+              type: "local",
+              command: ['/opt/Memory Tools/marmot "雪"', "serve", "--den", 'den with "quotes"'],
+              environment: { MARMOT_HOME: 'C:\\Memory\\雪 "home"' },
+              enabled: true,
+            },
+          },
+        ]);
+        NodeAssert.deepEqual(runtimeMock.state.lifecycleCalls, [
+          "mcp.add:lecturn",
+          "mcp.add:context-marmot",
+          "session.create",
+        ]);
+        NodeAssert.deepEqual(runtimeMock.state.mcpDisconnectCalls, []);
+        yield* adapter.stopSession(threadId);
+        NodeAssert.deepEqual(runtimeMock.state.mcpDisconnectCalls, [
+          { name: "context-marmot", directory },
+        ]);
+        NodeAssert.deepEqual(runtimeMock.state.lifecycleCalls.slice(-2), [
+          "mcp.disconnect:context-marmot",
+          "server.close",
+        ]);
+      }),
+  );
+
+  it.effect("installs Stave-only memory without env again when resuming", () =>
+    Effect.gen(function* () {
+      const threadId = asThreadId("opencode-stave-resume");
+      const directory = "/workspace/stave-resume";
+      const adapter = yield* makeStaveTestAdapter({
+        state: "configured",
+        config: { command: "/bin/marmot", args: ["serve", "--den", "den"] },
+      });
+      const input = { threadId, cwd: directory, runtimeMode: "full-access" as const };
+      const session = yield* adapter.startSession(input);
+      yield* adapter.stopSession(threadId);
+      const resumed = yield* adapter.startSession({ ...input, resumeCursor: session.resumeCursor });
+      NodeAssert.equal(resumed.status, "ready");
+      NodeAssert.deepEqual(
+        runtimeMock.state.mcpAddCalls,
+        Array.from({ length: 2 }, () => ({
+          name: "context-marmot",
+          directory,
+          config: {
+            type: "local",
+            command: ["/bin/marmot", "serve", "--den", "den"],
+            enabled: true,
+          },
+        })),
+      );
+      yield* adapter.stopSession(threadId);
+      NodeAssert.deepEqual(runtimeMock.state.mcpDisconnectCalls, [
+        { name: "context-marmot", directory },
+        { name: "context-marmot", directory },
+      ]);
+    }),
+  );
+
+  it.effect("disconnects Stave memory if session creation fails after registration", () =>
+    Effect.gen(function* () {
+      const threadId = asThreadId("opencode-stave-start-failure");
+      const directory = "/workspace/stave-start-failure";
+      runtimeMock.state.sessionCreateError = new Error("session creation failed");
+      const adapter = yield* makeStaveTestAdapter(configuredStaveMemory);
+      const result = yield* adapter
+        .startSession({ threadId, cwd: directory, runtimeMode: "full-access" })
+        .pipe(Effect.result);
+      NodeAssert.equal(result._tag, "Failure");
+      NodeAssert.deepEqual(runtimeMock.state.mcpDisconnectCalls, [
+        { name: "context-marmot", directory },
+      ]);
+      NodeAssert.deepEqual(runtimeMock.state.lifecycleCalls, [
+        "mcp.add:context-marmot",
+        "session.create",
+        "mcp.disconnect:context-marmot",
+        "server.close",
+      ]);
+      NodeAssert.equal(yield* adapter.hasSession(threadId), false);
+    }),
+  );
+
+  it.effect("closes the owned server without disconnect when Stave registration fails", () =>
+    Effect.gen(function* () {
+      const threadId = asThreadId("opencode-stave-add-failure");
+      runtimeMock.state.mcpAddError = new Error("MCP registration failed");
+      const adapter = yield* makeStaveTestAdapter(configuredStaveMemory);
+      const result = yield* adapter
+        .startSession({ threadId, cwd: "/workspace/stave-add-failure", runtimeMode: "full-access" })
+        .pipe(Effect.result);
+      NodeAssert.equal(result._tag, "Failure");
+      NodeAssert.deepEqual(runtimeMock.state.mcpDisconnectCalls, []);
+      NodeAssert.deepEqual(runtimeMock.state.lifecycleCalls, [
+        "mcp.add:context-marmot",
+        "server.close",
+      ]);
+      NodeAssert.equal(yield* adapter.hasSession(threadId), false);
+    }),
+  );
+
+  it.effect("disconnects Stave memory when connecting startup is interrupted", () =>
+    Effect.gen(function* () {
+      const threadId = asThreadId("opencode-stave-start-interrupted");
+      const directory = "/workspace/stave-start-interrupted";
+      const subscribed = promiseWithResolvers<void>();
+      runtimeMock.state.autoConnect = false;
+      runtimeMock.state.eventSubscribeObserved = () => subscribed.resolve(undefined);
+      const adapter = yield* makeStaveTestAdapter(configuredStaveMemory);
+      const start = yield* adapter
+        .startSession({ threadId, cwd: directory, runtimeMode: "full-access" })
+        .pipe(Effect.forkChild);
+      yield* Effect.promise(() => subscribed.promise);
+      yield* Fiber.interrupt(start);
+      NodeAssert.deepEqual(runtimeMock.state.mcpDisconnectCalls, [
+        { name: "context-marmot", directory },
+      ]);
+      NodeAssert.deepEqual(runtimeMock.state.lifecycleCalls.slice(-2), [
+        "mcp.disconnect:context-marmot",
+        "server.close",
+      ]);
+      NodeAssert.equal(yield* adapter.hasSession(threadId), false);
+    }),
+  );
+
+  it.effect("disconnects Stave memory after an unexpected owned server exit", () =>
+    Effect.gen(function* () {
+      const threadId = asThreadId("opencode-stave-unexpected-exit");
+      const directory = "/workspace/stave-unexpected-exit";
+      const exited = promiseWithResolvers<number>();
+      const closed = promiseWithResolvers<void>();
+      runtimeMock.state.serverExitCode = Effect.promise(() => exited.promise);
+      runtimeMock.state.serverCloseObserved = () => closed.resolve(undefined);
+      const adapter = yield* makeStaveTestAdapter(configuredStaveMemory);
+      yield* adapter.startSession({ threadId, cwd: directory, runtimeMode: "full-access" });
+      exited.resolve(1);
+      yield* Effect.promise(() => closed.promise);
+      NodeAssert.deepEqual(runtimeMock.state.mcpDisconnectCalls, [
+        { name: "context-marmot", directory },
+      ]);
+      NodeAssert.deepEqual(runtimeMock.state.lifecycleCalls.slice(-2), [
+        "mcp.disconnect:context-marmot",
+        "server.close",
+      ]);
+      NodeAssert.equal(yield* adapter.hasSession(threadId), false);
+    }),
+  );
+
+  for (const scenario of [
+    { name: "external server", resolution: configuredStaveMemory, external: true },
+    { name: "absent memory", resolution: { state: "absent" }, external: false },
+    {
+      name: "missing config",
+      resolution: { state: "unavailable", code: "missing_config" },
+      external: false,
+    },
+    {
+      name: "invalid config",
+      resolution: { state: "unavailable", code: "invalid_config" },
+      external: false,
+    },
+  ] satisfies Array<{ name: string; resolution: StaveMemoryResolution; external: boolean }>) {
+    it.effect(`does not mutate MCP configuration for ${scenario.name}`, () =>
+      Effect.gen(function* () {
+        const threadId = asThreadId(`opencode-stave-${scenario.name}`);
+        const adapter = yield* makeStaveTestAdapter(scenario.resolution, scenario.external);
+        const session = yield* adapter.startSession({
+          threadId,
+          cwd: "/workspace/stave-space",
+          runtimeMode: "full-access",
+        });
+        NodeAssert.equal(session.status, "ready");
+        yield* adapter.stopSession(threadId);
+        NodeAssert.deepEqual(runtimeMock.state.mcpAddCalls, []);
+        NodeAssert.deepEqual(runtimeMock.state.mcpDisconnectCalls, []);
+      }),
+    );
+  }
+
   it.effect("reuses a configured OpenCode server URL instead of spawning a local server", () =>
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;

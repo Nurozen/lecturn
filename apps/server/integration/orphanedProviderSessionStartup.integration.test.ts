@@ -36,6 +36,7 @@ import * as ProviderService from "../src/provider/Services/ProviderService.ts";
 import * as ProviderSessionDirectory from "../src/provider/Services/ProviderSessionDirectory.ts";
 import * as ProviderSessionReaper from "../src/provider/Services/ProviderSessionReaper.ts";
 import * as RepositoryIdentityResolver from "../src/project/RepositoryIdentityResolver.ts";
+import * as StaveWorkspaceReader from "../src/stave/StaveWorkspaceReader.ts";
 import * as ServerLifecycleEvents from "../src/serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "../src/serverRuntimeStartup.ts";
 import * as ServerSettings from "../src/serverSettings.ts";
@@ -55,6 +56,7 @@ const stoppedBindingResumeCursor = {
 const makePersistedRuntimeLayer = (dbPath: string) => {
   const persistence = makeSqlitePersistenceLive(dbPath);
   const orchestration = OrchestrationLayerLive.pipe(
+    Layer.provideMerge(StaveWorkspaceReader.layer),
     Layer.provideMerge(RepositoryIdentityResolver.layer),
     Layer.provideMerge(persistence),
   );

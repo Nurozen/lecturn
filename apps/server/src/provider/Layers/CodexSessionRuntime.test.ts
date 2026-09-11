@@ -19,6 +19,7 @@ import {
   buildTurnStartParams,
   describeMcpElicitation,
   hasConfiguredMcpServer,
+  hasT3BrowserMcpServer,
   isRecoverableThreadResumeError,
   makeMemoryConsolidationNotificationFilter,
   openCodexThread,
@@ -978,4 +979,24 @@ describe("openCodexThread", () => {
       NodeAssert.deepStrictEqual(methods, ["thread/fork"]);
     }),
   );
+});
+
+describe("Marmot-only Codex tools", () => {
+  it("reloads MCP configuration without advertising unavailable browser tools", () => {
+    const args = ["-c", "mcp_servers.context-marmot.enabled=true"];
+    NodeAssert.equal(hasConfiguredMcpServer(args), true);
+    NodeAssert.equal(hasT3BrowserMcpServer(args), false);
+    NodeAssert.doesNotMatch(
+      buildCodexDeveloperInstructions(
+        "default",
+        { model: "gpt-5.3-codex", reasoningEffort: "high" },
+        hasT3BrowserMcpServer(args),
+      ),
+      /preview_open/,
+    );
+    NodeAssert.equal(
+      hasT3BrowserMcpServer([...args, "-c", 'mcp_servers.lecturn.url="http://127.0.0.1/mcp"']),
+      true,
+    );
+  });
 });

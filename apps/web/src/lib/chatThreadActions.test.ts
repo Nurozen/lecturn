@@ -10,6 +10,7 @@ import {
   resolveThreadActionProjectRef,
   hasExplicitComposerModelSelection,
   resolveNewDraftStartFromOrigin,
+  resolveNewThreadEnvModeSources,
   resolveNewThreadModelSelectionOverride,
   startNewThreadFromContext,
   type ChatThreadActionContext,
@@ -167,5 +168,50 @@ describe("chatThreadActions", () => {
 
     expect(didStart).toBe(false);
     expect(handleNewThread).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveNewThreadEnvModeSources", () => {
+  const staveInfo = {
+    spaceId: "space-1",
+    isSaga: false,
+    repos: [],
+    memories: [],
+    primaryRepoPath: "/spaces/space-1/repo",
+  };
+
+  it("forces local for a Stave space and skips the lecturn.json read", () => {
+    expect(
+      resolveNewThreadEnvModeSources({
+        workspaceRoot: "/spaces/space-1",
+        defaultThreadEnvMode: "worktree",
+        stave: staveInfo,
+      }),
+    ).toEqual({ forcedMode: "local", projectSetting: "worktree", consultProjectFile: false });
+  });
+
+  it("skips the lecturn.json read when the per-project setting decides", () => {
+    expect(
+      resolveNewThreadEnvModeSources({
+        workspaceRoot: "/repo",
+        defaultThreadEnvMode: "worktree",
+        stave: null,
+      }),
+    ).toEqual({ forcedMode: undefined, projectSetting: "worktree", consultProjectFile: false });
+  });
+
+  it("consults lecturn.json only for a known project with no higher-priority source", () => {
+    expect(
+      resolveNewThreadEnvModeSources({ workspaceRoot: "/repo", defaultThreadEnvMode: null }),
+    ).toEqual({
+      forcedMode: undefined,
+      projectSetting: null,
+      consultProjectFile: true,
+    });
+    expect(resolveNewThreadEnvModeSources(undefined)).toEqual({
+      forcedMode: undefined,
+      projectSetting: undefined,
+      consultProjectFile: false,
+    });
   });
 });

@@ -1,3 +1,5 @@
+import { StaveLifecycleNotice } from "../stave/StaveLifecycleNotice";
+import { prepareStaveProjectDeletion } from "../../lib/staveProjectDeletion";
 import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
@@ -7,6 +9,7 @@ import {
   type AtomCommandResult,
 } from "@lecturn/client-runtime/state/runtime";
 import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
+import { isStaveProject } from "@lecturn/client-runtime/state/projectGit";
 import { AsyncResult } from "effect/unstable/reactivity";
 import {
   deriveProjectGroupingOverrideKey,
@@ -78,6 +81,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { StaveProjectSection } from "./StaveProjectSection";
 import {
   EMPTY_PROJECT_SCRIPT_INPUT,
   editorRequestForScript,
@@ -469,6 +473,9 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
 
   // ----- new-thread workspace mode -----
   const storedEnvMode = representative.defaultThreadEnvMode ?? null;
+  // A Stave space's repos are already worktrees, so every checkout in the
+  // group runs threads in the space root and the workspace default is fixed.
+  const isStaveGroup = group.memberProjects.some((member) => isStaveProject(member));
   const setDefaultThreadEnvMode = useCallback(
     (mode: ThreadEnvMode | null) =>
       void updateAllMembers(
@@ -510,6 +517,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   const selectedCheckout =
     group.memberProjects.find((member) => member.physicalProjectKey === selectedCheckoutKey) ??
     representative;
+  const staveInfo = selectedCheckout.stave ?? null;
   const selectedServerConfig = useAtomValue(
     serverEnvironment.configValueAtom(selectedCheckout.environmentId),
   );
@@ -723,6 +731,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
       const isWholeGroup = members.length === group.memberProjects.length;
       const singleMember = members.length === 1 ? members[0]! : null;
       const targetLabel = singleMember?.title ?? group.displayName;
+      const staveDeletions = await Promise.all(members.map(prepareStaveProjectDeletion));
       const confirmed = await settlePromise(() =>
         api.dialogs.confirm(
           [
@@ -742,9 +751,15 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
                   "This permanently clears conversation history for those threads and any archived threads.",
                 ]
               : ["This permanently clears any archived conversation history."]),
-            isWholeGroup
-              ? "This removes only the project entries, not the files on disk."
-              : "Other entries in this grouped project are unaffected.",
+            ...(staveDeletions.some((preview) => preview.lines.length > 0)
+              ? staveDeletions.flatMap((preview, index) =>
+                  preview.lines.map((line) => `${members[index]!.title}: ${line}`),
+                )
+              : [
+                  isWholeGroup
+                    ? "This removes only the project entries, not the files on disk."
+                    : "Other entries in this grouped project are unaffected.",
+                ]),
             "This action cannot be undone.",
           ].join("\n"),
           { variant: "destructive" },
@@ -764,6 +779,11 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
             input: {
               projectId: member.id,
               force: true,
+              ...(staveDeletions[members.indexOf(member)]?.staveSagaTeardown
+                ? { staveSagaTeardown: staveDeletions[members.indexOf(member)]!.staveSagaTeardown }
+                : {}),
+              staveSagaRemoveConfirmed:
+                staveDeletions[members.indexOf(member)]?.staveSagaRemoveConfirmed ?? false,
             },
           }),
           () => undefined,
@@ -947,9 +967,13 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
           />
           <SettingsRow
             title="Workspace"
-            description="Where new threads in this project start. Overrides lecturn.json and the global default; applies to every checkout in this group."
+            description={
+              isStaveGroup
+                ? "Stave spaces always run in the space root"
+                : "Where new threads in this project start. Overrides lecturn.json and the global default; applies to every checkout in this group."
+            }
             resetAction={
-              storedEnvMode !== null ? (
+              storedEnvMode !== null && !isStaveGroup ? (
                 <SettingResetButton
                   label="project workspace default"
                   onClick={() => setDefaultThreadEnvMode(null)}
@@ -958,7 +982,8 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
             }
             control={
               <Select
-                value={storedEnvMode ?? "inherit"}
+                value={isStaveGroup ? "local" : (storedEnvMode ?? "inherit")}
+                disabled={isStaveGroup}
                 onValueChange={(value) => {
                   if (value === "worktree" || value === "local") {
                     setDefaultThreadEnvMode(value);
@@ -969,11 +994,13 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
               >
                 <SelectTrigger size="sm" aria-label="New-thread workspace">
                   <SelectValue>
-                    {storedEnvMode === null
-                      ? group.memberProjects.length > 1
-                        ? "Default (per checkout)"
-                        : `Default (${resolveEnvModeLabel(inheritedEnvMode).toLowerCase()})`
-                      : resolveEnvModeLabel(storedEnvMode)}
+                    {isStaveGroup
+                      ? "Local"
+                      : storedEnvMode === null
+                        ? group.memberProjects.length > 1
+                          ? "Default (per checkout)"
+                          : `Default (${resolveEnvModeLabel(inheritedEnvMode).toLowerCase()})`
+                        : resolveEnvModeLabel(storedEnvMode)}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -1237,6 +1264,24 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
           ) : null}
         </SettingsSection>
 
+        {staveInfo && selectedCheckout.notice ? (
+          <StaveLifecycleNotice
+            key={`${selectedCheckout.environmentId}:${selectedCheckout.id}:${selectedCheckout.workspaceRoot}:${staveInfo.createdAt}`}
+            environmentId={selectedCheckout.environmentId}
+            projectId={selectedCheckout.id}
+            workspaceRoot={selectedCheckout.workspaceRoot}
+            stave={staveInfo}
+            notice={selectedCheckout.notice}
+          />
+        ) : null}
+        {staveInfo ? (
+          <StaveProjectSection
+            stave={staveInfo}
+            environmentId={selectedCheckout.environmentId}
+            workspaceRoot={selectedCheckout.workspaceRoot}
+          />
+        ) : null}
+
         <SettingsSection title="Danger">
           <SettingsRow
             title={
@@ -1244,8 +1289,12 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
             }
             description={
               group.memberProjects.length > 1
-                ? `Deletes all ${group.memberProjects.length} checkout entries and their threads on every machine. Files on disk are not touched.`
-                : "Deletes the project entry and its threads. Files on disk are not touched."
+                ? group.memberProjects.some((member) => member.stave != null)
+                  ? `Deletes all ${group.memberProjects.length} project entries and their threads. Stave cleanup follows each environment’s lifecycle policy; review the confirmation for file and memory changes.`
+                  : `Deletes all ${group.memberProjects.length} checkout entries and their threads on every machine. Files on disk are not touched.`
+                : staveInfo
+                  ? "Deletes the project and its threads. Stave cleanup follows this environment’s lifecycle policy; review the confirmation for file and memory changes."
+                  : "Deletes the project entry and its threads. Files on disk are not touched."
             }
             control={
               <Button

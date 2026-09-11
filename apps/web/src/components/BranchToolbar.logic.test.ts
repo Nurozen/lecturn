@@ -9,6 +9,7 @@ import {
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
   resolveEnvModeLabel,
+  resolveEnvModeLocked,
   resolveBranchTriggerLabel,
   resolveBranchToolbarPrBranch,
   resolveBranchToolbarValue,
@@ -424,6 +425,18 @@ describe("shouldShowEnvironmentIndicator", () => {
 });
 
 describe("shouldShowComposerContextStrip", () => {
+  it("keeps Stave workspace context visible with no editable Git repo", () => {
+    expect(
+      shouldShowComposerContextStrip({
+        hasActiveProject: true,
+        isGitRepo: false,
+        isStaveProject: true,
+        showEnvironmentIndicator: false,
+        hostsRestingComposerControls: false,
+      }),
+    ).toBe(true);
+  });
+
   it("keeps the environment indicator visible for a non-Git project", () => {
     expect(
       shouldShowComposerContextStrip({
@@ -644,6 +657,23 @@ describe("dedupeRemoteBranchesWithLocalMatches", () => {
 });
 
 describe("resolveBranchSelectionTarget", () => {
+  it("keeps Stave checkout in its primary repo instead of reusing a sibling worktree", () => {
+    for (const worktreePath of ["/spaces/other/repo", "/spaces/current/repo", null]) {
+      expect(
+        resolveBranchSelectionTarget({
+          isStave: true,
+          activeProjectCwd: "/spaces/current/repo",
+          activeWorktreePath: "/legacy/worktree",
+          refName: { isDefault: false, worktreePath },
+        }),
+      ).toEqual({
+        checkoutCwd: "/spaces/current/repo",
+        nextWorktreePath: null,
+        reuseExistingWorktree: false,
+      });
+    }
+  });
+
   it("reuses an existing secondary worktree for the selected ref", () => {
     expect(
       resolveBranchSelectionTarget({
@@ -834,5 +864,82 @@ describe("sanitizeNewRefName", () => {
   it("does not collapse dashes the user typed", () => {
     expect(sanitizeNewRefName("new - branch")).toBe("new---branch");
     expect(sanitizeNewRefName("foo--bar")).toBe("foo--bar");
+  });
+});
+
+describe("resolveEffectiveEnvMode", () => {
+  it("lets a parent override win over the draft's env mode", () => {
+    expect(
+      resolveEffectiveEnvMode({
+        activeWorktreePath: null,
+        hasServerThread: false,
+        draftThreadEnvMode: "local",
+        overrideEnvMode: "worktree",
+      }),
+    ).toBe("worktree");
+  });
+
+  it("forces local for a Stave space even when the override or draft asks for a worktree", () => {
+    expect(
+      resolveEffectiveEnvMode({
+        activeWorktreePath: null,
+        hasServerThread: false,
+        draftThreadEnvMode: "worktree",
+        forcedEnvMode: "local",
+        overrideEnvMode: "worktree",
+      }),
+    ).toBe("local");
+  });
+
+  it("keeps the pre-Stave resolution when nothing is forced", () => {
+    expect(
+      resolveEffectiveEnvMode({
+        activeWorktreePath: null,
+        hasServerThread: false,
+        draftThreadEnvMode: "worktree",
+      }),
+    ).toBe("worktree");
+    expect(
+      resolveEffectiveEnvMode({
+        activeWorktreePath: "/repo/.worktrees/a",
+        hasServerThread: true,
+        draftThreadEnvMode: undefined,
+      }),
+    ).toBe("worktree");
+  });
+});
+
+describe("resolveEnvModeLocked", () => {
+  it("locks the picker for a Stave space regardless of thread state", () => {
+    expect(
+      resolveEnvModeLocked({
+        envLocked: false,
+        forcedEnvMode: "local",
+        hasServerThread: false,
+        activeWorktreePath: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("locks a started thread that already has a worktree", () => {
+    expect(
+      resolveEnvModeLocked({
+        envLocked: false,
+        forcedEnvMode: undefined,
+        hasServerThread: true,
+        activeWorktreePath: "/repo/.worktrees/a",
+      }),
+    ).toBe(true);
+  });
+
+  it("leaves a plain draft unlocked", () => {
+    expect(
+      resolveEnvModeLocked({
+        envLocked: false,
+        forcedEnvMode: undefined,
+        hasServerThread: false,
+        activeWorktreePath: null,
+      }),
+    ).toBe(false);
   });
 });

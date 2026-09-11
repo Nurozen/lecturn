@@ -1,10 +1,31 @@
-import type { EnvironmentId, EnvironmentMachineKind, ProjectId } from "@lecturn/contracts";
+import {
+  pullRequestHostOf,
+  type EnvironmentId,
+  type EnvironmentMachineKind,
+  type ProjectId,
+  type OrchestrationProjectShell,
+  type SourceControlProviderKind,
+} from "@lecturn/contracts";
+import {
+  resolveProjectGitTargets,
+  resolveRepositoryPullRequestSelector,
+} from "@lecturn/client-runtime/state/projectGit";
 
 /** The little of a project this needs: who holds it, and which repository it is a copy of. */
 export interface AssignableProject {
   readonly id: ProjectId;
   readonly environmentId: EnvironmentId;
-  readonly repositoryIdentity?: { readonly canonicalKey?: string | undefined } | null | undefined;
+  readonly repositoryIdentity?:
+    | {
+        readonly canonicalKey?: string | undefined;
+        readonly displayName?: string | null;
+        readonly owner?: string | null;
+        readonly name?: string;
+        readonly provider?: string;
+      }
+    | null
+    | undefined;
+  readonly stave?: OrchestrationProjectShell["stave"];
 }
 
 /**
@@ -15,7 +36,17 @@ export interface AssignableProject {
  * whatever the remote said; the fold here only guards a key assembled some other way.
  */
 function repositoryKey(project: AssignableProject): string | undefined {
-  return project.repositoryIdentity?.canonicalKey?.toLowerCase();
+  // Listing accepts project IDs, so a mixed space cannot be dropped on the strength of
+  // only its primary repository. Deduplicate only complete, known repository sets.
+  if (project.stave) {
+    const identities = project.stave.repos
+      .filter((repo) => repo.mode === "edit")
+      .map((repo) => repo.repositoryIdentity?.canonicalKey?.toLowerCase());
+    if (identities.length === 0 || identities.some((key) => !key)) return undefined;
+    return JSON.stringify([...new Set(identities)].sort());
+  }
+  const key = project.repositoryIdentity?.canonicalKey?.toLowerCase();
+  return key ? JSON.stringify([key]) : undefined;
 }
 
 /**
@@ -63,6 +94,32 @@ export function assignProjectsToEnvironments(
   return assignment;
 }
 
+/** Match the selected repository, including its host, against every editable checkout. */
+export function projectPullRequestRepository(
+  project: AssignableProject & { readonly workspaceRoot: string },
+  reference: { readonly repository: string; readonly host?: string | undefined },
+) {
+  const candidates = project.stave
+    ? resolveProjectGitTargets({
+        project: { workspaceRoot: project.workspaceRoot, stave: project.stave },
+      }).map((target) => ({ identity: target.repositoryIdentity, workspaceRoot: target.cwd }))
+    : [{ identity: project.repositoryIdentity, workspaceRoot: project.workspaceRoot }];
+  const matches = candidates.filter(({ identity }) => {
+    if (!identity) return false;
+    if (
+      resolveRepositoryPullRequestSelector(identity)?.toLowerCase() !==
+      reference.repository.toLowerCase()
+    )
+      return false;
+    return (
+      reference.host === undefined ||
+      pullRequestHostOf(identity, identity.provider as SourceControlProviderKind) ===
+        reference.host.toLowerCase()
+    );
+  });
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 /** A copy of the repository the reader could act on, named by the server holding it. */
 export interface PickableEnvironment {
   readonly environmentId: EnvironmentId;
@@ -84,7 +141,12 @@ export interface PickableEnvironment {
  * has always had.
  */
 export function resolvePickableEnvironments(
-  current: { readonly environmentId: EnvironmentId; readonly projectId: ProjectId },
+  current: {
+    readonly environmentId: EnvironmentId;
+    readonly projectId: ProjectId;
+    readonly repository?: string;
+    readonly host?: string | undefined;
+  },
   projects: ReadonlyArray<AssignableProject & { readonly workspaceRoot: string }>,
   environments: ReadonlyArray<{
     readonly environmentId: EnvironmentId;
@@ -96,7 +158,16 @@ export function resolvePickableEnvironments(
     (project) =>
       project.environmentId === current.environmentId && project.id === current.projectId,
   );
-  const key = own === undefined ? undefined : repositoryKey(own);
+  const selected =
+    own && current.repository
+      ? projectPullRequestRepository(own, {
+          repository: current.repository,
+          ...(current.host ? { host: current.host } : {}),
+        })
+      : undefined;
+  const key =
+    selected?.identity?.canonicalKey?.toLowerCase() ??
+    (current.repository ? undefined : own === undefined ? undefined : repositoryKey(own));
   const ownEnvironment = environments.find(
     (environment) => environment.environmentId === current.environmentId,
   );
@@ -107,7 +178,13 @@ export function resolvePickableEnvironments(
     // repository is still one place to act, and what is being picked here is the server.
     const copy = projects.find(
       (project) =>
-        project.environmentId === environment.environmentId && repositoryKey(project) === key,
+        project.environmentId === environment.environmentId &&
+        (current.repository
+          ? projectPullRequestRepository(project, {
+              repository: current.repository,
+              ...(current.host ? { host: current.host } : {}),
+            })?.identity?.canonicalKey?.toLowerCase() === key
+          : repositoryKey(project) === key),
     );
     return copy === undefined
       ? []
@@ -115,7 +192,12 @@ export function resolvePickableEnvironments(
           {
             environmentId: environment.environmentId,
             projectId: copy.id,
-            workspaceRoot: copy.workspaceRoot,
+            workspaceRoot: current.repository
+              ? projectPullRequestRepository(copy, {
+                  repository: current.repository,
+                  ...(current.host ? { host: current.host } : {}),
+                })!.workspaceRoot
+              : copy.workspaceRoot,
             label: environment.label,
             ...(environment.machine === undefined ? {} : { machine: environment.machine }),
           },
@@ -128,7 +210,7 @@ export function resolvePickableEnvironments(
     {
       environmentId: current.environmentId,
       projectId: own.id,
-      workspaceRoot: own.workspaceRoot,
+      workspaceRoot: selected?.workspaceRoot ?? own.workspaceRoot,
       label: ownEnvironment.label,
       ...(ownEnvironment.machine === undefined ? {} : { machine: ownEnvironment.machine }),
     },

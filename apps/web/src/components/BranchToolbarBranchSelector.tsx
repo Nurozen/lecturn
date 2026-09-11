@@ -1,4 +1,12 @@
+import { describeStaveWorkspace } from "./stave/staveWorkspaceContext.logic";
 import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
+import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
+import {
+  type ProjectGitTarget,
+  isStaveProject,
+  resolveProjectGitCwd,
+  staveForcedEnvMode,
+} from "@lecturn/client-runtime/state/projectGit";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -68,6 +76,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 interface BranchToolbarBranchSelectorProps {
   className?: string;
+  repoTarget?: ProjectGitTarget;
   environmentId: EnvironmentId;
   threadId: ThreadId;
   draftId?: DraftId;
@@ -82,11 +91,15 @@ interface BranchToolbarBranchSelectorProps {
 }
 
 function toBranchActionErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "An error occurred.";
+  return (
+    staveAdmissionErrorMessage(error) ??
+    (error instanceof Error ? error.message : "An error occurred.")
+  );
 }
 
 export function BranchToolbarBranchSelector({
   className,
+  repoTarget,
   environmentId,
   threadId,
   draftId,
@@ -131,23 +144,32 @@ export function BranchToolbarBranchSelector({
       ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
       : null;
   const activeProject = useProject(activeProjectRef);
+  const staveContext = describeStaveWorkspace(activeProject);
 
   const activeThreadId = serverThread?.id ?? (draftThread ? threadId : undefined);
-  const activeThreadBranch =
-    activeThreadBranchOverride !== undefined
+  const activeThreadBranch = isStaveProject(activeProject)
+    ? null
+    : activeThreadBranchOverride !== undefined
       ? activeThreadBranchOverride
       : (serverThread?.branch ?? draftThread?.branch ?? null);
   const activeWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
-  const activeProjectCwd = activeProject?.workspaceRoot ?? null;
-  const branchCwd = activeWorktreePath ?? activeProjectCwd;
-  const hasServerThread = serverThread !== null;
-  const effectiveEnvMode =
-    effectiveEnvModeOverride ??
-    resolveEffectiveEnvMode({
-      activeWorktreePath,
-      hasServerThread,
-      draftThreadEnvMode: draftThread?.envMode,
+  // Space Git supplies a manifest checkout; thread sessions stay in the space root.
+  const activeProjectCwd =
+    repoTarget?.cwd ?? resolveProjectGitCwd({ project: activeProject, thread: null });
+  const branchCwd =
+    repoTarget?.cwd ??
+    resolveProjectGitCwd({
+      project: activeProject,
+      thread: { worktreePath: activeWorktreePath },
     });
+  const hasServerThread = serverThread !== null;
+  const effectiveEnvMode = resolveEffectiveEnvMode({
+    activeWorktreePath,
+    hasServerThread,
+    draftThreadEnvMode: draftThread?.envMode,
+    forcedEnvMode: staveForcedEnvMode(activeProject),
+    overrideEnvMode: effectiveEnvModeOverride,
+  });
 
   // ---------------------------------------------------------------------------
   // Thread branch mutation (colocated — only this component calls it)
@@ -155,6 +177,7 @@ export function BranchToolbarBranchSelector({
   const setThreadBranch = useCallback(
     (branch: string | null, worktreePath: string | null) => {
       if (!activeThreadId || !activeProject) return;
+      if (isStaveProject(activeProject)) return;
       if (serverSession && worktreePath !== activeWorktreePath) {
         void stopThreadSession({
           environmentId,
@@ -400,6 +423,7 @@ export function BranchToolbarBranchSelector({
     }
 
     const selectionTarget = resolveBranchSelectionTarget({
+      isStave: isStaveProject(activeProject),
       activeProjectCwd,
       activeWorktreePath,
       refName,
@@ -770,6 +794,11 @@ export function BranchToolbarBranchSelector({
           <ComboboxTrigger
             render={<Button variant="ghost" size="xs" />}
             className="min-w-0 max-w-full font-normal text-muted-foreground/70 text-xs! hover:text-foreground/80"
+            aria-label={
+              staveContext
+                ? `Git branch for ${repoTarget?.repoName ?? staveContext.primaryRepoName ?? "repository"}: ${triggerLabel}`
+                : undefined
+            }
             disabled={isInitialBranchesLoadPending || isBranchActionPending}
           >
             <GitBranchIcon className="size-3 shrink-0 opacity-70" />
@@ -781,7 +810,9 @@ export function BranchToolbarBranchSelector({
                 data-composer-label-motion
                 className="block w-full min-w-0 max-w-[240px] origin-left truncate transition-[opacity,transform] duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:[transform:translateX(-0.25rem)_scaleX(0.95)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transform-none motion-reduce:transition-opacity"
               >
-                {triggerLabel}
+                {staveContext
+                  ? `Git: ${repoTarget?.repoName ?? staveContext.primaryRepoName ?? "repository"}`
+                  : triggerLabel}
               </span>
             </span>
             <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
@@ -789,6 +820,15 @@ export function BranchToolbarBranchSelector({
         </span>
       </div>
       <ComboboxPopup align="end" side="top" className="flex w-80 flex-col">
+        {staveContext ? (
+          <div className="border-b px-3 py-2 text-xs text-muted-foreground">
+            <p className="font-medium text-foreground">
+              Git: {repoTarget?.repoName ?? staveContext.primaryRepoName ?? "repository"}
+            </p>
+            <p className="mt-1 break-all">Current branch: {triggerLabel}</p>
+            <p className="mt-1">Branch changes apply to this repo. Threads use the whole space.</p>
+          </div>
+        ) : null}
         <div className="shrink-0 px-3 pt-2.5">
           <div className="relative -translate-y-px border-b border-border/70 pb-1.5 transition-colors focus-within:border-ring">
             <SearchIcon

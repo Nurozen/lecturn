@@ -1,5 +1,8 @@
+import { SagaWorkbenchService } from "./stave/SagaWorkbenchService.ts";
 // @effect-diagnostics nodeBuiltinImport:off - assembleThreadFork mints ids through a synchronous callback, which the Effect Crypto service cannot satisfy
 import * as NodeCrypto from "node:crypto";
+import * as NodePath from "node:path";
+import { isPathUnder } from "./stave/StaveSpaceLock.ts";
 
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -122,6 +125,9 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import { makeStaveRpcHandlers } from "./stave/staveRpcHandlers.ts";
+import * as StaveAdmission from "./stave/StaveAdmission.ts";
+import * as StaveOperations from "./stave/StaveOperations.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -564,6 +570,7 @@ const makeWsRpcLayer = (
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+      const staveAdmission = yield* StaveAdmission.StaveAdmission;
       const canReplayPersistedRange = Effect.fnUntraced(function* (
         afterSequence: number,
         headSequence: number,
@@ -770,6 +777,7 @@ const makeWsRpcLayer = (
         switch (event.type) {
           case "project.created":
           case "project.meta-updated":
+          case "project.refreshed":
             return projectUpsertOrRemove(event.payload.projectId, event.sequence);
           case "project.deleted":
             return Effect.succeed(
@@ -1373,6 +1381,26 @@ const makeWsRpcLayer = (
             });
           }
 
+          // Forks skip the normalizer, and the materialized command inherits
+          // the source's worktreePath (threadFork.ts): a Stave-owned source
+          // that still runs in a worktree cannot be forked, since the child
+          // would carry the worktree into the space.
+          if (Option.isSome(project)) {
+            yield* staveAdmission
+              .check({
+                projectRoot: project.value.workspaceRoot,
+                projectId: project.value.id,
+                intent: "thread.fork",
+                worktreePath: assembly.command.thread.worktreePath,
+              })
+              .pipe(
+                Effect.mapError(
+                  (error) =>
+                    new OrchestrationDispatchCommandError({ message: error.message, cause: error }),
+                ),
+              );
+          }
+
           const workspaceCwd = resolveThreadWorkspaceCwd({
             thread: source,
             projects: Option.match(project, {
@@ -1623,7 +1651,61 @@ const makeWsRpcLayer = (
           .refreshStatus(cwd)
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
 
+      const admitStaveWorktreeRpc = (
+        operation: string,
+        intent: Extract<StaveAdmission.StaveAdmissionIntent, "vcs.createWorktree" | "pr.prepare">,
+        cwd: string,
+      ) =>
+        checkStaveWorktreeRpcOwnership(projectionSnapshotQuery, staveAdmission, {
+          operation,
+          intent,
+          cwd,
+        });
+
+      // Stave reads live in their own module; they share this connection's
+      // auth/tracing wrapper so scope enforcement stays in one place.
+      const sagaWorkbench = yield* SagaWorkbenchService;
+      const staveRpcHandlers = yield* makeStaveRpcHandlers({ observeRpcEffect, observeRpcStream });
+
       return WsRpcGroup.of({
+        ...staveRpcHandlers,
+        [WS_METHODS.sagaWorkbenchGetSnapshot]: (input) =>
+          observeRpcEffect(WS_METHODS.sagaWorkbenchGetSnapshot, sagaWorkbench.getSnapshot(input)),
+        [WS_METHODS.sagaWorkbenchGetEvidence]: (input) =>
+          observeRpcEffect(WS_METHODS.sagaWorkbenchGetEvidence, sagaWorkbench.getEvidence(input)),
+        [WS_METHODS.sagaWorkbenchGetActivity]: (input) =>
+          observeRpcEffect(WS_METHODS.sagaWorkbenchGetActivity, sagaWorkbench.getActivity(input)),
+        [WS_METHODS.sagaWorkbenchConfigure]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.sagaWorkbenchConfigure,
+            sagaWorkbench.configure(input, currentSession),
+          ),
+        [WS_METHODS.sagaWorkbenchSetStage]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.sagaWorkbenchSetStage,
+            sagaWorkbench.setStage(input, currentSession),
+          ),
+        [WS_METHODS.sagaWorkbenchApprove]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.sagaWorkbenchApprove,
+            sagaWorkbench.approve(input, currentSession),
+          ),
+        [WS_METHODS.sagaWorkbenchComplete]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.sagaWorkbenchComplete,
+            sagaWorkbench.complete(input, currentSession),
+          ),
+        [WS_METHODS.sagaWorkbenchReopen]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.sagaWorkbenchReopen,
+            sagaWorkbench.reopen(input, currentSession),
+          ),
+        [WS_METHODS.sagaWorkbenchSummarize]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.sagaWorkbenchSummarize,
+            sagaWorkbench.summarize(input, currentSession),
+          ),
+
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,
@@ -2705,9 +2787,10 @@ const makeWsRpcLayer = (
         [WS_METHODS.gitPreparePullRequestThread]: (input) =>
           observeRpcEffect(
             WS_METHODS.gitPreparePullRequestThread,
-            gitWorkflow
-              .preparePullRequestThread(input)
-              .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            admitStaveWorktreeRpc("ws.gitPreparePullRequestThread", "pr.prepare", input.cwd).pipe(
+              Effect.andThen(gitWorkflow.preparePullRequestThread(input)),
+              Effect.tap(() => refreshGitStatus(input.cwd)),
+            ),
             { "rpc.aggregate": "git" },
           ),
         [WS_METHODS.vcsListRefs]: (input) =>
@@ -2717,7 +2800,10 @@ const makeWsRpcLayer = (
         [WS_METHODS.vcsCreateWorktree]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsCreateWorktree,
-            gitWorkflow.createWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            admitStaveWorktreeRpc("ws.vcsCreateWorktree", "vcs.createWorktree", input.cwd).pipe(
+              Effect.andThen(gitWorkflow.createWorktree(input)),
+              Effect.tap(() => refreshGitStatus(input.cwd)),
+            ),
             { "rpc.aggregate": "vcs" },
           ),
         [WS_METHODS.vcsRemoveWorktree]: (input) =>
@@ -3094,6 +3180,8 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         ),
     });
     const pullRequests = yield* PullRequestService.PullRequestService;
+    const staveOperations = yield* StaveOperations.StaveOperations;
+    const sagaWorkbench = yield* SagaWorkbenchService;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -3133,6 +3221,10 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               // One server-lifetime service means clients share the same PR caches, and a WS
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
+              // Stave operations outlive the socket that started them, so every
+              // connection attaches to the one server-lifetime registry.
+              Layer.provide(Layer.succeed(StaveOperations.StaveOperations, staveOperations)),
+              Layer.provide(Layer.succeed(SagaWorkbenchService, sagaWorkbench)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(
@@ -3169,4 +3261,70 @@ export const websocketRpcRouteLayer = Layer.unwrap(
       ),
     );
   }),
+);
+
+/** Separately imported repositories and canonical aliases retain their Stave ownership. */
+export const checkStaveWorktreeRpcOwnership = Effect.fn("checkStaveWorktreeRpcOwnership")(
+  function* (
+    projection: Pick<
+      ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"],
+      "getShellSnapshot" | "getActiveProjectByWorkspaceRoot"
+    >,
+    admission: StaveAdmission.StaveAdmission["Service"],
+    input: {
+      readonly operation: string;
+      readonly intent: "vcs.createWorktree" | "pr.prepare";
+      readonly cwd: string;
+    },
+  ) {
+    const { operation, intent, cwd } = input;
+    const owner = yield* projection.getShellSnapshot().pipe(
+      Effect.flatMap((snapshot) =>
+        Effect.gen(function* () {
+          for (const project of snapshot.projects) {
+            if (project.stave == null) continue;
+            const roots = [
+              project.workspaceRoot,
+              ...(project.stave.primaryRepoPath ? [project.stave.primaryRepoPath] : []),
+              ...project.stave.repos.map((repo) =>
+                NodePath.resolve(project.workspaceRoot, repo.path),
+              ),
+            ];
+            for (const root of roots) {
+              if (yield* isPathUnder(root, cwd)) return Option.some(project);
+            }
+          }
+          return yield* projection.getActiveProjectByWorkspaceRoot(cwd);
+        }),
+      ),
+      Effect.mapError(
+        (cause) =>
+          new GitCommandError({
+            operation,
+            command: "git",
+            cwd,
+            detail: `failed to resolve the project owning ${cwd}`,
+            cause,
+          }),
+      ),
+    );
+    yield* admission
+      .check(
+        Option.isSome(owner)
+          ? { projectRoot: owner.value.workspaceRoot, projectId: owner.value.id, intent }
+          : { projectRoot: cwd, intent },
+      )
+      .pipe(
+        Effect.mapError(
+          (error) =>
+            new GitCommandError({
+              operation,
+              command: "git",
+              cwd,
+              detail: error.message,
+              cause: error,
+            }),
+        ),
+      );
+  },
 );

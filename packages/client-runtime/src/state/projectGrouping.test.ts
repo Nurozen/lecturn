@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import type { EnvironmentProject } from "./models.ts";
 import {
   buildProjectGroups,
+  buildSagaProjectTree,
   derivePhysicalProjectKey,
   type ProjectGroupingSettings,
 } from "./projectGrouping.ts";
@@ -212,5 +213,181 @@ describe("buildProjectGroups", () => {
     });
     expect(groups).toHaveLength(1);
     expect(groups[0]?.members.map((member) => member.project.id)).toEqual(["winner", "sibling"]);
+  });
+});
+
+describe("buildSagaProjectTree", () => {
+  const stave = (spaceId: string, isSaga = false) => ({
+    spaceId,
+    createdAt: "2026-09-01T00:00:00Z",
+    isSaga,
+    state: "live" as const,
+    repos: [],
+    memories: [],
+  });
+  const member = (id: string) => ({
+    id,
+    workspaceRoot: `/work/${id}`,
+    createdAt: "2026-09-01T00:00:00Z",
+    after: [],
+    state: "live" as const,
+    dirty: false,
+    repos: [],
+    prs: [],
+  });
+  const projects = () => [
+    makeProject("b", "/work/b", { repositoryIdentity: null, stave: stave("b") }),
+    makeProject("ordinary", "/work/ordinary", { repositoryIdentity: null }),
+    makeProject("saga", "/work/saga", { repositoryIdentity: null, stave: stave("saga", true) }),
+    makeProject("a", "/work/a", { repositoryIdentity: null, stave: stave("a") }),
+  ];
+  const groupsFor = (items = projects()) =>
+    buildProjectGroups({ projects: items, settings: settings("separate") });
+  const index = () => [
+    {
+      environmentId,
+      sagaRoot: "/work/saga",
+      status: {
+        sagaId: "saga",
+        sagaCreatedAt: "2026-09-01T00:00:00Z",
+        members: [member("a"), member("b")],
+        notes: [],
+      },
+    },
+  ];
+
+  it("uses Stave's member order and preserves every existing group and key", () => {
+    const groups = groupsFor();
+    const tree = buildSagaProjectTree(groups, index());
+    const parent = tree.find((node) => node.group.representative.id === "saga")!;
+    expect(parent.children.map((node) => node.group.representative.id)).toEqual(["a", "b"]);
+    expect(tree.map((node) => node.group.representative.id)).toEqual(["ordinary", "saga"]);
+    const flattened = tree.flatMap((node) => [
+      node.group,
+      ...node.children.map((child) => child.group),
+    ]);
+    expect(new Set(flattened.map((group) => group.key))).toEqual(
+      new Set(groups.map((group) => group.key)),
+    );
+    for (const group of flattened) expect(groups).toContain(group);
+  });
+
+  it("keeps all projects visible when status or the parent is missing", () => {
+    const groups = groupsFor();
+    expect(buildSagaProjectTree(groups, []).map((node) => node.group)).toEqual(groups);
+    const withoutParent = groups.filter((group) => !group.representative.stave?.isSaga);
+    expect(buildSagaProjectTree(withoutParent, index()).map((node) => node.group)).toEqual(
+      withoutParent,
+    );
+  });
+
+  it("keeps other installations and archived incarnations with the same ID outside the saga", () => {
+    const otherInstallation = makeProject("other-a", "/other-work/a", {
+      repositoryIdentity: null,
+      stave: stave("a"),
+    });
+    const oldArchive = makeProject("old-a", "/work/.archive/a-old", {
+      repositoryIdentity: null,
+      stave: { ...stave("a"), state: "archived", createdAt: "2026-08-01T00:00:00Z" },
+    });
+    const tree = buildSagaProjectTree(
+      groupsFor([...projects(), otherInstallation, oldArchive]),
+      index(),
+    );
+    expect(
+      tree
+        .find((node) => node.group.representative.id === "saga")
+        ?.children.map((node) => node.group.representative.id),
+    ).toEqual(["a", "b"]);
+    expect(
+      tree
+        .filter((node) => ["other-a", "old-a"].includes(node.group.representative.id))
+        .map((node) => node.memberStatus),
+    ).toEqual([null, null]);
+  });
+
+  it("does not guess membership when identity is missing or the root was recreated", () => {
+    const roster = index();
+    roster[0]!.status.members[0]!.createdAt = "2026-08-01T00:00:00Z";
+    const tree = buildSagaProjectTree(groupsFor(), roster);
+    expect(
+      tree
+        .find((node) => node.group.representative.id === "saga")
+        ?.children.map((node) => node.group.representative.id),
+    ).toEqual(["b"]);
+    const legacy = [
+      {
+        ...roster[0]!,
+        status: {
+          sagaId: "saga",
+          members: roster[0]!.status.members.map(
+            ({ workspaceRoot: _root, createdAt: _stamp, ...member }) => member,
+          ),
+          notes: [],
+        },
+      },
+    ];
+    expect(
+      buildSagaProjectTree(groupsFor(), legacy).every((node) => node.children.length === 0),
+    ).toBe(true);
+    roster[0]!.status.sagaCreatedAt = "2026-08-01T00:00:00Z";
+    expect(
+      buildSagaProjectTree(groupsFor(), roster).every((node) => node.children.length === 0),
+    ).toBe(true);
+  });
+
+  it("keeps a same-id member from another environment outside the saga", () => {
+    const other = makeProject("remote-a", "/work/a", {
+      environmentId: EnvironmentId.make("remote"),
+      repositoryIdentity: null,
+      stave: stave("a"),
+    });
+    const tree = buildSagaProjectTree(groupsFor([...projects(), other]), index());
+    expect(tree.some((node) => node.group.representative === other)).toBe(true);
+    expect(tree.find((node) => node.group.representative.id === "saga")?.children).toHaveLength(2);
+  });
+
+  it("preserves missing/corrupt state for visible member projects", () => {
+    const rows = index();
+    const status = {
+      ...rows[0]!.status,
+      members: [
+        { ...member("a"), state: "missing" as const },
+        { ...member("b"), state: "corrupt" as const, dirty: true },
+      ],
+    };
+    const tree = buildSagaProjectTree(groupsFor(), [{ ...rows[0]!, status }]);
+    expect(
+      tree
+        .find((node) => node.group.representative.id === "saga")
+        ?.children.map((node) => [node.memberStatus?.state, node.memberStatus?.dirty]),
+    ).toEqual([
+      ["missing", false],
+      ["corrupt", true],
+    ]);
+  });
+
+  it("does not move an unrelated physical clone inside a grouped saga member", () => {
+    const groups = groupsFor();
+    const a = groups.find((group) => group.representative.id === "a")!;
+    const ordinary = groups.find((group) => group.representative.id === "ordinary")!;
+    const combined = {
+      ...a,
+      members: [...a.members, ...ordinary.members],
+      memberProjectRefs: [...a.memberProjectRefs, ...ordinary.memberProjectRefs],
+    };
+    const input = groups.filter((group) => group !== a && group !== ordinary).concat(combined);
+    expect(buildSagaProjectTree(input, index()).some((node) => node.group === combined)).toBe(true);
+  });
+
+  it("leaves ambiguous duplicate rosters flat and never forms saga cycles", () => {
+    const groups = groupsFor();
+    expect(
+      buildSagaProjectTree(groups, [...index(), ...index()]).map((node) => node.group),
+    ).toEqual(groups);
+    const recursive = index();
+    recursive[0]!.status.members.unshift(member("saga"));
+    const tree = buildSagaProjectTree(groups, recursive);
+    expect(tree.find((node) => node.group.representative.id === "saga")?.children).toHaveLength(2);
   });
 });

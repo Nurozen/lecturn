@@ -57,6 +57,7 @@ export function useSharedPullRequestSummary(
           environmentId,
           reference.projectId,
           reference.repository.toLowerCase(),
+          reference.host?.toLowerCase() ?? "",
           reference.number,
         ]);
   const atom = observedPullRequestSummaryAtom(key);
@@ -160,7 +161,11 @@ export function usePullRequestList(
   targets: ReadonlyArray<EnvironmentQueryTarget<PullRequestListInput>>,
 ): MergedPullRequestListView {
   const query = usePullRequestListsQuery(targets);
-  const data = useMemo(() => mergePullRequestLists(query.values), [query.values]);
+  const preferredEnvironmentId = targets[0]?.environmentId;
+  const data = useMemo(
+    () => mergePullRequestLists(query.values, preferredEnvironmentId),
+    [query.values, preferredEnvironmentId],
+  );
   return { data, error: query.error, isPending: query.isPending, refresh: query.refresh };
 }
 

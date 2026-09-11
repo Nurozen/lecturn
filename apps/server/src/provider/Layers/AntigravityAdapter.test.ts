@@ -52,6 +52,7 @@ type Runtime = Effect.Success<ReturnType<AntigravityAdapterOptions["makeRuntime"
 
 const makeHarness = Effect.fn("makeAntigravityAdapterHarness")(function* (options?: {
   readonly enabled?: boolean;
+  readonly staveMemoryWiring?: AntigravityAdapterOptions["staveMemoryWiring"];
   readonly holdCancel?: boolean;
   readonly holdClose?: boolean;
   readonly holdDispatch?: boolean;
@@ -198,6 +199,7 @@ const makeHarness = Effect.fn("makeAntigravityAdapterHarness")(function* (option
     decodeSettings({ enabled: options?.enabled ?? true }),
     {
       instanceId,
+      ...(options?.staveMemoryWiring ? { staveMemoryWiring: options.staveMemoryWiring } : {}),
       makeRuntime: (input) =>
         Effect.gen(function* () {
           launches.push(input);
@@ -282,6 +284,35 @@ const layer = ServerConfig.layerTest(process.cwd(), {
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
 it.layer(layer)("AntigravityAdapter", (it) => {
+  it.effect("adds configured Stave memory to the ACP session", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        staveMemoryWiring: {
+          resolve: () =>
+            Effect.succeed({
+              state: "configured",
+              config: {
+                command: "/opt/context-marmot",
+                args: ["mcp"],
+                env: { MEMORY: "space-memory" },
+              },
+            }),
+        },
+      });
+      yield* harness.adapter.startSession({
+        threadId,
+        cwd: "/tmp/workspace",
+        runtimeMode: "full-access",
+      });
+      expect(harness.launches[0]?.mcpServers).toContainEqual({
+        name: "context-marmot",
+        command: "/opt/context-marmot",
+        args: ["mcp"],
+        env: [{ name: "MEMORY", value: "space-memory" }],
+      });
+    }).pipe(Effect.scoped),
+  );
+
   it.effect(
     "runs native auth, resume, models, commands, and streaming through the ACP transport",
     () =>

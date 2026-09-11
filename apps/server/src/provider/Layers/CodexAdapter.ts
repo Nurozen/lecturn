@@ -46,6 +46,10 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 import { getModelSelectionStringOptionValue } from "@lecturn/shared/model";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import {
+  noop as noopStaveMemoryWiring,
+  type StaveMemoryWiring,
+} from "../../stave/StaveMemoryWiring.ts";
 
 import {
   ProviderAdapterRequestError,
@@ -58,6 +62,8 @@ import {
 import { type CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { make as makeProcessRunner, type ProcessRunner } from "../../processRunner.ts";
+import { hasCanonicalMarmotServer } from "./codexMcpInventory.ts";
 import {
   CodexResumeCursorSchema,
   CodexSessionRuntimeThreadIdMissingError,
@@ -91,6 +97,8 @@ export const CODEX_ADAPTER_CAPABILITIES = {
 export interface CodexAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
   readonly environment?: NodeJS.ProcessEnv;
+  readonly staveMemoryWiring?: StaveMemoryWiring["Service"];
+  readonly processRunner?: ProcessRunner["Service"];
   readonly makeRuntime?: (
     options: CodexSessionRuntimeOptions,
   ) => Effect.Effect<
@@ -108,6 +116,11 @@ interface CodexAdapterSessionContext {
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
   stopped: boolean;
+}
+
+// JSON basic-string escapes are valid TOML; TOML additionally requires escaping DEL.
+function encodeTomlString(value: string): string {
+  return JSON.stringify(value).replaceAll(String.fromCharCode(0x7f), "\\u007f");
 }
 
 function mapCodexRuntimeError(
@@ -1968,9 +1981,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   options?: CodexAdapterLiveOptions,
 ) {
   const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("codex");
+  const staveMemoryWiring = options?.staveMemoryWiring ?? noopStaveMemoryWiring;
   const fileSystem = yield* FileSystem.FileSystem;
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const crypto = yield* Crypto.Crypto;
+  const processRunner = options?.processRunner ?? (yield* makeProcessRunner());
   const serverConfig = yield* Effect.service(ServerConfig);
   const nativeEventLogger =
     options?.nativeEventLogger ??
@@ -2022,10 +2037,20 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           };
         }
         const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+        const cwd = input.cwd ?? process.cwd();
+        const memory = yield* staveMemoryWiring.resolve(cwd);
+        const appServerArgs: Array<string> = mcpSession
+          ? [
+              "-c",
+              `mcp_servers.lecturn.url=${mcpSession.endpoint}`,
+              "-c",
+              'mcp_servers.lecturn.bearer_token_env_var="LECTURN_MCP_BEARER_TOKEN"',
+            ]
+          : [];
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
-          cwd: input.cwd ?? process.cwd(),
+          cwd,
           binaryPath: codexConfig.binaryPath,
           launchArgs: resolveCodexLaunchArgs(codexConfig.launchArgs, options?.environment),
           ...(options?.environment ? { environment: options.environment } : {}),
@@ -2053,15 +2078,57 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                     "",
                   ),
                 },
-                appServerArgs: [
-                  "-c",
-                  `mcp_servers.lecturn.url=${mcpSession.endpoint}`,
-                  "-c",
-                  'mcp_servers.lecturn.bearer_token_env_var="LECTURN_MCP_BEARER_TOKEN"',
-                ],
               }
             : {}),
+          ...(appServerArgs.length > 0 || memory.state === "configured" ? { appServerArgs } : {}),
         };
+        if (memory.state === "configured") {
+          const canonicalExists = yield* hasCanonicalMarmotServer(runtimeInput, processRunner).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderAdapterProcessError({
+                  provider: PROVIDER,
+                  threadId: input.threadId,
+                  detail: cause.message,
+                  cause,
+                }),
+            ),
+          );
+          if (!canonicalExists) {
+            // Disabled MCP entries still require a valid transport. A concurrent
+            // conflicting HTTP entry then fails validation instead of running.
+            appServerArgs.push(
+              "-c",
+              `mcp_servers.context-marmot.command=${encodeTomlString(memory.config.command)}`,
+            );
+          }
+          // Codex recursively merges MCP tables across config layers. Use a
+          // session-local name so old env and transport fields cannot survive.
+          const memoryId = yield* crypto.randomUUIDv4.pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderAdapterProcessError({
+                  provider: PROVIDER,
+                  threadId: input.threadId,
+                  detail: "Failed to allocate a Stave memory MCP server name.",
+                  cause,
+                }),
+            ),
+          );
+          const memoryServer = `mcp_servers.sm_${memoryId.replaceAll("-", "").slice(0, 12)}`;
+          appServerArgs.push(
+            "-c",
+            "mcp_servers.context-marmot.enabled=false",
+            "-c",
+            `${memoryServer}.command=${encodeTomlString(memory.config.command)}`,
+            "-c",
+            `${memoryServer}.args=[${memory.config.args.map(encodeTomlString).join(",")}]`,
+          );
+          const env = Object.entries(memory.config.env ?? {})
+            .map(([key, value]) => `${encodeTomlString(key)}=${encodeTomlString(value)}`)
+            .join(",");
+          appServerArgs.push("-c", `${memoryServer}.env={${env}}`);
+        }
         const sessionScope = yield* Scope.make("sequential");
         let sessionScopeTransferred = false;
         yield* Effect.addFinalizer(() =>

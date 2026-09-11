@@ -10,6 +10,8 @@ import {
 } from "@lecturn/contracts";
 import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import * as Data from "effect/Data";
+import * as Deferred from "effect/Deferred";
+import * as StaveRuntimeFence from "../stave/StaveRuntimeFence.ts";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
@@ -203,6 +205,7 @@ const multiTerminalHistoryLogPath = (
   );
 
 interface CreateManagerOptions {
+  runtimeFence?: StaveRuntimeFence.StaveRuntimeFence["Service"];
   shellResolver?: () => string;
   env?: NodeJS.ProcessEnv;
   subprocessInspector?: (terminalPid: number) => Effect.Effect<{
@@ -242,6 +245,7 @@ const createManager = (
       const manager = yield* TerminalManager.makeWithOptions({
         logsDir,
         historyLineLimit,
+        ...(options.runtimeFence ? { runtimeFence: options.runtimeFence } : {}),
         ptyAdapter,
         ...(options.shellResolver !== undefined ? { shellResolver: options.shellResolver } : {}),
         ...(options.env !== undefined ? { env: options.env } : {}),
@@ -1883,4 +1887,94 @@ it.layer(
       expect(process.killSignals).toContain("SIGKILL");
     }).pipe(Effect.provide(TestClock.layer())),
   );
+});
+
+it.layer(
+  Layer.merge(NodeServices.layer, ProcessRunner.layer.pipe(Layer.provide(NodeServices.layer))),
+)("Stave terminal runtime quiescence", (it) => {
+  for (const restart of [false, true]) {
+    it.effect(
+      `drains held ${restart ? "restart" : "open"} and blocks direct and stream starts until teardown finishes`,
+      () =>
+        Effect.gen(function* () {
+          const fence = yield* StaveRuntimeFence.makeWithOptions().pipe(
+            Effect.provideService(
+              FileSystem.FileSystem,
+              FileSystem.makeNoop({ realPath: (path) => Effect.succeed(path) }),
+            ),
+          );
+          const pty = new FakePtyAdapter();
+          const { manager, baseDir } = yield* createManager(5, {
+            ptyAdapter: pty,
+            runtimeFence: fence,
+            processKillGraceMs: 0,
+          });
+          const path = yield* Path.Path;
+          const fs = yield* FileSystem.FileSystem;
+          const root = path.join(baseDir, "space");
+          const repo = path.join(root, "repo");
+          const sibling = path.join(baseDir, "space-more");
+          yield* fs.makeDirectory(repo, { recursive: true });
+          yield* fs.makeDirectory(sibling);
+          yield* manager.open(openInput({ threadId: "sibling", cwd: sibling }));
+          if (restart) yield* manager.open(openInput({ cwd: repo }));
+          const entered = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          const quiesced = yield* Deferred.make<void>();
+          const keepFence = yield* Deferred.make<void>();
+          const originalSpawn = pty.spawn.bind(pty);
+          pty.spawn = (input) =>
+            Deferred.succeed(entered, undefined).pipe(
+              Effect.andThen(Deferred.await(release)),
+              Effect.andThen(originalSpawn(input)),
+            );
+          const pending = yield* (
+            restart
+              ? manager.restart(restartInput({ cwd: repo }))
+              : manager.open(openInput({ cwd: repo }))
+          ).pipe(Effect.forkChild);
+          yield* Deferred.await(entered);
+          const cleanup = Effect.gen(function* () {
+            yield* manager.closeSessionsUnder!(root);
+            yield* Deferred.succeed(quiesced, undefined);
+            yield* Deferred.await(keepFence);
+          });
+          const teardown = yield* (restart ? fence.withFence(root, cleanup) : cleanup).pipe(
+            Effect.forkChild,
+          );
+          yield* Effect.yieldNow;
+          assert.isFalse(yield* Deferred.isDone(quiesced));
+          for (const action of [
+            manager.open(openInput({ threadId: "blocked-open", cwd: repo })).pipe(Effect.asVoid),
+            manager
+              .restart(restartInput({ threadId: "blocked-restart", cwd: repo }))
+              .pipe(Effect.asVoid),
+            manager
+              .attachStream(
+                {
+                  threadId: "blocked-stream",
+                  terminalId: DEFAULT_TERMINAL_ID,
+                  cwd: repo,
+                  restartIfNotRunning: true,
+                },
+                () => Effect.void,
+              )
+              .pipe(Effect.asVoid),
+          ]) {
+            const result = yield* action.pipe(Effect.result);
+            assert.equal(result._tag, "Failure");
+            if (result._tag === "Failure")
+              assert.equal(result.failure._tag, "TerminalCwdStatError");
+          }
+          yield* Deferred.succeed(release, undefined);
+          yield* Fiber.join(pending);
+          yield* Deferred.await(quiesced);
+          assert.isFalse(pty.processes[0]!.killed);
+          assert.isTrue(pty.processes.at(-1)!.killed);
+          assert.include(pty.processes.at(-1)!.killSignals, "SIGKILL");
+          yield* Deferred.succeed(keepFence, undefined);
+          yield* Fiber.join(teardown);
+        }),
+    );
+  }
 });

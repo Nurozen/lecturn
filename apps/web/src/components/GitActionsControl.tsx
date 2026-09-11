@@ -104,11 +104,15 @@ interface GitActionsControlProps {
   gitCwd: string | null;
   activeThreadRef: ScopedThreadRef | null;
   draftId?: DraftId;
+  repositoryTarget?: { readonly repository: string; readonly host?: string };
+  syncThreadBranch?: boolean;
   /**
    * Opens the thread's own change request beside it. Absent when the thread has no project to
    * place it against, in which case it still opens in the browser.
    */
-  onOpenPullRequest?: ((number: number) => void) | undefined;
+  onOpenPullRequest?:
+    | ((number: number, target?: { repository: string; host?: string }) => void)
+    | undefined;
 }
 
 interface PendingDefaultBranchAction {
@@ -987,6 +991,8 @@ export default function GitActionsControl({
   activeThreadRef,
   draftId,
   onOpenPullRequest,
+  repositoryTarget,
+  syncThreadBranch = true,
 }: GitActionsControlProps) {
   const updateThreadMetadata = useAtomCommand(
     threadEnvironment.updateMetadata,
@@ -1045,7 +1051,7 @@ export default function GitActionsControl({
 
   const persistThreadBranchSync = useCallback(
     (branch: string | null) => {
-      if (!activeThreadRef) {
+      if (!activeThreadRef || !syncThreadBranch) {
         return;
       }
 
@@ -1081,6 +1087,7 @@ export default function GitActionsControl({
       draftId,
       setDraftThreadContext,
       updateThreadMetadata,
+      syncThreadBranch,
     ],
   );
 
@@ -1235,7 +1242,7 @@ export default function GitActionsControl({
     // Beside the thread where it was made, the way the browser opens beside it. Checked before
     // the shell, which opening in the app does not need.
     if (openPr && onOpenPullRequest) {
-      onOpenPullRequest(openPr.number);
+      onOpenPullRequest(openPr.number, repositoryTarget);
       return;
     }
     const prUrl = openPr?.url ?? null;
@@ -1258,7 +1265,7 @@ export default function GitActionsControl({
         }),
       );
     });
-  }, [gitStatusForActions, onOpenPullRequest, openLink, threadToastData]);
+  }, [gitStatusForActions, onOpenPullRequest, openLink, threadToastData, repositoryTarget]);
 
   runGitActionWithToast = useEffectEvent(
     async ({

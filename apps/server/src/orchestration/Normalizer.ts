@@ -1,6 +1,7 @@
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import {
   type ClientOrchestrationCommand,
@@ -8,6 +9,8 @@ import {
   type OrchestrationCommand,
   OrchestrationDispatchCommandError,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  type ProjectId,
+  type ThreadId,
 } from "@lecturn/contracts";
 
 import {
@@ -19,7 +22,10 @@ import {
 } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
 import { parseBase64DataUrl } from "../imageMime.ts";
+import { StaveWorkspaceReader } from "../stave/StaveWorkspaceReader.ts";
+import { StaveAdmission, type StaveAdmissionInput } from "../stave/StaveAdmission.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
+import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
 
 export const canonicalizeClientCommandTimestamps = (
   command: ClientOrchestrationCommand,
@@ -48,6 +54,126 @@ export const canonicalizeClientCommandTimestamps = (
     },
   };
 };
+
+interface WorktreeIntent extends Omit<StaveAdmissionInput, "projectRoot"> {
+  /** Project carried by the command, when it has one. */
+  readonly projectId?: ProjectId;
+  /** Thread whose project owns the command, for thread-scoped shapes. */
+  readonly threadId?: ThreadId;
+  /** Root the command names directly, used when neither lookup resolves. */
+  readonly fallbackProjectRoot?: string;
+}
+
+/**
+ * Commands that require Stave worktree or lifecycle admission, and how to
+ * find their project. Local thread creation and every turn start also check
+ * lifecycle state; unrelated commands skip the lookup.
+ */
+export const describeWorktreeIntent = (
+  command: ClientOrchestrationCommand,
+): WorktreeIntent | null => {
+  switch (command.type) {
+    case "thread.create":
+      return {
+        intent: "thread.create",
+        worktreePath: command.worktreePath,
+        projectId: command.projectId,
+      };
+    case "thread.meta.update":
+      return command.worktreePath === undefined || command.worktreePath === null
+        ? null
+        : {
+            intent: "thread.meta.update",
+            worktreePath: command.worktreePath,
+            threadId: command.threadId,
+          };
+    case "thread.turn.start": {
+      const bootstrap = command.bootstrap;
+      const worktreePath = bootstrap?.createThread?.worktreePath ?? null;
+      const prepareWorktree = bootstrap?.prepareWorktree !== undefined;
+      return {
+        intent: "thread.turn.start",
+        worktreePath,
+        prepareWorktree,
+        threadId: command.threadId,
+        ...(bootstrap?.createThread ? { projectId: bootstrap.createThread.projectId } : {}),
+        ...(bootstrap?.prepareWorktree
+          ? { fallbackProjectRoot: bootstrap.prepareWorktree.projectCwd }
+          : {}),
+      };
+    }
+    case "thread.unsettle":
+      return { intent: "thread.unsettle", threadId: command.threadId };
+    default:
+      return null;
+  }
+};
+
+/**
+ * Stave worktree rule on the normalization path (WebSocket, HTTP, mobile).
+ * Resolves the project root from the command's project id, or through the
+ * thread's project when the command carries only a thread id, then asks
+ * `StaveAdmission`. A project or thread the projection does not know is left
+ * to the decider, which rejects it with its own error.
+ */
+export const enforceStaveWorktreeRule = Effect.fn("Normalizer.enforceStaveWorktreeRule")(function* (
+  command: ClientOrchestrationCommand,
+) {
+  const request = describeWorktreeIntent(command);
+  if (request === null) {
+    return;
+  }
+  const admission = yield* StaveAdmission;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const readError = (cause: unknown) =>
+    new OrchestrationDispatchCommandError({
+      message: "Failed to resolve the command's project for Stave admission.",
+      cause,
+    });
+
+  const thread =
+    request.threadId === undefined
+      ? undefined
+      : Option.getOrUndefined(
+          yield* projectionSnapshotQuery
+            .getThreadShellById(request.threadId)
+            .pipe(Effect.mapError(readError)),
+        );
+  const projectId = request.projectId ?? thread?.projectId;
+  const project =
+    projectId === undefined
+      ? undefined
+      : Option.getOrUndefined(
+          yield* projectionSnapshotQuery
+            .getProjectShellById(projectId)
+            .pipe(Effect.mapError(readError)),
+        );
+  const projectRoot = project?.workspaceRoot ?? request.fallbackProjectRoot;
+  if (projectRoot === undefined) {
+    return;
+  }
+
+  const {
+    projectId: _projectId,
+    threadId: _threadId,
+    fallbackProjectRoot: _root,
+    ...input
+  } = request;
+  yield* admission
+    .check({
+      ...input,
+      projectRoot,
+      ...(projectId === undefined ? {} : { projectId }),
+      ...(command.type === "thread.turn.start" && thread?.worktreePath != null
+        ? { worktreePath: thread.worktreePath }
+        : {}),
+    })
+    .pipe(
+      Effect.mapError(
+        (error) => new OrchestrationDispatchCommandError({ message: error.message, cause: error }),
+      ),
+    );
+});
 
 const removeClaimedAttachmentPaths = Effect.fn("Normalizer.removeClaimedAttachmentPaths")(
   function* (attachmentPaths: ReadonlyArray<string>) {
@@ -137,6 +263,36 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
       return yield* new OrchestrationDispatchCommandError({
         message: "thread.fork is materialized only by the WebSocket dispatcher.",
       });
+    }
+
+    // Before any attachment side effect: a refused command must leave no
+    // claimed copies behind.
+    yield* enforceStaveWorktreeRule(canonicalCommand);
+
+    if (canonicalCommand.type === "project.delete") {
+      const reader = yield* Effect.serviceOption(StaveWorkspaceReader);
+      const query = yield* ProjectionSnapshotQuery;
+      const project = yield* query.getProjectShellById(canonicalCommand.projectId).pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestrationDispatchCommandError({
+              message: "Failed to bind Stave deletion identity.",
+              cause,
+            }),
+        ),
+      );
+      if (Option.isSome(reader) && Option.isSome(project)) {
+        yield* reader.value.invalidate(project.value.workspaceRoot);
+        const space = yield* reader.value.load(project.value.workspaceRoot);
+        if (Option.isSome(space))
+          return {
+            ...canonicalCommand,
+            staveSpaceId: space.value.spaceId,
+            ...(space.value.createdAt === undefined
+              ? {}
+              : { staveCreatedAt: space.value.createdAt }),
+          } as OrchestrationCommand;
+      }
     }
 
     if (canonicalCommand.type !== "thread.turn.start") {

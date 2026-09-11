@@ -37,6 +37,7 @@ policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../A
 - [Remote environments](./internals/remote.md)
 - [Server updates](./internals/server-updates.md)
 - [Resource telemetry](./internals/resource-telemetry.md)
+- [Stave integration](internals/stave-integration.md) — fork-only: how a project maps to a Stave space, the manifest reader, derived `project.stave`, admission rules.
 - [Product analytics](./internals/product-analytics.md)
 - [Environment auth](./internals/environment-auth.md)
 - [Lecturn Connect](./internals/lecturn-connect.md)

@@ -26,6 +26,8 @@ const makeProject = (scripts: OrchestrationProject["scripts"]): OrchestrationPro
 
 const makeProjectionSnapshotQueryLayer = (project: OrchestrationProject) =>
   Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+    listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
+    listActiveProjectRootsUnder: () => Effect.succeed([]),
     getCommandReadModel: () => Effect.die("unused"),
     getSnapshot: () => Effect.die("unused"),
     getShellSnapshot: () => Effect.die("unused"),
@@ -46,6 +48,7 @@ const makeProjectionSnapshotQueryLayer = (project: OrchestrationProject) =>
     getThreadDetailById: () => Effect.die("unused"),
     getThreadDetailSnapshot: () => Effect.die("unused"),
     listThreadActivitiesById: () => Effect.die("unused"),
+    getInferenceTurnPairs: () => Effect.succeed([]),
     listThreadTurnsById: () => Effect.die("unused"),
     getThreadForkContextById: () => Effect.die("unused"),
     listThreadIdsByWorktreePath: () => Effect.die("unused"),

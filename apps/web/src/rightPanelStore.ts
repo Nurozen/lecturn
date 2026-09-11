@@ -64,6 +64,7 @@ export type RightPanelSurface =
       environmentId?: string;
       projectId: string;
       repository: string;
+      host?: string | undefined;
       number: number;
     }
   | { id: "agents"; kind: "agents" };
@@ -97,7 +98,13 @@ interface RightPanelStoreState {
   openAttachment: (ref: ScopedThreadRef, attachment: ChatFileAttachment) => void;
   openPullRequest: (
     ref: ScopedThreadRef,
-    target: { environmentId?: string; projectId: string; repository: string; number: number },
+    target: {
+      environmentId?: string;
+      projectId: string;
+      repository: string;
+      host?: string | undefined;
+      number: number;
+    },
   ) => void;
   openTerminal: (ref: ScopedThreadRef, terminalId: string) => void;
   splitTerminal: (
@@ -184,19 +191,21 @@ export function pullRequestSurfaceId(target: {
   environmentId?: string;
   projectId: string;
   repository: string;
+  host?: string | undefined;
   number: number;
 }): PullRequestSurface["id"] {
   // The environment leads the id where there is one, so the same change request read from two
   // servers is two tabs rather than one tab that changes its mind about which server it is on.
   const scope =
     target.environmentId === undefined ? "" : `${encodeURIComponent(target.environmentId)}:`;
-  return `pull-request:${scope}${encodeURIComponent(target.projectId)}:${encodeURIComponent(target.repository)}:${target.number}`;
+  return `pull-request:${scope}${encodeURIComponent(target.projectId)}:${target.host ? `${encodeURIComponent(target.host.toLowerCase())}:` : ""}${encodeURIComponent(target.repository)}:${target.number}`;
 }
 
 export function pullRequestSurface(target: {
   environmentId?: string;
   projectId: string;
   repository: string;
+  host?: string | undefined;
   number: number;
 }): PullRequestSurface {
   return {
@@ -205,6 +214,7 @@ export function pullRequestSurface(target: {
     ...(target.environmentId === undefined ? {} : { environmentId: target.environmentId }),
     projectId: target.projectId,
     repository: target.repository,
+    ...(target.host ? { host: target.host.toLowerCase() } : {}),
     number: target.number,
   };
 }
@@ -287,12 +297,13 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                       ) {
                         return [];
                       }
-                      const { environmentId, ...rest } = surface;
+                      const { environmentId, host, ...rest } = surface;
                       // Anything else stored under that name is not an environment.
                       return [
                         pullRequestSurface({
                           ...rest,
                           ...(typeof environmentId === "string" ? { environmentId } : {}),
+                          ...(typeof host === "string" ? { host } : {}),
                         }),
                       ];
                     }

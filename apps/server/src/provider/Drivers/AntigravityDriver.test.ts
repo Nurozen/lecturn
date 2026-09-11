@@ -1,3 +1,4 @@
+import * as StaveMemoryWiring from "../../stave/StaveMemoryWiring.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import {
@@ -233,6 +234,7 @@ const testLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "lecturn-antigravity-driver-config-",
 }).pipe(
   Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(StaveMemoryWiring.layerNoop),
   Layer.provideMerge(ServerSettingsService.layerTest()),
   Layer.provideMerge(
     Layer.mock(BackgroundPolicy.BackgroundPolicy)({

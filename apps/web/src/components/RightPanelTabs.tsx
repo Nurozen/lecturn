@@ -118,6 +118,7 @@ interface RightPanelTabsProps {
 export interface PullRequestTabStatus {
   projectId: string;
   repository: string;
+  host?: string | undefined;
   number: number;
   state: PullRequestState;
   isDraft: boolean;
@@ -699,6 +700,7 @@ function PullRequestSurfaceIcon({
           input: {
             projectId: surface.projectId as ProjectId,
             repository: surface.repository,
+            ...(surface.host ? { host: surface.host } : {}),
             number: surface.number,
           },
         }),

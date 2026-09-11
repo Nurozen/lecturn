@@ -1,3 +1,4 @@
+import { StaveMemoryWiring } from "../../stave/StaveMemoryWiring.ts";
 /**
  * CodexDriver — first concrete `ProviderDriver` in the new per-instance model.
  *
@@ -79,6 +80,7 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
  * registered driver and the runtime satisfies them once.
  */
 export type CodexDriverEnv =
+  | StaveMemoryWiring
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
@@ -143,6 +145,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       // spawner-availability failures surfaced from `checkCodexProviderStatus`
       // below.
       const adapter = yield* makeCodexAdapter(effectiveConfig, {
+        staveMemoryWiring: yield* StaveMemoryWiring,
         instanceId,
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),

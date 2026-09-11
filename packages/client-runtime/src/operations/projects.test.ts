@@ -8,9 +8,13 @@ import {
 import * as Option from "effect/Option";
 
 import {
+  ADD_PROJECT_STAVE_SOURCES,
+  addProjectStaveSourceDescription,
+  addProjectStaveSourceLabel,
   buildAddProjectRemoteSourceReadiness,
   buildProjectCreateCommand,
   canCreateProjectInEnvironment,
+  isAddProjectStaveSource,
   findExistingAddProject,
   getAddProjectInitialQuery,
   getCloneDestinationBrowsePath,
@@ -267,5 +271,34 @@ describe("add project shared logic", () => {
       createWorkspaceRootIfMissing: true,
       defaultModelSelection: null,
     });
+  });
+
+  it("lets a Stave-created project keep its manifest id and existing root", () => {
+    expect(
+      buildProjectCreateCommand({
+        commandId: CommandId.make("command"),
+        projectId: ProjectId.make("project"),
+        workspaceRoot: "/work/demo",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        title: "demo-space",
+        createWorkspaceRootIfMissing: false,
+      }),
+    ).toMatchObject({
+      title: "demo-space",
+      workspaceRoot: "/work/demo",
+      createWorkspaceRootIfMissing: false,
+    });
+  });
+
+  it("keeps the Stave sources apart from the remote sources", () => {
+    expect(ADD_PROJECT_STAVE_SOURCES).toEqual(["stave-space", "stave-saga"]);
+    expect(isAddProjectStaveSource("stave-space")).toBe(true);
+    expect(isAddProjectStaveSource("stave-saga")).toBe(true);
+    expect(isAddProjectStaveSource("url")).toBe(false);
+    expect(isAddProjectStaveSource("github")).toBe(false);
+    expect(addProjectStaveSourceLabel("stave-space")).toBe("New Stave space");
+    expect(addProjectStaveSourceLabel("stave-saga")).toBe("New Stave saga");
+    expect(addProjectStaveSourceDescription("stave-space")).toContain("space");
+    expect(addProjectStaveSourceDescription("stave-saga")).toContain("saga");
   });
 });

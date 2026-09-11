@@ -213,6 +213,14 @@ describe("WSL runtime cache", () => {
     expect(script).toContain('mv -T "$runtime_tmp" "$runtime_root"');
     expect(script).not.toContain('rm -rf "$runtime_root"');
 
+    // The Windows-host tar drops the exec bit on the bundled Linux Stave
+    // binary, so the script restores it after extraction and before promotion.
+    const staveChmod = script.indexOf(
+      'chmod +x "$runtime_tmp"/apps/server/dist/stave/*/stave 2>/dev/null || true',
+    );
+    expect(staveChmod).toBeGreaterThan(script.indexOf("tar -xzf"));
+    expect(staveChmod).toBeLessThan(script.indexOf('mv -T "$runtime_tmp" "$runtime_root"'));
+
     const lockAcquired = script.indexOf("flock -x 9");
     const readinessAfterLock = script.indexOf("if runtime_is_ready; then", lockAcquired + 1);
     const existingRuntimeMoved = script.indexOf('mv -T "$runtime_root" "$runtime_stale"');

@@ -335,6 +335,33 @@ it.layer(NodeServices.layer)("AntigravityTextGeneration", (it) => {
       }).pipe(Effect.scoped),
   );
 
+  it.effect("infers a summary and phase with the same account in an isolated workspace", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture({
+        outputs: [
+          '{"summary":"  Login implementation is ready for review.  ","stage":"review","confidence":0.9}',
+        ],
+      });
+      const result = yield* fixture.textGeneration.generateWorkflowSummary({
+        cwd: fixture.projectDirectory,
+        modelSelection,
+        message:
+          '{"priorSummary":"Login implementation is underway.","turns":[{"question":"Finish login","response":"Implementation complete; ready for review."}]}',
+      });
+      expect(result).toEqual({
+        summary: "Login implementation is ready for review.",
+        stage: "review",
+        confidence: 0.9,
+      });
+      expect(fixture.state.selectedModels).toEqual([modelSelection.model]);
+      expect(fixture.state.workspaces).not.toContain(fixture.projectDirectory);
+      expect(fixture.state.prompts[0]?.prompt).toEqual([
+        { type: "text", text: expect.stringContaining("Login implementation is underway.") },
+      ]);
+      yield* fixture.assertCleaned;
+    }).pipe(Effect.scoped),
+  );
+
   it.effect.each(["tool_call", "tool_call_update"] as const)(
     "aborts on %s even without a permission request",
     (sessionUpdate) =>

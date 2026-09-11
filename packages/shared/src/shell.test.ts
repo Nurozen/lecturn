@@ -1,6 +1,12 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeChildProcess from "node:child_process";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it as effectIt } from "@effect/vitest";
-import { HostProcessEnvironment, HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import {
+  HostProcessEnvironment,
+  HostProcessPlatform,
+  HostProcessExecutablePath,
+} from "@lecturn/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -85,7 +91,7 @@ describe("readPathFromLoginShell", () => {
     expect(args?.[1]).toContain("printenv PATH || true");
     expect(args?.[1]).toContain("__LECTURN_ENV_PATH_START__");
     expect(args?.[1]).toContain("__LECTURN_ENV_PATH_END__");
-    expect(options).toEqual({ encoding: "utf8", timeout: 5000 });
+    expect(options).toEqual({ encoding: "utf8", timeout: 5000, killSignal: "SIGKILL" });
   });
 });
 
@@ -122,6 +128,42 @@ describe("readPathFromLaunchctl", () => {
 });
 
 describe("readEnvironmentFromLoginShell", () => {
+  effectIt.effect("terminates a login probe that ignores SIGTERM", () =>
+    Effect.gen(function* () {
+      const platform = yield* HostProcessPlatform;
+      if (platform === "win32") return;
+      const executablePath = yield* HostProcessExecutablePath;
+      // A finite guard keeps the regression bounded even if the hard kill is removed.
+      // Readiness proves the signal handler was installed before the probe timed out.
+      const fixture = [
+        "process.on('SIGTERM', () => {});",
+        "process.stdout.write('probe-ready\\n');",
+        "setTimeout(() => process.exit(0), 2000);",
+      ].join("\n");
+      const failure = yield* Effect.sync(() => {
+        try {
+          readEnvironmentFromLoginShell(
+            "controlled-login-probe",
+            ["PATH"],
+            (_file, _args, options) =>
+              NodeChildProcess.execFileSync(executablePath, ["-e", fixture], {
+                ...options,
+                timeout: 750,
+              }),
+          );
+        } catch (error) {
+          return error;
+        }
+        return undefined;
+      });
+      expect(failure).toMatchObject({
+        code: "ETIMEDOUT",
+        signal: "SIGKILL",
+        stdout: expect.stringContaining("probe-ready"),
+      });
+    }),
+  );
+
   it("extracts multiple environment variables from a login shell command", () => {
     const execFile = vi.fn<
       (

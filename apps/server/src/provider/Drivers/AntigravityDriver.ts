@@ -1,3 +1,4 @@
+import { StaveMemoryWiring } from "../../stave/StaveMemoryWiring.ts";
 import { AntigravitySettings, ProviderDriverKind, ProviderSetupError } from "@lecturn/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
@@ -55,6 +56,7 @@ const DRIVER = ProviderDriverKind.make("antigravity");
 const decodeSettings = Schema.decodeSync(AntigravitySettings);
 
 export type AntigravityDriverEnv =
+  | StaveMemoryWiring
   | AntigravityInstallation
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
@@ -296,6 +298,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
         Effect.map((manifest) => ModelManifest.manifestDefaultModel(manifest, DRIVER)),
       );
       const adapter = yield* makeAntigravityAdapter(settings, {
+        staveMemoryWiring: yield* StaveMemoryWiring,
         instanceId,
         makeRuntime,
         withProcess: authFlow.withProcess,

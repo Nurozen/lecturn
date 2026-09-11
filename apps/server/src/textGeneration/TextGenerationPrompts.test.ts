@@ -5,6 +5,8 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildWorkflowSummaryPrompt,
+  normalizeWorkflowSummary,
 } from "./TextGenerationPrompts.ts";
 import { normalizeCliError, sanitizeThreadTitle } from "./TextGenerationUtils.ts";
 import { TextGenerationError } from "@lecturn/contracts";
@@ -319,5 +321,70 @@ describe("normalizeCliError", () => {
 
     expect(result.detail).toBe("Failed to generate a commit message");
     expect(result.message).not.toContain("secret-token");
+  });
+});
+
+describe("workflow summary boundary", () => {
+  it("bounds evidence and preserves the instruction boundary", () => {
+    const { prompt } = buildWorkflowSummaryPrompt({
+      message: JSON.stringify({
+        priorSummary: "x".repeat(100_000),
+        turns: Array.from({ length: 5 }, () => ({
+          question: "q".repeat(100_000),
+          response: "r".repeat(100_000),
+        })),
+        toolCalls: "excluded secret",
+      }),
+    });
+    expect(prompt.length).toBeLessThan(46_000);
+    expect(prompt.endsWith("END CONVERSATION DATA")).toBe(true);
+    expect(prompt).toContain("Accept is NOT completed or merged");
+    expect(prompt).not.toContain("excluded secret");
+    const data = JSON.parse(
+      prompt.split("BEGIN CONVERSATION DATA\n")[1]!.split("\nEND CONVERSATION DATA")[0]!,
+    );
+    expect(data.turns).toHaveLength(3);
+  });
+  it("rejects non-conversation inputs rather than passing them to a model", () => {
+    expect(() => buildWorkflowSummaryPrompt({ message: "arbitrary evidence" })).toThrow();
+    expect(() => buildWorkflowSummaryPrompt({ message: '{"facts":{"ci":"green"}}' })).toThrow();
+  });
+  it("preserves only the most recent three question/response pairs", () => {
+    const { prompt } = buildWorkflowSummaryPrompt({
+      message: JSON.stringify({
+        priorSummary: "Earlier context",
+        turns: [0, 1, 2, 3].map((n) => ({
+          question: `question ${n}`,
+          response: `response ${n}`,
+          tool: "secret tool output",
+        })),
+      }),
+    });
+    expect(prompt).not.toContain("question 0");
+    expect(prompt).not.toContain("secret tool output");
+    expect(prompt).toContain("question 1");
+    expect(prompt).toContain("response 3");
+    expect(prompt).toContain("Earlier context");
+  });
+  it("retains the final response after long commentary with an explicit truncation marker", () => {
+    const { prompt } = buildWorkflowSummaryPrompt({
+      message: JSON.stringify({
+        priorSummary: null,
+        turns: [
+          {
+            question: "Implement the feature",
+            response: `Beginning context ${"commentary ".repeat(2000)}Final answer: ready for acceptance.`,
+          },
+        ],
+      }),
+    });
+    expect(prompt).toContain("Beginning context");
+    expect(prompt).toContain("[Middle content truncated]");
+    expect(prompt).toContain("Final answer: ready for acceptance.");
+  });
+  it("bounds prose without title-only punctuation or ellipsis normalization", () => {
+    expect(normalizeWorkflowSummary("  API done.\n CI pending. ")).toBe("API done. CI pending.");
+    expect(normalizeWorkflowSummary("x".repeat(5000))).toHaveLength(700);
+    expect(normalizeWorkflowSummary(" \n ")).toBe("");
   });
 });

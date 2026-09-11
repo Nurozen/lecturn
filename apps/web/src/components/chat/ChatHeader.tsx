@@ -1,3 +1,4 @@
+import { StaveGitOverview } from "../stave/StaveGitOverview";
 import {
   type EnvironmentId,
   type EditorId,
@@ -57,6 +58,8 @@ interface ChatHeaderProps {
   /** Drafts have no server thread yet, so the title carries no action menu. */
   isServerThread: boolean;
   activeProjectName: string | undefined;
+  staveProject?: import("@lecturn/contracts").OrchestrationProjectShell;
+  onOpenSpaceDiff?: () => void;
   activeProjectCwd: string | null;
   activeProjectFaviconPath: string | null;
   activeProjectIcon: import("@lecturn/contracts").ProjectIconOverride | null;
@@ -67,7 +70,9 @@ interface ChatHeaderProps {
   availableEditors: ReadonlyArray<EditorId>;
   rightPanelOpen: boolean;
   gitCwd: string | null;
-  readonly onOpenPullRequest?: ((number: number) => void) | undefined;
+  readonly onOpenPullRequest?:
+    | ((number: number, target?: { repository: string; host?: string }) => void)
+    | undefined;
   onNewThreadInProject: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
@@ -128,6 +133,8 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadTitle,
   isServerThread,
   activeProjectName,
+  staveProject,
+  onOpenSpaceDiff,
   activeProjectCwd,
   activeProjectFaviconPath,
   activeProjectIcon,
@@ -476,14 +483,22 @@ export const ChatHeader = memo(function ChatHeader({
             openInCwd={openInCwd}
           />
         )}
-        {activeProjectName && (
+        {staveProject && onOpenSpaceDiff ? (
+          <StaveGitOverview
+            project={staveProject}
+            threadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}
+            onOpenDiff={onOpenSpaceDiff}
+            {...(draftId ? { draftId } : {})}
+            {...(onOpenPullRequest ? { onOpenPullRequest } : {})}
+          />
+        ) : activeProjectName ? (
           <GitActionsControl
             gitCwd={gitCwd}
             activeThreadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}
             onOpenPullRequest={onOpenPullRequest}
             {...(draftId ? { draftId } : {})}
           />
-        )}
+        ) : null}
       </div>
     </div>
   );

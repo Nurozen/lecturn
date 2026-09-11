@@ -26,6 +26,8 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildWorkflowSummaryPrompt,
+  normalizeWorkflowSummary,
 } from "./TextGenerationPrompts.ts";
 import {
   normalizeCliError,
@@ -101,7 +103,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "generateWorkflowSummary",
     value: unknown,
   ): Effect.Effect<string, TextGenerationError> =>
     encodeJsonString(value).pipe(
@@ -120,7 +123,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "generateWorkflowSummary",
     attachments: TextGeneration.BranchNameGenerationInput["attachments"],
   ): Effect.fn.Return<MaterializedImageAttachments, TextGenerationError> {
     if (!attachments || attachments.length === 0) {
@@ -162,7 +166,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateWorkflowSummary";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -178,7 +183,31 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     const outputPath = yield* writeTempFile(operation, "codex-output", "");
 
     const runCodexCommand = Effect.fn("runCodexJson.runCodexCommand")(function* () {
+      const inference = operation === "generateWorkflowSummary";
+      const commandCwd = inference
+        ? yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-workflow-inference-" }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new TextGenerationError({
+                  operation,
+                  detail: "Could not isolate workflow inference.",
+                  cause,
+                }),
+            ),
+          )
+        : cwd;
       const launchArgs = resolveCodexLaunchArgs(codexConfig.launchArgs, resolvedEnvironment);
+      // Retain provider profiles and authentication settings. Override instruction
+      // sources after launch arguments instead of discarding the account's config.
+      // Account-managed MCP schemas can remain exposed by the CLI; the inference
+      // instructions prohibit their use and no tool payload enters our prompt.
+      const inferenceInstructions = inference
+        ? yield* writeTempFile(
+            operation,
+            "workflow-instructions",
+            "Classify only the supplied conversation and return the requested JSON. Do not use tools or external context.",
+          ).pipe(Effect.flatMap((filePath) => encodeJsonForOperation(operation, filePath)))
+        : undefined;
       const reasoningEffort =
         getModelSelectionStringOptionValue(modelSelection, "reasoningEffort") ??
         DEFAULT_TEXT_GENERATION_REASONING_EFFORT;
@@ -188,6 +217,31 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         [
           "exec",
           ...codexExecLaunchArgs(launchArgs),
+          ...(inference
+            ? [
+                "--ignore-rules",
+                ...[
+                  `model_instructions_file=${inferenceInstructions}`,
+                  'developer_instructions=""',
+                  "features.hooks=false",
+                  "notify=[]",
+                  "project_doc_max_bytes=0",
+                  "include_environment_context=false",
+                  "include_collaboration_mode_instructions=false",
+                  "features.memories=false",
+                  "features.plugins=false",
+                  "features.apps=false",
+                  "features.skip_host_skill_discovery=true",
+                  "features.shell_tool=false",
+                  "features.multi_agent=false",
+                  "features.multi_agent_v2=false",
+                  "features.browser_use=false",
+                  "features.computer_use=false",
+                  "features.image_generation=false",
+                  'web_search="disabled"',
+                ].flatMap((value) => ["--config", value]),
+              ]
+            : []),
           "--ephemeral",
           "--skip-git-repo-check",
           "-s",
@@ -211,7 +265,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           ...resolvedEnvironment,
           ...(codexConfig.homePath ? { CODEX_HOME: expandHomePath(codexConfig.homePath) } : {}),
         },
-        cwd,
+        cwd: commandCwd,
         shell: spawnCommand.shell,
         stdin: {
           stream: Stream.encodeText(Stream.make(prompt)),
@@ -405,10 +459,39 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateWorkflowSummary: TextGeneration.TextGeneration["Service"]["generateWorkflowSummary"] =
+    Effect.fn("CodexTextGeneration.generateWorkflowSummary")(function* (input) {
+      const { prompt, outputSchema } = yield* Effect.try({
+        try: () => buildWorkflowSummaryPrompt(input),
+        catch: (cause) =>
+          new TextGenerationError({
+            operation: "generateWorkflowSummary",
+            detail: "Workflow inference requires a prior summary and completed textual turns.",
+            cause,
+          }),
+      });
+      const generated = yield* runCodexJson({
+        operation: "generateWorkflowSummary",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        imagePaths: [],
+        modelSelection: input.modelSelection,
+      });
+      const summary = normalizeWorkflowSummary(generated.summary);
+      if (!summary)
+        return yield* new TextGenerationError({
+          operation: "generateWorkflowSummary",
+          detail: "The provider returned an empty workflow summary.",
+        });
+      return { summary, stage: generated.stage, confidence: generated.confidence };
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateWorkflowSummary,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

@@ -333,3 +333,102 @@ export function buildProjectGroups<TProject extends EnvironmentProject>(input: {
     };
   });
 }
+
+export interface SagaProjectIndexEntry {
+  readonly environmentId: EnvironmentId;
+  readonly sagaRoot: string;
+  readonly status: import("@lecturn/contracts").StaveSagaStatus;
+}
+
+export interface SagaProjectTreeNode<TProject extends EnvironmentProject = EnvironmentProject> {
+  readonly group: ProjectGroup<TProject>;
+  readonly children: ReadonlyArray<SagaProjectTreeNode<TProject>>;
+  readonly memberStatus: import("@lecturn/contracts").StaveSagaStatus["members"][number] | null;
+}
+
+/** Adds saga nesting without changing physical groups, keys, or navigation targets.
+ * Ambiguous groups stay at the top level, so an environment's roster cannot move
+ * unrelated clones or projects from another environment into its saga.
+ */
+export function buildSagaProjectTree<TProject extends EnvironmentProject>(
+  groups: ReadonlyArray<ProjectGroup<TProject>>,
+  sagaIndex: ReadonlyArray<SagaProjectIndexEntry>,
+): ReadonlyArray<SagaProjectTreeNode<TProject>> {
+  const parents = sagaIndex.flatMap((entry) => {
+    const matches = groups.filter((group) =>
+      group.members.some(
+        ({ project }) =>
+          project.environmentId === entry.environmentId &&
+          project.stave?.isSaga === true &&
+          project.stave.spaceId === entry.status.sagaId &&
+          entry.status.sagaCreatedAt !== undefined &&
+          project.stave.createdAt === entry.status.sagaCreatedAt &&
+          normalizeProjectPathForComparison(project.workspaceRoot) ===
+            normalizeProjectPathForComparison(entry.sagaRoot),
+      ),
+    );
+    return matches.length === 1 ? [{ entry, group: matches[0]! }] : [];
+  });
+  const nested = new Map<
+    string,
+    {
+      parentKey: string;
+      order: number;
+      status: SagaProjectIndexEntry["status"]["members"][number];
+    }
+  >();
+  for (const group of groups) {
+    if (group.members.length === 0 || group.members.some(({ project }) => project.stave?.isSaga))
+      continue;
+    const assignments = group.members.map(({ project }) => {
+      const matches = parents.flatMap((parent) => {
+        if (project.environmentId !== parent.entry.environmentId || !project.stave) return [];
+        const order = parent.entry.status.members.findIndex(
+          (member) =>
+            member.id === project.stave?.spaceId &&
+            member.workspaceRoot !== undefined &&
+            member.createdAt !== undefined &&
+            member.createdAt === project.stave?.createdAt &&
+            normalizeProjectPathForComparison(member.workspaceRoot) ===
+              normalizeProjectPathForComparison(project.workspaceRoot),
+        );
+        return order < 0 ? [] : [{ parent, order, status: parent.entry.status.members[order]! }];
+      });
+      return matches.length === 1 ? matches[0] : undefined;
+    });
+    const first = assignments[0];
+    if (
+      !first ||
+      assignments.some(
+        (assignment) =>
+          !assignment ||
+          assignment.parent !== first.parent ||
+          assignment.status.id !== first.status.id,
+      )
+    )
+      continue;
+    nested.set(group.key, {
+      parentKey: first.parent.group.key,
+      order: first.order,
+      status: first.status,
+    });
+  }
+  const children = new Map<string, SagaProjectTreeNode<TProject>[]>();
+  for (const group of groups) {
+    const assignment = nested.get(group.key);
+    if (!assignment) continue;
+    const siblings = children.get(assignment.parentKey) ?? [];
+    siblings.push({ group, children: [], memberStatus: assignment.status });
+    children.set(assignment.parentKey, siblings);
+  }
+  for (const siblings of children.values()) {
+    siblings.sort((a, b) => nested.get(a.group.key)!.order - nested.get(b.group.key)!.order);
+  }
+  return groups
+    .filter((group) => !nested.has(group.key))
+    .map((group) => ({
+      group,
+      children: children.get(group.key) ?? [],
+      memberStatus: null,
+    }));
+}

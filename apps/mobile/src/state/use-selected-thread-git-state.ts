@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 
+import { resolveProjectGitCwd } from "@lecturn/client-runtime/state/projectGit";
 import { dedupeRemoteBranchesWithLocalMatches } from "@lecturn/shared/git";
 
 import { useBranches } from "./queries";
@@ -9,16 +10,16 @@ import { useVcsActionState } from "./use-vcs-action-state";
 import { useThreadSelection } from "./use-thread-selection";
 import { useSelectedThreadWorktree } from "./use-selected-thread-worktree";
 
-export function useSelectedThreadGitState() {
+export function useSelectedThreadGitState(repoKey?: string) {
   const { selectedThread, selectedThreadProject } = useThreadSelection();
-  const { selectedThreadCwd } = useSelectedThreadWorktree();
+  const { selectedThreadGitCwd } = useSelectedThreadWorktree(repoKey);
 
   const selectedThreadGitTarget = useMemo(
     () => ({
       environmentId: selectedThread?.environmentId ?? null,
-      cwd: selectedThreadCwd,
+      cwd: selectedThreadGitCwd,
     }),
-    [selectedThread?.environmentId, selectedThreadCwd],
+    [selectedThread?.environmentId, selectedThreadGitCwd],
   );
   const gitActionState = useVcsActionState(selectedThreadGitTarget);
   const sourceControlDiscovery = useEnvironmentQuery(
@@ -30,13 +31,17 @@ export function useSelectedThreadGitState() {
         }),
   );
 
+  // Ordinary projects list branches from their root; Stave uses the selected checkout.
+  const selectedThreadGitRootCwd = selectedThreadProject?.stave
+    ? selectedThreadGitCwd
+    : resolveProjectGitCwd({ project: selectedThreadProject });
   const selectedThreadBranchTarget = useMemo(
     () => ({
       environmentId: selectedThread?.environmentId ?? null,
-      cwd: selectedThreadProject?.workspaceRoot ?? null,
+      cwd: selectedThreadGitRootCwd,
       query: null,
     }),
-    [selectedThread?.environmentId, selectedThreadProject?.workspaceRoot],
+    [selectedThread?.environmentId, selectedThreadGitRootCwd],
   );
   const selectedThreadBranchState = useBranches(selectedThreadBranchTarget);
   const selectedThreadBranches = useMemo(

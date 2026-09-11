@@ -1,4 +1,5 @@
 import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
+import { staveForcedEnvMode } from "@lecturn/client-runtime/state/projectGit";
 import type { EnvironmentId, ThreadId } from "@lecturn/contracts";
 import {
   ChevronDownIcon,
@@ -19,6 +20,7 @@ import {
   resolveCurrentWorkspaceLabel,
   resolveEnvModeLabel,
   resolveEffectiveEnvMode,
+  resolveEnvModeLocked,
   resolveLockedWorkspaceLabel,
   resolvePreviousWorktreeLabel,
   resolvePreviousWorktreeSeed,
@@ -43,6 +45,8 @@ import { ComposerSurface } from "./chat/ComposerSurface";
 import { measureRestingComposerControls } from "./chat/restingComposerControlsMeasurement";
 import { resolveRestingComposerControlsNaturalWidth } from "./composerFooterLayout";
 import { cn } from "~/lib/utils";
+import { describeStaveWorkspace } from "./stave/staveWorkspaceContext.logic";
+import { StaveWorkspaceContext } from "./stave/StaveWorkspaceContext";
 
 interface BranchToolbarProps {
   environmentId: EnvironmentId;
@@ -67,6 +71,9 @@ interface BranchToolbarProps {
 interface MobileRunContextSelectorProps {
   envLocked: boolean;
   envModeLocked: boolean;
+  /** False for Stave spaces: their repos are already worktrees, so the
+      worktree options are not offered at all rather than shown disabled. */
+  worktreeModeAvailable: boolean;
   environmentId: EnvironmentId;
   availableEnvironments: readonly EnvironmentOption[] | undefined;
   showEnvironmentPicker: boolean;
@@ -82,6 +89,7 @@ interface MobileRunContextSelectorProps {
 const MobileRunContextSelector = memo(function MobileRunContextSelector({
   envLocked,
   envModeLocked,
+  worktreeModeAvailable,
   environmentId,
   availableEnvironments,
   showEnvironmentPicker,
@@ -210,13 +218,15 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
                 </span>
               </span>
             </MenuRadioItem>
-            <MenuRadioItem disabled={envModeLocked} value="worktree">
-              <span className="flex min-w-0 items-center gap-1.5">
-                <FolderGit2Icon className="size-3" />
-                <span className="min-w-0 truncate">{resolveEnvModeLabel("worktree")}</span>
-              </span>
-            </MenuRadioItem>
-            {previousWorktreeLabel ? (
+            {worktreeModeAvailable ? (
+              <MenuRadioItem disabled={envModeLocked} value="worktree">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <FolderGit2Icon className="size-3" />
+                  <span className="min-w-0 truncate">{resolveEnvModeLabel("worktree")}</span>
+                </span>
+              </MenuRadioItem>
+            ) : null}
+            {worktreeModeAvailable && previousWorktreeLabel ? (
               <MenuRadioItem disabled={envModeLocked} value="previous-worktree">
                 <span className="flex min-w-0 items-center gap-1.5">
                   <HistoryIcon className="size-3" />
@@ -412,7 +422,7 @@ function useLabelsOverflow(element: HTMLDivElement | null): boolean {
 export const BranchToolbar = memo(function BranchToolbar({
   environmentId,
   threadId,
-  showGitControls,
+  showGitControls: requestedGitControls,
   draftId,
   onEnvModeChange,
   effectiveEnvModeOverride,
@@ -443,16 +453,27 @@ export const BranchToolbar = memo(function BranchToolbar({
       ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
       : null;
   const activeProject = useProject(activeProjectRef);
+  const staveContext = describeStaveWorkspace(activeProject);
+  const showGitControls =
+    requestedGitControls && (!staveContext || staveContext.primaryRepoPath !== null);
   const hasActiveThread = serverThread !== null || draftThread !== null;
   const activeWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
-  const effectiveEnvMode =
-    effectiveEnvModeOverride ??
-    resolveEffectiveEnvMode({
-      activeWorktreePath,
-      hasServerThread: serverThread !== null,
-      draftThreadEnvMode: draftThread?.envMode,
-    });
-  const envModeLocked = envLocked || (serverThread !== null && activeWorktreePath !== null);
+  // A Stave space's repos are already worktrees: the mode is pinned to local
+  // and the picker is read-only so nothing can offer to create another one.
+  const forcedEnvMode = staveForcedEnvMode(activeProject);
+  const effectiveEnvMode = resolveEffectiveEnvMode({
+    activeWorktreePath,
+    hasServerThread: serverThread !== null,
+    draftThreadEnvMode: draftThread?.envMode,
+    forcedEnvMode,
+    overrideEnvMode: effectiveEnvModeOverride,
+  });
+  const envModeLocked = resolveEnvModeLocked({
+    envLocked,
+    forcedEnvMode,
+    hasServerThread: serverThread !== null,
+    activeWorktreePath,
+  });
 
   // "Previous worktree" hops a draft into the most recently active worktree
   // of this project — the "keep going where I just was" follow-up flow. Only
@@ -514,11 +535,12 @@ export const BranchToolbar = memo(function BranchToolbar({
         !contextStripVisible && "pointer-events-none invisible absolute inset-x-0 top-full",
       )}
     >
-      {showGitControls ? (
+      {showGitControls && !staveContext ? (
         <div className="contents @3xl/composer-surface:hidden">
           <MobileRunContextSelector
             envLocked={envLocked}
             envModeLocked={envModeLocked}
+            worktreeModeAvailable={forcedEnvMode === undefined}
             environmentId={environmentId}
             availableEnvironments={availableEnvironments}
             showEnvironmentPicker={showEnvironmentPicker}
@@ -532,11 +554,11 @@ export const BranchToolbar = memo(function BranchToolbar({
           />
         </div>
       ) : null}
-      {showGitControls || showEnvironmentIndicator ? (
+      {showGitControls || showEnvironmentIndicator || staveContext ? (
         <div
           className={cn(
             "min-h-7 min-w-10 items-center gap-1 sm:min-h-6",
-            showGitControls ? "hidden @3xl/composer-surface:flex" : "flex",
+            showGitControls && !staveContext ? "hidden @3xl/composer-surface:flex" : "flex",
             composerControlsHostRef ? "shrink" : "flex-1",
           )}
         >
@@ -557,7 +579,9 @@ export const BranchToolbar = memo(function BranchToolbar({
               ) : null}
             </>
           )}
-          {showGitControls ? (
+          {staveContext ? (
+            <StaveWorkspaceContext context={staveContext} />
+          ) : showGitControls ? (
             <BranchToolbarEnvModeSelector
               envLocked={envModeLocked}
               effectiveEnvMode={effectiveEnvMode}
@@ -582,7 +606,7 @@ export const BranchToolbar = memo(function BranchToolbar({
         />
       ) : null}
 
-      {showGitControls ? (
+      {showGitControls && !staveContext ? (
         <BranchToolbarBranchSelector
           className="min-w-0 flex-initial justify-end @3xl/composer-surface:ml-auto"
           environmentId={environmentId}

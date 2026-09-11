@@ -26,6 +26,8 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildWorkflowSummaryPrompt,
+  normalizeWorkflowSummary,
 } from "./TextGenerationPrompts.ts";
 import {
   sanitizeCommitSubject,
@@ -401,10 +403,37 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       return { title: sanitizeThreadTitle(generated.title) };
     });
 
+  const generateWorkflowSummary: TextGeneration.TextGeneration["Service"]["generateWorkflowSummary"] =
+    Effect.fn("AntigravityTextGeneration.generateWorkflowSummary")(function* (input) {
+      const { prompt, outputSchema } = yield* Effect.try({
+        try: () => buildWorkflowSummaryPrompt(input),
+        catch: (cause) =>
+          new TextGenerationError({
+            operation: "generateWorkflowSummary",
+            detail: "Workflow inference requires a prior summary and completed textual turns.",
+            cause,
+          }),
+      });
+      const generated = yield* runAntigravityJson({
+        operation: "generateWorkflowSummary",
+        prompt,
+        outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      const summary = normalizeWorkflowSummary(generated.summary);
+      if (!summary)
+        return yield* new TextGenerationError({
+          operation: "generateWorkflowSummary",
+          detail: "The provider returned an empty workflow summary.",
+        });
+      return { summary, stage: generated.stage, confidence: generated.confidence };
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateWorkflowSummary,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

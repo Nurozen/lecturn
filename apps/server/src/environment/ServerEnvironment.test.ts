@@ -62,6 +62,7 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
     tailscaleServeEnabled: false,
     tailscaleServePort: 443,
     threadForkingEnabled: true,
+    staveEnabled: true,
     port: 0,
     host: undefined,
     desktopBootstrapToken: undefined,
@@ -255,6 +256,36 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
 
       const web = yield* describeWith({ mode: "web", desktopTelemetryControlFd: 5 });
       expect(web.capabilities.desktopAppUpdate).toBeUndefined();
+    }),
+  );
+
+  it.effect("advertises the Stave capability only when the kill switch is on", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "lecturn-server-environment-stave-capability-test-",
+      });
+      const serverConfig = yield* makeServerConfig(baseDir);
+      yield* fileSystem.makeDirectory(serverConfig.stateDir, { recursive: true });
+
+      const describeWith = (overrides: Partial<ServerConfig.ServerConfig["Service"]>) =>
+        Effect.gen(function* () {
+          const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
+          return yield* serverEnvironment.getDescriptor;
+        }).pipe(
+          Effect.provide(
+            ServerEnvironment.layer.pipe(
+              Layer.provide(ServerSecretStore.layer),
+              Layer.provide(ServerConfig.layer({ ...serverConfig, ...overrides })),
+            ),
+          ),
+        );
+
+      const enabled = yield* describeWith({ staveEnabled: true });
+      expect(enabled.capabilities.stave).toEqual({ protocolVersion: 1 });
+
+      const disabled = yield* describeWith({ staveEnabled: false });
+      expect(disabled.capabilities.stave).toBeUndefined();
     }),
   );
 

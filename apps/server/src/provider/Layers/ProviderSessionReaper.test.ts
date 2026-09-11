@@ -209,6 +209,8 @@ describe("ProviderSessionReaper", () => {
       Layer.provideMerge(Layer.succeed(ProviderService, providerService)),
       Layer.provideMerge(
         Layer.succeed(ProjectionSnapshotQuery, {
+          listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
+          listActiveProjectRootsUnder: () => Effect.succeed([]),
           getCommandReadModel: () => Effect.die("unused"),
           getSnapshot: () => Effect.die("unused"),
           getShellSnapshot: () => Effect.die("unused"),
@@ -231,6 +233,7 @@ describe("ProviderSessionReaper", () => {
           getThreadDetailById: () => Effect.die("unused"),
           getThreadDetailSnapshot: () => Effect.die("unused"),
           listThreadActivitiesById: () => Effect.die("unused"),
+          getInferenceTurnPairs: () => Effect.succeed([]),
           listThreadTurnsById: () => Effect.die("unused"),
           getThreadForkContextById: () => Effect.die("unused"),
           listThreadIdsByWorktreePath: () => Effect.die("unused"),

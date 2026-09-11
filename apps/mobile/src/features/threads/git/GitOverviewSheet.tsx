@@ -4,13 +4,16 @@ import {
   getGitActionDisabledReason,
   requiresDefaultBranchConfirmation,
 } from "@lecturn/client-runtime/state/vcs";
-import { EnvironmentId, ThreadId } from "@lecturn/contracts";
+import { isStaveProject, type ProjectGitTarget } from "@lecturn/client-runtime/state/projectGit";
+import { EnvironmentId, ThreadId, type ProjectId, WS_METHODS } from "@lecturn/contracts";
 import {
   CommonActions,
   StackActions,
   useNavigation,
   type StaticScreenProps,
 } from "@react-navigation/native";
+import { createEnvironmentRpcQueryAtomFamily } from "@lecturn/client-runtime/state/runtime";
+import { connectionAtomRuntime } from "../../../connection/runtime";
 import { SymbolView } from "../../../components/AppSymbol";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Platform, Pressable, RefreshControl, ScrollView, View } from "react-native";
@@ -32,6 +35,94 @@ import { vcsEnvironment } from "../../../state/vcs";
 import { resolveGitOverviewReviewNavigationAction } from "./git-overview-navigation";
 import { MetaCard, SheetListRow, menuItemIconName, statusSummary } from "./gitSheetComponents";
 
+const spacePullRequests = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+  label: "mobile:stave-space-pull-requests",
+  tag: WS_METHODS.pullRequestsList,
+  staleTimeMs: 30_000,
+});
+
+function SpacePullRequests(props: {
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+}) {
+  const query = useEnvironmentQuery(
+    spacePullRequests({
+      environmentId: props.environmentId,
+      input: { projectId: props.projectId, state: "open", limit: 50 },
+    }),
+  );
+  const groups = new Map<string, NonNullable<typeof query.data>["entries"][number][]>();
+  for (const pr of query.data?.entries ?? []) {
+    const key = `${pr.host} / ${pr.repository}`;
+    const group = groups.get(key) ?? [];
+    group.push(pr);
+    groups.set(key, group);
+  }
+  return (
+    <View className="gap-2 rounded-2xl border border-border bg-card px-4 py-3">
+      <Text className="font-lecturn-bold text-base">Space pull requests</Text>
+      {query.error ? <Text className="text-foreground-muted text-sm">{query.error}</Text> : null}
+      {query.isPending && !query.data ? (
+        <Text className="text-foreground-muted text-sm">Loading pull requests…</Text>
+      ) : null}
+      {query.data?.entries.length === 0 && query.data.errors.length === 0 ? (
+        <Text className="text-foreground-muted text-sm">No open pull requests.</Text>
+      ) : null}
+      {[...groups].map(([repository, prs]) => (
+        <View key={repository} className="gap-1">
+          <Text className="text-foreground-muted text-xs">{repository}</Text>
+          {prs.map((pr) => (
+            <SheetListRow
+              key={pr.number}
+              icon="arrow.triangle.pull"
+              title={`#${pr.number} ${pr.title}`}
+              subtitle={`${pr.headBranch} → ${pr.baseBranch}${pr.isDraft ? " · Draft" : ""}`}
+              onPress={() => {
+                void tryOpenExternalUrl(pr.url, "pull-request");
+              }}
+            />
+          ))}
+        </View>
+      ))}
+      {query.data?.errors.map((error) => (
+        <Text key={`${error.projectId}:${error.message}`} className="text-foreground-muted text-sm">
+          {error.message}
+        </Text>
+      ))}
+      {query.data?.truncated ? (
+        <Text className="text-foreground-muted text-sm">
+          Showing the first 50 open pull requests per repository.
+        </Text>
+      ) : null}
+      <Pressable accessibilityRole="button" onPress={query.refresh}>
+        <Text className="text-primary text-sm">Refresh pull requests</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function SpaceRepositoryRow(props: {
+  readonly environmentId: EnvironmentId;
+  readonly target: ProjectGitTarget;
+  readonly selected: boolean;
+  readonly disabled: boolean;
+  readonly onSelect: () => void;
+}) {
+  const query = useEnvironmentQuery(
+    vcsEnvironment.status({ environmentId: props.environmentId, input: { cwd: props.target.cwd } }),
+  );
+  const conflicts = query.data?.workingTree.files.filter((file) => file.conflicted).length ?? 0;
+  return (
+    <SheetListRow
+      icon={props.selected ? "checkmark.circle" : "folder"}
+      title={`${props.target.repoName}${props.target.mode === "reference" ? " · Read-only reference" : ""}`}
+      subtitle={`${query.data?.refName ?? props.target.branch ?? "Detached HEAD"} · ${query.error ?? statusSummary(query.data)}${conflicts ? ` · ${conflicts} conflicts` : ""}\n${props.target.cwd}`}
+      disabled={props.disabled}
+      onPress={props.onSelect}
+    />
+  );
+}
+
 const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);
 
 type GitOverviewSheetProps = StaticScreenProps<{
@@ -49,35 +140,59 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
   const isInspector = presentation === "inspector";
   const environmentId = EnvironmentId.make(props.route.params.environmentId);
   const threadId = ThreadId.make(props.route.params.threadId);
-  const { selectedThread } = useThreadSelection();
-  const { selectedThreadCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
+  const { selectedThread, selectedThreadProject } = useThreadSelection();
+  const {
+    selectedThreadGitCwd,
+    selectedThreadWorktreePath,
+    selectedThreadGitTargets,
+    selectedThreadGitRepository,
+    selectGitRepository,
+  } = useSelectedThreadWorktree();
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
   const theme = useUniwindTheme();
   const foregroundColor = theme["--color-foreground"];
   const sheetColor = theme["--color-sheet"];
+  const worktreesSupported = !isStaveProject(selectedThreadProject);
+  const readOnly = selectedThreadGitRepository?.mode === "reference";
+  const repoParams = useMemo(
+    () =>
+      !worktreesSupported && selectedThreadGitRepository
+        ? { repoKey: selectedThreadGitRepository.key }
+        : {},
+    [worktreesSupported, selectedThreadGitRepository],
+  );
 
   const gitStatus = useEnvironmentQuery(
-    selectedThread !== null && selectedThreadCwd !== null
+    selectedThread !== null && selectedThreadGitCwd !== null
       ? vcsEnvironment.status({
           environmentId: selectedThread.environmentId,
-          input: { cwd: selectedThreadCwd },
+          input: { cwd: selectedThreadGitCwd },
         })
       : null,
   );
 
-  const currentBranchLabel = gitStatus.data?.refName ?? selectedThread?.branch ?? "Detached HEAD";
+  const currentBranchLabel =
+    gitStatus.data?.refName ??
+    selectedThreadGitRepository?.branch ??
+    selectedThread?.branch ??
+    "Detached HEAD";
   const currentStatusSummary = statusSummary(gitStatus.data);
   const currentWorktreePath = selectedThreadWorktreePath;
   const gitOperationLabel = gitState.gitOperationLabel;
   const busy = gitOperationLabel !== null;
-  const isRepo = gitStatus.data?.isRepo ?? true;
+  const isRepo = selectedThreadGitCwd !== null && (gitStatus.data?.isRepo ?? true);
   const hasPrimaryRemote = gitStatus.data?.hasPrimaryRemote ?? false;
   const isDefaultRef = gitStatus.data?.isDefaultRef ?? false;
 
   const menuItems = useMemo(
-    () => (isRepo ? buildMenuItems(gitStatus.data, busy, hasPrimaryRemote) : []),
-    [busy, gitStatus.data, hasPrimaryRemote, isRepo],
+    () =>
+      isRepo
+        ? buildMenuItems(gitStatus.data, busy, hasPrimaryRemote).filter(
+            (item) => !readOnly || item.kind === "open_pr",
+          )
+        : [],
+    [busy, gitStatus.data, hasPrimaryRemote, isRepo, readOnly],
   );
 
   const sheetMenuItems = useMemo(
@@ -94,9 +209,10 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
     [busy, gitStatus.data, hasPrimaryRemote, menuItems],
   );
 
+  const { refreshSelectedThreadGitStatus } = gitActions;
   useEffect(() => {
-    void gitActions.refreshSelectedThreadGitStatus({ quiet: true });
-  }, [gitActions]);
+    void refreshSelectedThreadGitStatus({ quiet: true });
+  }, [refreshSelectedThreadGitStatus]);
 
   const openExistingPr = useCallback(async () => {
     const prUrl = gitStatus.data?.pr?.state === "open" ? gitStatus.data.pr.url : null;
@@ -128,6 +244,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
         navigation.navigate("GitConfirm", {
           environmentId: String(environmentId),
           threadId: String(threadId),
+          ...repoParams,
           confirmAction: confirmableAction,
           branchName,
           includesCommit: String(
@@ -142,7 +259,16 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
       }
       await gitActions.onRunSelectedThreadGitAction(input);
     },
-    [environmentId, gitActions, gitStatus.data, isDefaultRef, isInspector, navigation, threadId],
+    [
+      environmentId,
+      gitActions,
+      gitStatus.data,
+      isDefaultRef,
+      isInspector,
+      navigation,
+      repoParams,
+      threadId,
+    ],
   );
 
   const onPressMenuItem = useCallback(
@@ -156,6 +282,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
         navigation.navigate("GitCommit", {
           environmentId: String(environmentId),
           threadId: String(threadId),
+          ...repoParams,
         });
         return;
       }
@@ -167,7 +294,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
         await runActionWithPrompt({ action: "create_pr" });
       }
     },
-    [environmentId, openExistingPr, navigation, runActionWithPrompt, threadId],
+    [environmentId, openExistingPr, navigation, repoParams, runActionWithPrompt, threadId],
   );
 
   // Status facts live on the relevant rows instead of crowding the header
@@ -191,7 +318,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
       }
       return undefined;
     },
-    [gitStatus.data, menuItems],
+    [gitStatus.data],
   );
 
   const behindCount = gitStatus.data?.behindCount ?? 0;
@@ -224,6 +351,33 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
         <RefreshControl refreshing={isPullRefreshing} onRefresh={() => void handlePullRefresh()} />
       }
     >
+      {!worktreesSupported ? (
+        <View className="gap-1 rounded-2xl border border-border bg-card px-4 py-3">
+          <Text className="text-base font-lecturn-bold">Space repositories</Text>
+          <Text className="text-sm text-foreground-muted">
+            Select a repository for Git actions. Threads keep working across the whole space.
+          </Text>
+          {selectedThreadGitTargets.length === 0 ? (
+            <Text className="text-sm text-foreground-muted">This space has no repositories.</Text>
+          ) : null}
+          {selectedThreadGitTargets.map((target) => (
+            <SpaceRepositoryRow
+              key={target.key}
+              environmentId={environmentId}
+              target={target}
+              selected={target.key === selectedThreadGitRepository?.key}
+              disabled={busy}
+              onSelect={() => selectGitRepository(target.key)}
+            />
+          ))}
+        </View>
+      ) : null}
+      {!worktreesSupported && selectedThreadGitRepository ? (
+        <MetaCard
+          label={readOnly ? "Inspecting reference" : "Selected repository"}
+          value={selectedThreadGitRepository.cwd}
+        />
+      ) : null}
       <View
         className={
           isInspector
@@ -243,7 +397,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
             />
           </View>
         ))}
-        {behindCount > 0 ? (
+        {behindCount > 0 && !readOnly ? (
           <>
             <View className="ml-12 h-px bg-border" />
             <SheetListRow
@@ -259,10 +413,14 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
         <SheetListRow
           icon="text.bubble"
           title="Review changes"
-          subtitle="Inspect turn diffs, worktree changes, and base branch diff"
+          subtitle={
+            worktreesSupported
+              ? "Inspect turn diffs, worktree changes, and base branch diff"
+              : "Inspect working tree changes and base branch diff"
+          }
           disabled={busy || !isRepo}
           onPress={() => {
-            const params = { environmentId, threadId };
+            const params = { environmentId, threadId, ...repoParams };
             navigation.dispatch(
               resolveGitOverviewReviewNavigationAction(presentation) === "replace"
                 ? StackActions.replace("ThreadReview", params)
@@ -273,18 +431,26 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
         <View className="ml-12 h-px bg-border" />
         <SheetListRow
           icon="point.topleft.down.curvedto.point.bottomright.up"
-          title="Branches & worktrees"
-          subtitle="Switch branch, create branch, or move to a worktree"
-          disabled={busy || !isRepo}
+          title={worktreesSupported ? "Branches & worktrees" : "Branches"}
+          subtitle={
+            worktreesSupported
+              ? "Switch branch, create branch, or move to a worktree"
+              : "Switch branch or create branch"
+          }
+          disabled={busy || !isRepo || readOnly}
           onPress={() =>
             navigation.navigate("GitBranches", {
               environmentId: String(environmentId),
               threadId: String(threadId),
+              ...repoParams,
             })
           }
         />
       </View>
 
+      {!worktreesSupported && selectedThreadProject ? (
+        <SpacePullRequests environmentId={environmentId} projectId={selectedThreadProject.id} />
+      ) : null}
       {currentWorktreePath ? <MetaCard label="Worktree" value={currentWorktreePath} /> : null}
     </ScrollView>
   );

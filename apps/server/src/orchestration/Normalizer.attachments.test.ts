@@ -11,15 +11,23 @@ import {
   ThreadId,
 } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 
 import * as ServerConfig from "../config.ts";
+import * as StaveAdmission from "../stave/StaveAdmission.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import { cleanupFailedUploadedAttachments, normalizeDispatchCommand } from "./Normalizer.ts";
+import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
 
 const testLayer = Layer.mergeAll(
   WorkspacePaths.layer,
   ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-normalizer-attachments-" }),
+  StaveAdmission.layerNoop,
+  Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
+    getThreadShellById: () => Effect.succeed(Option.none()),
+    getProjectShellById: () => Effect.succeed(Option.none()),
+  }),
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
 const attachmentUuid = "00000000-0000-4000-8000-0000000000aa";

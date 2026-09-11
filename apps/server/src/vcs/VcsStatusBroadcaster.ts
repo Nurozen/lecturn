@@ -6,6 +6,7 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
@@ -146,14 +147,50 @@ export class VcsAutoPullPolicy extends Context.Reference<{
   defaultValue: () => ({ isEnabled: () => Effect.succeed(false) }),
 }) {}
 
+// The subset of a project row the auto-pull policy reads. Both
+// OrchestrationProject and OrchestrationProjectShell satisfy it.
+interface AutoPullCandidate {
+  readonly autoPull?: boolean | undefined;
+  readonly stave?: { readonly primaryRepoPath?: string | undefined } | null | undefined;
+}
+
+// Stave owns its edit branches and synchronisation; automatic Git pulls are disabled.
+function autoPullEnabledFor(project: AutoPullCandidate): boolean {
+  if (project.autoPull !== true) return false;
+  if (project.stave != null) return false;
+  return true;
+}
+
 export const autoPullPolicyLayer = Layer.effect(
   VcsAutoPullPolicy,
   Effect.gen(function* () {
     const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+    // A Stave space's workspace root is a directory of worktrees rather than a
+    // repo, so clients request status (and therefore auto-pull) for
+    // `stave.primaryRepoPath`, which the exact-root query cannot find. Paths
+    // are compared as raw strings, matching that query: the policy layer has no
+    // FileSystem, and clients echo the `primaryRepoPath` string the server
+    // derived, so realPath is unnecessary.
+    const findByPrimaryRepoPath = (cwd: string) =>
+      snapshots
+        .getShellSnapshot()
+        .pipe(
+          Effect.map((snapshot) =>
+            Option.fromUndefinedOr(
+              snapshot.projects.find((project) => project.stave?.primaryRepoPath === cwd),
+            ),
+          ),
+        );
     return {
       isEnabled: (cwd: string) =>
         snapshots.getActiveProjectByWorkspaceRoot(cwd).pipe(
-          Effect.map((project) => project._tag === "Some" && project.value.autoPull === true),
+          Effect.flatMap(
+            Option.match({
+              onNone: () => findByPrimaryRepoPath(cwd),
+              onSome: (project) => Effect.succeed(Option.some<AutoPullCandidate>(project)),
+            }),
+          ),
+          Effect.map(Option.exists((project) => autoPullEnabledFor(project))),
           Effect.orElseSucceed(() => false),
         ),
     };

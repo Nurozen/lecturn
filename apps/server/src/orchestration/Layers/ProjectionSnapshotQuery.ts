@@ -31,6 +31,13 @@ import {
   ThreadId,
 } from "@lecturn/contracts";
 import * as Arr from "effect/Array";
+import * as Path from "effect/Path";
+import * as FileSystem from "effect/FileSystem";
+import { StaveLifecycleRepositoryLive } from "../../persistence/Layers/StaveLifecycleRepository.ts";
+import {
+  StaveLifecycleRepository,
+  type StaveLifecycleRow,
+} from "../../persistence/Services/StaveLifecycleRepository.ts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -63,6 +70,8 @@ import {
 } from "../threadDetailCursor.ts";
 import { projectActivityPayload } from "../ActivityPayloadProjection.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
+import { StaveDisplayMembership } from "../../stave/StaveDisplayMembership.ts";
+import * as StaveWorkspaceReader from "../../stave/StaveWorkspaceReader.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import {
   ProjectionSnapshotQuery,
@@ -357,15 +366,60 @@ function mapSessionRow(
   };
 }
 
-function mapProjectShellRow(
-  row: Schema.Schema.Type<typeof ProjectionProjectDbRowSchema>,
-  repositoryIdentity: OrchestrationProject["repositoryIdentity"],
-): OrchestrationProjectShell {
+type ProjectDbRow = Schema.Schema.Type<typeof ProjectionProjectDbRowSchema>;
+
+/**
+ * Per-workspace-root fields that are not stored in the projection tables and
+ * are resolved outside the SQL transaction (git identity, Stave manifest).
+ */
+interface ProjectDerivedFields {
+  readonly repositoryIdentity: OrchestrationProject["repositoryIdentity"];
+  readonly stave: OrchestrationProject["stave"];
+  readonly notice: OrchestrationProject["notice"];
+}
+
+const NO_DERIVED_FIELDS: ProjectDerivedFields = {
+  repositoryIdentity: null,
+  stave: null,
+  notice: null,
+};
+
+function lifecycleNotice(
+  lifecycleRow: Option.Option<StaveLifecycleRow>,
+): OrchestrationProject["notice"] {
+  return Option.match(lifecycleRow, {
+    onNone: () => null,
+    onSome: (row) =>
+      row.disposition === "pending_archive"
+        ? {
+            kind: "archive_scheduled" as const,
+            ...(row.archiveDeadlineAt
+              ? { at: row.archiveDeadlineAt }
+              : {
+                  code: "archive_suggested",
+                  message: "All threads are settled. Archive this space when ready.",
+                }),
+          }
+        : row.disposition === "refused"
+          ? {
+              kind: "refused" as const,
+              at: row.updatedAt,
+              ...(row.refusalCode ? { code: row.refusalCode } : {}),
+              ...(row.refusalMessage ? { message: row.refusalMessage } : {}),
+            }
+          : row.deleteIntentSequence !== null ||
+              ["pending_destroy", "destroying", "archiving", "restoring"].includes(row.disposition)
+            ? { kind: "pending_cleanup" as const, at: row.updatedAt }
+            : null,
+  });
+}
+
+/** Columns every project read model shares; use directly only where derived fields are skipped. */
+function mapProjectRowBase(row: ProjectDbRow) {
   return {
     id: row.projectId,
     title: row.title,
     workspaceRoot: row.workspaceRoot,
-    repositoryIdentity,
     defaultModelSelection: row.defaultModelSelection,
     defaultThreadEnvMode: row.defaultThreadEnvMode,
     autoPull: row.autoPull === 1,
@@ -375,6 +429,23 @@ function mapProjectShellRow(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+/** The single place `stave` / `notice` are attached to a wire project. */
+function mapProjectShellRow(
+  row: ProjectDbRow,
+  derived: ProjectDerivedFields,
+): OrchestrationProjectShell {
+  return {
+    ...mapProjectRowBase(row),
+    repositoryIdentity: derived.repositoryIdentity,
+    stave: derived.stave,
+    notice: derived.notice,
+  };
+}
+
+function mapProjectRow(row: ProjectDbRow, derived: ProjectDerivedFields): OrchestrationProject {
+  return { ...mapProjectShellRow(row, derived), deletedAt: row.deletedAt };
 }
 
 function mapProposedPlanRow(
@@ -417,12 +488,49 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
   const threadPlanProgress = yield* ThreadPlanProgressService;
   const sql = yield* SqlClient.SqlClient;
+  const lifecycle = yield* StaveLifecycleRepository;
+  const path = yield* Effect.serviceOption(Path.Path).pipe(
+    Effect.flatMap(
+      Option.match({
+        onSome: Effect.succeed,
+        onNone: () => Path.Path.pipe(Effect.provide(Path.layer)),
+      }),
+    ),
+  );
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
-  const repositoryIdentityResolutionConcurrency = 4;
-  const resolveRepositoryIdentitiesForProjects = Effect.fn(
-    "ProjectionSnapshotQuery.resolveRepositoryIdentitiesForProjects",
+  const staveWorkspaceReader = yield* StaveWorkspaceReader.StaveWorkspaceReader;
+  const displayMembership = yield* Effect.serviceOption(StaveDisplayMembership);
+  const derivedFieldsResolutionConcurrency = 4;
+
+  /** Resolve identity and Stave info for one root; must run outside SQL transactions. */
+  const resolveDerivedFieldsForRoot = Effect.fn(
+    "ProjectionSnapshotQuery.resolveDerivedFieldsForRoot",
+  )((workspaceRoot: string) =>
+    Effect.all(
+      [repositoryIdentityResolver.resolve(workspaceRoot), staveWorkspaceReader.load(workspaceRoot)],
+      { concurrency: 2 },
+    ).pipe(
+      Effect.flatMap(([repositoryIdentity, stave]) =>
+        Effect.gen(function* (): Effect.fn.Return<ProjectDerivedFields> {
+          const info = Option.getOrNull(stave);
+          return {
+            repositoryIdentity,
+            stave:
+              info !== null && Option.isSome(displayMembership)
+                ? yield* displayMembership.value.enrich(workspaceRoot, info)
+                : info,
+            notice: null,
+          };
+        }),
+      ),
+    ),
+  );
+
+  /** Resolve derived fields once per unique workspace root, keyed back by project id. */
+  const resolveProjectDerivedFieldsForProjects = Effect.fn(
+    "ProjectionSnapshotQuery.resolveProjectDerivedFieldsForProjects",
   )(function* (
-    projectRows: ReadonlyArray<Schema.Schema.Type<typeof ProjectionProjectDbRowSchema>>,
+    projectRows: ReadonlyArray<ProjectDbRow>,
     options?: {
       readonly includeDeleted?: boolean;
     },
@@ -432,22 +540,32 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ? projectRows
         : projectRows.filter((row) => row.deletedAt === null);
     const uniqueWorkspaceRoots = [...new Set(filteredProjectRows.map((row) => row.workspaceRoot))];
-    const repositoryIdentityByWorkspaceRoot = new Map(
+    const derivedByWorkspaceRoot = new Map(
       yield* Effect.forEach(
         uniqueWorkspaceRoots,
         (workspaceRoot) =>
-          repositoryIdentityResolver
-            .resolve(workspaceRoot)
-            .pipe(Effect.map((identity) => [workspaceRoot, identity] as const)),
-        { concurrency: repositoryIdentityResolutionConcurrency },
+          resolveDerivedFieldsForRoot(workspaceRoot).pipe(
+            Effect.map((derived) => [workspaceRoot, derived] as const),
+          ),
+        { concurrency: derivedFieldsResolutionConcurrency },
       ),
     );
 
     return new Map(
-      filteredProjectRows.map((row) => [
-        row.projectId,
-        repositoryIdentityByWorkspaceRoot.get(row.workspaceRoot) ?? null,
-      ]),
+      yield* Effect.forEach(filteredProjectRows, (row) =>
+        lifecycle.getByProjectId(row.projectId).pipe(
+          Effect.map(
+            (lifecycleRow) =>
+              [
+                row.projectId,
+                {
+                  ...(derivedByWorkspaceRoot.get(row.workspaceRoot) ?? NO_DERIVED_FIELDS),
+                  notice: lifecycleNotice(lifecycleRow),
+                },
+              ] as const,
+          ),
+        ),
+      ),
     );
   });
 
@@ -2004,26 +2122,13 @@ pending_approval_requests AS (
                 });
               }
 
-              const repositoryIdentities = yield* resolveRepositoryIdentitiesForProjects(
-                projectRows,
-                { includeDeleted: true },
-              );
+              const derivedFields = yield* resolveProjectDerivedFieldsForProjects(projectRows, {
+                includeDeleted: true,
+              });
 
-              const projects: ReadonlyArray<OrchestrationProject> = projectRows.map((row) => ({
-                id: row.projectId,
-                title: row.title,
-                workspaceRoot: row.workspaceRoot,
-                repositoryIdentity: repositoryIdentities.get(row.projectId) ?? null,
-                defaultModelSelection: row.defaultModelSelection,
-                defaultThreadEnvMode: row.defaultThreadEnvMode,
-                autoPull: row.autoPull === 1,
-                faviconPath: row.faviconPath ?? null,
-                projectIcon: row.projectIcon ?? null,
-                scripts: row.scripts,
-                createdAt: row.createdAt,
-                updatedAt: row.updatedAt,
-                deletedAt: row.deletedAt,
-              }));
+              const projects: ReadonlyArray<OrchestrationProject> = projectRows.map((row) =>
+                mapProjectRow(row, derivedFields.get(row.projectId) ?? NO_DERIVED_FIELDS),
+              );
 
               const threads: ReadonlyArray<OrchestrationThread> = threadRows.map((row) => ({
                 id: row.threadId,
@@ -2148,20 +2253,7 @@ pending_approval_requests AS (
                   continue;
                 }
                 updatedAt = maxIso(updatedAt, row.updatedAt);
-                projects.push({
-                  id: row.projectId,
-                  title: row.title,
-                  workspaceRoot: row.workspaceRoot,
-                  defaultModelSelection: row.defaultModelSelection,
-                  defaultThreadEnvMode: row.defaultThreadEnvMode,
-                  autoPull: row.autoPull === 1,
-                  faviconPath: row.faviconPath ?? null,
-                  projectIcon: row.projectIcon ?? null,
-                  scripts: row.scripts,
-                  createdAt: row.createdAt,
-                  updatedAt: row.updatedAt,
-                  deletedAt: row.deletedAt,
-                });
+                projects.push({ ...mapProjectRowBase(row), deletedAt: row.deletedAt });
               }
               for (let index = 0; index < threadRows.length; index += 1) {
                 const row = threadRows[index];
@@ -2361,7 +2453,7 @@ pending_approval_requests AS (
               updatedAt = maxIso(updatedAt, row.updatedAt);
             }
 
-            const repositoryIdentities = yield* resolveRepositoryIdentitiesForProjects(projectRows);
+            const derivedFields = yield* resolveProjectDerivedFieldsForProjects(projectRows);
             const latestTurnByThread = new Map(
               latestTurnRows.map((row) => [row.threadId, mapLatestTurn(row)] as const),
             );
@@ -2374,7 +2466,10 @@ pending_approval_requests AS (
               projects: Arr.filterMap(projectRows, (row) =>
                 row.deletedAt === null
                   ? Result.succeed(
-                      mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null),
+                      mapProjectShellRow(
+                        row,
+                        derivedFields.get(row.projectId) ?? NO_DERIVED_FIELDS,
+                      ),
                     )
                   : Result.failVoid,
               ),
@@ -2510,7 +2605,7 @@ pending_approval_requests AS (
             }
 
             const activeProjectIds = new Set(threadRows.map((row) => row.projectId));
-            const repositoryIdentities = yield* resolveRepositoryIdentitiesForProjects(
+            const derivedFields = yield* resolveProjectDerivedFieldsForProjects(
               projectRows.filter((row) => activeProjectIds.has(row.projectId)),
             );
             const latestTurnByThread = new Map(
@@ -2525,7 +2620,10 @@ pending_approval_requests AS (
               projects: Arr.filterMap(projectRows, (row) =>
                 row.deletedAt === null && activeProjectIds.has(row.projectId)
                   ? Result.succeed(
-                      mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null),
+                      mapProjectShellRow(
+                        row,
+                        derivedFields.get(row.projectId) ?? NO_DERIVED_FIELDS,
+                      ),
                     )
                   : Result.failVoid,
               ),
@@ -2665,23 +2763,14 @@ pending_approval_requests AS (
         Effect.flatMap((option) =>
           Option.isNone(option)
             ? Effect.succeed(Option.none<OrchestrationProject>())
-            : repositoryIdentityResolver.resolve(option.value.workspaceRoot).pipe(
-                Effect.map((repositoryIdentity) =>
-                  Option.some({
-                    id: option.value.projectId,
-                    title: option.value.title,
-                    workspaceRoot: option.value.workspaceRoot,
-                    repositoryIdentity,
-                    defaultModelSelection: option.value.defaultModelSelection,
-                    defaultThreadEnvMode: option.value.defaultThreadEnvMode,
-                    autoPull: option.value.autoPull === 1,
-                    faviconPath: option.value.faviconPath ?? null,
-                    projectIcon: option.value.projectIcon ?? null,
-                    scripts: option.value.scripts,
-                    createdAt: option.value.createdAt,
-                    updatedAt: option.value.updatedAt,
-                    deletedAt: option.value.deletedAt,
-                  } satisfies OrchestrationProject),
+            : resolveProjectDerivedFieldsForProjects([option.value]).pipe(
+                Effect.map((derived) =>
+                  Option.some(
+                    mapProjectRow(
+                      option.value,
+                      derived.get(option.value.projectId) ?? NO_DERIVED_FIELDS,
+                    ),
+                  ),
                 ),
               ),
         ),
@@ -2698,13 +2787,16 @@ pending_approval_requests AS (
       Effect.flatMap((option) =>
         Option.isNone(option)
           ? Effect.succeed(Option.none<OrchestrationProjectShell>())
-          : repositoryIdentityResolver
-              .resolve(option.value.workspaceRoot)
-              .pipe(
-                Effect.map((repositoryIdentity) =>
-                  Option.some(mapProjectShellRow(option.value, repositoryIdentity)),
+          : resolveProjectDerivedFieldsForProjects([option.value]).pipe(
+              Effect.map((derived) =>
+                Option.some(
+                  mapProjectShellRow(
+                    option.value,
+                    derived.get(option.value.projectId) ?? NO_DERIVED_FIELDS,
+                  ),
                 ),
               ),
+            ),
       ),
     );
 
@@ -3331,6 +3423,45 @@ pending_approval_requests AS (
       ),
     );
 
+  const getInferenceTurnPairs: ProjectionSnapshotQueryShape["getInferenceTurnPairs"] = (input) =>
+    sql<{ question: string; response: string }>`
+      SELECT CASE WHEN length(question.text) <= 12000 THEN question.text
+        ELSE substr(question.text, 1, 6000) || char(10) || '[Middle content truncated]' || char(10) || substr(question.text, -6000) END AS question,
+        (SELECT CASE WHEN length(body) <= 12000 THEN body
+          ELSE substr(body, 1, 6000) || char(10) || '[Middle content truncated]' || char(10) || substr(body, -6000) END
+         FROM (SELECT group_concat(text, char(10) || char(10)) AS body FROM (
+           SELECT segment.text FROM projection_thread_messages AS segment
+           WHERE segment.thread_id = turn.thread_id AND segment.turn_id = turn.turn_id
+             AND segment.role = 'assistant' AND segment.is_streaming = 0
+             AND segment.rowid <= answer.rowid AND trim(segment.text) <> ''
+           ORDER BY segment.created_at, segment.rowid
+         ))) AS response
+      FROM projection_turns AS turn
+      JOIN projection_thread_messages AS question
+        ON question.message_id = turn.pending_message_id AND question.thread_id = turn.thread_id
+      JOIN projection_thread_messages AS answer
+        ON answer.message_id = turn.assistant_message_id AND answer.thread_id = turn.thread_id
+      WHERE turn.thread_id = ${input.threadId}
+        AND turn.turn_id IS NOT NULL AND turn.state = 'completed'
+        AND turn.source_proposed_plan_id IS NULL
+        AND question.role = 'user' AND answer.role = 'assistant'
+        AND answer.turn_id = turn.turn_id
+        AND question.is_streaming = 0 AND answer.is_streaming = 0
+        AND trim(question.text) <> '' AND trim(answer.text) <> ''
+        AND (${input.beforeMessageId ?? null} IS NULL OR EXISTS (
+          SELECT 1 FROM projection_thread_messages AS boundary
+          WHERE boundary.message_id = ${input.beforeMessageId ?? null}
+            AND boundary.thread_id = turn.thread_id AND boundary.role = 'user'
+            AND question.rowid < boundary.rowid AND answer.rowid < boundary.rowid
+            AND turn.completed_at <= boundary.created_at
+        ))
+      ORDER BY question.created_at DESC, question.rowid DESC
+      LIMIT 3
+    `.pipe(
+      Effect.mapError(toPersistenceSqlError("ProjectionSnapshotQuery.getInferenceTurnPairs:query")),
+      Effect.map((rows) => [...rows].reverse()),
+    );
+
   const listThreadTurnsById: ProjectionSnapshotQueryShape["listThreadTurnsById"] = (threadId) =>
     listThreadTurnRowsByThread({ threadId }).pipe(
       Effect.mapError(
@@ -3359,6 +3490,65 @@ pending_approval_requests AS (
         })),
       ),
     );
+
+  const listThreadLifecycleAnchorsByProjectId: ProjectionSnapshotQueryShape["listThreadLifecycleAnchorsByProjectId"] =
+    (projectId) =>
+      sql`SELECT thread_id AS "threadId", created_at AS "createdAt", updated_at AS "updatedAt",
+      settled_at AS "settledAt", unsettled_at AS "unsettledAt", archived_at AS "archivedAt", deleted_at AS "deletedAt", settled_override AS "settledOverride"
+      FROM projection_threads WHERE project_id = ${projectId} ORDER BY thread_id`.pipe(
+        Effect.flatMap(
+          Schema.decodeUnknownEffect(
+            Schema.Array(
+              Schema.Struct({
+                threadId: ThreadId,
+                createdAt: IsoDateTime,
+                updatedAt: IsoDateTime,
+                settledAt: Schema.NullOr(IsoDateTime),
+                unsettledAt: Schema.NullOr(IsoDateTime),
+                archivedAt: Schema.NullOr(IsoDateTime),
+                deletedAt: Schema.NullOr(IsoDateTime),
+                settledOverride: Schema.NullOr(Schema.Literals(["settled", "active"])),
+              }),
+            ),
+          ),
+        ),
+        Effect.mapError(
+          toPersistenceSqlError("ProjectionSnapshotQuery.listThreadLifecycleAnchorsByProjectId"),
+        ),
+      );
+  const listActiveProjectRootsUnder: ProjectionSnapshotQueryShape["listActiveProjectRootsUnder"] =
+    Effect.fn("ProjectionSnapshotQuery.listActiveProjectRootsUnder")(function* (prefix) {
+      const rows =
+        yield* sql`SELECT project_id AS "projectId", workspace_root AS "workspaceRoot" FROM projection_projects WHERE deleted_at IS NULL`.pipe(
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(
+              Schema.Array(Schema.Struct({ projectId: ProjectId, workspaceRoot: Schema.String })),
+            ),
+          ),
+          Effect.mapError(
+            toPersistenceSqlError("ProjectionSnapshotQuery.listActiveProjectRootsUnder"),
+          ),
+        );
+      const fs = yield* Effect.serviceOption(FileSystem.FileSystem);
+      const realpath = (value: string) =>
+        Option.isSome(fs)
+          ? fs.value.realPath(value).pipe(Effect.orElseSucceed(() => path.resolve(value)))
+          : Effect.succeed(path.resolve(value));
+      const root = yield* realpath(prefix);
+      return yield* Effect.filter(rows, (row) =>
+        realpath(row.workspaceRoot).pipe(
+          Effect.map((resolved) => {
+            const relative = path.relative(root, resolved);
+            return (
+              relative !== "" &&
+              relative !== ".." &&
+              !relative.startsWith(`..${path.sep}`) &&
+              !path.isAbsolute(relative)
+            );
+          }),
+        ),
+      );
+    });
 
   const listThreadIdsByWorktreePath: ProjectionSnapshotQueryShape["listThreadIdsByWorktreePath"] = (
     worktreePath,
@@ -3392,12 +3582,15 @@ pending_approval_requests AS (
     getThreadDetailSnapshot,
     listThreadActivitiesById,
     listThreadTurnsById,
+    getInferenceTurnPairs,
     getThreadForkContextById,
     listThreadIdsByWorktreePath,
+    listThreadLifecycleAnchorsByProjectId,
+    listActiveProjectRootsUnder,
   } satisfies ProjectionSnapshotQueryShape;
 });
 
 export const OrchestrationProjectionSnapshotQueryLive = Layer.effect(
   ProjectionSnapshotQuery,
   makeProjectionSnapshotQuery,
-);
+).pipe(Layer.provide(StaveLifecycleRepositoryLive));

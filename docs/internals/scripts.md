@@ -66,7 +66,8 @@ authenticated.
 
 ## Desktop artifacts
 
-- `vp run dist:desktop:artifact --platform <mac|linux|win> --target <target> --arch <arch>`: Builds a desktop artifact for a specific platform/target/arch.
+- `vp run dist:desktop:artifact --platform <mac|linux|win> --target <target> --arch <arch>`: Builds a desktop artifact for a specific platform/target/arch. Pass `--stave-binary <path>` (and `--stave-wsl-binary <path>` for Windows) to bundle the Stave CLI, or `--allow-missing-stave` for a local build without it; the build fails without one of them.
+- `node scripts/fetch-stave.ts (--platform-key <key> | --all | --resolve-only) [--version <tag|latest>] [--out <dir>]`: Downloads a sha256-verified Stave release binary from GitHub into `<out>/<platformKey>/`, or with `--resolve-only` prints the resolved tag.
 - `vp run dist:desktop:dmg`: Builds a shareable macOS `.dmg` into `./release`. Architecture defaults
   to the host, so this produces an arm64 DMG on Apple Silicon. Use `dist:desktop:dmg:arm64` or
   `dist:desktop:dmg:x64`, or pass `--arch <arm64|x64|universal>`, to force one.

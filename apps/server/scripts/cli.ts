@@ -20,6 +20,7 @@ import { resolveCatalogDependencies } from "../../../scripts/lib/resolve-catalog
 import { fromJsonStringPretty } from "@lecturn/shared/schemaJson";
 import { fromYaml } from "@lecturn/shared/schemaYaml";
 import { resolveSpawnCommand } from "@lecturn/shared/shell";
+import { STAVE_PLATFORM_KEYS } from "@lecturn/shared/stave";
 import serverPackageJson from "../package.json" with { type: "json" };
 import {
   ServerCliBuildAssetMissingError,
@@ -183,6 +184,27 @@ const buildCmd = Command.make(
     }),
 ).pipe(Command.withDescription("Build the server package (tsdown + bundle web client)."));
 
+/**
+ * Asserts the bundled Stave binary is present for every supported platform key
+ * under dist/stave before publishing. Release CI fetches these with
+ * `scripts/fetch-stave.ts --all`; a missing key means the npm package would
+ * ship without Stave for that host, so publishing stops at the first gap.
+ */
+const assertStaveBinaries = Effect.fn("assertStaveBinaries")(function* (serverDir: string) {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+
+  for (const platformKey of STAVE_PLATFORM_KEYS) {
+    const binaryName = platformKey.startsWith("win32-") ? "stave.exe" : "stave";
+    const assetPath = path.join(serverDir, "dist/stave", platformKey, binaryName);
+    if (!(yield* fs.exists(assetPath))) {
+      return yield* new ServerCliBuildAssetMissingError({ assetPath });
+    }
+  }
+
+  yield* Effect.log(`[cli] Bundled Stave binaries present for: ${STAVE_PLATFORM_KEYS.join(", ")}`);
+});
+
 // ---------------------------------------------------------------------------
 // publish subcommand
 // ---------------------------------------------------------------------------
@@ -259,6 +281,7 @@ const publishCmd = Command.make(
     binName: Flag.string("bin-name").pipe(Flag.optional),
     provenance: Flag.boolean("provenance").pipe(Flag.withDefault(false)),
     dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)),
+    requireStave: Flag.boolean("require-stave").pipe(Flag.withDefault(false)),
     verbose: Flag.boolean("verbose").pipe(Flag.withDefault(false)),
   },
   (config) =>
@@ -279,6 +302,10 @@ const publishCmd = Command.make(
         if (!(yield* fs.exists(abs))) {
           return yield* new ServerCliBuildAssetMissingError({ assetPath: abs });
         }
+      }
+
+      if (config.requireStave) {
+        yield* assertStaveBinaries(serverDir);
       }
 
       yield* Effect.acquireUseRelease(

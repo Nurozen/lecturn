@@ -14,7 +14,12 @@ export function getProjectScopeSelectionTarget(
   preferredEnvironmentId: EnvironmentId | null,
 ): EnvironmentProject {
   return (
-    scope.projects.find((project) => project.environmentId === preferredEnvironmentId) ??
+    scope.projects.find(
+      (project) =>
+        project.environmentId === preferredEnvironmentId && project.stave?.state !== "archived",
+    ) ??
+    (scope.representative.stave?.state !== "archived" ? scope.representative : undefined) ??
+    scope.projects.find((project) => project.stave?.state !== "archived") ??
     scope.representative
   );
 }
@@ -23,7 +28,9 @@ export function getOnlySelectableProject(
   projectScopes: ReadonlyArray<HomeProjectScope>,
 ): EnvironmentProject | null {
   const onlyScope = projectScopes.length === 1 ? projectScopes[0] : null;
-  return onlyScope?.representative ?? null;
+  if (!onlyScope) return null;
+  const target = getProjectScopeSelectionTarget(onlyScope, null);
+  return target.stave?.state === "archived" ? null : target;
 }
 
 export function resolveDraftProjectSelection(

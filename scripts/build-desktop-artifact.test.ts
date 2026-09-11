@@ -16,7 +16,16 @@ import {
   BundleNotSelfContainedError,
   BuildCommandFailedError,
   buildWslRuntimeArchiveArgs,
+  parseWslRuntimeArchiveEntries,
   parseWslRuntimeArchiveMembers,
+  resolveWslRuntimeRequiredMembers,
+  stageStave,
+  StaveBinaryMissingError,
+  staveExecutableName,
+  STAVE_EXTRA_RESOURCE,
+  STAVE_RESOURCE_DIR,
+  STAVE_VERSION_FILE_NAME,
+  wslStaveMemberPath,
   DesktopDmgBackgroundSourceMissingError,
   createStageWorkspaceConfig,
   createStagePatchedDependencies,
@@ -152,6 +161,9 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
   readonly copyUnpackedNatives: boolean;
   readonly serverEntrySource?: string;
   readonly wslRuntime?: "valid" | "forbidden" | "bad-digest";
+  // Stages resources/stave/stave.exe plus the Linux binary inside the WSL
+  // archive (when one is built), optionally without its executable bit.
+  readonly stave?: "valid" | "not-executable";
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -187,6 +199,13 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
   const appExecutableName = "lecturn.exe";
   yield* fs.writeFileString(path.join(packagedAppDir, appExecutableName), "electron");
   yield* fs.writeFileString(path.join(packagedAppDir, "chrome_crashpad_handler.exe"), "crashpad");
+  if (input.stave !== undefined) {
+    yield* fs.makeDirectory(path.join(resourcesDir, STAVE_RESOURCE_DIR), { recursive: true });
+    yield* fs.writeFileString(
+      path.join(resourcesDir, STAVE_RESOURCE_DIR, staveExecutableName("win")),
+      "stave-win",
+    );
+  }
 
   if (input.wslRuntime !== undefined) {
     const wslSourceDir = path.join(tempDir, "wsl-source");
@@ -206,6 +225,12 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
       path.join(linuxPrebuildDir, "lecturn-wsl-node-pty.json"),
       '{"arch":"x64"}',
     );
+    if (input.stave !== undefined) {
+      const wslStavePath = path.join(wslSourceDir, ...wslStaveMemberPath("x64").split("/"));
+      yield* fs.makeDirectory(path.dirname(wslStavePath), { recursive: true });
+      yield* fs.writeFileString(wslStavePath, "stave-linux");
+      yield* fs.chmod(wslStavePath, input.stave === "valid" ? 0o755 : 0o644);
+    }
     if (input.wslRuntime === "forbidden") {
       const windowsPrebuildDir = path.join(
         wslSourceDir,
@@ -555,7 +580,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "!apps/desktop/prod-resources/windows-server/**/*",
       "!apps/desktop/prod-resources/wsl-runtime.tar.gz",
       "!apps/desktop/prod-resources/wsl-runtime.tar.gz.sha256",
+      "!apps/desktop/prod-resources/stave",
+      "!apps/desktop/prod-resources/stave/**/*",
     ]);
+    assert.include(DESKTOP_FILE_EXCLUSIONS, `!${STAVE_EXTRA_RESOURCE.from}`);
+    assert.include(DESKTOP_FILE_EXCLUSIONS, `!${STAVE_EXTRA_RESOURCE.from}/**/*`);
     assert.equal(WINDOWS_SERVER_RESOURCE_SOURCE_DIR, "apps/desktop/prod-resources/windows-server");
     assert.deepStrictEqual(WINDOWS_SERVER_EXTRA_RESOURCES, [
       {
@@ -620,6 +649,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           from: "apps/desktop/prod-resources/resource-monitor",
           to: "resource-monitor",
         },
+        STAVE_EXTRA_RESOURCE,
         ...WINDOWS_SERVER_EXTRA_RESOURCES,
         ...WSL_RUNTIME_EXTRA_RESOURCES,
       ]);
@@ -632,7 +662,31 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           from: "apps/desktop/prod-resources/resource-monitor",
           to: "resource-monitor",
         },
+        STAVE_EXTRA_RESOURCE,
         ...WINDOWS_SERVER_EXTRA_RESOURCES,
+      ]);
+      // --allow-missing-stave builds stage nothing under resources/stave, so
+      // the resource is dropped instead of pointing electron-builder at an
+      // empty source directory.
+      const withoutStave = yield* createBuildConfig(
+        "linux",
+        "AppImage",
+        "1.2.3",
+        false,
+        false,
+        undefined,
+        undefined,
+        false,
+        "x64",
+        false,
+      );
+      assert.deepStrictEqual(withoutStave.extraResources, [
+        { from: "LICENSE", to: "LICENSE" },
+        { from: "THIRD_PARTY_NOTICES.txt", to: "THIRD_PARTY_NOTICES.txt" },
+        {
+          from: "apps/desktop/prod-resources/resource-monitor",
+          to: "resource-monitor",
+        },
       ]);
       assert.deepStrictEqual(win.nsis, { differentialPackage: true });
       // Native binaries and helper executables cannot load from inside an
@@ -821,6 +875,171 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           ),
           "cached monitor",
         );
+      }),
+    ),
+  );
+
+  it.effect("stages the Stave binary with its license and version as an executable", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-stave-stage-test-" });
+        const fetched = path.join(root, "fetched/darwin-arm64");
+        yield* fs.makeDirectory(fetched, { recursive: true });
+        yield* fs.writeFileString(path.join(fetched, "stave"), "stave-binary");
+        yield* fs.writeFileString(path.join(fetched, "LICENSE"), "MIT");
+        yield* fs.writeFileString(path.join(fetched, STAVE_VERSION_FILE_NAME), "v0.4.0\n");
+        const stageResourcesDir = path.join(root, "stage");
+
+        const result = yield* stageStave({
+          stageResourcesDir,
+          platform: "mac",
+          arch: "arm64",
+          staveBinaryPath: path.join(fetched, "stave"),
+          staveBinaryX64Path: undefined,
+          allowMissing: false,
+          verbose: false,
+        });
+
+        assert.deepStrictEqual(result, { staged: true, version: "v0.4.0" });
+        const stagedBinary = path.join(stageResourcesDir, "stave/stave");
+        assert.equal(yield* fs.readFileString(stagedBinary), "stave-binary");
+        assert.equal(
+          yield* fs.readFileString(path.join(stageResourcesDir, "stave/LICENSE")),
+          "MIT",
+        );
+        assert.equal(
+          yield* fs.readFileString(path.join(stageResourcesDir, "stave", STAVE_VERSION_FILE_NAME)),
+          "v0.4.0\n",
+        );
+        if ((yield* HostProcessPlatform) !== "win32") {
+          const stat = yield* fs.stat(stagedBinary);
+          assert.equal(Number(stat.mode) & 0o777, 0o755);
+        }
+      }),
+    ),
+  );
+
+  it.effect("stages a developer-built Stave binary without license or version files", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-stave-stage-dev-test-" });
+        const binaryPath = path.join(root, "go/bin/stave");
+        yield* fs.makeDirectory(path.dirname(binaryPath), { recursive: true });
+        yield* fs.writeFileString(binaryPath, "local-stave");
+        const stageResourcesDir = path.join(root, "stage");
+
+        const result = yield* stageStave({
+          stageResourcesDir,
+          platform: "linux",
+          arch: "x64",
+          staveBinaryPath: binaryPath,
+          staveBinaryX64Path: undefined,
+          allowMissing: false,
+          verbose: false,
+        });
+
+        assert.deepStrictEqual(result, { staged: true, version: null });
+        assert.deepStrictEqual(yield* fs.readDirectory(path.join(stageResourcesDir, "stave")), [
+          "stave",
+        ]);
+      }),
+    ),
+  );
+
+  it.effect("fails with the flag to pass when the Stave binary is missing", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-stave-missing-test-" });
+        const stageResourcesDir = path.join(root, "stage");
+
+        const notProvided = yield* stageStave({
+          stageResourcesDir,
+          platform: "win",
+          arch: "x64",
+          staveBinaryPath: undefined,
+          staveBinaryX64Path: undefined,
+          allowMissing: false,
+          verbose: false,
+        }).pipe(Effect.flip);
+        assert.instanceOf(notProvided, StaveBinaryMissingError);
+        assert.equal(notProvided.role, "primary");
+        assert.isUndefined(notProvided.path);
+        assert.include(notProvided.message, "--stave-binary");
+        assert.include(notProvided.message, "--allow-missing-stave");
+
+        const missingPath = path.join(root, "nowhere/stave.exe");
+        const notFound = yield* stageStave({
+          stageResourcesDir,
+          platform: "win",
+          arch: "x64",
+          staveBinaryPath: missingPath,
+          staveBinaryX64Path: undefined,
+          allowMissing: true,
+          verbose: false,
+        }).pipe(Effect.flip);
+        assert.instanceOf(notFound, StaveBinaryMissingError);
+        assert.equal(notFound.role, "primary");
+        assert.equal(notFound.path, missingPath);
+      }),
+    ),
+  );
+
+  it.effect("skips Stave for local builds that allow a missing binary", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-stave-allow-missing-test-" });
+        const stageResourcesDir = path.join(root, "stage");
+
+        const result = yield* stageStave({
+          stageResourcesDir,
+          platform: "mac",
+          arch: "arm64",
+          staveBinaryPath: undefined,
+          staveBinaryX64Path: undefined,
+          allowMissing: true,
+          verbose: false,
+        });
+
+        assert.deepStrictEqual(result, { staged: false });
+        assert.deepStrictEqual(yield* fs.readDirectory(path.join(stageResourcesDir, "stave")), []);
+      }),
+    ),
+  );
+
+  it.effect("requires both slices before lipo-ing a universal macOS Stave binary", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-stave-universal-test-" });
+        const arm64Path = path.join(root, "darwin-arm64/stave");
+        yield* fs.makeDirectory(path.dirname(arm64Path), { recursive: true });
+        yield* fs.writeFileString(arm64Path, "arm64-stave");
+        const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> =
+          [];
+
+        const error = yield* stageStave({
+          stageResourcesDir: path.join(root, "stage"),
+          platform: "mac",
+          arch: "universal",
+          staveBinaryPath: arm64Path,
+          staveBinaryX64Path: undefined,
+          allowMissing: false,
+          verbose: false,
+        }).pipe(Effect.flip, Effect.provide(iconResizeSpawnerLayer(commands, [])));
+
+        assert.instanceOf(error, StaveBinaryMissingError);
+        assert.equal(error.role, "x64-slice");
+        assert.include(error.message, "--stave-binary-x64");
+        assert.deepStrictEqual(commands, []);
       }),
     ),
   );
@@ -1717,7 +1936,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
-  it("stages the resource monitor as an external executable resource", () => {
+  it("stages the resource monitor and Stave as external executable resources", () => {
     assert.deepStrictEqual(DESKTOP_EXTRA_RESOURCES, [
       { from: "LICENSE", to: "LICENSE" },
       { from: "THIRD_PARTY_NOTICES.txt", to: "THIRD_PARTY_NOTICES.txt" },
@@ -1725,7 +1944,16 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         from: "apps/desktop/prod-resources/resource-monitor",
         to: "resource-monitor",
       },
+      {
+        from: "apps/desktop/prod-resources/stave",
+        to: "stave",
+      },
     ]);
+    assert.equal(STAVE_RESOURCE_DIR, "stave");
+    assert.equal(STAVE_VERSION_FILE_NAME, "stave.version");
+    assert.equal(staveExecutableName("mac"), "stave");
+    assert.equal(staveExecutableName("linux"), "stave");
+    assert.equal(staveExecutableName("win"), "stave.exe");
     assert.deepStrictEqual(resolveResourceMonitorRustTargets("mac", "universal"), [
       "aarch64-apple-darwin",
       "x86_64-apple-darwin",
@@ -1783,6 +2011,60 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       parseWslRuntimeArchiveMembers(
         "./apps/server/dist/bin.mjs\r\nnode_modules/node-pty/package.json\r\n",
       ),
+      ["apps/server/dist/bin.mjs", "node_modules/node-pty/package.json"],
+    );
+  });
+
+  it("parses verbose tar listings from bsdtar and GNU tar with executable bits", () => {
+    const bsdtar = [
+      "drwxr-xr-x  0 runner staff      0 Sep  1 12:00 ./apps/server/dist/",
+      "-rwxr-xr-x  0 runner staff  12345 Sep  1 12:00 apps/server/dist/stave/linux-x64/stave",
+      "-rw-r--r--  0 runner staff   1234 Sep  1  2025 apps/server/dist/bin.mjs",
+      "lrwxr-xr-x  0 runner staff      0 Sep  1 12:00 node_modules/link -> target",
+      "",
+    ].join("\r\n");
+    assert.deepStrictEqual(parseWslRuntimeArchiveEntries(bsdtar), [
+      { name: "apps/server/dist", executable: true },
+      { name: "apps/server/dist/stave/linux-x64/stave", executable: true },
+      { name: "apps/server/dist/bin.mjs", executable: false },
+      { name: "node_modules/link", executable: true },
+    ]);
+
+    const gnu = [
+      "-rwxr-xr-x runner/staff 12345 2026-09-01 12:00 apps/server/dist/stave/linux-x64/stave",
+      "-rw-r--r-- runner/staff  1234 2026-09-01 12:00 node_modules/node-pty/package.json",
+      "-rw-r--r-- runner/staff  4444 2026-09-01 12:00:30 apps/server/dist/bin.mjs",
+    ].join("\n");
+    assert.deepStrictEqual(parseWslRuntimeArchiveEntries(gnu), [
+      { name: "apps/server/dist/stave/linux-x64/stave", executable: true },
+      { name: "node_modules/node-pty/package.json", executable: false },
+      { name: "apps/server/dist/bin.mjs", executable: false },
+    ]);
+  });
+
+  it("requires the Linux Stave member in the WSL archive only when it was staged", () => {
+    assert.equal(wslStaveMemberPath("x64"), "apps/server/dist/stave/linux-x64/stave");
+    assert.deepStrictEqual(
+      resolveWslRuntimeRequiredMembers({ wslArch: "x64", expectStave: true }),
+      [
+        "apps/server/dist/bin.mjs",
+        "node_modules/node-pty/package.json",
+        "node_modules/node-pty/prebuilds/linux-x64/pty.node",
+        "node_modules/node-pty/prebuilds/linux-x64/lecturn-wsl-node-pty.json",
+        "apps/server/dist/stave/linux-x64/stave",
+      ],
+    );
+    assert.deepStrictEqual(
+      resolveWslRuntimeRequiredMembers({ wslArch: "arm64", expectStave: false }),
+      [
+        "apps/server/dist/bin.mjs",
+        "node_modules/node-pty/package.json",
+        "node_modules/node-pty/prebuilds/linux-arm64/pty.node",
+        "node_modules/node-pty/prebuilds/linux-arm64/lecturn-wsl-node-pty.json",
+      ],
+    );
+    assert.deepStrictEqual(
+      resolveWslRuntimeRequiredMembers({ wslArch: undefined, expectStave: true }),
       ["apps/server/dist/bin.mjs", "node_modules/node-pty/package.json"],
     );
   });
@@ -1855,6 +2137,124 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       }),
     );
   });
+
+  it.effect("validates the bundled Stave executable in the payload and WSL archive", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeWindowsPayloadFixture({
+          copyUnpackedNatives: true,
+          wslRuntime: "valid",
+          stave: "valid",
+        });
+        const result = yield* validateWindowsPackagedPayload({
+          stageDistDir: fixture.stageDistDir,
+          appExecutableName: fixture.appExecutableName,
+          targetArch: "x64",
+          expectWslRuntime: true,
+          expectStave: true,
+        });
+
+        assert.equal(result.packagedAppDir, fixture.packagedAppDir);
+      }),
+    ),
+  );
+
+  it.effect("rejects a Windows package missing its expected Stave executable", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeWindowsPayloadFixture({ copyUnpackedNatives: true });
+        const error = yield* validateWindowsPackagedPayload({
+          stageDistDir: fixture.stageDistDir,
+          appExecutableName: fixture.appExecutableName,
+          targetArch: "x64",
+          expectStave: true,
+        }).pipe(Effect.flip);
+
+        assert.instanceOf(error, WindowsPackagedPayloadValidationError);
+        assert.equal(error.reason, "stave-missing");
+        assert.deepStrictEqual(error.missingFiles, ["stave/stave.exe"]);
+        assert.equal(
+          error.message,
+          "Windows packaged payload is missing the bundled Stave executable.",
+        );
+      }),
+    ),
+  );
+
+  it.effect("rejects a WSL archive that omits the expected Linux Stave binary", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeWindowsPayloadFixture({
+          copyUnpackedNatives: true,
+          wslRuntime: "valid",
+          stave: "valid",
+        });
+        // Simulate a payload whose resources/stave landed but whose WSL leg
+        // was archived before the Linux binary was staged.
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const resourcesDir = path.join(fixture.packagedAppDir, "resources");
+        const withoutWslStave = yield* makeWindowsPayloadFixture({
+          copyUnpackedNatives: true,
+          wslRuntime: "valid",
+        });
+        for (const name of [WSL_RUNTIME_ARCHIVE_NAME, WSL_RUNTIME_ARCHIVE_HASH_NAME]) {
+          yield* fs.copyFile(
+            path.join(withoutWslStave.packagedAppDir, "resources", name),
+            path.join(resourcesDir, name),
+          );
+        }
+
+        const error = yield* validateWindowsPackagedPayload({
+          stageDistDir: fixture.stageDistDir,
+          appExecutableName: fixture.appExecutableName,
+          targetArch: "x64",
+          expectWslRuntime: true,
+          expectStave: true,
+        }).pipe(Effect.flip);
+
+        assert.instanceOf(error, WindowsPackagedPayloadValidationError);
+        assert.equal(error.reason, "wsl-runtime-invalid");
+        assert.deepStrictEqual(error.missingFiles, ["apps/server/dist/stave/linux-x64/stave"]);
+      }),
+    ),
+  );
+
+  // Only POSIX build hosts can record the mode bit in the archive; a Windows
+  // host relies on the WSL install script to chmod after extraction, so the
+  // same payload passes there.
+  it.effect("rejects a WSL archive whose Linux Stave binary is not executable", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        if ((yield* HostProcessPlatform) === "win32") return;
+        const fixture = yield* makeWindowsPayloadFixture({
+          copyUnpackedNatives: true,
+          wslRuntime: "valid",
+          stave: "not-executable",
+        });
+        const validate = validateWindowsPackagedPayload({
+          stageDistDir: fixture.stageDistDir,
+          appExecutableName: fixture.appExecutableName,
+          targetArch: "x64",
+          expectWslRuntime: true,
+          expectStave: true,
+        });
+
+        const error = yield* validate.pipe(Effect.flip);
+        assert.instanceOf(error, WindowsPackagedPayloadValidationError);
+        assert.equal(error.reason, "wsl-runtime-invalid");
+        assert.include(String(error.cause), "is not executable");
+
+        // Cross-build validation skips the Windows executable probe: this
+        // fixture exercises archive mode handling, not a runnable Electron app.
+        const onWindowsHost = yield* validate.pipe(
+          Effect.provideService(HostProcessPlatform, "win32"),
+          Effect.provideService(HostProcessArchitecture, "arm64"),
+        );
+        assert.equal(onWindowsHost.packagedAppDir, fixture.packagedAppDir);
+      }),
+    ),
+  );
 
   it.effect("ships only Linux runtime members in the WSL archive", () =>
     Effect.scoped(
@@ -2048,6 +2448,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         mockUpdates: Option.none(),
         mockUpdateServerPort: Option.none(),
         wslPrebuild: Option.none(),
+        staveBinary: Option.none(),
+        staveBinaryX64: Option.none(),
+        staveWslBinary: Option.none(),
+        allowMissingStave: Option.none(),
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -2088,6 +2492,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
             mockUpdates: Option.none(),
             mockUpdateServerPort: Option.none(),
             wslPrebuild: Option.none(),
+            staveBinary: Option.none(),
+            staveBinaryX64: Option.none(),
+            staveWslBinary: Option.none(),
+            allowMissingStave: Option.none(),
           }),
         );
 
@@ -2112,6 +2520,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         mockUpdates: Option.some(false),
         mockUpdateServerPort: Option.none(),
         wslPrebuild: Option.none(),
+        staveBinary: Option.none(),
+        staveBinaryX64: Option.none(),
+        staveWslBinary: Option.none(),
+        allowMissingStave: Option.none(),
       }).pipe(
         Effect.provide(
           ConfigProvider.layer(

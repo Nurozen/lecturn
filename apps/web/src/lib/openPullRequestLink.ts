@@ -15,6 +15,10 @@ import { useOpenLink } from "../browser/useOpenLink";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useRightPanelStore } from "../rightPanelStore";
 import type { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
+import {
+  resolveProjectGitTargets,
+  resolveRepositoryPullRequestSelector,
+} from "@lecturn/client-runtime/state/projectGit";
 
 import { useProjects, useServerConfigs } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
@@ -214,24 +218,40 @@ function claim(host: string, match: RegExpExecArray | null): ChangeRequestLink |
  * groups and Azure project paths need — and the host is the first segment of the canonical
  * remote, so github.com and an Enterprise install stay apart.
  */
+export function findChangeRequestTarget(
+  projects: ReadonlyArray<EnvironmentProject>,
+  link: ChangeRequestLink,
+): { project: EnvironmentProject; repository: string; host: string } | undefined {
+  for (const project of projects) {
+    const matches = resolveProjectGitTargets({ project }).flatMap((target) => {
+      const identity = target.repositoryIdentity;
+      if (!identity?.provider) return [];
+      const repository =
+        identity.displayName ??
+        (identity.owner && identity.name ? `${identity.owner}/${identity.name}` : null);
+      const host = pullRequestHostOf(identity, identity.provider as SourceControlProviderKind);
+      return repository?.toLowerCase() === link.repository.toLowerCase() &&
+        host === link.host.toLowerCase()
+        ? [
+            {
+              project,
+              repository: resolveRepositoryPullRequestSelector(identity) ?? repository,
+              host,
+            },
+          ]
+        : [];
+    });
+    // Multiple checkouts of the same remote cannot identify the intended checkout.
+    if (matches.length === 1) return matches[0];
+  }
+  return undefined;
+}
+
 export function findProjectForChangeRequest(
   projects: ReadonlyArray<EnvironmentProject>,
   link: ChangeRequestLink,
 ): EnvironmentProject | undefined {
-  return projects.find((project) => {
-    const identity = project.repositoryIdentity;
-    if (!identity) return false;
-    const kind = identity.provider as SourceControlProviderKind | undefined;
-    if (kind === undefined) return false;
-    const repository =
-      identity.displayName ??
-      (identity.owner && identity.name ? `${identity.owner}/${identity.name}` : null);
-    return (
-      repository !== null &&
-      repository.toLowerCase() === link.repository.toLowerCase() &&
-      pullRequestHostOf(identity, kind) === link.host.toLowerCase()
-    );
-  });
+  return findChangeRequestTarget(projects, link)?.project;
 }
 
 /**
@@ -292,8 +312,9 @@ export function useOpenChangeRequestLink(
                 Number(right.environmentId === primaryEnvironmentId) -
                 Number(left.environmentId === primaryEnvironmentId),
             );
-      const project = findProjectForChangeRequest(projects, parsed);
-      if (project === undefined || !reads(project.environmentId)) return false;
+      const target = findChangeRequestTarget(projects, parsed);
+      if (target === undefined || !reads(target.project.environmentId)) return false;
+      const { project, repository, host } = target;
       event.preventDefault();
       event.stopPropagation();
       if (resolvedThreadRef) {
@@ -301,7 +322,8 @@ export function useOpenChangeRequestLink(
           projectId: project.id,
           // The identity's own spelling, not the one read out of the URL: the panel asks the
           // provider for this repository, while matching a link only ever compares lower case.
-          repository: project.repositoryIdentity?.displayName ?? parsed.repository,
+          repository,
+          host,
           number: parsed.number,
         });
         return true;
@@ -313,7 +335,8 @@ export function useOpenChangeRequestLink(
           // Every state, so the pull request being opened is also in the list behind it whether
           // it is open, merged or closed.
           state: "all",
-          repository: parsed.repository,
+          repository,
+          selectedHost: host,
           number: parsed.number,
           selectedProjectId: project.id,
           // Named so the page opens the right one of two servers holding this project.

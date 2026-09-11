@@ -87,11 +87,12 @@ const DESKTOP_BACKEND_ENV_NAMES = [
   "LECTURN_TAILSCALE_SERVE_PORT",
 ] as const;
 
-// Sensitive env vars that the WSL backend needs but Windows process.env won't
-// forward across the wsl.exe boundary without WSLENV. The dev-server URL is
-// handled separately via a `--dev-url` CLI flag because WSLENV translation of
-// URL-shaped values (colons / slashes) is unreliable.
-const WSL_FORWARDED_ENV_NAMES = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"] as const;
+// Env vars the WSL backend needs but Windows process.env won't forward across
+// the wsl.exe boundary without WSLENV: provider secrets plus the LECTURN_STAVE
+// kill switch (a plain boolean, so WSLENV carries it verbatim). The dev-server
+// URL is handled separately via a `--dev-url` CLI flag because WSLENV
+// translation of URL-shaped values (colons / slashes) is unreliable.
+const WSL_FORWARDED_ENV_NAMES = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "LECTURN_STAVE"] as const;
 
 const WSL_SERVER_SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
@@ -180,6 +181,39 @@ const resolveResourceMonitorPath = Effect.fn(
   return Option.none<string>();
 });
 
+function staveBinaryName(platform: NodeJS.Platform): string {
+  return platform === "win32" ? "stave.exe" : "stave";
+}
+
+// Locate the bundled Stave CLI for the Windows/native primary. Packaged builds
+// ship it beside the resource monitor under resources/stave; a checkout falls
+// back to a Go-installed binary (GOBIN, GOPATH/bin, ~/go/bin) and then the
+// prod-resources copy. None means the server decides on its own (LECTURN_STAVE_PATH
+// or the copy inside its dist tree).
+const resolveStavePath = Effect.fn("desktop.backendConfiguration.resolveStavePath")(function* () {
+  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const binaryName = staveBinaryName(environment.platform);
+  const goBin = process.env.GOBIN;
+  const goPath = process.env.GOPATH;
+  const candidates = environment.isPackaged
+    ? [environment.path.join(environment.resourcesPath, "stave", binaryName)]
+    : [
+        ...(goBin ? [environment.path.join(goBin, binaryName)] : []),
+        ...(goPath ? [environment.path.join(goPath, "bin", binaryName)] : []),
+        environment.path.join(environment.homeDirectory, "go", "bin", binaryName),
+        ...environment.resolveResourcePathCandidates(environment.path.join("stave", binaryName)),
+      ];
+
+  for (const candidate of candidates) {
+    if (yield* fileSystem.exists(candidate).pipe(Effect.orElseSucceed(() => false))) {
+      return Option.some(candidate);
+    }
+  }
+
+  return Option.none<string>();
+});
+
 const readPersistedBackendObservabilitySettings = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
@@ -225,6 +259,9 @@ interface WslPreflightSuccess {
   readonly resolvedPath: string;
   // Identifies the distro-local runtime cache selected from the packaged archive.
   readonly runtimeId?: string;
+  // Linux path of the bundled Stave CLI inside the chosen runtime root, or null
+  // when the Windows-side server tree does not carry a binary for this arch.
+  readonly linuxStavePath: string | null;
 }
 
 interface WslPreflightFailure {
@@ -321,6 +358,19 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
       ...(result.retryLimit === undefined ? {} : { retryLimit: result.retryLimit }),
     }) as const;
 
+  // The Linux Stave binary rides inside the server tree (see
+  // build-desktop-artifact.ts) at a per-arch path. Both runtimes are copies
+  // of the Windows-side server tree, so its presence there decides whether
+  // the Linux runtime root carries it too.
+  const staveRelativePath = `apps/server/dist/stave/linux-${
+    environment.runtimeInfo.hostArch === "arm64" ? "arm64" : "x64"
+  }/stave`;
+  const resolveLinuxStavePath = (windowsTreeRoot: string, linuxAppRoot: string) =>
+    fileSystem.exists(environment.path.join(windowsTreeRoot, staveRelativePath)).pipe(
+      Effect.orElseSucceed(() => false),
+      Effect.map((present) => (present ? `${linuxAppRoot}/${staveRelativePath}` : null)),
+    );
+
   // The mounted server tree is the fallback runtime: the Windows-side copy the
   // distro reads over /mnt. Slower to launch from, but always installed.
   const resolveMountedAppRoot = Effect.gen(function* () {
@@ -346,7 +396,12 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
           reason: `wslpath conversion failed for ${serverTree.root}`,
           fatal: false,
         } as const)
-      : ({ ok: true, windowsEntryPath, linuxAppRoot: mountedAppRoot.value } as const);
+      : ({
+          ok: true,
+          windowsEntryPath,
+          linuxAppRoot: mountedAppRoot.value,
+          windowsTreeRoot: serverTree.root,
+        } as const);
   });
 
   // Set once a staged runtime has been ruled out by the probe, and carried
@@ -377,6 +432,10 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
           nodePath: stagedNodePty.nodePath,
           resolvedPath: stagedNodePty.resolvedPath,
           runtimeId: input.runtimeArchive.runtimeId,
+          linuxStavePath: yield* resolveLinuxStavePath(
+            environment.serverRoot,
+            runtime.linuxAppRoot,
+          ),
         } as const;
       }
       // A transport failure says nothing about the staged tree, so it is
@@ -432,6 +491,7 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
     linuxEntryPath: `${mounted.linuxAppRoot}/apps/server/dist/bin.mjs`,
     nodePath: nodePtyResult.nodePath,
     resolvedPath: nodePtyResult.resolvedPath,
+    linuxStavePath: yield* resolveLinuxStavePath(mounted.windowsTreeRoot, mounted.linuxAppRoot),
   } as const;
 });
 
@@ -471,6 +531,7 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
   function* (
     input: SharedBootstrapInput & {
       readonly resourceMonitorPath: Option.Option<string>;
+      readonly stavePath: Option.Option<string>;
     },
   ): Effect.fn.Return<
     DesktopBackendManager.DesktopBackendStartConfig,
@@ -495,6 +556,10 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       ...Option.match(input.resourceMonitorPath, {
         onNone: () => ({}),
         onSome: (resourceMonitorPath) => ({ resourceMonitorPath }),
+      }),
+      ...Option.match(input.stavePath, {
+        onNone: () => ({}),
+        onSome: (stavePath) => ({ stavePath }),
       }),
       ...buildObservabilityFragment(input.observabilitySettings),
     };
@@ -549,28 +614,6 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
   // LAN; the primary owns LAN exposure when the user opts in.
   const wslBindHost = "0.0.0.0";
 
-  const bootstrap = {
-    mode: "desktop" as const,
-    noBrowser: true,
-    port: input.port,
-    // Omit lecturnHome so the Linux backend uses its own home dir instead of
-    // the Windows-side baseDir (which would be a /mnt/c path and share
-    // the SQLite file with the primary).
-    host: wslBindHost,
-    desktopBootstrapToken: input.bootstrapToken,
-    // PortSchema rejects 0, so when tailscale serve is disabled we still
-    // need a valid number in this slot. The backend reads tailscaleServePort
-    // only when tailscaleServeEnabled is true, so the actual value here is
-    // inert.
-    tailscaleServeEnabled: false,
-    tailscaleServePort: 443,
-    // The packaged sidecar is a Windows executable and cannot run inside the
-    // Linux WSL backend. Keep the field absent instead of passing an unusable
-    // `/mnt/.../*.exe` path; WSL resource telemetry is reported unavailable.
-    // See docs/architecture/resource-telemetry.md.
-    ...buildObservabilityFragment(input.observabilitySettings),
-  };
-
   // The archive is the primary packaged WSL path: it installs directly into
   // the distro's ext4 filesystem. The server.asar extraction service is only
   // consulted lazily if the archive is unavailable or cannot be staged.
@@ -619,6 +662,33 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     // arch/distro), rather than silently dropping into a fragile runtime build.
     allowBuild: !environment.isPackaged,
   });
+
+  const bootstrap = {
+    mode: "desktop" as const,
+    noBrowser: true,
+    port: input.port,
+    // Omit lecturnHome so the Linux backend uses its own home dir instead of
+    // the Windows-side baseDir (which would be a /mnt/c path and share
+    // the SQLite file with the primary).
+    host: wslBindHost,
+    desktopBootstrapToken: input.bootstrapToken,
+    // PortSchema rejects 0, so when tailscale serve is disabled we still
+    // need a valid number in this slot. The backend reads tailscaleServePort
+    // only when tailscaleServeEnabled is true, so the actual value here is
+    // inert.
+    tailscaleServeEnabled: false,
+    tailscaleServePort: 443,
+    // The packaged sidecar is a Windows executable and cannot run inside the
+    // Linux WSL backend. Keep the field absent instead of passing an unusable
+    // `/mnt/.../*.exe` path; WSL resource telemetry is reported unavailable.
+    // See docs/architecture/resource-telemetry.md.
+    // stavePath, by contrast, is a Linux path inside the chosen runtime root
+    // (the server tree carries a Linux Stave binary), so it is safe to pass.
+    ...(preflight._tag === "Ready" && preflight.linuxStavePath !== null
+      ? { stavePath: preflight.linuxStavePath }
+      : {}),
+    ...buildObservabilityFragment(input.observabilitySettings),
+  };
 
   // Every operation after preflight uses the same concrete distro. In
   // default-tracking mode this closes the race where the system default
@@ -809,7 +879,11 @@ export const make = Effect.gen(function* () {
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
     );
-    return yield* resolvePrimaryStartConfig({ ...shared, resourceMonitorPath }).pipe(
+    const stavePath = yield* resolveStavePath().pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
+    );
+    return yield* resolvePrimaryStartConfig({ ...shared, resourceMonitorPath, stavePath }).pipe(
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
       Effect.provideService(DesktopServerExposure.DesktopServerExposure, serverExposure),
     );

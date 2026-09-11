@@ -524,3 +524,62 @@ describe("ServerSettings environment icon", () => {
     expect(encodeServerSettings(settings).environmentIcon).toBe("laptop");
   });
 });
+
+describe("ServerSettings.stave", () => {
+  const decodeStaveServerSettings = Schema.decodeUnknownSync(ServerSettings);
+  const decodeStaveServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+
+  it("defaults the whole block for settings files written before Stave existed", () => {
+    const settings = decodeStaveServerSettings({});
+
+    expect(settings.stave).toEqual({
+      enabled: false,
+      binaryPath: "",
+      configPath: "",
+      lifecycle: {
+        onProjectDelete: "destroy",
+        onAllThreadsSettled: "archive-after-grace",
+        archiveGraceDays: 7,
+        memoryFateOnDestroy: "keep",
+        settleOnSagaMerge: false,
+      },
+    });
+    expect(DEFAULT_SERVER_SETTINGS.stave).toEqual(settings.stave);
+  });
+
+  it("fills missing lifecycle fields when only part of the block is persisted", () => {
+    const settings = decodeStaveServerSettings({
+      stave: { enabled: true, binaryPath: "  /usr/local/bin/stave  " },
+    });
+
+    expect(settings.stave.enabled).toBe(true);
+    expect(settings.stave.binaryPath).toBe("/usr/local/bin/stave");
+    expect(settings.stave.lifecycle.onProjectDelete).toBe("destroy");
+    expect(settings.stave.lifecycle.archiveGraceDays).toBe(7);
+  });
+
+  it("accepts a partial nested patch and rejects unknown lifecycle policies", () => {
+    const patch = decodeStaveServerSettingsPatch({
+      stave: { lifecycle: { onProjectDelete: "archive" } },
+    });
+    expect(patch.stave).toEqual({ lifecycle: { onProjectDelete: "archive" } });
+
+    expect(() =>
+      decodeStaveServerSettingsPatch({ stave: { lifecycle: { onProjectDelete: "purge" } } }),
+    ).toThrow();
+    expect(() =>
+      decodeStaveServerSettingsPatch({ stave: { lifecycle: { archiveGraceDays: -1 } } }),
+    ).toThrow();
+  });
+});
+
+describe("ClientSettings saga nesting", () => {
+  const decodeSagaClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
+  const decodeSagaClientSettingsPatch = Schema.decodeUnknownSync(ClientSettingsPatch);
+
+  it("nests saga members by default and accepts an opt-out", () => {
+    expect(decodeSagaClientSettings({}).sidebarNestSagas).toBe(true);
+    expect(decodeSagaClientSettings({ sidebarNestSagas: false }).sidebarNestSagas).toBe(false);
+    expect(decodeSagaClientSettingsPatch({ sidebarNestSagas: false }).sidebarNestSagas).toBe(false);
+  });
+});

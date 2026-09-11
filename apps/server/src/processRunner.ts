@@ -9,7 +9,7 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
-import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import { HostProcessEnvironment, HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import { resolveSpawnCommand } from "@lecturn/shared/shell";
 import {
   collectUint8StreamText,
@@ -24,6 +24,19 @@ export interface ProcessRunInput {
   readonly spawnCwd?: string | undefined;
   readonly timeout?: Duration.Input | undefined;
   readonly env?: NodeJS.ProcessEnv | undefined;
+  /** Defaults to inheriting the host environment; false uses only `env`. */
+  readonly extendEnv?: boolean | undefined;
+  /**
+   * Variable names removed from the child's environment after `env` has been
+   * merged over the host environment (e.g. `["STAVE_CD_FD"]` so a child never
+   * inherits a parent-only protocol descriptor).
+   */
+  readonly unsetEnv?: ReadonlyArray<string> | undefined;
+  /**
+   * Text written to the child's stdin. Any string, including `""`, is written
+   * and then ENDS the pipe so the child sees EOF; `undefined` never runs the
+   * stdin sink and leaves the pipe open.
+   */
   readonly stdin?: string | undefined;
   readonly maxOutputBytes?: number | undefined;
   readonly outputMode?: "error" | "truncate" | undefined;
@@ -33,6 +46,16 @@ export interface ProcessRunInput {
    * Partial stdout/stderr are not preserved.
    */
   readonly timeoutBehavior?: "error" | "timedOutResult" | undefined;
+  /**
+   * Receives each complete stdout line as it arrives, while output is still
+   * being buffered into the result. Lines are split on "\n" with a trailing
+   * "\r" stripped; empty lines are skipped and a trailing partial line is
+   * flushed at end-of-stream. Output caps, truncation, and the returned text
+   * are unaffected.
+   */
+  readonly onStdoutLine?: ((line: string) => Effect.Effect<void>) | undefined;
+  /** Same as `onStdoutLine`, for stderr. */
+  readonly onStderrLine?: ((line: string) => Effect.Effect<void>) | undefined;
 }
 
 export interface ProcessRunOutput {
@@ -172,6 +195,44 @@ export const isWindowsCommandNotFound = Effect.fn("processRunner.isWindowsComman
   },
 );
 
+// Line splitter shared with GitVcsDriverCore.collectOutput: decodes chunks
+// incrementally and emits complete lines, flushing the partial tail on end.
+const makeLineEmitter = (onLine: (line: string) => Effect.Effect<void>) => {
+  const decoder = new TextDecoder();
+  let lineBuffer = "";
+
+  const emitCompleteLines = Effect.fnUntraced(function* (flush: boolean) {
+    let newlineIndex = lineBuffer.indexOf("\n");
+    while (newlineIndex >= 0) {
+      const line = lineBuffer.slice(0, newlineIndex).replace(/\r$/, "");
+      lineBuffer = lineBuffer.slice(newlineIndex + 1);
+      if (line.length > 0) {
+        yield* onLine(line);
+      }
+      newlineIndex = lineBuffer.indexOf("\n");
+    }
+
+    if (flush) {
+      const trailing = lineBuffer.replace(/\r$/, "");
+      lineBuffer = "";
+      if (trailing.length > 0) {
+        yield* onLine(trailing);
+      }
+    }
+  });
+
+  return {
+    feed: Effect.fnUntraced(function* (chunk: Uint8Array) {
+      lineBuffer += decoder.decode(chunk, { stream: true });
+      yield* emitCompleteLines(false);
+    }),
+    flush: Effect.suspend(() => {
+      lineBuffer += decoder.decode();
+      return emitCompleteLines(true);
+    }),
+  };
+};
+
 const collectText = Effect.fn("processRunner.collectText")(function* (input: {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
@@ -182,8 +243,10 @@ const collectText = Effect.fn("processRunner.collectText")(function* (input: {
   readonly maxOutputBytes: number;
   readonly outputMode: "error" | "truncate";
   readonly truncatedMarker: string;
+  readonly onLine?: ((line: string) => Effect.Effect<void>) | undefined;
 }) {
-  const stream = input.stream.pipe(
+  const lineEmitter = input.onLine === undefined ? undefined : makeLineEmitter(input.onLine);
+  const mappedStream = input.stream.pipe(
     Stream.mapError(
       (cause) =>
         new ProcessReadError({
@@ -196,6 +259,28 @@ const collectText = Effect.fn("processRunner.collectText")(function* (input: {
         }),
     ),
   );
+  const stream =
+    lineEmitter === undefined ? mappedStream : mappedStream.pipe(Stream.tap(lineEmitter.feed));
+
+  const collected = yield* collectBuffered({ ...input, stream });
+  if (lineEmitter !== undefined) {
+    yield* lineEmitter.flush;
+  }
+  return collected;
+});
+
+const collectBuffered = Effect.fnUntraced(function* (input: {
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+  readonly cwd?: string | undefined;
+  readonly spawnCwd?: string | undefined;
+  readonly streamName: "stdout" | "stderr";
+  readonly stream: Stream.Stream<Uint8Array, ProcessReadError>;
+  readonly maxOutputBytes: number;
+  readonly outputMode: "error" | "truncate";
+  readonly truncatedMarker: string;
+}) {
+  const stream = input.stream;
 
   if (input.outputMode === "truncate") {
     return yield* collectUint8StreamText({
@@ -286,6 +371,28 @@ function finalizeRunProcess<R>(
   );
 }
 
+// Without `unsetEnv` the spawner merges `env` over the host environment itself;
+// with it, the merge happens here so the named variables can be dropped.
+const resolveEnvOptions = Effect.fnUntraced(function* (
+  input: Pick<ProcessRunInput, "env" | "unsetEnv" | "extendEnv">,
+): Effect.fn.Return<{ readonly env?: NodeJS.ProcessEnv; readonly extendEnv?: boolean }> {
+  const unsetEnv = input.unsetEnv ?? [];
+  if (unsetEnv.length === 0) {
+    if (input.extendEnv === false) return { env: input.env ?? {}, extendEnv: false };
+    return input.env === undefined ? {} : { env: input.env, extendEnv: true };
+  }
+
+  const hostEnvironment = yield* HostProcessEnvironment;
+  const env: NodeJS.ProcessEnv = {
+    ...(input.extendEnv === false ? {} : hostEnvironment),
+    ...input.env,
+  };
+  for (const name of unsetEnv) {
+    delete env[name];
+  }
+  return { env, extendEnv: false };
+});
+
 const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
   input: ProcessRunInput,
@@ -293,23 +400,14 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
   const maxOutputBytes = input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
   const outputMode = input.outputMode ?? "error";
   const truncatedMarker = input.truncatedMarker ?? "";
-  const extendEnv = input.env !== undefined;
-  const spawnCommand = yield* resolveSpawnCommand(
-    input.command,
-    input.args,
-    input.env === undefined ? {} : { env: input.env, extendEnv },
-  );
+  const envOptions = yield* resolveEnvOptions(input);
+  const spawnCommand = yield* resolveSpawnCommand(input.command, input.args, envOptions);
 
   const child = yield* spawner
     .spawn(
       ChildProcess.make(spawnCommand.command, spawnCommand.args, {
         ...((input.spawnCwd ?? input.cwd) ? { cwd: input.spawnCwd ?? input.cwd } : {}),
-        ...(input.env !== undefined
-          ? {
-              env: input.env,
-              extendEnv,
-            }
-          : {}),
+        ...envOptions,
         shell: spawnCommand.shell,
       }),
     )
@@ -359,6 +457,7 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
         maxOutputBytes,
         outputMode,
         truncatedMarker,
+        onLine: input.onStdoutLine,
       }),
       collectText({
         command: input.command,
@@ -370,6 +469,7 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
         maxOutputBytes,
         outputMode,
         truncatedMarker,
+        onLine: input.onStderrLine,
       }),
       writeStdin,
     ],

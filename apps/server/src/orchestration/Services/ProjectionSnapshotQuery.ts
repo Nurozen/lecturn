@@ -8,6 +8,7 @@
  */
 import type {
   CheckpointRef,
+  MessageId,
   OrchestrationCheckpointSummary,
   OrchestrationProject,
   OrchestrationProjectShell,
@@ -84,7 +85,29 @@ export interface ProjectionThreadDetailQuery {
 /**
  * ProjectionSnapshotQueryShape - Service API for read-model snapshots.
  */
+export interface ProjectionThreadLifecycleAnchor {
+  readonly threadId: ThreadId;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly settledAt: string | null;
+  readonly unsettledAt: string | null;
+  readonly archivedAt: string | null;
+  readonly deletedAt: string | null;
+  readonly settledOverride: "settled" | "active" | null;
+}
+
 export interface ProjectionSnapshotQueryShape {
+  readonly listThreadLifecycleAnchorsByProjectId: (
+    projectId: ProjectId,
+  ) => Effect.Effect<ReadonlyArray<ProjectionThreadLifecycleAnchor>, ProjectionRepositoryError>;
+  /** Candidates for realpath-based descendant validation, including aliases. */
+  readonly listActiveProjectRootsUnder: (
+    prefix: string,
+  ) => Effect.Effect<
+    ReadonlyArray<{ readonly projectId: ProjectId; readonly workspaceRoot: string }>,
+    ProjectionRepositoryError
+  >;
+
   /**
    * Read the lightweight command snapshot used to bootstrap the in-memory
    * orchestration engine without hydrating message/activity/checkpoint bodies.
@@ -241,6 +264,15 @@ export interface ProjectionSnapshotQueryShape {
    * null turn id are excluded), including the provider turn anchor.
    * Server-only.
    */
+  /** Last three completed textual question/response pairs, oldest first; no activities or attachments. */
+  readonly getInferenceTurnPairs: (input: {
+    readonly threadId: ThreadId;
+    readonly beforeMessageId?: MessageId;
+  }) => Effect.Effect<
+    ReadonlyArray<{ readonly question: string; readonly response: string }>,
+    ProjectionRepositoryError
+  >;
+
   readonly listThreadTurnsById: (
     threadId: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ProjectionTurn>, ProjectionRepositoryError>;

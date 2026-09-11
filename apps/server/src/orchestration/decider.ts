@@ -275,7 +275,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "project.delete": {
-      yield* requireProject({
+      const project = yield* requireProject({
         readModel,
         command,
         projectId: command.projectId,
@@ -304,6 +304,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               type: "project.delete",
               commandId: command.commandId,
               projectId: command.projectId,
+              ...(command.staveSpaceId !== undefined ? { staveSpaceId: command.staveSpaceId } : {}),
+              ...(command.staveCreatedAt !== undefined
+                ? { staveCreatedAt: command.staveCreatedAt }
+                : {}),
+              ...(command.staveSagaTeardown !== undefined
+                ? { staveSagaTeardown: command.staveSagaTeardown }
+                : {}),
+              ...(command.staveSagaRemoveConfirmed !== undefined
+                ? { staveSagaRemoveConfirmed: command.staveSagaRemoveConfirmed }
+                : {}),
             },
           ],
         });
@@ -320,7 +330,44 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: "project.deleted" as const,
         payload: {
           projectId: command.projectId,
+          workspaceRoot: project.workspaceRoot,
+          ...(command.staveSpaceId !== undefined ? { staveSpaceId: command.staveSpaceId } : {}),
+          ...(command.staveCreatedAt !== undefined
+            ? { staveCreatedAt: command.staveCreatedAt }
+            : {}),
+          ...(command.staveSagaTeardown !== undefined
+            ? { staveSagaTeardown: command.staveSagaTeardown }
+            : {}),
+          ...(command.staveSagaRemoveConfirmed !== undefined
+            ? { staveSagaRemoveConfirmed: command.staveSagaRemoveConfirmed }
+            : {}),
           deletedAt: occurredAt,
+        },
+      };
+    }
+
+    case "project.refresh": {
+      const project = yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      if (project.deletedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Project '${command.projectId}' does not exist for command '${command.type}'.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "project.refreshed",
+        payload: {
+          projectId: command.projectId,
         },
       };
     }
@@ -961,9 +1008,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           messageId: command.message.messageId,
-          ...(command.modelSelection !== undefined
-            ? { modelSelection: command.modelSelection }
-            : {}),
+          // Capture the account at submission; asynchronous consumers must not
+          // observe a later provider switch when older clients omit this field.
+          modelSelection: command.modelSelection ?? targetThread.modelSelection,
           ...(command.titleSeed !== undefined ? { titleSeed: command.titleSeed } : {}),
           runtimeMode: targetThread.runtimeMode,
           interactionMode: targetThread.interactionMode,

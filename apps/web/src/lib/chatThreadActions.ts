@@ -1,9 +1,12 @@
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
+import { staveForcedEnvMode } from "@lecturn/client-runtime/state/projectGit";
 import type {
   EnvironmentId,
   ModelSelection,
+  OrchestrationProjectShell,
   ProjectId,
   ScopedProjectRef,
+  ThreadEnvMode,
 } from "@lecturn/contracts";
 import type { ComposerThreadDraftState, DraftThreadEnvMode } from "../composerDraftStore";
 
@@ -35,6 +38,32 @@ export interface ChatThreadActionContext {
   readonly activeThread: ThreadContextLike | undefined;
   readonly defaultProjectRef: ScopedProjectRef | null;
   readonly handleNewThread: NewThreadHandler;
+}
+
+/**
+ * The default-env-mode sources a new draft can settle without reading
+ * lecturn.json. The file is only consulted when neither a forced mode (Stave
+ * space) nor the per-project setting decides, mirroring the priority order in
+ * `resolveDefaultThreadEnvMode`.
+ */
+export function resolveNewThreadEnvModeSources(
+  project:
+    | (Pick<OrchestrationProjectShell, "defaultThreadEnvMode" | "workspaceRoot"> & {
+        readonly stave?: OrchestrationProjectShell["stave"];
+      })
+    | undefined,
+): {
+  forcedMode: ThreadEnvMode | undefined;
+  projectSetting: ThreadEnvMode | null | undefined;
+  consultProjectFile: boolean;
+} {
+  const forcedMode = staveForcedEnvMode(project);
+  const projectSetting = project?.defaultThreadEnvMode;
+  return {
+    forcedMode,
+    projectSetting,
+    consultProjectFile: project !== undefined && forcedMode === undefined && projectSetting == null,
+  };
 }
 
 export function resolveNewDraftStartFromOrigin(input: {

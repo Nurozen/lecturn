@@ -1,3 +1,10 @@
+import * as SagaInferenceReactor from "./stave/SagaInferenceReactor.ts";
+import * as SagaWorkbenchService from "./stave/SagaWorkbenchService.ts";
+import * as SagaWorkbenchEvidence from "./stave/SagaWorkbenchEvidence.ts";
+import * as SagaWorkbenchRepository from "./persistence/Layers/SagaWorkbenchRepository.ts";
+import * as StaveExecution from "./stave/StaveExecution.ts";
+import * as StaveRuntimeFence from "./stave/StaveRuntimeFence.ts";
+import * as StaveMemoryWiring from "./stave/StaveMemoryWiring.ts";
 import { EnvironmentHttpApi, ProviderDriverKind } from "@lecturn/contracts";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
@@ -61,6 +68,7 @@ import * as GitManager from "./git/GitManager.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
+import * as StaveLifecycleService from "./orchestration/Layers/StaveLifecycleService.ts";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor.ts";
 import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus.ts";
 import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion.ts";
@@ -76,6 +84,19 @@ import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
 import * as LecturnProjectFileLoader from "./project/LecturnProjectFileLoader.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
+import { StaveLifecycleRepositoryLive } from "./persistence/Layers/StaveLifecycleRepository.ts";
+import * as StaveSpaceLock from "./stave/StaveSpaceLock.ts";
+import * as StaveAdmission from "./stave/StaveAdmission.ts";
+import * as StaveBinary from "./stave/StaveBinary.ts";
+import * as StaveCli from "./stave/StaveCli.ts";
+import * as StaveConfigReader from "./stave/StaveConfigReader.ts";
+import * as StaveOperations from "./stave/StaveOperations.ts";
+import * as StaveMergeSignal from "./stave/StaveMergeSignal.ts";
+import * as StaveReadCache from "./stave/StaveReadCache.ts";
+import * as StaveDisplayMembership from "./stave/StaveDisplayMembership.ts";
+import * as StaveRoots from "./stave/StaveRoots.ts";
+import * as StaveRpcHandlers from "./stave/staveRpcHandlers.ts";
+import * as StaveWorkspaceReader from "./stave/StaveWorkspaceReader.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
@@ -119,7 +140,10 @@ import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts
 import * as ResourceMonitorBinary from "./resourceTelemetry/ResourceMonitorBinary.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
-import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
+import {
+  OrchestrationLayerLive,
+  OrchestrationInfrastructureLayerLive,
+} from "./orchestration/runtimeLayer.ts";
 import {
   clearPersistedServerRuntimeState,
   makePersistedServerRuntimeState,
@@ -267,6 +291,9 @@ const PlatformServicesLive = Layer.unwrap(
 
 const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(OrchestrationReactorLive),
+  Layer.provideMerge(StaveLifecycleService.layer),
+  Layer.provideMerge(SagaInferenceReactor.layer),
+  Layer.provideMerge(StaveOperations.layer.pipe(Layer.provide(ProcessRunner.layer))),
   Layer.provideMerge(ProviderRuntimeIngestionLive),
   Layer.provideMerge(ProviderCommandReactorLive),
   Layer.provideMerge(CheckpointReactorLive),
@@ -293,6 +320,25 @@ const ProviderLayerLive = ProviderServiceLive.pipe(
 
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
 
+// The Stave CLI stack: one binary resolution and one config reader per server
+// (layer memoisation), settings-aware through the shared settings layer.
+const StaveBinaryLayerLive = StaveBinary.layer.pipe(
+  Layer.provide(ServerSettingsLayerLive),
+  Layer.provide(ProcessRunner.layer),
+);
+const StaveCliLayerLive = StaveCli.layer.pipe(
+  Layer.provide(StaveBinaryLayerLive),
+  Layer.provide(ServerSettingsLayerLive),
+  Layer.provide(ProcessRunner.layer),
+);
+const StaveConfigReaderLayerLive = StaveConfigReader.layer.pipe(
+  Layer.provide(Layer.mergeAll(StaveBinaryLayerLive, StaveCliLayerLive, ServerSettingsLayerLive)),
+);
+const StaveRootsLayerLive = StaveRoots.layer.pipe(Layer.provide(StaveConfigReaderLayerLive));
+// Git spawns learn the agent-work ceiling from Stave's config so a space
+// directory never adopts an ancestor repository.
+const GitVcsDriverLayerLive = GitVcsDriver.layer.pipe(Layer.provide(StaveRootsLayerLive));
+
 const VcsDriverRegistryLayerLive = VcsDriverRegistry.layer.pipe(
   Layer.provide(VcsProjectConfig.layer),
 );
@@ -301,7 +347,7 @@ const SourceControlProviderRegistryLayerLive = SourceControlProviderRegistry.lay
   Layer.provide(
     Layer.mergeAll(AzureDevOpsCli.layer, BitbucketApi.layer, GitHubCli.layer, GitLabCli.layer),
   ),
-  Layer.provideMerge(GitVcsDriver.layer),
+  Layer.provideMerge(GitVcsDriverLayerLive),
   Layer.provideMerge(VcsDriverRegistryLayerLive),
 );
 
@@ -313,14 +359,14 @@ const PullRequestServiceLive = PullRequestService.layer.pipe(
 
 const GitManagerLayerLive = GitManager.layer.pipe(
   Layer.provideMerge(ProjectSetupScriptRunner.layer),
-  Layer.provideMerge(GitVcsDriver.layer),
+  Layer.provideMerge(GitVcsDriverLayerLive),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
   Layer.provideMerge(TextGeneration.layer),
 );
 
 const GitLayerLive = Layer.empty.pipe(
   Layer.provideMerge(GitManagerLayerLive),
-  Layer.provideMerge(GitVcsDriver.layer),
+  Layer.provideMerge(GitVcsDriverLayerLive),
 );
 
 const GitWorkflowLayerLive = GitWorkflowService.layer.pipe(
@@ -329,12 +375,12 @@ const GitWorkflowLayerLive = GitWorkflowService.layer.pipe(
 );
 
 const SourceControlRepositoryServiceLayerLive = SourceControlRepositoryService.layer.pipe(
-  Layer.provideMerge(GitVcsDriver.layer),
+  Layer.provideMerge(GitVcsDriverLayerLive),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
 );
 
 const ReviewLayerLive = ReviewService.layer.pipe(
-  Layer.provideMerge(GitVcsDriver.layer),
+  Layer.provideMerge(GitVcsDriverLayerLive),
   Layer.provideMerge(VcsDriverRegistryLayerLive),
 );
 
@@ -392,6 +438,68 @@ const ServerEnvironmentLayerLive = ServerEnvironment.layer.pipe(
   Layer.provide(ServerSecretStore.layer),
 );
 
+// Reader, admission and identity resolver share one resolver instance
+// through layer memoisation.
+const StaveWorkspaceReaderLayerLive = StaveWorkspaceReader.layer.pipe(
+  Layer.provide(RepositoryIdentityResolver.layer),
+);
+const StaveLifecycleLayerLive = StaveLifecycleRepositoryLive.pipe(
+  Layer.provide(PersistenceLayerLive),
+);
+const StaveExecutionLayerLive = StaveExecution.layer.pipe(
+  Layer.provide(Layer.mergeAll(StaveBinaryLayerLive, ServerSettingsLayerLive)),
+);
+const StaveLayerLive = Layer.mergeAll(
+  StaveExecutionLayerLive,
+  StaveMemoryWiring.layer.pipe(Layer.provide(ServerSettingsLayerLive)),
+  StaveReadCache.layer,
+  StaveMergeSignal.layer.pipe(
+    Layer.provide(Layer.mergeAll(StaveCliLayerLive, StaveBinaryLayerLive, ServerSettingsLayerLive)),
+  ),
+  StaveDisplayMembership.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        StaveCliLayerLive,
+        StaveBinaryLayerLive,
+        ServerSettingsLayerLive,
+        StaveReadCache.layer,
+      ),
+    ),
+  ),
+  StaveSpaceLock.layer,
+  StaveLifecycleLayerLive,
+  StaveWorkspaceReaderLayerLive,
+  StaveAdmission.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(StaveWorkspaceReaderLayerLive, StaveSpaceLock.layer, StaveLifecycleLayerLive),
+    ),
+  ),
+  RepositoryIdentityResolver.layer,
+  StaveBinaryLayerLive,
+  StaveCliLayerLive,
+  StaveConfigReaderLayerLive,
+  StaveRootsLayerLive,
+  StaveRpcHandlers.runtimeLayer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        StaveCliLayerLive,
+        StaveWorkspaceReaderLayerLive,
+        StaveReadCache.layer,
+        StaveExecutionLayerLive,
+        ServerSettingsLayerLive,
+      ),
+    ),
+  ),
+);
+
+// One fence instance protects providers, terminals and Stave operations. The
+// read-only projection infrastructure avoids a dependency on runtime reactors.
+const StaveRuntimeFenceLayerLive = StaveRuntimeFence.layer.pipe(
+  Layer.provide(OrchestrationInfrastructureLayerLive),
+  Layer.provide(StaveLayerLive),
+  Layer.provide(PersistenceLayerLive),
+);
+
 const AuthLayerLive = EnvironmentAuth.layer.pipe(
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provide(ServerEnvironmentLayerLive),
@@ -409,6 +517,16 @@ const CloudManagedEndpointRuntimeLive = Layer.mergeAll(
 const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(ProviderLayerLive),
   Layer.provideMerge(OrchestrationLayerLive),
+);
+
+const SagaWorkbenchLayerLive = SagaWorkbenchService.layer.pipe(
+  Layer.provide(SagaWorkbenchRepository.layer.pipe(Layer.provide(PersistenceLayerLive))),
+  Layer.provide(
+    SagaWorkbenchEvidence.layer.pipe(
+      Layer.provide(ProcessRunner.layer),
+      Layer.provide(PullRequestProviderRegistry.layer),
+    ),
+  ),
 );
 
 const AntigravityInstallationRefreshLive = Layer.effectDiscard(
@@ -440,6 +558,7 @@ const AntigravityInstallationRefreshLive = Layer.effectDiscard(
 
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(AntigravityInstallationRefreshLive),
+  Layer.provideMerge(SagaWorkbenchLayerLive),
   Layer.provideMerge(ProviderAuthServiceLive),
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),
@@ -481,7 +600,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(OpenCodeRuntime.OpenCodeRuntimeLive),
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(Layer.mergeAll(NativeAppIconResolver.layer, ProjectFaviconResolverLayerLive)),
-  Layer.provideMerge(RepositoryIdentityResolver.layer),
+  // Folded into one step: this pipe is at Effect's 20-argument ceiling. Layer
+  // memoisation keeps a single resolver instance for the reader and the rest.
+  Layer.provideMerge(Layer.mergeAll(StaveLayerLive, StaveRuntimeFenceLayerLive)),
   Layer.provideMerge(ServerEnvironmentLayerLive),
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(ServerSecretStore.layer),
@@ -535,9 +656,13 @@ export const makeRoutesLayer = Layer.mergeAll(
   ),
   McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer)),
 ).pipe(
-  // Both transports consume the same service instance, so caches single-flight across clients
-  // and mutations observed on WebSocket invalidate patches subsequently read over HTTP.
+  // Reusing the exact layer object shares the runtime instance by memoization;
+  // isolated route harnesses can also supply its dependencies directly.
+  Layer.provide(SagaWorkbenchLayerLive),
   Layer.provide(PullRequestServiceLive),
+  // One registry per server: a Stave operation started over one socket keeps
+  // running after that socket closes and can be re-attached from any other.
+  // Its Stave/orchestration dependencies come from the runtime layer.
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(ServerSelfUpdate.layer.pipe(Layer.provide(DesktopAppUpdateLayerLive))),
   Layer.provide(commandReadinessLayer),

@@ -1,3 +1,4 @@
+import { StaveMemoryWiring, noop as noopStaveMemoryWiring } from "../../stave/StaveMemoryWiring.ts";
 import {
   ANTIGRAVITY_DEFAULT_MODEL,
   ApprovalRequestId,
@@ -127,6 +128,7 @@ function mapAntigravityError(threadId: ThreadId, method: string, cause: EffectAc
 }
 
 export interface AntigravityAdapterOptions {
+  readonly staveMemoryWiring?: StaveMemoryWiring["Service"];
   readonly instanceId: ProviderInstanceId;
   readonly makeRuntime: (
     input: Omit<AntigravityAcpRuntimeInput, "spawn" | "childProcessSpawner" | "onAuthorizationUrl">,
@@ -689,6 +691,29 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
             stopOwned,
             Effect.gen(function* () {
               const mcp = McpProviderSession.readMcpProviderSession(input.threadId);
+              const memory = yield* (options.staveMemoryWiring ?? noopStaveMemoryWiring).resolve(
+                cwd,
+              );
+              const mcpServers: Array<EffectAcpSchema.McpServer> = [];
+              if (mcp) {
+                mcpServers.push({
+                  type: "http",
+                  name: "lecturn",
+                  url: mcp.endpoint,
+                  headers: [{ name: "Authorization", value: mcp.authorizationHeader }],
+                });
+              }
+              if (memory.state === "configured") {
+                mcpServers.push({
+                  name: "context-marmot",
+                  command: memory.config.command,
+                  args: memory.config.args,
+                  env: Object.entries(memory.config.env ?? {}).map(([name, value]) => ({
+                    name,
+                    value,
+                  })),
+                });
+              }
               // The attachments dir grant lets the agent read pasted files at
               // the paths ProviderService injects into the turn text. It is a
               // leaf directory holding only uploads.
@@ -698,16 +723,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
                 clientFileSystem: true,
                 additionalDirectories: [serverConfig.attachmentsDir],
                 ...(Option.isSome(cursor) ? { resumeSessionId: cursor.value.sessionId } : {}),
-                mcpServers: mcp
-                  ? [
-                      {
-                        type: "http",
-                        name: "lecturn",
-                        url: mcp.endpoint,
-                        headers: [{ name: "Authorization", value: mcp.authorizationHeader }],
-                      },
-                    ]
-                  : [],
+                mcpServers,
                 ...makeNativeLoggers({
                   nativeEventLogger: options.nativeEventLogger,
                   provider: PROVIDER,

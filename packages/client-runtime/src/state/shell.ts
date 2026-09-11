@@ -1,18 +1,22 @@
 import {
   ORCHESTRATION_WS_METHODS,
+  ProjectId,
   type EnvironmentId,
+  type OrchestrationProjectShell,
   type OrchestrationShellSnapshot,
   type OrchestrationShellStreamItem,
   type ServerConfig,
 } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
 
 import { EnvironmentRegistry } from "../connection/registry.ts";
 import { connectionProjectionPhase } from "../connection/model.ts";
@@ -412,6 +416,57 @@ export function createEnvironmentShellAtoms<R, E>(
     stateAtom,
     stateValueAtom,
   };
+}
+
+/**
+ * The project as the shell holds it once the store has applied `sequence`.
+ * A project the server created on the client's behalf (a Stave space,
+ * deviation 26) is only safe to open after the shell caught up to the
+ * sequence its `project.create` produced; before that the row is either
+ * absent or from an older snapshot.
+ */
+export function findProjectVisibleAtSequence(
+  state: EnvironmentShellState,
+  input: { readonly projectId: ProjectId; readonly sequence: number },
+): OrchestrationProjectShell | null {
+  const snapshot = Option.getOrNull(state.snapshot);
+  if (snapshot === null || snapshot.snapshotSequence < input.sequence) {
+    return null;
+  }
+  return snapshot.projects.find((project) => project.id === input.projectId) ?? null;
+}
+
+export class ProjectNotVisibleError extends Schema.TaggedErrorClass<ProjectNotVisibleError>()(
+  "ProjectNotVisibleError",
+  { projectId: ProjectId, sequence: Schema.Number },
+) {
+  override get message(): string {
+    return `The project did not reach the client store at sequence ${this.sequence}.`;
+  }
+}
+
+/**
+ * Succeeds with the project once the shell atom reports it at or after
+ * `sequence`; fails with `ProjectNotVisibleError` when `timeout` elapses first.
+ */
+export function waitForProjectVisible(input: {
+  readonly registry: AtomRegistry.AtomRegistry;
+  readonly stateAtom: Atom.Atom<EnvironmentShellState>;
+  readonly projectId: ProjectId;
+  readonly sequence: number;
+  readonly timeout?: Duration.Input;
+}): Effect.Effect<OrchestrationProjectShell, ProjectNotVisibleError> {
+  const notVisible = () =>
+    Effect.fail(
+      new ProjectNotVisibleError({ projectId: input.projectId, sequence: input.sequence }),
+    );
+  return AtomRegistry.toStream(input.registry, input.stateAtom).pipe(
+    Stream.map((state) => findProjectVisibleAtSequence(state, input)),
+    Stream.filter((project): project is OrchestrationProjectShell => project !== null),
+    Stream.runHead,
+    Effect.flatMap(Option.match({ onNone: notVisible, onSome: Effect.succeed })),
+    Effect.timeoutOrElse({ duration: input.timeout ?? "10 seconds", orElse: notVisible }),
+  );
 }
 
 export * from "./models.ts";

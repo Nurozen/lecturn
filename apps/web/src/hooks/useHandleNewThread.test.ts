@@ -56,6 +56,11 @@ vi.mock("@lecturn/client-runtime/environment", () => ({
   scopeProjectRef: (environmentId: string, projectId: string) => ({ environmentId, projectId }),
   scopeThreadRef: (environmentId: string, threadId: string) => ({ environmentId, threadId }),
 }));
+vi.mock("@lecturn/client-runtime/state/projectGit", () => ({
+  isStaveProject: () => false,
+  normalizeProjectThreadWorkspace: (_project: unknown, workspace: unknown) => workspace,
+  staveThreadStartMessage: () => null,
+}));
 vi.mock("@lecturn/contracts", () => ({ DEFAULT_RUNTIME_MODE: "default" }));
 vi.mock("@lecturn/shared/threadEnvMode", () => ({
   resolveDefaultThreadEnvMode: (input: {
@@ -67,6 +72,8 @@ vi.mock("@tanstack/react-router", () => ({
   useParams: () => null,
   useRouter: () => testState.router,
 }));
+vi.mock("../composerHandleContext", () => ({ useComposerHandleContext: () => null }));
+vi.mock("../components/ui/toast", () => ({ toastManager: { add: vi.fn() } }));
 vi.mock("react", () => ({
   useCallback: <T>(callback: T) => callback,
   useMemo: <T>(factory: () => T) => factory(),
@@ -85,6 +92,11 @@ vi.mock("../composerDraftStore", () => {
 vi.mock("../lib/chatThreadActions", () => ({
   hasExplicitComposerModelSelection: () => false,
   resolveNewDraftStartFromOrigin: () => false,
+  resolveNewThreadEnvModeSources: () => ({
+    forcedMode: null,
+    projectSetting: null,
+    consultProjectFile: true,
+  }),
   resolveNewThreadModelSelectionOverride: () => null,
 }));
 vi.mock("../lib/lecturnProjectFileDefaults", () => ({

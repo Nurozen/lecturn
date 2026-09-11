@@ -26,7 +26,9 @@ and pushes to `main`:
 desktop artifacts from a single `v*.*.*` tag and publishes one GitHub release. It auto-enables
 signing only when platform credentials are present. macOS passkey builds additionally require
 `APPLE_TEAM_ID` and the `MACOS_PROVISIONING_PROFILE` secret; Windows uses Azure Trusted Signing.
-Without the core signing credentials, it still releases unsigned artifacts.
+Without the core signing credentials, it still releases unsigned artifacts. Its `preflight` job also
+resolves the Stave release tag to bundle (`stave_version` dispatch input, default `latest`) once,
+and every build and publish job fetches that pinned tag with `scripts/fetch-stave.ts`.
 
 Preflight shares pnpm's lockfile verification results with the desktop build jobs through a small
 artifact. This avoids repeating dependency checks, especially on Windows, without transferring the

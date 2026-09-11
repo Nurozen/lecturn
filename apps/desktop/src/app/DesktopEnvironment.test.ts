@@ -54,6 +54,7 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.appDataDirectory, "/Users/alice/Library/Application Support");
       assert.equal(environment.baseDir, "/tmp/lecturn");
       assert.equal(environment.stateDir, "/tmp/lecturn/userdata");
+      assert.equal(environment.userDataPathOverride, "/tmp/lecturn/userdata/electron");
       assert.equal(environment.desktopSettingsPath, "/tmp/lecturn/userdata/desktop-settings.json");
       assert.equal(environment.clientSettingsPath, "/tmp/lecturn/userdata/client-settings.json");
       assert.equal(
@@ -96,6 +97,7 @@ describe("DesktopEnvironment", () => {
 
       assert.equal(environment.isDevelopment, false);
       assert.equal(environment.stateDir, "/tmp/lecturn/userdata");
+      assert.equal(environment.userDataPathOverride, "/tmp/lecturn/userdata/electron");
       assert.equal(environment.logDir, "/tmp/lecturn/userdata/logs");
       assert.equal(environment.browserArtifactsDir, "/tmp/lecturn/userdata/browser-artifacts");
       assert.equal(environment.serverSettingsPath, "/tmp/lecturn/userdata/settings.json");

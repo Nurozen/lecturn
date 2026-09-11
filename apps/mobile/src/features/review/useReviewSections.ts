@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo } from "react";
 
+import { isStaveProject } from "@lecturn/client-runtime/state/projectGit";
 import type { EnvironmentId, OrchestrationCheckpointSummary, ThreadId } from "@lecturn/contracts";
 
 import { useCheckpointDiff } from "../../state/queries";
@@ -7,6 +8,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { reviewEnvironment } from "../../state/review";
 import { useSelectedThreadDetail } from "../../state/use-thread-detail";
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
+import { useThreadSelection } from "../../state/use-thread-selection";
 import {
   buildReviewSectionItems,
   getDefaultReviewSectionId,
@@ -27,19 +29,27 @@ export function useReviewSections(input: {
   readonly environmentId?: EnvironmentId;
   readonly threadId?: ThreadId;
   readonly reviewCache: ReviewCacheForThread;
+  readonly repoKey?: string;
 }) {
   const { environmentId, reviewCache, threadId } = input;
   const enabled = input.enabled ?? true;
   const selectedThread = useSelectedThreadDetail();
-  const { selectedThreadCwd } = useSelectedThreadWorktree();
+  const { selectedThreadProject } = useThreadSelection();
+  const { selectedThreadGitCwd, selectedThreadGitRepository } = useSelectedThreadWorktree(
+    input.repoKey,
+  );
   const diffPreview = useEnvironmentQuery(
-    enabled && environmentId !== undefined && selectedThreadCwd !== null
+    enabled && environmentId !== undefined && selectedThreadGitCwd !== null
       ? reviewEnvironment.diffPreview({
           environmentId,
-          input: { cwd: selectedThreadCwd },
+          input: { cwd: selectedThreadGitCwd },
         })
       : null,
   );
+  // Checkpoints snapshot the thread cwd, which for a Stave space is the
+  // non-git space root, so turn diffs are meaningless there: no turn sections
+  // and no checkpoint diff queries.
+  const checkpointsAvailable = !isStaveProject(selectedThreadProject);
   const { loadingTurnIds } = reviewCache.asyncState;
 
   useEffect(() => {
@@ -49,8 +59,9 @@ export function useReviewSections(input: {
   }, [diffPreview.data, reviewCache.threadKey]);
 
   const readyCheckpoints = useMemo(
-    () => getReadyReviewCheckpoints(selectedThread?.checkpoints ?? []),
-    [selectedThread?.checkpoints],
+    () =>
+      checkpointsAvailable ? getReadyReviewCheckpoints(selectedThread?.checkpoints ?? []) : [],
+    [checkpointsAvailable, selectedThread?.checkpoints],
   );
   const checkpointBySectionId = useMemo(
     () =>
@@ -70,9 +81,22 @@ export function useReviewSections(input: {
         turnDiffById: reviewCache.turnDiffById,
         loadingTurnIds,
         loadingGitSections: diffPreview.isPending,
-      }),
+        ...(!checkpointsAvailable && selectedThreadGitRepository
+          ? { gitCwd: selectedThreadGitRepository.cwd }
+          : {}),
+      }).map((section) =>
+        checkpointsAvailable || !selectedThreadGitRepository
+          ? section
+          : {
+              ...section,
+              title: `${selectedThreadGitRepository.repoName} / ${section.title}`,
+              subtitle: `${selectedThreadGitRepository.cwd}${section.subtitle ? ` · ${section.subtitle}` : ""}`,
+            },
+      ),
     [
       diffPreview.isPending,
+      checkpointsAvailable,
+      selectedThreadGitRepository,
       loadingTurnIds,
       readyCheckpoints,
       reviewCache.gitSections,

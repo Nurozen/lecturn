@@ -4,6 +4,7 @@ import {
   scopeThreadRef,
   scopedThreadKey,
 } from "@lecturn/client-runtime/environment";
+import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
 import { settlePromise, squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
 import { canSnooze, threadWokeAt } from "@lecturn/client-runtime/state/thread-settled";
 import { EnvironmentId, type ScopedThreadRef, ThreadId } from "@lecturn/contracts";
@@ -445,7 +446,9 @@ export function useThreadActions() {
             : null;
       if (cleanupFailure) {
         const error = squashAtomCommandFailure(cleanupFailure);
-        const message = error instanceof Error ? error.message : "Unknown error removing worktree.";
+        const message =
+          staveAdmissionErrorMessage(error) ??
+          (error instanceof Error ? error.message : "Unknown error removing worktree.");
         console.error("Failed to remove orphaned worktree after thread deletion", {
           threadId: threadRef.threadId,
           projectCwd: threadProject.workspaceRoot,

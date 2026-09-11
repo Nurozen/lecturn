@@ -1,17 +1,24 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey, scopeThreadRef } from "@lecturn/client-runtime/environment";
+import { resolveProjectGitTargets } from "@lecturn/client-runtime/state/projectGit";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
 import {
   createLinkedPullRequestSummaryAtomFamily,
   pullRequestDetailToVcsStatus,
 } from "@lecturn/client-runtime/state/pull-requests";
+import type { OrchestrationProjectShell } from "@lecturn/contracts";
 import { Atom } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useMemo } from "react";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "./atom-registry";
 import { useEnvironmentQuery } from "./query";
-import { presentThreadPr, type ThreadPrPresentation } from "./thread-pr-presentation";
+import { resolveThreadGitTarget } from "./thread-git-target";
+import {
+  presentThreadPr,
+  presentThreadGitStatusPr,
+  type ThreadPrPresentation,
+} from "./thread-pr-presentation";
 import { vcsEnvironment } from "./vcs";
 
 const linkedPullRequestDetailAtom = createLinkedPullRequestSummaryAtomFamily(connectionAtomRuntime);
@@ -35,21 +42,27 @@ export {
   type ThreadPrPresentation,
 } from "./thread-pr-presentation";
 
+export type ThreadPrProject = Pick<OrchestrationProjectShell, "workspaceRoot" | "stave">;
+
 /**
  * Live PR status for a thread's branch. Subscriptions are deduplicated per
  * (environmentId, cwd) by the atom family, so many rows on the same worktree
  * or project root share one stream — and virtualization means only visible
- * rows subscribe at all.
+ * rows subscribe at all. The project decides where git runs: a Stave space
+ * with several editable repositories shows its PRs in the space Git overview,
+ * rather than representing the whole space with one inferred repo's PR badge.
  */
 export function useThreadPr(
   thread: EnvironmentThreadShell,
-  projectCwd: string | null,
+  project: ThreadPrProject | null,
 ): ThreadPrPresentation | null {
-  const cwd = thread.worktreePath ?? projectCwd;
+  const target = resolveThreadGitTarget({ project, thread });
+  const ambiguousRepo =
+    project?.stave != null && resolveProjectGitTargets({ project }).length !== 1;
+  const { cwd } = target;
+  const branch = ambiguousRepo ? null : project?.stave ? undefined : target.branch;
   const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-  const snapshotIdentity = JSON.stringify(
-    thread.linkedPullRequest ?? { branch: thread.branch, cwd },
-  );
+  const snapshotIdentity = JSON.stringify(thread.linkedPullRequest ?? { branch, cwd });
   // Select this row's entry so writes for other rows do not re-render it.
   const snapshotEntry = useAtomValue(
     threadPrSnapshotsAtom,
@@ -60,7 +73,7 @@ export function useThreadPr(
   );
   const snapshot = snapshotEntry?.identity === snapshotIdentity ? snapshotEntry.presentation : null;
   const gitStatus = useEnvironmentQuery(
-    thread.linkedPullRequest == null && thread.branch !== null && cwd !== null
+    thread.linkedPullRequest == null && branch !== null && cwd !== null
       ? vcsEnvironment.status({
           environmentId: thread.environmentId,
           input: { cwd },
@@ -76,6 +89,7 @@ export function useThreadPr(
             projectId: thread.linkedPullRequest.projectId,
             repository: thread.linkedPullRequest.repository,
             number: thread.linkedPullRequest.number,
+            ...(thread.linkedPullRequest.host ? { host: thread.linkedPullRequest.host } : {}),
           },
         }),
   );
@@ -92,12 +106,8 @@ export function useThreadPr(
           });
     }
 
-    const status = gitStatus.data;
-    if (thread.branch === null) return null;
-    if (status === null) return undefined;
-    if (status.refName !== thread.branch || !status.pr) return null;
-    return presentThreadPr(status.pr, status.sourceControlProvider);
-  }, [gitStatus.data, linkedPullRequest.data, thread.branch, thread.linkedPullRequest]);
+    return presentThreadGitStatusPr(gitStatus.data, branch);
+  }, [branch, gitStatus.data, linkedPullRequest.data, thread.linkedPullRequest]);
 
   useEffect(() => {
     if (live === undefined) return;

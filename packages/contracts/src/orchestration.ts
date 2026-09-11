@@ -5,6 +5,7 @@ import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as Struct from "effect/Struct";
 import { ProviderOptionSelections } from "./model.ts";
 import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
+import { StaveProjectInfo, StaveProjectNotice, StaveSagaTeardownAuthorization } from "./stave.ts";
 import {
   ApprovalRequestId,
   CheckpointRef,
@@ -341,6 +342,11 @@ export const OrchestrationProject = Schema.Struct({
   // Optional on the wire so cached snapshots from older servers still decode.
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
+  // Stave space attached to this project, and any lifecycle notice for it.
+  // Optional on the wire so payloads from pre-Stave servers still decode;
+  // null means "not a Stave space". Keep in sync with OrchestrationProjectShell.
+  stave: Schema.optional(Schema.NullOr(StaveProjectInfo)),
+  notice: Schema.optional(Schema.NullOr(StaveProjectNotice)),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -477,6 +483,7 @@ export type ThreadTitleRegeneration = typeof ThreadTitleRegeneration.Type;
 export const ThreadLinkedPullRequest = Schema.Struct({
   projectId: ProjectId,
   repository: TrimmedNonEmptyString,
+  host: Schema.optionalKey(TrimmedNonEmptyString),
   number: PositiveInt,
   url: TrimmedNonEmptyString,
 });
@@ -639,6 +646,9 @@ export const OrchestrationProjectShell = Schema.Struct({
   // Optional on the wire so cached snapshots from older servers still decode.
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
+  // Same version-skew contract as OrchestrationProject.stave / .notice.
+  stave: Schema.optional(Schema.NullOr(StaveProjectInfo)),
+  notice: Schema.optional(Schema.NullOr(StaveProjectNotice)),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -872,6 +882,10 @@ const ProjectDeleteCommand = Schema.Struct({
   commandId: CommandId,
   projectId: ProjectId,
   force: Schema.optional(Schema.Boolean),
+  staveSagaRemoveConfirmed: Schema.optional(Schema.Boolean),
+  staveSagaTeardown: Schema.optional(StaveSagaTeardownAuthorization),
+  staveSpaceId: Schema.optional(TrimmedNonEmptyString),
+  staveCreatedAt: Schema.optional(IsoDateTime),
 });
 
 const ThreadCreateCommand = Schema.Struct({
@@ -1313,7 +1327,17 @@ const ThreadTitleRegenerationCompleteCommand = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
 });
 
+// Server-only: pushes a project's current shell to connected clients when
+// derived state (Stave space info, notices) changes without a projection write.
+const ProjectRefreshCommand = Schema.Struct({
+  type: Schema.Literal("project.refresh"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
+  ProjectRefreshCommand,
   ThreadAutoSettleCommand,
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
@@ -1336,6 +1360,7 @@ export const OrchestrationEventType = Schema.Literals([
   "project.created",
   "project.meta-updated",
   "project.deleted",
+  "project.refreshed",
   "thread.created",
   "thread.deleted",
   "thread.archived",
@@ -1400,7 +1425,16 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
 
 export const ProjectDeletedPayload = Schema.Struct({
   projectId: ProjectId,
+  workspaceRoot: Schema.optional(TrimmedNonEmptyString),
+  staveSagaRemoveConfirmed: Schema.optional(Schema.Boolean),
+  staveSagaTeardown: Schema.optional(StaveSagaTeardownAuthorization),
+  staveSpaceId: Schema.optional(TrimmedNonEmptyString),
+  staveCreatedAt: Schema.optional(IsoDateTime),
   deletedAt: IsoDateTime,
+});
+
+export const ProjectRefreshedPayload = Schema.Struct({
+  projectId: ProjectId,
 });
 
 export const ThreadCreatedPayload = Schema.Struct({
@@ -1667,6 +1701,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("project.deleted"),
     payload: ProjectDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.refreshed"),
+    payload: ProjectRefreshedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

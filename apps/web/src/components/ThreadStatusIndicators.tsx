@@ -21,6 +21,7 @@ import { useEnvironmentQuery } from "../state/query";
 import { linkedPullRequestDetailAtom, useSharedPullRequestSummary } from "../state/pullRequests";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { vcsEnvironment } from "../state/vcs";
+import { resolveThreadGitTarget } from "../lib/threadGitTarget";
 import { useUiStateStore } from "../uiStateStore";
 import { resolveChangeRequestPresentation } from "../sourceControlPresentation";
 import { resolveThreadStatusPill, type ThreadStatusPill } from "./Sidebar.logic";
@@ -62,6 +63,7 @@ export function useLinkedThreadPullRequest(
           input: {
             projectId: linkedPullRequest.projectId,
             repository: linkedPullRequest.repository,
+            ...(linkedPullRequest.host ? { host: linkedPullRequest.host } : {}),
             number: linkedPullRequest.number,
           },
         }),
@@ -537,16 +539,14 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
       [thread.environmentId, thread.projectId],
     ),
   );
-  const threadProjectCwd = threadProject?.workspaceRoot ?? null;
-  const gitCwd = thread.worktreePath ?? threadProjectCwd;
+  const gitTarget = resolveThreadGitTarget({ project: threadProject, thread });
+  const gitCwd = gitTarget.cwd;
   const linkedPullRequest = useLinkedThreadPullRequest(
     thread.environmentId,
     thread.linkedPullRequest,
   );
   const gitStatus = useEnvironmentQuery(
-    thread.linkedPullRequest == null &&
-      (thread.branch != null || thread.worktreePath !== null) &&
-      gitCwd !== null
+    thread.linkedPullRequest == null && gitTarget.statusEnabled && gitCwd !== null
       ? vcsEnvironment.status({
           environmentId: thread.environmentId,
           input: { cwd: gitCwd },
@@ -555,7 +555,7 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
   );
   const pr =
     thread.linkedPullRequest == null
-      ? resolveThreadPr({ threadBranch: thread.branch, gitStatus: gitStatus.data })
+      ? resolveThreadPr({ threadBranch: gitTarget.branch, gitStatus: gitStatus.data })
       : (linkedPullRequest?.pr ?? null);
   const prStatus = prStatusIndicator(
     pr,

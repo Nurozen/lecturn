@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
+import { buildReviewSectionItems, buildReviewParsedDiff } from "./reviewModel";
+import { getCachedNativeReviewDiffData } from "./nativeReviewDiffAdapter";
 
 import {
   countReviewCommentContexts,
@@ -141,5 +143,59 @@ describe("review comment serialization", () => {
 
     expect(serialized).toContain('sectionTitle="Changes &gt; 5"');
     expect(comment?.sectionTitle).toBe("Changes > 5");
+  });
+});
+
+describe("Stave repository comment isolation", () => {
+  it("keeps a serialized comment on its checkout when two repos have the same file and diff", () => {
+    const patch = [
+      "diff --git a/src/index.ts b/src/index.ts",
+      "--- a/src/index.ts",
+      "+++ b/src/index.ts",
+      "@@ -1 +1 @@",
+      "-const retryLimit = 2;",
+      "+const retryLimit = 4;",
+    ].join("\n");
+    const sectionFor = (gitCwd: string, loading = false) =>
+      buildReviewSectionItems({
+        checkpoints: [],
+        gitSections: loading
+          ? []
+          : [
+              {
+                id: "working-tree",
+                kind: "working-tree",
+                title: "Dirty worktree",
+                baseRef: "HEAD",
+                headRef: null,
+                diff: patch,
+                diffHash: "identical",
+                truncated: false,
+              },
+            ],
+        turnDiffById: {},
+        loadingTurnIds: {},
+        loadingGitSections: loading,
+        gitCwd,
+      })[0]!;
+    const repoA = sectionFor('/spaces/test/nested/api "one"');
+    const repoB = sectionFor("/spaces/test/nested/api-two");
+    const draft = formatReviewCommentContext(
+      { ...makeTarget(), sectionId: repoA.id, filePath: "src/index.ts" },
+      "Only update repository A.",
+    );
+    const comments = parseReviewInlineComments(draft);
+    const parsedDiff = buildReviewParsedDiff(patch, "repo-comment-isolation");
+    const render = (id: string) =>
+      getCachedNativeReviewDiffData({
+        parsedDiff,
+        comments: comments.filter((comment) => comment.sectionId === id),
+      });
+
+    expect(render(repoA.id).rows.filter((row) => row.kind === "comment")).toHaveLength(1);
+    expect(render(repoB.id).rows.filter((row) => row.kind === "comment")).toHaveLength(0);
+    expect(render("git:working-tree").rows.filter((row) => row.kind === "comment")).toHaveLength(0);
+    // A refresh's loading placeholder retains the checkout identity and selection.
+    expect(sectionFor('/spaces/test/nested/api "one"', true).id).toBe(repoA.id);
   });
 });

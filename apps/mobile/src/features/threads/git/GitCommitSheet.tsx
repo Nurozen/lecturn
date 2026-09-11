@@ -17,26 +17,32 @@ import { SheetActionButton } from "./gitSheetComponents";
 type GitCommitSheetProps = StaticScreenProps<{
   readonly environmentId: string;
   readonly threadId: string;
+  readonly repoKey?: string;
 }>;
 
-export function GitCommitSheet(_props: GitCommitSheetProps) {
+export function GitCommitSheet(props: GitCommitSheetProps) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { selectedThread } = useThreadSelection();
-  const { selectedThreadCwd } = useSelectedThreadWorktree();
-  const gitState = useSelectedThreadGitState();
-  const gitActions = useSelectedThreadGitActions();
+  const { selectedThreadGitCwd, selectedThreadGitRepository } = useSelectedThreadWorktree(
+    props.route.params.repoKey,
+  );
+  const gitState = useSelectedThreadGitState(props.route.params.repoKey);
+  const gitActions = useSelectedThreadGitActions(props.route.params.repoKey);
 
   const gitStatus = useEnvironmentQuery(
-    selectedThread !== null && selectedThreadCwd !== null
+    selectedThread !== null && selectedThreadGitCwd !== null
       ? vcsEnvironment.status({
           environmentId: selectedThread.environmentId,
-          input: { cwd: selectedThreadCwd },
+          input: { cwd: selectedThreadGitCwd },
         })
       : null,
   );
 
-  const busy = gitState.gitOperationLabel !== null;
+  const busy =
+    gitState.gitOperationLabel !== null ||
+    selectedThreadGitRepository?.mode === "reference" ||
+    selectedThreadGitCwd === null;
   const isDefaultRef = gitStatus.data?.isDefaultRef ?? false;
   const allFiles = gitStatus.data?.workingTree?.files ?? [];
 
@@ -77,6 +83,11 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
         contentInset={{ bottom: Math.max(insets.bottom, 18) + 18 }}
         contentContainerClassName="gap-4 px-5 pt-2"
       >
+        {props.route.params.repoKey ? (
+          <Text className="text-sm font-lecturn-bold">
+            {selectedThreadGitRepository?.repoName ?? "Repository unavailable"}
+          </Text>
+        ) : null}
         <View className="gap-3 rounded-[22px] border border-border bg-card px-4 py-4">
           <View className="flex-row items-center justify-between gap-3">
             <Text className="text-foreground-muted text-sm font-medium">Branch</Text>

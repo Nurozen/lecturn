@@ -84,6 +84,11 @@ export class ServerConfig extends Context.Service<
     readonly desktopTelemetryFd?: number | undefined;
     readonly desktopTelemetryControlFd?: number | undefined;
     readonly resourceMonitorPath?: string | undefined;
+    /**
+     * Bundled Stave CLI handed over by the desktop bootstrap envelope only;
+     * `StaveBinary` consults it after settings and `LECTURN_STAVE_PATH`.
+     */
+    readonly stavePath?: string | undefined;
     readonly autoBootstrapProjectFromCwd: boolean;
     readonly logWebSocketEvents: boolean;
     readonly tailscaleServeEnabled: boolean;
@@ -94,6 +99,12 @@ export class ServerConfig extends Context.Service<
      * WebSocket fork dispatch, so a modified client cannot bypass it.
      */
     readonly threadForkingEnabled: boolean;
+    /**
+     * Kill switch for the Stave integration (`LECTURN_STAVE`, default on):
+     * removes the advertised `stave` capability and gates every Stave
+     * handler, so a modified client cannot bypass it.
+     */
+    readonly staveEnabled: boolean;
   }
 >()("lecturn/config/ServerConfig") {
   /** @deprecated Import and use `layerTest` from this module. */
@@ -207,12 +218,14 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     tailscaleServeEnabled: false,
     tailscaleServePort: 443,
     threadForkingEnabled: true,
+    staveEnabled: true,
     port: 0,
     host: undefined,
     desktopBootstrapToken: undefined,
     desktopTelemetryFd: undefined,
     desktopTelemetryControlFd: undefined,
     resourceMonitorPath: undefined,
+    stavePath: undefined,
     staticDir: undefined,
     devUrl,
     devAllowedOrigins: [],

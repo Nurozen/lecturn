@@ -4,6 +4,7 @@ import type { Thread } from "../types";
 import {
   browseInputEndPaddingClass,
   buildBrowseGroups,
+  buildStaveAddProjectItems,
   buildThreadActionItems,
   enumerateCommandPaletteItems,
   filterPinnedBrowseEntries,
@@ -476,5 +477,55 @@ describe("filterPinnedBrowseEntries", () => {
       visibleEntries: windowsEntries,
       exactEntry: windowsEntries[0],
     });
+  });
+});
+
+describe("buildStaveAddProjectItems", () => {
+  it("keeps supported creation sources when one binary feature is unavailable", () => {
+    const items = buildStaveAddProjectItems({
+      environmentId: "env",
+      available: true,
+      unsupportedOperations: ["createSaga"],
+      icons: { "stave-space": null, "stave-saga": null },
+      launch: () => {},
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]?.value).toContain("stave-space");
+  });
+
+  const environmentId = EnvironmentId.make("env-1");
+
+  it("renders nothing until the Stave feature gate passes", () => {
+    expect(
+      buildStaveAddProjectItems({
+        environmentId,
+        available: false,
+        icons: { "stave-space": null, "stave-saga": null },
+        launch: () => {},
+      }),
+    ).toEqual([]);
+  });
+
+  it("offers a space and a saga entry that launch the wizard", async () => {
+    const launched: string[] = [];
+    const items = buildStaveAddProjectItems({
+      environmentId,
+      available: true,
+      icons: { "stave-space": "space-icon", "stave-saga": "saga-icon" },
+      launch: (source) => {
+        launched.push(source);
+      },
+    });
+
+    expect(items.map((item) => item.value)).toEqual([
+      "action:add-project:env-1:stave-space",
+      "action:add-project:env-1:stave-saga",
+    ]);
+    expect(items.map((item) => item.title)).toEqual(["New Stave space", "New Stave saga"]);
+    expect(items.map((item) => item.icon)).toEqual(["space-icon", "saga-icon"]);
+    expect(items.every((item) => item.keepOpen !== true)).toBe(true);
+
+    await items[1]?.run();
+    expect(launched).toEqual(["stave-saga"]);
   });
 });

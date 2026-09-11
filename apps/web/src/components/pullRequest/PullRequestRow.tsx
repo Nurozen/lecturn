@@ -161,7 +161,16 @@ function PullRequestRowImpl({
               #{entry.number}
             </span>
           </span>
-          {showProjectTitle ? <span className="truncate">{entry.repository}</span> : null}
+          {showProjectTitle ? (
+            <Tooltip>
+              <TooltipTrigger render={<span className="truncate" />}>
+                {entry.projectTitle} · {entry.repository}
+              </TooltipTrigger>
+              <TooltipPopup>
+                {entry.projectTitle} · {entry.host}/{entry.repository}
+              </TooltipPopup>
+            </Tooltip>
+          ) : null}
           {environmentLabel ? (
             <span className="min-w-0 max-w-32 truncate">{environmentLabel}</span>
           ) : null}
@@ -192,6 +201,7 @@ function PullRequestRowImpl({
               reference={{
                 projectId: entry.projectId,
                 repository: entry.repository,
+                ...(entry.host ? { host: entry.host } : {}),
                 number: entry.number,
               }}
             />

@@ -111,6 +111,10 @@ Follow-up work runs asynchronously in queue-backed workers built on [`DrainableW
 [`ProviderCommandReactor`][cmd] dispatches provider calls in response to intent events,
 [`CheckpointReactor`][checkpoint] captures and reverts workspace checkpoints, and
 [`ThreadSettlementReactor`][settlement] evaluates server-owned automatic settlement rules.
+`StaveLifecycleService` consumes durable project-deletion intents and settled-project archive
+schedules through the same application runtime; its event/settings nudges and minute sweep share
+one worker. It reuses the operation registry, canonical locks and leased cleanup helpers.
+See [Stave integration](./stave-integration.md) for lifecycle persistence and recovery.
 
 `DrainableWorker` pairs a transactional queue with a transactional count of outstanding items.
 `enqueue` atomically offers and increments; processing always decrements. `drain` retries until the

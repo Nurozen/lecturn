@@ -1,3 +1,9 @@
+import { useStaveGitSelection } from "./stave/staveGitSelection";
+import {
+  normalizeProjectThreadWorkspace,
+  resolveProjectGitRepositoryIdentity,
+  resolveRepositoryPullRequestSelector,
+} from "@lecturn/client-runtime/state/projectGit";
 import {
   type AssistantCitation,
   type ApprovalRequestId,
@@ -8,6 +14,8 @@ import {
   type ModelSelection,
   type ProjectScript,
   type ProjectId,
+  type SourceControlProviderKind,
+  pullRequestHostOf,
   type ProviderApprovalDecision,
   type PreviewAnnotationPayload,
   ProviderInstanceId,
@@ -195,6 +203,7 @@ import {
 import { cn, randomHex } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
+import { resolveCheckpointsUnavailableReason, resolveThreadGitTarget } from "~/lib/threadGitTarget";
 import { type NewProjectScriptInput } from "./ProjectScriptsControl";
 import {
   buildProjectScript,
@@ -1726,7 +1735,6 @@ function ChatViewContent(props: ChatViewProps) {
   const [, setThreadErrorBannerDismissTick] = useState(0);
   const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
-  const canCheckoutPullRequestIntoThread = isLocalDraftThread;
   const activeThreadId = activeThread?.id ?? null;
   const activeThreadEnvironmentId = activeThread?.environmentId ?? null;
   const runningTerminalIds = useThreadRunningTerminalIds({
@@ -1928,6 +1936,7 @@ function ChatViewContent(props: ChatViewProps) {
     [activeThread?.environmentId, activeThread?.projectId],
   );
   const activeProject = useProject(activeProjectRef);
+  const canCheckoutPullRequestIntoThread = isLocalDraftThread && !activeProject?.stave;
   const handleNewThreadInActiveProject = useCallback(() => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
   }, [activeProjectRef, handleNewThread]);
@@ -2992,18 +3001,35 @@ function ChatViewContent(props: ChatViewProps) {
       : null;
   // An unsent fork has no provider session yet, so revert has nothing to act
   // on until the child's first send creates one.
+  // A Stave space never records checkpoints (its root is not a repo), so revert
+  // stays blocked there with the reason surfaced in the button tooltip.
   const revertDisabledReason =
     activeThread != null && activeThread.forkedFrom != null && activeThread.session == null
       ? "Send a message first — revert becomes available once the fork has its own session"
-      : null;
+      : resolveCheckpointsUnavailableReason(activeProject);
 
   const gitCwd = activeProject
     ? projectScriptCwd({
         project: { cwd: activeProject.workspaceRoot },
-        worktreePath: activeThread?.worktreePath ?? null,
+        worktreePath: activeProject.stave ? null : (activeThread?.worktreePath ?? null),
       })
     : null;
-  const gitStatusCwd = activeThread?.worktreePath ?? gitCwd;
+  // `gitCwd` is where scripts, terminals and provider sessions run (the space
+  // root for Stave); git status and the header's git actions target the
+  // selected repository instead. The overview keeps every space repository visible.
+  const staveGitSelection = useStaveGitSelection(environmentId, activeProject);
+  const activeThreadGitTarget = activeProject?.stave
+    ? {
+        cwd: staveGitSelection.selected?.cwd ?? null,
+        branch: staveGitSelection.selected?.branch ?? null,
+      }
+    : resolveThreadGitTarget({
+        project: activeProject,
+        thread: activeThread,
+      });
+  const gitStatusCwd = activeProject?.stave
+    ? (staveGitSelection.selected?.cwd ?? null)
+    : activeThreadGitTarget.cwd;
   const gitStatusQuery = useEnvironmentQuery(
     gitStatusCwd === null
       ? null
@@ -3075,7 +3101,9 @@ function ChatViewContent(props: ChatViewProps) {
     : null;
   const hasTimelineTopBanner = Boolean(visibleThreadError) || visibleProviderStatus !== null;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
-  const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
+  const activeThreadWorktreePath = activeProject?.stave
+    ? null
+    : (activeThread?.worktreePath ?? null);
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
   const activeTerminalLaunchContext =
     terminalUiLaunchContext?.threadId === activeThreadId ? terminalUiLaunchContext : null;
@@ -3087,12 +3115,14 @@ function ChatViewContent(props: ChatViewProps) {
   const mountComposerContextStrip = shouldShowComposerContextStrip({
     hasActiveProject: activeProject !== null,
     isGitRepo,
+    isStaveProject: Boolean(activeProject?.stave),
     showEnvironmentIndicator: showComposerEnvironmentIndicator,
     hostsRestingComposerControls: routeKind === "server",
   });
   const showComposerContextStrip = shouldShowComposerContextStrip({
     hasActiveProject: activeProject !== null,
     isGitRepo,
+    isStaveProject: Boolean(activeProject?.stave),
     showEnvironmentIndicator: showComposerEnvironmentIndicator,
     hostsRestingComposerControls: routeKind === "server" && restingComposerControlsVisible,
   });
@@ -3751,14 +3781,24 @@ function ChatViewContent(props: ChatViewProps) {
   const persistedLinkedThreadPullRequest = isServerThread
     ? (activeThreadShell?.linkedPullRequest ?? activeThread?.linkedPullRequest ?? null)
     : (activeThread?.linkedPullRequest ?? null);
-  const activeProjectRepository = activeProject?.repositoryIdentity?.displayName ?? null;
+  const activeProjectGitIdentity = activeProject?.stave
+    ? staveGitSelection.selected?.repositoryIdentity
+    : resolveProjectGitRepositoryIdentity(activeProject);
+  const activeProjectRepository = resolveRepositoryPullRequestSelector(activeProjectGitIdentity);
+  const activeProjectGitHost = activeProjectGitIdentity
+    ? pullRequestHostOf(
+        activeProjectGitIdentity,
+        activeProjectGitIdentity.provider as SourceControlProviderKind,
+      )
+    : undefined;
   const persistedLinkedThreadPullRequestStatus = useLinkedThreadPullRequest(
     activeThreadRef?.environmentId ?? null,
     persistedLinkedThreadPullRequest,
   );
   const replacementLinkedThreadPullRequest = useMemo(() => {
+    if (activeProject?.stave) return null;
     const detected = gitStatusQuery.data?.pr;
-    const threadBranch = activeThread?.branch;
+    const threadBranch = activeThreadGitTarget.branch;
     const projectId = activeProject?.id;
     if (
       persistedLinkedThreadPullRequest === null ||
@@ -3779,13 +3819,16 @@ function ChatViewContent(props: ChatViewProps) {
     return {
       projectId,
       repository: activeProjectRepository,
+      ...(activeProjectGitHost ? { host: activeProjectGitHost } : {}),
       number: detected.number,
       url: detected.url,
     };
   }, [
     activeProject?.id,
+    activeProject?.stave,
     activeProjectRepository,
-    activeThread?.branch,
+    activeProjectGitHost,
+    activeThreadGitTarget.branch,
     gitStatusQuery.data,
     persistedLinkedThreadPullRequest,
     persistedLinkedThreadPullRequestStatus?.pr.state,
@@ -3796,10 +3839,26 @@ function ChatViewContent(props: ChatViewProps) {
     ? JSON.stringify([
         linkedThreadPullRequest.projectId,
         linkedThreadPullRequest.repository,
+        linkedThreadPullRequest.host ?? null,
         linkedThreadPullRequest.number,
       ])
     : null;
   const threadRepository = linkedThreadPullRequest?.repository ?? activeProjectRepository;
+  const linkedProjectIdentity = linkedThreadPullRequest
+    ? allProjects.find(
+        (project) =>
+          project.id === linkedThreadPullRequest.projectId &&
+          project.environmentId === environmentId,
+      )?.repositoryIdentity
+    : activeProjectGitIdentity;
+  const threadPullRequestHost =
+    linkedThreadPullRequest?.host ??
+    (linkedProjectIdentity
+      ? pullRequestHostOf(
+          linkedProjectIdentity,
+          linkedProjectIdentity.provider as SourceControlProviderKind,
+        )
+      : undefined);
   const openThreadPullRequest = useCallback(
     (number: number) => {
       if (!supportsPullRequests || !activeThreadRef) {
@@ -3811,6 +3870,7 @@ function ChatViewContent(props: ChatViewProps) {
       useRightPanelStore.getState().openPullRequest(activeThreadRef, {
         projectId,
         repository,
+        ...(threadPullRequestHost ? { host: threadPullRequestHost } : {}),
         number,
       });
     },
@@ -3819,6 +3879,7 @@ function ChatViewContent(props: ChatViewProps) {
       activeProjectRepository,
       activeThreadRef,
       linkedThreadPullRequest,
+      threadPullRequestHost,
       supportsPullRequests,
     ],
   );
@@ -3830,7 +3891,7 @@ function ChatViewContent(props: ChatViewProps) {
       threadPrRelinkKeysRef.current.delete(activeThreadKey);
       return;
     }
-    const relinkKey = `${replacementLinkedThreadPullRequest.projectId}:${replacementLinkedThreadPullRequest.repository}#${replacementLinkedThreadPullRequest.number}`;
+    const relinkKey = `${replacementLinkedThreadPullRequest.projectId}:${replacementLinkedThreadPullRequest.host ?? ""}/${replacementLinkedThreadPullRequest.repository}#${replacementLinkedThreadPullRequest.number}`;
     if (threadPrRelinkKeysRef.current.get(activeThreadKey) === relinkKey) return;
     threadPrRelinkKeysRef.current.set(activeThreadKey, relinkKey);
     const openSurface = selectActiveRightPanelSurface(
@@ -3880,18 +3941,19 @@ function ChatViewContent(props: ChatViewProps) {
     updateThreadMetadata,
   ]);
   const openProjectPullRequest = useCallback(
-    (number: number) => {
+    (number: number, target?: { repository: string; host?: string }) => {
       if (
         !supportsPullRequests ||
         !activeThreadRef ||
         !activeProject ||
-        activeProjectRepository === null
+        (!target && activeProjectRepository === null)
       ) {
         return;
       }
       useRightPanelStore.getState().openPullRequest(activeThreadRef, {
         projectId: activeProject.id,
-        repository: activeProjectRepository,
+        repository: target?.repository ?? activeProjectRepository!,
+        ...(target?.host ? { host: target.host } : {}),
         number,
       });
     },
@@ -4918,9 +4980,9 @@ function ChatViewContent(props: ChatViewProps) {
     setExpandedImage(null);
   }, []);
 
-  const activeWorktreePath = activeThread?.worktreePath ?? null;
+  const requestedWorktreePath = activeThread?.worktreePath ?? null;
   const derivedEnvMode: DraftThreadEnvMode = resolveEffectiveEnvMode({
-    activeWorktreePath,
+    activeWorktreePath: requestedWorktreePath,
     hasServerThread: isServerThread,
     draftThreadEnvMode: isLocalDraftThread ? draftThread?.envMode : undefined,
   });
@@ -4931,19 +4993,30 @@ function ChatViewContent(props: ChatViewProps) {
     activeThread.worktreePath === null &&
     !envLocked,
   );
-  const envMode: DraftThreadEnvMode = canOverrideServerThreadEnvMode
+  const requestedEnvMode: DraftThreadEnvMode = canOverrideServerThreadEnvMode
     ? (pendingServerThreadEnvMode ?? draftThread?.envMode ?? derivedEnvMode)
     : derivedEnvMode;
-  const activeThreadBranch =
+  const requestedThreadBranch =
     canOverrideServerThreadEnvMode && pendingServerThreadBranch !== undefined
       ? pendingServerThreadBranch
       : (activeThread?.branch ?? null);
-  const startFromOrigin = isLocalDraftThread
+  const requestedStartFromOrigin = isLocalDraftThread
     ? (draftThread?.startFromOrigin ?? false)
     : canOverrideServerThreadEnvMode
       ? (pendingServerThreadStartFromOriginByThreadId[activeThread?.id ?? ""] ??
         primaryServerSettings.newWorktreesStartFromOrigin)
       : false;
+  const {
+    envMode,
+    worktreePath: activeWorktreePath,
+    branch: activeThreadBranch,
+    startFromOrigin,
+  } = normalizeProjectThreadWorkspace(activeProject, {
+    envMode: requestedEnvMode,
+    worktreePath: requestedWorktreePath,
+    branch: requestedThreadBranch,
+    startFromOrigin: requestedStartFromOrigin,
+  });
   const sendEnvMode = resolveSendEnvMode({
     requestedEnvMode: envMode,
     isGitRepo,
@@ -5008,11 +5081,12 @@ function ChatViewContent(props: ChatViewProps) {
       resizeObserver.disconnect();
     };
   }, [composerOverlayElement, publishComposerOverlayHeight]);
-  const activeThreadPr =
-    replacementLinkedThreadPullRequest !== null
+  const activeThreadPr = activeProject?.stave
+    ? null
+    : replacementLinkedThreadPullRequest !== null
       ? (gitStatusQuery.data?.pr ?? null)
       : resolveDisplayedThreadPr({
-          threadBranch: activeThread?.branch ?? null,
+          threadBranch: activeThreadGitTarget.branch,
           gitStatus: gitStatusQuery.data ?? null,
           snapshot: activeThreadKey ? changeRequestSnapshotByKey.get(activeThreadKey) : undefined,
           retainTerminalOnBranchMismatch: activeThread?.worktreePath === null,
@@ -6320,14 +6394,14 @@ function ChatViewContent(props: ChatViewProps) {
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
-      isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
+      isFirstMessage && sendEnvMode === "worktree" && !activeWorktreePath
         ? activeThreadBranch
         : null;
 
     // In worktree mode, require an explicit base branch so we don't silently
     // fall back to local execution when branch selection is missing.
     const shouldCreateWorktree =
-      isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath;
+      isFirstMessage && sendEnvMode === "worktree" && !activeWorktreePath;
     if (shouldCreateWorktree && !activeThreadBranch) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
       return;
@@ -6640,7 +6714,7 @@ function ChatViewContent(props: ChatViewProps) {
                       runtimeMode,
                       interactionMode: sendInteractionMode,
                       branch: activeThreadBranch,
-                      worktreePath: activeThread.worktreePath,
+                      worktreePath: activeWorktreePath,
                       createdAt: activeThread.createdAt,
                     },
                   }
@@ -7209,7 +7283,7 @@ function ChatViewContent(props: ChatViewProps) {
         runtimeMode,
         interactionMode: "default",
         branch: activeThreadBranch,
-        worktreePath: activeThread.worktreePath,
+        worktreePath: activeWorktreePath,
         createdAt,
       },
     });
@@ -7293,6 +7367,7 @@ function ChatViewContent(props: ChatViewProps) {
     activeProject,
     activeProposedPlan,
     activeThreadBranch,
+    activeWorktreePath,
     activeThread,
     beginLocalDispatch,
     activeEnvironmentUnavailable,
@@ -7592,6 +7667,13 @@ function ChatViewContent(props: ChatViewProps) {
           key={`${activeThreadKey}:${diffPanelGitStatusResolutionKey}`}
           mode="embedded"
           composerDraftTarget={composerDraftTarget}
+          {...(activeProject?.stave
+            ? {
+                projectOverride: activeProject,
+                environmentIdOverride: environmentId,
+                threadRefOverride: activeThreadRef,
+              }
+            : {})}
           initialGitScope={initialDiffPanelGitScope}
           workspaceMutationId={workspaceMutationId}
         />
@@ -7610,24 +7692,28 @@ function ChatViewContent(props: ChatViewProps) {
       // reader's feet. A link the agent wrote can open any other one here, and that one has to be
       // checkable out like it is anywhere else.
       <PullRequestDetailPanel
-        key={`${renderedRightPanelSurface.repository}#${renderedRightPanelSurface.number}`}
+        key={`${renderedRightPanelSurface.host ?? ""}/${renderedRightPanelSurface.repository}#${renderedRightPanelSurface.number}`}
         environmentId={activeThread.environmentId}
         threadRef={activeThreadRef}
         reference={{
           projectId: renderedRightPanelSurface.projectId as ProjectId,
           repository: renderedRightPanelSurface.repository,
+          ...(renderedRightPanelSurface.host ? { host: renderedRightPanelSurface.host } : {}),
           number: renderedRightPanelSurface.number,
         }}
         context={
+          activeProject?.stave ||
           isThreadOwnPullRequest(
             {
               projectId: linkedThreadPullRequest?.projectId ?? activeProject?.id ?? null,
               repository: threadRepository,
+              ...(threadPullRequestHost ? { host: threadPullRequestHost } : {}),
               number: activeThreadPr?.number ?? null,
             },
             {
               projectId: renderedRightPanelSurface.projectId,
               repository: renderedRightPanelSurface.repository,
+              ...(renderedRightPanelSurface.host ? { host: renderedRightPanelSurface.host } : {}),
               number: renderedRightPanelSurface.number,
             },
           )
@@ -7716,7 +7802,8 @@ function ChatViewContent(props: ChatViewProps) {
         >
           {!shouldUseRightPanelSheet || !rightPanelControlsInPanel ? panelLayoutControls : null}
           <ChatHeader
-            {...(!supportsPullRequests || activeProjectRepository === null
+            {...(!supportsPullRequests ||
+            (!activeProject?.stave && activeProjectRepository === null)
               ? {}
               : { onOpenPullRequest: openProjectPullRequest })}
             activeThreadEnvironmentId={activeThread.environmentId}
@@ -7725,6 +7812,18 @@ function ChatViewContent(props: ChatViewProps) {
             activeThreadTitle={activeThread.title}
             isServerThread={isServerThread}
             activeProjectName={activeProject?.title}
+            {...(activeProject?.stave
+              ? {
+                  staveProject: activeProject,
+                  onOpenSpaceDiff: () => {
+                    if (activeThreadRef) {
+                      useDiffPanelStore.getState().selectGitScope(activeThreadRef, "unstaged");
+                      useRightPanelStore.getState().open(activeThreadRef, "diff");
+                    }
+                    onDiffPanelOpen?.();
+                  },
+                }
+              : {})}
             activeProjectCwd={activeProject?.workspaceRoot ?? null}
             activeProjectFaviconPath={activeProject?.faviconPath ?? null}
             activeProjectIcon={activeProject?.projectIcon ?? null}
@@ -7736,7 +7835,7 @@ function ChatViewContent(props: ChatViewProps) {
             keybindings={keybindings}
             availableEditors={availableEditors}
             rightPanelOpen={rightPanelOpen}
-            gitCwd={gitCwd}
+            gitCwd={gitStatusCwd}
             onNewThreadInProject={handleNewThreadInActiveProject}
             onRunProjectScript={runProjectScript}
             onAddProjectScript={saveProjectScript}

@@ -134,6 +134,16 @@ export function resourceMonitorExecutableName(platform: typeof BuildPlatform.Typ
   return platform === "win" ? "lecturn-resource-monitor.exe" : "lecturn-resource-monitor";
 }
 
+// The Stave CLI ships as a prebuilt binary (fetched by scripts/fetch-stave.ts)
+// staged next to the resource monitor at resources/stave/. The desktop passes
+// that path to the server; the Windows WSL payload carries the Linux build
+// under apps/server/dist/stave/linux-<arch>/ where the server looks it up.
+export const STAVE_RESOURCE_DIR = "stave";
+export const STAVE_VERSION_FILE_NAME = "stave.version";
+export function staveExecutableName(platform: typeof BuildPlatform.Type): string {
+  return platform === "win" ? "stave.exe" : "stave";
+}
+
 const PLATFORM_CONFIG: Record<typeof BuildPlatform.Type, PlatformConfig> = {
   mac: {
     cliFlag: "--mac",
@@ -165,6 +175,10 @@ interface BuildCliInput {
   readonly mockUpdates: Option.Option<boolean>;
   readonly mockUpdateServerPort: Option.Option<number>;
   readonly wslPrebuild: Option.Option<string>;
+  readonly staveBinary: Option.Option<string>;
+  readonly staveBinaryX64: Option.Option<string>;
+  readonly staveWslBinary: Option.Option<string>;
+  readonly allowMissingStave: Option.Option<boolean>;
 }
 
 function detectHostBuildPlatform(hostPlatform: string): typeof BuildPlatform.Type | undefined {
@@ -651,6 +665,34 @@ export class WslNodePtyPrebuildMissingError extends Schema.TaggedErrorClass<WslN
   }
 }
 
+const STAVE_BINARY_ROLE_FLAGS = {
+  primary: "--stave-binary / LECTURN_DESKTOP_STAVE_BINARY",
+  "x64-slice": "--stave-binary-x64 / LECTURN_DESKTOP_STAVE_BINARY_X64",
+  wsl: "--stave-wsl-binary / LECTURN_DESKTOP_STAVE_WSL_BINARY",
+} as const;
+
+export class StaveBinaryMissingError extends Schema.TaggedErrorClass<StaveBinaryMissingError>()(
+  "StaveBinaryMissingError",
+  {
+    platform: BuildPlatform,
+    arch: BuildArch,
+    role: Schema.Literals(["primary", "x64-slice", "wsl"]),
+    path: Schema.optionalKey(Schema.String),
+  },
+) {
+  override get message(): string {
+    const flag = STAVE_BINARY_ROLE_FLAGS[this.role];
+    const what =
+      this.role === "wsl"
+        ? "the Linux Stave binary for the WSL payload"
+        : this.role === "x64-slice"
+          ? "the x64 Stave binary for the universal macOS build"
+          : `the Stave binary for ${this.platform}/${this.arch}`;
+    const location = this.path === undefined ? "was not provided" : `was not found at ${this.path}`;
+    return `${what} ${location}; pass ${flag}, or --allow-missing-stave (LECTURN_DESKTOP_ALLOW_MISSING_STAVE) for a local build without Stave.`;
+  }
+}
+
 export class WindowsServerSidecarPackError extends Schema.TaggedErrorClass<WindowsServerSidecarPackError>()(
   "WindowsServerSidecarPackError",
   {
@@ -682,6 +724,7 @@ const WindowsPackagedPayloadValidationReason = Schema.Literals([
   "sidecar-invalid",
   "unpacked-native-missing",
   "resource-monitor-missing",
+  "stave-missing",
   "wsl-runtime-missing",
   "wsl-runtime-invalid",
   "file-limit-exceeded",
@@ -707,6 +750,9 @@ export class WindowsPackagedPayloadValidationError extends Schema.TaggedErrorCla
     }
     if (this.reason === "resource-monitor-missing") {
       return "Windows packaged payload is missing the resource monitor executable.";
+    }
+    if (this.reason === "stave-missing") {
+      return "Windows packaged payload is missing the bundled Stave executable.";
     }
     if (this.reason === "wsl-runtime-missing") {
       return "Windows packaged payload is missing the WSL runtime archive or SHA-256 sidecar.";
@@ -904,6 +950,10 @@ interface ResolvedBuildOptions {
   readonly mockUpdates: boolean;
   readonly mockUpdateServerPort: number | undefined;
   readonly wslPrebuild: string | undefined;
+  readonly staveBinary: string | undefined;
+  readonly staveBinaryX64: string | undefined;
+  readonly staveWslBinary: string | undefined;
+  readonly allowMissingStave: boolean;
 }
 
 interface StagePackageJson {
@@ -937,6 +987,9 @@ export const DESKTOP_FILE_EXCLUSIONS = [
   "!apps/desktop/prod-resources/windows-server/**/*",
   "!apps/desktop/prod-resources/wsl-runtime.tar.gz",
   "!apps/desktop/prod-resources/wsl-runtime.tar.gz.sha256",
+  // The Stave binary is emitted once at resources/stave (see STAVE_EXTRA_RESOURCE).
+  "!apps/desktop/prod-resources/stave",
+  "!apps/desktop/prod-resources/stave/**/*",
 ] as const;
 // Windows terminal helpers cannot run on macOS and slow signing and notarization.
 export const MAC_FILE_EXCLUSIONS = [
@@ -1054,6 +1107,10 @@ export const WSL_RUNTIME_EXTRA_RESOURCES = [
   WSL_RUNTIME_ARCHIVE_EXTRA_RESOURCE,
   WSL_RUNTIME_ARCHIVE_HASH_EXTRA_RESOURCE,
 ] as const;
+export const STAVE_EXTRA_RESOURCE = {
+  from: `apps/desktop/prod-resources/${STAVE_RESOURCE_DIR}`,
+  to: STAVE_RESOURCE_DIR,
+} as const;
 export const DESKTOP_EXTRA_RESOURCES = [
   { from: "LICENSE", to: "LICENSE" },
   { from: "THIRD_PARTY_NOTICES.txt", to: "THIRD_PARTY_NOTICES.txt" },
@@ -1061,6 +1118,7 @@ export const DESKTOP_EXTRA_RESOURCES = [
     from: "apps/desktop/prod-resources/resource-monitor",
     to: "resource-monitor",
   },
+  STAVE_EXTRA_RESOURCE,
 ] as const;
 
 export interface MacPasskeySigningConfiguration {
@@ -1493,6 +1551,15 @@ const BuildEnvConfig = Config.all({
   // into the staged node-pty so the WSL backend ships a ready binary and never
   // compiles on the user's machine.
   wslPrebuild: Config.string("LECTURN_DESKTOP_WSL_PREBUILD").pipe(Config.option),
+  // Prebuilt Stave CLI binaries (scripts/fetch-stave.ts output) for the target
+  // platform/arch, the x64 slice of a universal macOS build, and the Linux
+  // build that rides along in the Windows WSL payload.
+  staveBinary: Config.string("LECTURN_DESKTOP_STAVE_BINARY").pipe(Config.option),
+  staveBinaryX64: Config.string("LECTURN_DESKTOP_STAVE_BINARY_X64").pipe(Config.option),
+  staveWslBinary: Config.string("LECTURN_DESKTOP_STAVE_WSL_BINARY").pipe(Config.option),
+  allowMissingStave: Config.boolean("LECTURN_DESKTOP_ALLOW_MISSING_STAVE").pipe(
+    Config.withDefault(false),
+  ),
 });
 
 const MockUpdateServerPortSchema = Schema.NumberFromString.check(
@@ -1586,6 +1653,13 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
 
   const wslPrebuild =
     Option.getOrUndefined(input.wslPrebuild) ?? Option.getOrUndefined(env.wslPrebuild);
+  const staveBinary =
+    Option.getOrUndefined(input.staveBinary) ?? Option.getOrUndefined(env.staveBinary);
+  const staveBinaryX64 =
+    Option.getOrUndefined(input.staveBinaryX64) ?? Option.getOrUndefined(env.staveBinaryX64);
+  const staveWslBinary =
+    Option.getOrUndefined(input.staveWslBinary) ?? Option.getOrUndefined(env.staveWslBinary);
+  const allowMissingStave = resolveBooleanFlag(input.allowMissingStave, env.allowMissingStave);
 
   return {
     platform,
@@ -1600,6 +1674,10 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
     mockUpdates,
     mockUpdateServerPort,
     wslPrebuild,
+    staveBinary,
+    staveBinaryX64,
+    staveWslBinary,
+    allowMissingStave,
   } satisfies ResolvedBuildOptions;
 });
 
@@ -2138,6 +2216,124 @@ export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* 
   }
 });
 
+// Copies one Stave binary plus the LICENSE and stave.version siblings that
+// scripts/fetch-stave.ts leaves next to it. A developer-built binary (for
+// example ~/go/bin/stave) has neither, so their absence is only logged.
+// Returns the release tag from stave.version, or null when it was not shipped.
+const stageStaveFiles = Effect.fn("stageStaveFiles")(function* (input: {
+  readonly sourceBinaryPath: string;
+  readonly destinationDir: string;
+  readonly executableName: string;
+  readonly chmod: boolean;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const sourceDir = path.dirname(input.sourceBinaryPath);
+  const destinationPath = path.join(input.destinationDir, input.executableName);
+  yield* fs.makeDirectory(input.destinationDir, { recursive: true });
+  yield* fs.copyFile(input.sourceBinaryPath, destinationPath);
+  if (input.chmod) {
+    // A Windows build host has no POSIX mode bits; the WSL install script
+    // restores the executable bit after extraction instead.
+    const chmod = fs.chmod(destinationPath, 0o755);
+    yield* (yield* HostProcessPlatform) === "win32" ? Effect.ignore(chmod) : chmod;
+  }
+
+  let version: string | null = null;
+  for (const sibling of ["LICENSE", STAVE_VERSION_FILE_NAME] as const) {
+    const siblingPath = path.join(sourceDir, sibling);
+    if (!(yield* fs.exists(siblingPath).pipe(Effect.orElseSucceed(() => false)))) {
+      yield* Effect.log(
+        `[desktop-artifact] No ${sibling} next to ${input.sourceBinaryPath}; staging the Stave binary without it.`,
+      );
+      continue;
+    }
+    yield* fs.copyFile(siblingPath, path.join(input.destinationDir, sibling));
+    if (sibling === STAVE_VERSION_FILE_NAME) {
+      version = (yield* fs.readFileString(siblingPath)).trim() || null;
+    }
+  }
+  return { destinationPath, version } as const;
+});
+
+// Stages the Stave CLI at resources/stave/stave[.exe]. Universal macOS builds
+// lipo the arm64 and x64 slices together like the resource monitor. Without a
+// binary the build fails unless --allow-missing-stave opts into a local build
+// that ships no Stave; the (empty) directory is still created so the
+// extraResources entry always has a source.
+export const stageStave = Effect.fn("stageStave")(function* (input: {
+  readonly stageResourcesDir: string;
+  readonly platform: typeof BuildPlatform.Type;
+  readonly arch: typeof BuildArch.Type;
+  readonly staveBinaryPath: string | undefined;
+  readonly staveBinaryX64Path: string | undefined;
+  readonly allowMissing: boolean;
+  readonly verbose: boolean;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const destinationDir = path.join(input.stageResourcesDir, STAVE_RESOURCE_DIR);
+  yield* fs.remove(destinationDir, { recursive: true, force: true }).pipe(Effect.ignore);
+  yield* fs.makeDirectory(destinationDir, { recursive: true });
+
+  const missing = (role: "primary" | "x64-slice", binaryPath?: string) =>
+    new StaveBinaryMissingError({
+      platform: input.platform,
+      arch: input.arch,
+      role,
+      ...(binaryPath === undefined ? {} : { path: binaryPath }),
+    });
+
+  if (input.staveBinaryPath === undefined) {
+    if (!input.allowMissing) {
+      return yield* missing("primary");
+    }
+    yield* Effect.logWarning(
+      "[desktop-artifact] No Stave binary provided (--stave-binary / LECTURN_DESKTOP_STAVE_BINARY); the packaged app will not bundle Stave.",
+    );
+    return { staged: false } as const;
+  }
+  if (!(yield* fs.exists(input.staveBinaryPath).pipe(Effect.orElseSucceed(() => false)))) {
+    return yield* missing("primary", input.staveBinaryPath);
+  }
+
+  const executableName = staveExecutableName(input.platform);
+  const universal = input.platform === "mac" && input.arch === "universal";
+  if (universal) {
+    if (input.staveBinaryX64Path === undefined) {
+      return yield* missing("x64-slice");
+    }
+    if (!(yield* fs.exists(input.staveBinaryX64Path).pipe(Effect.orElseSucceed(() => false)))) {
+      return yield* missing("x64-slice", input.staveBinaryX64Path);
+    }
+  }
+
+  const staged = yield* stageStaveFiles({
+    sourceBinaryPath: input.staveBinaryPath,
+    destinationDir,
+    executableName,
+    chmod: input.platform !== "win",
+  });
+  if (universal && input.staveBinaryX64Path !== undefined) {
+    yield* runCommand(
+      ChildProcess.make("lipo", [
+        "-create",
+        input.staveBinaryPath,
+        input.staveBinaryX64Path,
+        "-output",
+        staged.destinationPath,
+      ]),
+      { label: "lipo stave universal binary", verbose: input.verbose },
+    );
+    yield* fs.chmod(staged.destinationPath, 0o755);
+  }
+
+  yield* Effect.log(
+    `[desktop-artifact] Staged Stave ${staged.version ?? "(unversioned)"} at ${staged.destinationPath}.`,
+  );
+  return { staged: true, version: staged.version } as const;
+});
+
 function generateMacIconSet(
   sourcePng: string,
   targetIcns: string,
@@ -2461,6 +2657,10 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   // whose source file was never written fails the electron-builder step.
   wslRuntimeBundled = false,
   arch?: typeof BuildArch.Type,
+  // False only for --allow-missing-stave builds that staged no Stave binary;
+  // the resource is then dropped so electron-builder never copies an empty
+  // resources/stave directory.
+  staveBundled = true,
 ) {
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
@@ -2479,7 +2679,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     // app.asar.unpacked. Windows additionally ships the server tree as the
     // hand-packed server.asar sidecar (see WINDOWS_SERVER_ASAR_RESOURCE).
     extraResources: [
-      ...DESKTOP_EXTRA_RESOURCES,
+      ...DESKTOP_EXTRA_RESOURCES.filter(
+        (resource) => staveBundled || resource !== STAVE_EXTRA_RESOURCE,
+      ),
       ...(platform === "win" ? WINDOWS_SERVER_EXTRA_RESOURCES : []),
       ...(platform === "win" && wslRuntimeBundled ? WSL_RUNTIME_EXTRA_RESOURCES : []),
     ],
@@ -2705,6 +2907,112 @@ export const parseWslRuntimeArchiveMembers = (listing: string): ReadonlyArray<st
     .map((member) => member.replace(/^\.\//, "").replace(/\/$/, ""))
     .filter((member) => member.length > 0);
 
+// Parses a verbose (`tar -tv`) listing into member names and whether any
+// execute bit is set. Handles GNU tar (`-rwxr-xr-x user/group 123 2026-09-01
+// 12:00 name`) and bsdtar (`-rwxr-xr-x  0 user group 123 Sep  1 12:00 name`,
+// with a year in place of the time for old entries).
+const TAR_VERBOSE_ENTRY_PATTERN = /^([-dlbcps][-rwxsStT]{9})\s+(.+)$/;
+const GNU_TAR_NAME_PATTERN = /\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?\s+(.+)$/;
+const BSD_TAR_NAME_PATTERN = /[A-Za-z]{3}\s+\d{1,2}\s+(?:\d{2}:\d{2}|\d{4})\s+(.+)$/;
+export const parseWslRuntimeArchiveEntries = (
+  listing: string,
+): ReadonlyArray<{ readonly name: string; readonly executable: boolean }> =>
+  listing
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0)
+    .flatMap((line) => {
+      const entry = TAR_VERBOSE_ENTRY_PATTERN.exec(line);
+      const mode = entry?.[1];
+      const rest = entry?.[2];
+      if (mode === undefined || rest === undefined) return [];
+      const rawName =
+        GNU_TAR_NAME_PATTERN.exec(rest)?.[1] ??
+        BSD_TAR_NAME_PATTERN.exec(rest)?.[1] ??
+        rest.split(/\s+/).at(-1) ??
+        "";
+      const name = rawName
+        .replace(/ -> .*$/, "")
+        .replace(/^\.\//, "")
+        .replace(/\/$/, "");
+      if (name.length === 0) return [];
+      return [{ name, executable: /[xst]/.test(`${mode[3]}${mode[6]}${mode[9]}`) }];
+    });
+
+// Where the server locates the bundled Linux Stave binary inside the WSL
+// runtime tree (relative to the archive root / server.asar root).
+export const wslStaveMemberPath = (wslArch: "x64" | "arm64"): string =>
+  `apps/server/dist/${STAVE_RESOURCE_DIR}/linux-${wslArch}/${staveExecutableName("linux")}`;
+
+// Members every packaged WSL runtime archive must carry; the Stave binary is
+// only required when the build staged one for the WSL leg.
+export const resolveWslRuntimeRequiredMembers = (input: {
+  readonly wslArch: "x64" | "arm64" | undefined;
+  readonly expectStave: boolean;
+}): ReadonlyArray<string> => [
+  "apps/server/dist/bin.mjs",
+  "node_modules/node-pty/package.json",
+  ...(input.wslArch === undefined
+    ? []
+    : [
+        `node_modules/node-pty/prebuilds/linux-${input.wslArch}/pty.node`,
+        `node_modules/node-pty/prebuilds/linux-${input.wslArch}/lecturn-wsl-node-pty.json`,
+        ...(input.expectStave ? [wslStaveMemberPath(input.wslArch)] : []),
+      ]),
+];
+
+// Stages the Linux Stave binary into the server sidecar tree before it is
+// archived for WSL and packed into server.asar, so both carry it. Requiring it
+// only alongside a bundled WSL runtime keeps non-WSL builds unaffected.
+const stageWslStave = Effect.fn("stageWslStave")(function* (input: {
+  readonly serverStageDir: string;
+  readonly arch: typeof BuildArch.Type;
+  readonly staveWslBinaryPath: string | undefined;
+  readonly required: boolean;
+  readonly allowMissing: boolean;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const wslArch = resolveWslPrebuildArch(input.arch);
+  if (wslArch === undefined) return false;
+
+  const missing = (binaryPath?: string) =>
+    new StaveBinaryMissingError({
+      platform: "win",
+      arch: input.arch,
+      role: "wsl",
+      ...(binaryPath === undefined ? {} : { path: binaryPath }),
+    });
+  if (input.staveWslBinaryPath === undefined) {
+    if (input.required && !input.allowMissing) {
+      return yield* missing();
+    }
+    if (input.required) {
+      yield* Effect.logWarning(
+        "[desktop-artifact] No Linux Stave binary provided (--stave-wsl-binary / LECTURN_DESKTOP_STAVE_WSL_BINARY); the WSL backend will not bundle Stave.",
+      );
+    }
+    return false;
+  }
+  if (!(yield* fs.exists(input.staveWslBinaryPath).pipe(Effect.orElseSucceed(() => false)))) {
+    return yield* missing(input.staveWslBinaryPath);
+  }
+
+  const staged = yield* stageStaveFiles({
+    sourceBinaryPath: input.staveWslBinaryPath,
+    destinationDir: path.join(
+      input.serverStageDir,
+      path.dirname(wslStaveMemberPath(wslArch).split("/").join(path.sep)),
+    ),
+    executableName: staveExecutableName("linux"),
+    chmod: true,
+  });
+  yield* Effect.log(
+    `[desktop-artifact] Staged WSL Stave ${staged.version ?? "(unversioned)"} (linux-${wslArch}).`,
+  );
+  return true;
+});
+
 export const stageWslRuntimeArchive = Effect.fn("stageWslRuntimeArchive")(function* (input: {
   readonly sourceDir: string;
   readonly archivePath: string;
@@ -2773,6 +3081,8 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
   readonly patchedDependencies: Record<string, string>;
   readonly overrides: Record<string, string>;
   readonly wslPrebuildPath: string | undefined;
+  readonly staveWslBinaryPath: string | undefined;
+  readonly allowMissingStave: boolean;
   readonly asarPath: string;
   readonly wslRuntimeArchivePath: string;
   readonly wslRuntimeArchiveHashPath: string;
@@ -2841,10 +3151,21 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
     arch: input.arch,
     prebuildPath: input.wslPrebuildPath,
   });
+  const wslRuntimeBundled = bundlesWslRuntime({
+    arch: input.arch,
+    prebuildPath: input.wslPrebuildPath,
+  });
+  const wslStaveStaged = yield* stageWslStave({
+    serverStageDir,
+    arch: input.arch,
+    staveWslBinaryPath: input.staveWslBinaryPath,
+    required: wslRuntimeBundled,
+    allowMissing: input.allowMissingStave,
+  });
   // Skip the archive entirely rather than shipping one the install script must
   // extract and reject on every launch. The desktop app treats a missing
   // archive as "no WSL-local runtime" and goes straight to the mounted tree.
-  if (bundlesWslRuntime({ arch: input.arch, prebuildPath: input.wslPrebuildPath })) {
+  if (wslRuntimeBundled) {
     yield* stageWslRuntimeArchive({
       sourceDir: serverStageDir,
       archivePath: input.wslRuntimeArchivePath,
@@ -2863,6 +3184,7 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
   yield* Effect.log(
     `[desktop-artifact] Packed server.asar (${String(packedStat.size)} bytes) + unpacked natives.`,
   );
+  return { wslStaveStaged } as const;
 });
 
 function collectUnpackedAsarFiles(
@@ -2996,12 +3318,18 @@ export const validateWindowsPackagedPayload = Effect.fn(
   readonly appExecutableName: string;
   readonly targetArch: typeof BuildArch.Type;
   readonly expectWslRuntime?: boolean;
+  // Whether the build staged a Stave binary at resources/stave (and, unless
+  // expectWslStave says otherwise, the Linux one inside the WSL archive).
+  readonly expectStave?: boolean;
+  readonly expectWslStave?: boolean;
   readonly fileLimit?: number;
   readonly verbose?: boolean;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const fileLimit = input.fileLimit ?? WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT;
+  const expectStave = input.expectStave === true;
+  const expectWslStave = input.expectWslStave ?? expectStave;
   const isFile = (filePath: string) =>
     fs.stat(filePath).pipe(
       Effect.map((stat) => stat.type === "File"),
@@ -3095,6 +3423,16 @@ export const validateWindowsPackagedPayload = Effect.fn(
     });
   }
 
+  const staveExecutable = staveExecutableName("win");
+  const stavePath = path.join(resourcesDir, STAVE_RESOURCE_DIR, staveExecutable);
+  if (expectStave && !(yield* isFile(stavePath))) {
+    return yield* new WindowsPackagedPayloadValidationError({
+      reason: "stave-missing",
+      packagedAppDir,
+      missingFiles: [`${STAVE_RESOURCE_DIR}/${staveExecutable}`],
+    });
+  }
+
   const wslArchivePath = path.join(resourcesDir, WSL_RUNTIME_ARCHIVE_NAME);
   const wslArchiveHashPath = path.join(resourcesDir, WSL_RUNTIME_ARCHIVE_HASH_NAME);
   const [hasWslArchive, hasWslArchiveHash] = yield* Effect.all([
@@ -3144,8 +3482,10 @@ export const validateWindowsPackagedPayload = Effect.fn(
       );
     }
 
+    // Verbose listing: the mode column proves the Linux Stave binary is
+    // executable after extraction.
     const listing = yield* spawnAndCollectOutput(
-      ChildProcess.make("tar", ["-tzf", WSL_RUNTIME_ARCHIVE_NAME], {
+      ChildProcess.make("tar", ["-tvzf", WSL_RUNTIME_ARCHIVE_NAME], {
         cwd: resourcesDir,
         stdin: "ignore",
         stdout: "pipe",
@@ -3157,7 +3497,8 @@ export const validateWindowsPackagedPayload = Effect.fn(
         new Error(`tar could not list WSL runtime archive: ${listing.stderr.trim()}`),
       );
     }
-    const members = parseWslRuntimeArchiveMembers(listing.stdout);
+    const entries = parseWslRuntimeArchiveEntries(listing.stdout);
+    const members = entries.map((entry) => entry.name);
     const forbiddenMember = members.find((member) =>
       WSL_RUNTIME_ARCHIVE_EXCLUDED_PREFIXES.some((prefix) => member.startsWith(prefix)),
     );
@@ -3167,16 +3508,10 @@ export const validateWindowsPackagedPayload = Effect.fn(
       );
     }
     const wslArch = resolveWslPrebuildArch(input.targetArch);
-    const requiredMembers = [
-      "apps/server/dist/bin.mjs",
-      "node_modules/node-pty/package.json",
-      ...(wslArch === undefined
-        ? []
-        : [
-            `node_modules/node-pty/prebuilds/linux-${wslArch}/pty.node`,
-            `node_modules/node-pty/prebuilds/linux-${wslArch}/lecturn-wsl-node-pty.json`,
-          ]),
-    ];
+    const requiredMembers = resolveWslRuntimeRequiredMembers({
+      wslArch,
+      expectStave: expectWslStave,
+    });
     const missingMembers = requiredMembers.filter((member) => !members.includes(member));
     if (missingMembers.length > 0) {
       return yield* new WindowsPackagedPayloadValidationError({
@@ -3185,6 +3520,18 @@ export const validateWindowsPackagedPayload = Effect.fn(
         missingFiles: missingMembers,
         cause: new Error("WSL runtime archive is incomplete"),
       });
+    }
+    // A Windows build host's tar (bsdtar/MSYS) cannot record execute bits for
+    // extensionless files, so only POSIX hosts can prove the mode here; the
+    // Linux-side WSL install script chmods the binary after extraction instead.
+    if (expectWslStave && wslArch !== undefined && (yield* HostProcessPlatform) !== "win32") {
+      const staveMember = wslStaveMemberPath(wslArch);
+      const staveEntry = entries.find((entry) => entry.name === staveMember);
+      if (staveEntry !== undefined && !staveEntry.executable) {
+        return yield* invalidWslRuntime(
+          new Error(`WSL runtime archive member ${staveMember} is not executable`),
+        );
+      }
     }
   }
 
@@ -3443,6 +3790,15 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     arch: options.arch,
     verbose: options.verbose,
   });
+  const stave = yield* stageStave({
+    stageResourcesDir,
+    platform: options.platform,
+    arch: options.arch,
+    staveBinaryPath: options.staveBinary,
+    staveBinaryX64Path: options.staveBinaryX64,
+    allowMissing: options.allowMissingStave,
+    verbose: options.verbose,
+  });
 
   yield* assertPlatformBuildResources(
     options.platform,
@@ -3549,6 +3905,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         : undefined,
       bundlesWslRuntime({ arch: options.arch, prebuildPath: options.wslPrebuild }),
       options.arch,
+      stave.staged,
     ),
     dependencies: stageDependencies,
     devDependencies: {
@@ -3589,8 +3946,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   // WSL is Windows-only, so only the Windows artifact carries the server
   // sidecar (which embeds the Linux node-pty prebuild); other platforms
   // ignore the prebuild input.
+  let wslStaveStaged = false;
   if (options.platform === "win" && windowsServerAsarPath) {
-    yield* stageWindowsServerSidecar({
+    const sidecar = yield* stageWindowsServerSidecar({
       stageRoot,
       repoRoot,
       serverDistDir: distDirs.serverDist,
@@ -3602,6 +3960,8 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       patchedDependencies: workspacePatchedDependencies,
       overrides: resolvedOverrides,
       wslPrebuildPath: options.wslPrebuild,
+      staveWslBinaryPath: options.staveWslBinary,
+      allowMissingStave: options.allowMissingStave,
       asarPath: windowsServerAsarPath,
       wslRuntimeArchivePath: path.join(stageAppDir, WSL_RUNTIME_ARCHIVE_EXTRA_RESOURCE.from),
       wslRuntimeArchiveHashPath: path.join(
@@ -3611,6 +3971,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
       verbose: options.verbose,
     });
+    wslStaveStaged = sidecar.wslStaveStaged;
   }
 
   // electron-builder treats several set-but-empty variables (e.g. CSC_LINK="")
@@ -3711,6 +4072,8 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         arch: options.arch,
         prebuildPath: options.wslPrebuild,
       }),
+      expectStave: stave.staged,
+      expectWslStave: wslStaveStaged,
       verbose: options.verbose,
     });
   }
@@ -3799,6 +4162,30 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
   wslPrebuild: Flag.string("wsl-prebuild").pipe(
     Flag.withDescription(
       "Path to a prebuilt Linux node-pty (pty.node) for the target arch, staged for the WSL backend (env: LECTURN_DESKTOP_WSL_PREBUILD).",
+    ),
+    Flag.optional,
+  ),
+  staveBinary: Flag.string("stave-binary").pipe(
+    Flag.withDescription(
+      "Path to the Stave CLI binary (stave or stave.exe) for the target platform/arch, bundled at resources/stave (env: LECTURN_DESKTOP_STAVE_BINARY).",
+    ),
+    Flag.optional,
+  ),
+  staveBinaryX64: Flag.string("stave-binary-x64").pipe(
+    Flag.withDescription(
+      "Path to the x64 Stave CLI binary, lipo'd with --stave-binary for --platform mac --arch universal (env: LECTURN_DESKTOP_STAVE_BINARY_X64).",
+    ),
+    Flag.optional,
+  ),
+  staveWslBinary: Flag.string("stave-wsl-binary").pipe(
+    Flag.withDescription(
+      "Path to the Linux Stave CLI binary staged into the Windows WSL payload (env: LECTURN_DESKTOP_STAVE_WSL_BINARY).",
+    ),
+    Flag.optional,
+  ),
+  allowMissingStave: Flag.boolean("allow-missing-stave").pipe(
+    Flag.withDescription(
+      "Build without a bundled Stave binary instead of failing; for local development builds (env: LECTURN_DESKTOP_ALLOW_MISSING_STAVE).",
     ),
     Flag.optional,
   ),

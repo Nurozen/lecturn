@@ -1,3 +1,4 @@
+import { isStaveProject, resolveProjectGitTargets } from "@lecturn/client-runtime/state/projectGit";
 import { scopedThreadKey, scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
 import {
@@ -132,6 +133,7 @@ import {
 import { canEditPullRequestChangeRequest } from "./pullRequestEditing.logic";
 import {
   resolvePickableEnvironments,
+  projectPullRequestRepository,
   type PickableEnvironment,
 } from "./pullRequestProjectAssignment.logic";
 import { PullRequestChecksPopover } from "./PullRequestChecksPopover";
@@ -477,7 +479,12 @@ export function PullRequestDetailPanel({
   /** Page-owned detail columns use this to clear the selected pull request. */
   onClose?: () => void;
   /** Keeps surrounding inferred thread state in step with refreshed host state. */
-  onStateChange?: (status: { repository: string; number: number; state: PullRequestState }) => void;
+  onStateChange?: (status: {
+    repository: string;
+    host?: string | undefined;
+    number: number;
+    state: PullRequestState;
+  }) => void;
   /**
    * Beside a thread, the checkout affordance disappears: the panel is showing that thread's
    * own pull request, so the branch is already under the reader's feet — and checking it out
@@ -490,7 +497,7 @@ export function PullRequestDetailPanel({
    */
   composerDraftTarget?: ScopedThreadRef | DraftId;
 }) {
-  const pullRequestKey = `${reference.projectId}:${reference.repository}#${reference.number}`;
+  const pullRequestKey = `${reference.projectId}:${reference.host?.toLowerCase() ?? ""}:${reference.repository}#${reference.number}`;
   const [tab, setTab] = useState<DetailTab>("summary");
   const [timelineOrder, setTimelineOrder] = useState<"newest" | "oldest">("newest");
   const [codeCommitScope, setCodeCommitScope] = useState<{
@@ -582,7 +589,14 @@ export function PullRequestDetailPanel({
         reference,
       ),
     );
-  }, [environmentId, pullRequestKey, reference.projectId, reference.repository, reference.number]);
+  }, [
+    environmentId,
+    pullRequestKey,
+    reference.projectId,
+    reference.repository,
+    reference.number,
+    reference.host,
+  ]);
   useEffect(() => {
     if (detailQuery.data === null) return;
     writePullRequestDetailSnapshot(
@@ -598,6 +612,7 @@ export function PullRequestDetailPanel({
     pullRequestKey,
     reference.projectId,
     reference.repository,
+    reference.host,
     reference.number,
   ]);
   const resolvedCoreDetail = resolveDisplayedPullRequestDetail({
@@ -643,13 +658,23 @@ export function PullRequestDetailPanel({
         detail.headRepositoryNameWithOwner,
       )
     : null;
+  const projects = useProjects();
+  const selectedProject = projects.find(
+    (project) => project.id === reference.projectId && project.environmentId === environmentId,
+  );
+  const repositoryCwd = selectedProject
+    ? projectPullRequestRepository(selectedProject, reference)?.workspaceRoot
+    : undefined;
+  const branchRefsCwd = isStaveProject(selectedProject)
+    ? repositoryCwd
+    : (repositoryCwd ?? detail?.workspaceRoot);
   const branchRefsQuery = useEnvironmentQuery(
-    detail === null
+    detail === null || branchRefsCwd === undefined
       ? null
       : vcsEnvironment.listRefs({
           environmentId,
           input: {
-            cwd: detail.workspaceRoot,
+            cwd: branchRefsCwd,
             includeMatchingRemoteRefs: true,
             // listRefs keeps the current ref first and a known default second.
             limit: 2,
@@ -680,6 +705,7 @@ export function PullRequestDetailPanel({
     if (!resolvedCoreDetail) return;
     onStateChange?.({
       repository: resolvedCoreDetail.repository,
+      ...(resolvedCoreDetail.host ? { host: resolvedCoreDetail.host } : {}),
       number: resolvedCoreDetail.number,
       state: resolvedCoreDetail.state,
     });
@@ -689,7 +715,7 @@ export function PullRequestDetailPanel({
   // the pull request rather than by the panel, because this one panel shows a different pull
   // request every time it is opened.
   useLiveRefresh(detailQuery.refresh, {
-    key: `pull-request:${reference.projectId}:${reference.repository}#${reference.number}`,
+    key: `pull-request:${reference.projectId}:${reference.host?.toLowerCase() ?? ""}:${reference.repository}#${reference.number}`,
   });
   // The button, on the other hand, goes around the server's cache rather than through it: it is
   // the answer for a reader who can see that what they are looking at is behind. The
@@ -726,20 +752,33 @@ export function PullRequestDetailPanel({
   const [titleSaving, setTitleSaving] = useState(false);
   const newThread = useNewThreadHandler();
   const { environments } = useEnvironments();
-  const projects = useProjects();
   const unavailableGitHubUrl = useMemo(() => {
-    const identity = projects.find(
+    const project = projects.find(
       (project) => project.id === reference.projectId && project.environmentId === environmentId,
-    )?.repositoryIdentity;
+    );
+    const matched = project ? projectPullRequestRepository(project, reference) : undefined;
+    const identity =
+      project && matched
+        ? resolveProjectGitTargets({ project }).find(
+            (target) => target.cwd === matched.workspaceRoot,
+          )?.repositoryIdentity
+        : undefined;
     return gitHubPullRequestBrowserUrl(identity, reference.repository, reference.number);
-  }, [environmentId, projects, reference.number, reference.projectId, reference.repository]);
+  }, [
+    environmentId,
+    projects,
+    reference.number,
+    reference.projectId,
+    reference.repository,
+    reference.host,
+  ]);
   // Beside a thread there is nothing to pick: the hand-offs land in that thread's composer, and
   // the thread is already on one server's copy of the branch.
   const pickableEnvironments = useMemo(
     () =>
       context === "page"
         ? resolvePickableEnvironments(
-            { environmentId, projectId: reference.projectId },
+            { environmentId, ...reference },
             projects,
             environments.map((environment) => ({
               environmentId: environment.environmentId,
@@ -748,7 +787,15 @@ export function PullRequestDetailPanel({
             })),
           )
         : [],
-    [context, environmentId, environments, projects, reference.projectId],
+    [
+      context,
+      environmentId,
+      environments,
+      projects,
+      reference.projectId,
+      reference.repository,
+      reference.host,
+    ],
   );
   // Which server the reader chose, and only for the pull request they chose it on: this one panel
   // shows a different pull request every time it is opened, and the choice does not follow.
@@ -763,6 +810,12 @@ export function PullRequestDetailPanel({
   const acting =
     pickableEnvironments.find((entry) => entry.environmentId === chosenEnvironmentId) ?? null;
   const actingEnvironmentId = acting?.environmentId ?? environmentId;
+  const actingProject = projects.find(
+    (project) =>
+      project.environmentId === actingEnvironmentId &&
+      project.id === (acting?.projectId ?? reference.projectId),
+  );
+  const canPrepareCheckout = !isStaveProject(actingProject);
   const prepareThread = usePreparePullRequestThreadAction({
     environmentId: actingEnvironmentId,
     cwd: acting?.workspaceRoot ?? detail?.workspaceRoot ?? null,
@@ -985,6 +1038,15 @@ export function PullRequestDetailPanel({
         type: "success",
         title: "Added to the composer",
         description: "The task is in the composer — read it over, then send.",
+      });
+      return;
+    }
+    if (!canPrepareCheckout) {
+      toastManager.add({
+        type: "info",
+        title: "Stave owns this checkout",
+        description:
+          "Open a thread in the space to work across its repositories. Pull request checkout preparation is unavailable for Stave spaces.",
       });
       return;
     }
@@ -1418,7 +1480,7 @@ export function PullRequestDetailPanel({
                   It asks where, because the two answers are not interchangeable: one leaves your
                   work where it is, the other moves the repository you are standing in. Only on
                   the page: beside a thread the branch is already checked out right there. */}
-              {context === "page" ? (
+              {context === "page" && canPrepareCheckout ? (
                 <Menu>
                   <MenuTrigger
                     disabled={handoff !== null}

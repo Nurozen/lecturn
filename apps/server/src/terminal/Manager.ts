@@ -1,3 +1,4 @@
+import { StaveRuntimeFence, noop as noopRuntimeFence } from "../stave/StaveRuntimeFence.ts";
 /**
  * TerminalManager - Terminal session orchestration service interface.
  *
@@ -175,6 +176,8 @@ export class TerminalManager extends Context.Service<
      *
      * When `terminalId` is omitted, closes all sessions for the thread.
      */
+    readonly closeSessionsUnder?: (root: string) => Effect.Effect<void, TerminalError>;
+
     readonly close: (input: TerminalCloseInput) => Effect.Effect<void, TerminalError>;
 
     /**
@@ -1109,6 +1112,7 @@ function normalizedRuntimeEnv(
 }
 
 interface TerminalManagerOptions {
+  runtimeFence?: StaveRuntimeFence["Service"];
   logsDir: string;
   historyLineLimit?: number;
   ptyAdapter: PtyAdapter.PtyAdapter["Service"];
@@ -1132,9 +1136,11 @@ interface TerminalManagerOptions {
 export const make = Effect.fn("TerminalManager.make")(function* () {
   const { terminalLogsDir } = yield* ServerConfig.ServerConfig;
   const ptyAdapter = yield* PtyAdapter.PtyAdapter;
+  const runtimeFence = yield* StaveRuntimeFence;
   const portDiscovery = yield* PortScanner.PortDiscovery;
   return yield* makeWithOptions({
     logsDir: terminalLogsDir,
+    runtimeFence,
     ptyAdapter,
     registerTerminalProcesses: portDiscovery.registerTerminalProcesses,
     unregisterTerminal: portDiscovery.unregisterTerminal,
@@ -1149,6 +1155,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   const context = yield* Effect.context<never>();
   const runFork = Effect.runForkWith(context);
 
+  const runtimeFence = options.runtimeFence ?? noopRuntimeFence;
   const logsDir = options.logsDir;
   const historyLineLimit = options.historyLineLimit ?? DEFAULT_HISTORY_LINE_LIMIT;
   const platform = yield* HostProcessPlatform;
@@ -2143,126 +2150,148 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   );
 
   const openLocked = Effect.fn("terminal.openLocked")(function* (input: TerminalOpenInput) {
-    const terminalId = input.terminalId;
-    yield* assertValidCwd(input.cwd);
+    return yield* runtimeFence
+      .withStart(
+        input.cwd,
+        Effect.gen(function* () {
+          const terminalId = input.terminalId;
+          yield* assertValidCwd(input.cwd);
 
-    const sessionKey = toSessionKey(input.threadId, terminalId);
-    const existing = yield* getSession(input.threadId, terminalId);
-    if (Option.isNone(existing)) {
-      yield* flushPersist(input.threadId, terminalId);
-      const history = yield* readHistory(input.threadId, terminalId);
-      const cols = input.cols ?? DEFAULT_OPEN_COLS;
-      const rows = input.rows ?? DEFAULT_OPEN_ROWS;
-      const session: TerminalSessionState = {
-        threadId: input.threadId,
-        terminalId,
-        cwd: input.cwd,
-        worktreePath: input.worktreePath ?? null,
-        status: "starting",
-        pid: null,
-        history,
-        pendingHistoryControlSequence: "",
-        pendingProcessEvents: [],
-        pendingProcessEventIndex: 0,
-        processEventDrainRunning: false,
-        exitCode: null,
-        exitSignal: null,
-        updatedAt: yield* nowIso,
-        eventSequence: 0,
-        cols,
-        rows,
-        process: null,
-        unsubscribeData: null,
-        unsubscribeExit: null,
-        hasRunningSubprocess: false,
-        childCommandLabel: null,
-        runtimeEnv: normalizedRuntimeEnv(input.env),
-      };
+          const sessionKey = toSessionKey(input.threadId, terminalId);
+          const existing = yield* getSession(input.threadId, terminalId);
+          if (Option.isNone(existing)) {
+            yield* flushPersist(input.threadId, terminalId);
+            const history = yield* readHistory(input.threadId, terminalId);
+            const cols = input.cols ?? DEFAULT_OPEN_COLS;
+            const rows = input.rows ?? DEFAULT_OPEN_ROWS;
+            const session: TerminalSessionState = {
+              threadId: input.threadId,
+              terminalId,
+              cwd: input.cwd,
+              worktreePath: input.worktreePath ?? null,
+              status: "starting",
+              pid: null,
+              history,
+              pendingHistoryControlSequence: "",
+              pendingProcessEvents: [],
+              pendingProcessEventIndex: 0,
+              processEventDrainRunning: false,
+              exitCode: null,
+              exitSignal: null,
+              updatedAt: yield* nowIso,
+              eventSequence: 0,
+              cols,
+              rows,
+              process: null,
+              unsubscribeData: null,
+              unsubscribeExit: null,
+              hasRunningSubprocess: false,
+              childCommandLabel: null,
+              runtimeEnv: normalizedRuntimeEnv(input.env),
+            };
 
-      const createdSession = session;
-      yield* modifyManagerState((state) => {
-        const sessions = new Map(state.sessions);
-        sessions.set(sessionKey, createdSession);
-        return [undefined, { ...state, sessions }] as const;
-      });
+            const createdSession = session;
+            yield* modifyManagerState((state) => {
+              const sessions = new Map(state.sessions);
+              sessions.set(sessionKey, createdSession);
+              return [undefined, { ...state, sessions }] as const;
+            });
 
-      yield* evictInactiveSessionsIfNeeded();
-      yield* startSession(
-        session,
-        {
-          threadId: input.threadId,
-          terminalId,
-          cwd: input.cwd,
-          ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
-          cols,
-          rows,
-          ...(input.env ? { env: input.env } : {}),
-        },
-        "started",
+            yield* evictInactiveSessionsIfNeeded();
+            yield* startSession(
+              session,
+              {
+                threadId: input.threadId,
+                terminalId,
+                cwd: input.cwd,
+                ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
+                cols,
+                rows,
+                ...(input.env ? { env: input.env } : {}),
+              },
+              "started",
+            );
+            return snapshot(session);
+          }
+
+          const liveSession = existing.value;
+          const nextRuntimeEnv = normalizedRuntimeEnv(input.env);
+          const currentRuntimeEnv = liveSession.runtimeEnv;
+          const targetCols = input.cols ?? liveSession.cols;
+          const targetRows = input.rows ?? liveSession.rows;
+          const runtimeEnvChanged = !Equal.equals(currentRuntimeEnv, nextRuntimeEnv);
+          const nextWorktreePath =
+            input.worktreePath !== undefined
+              ? (input.worktreePath ?? null)
+              : liveSession.worktreePath;
+          const launchContextChanged =
+            liveSession.cwd !== input.cwd ||
+            runtimeEnvChanged ||
+            liveSession.worktreePath !== nextWorktreePath;
+
+          if (launchContextChanged) {
+            yield* stopProcess(liveSession);
+            liveSession.cwd = input.cwd;
+            liveSession.worktreePath = nextWorktreePath;
+            liveSession.runtimeEnv = nextRuntimeEnv;
+            liveSession.history = "";
+            liveSession.pendingHistoryControlSequence = "";
+            liveSession.pendingProcessEvents = [];
+            liveSession.pendingProcessEventIndex = 0;
+            liveSession.processEventDrainRunning = false;
+            yield* persistHistory(
+              liveSession.threadId,
+              liveSession.terminalId,
+              liveSession.history,
+            );
+          } else if (liveSession.status === "exited" || liveSession.status === "error") {
+            liveSession.runtimeEnv = nextRuntimeEnv;
+            liveSession.worktreePath = nextWorktreePath;
+            liveSession.history = "";
+            liveSession.pendingHistoryControlSequence = "";
+            liveSession.pendingProcessEvents = [];
+            liveSession.pendingProcessEventIndex = 0;
+            liveSession.processEventDrainRunning = false;
+            yield* persistHistory(
+              liveSession.threadId,
+              liveSession.terminalId,
+              liveSession.history,
+            );
+          }
+
+          if (!liveSession.process) {
+            yield* startSession(
+              liveSession,
+              {
+                threadId: input.threadId,
+                terminalId,
+                cwd: input.cwd,
+                worktreePath: liveSession.worktreePath,
+                cols: targetCols,
+                rows: targetRows,
+                ...(input.env ? { env: input.env } : {}),
+              },
+              "started",
+            );
+            return snapshot(liveSession);
+          }
+
+          if (liveSession.cols !== targetCols || liveSession.rows !== targetRows) {
+            yield* resizePtyProcess(liveSession, liveSession.process, targetCols, targetRows);
+            liveSession.cols = targetCols;
+            liveSession.rows = targetRows;
+            liveSession.updatedAt = yield* nowIso;
+          }
+
+          return snapshot(liveSession);
+        }),
+      )
+      .pipe(
+        Effect.catchTag(
+          "StaveRuntimeFenced",
+          (cause) => new TerminalCwdStatError({ cwd: input.cwd, cause }),
+        ),
       );
-      return snapshot(session);
-    }
-
-    const liveSession = existing.value;
-    const nextRuntimeEnv = normalizedRuntimeEnv(input.env);
-    const currentRuntimeEnv = liveSession.runtimeEnv;
-    const targetCols = input.cols ?? liveSession.cols;
-    const targetRows = input.rows ?? liveSession.rows;
-    const runtimeEnvChanged = !Equal.equals(currentRuntimeEnv, nextRuntimeEnv);
-    const nextWorktreePath =
-      input.worktreePath !== undefined ? (input.worktreePath ?? null) : liveSession.worktreePath;
-    const launchContextChanged =
-      liveSession.cwd !== input.cwd ||
-      runtimeEnvChanged ||
-      liveSession.worktreePath !== nextWorktreePath;
-
-    if (launchContextChanged) {
-      yield* stopProcess(liveSession);
-      liveSession.cwd = input.cwd;
-      liveSession.worktreePath = nextWorktreePath;
-      liveSession.runtimeEnv = nextRuntimeEnv;
-      liveSession.history = "";
-      liveSession.pendingHistoryControlSequence = "";
-      liveSession.pendingProcessEvents = [];
-      liveSession.pendingProcessEventIndex = 0;
-      liveSession.processEventDrainRunning = false;
-      yield* persistHistory(liveSession.threadId, liveSession.terminalId, liveSession.history);
-    } else if (liveSession.status === "exited" || liveSession.status === "error") {
-      liveSession.runtimeEnv = nextRuntimeEnv;
-      liveSession.worktreePath = nextWorktreePath;
-      liveSession.history = "";
-      liveSession.pendingHistoryControlSequence = "";
-      liveSession.pendingProcessEvents = [];
-      liveSession.pendingProcessEventIndex = 0;
-      liveSession.processEventDrainRunning = false;
-      yield* persistHistory(liveSession.threadId, liveSession.terminalId, liveSession.history);
-    }
-
-    if (!liveSession.process) {
-      yield* startSession(
-        liveSession,
-        {
-          threadId: input.threadId,
-          terminalId,
-          cwd: input.cwd,
-          worktreePath: liveSession.worktreePath,
-          cols: targetCols,
-          rows: targetRows,
-          ...(input.env ? { env: input.env } : {}),
-        },
-        "started",
-      );
-      return snapshot(liveSession);
-    }
-
-    if (liveSession.cols !== targetCols || liveSession.rows !== targetRows) {
-      yield* resizePtyProcess(liveSession, liveSession.process, targetCols, targetRows);
-      liveSession.cols = targetCols;
-      liveSession.rows = targetRows;
-      liveSession.updatedAt = yield* nowIso;
-    }
-
-    return snapshot(liveSession);
   });
 
   const open: TerminalManager["Service"]["open"] = (input) =>
@@ -2552,84 +2581,94 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     );
 
   const restart: TerminalManager["Service"]["restart"] = (input) =>
-    withThreadLock(
-      input.threadId,
-      Effect.gen(function* () {
-        yield* increment(terminalRestartsTotal, { scope: "thread" });
-        const terminalId = input.terminalId;
-        yield* assertValidCwd(input.cwd);
+    runtimeFence
+      .withStart(
+        input.cwd,
+        withThreadLock(
+          input.threadId,
+          Effect.gen(function* () {
+            yield* increment(terminalRestartsTotal, { scope: "thread" });
+            const terminalId = input.terminalId;
+            yield* assertValidCwd(input.cwd);
 
-        const sessionKey = toSessionKey(input.threadId, terminalId);
-        const existingSession = yield* getSession(input.threadId, terminalId);
-        let session: TerminalSessionState;
-        if (Option.isNone(existingSession)) {
-          const cols = input.cols ?? DEFAULT_OPEN_COLS;
-          const rows = input.rows ?? DEFAULT_OPEN_ROWS;
-          session = {
-            threadId: input.threadId,
-            terminalId,
-            cwd: input.cwd,
-            worktreePath: input.worktreePath ?? null,
-            status: "starting",
-            pid: null,
-            history: "",
-            pendingHistoryControlSequence: "",
-            pendingProcessEvents: [],
-            pendingProcessEventIndex: 0,
-            processEventDrainRunning: false,
-            exitCode: null,
-            exitSignal: null,
-            updatedAt: yield* nowIso,
-            eventSequence: 0,
-            cols,
-            rows,
-            process: null,
-            unsubscribeData: null,
-            unsubscribeExit: null,
-            hasRunningSubprocess: false,
-            childCommandLabel: null,
-            runtimeEnv: normalizedRuntimeEnv(input.env),
-          };
-          const createdSession = session;
-          yield* modifyManagerState((state) => {
-            const sessions = new Map(state.sessions);
-            sessions.set(sessionKey, createdSession);
-            return [undefined, { ...state, sessions }] as const;
-          });
-          yield* evictInactiveSessionsIfNeeded();
-        } else {
-          session = existingSession.value;
-          yield* stopProcess(session);
-          session.cwd = input.cwd;
-          session.worktreePath = input.worktreePath ?? null;
-          session.runtimeEnv = normalizedRuntimeEnv(input.env);
-        }
+            const sessionKey = toSessionKey(input.threadId, terminalId);
+            const existingSession = yield* getSession(input.threadId, terminalId);
+            let session: TerminalSessionState;
+            if (Option.isNone(existingSession)) {
+              const cols = input.cols ?? DEFAULT_OPEN_COLS;
+              const rows = input.rows ?? DEFAULT_OPEN_ROWS;
+              session = {
+                threadId: input.threadId,
+                terminalId,
+                cwd: input.cwd,
+                worktreePath: input.worktreePath ?? null,
+                status: "starting",
+                pid: null,
+                history: "",
+                pendingHistoryControlSequence: "",
+                pendingProcessEvents: [],
+                pendingProcessEventIndex: 0,
+                processEventDrainRunning: false,
+                exitCode: null,
+                exitSignal: null,
+                updatedAt: yield* nowIso,
+                eventSequence: 0,
+                cols,
+                rows,
+                process: null,
+                unsubscribeData: null,
+                unsubscribeExit: null,
+                hasRunningSubprocess: false,
+                childCommandLabel: null,
+                runtimeEnv: normalizedRuntimeEnv(input.env),
+              };
+              const createdSession = session;
+              yield* modifyManagerState((state) => {
+                const sessions = new Map(state.sessions);
+                sessions.set(sessionKey, createdSession);
+                return [undefined, { ...state, sessions }] as const;
+              });
+              yield* evictInactiveSessionsIfNeeded();
+            } else {
+              session = existingSession.value;
+              yield* stopProcess(session);
+              session.cwd = input.cwd;
+              session.worktreePath = input.worktreePath ?? null;
+              session.runtimeEnv = normalizedRuntimeEnv(input.env);
+            }
 
-        const cols = input.cols ?? session.cols;
-        const rows = input.rows ?? session.rows;
+            const cols = input.cols ?? session.cols;
+            const rows = input.rows ?? session.rows;
 
-        session.history = "";
-        session.pendingHistoryControlSequence = "";
-        session.pendingProcessEvents = [];
-        session.pendingProcessEventIndex = 0;
-        session.processEventDrainRunning = false;
-        yield* persistHistory(input.threadId, terminalId, session.history);
-        yield* startSession(
-          session,
-          {
-            threadId: input.threadId,
-            terminalId,
-            cwd: input.cwd,
-            ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
-            cols,
-            rows,
-            ...(input.env ? { env: input.env } : {}),
-          },
-          "restarted",
-        );
-        return snapshot(session);
-      }),
-    );
+            session.history = "";
+            session.pendingHistoryControlSequence = "";
+            session.pendingProcessEvents = [];
+            session.pendingProcessEventIndex = 0;
+            session.processEventDrainRunning = false;
+            yield* persistHistory(input.threadId, terminalId, session.history);
+            yield* startSession(
+              session,
+              {
+                threadId: input.threadId,
+                terminalId,
+                cwd: input.cwd,
+                ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
+                cols,
+                rows,
+                ...(input.env ? { env: input.env } : {}),
+              },
+              "restarted",
+            );
+            return snapshot(session);
+          }),
+        ),
+      )
+      .pipe(
+        Effect.catchTag(
+          "StaveRuntimeFenced",
+          (cause) => new TerminalCwdStatError({ cwd: input.cwd, cause }),
+        ),
+      );
 
   const close: TerminalManager["Service"]["close"] = (input) =>
     withThreadLock(
@@ -2661,6 +2700,18 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     clear,
     restart,
     close,
+    closeSessionsUnder: (root: string) =>
+      runtimeFence.withFence(
+        root,
+        Effect.gen(function* () {
+          const state = yield* readManagerState;
+          for (const session of state.sessions.values()) {
+            if (yield* runtimeFence.isUnder(root, session.cwd)) {
+              yield* close({ threadId: session.threadId, terminalId: session.terminalId });
+            }
+          }
+        }),
+      ),
     subscribe,
     subscribeMetadata,
   });

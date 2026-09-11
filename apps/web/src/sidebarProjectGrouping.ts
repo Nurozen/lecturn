@@ -11,6 +11,7 @@ export interface SidebarProjectGroupMember extends Project {
 
 export interface SidebarProjectSnapshot extends Project {
   projectKey: string;
+  settingsProjectKey?: string;
   displayName: string;
   groupedProjectCount: number;
   environmentPresence: EnvironmentPresence;
@@ -80,38 +81,58 @@ export function buildSidebarProjectSnapshots(input: {
           member.id === group.representative.id,
       ) ?? members[0]!;
 
-    const hasLocal =
-      input.primaryEnvironmentId !== null &&
-      members.some((member) => member.environmentId === input.primaryEnvironmentId);
-    const hasRemote =
-      input.primaryEnvironmentId !== null
-        ? members.some((member) => member.environmentId !== input.primaryEnvironmentId)
-        : false;
-    const remoteMembers = members.filter(
-      (member) =>
-        input.primaryEnvironmentId !== null && member.environmentId !== input.primaryEnvironmentId,
-    );
-    const remoteEnvironmentLabels = remoteMembers
-      .flatMap((member) => (member.environmentLabel ? [member.environmentLabel] : []))
-      .filter((label, index, labels) => labels.indexOf(label) === index);
-    const isDesktopLocal = input.isDesktopLocalEnvironment ?? (() => false);
-    const allRemoteMembersAreDesktopLocal =
-      remoteMembers.length > 0 &&
-      remoteMembers.every((member) => isDesktopLocal(member.environmentId));
-
     return {
       ...representative,
       projectKey: group.key,
       displayName: group.label,
       groupedProjectCount: members.length,
-      environmentPresence:
-        hasLocal && hasRemote ? "mixed" : hasRemote ? "remote-only" : "local-only",
-      allRemoteMembersAreDesktopLocal,
+      ...deriveSidebarEnvironmentMetadata({
+        members,
+        primaryEnvironmentId: input.primaryEnvironmentId,
+        ...(input.isDesktopLocalEnvironment
+          ? { isDesktopLocalEnvironment: input.isDesktopLocalEnvironment }
+          : {}),
+      }),
       memberProjects: members,
       memberProjectRefs: group.memberProjectRefs,
-      remoteEnvironmentLabels,
     };
   });
+}
+
+/** Presence belongs to the physical members currently represented by a navigation row. */
+export function deriveSidebarEnvironmentMetadata(input: {
+  members: readonly Pick<SidebarProjectGroupMember, "environmentId" | "environmentLabel">[];
+  primaryEnvironmentId: EnvironmentId | null;
+  isDesktopLocalEnvironment?: (environmentId: EnvironmentId) => boolean;
+}): Pick<
+  SidebarProjectSnapshot,
+  "environmentPresence" | "allRemoteMembersAreDesktopLocal" | "remoteEnvironmentLabels"
+> {
+  const { members } = input;
+  const hasLocal =
+    input.primaryEnvironmentId !== null &&
+    members.some((member) => member.environmentId === input.primaryEnvironmentId);
+  const hasRemote =
+    input.primaryEnvironmentId !== null
+      ? members.some((member) => member.environmentId !== input.primaryEnvironmentId)
+      : false;
+  const remoteMembers = members.filter(
+    (member) =>
+      input.primaryEnvironmentId !== null && member.environmentId !== input.primaryEnvironmentId,
+  );
+  const remoteEnvironmentLabels = remoteMembers
+    .flatMap((member) => (member.environmentLabel ? [member.environmentLabel] : []))
+    .filter((label, index, labels) => labels.indexOf(label) === index);
+  const isDesktopLocal = input.isDesktopLocalEnvironment ?? (() => false);
+  const allRemoteMembersAreDesktopLocal =
+    remoteMembers.length > 0 &&
+    remoteMembers.every((member) => isDesktopLocal(member.environmentId));
+
+  return {
+    environmentPresence: hasLocal && hasRemote ? "mixed" : hasRemote ? "remote-only" : "local-only",
+    allRemoteMembersAreDesktopLocal,
+    remoteEnvironmentLabels,
+  };
 }
 
 export function buildSidebarProjectPickerEntries(input: {

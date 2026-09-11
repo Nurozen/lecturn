@@ -65,3 +65,18 @@ describe("ExecutionEnvironmentDescriptor", () => {
     ).toEqual({ maxUploadBytes: 50 * 1024 * 1024 });
   });
 });
+
+describe("ExecutionEnvironmentDescriptor stave capability", () => {
+  it("treats a missing stave capability as unsupported under version skew", () => {
+    expect(decodeDescriptor(descriptor).capabilities.stave).toBeUndefined();
+  });
+
+  it("preserves the advertised Stave protocol version", () => {
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, stave: { protocolVersion: 1 } },
+      }).capabilities.stave,
+    ).toEqual({ protocolVersion: 1 });
+  });
+});

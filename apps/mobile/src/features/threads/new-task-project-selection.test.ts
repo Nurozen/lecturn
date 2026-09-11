@@ -49,6 +49,36 @@ describe("getOnlySelectableProject", () => {
 });
 
 describe("getProjectScopeSelectionTarget", () => {
+  it("selects a live workspace when the preferred environment is archived", () => {
+    const archived = {
+      ...makeProject("archived", "mac"),
+      stave: {
+        spaceId: "archived",
+        isSaga: false,
+        state: "archived" as const,
+        repos: [],
+        memories: [],
+      },
+    };
+    const live = makeProject("live", "server");
+    const scope = makeScope([archived, live]);
+    expect(getProjectScopeSelectionTarget(scope, archived.environmentId)).toBe(live);
+    expect(getOnlySelectableProject([scope])).toBe(live);
+  });
+  it("does not automatically open an all-archived scope", () => {
+    const archived = {
+      ...makeProject("archived"),
+      stave: {
+        spaceId: "archived",
+        isSaga: false,
+        state: "archived" as const,
+        repos: [],
+        memories: [],
+      },
+    };
+    expect(getOnlySelectableProject([makeScope([archived])])).toBeNull();
+  });
+
   it("keeps the current environment when it hosts the selected logical project", () => {
     const projects = [makeProject("lecturn-mac", "mac"), makeProject("lecturn-server", "server")];
     expect(getProjectScopeSelectionTarget(makeScope(projects), EnvironmentId.make("server"))).toBe(

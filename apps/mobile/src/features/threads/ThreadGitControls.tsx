@@ -14,6 +14,7 @@ import { useNavigation } from "@react-navigation/native";
 import { NativeHeaderToolbar } from "../../native/StackHeader";
 import { useCallback, useMemo } from "react";
 import { Alert } from "react-native";
+import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
 import {
   basename,
@@ -82,6 +83,7 @@ export type ThreadGitMenuProps = {
   readonly environmentId: EnvironmentId | string;
   readonly threadId: ThreadId | string;
   readonly currentBranch: string | null;
+  readonly repoKey?: string;
   readonly gitStatus: VcsStatusResult | null;
   readonly gitOperationLabel: string | null;
   readonly onOpenFilesInspector?: () => void;
@@ -111,6 +113,9 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
   const environmentId = props.environmentId;
   const threadId = props.threadId;
   const { gitStatus, gitOperationLabel, onPull, onRunAction } = props;
+  const { selectedThreadGitRepository } = useSelectedThreadWorktree(props.repoKey);
+  const readOnly = selectedThreadGitRepository?.mode === "reference";
+  const repoKey = props.repoKey ?? selectedThreadGitRepository?.key;
 
   const currentBranchLabel = gitStatus?.refName ?? props.currentBranch ?? "Detached HEAD";
   const busy = gitOperationLabel !== null;
@@ -120,15 +125,22 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
 
   const quickAction = useMemo(
     () =>
-      isRepo
-        ? resolveQuickAction(gitStatus, busy, isDefaultRef, hasPrimaryRemote)
-        : {
-            label: "Git unavailable",
+      readOnly
+        ? {
+            label: "Read-only reference",
             disabled: true,
             kind: "show_hint" as const,
-            hint: "This workspace is not a git repository.",
-          },
-    [busy, gitStatus, hasPrimaryRemote, isDefaultRef, isRepo],
+            hint: "Select an editable repository in Git overview for write actions.",
+          }
+        : isRepo
+          ? resolveQuickAction(gitStatus, busy, isDefaultRef, hasPrimaryRemote)
+          : {
+              label: "Git unavailable",
+              disabled: true,
+              kind: "show_hint" as const,
+              hint: "This workspace is not a git repository.",
+            },
+    [busy, gitStatus, hasPrimaryRemote, isDefaultRef, isRepo, readOnly],
   );
 
   const quickActionHint = quickAction.disabled
@@ -176,6 +188,7 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
         navigation.navigate("GitConfirm", {
           environmentId: String(environmentId),
           threadId: String(threadId),
+          ...(repoKey ? { repoKey } : {}),
           confirmAction: confirmableAction,
           branchName,
           includesCommit: String(
@@ -187,7 +200,7 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
 
       await onRunAction(input);
     },
-    [environmentId, gitStatus, isDefaultRef, onRunAction, navigation, threadId],
+    [environmentId, gitStatus, isDefaultRef, onRunAction, navigation, repoKey, threadId],
   );
 
   const runQuickAction = useCallback(async () => {
@@ -219,8 +232,9 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
     navigation.navigate("ThreadReview", {
       environmentId: EnvironmentId.make(String(environmentId)),
       threadId: ThreadId.make(String(threadId)),
+      ...(repoKey ? { repoKey } : {}),
     });
-  }, [environmentId, navigation, threadId]);
+  }, [environmentId, navigation, repoKey, threadId]);
 
   const openGitInspector = useCallback(() => {
     if (props.onOpenGitInspector) {

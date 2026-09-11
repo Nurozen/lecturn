@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import type {
@@ -197,6 +198,7 @@ function makeService(input: {
             }),
         }),
         SourceControlRateLimit.layer,
+        Path.layer,
       ),
     ),
   );
@@ -468,9 +470,9 @@ it.effect("uses a provider's raw cursor advance when it consumed malformed rows"
 
     const result = yield* service.list({ state: "open" });
 
-    // Keyed by the selector Azure is actually asked with, which is the repository's own name.
+    // Cursor identity preserves the full remote path; the Azure adapter selects the bare name.
     assert.deepStrictEqual(result.nextCursors, {
-      "dev.azure.com web": "2026-07-02T00:00:00Z|4|7",
+      "dev.azure.com acme/web": "2026-07-02T00:00:00Z|4|7",
     });
   }),
 );
@@ -1034,6 +1036,7 @@ it.effect("publishes a successful merge for immediate settlement", () =>
 
       assert.deepStrictEqual(Option.getOrThrow(yield* Fiber.join(observedMerge)), {
         ...reference,
+        host: "github.com",
         mergedAt,
       });
     }),
@@ -3025,6 +3028,7 @@ it.effect("fills in the line counts for the rows it is given", () =>
     assert.deepStrictEqual(result.stats, [
       {
         projectId: "p1" as ProjectId,
+        host: "github.com",
         repository: "acme/web",
         number: 1,
         additions: 12,
@@ -3440,10 +3444,7 @@ it.effect("carries an armed auto-merge through to the detail, and silence as sil
   }),
 );
 
-it("names an Azure DevOps repository by its own name, not its project path", () => {
-  // `az repos pr list --repository` takes a name and detects the organisation and project from
-  // the checkout; the recorded `org/project/_git/repo` path is refused, and the repository then
-  // reads as unavailable on the page.
+it("preserves the complete Azure DevOps repository identity", () => {
   const selector = PullRequestService.repositoryIdentityOf({
     repositoryIdentity: {
       provider: "azure-devops",
@@ -3452,17 +3453,17 @@ it("names an Azure DevOps repository by its own name, not its project path", () 
       name: "checkout",
     },
   } as never);
-  assert.strictEqual(selector, "checkout");
+  assert.strictEqual(selector, "contoso/payments/_git/checkout");
 });
 
-it("falls back to the path's last segment where an Azure identity has no name", () => {
+it("retains the full Azure path where an identity has no separate name", () => {
   const selector = PullRequestService.repositoryIdentityOf({
     repositoryIdentity: {
       provider: "azure-devops",
       displayName: "contoso/payments/_git/checkout",
     },
   } as never);
-  assert.strictEqual(selector, "checkout");
+  assert.strictEqual(selector, "contoso/payments/_git/checkout");
 });
 
 it("keeps a GitLab identity's whole path, because a nested group is part of the name", () => {
@@ -3986,4 +3987,587 @@ it.effect("names the signed-in account in the detail, and says nothing where the
     assert.strictEqual(named.viewer, "bilal");
     assert.strictEqual(unnamed.viewer, undefined);
   }),
+);
+
+it("routes Stave PR identity and cwd to its primary repository", () => {
+  const space = {
+    workspaceRoot: "/spaces/task",
+    repositoryIdentity: null,
+    stave: {
+      primaryRepoPath: "/spaces/task/web",
+      primaryRepositoryIdentity: {
+        provider: "github",
+        displayName: "acme/web",
+        owner: "acme",
+        name: "web",
+      },
+    },
+  } as never;
+  assert.strictEqual(PullRequestService.repositoryIdentityOf(space), "acme/web");
+  assert.strictEqual(PullRequestService.pullRequestCwd(space), "/spaces/task/web");
+});
+
+function multiRepoSpace(
+  repos: ReadonlyArray<{
+    path: string;
+    repository: string;
+    host?: string;
+    mode?: "edit" | "reference";
+  }>,
+): OrchestrationProjectShell {
+  return {
+    ...project({ id: "space", title: "Space", workspaceRoot: "/spaces/task" }),
+    stave: {
+      spaceId: "task",
+      isSaga: false,
+      state: "live",
+      memories: [],
+      repos: repos.map((repo) => ({
+        name: repo.path,
+        path: repo.path,
+        resolvedPath: `/spaces/task/${repo.path}`,
+        mode: repo.mode ?? "edit",
+        branch: `stave/task/${repo.path}`,
+        repositoryIdentity: project({
+          id: "fixture",
+          title: "Fixture",
+          workspaceRoot: "/fixture",
+          repository: repo.repository,
+          ...(repo.host === undefined ? {} : { host: repo.host }),
+        }).repositoryIdentity!,
+      })),
+    },
+  };
+}
+
+it.effect("lists every editable nested repository under its space, excluding references", () =>
+  Effect.gen(function* () {
+    const asked: string[] = [];
+    const space = multiRepoSpace([
+      { path: "web", repository: "acme/web" },
+      { path: "services/api", repository: "acme/api" },
+      { path: "references/docs", repository: "acme/docs", mode: "reference" },
+    ]);
+    const service = yield* makeService({
+      projects: [space],
+      providers: [
+        fakeProvider("github", {
+          listChangeRequests: ({ cwd }) => {
+            asked.push(cwd);
+            return Effect.succeed({
+              items: [changeRequest(1, "2026-07-02T00:00:00Z")],
+              truncated: false,
+              continues: false,
+            });
+          },
+        }),
+      ],
+    });
+    const result = yield* service.list({ state: "open", projectId: space.id });
+    assert.deepStrictEqual(asked.toSorted(), ["/spaces/task/services/api", "/spaces/task/web"]);
+    assert.deepStrictEqual(
+      result.entries.map((entry) => [entry.projectId, entry.repository]).toSorted(),
+      [
+        ["space", "acme/api"],
+        ["space", "acme/web"],
+      ],
+    );
+    assert.strictEqual(result.providers[0]?.projectCount, 2);
+  }),
+);
+
+it.effect(
+  "routes detail, permissions and mutations to the selected repo and refuses references",
+  () =>
+    Effect.gen(function* () {
+      const called: string[] = [];
+      const space = multiRepoSpace([
+        { path: "web", repository: "acme/web" },
+        { path: "services/api", repository: "acme/api" },
+        { path: "references/docs", repository: "acme/docs", mode: "reference" },
+      ]);
+      const service = yield* makeService({
+        projects: [space],
+        providers: [
+          fakeProvider("github", {
+            getChangeRequest: ({ cwd }) => {
+              called.push(`detail:${cwd}`);
+              return Effect.succeed(hostedChangeRequest("API"));
+            },
+            getViewerPermissions: ({ cwd }) => {
+              called.push(`permissions:${cwd}`);
+              return Effect.succeed({ ...hostedChangeRequest("").viewerPermissions });
+            },
+            runAction: ({ cwd }) =>
+              Effect.sync(() => {
+                called.push(`merge:${cwd}`);
+              }),
+          }),
+        ],
+      });
+      const ref = { projectId: space.id, repository: "acme/api", number: 1 };
+      const detail = yield* service.detail(ref);
+      assert.strictEqual(detail.workspaceRoot, "/spaces/task");
+      assert.strictEqual(detail.host, "github.com");
+      yield* service.runAction({ ...ref, action: "merge" });
+      const refused = yield* Effect.flip(
+        service.runAction({ ...ref, repository: "acme/docs", action: "merge" }),
+      );
+      assert.strictEqual(refused._tag, "PullRequestOperationError");
+      assert.deepStrictEqual(called, [
+        "detail:/spaces/task/services/api",
+        "permissions:/spaces/task/services/api",
+        "merge:/spaces/task/services/api",
+      ]);
+    }),
+);
+
+it.effect("separates same-name repositories by host in cached reads and mutations", () =>
+  Effect.gen(function* () {
+    const reads: string[] = [];
+    const mutations: string[] = [];
+    const space = multiRepoSpace([
+      { path: "public", repository: "acme/web" },
+      { path: "private", repository: "acme/web", host: "github.internal.test" },
+    ]);
+    const service = yield* makeService({
+      projects: [space],
+      providers: [
+        fakeProvider("github", {
+          getChangeRequest: ({ host }) => {
+            reads.push(host!);
+            return Effect.succeed(hostedChangeRequest(host!));
+          },
+          runAction: ({ cwd, host }) =>
+            Effect.sync(() => {
+              mutations.push(`${host}:${cwd}`);
+            }),
+        }),
+      ],
+    });
+    const ref = { projectId: space.id, repository: "acme/web", number: 1 };
+    const ambiguous = yield* Effect.flip(service.detail(ref));
+    assert.strictEqual(ambiguous._tag, "PullRequestOperationError");
+    const publicRef = { ...ref, host: "github.com" };
+    const privateRef = { ...ref, host: "github.internal.test" };
+    const pub = yield* service.detail(publicRef);
+    const priv = yield* service.detail(privateRef);
+    assert.strictEqual(pub.body, "github.com");
+    assert.strictEqual(priv.body, "github.internal.test");
+    assert.strictEqual((yield* service.summary(privateRef)).host, "github.internal.test");
+    assert.deepStrictEqual(reads, ["github.com", "github.internal.test"]);
+    yield* service.runAction({ ...privateRef, action: "merge" });
+    yield* Effect.flip(service.runAction({ ...ref, action: "merge" }));
+    yield* Effect.flip(service.runAction({ ...ref, host: "unrelated.test", action: "merge" }));
+    assert.deepStrictEqual(mutations, ["github.internal.test:/spaces/task/private"]);
+  }),
+);
+
+it.effect("keeps same-number stats for each repo and duplicate checkout ownership", () =>
+  Effect.gen(function* () {
+    const asked: unknown[] = [];
+    const space = multiRepoSpace([
+      { path: "web", repository: "acme/web" },
+      { path: "services/api", repository: "acme/api" },
+      { path: "private/web", repository: "acme/web", host: "github.internal.test" },
+    ]);
+    const copy = project({
+      id: "copy",
+      title: "Copy",
+      workspaceRoot: "/copy",
+      repository: "acme/api",
+    });
+    const service = yield* makeService({
+      projects: [space, copy],
+      providers: [
+        fakeProvider("github", {
+          listChangeRequestStats: ({ host, changeRequests }) => {
+            asked.push([host, changeRequests]);
+            return Effect.succeed(
+              changeRequests.map((ref) => ({
+                ...ref,
+                additions: host === "github.com" ? 2 : 3,
+                deletions: 1,
+              })),
+            );
+          },
+        }),
+      ],
+    });
+    const refs = [
+      { projectId: space.id, repository: "acme/web", host: "github.com", number: 1 },
+      { projectId: space.id, repository: "acme/api", host: "github.com", number: 1 },
+      { projectId: space.id, repository: "acme/web", host: "github.internal.test", number: 1 },
+      { projectId: copy.id, repository: "acme/api", number: 1 },
+    ];
+    const stats = (yield* service.listStats({ refs })).stats;
+    assert.strictEqual(stats.length, 4);
+    assert.deepStrictEqual(
+      stats.map((row) => [row.projectId, row.host, row.repository, row.additions]).toSorted(),
+      [
+        ["copy", "github.com", "acme/api", 2],
+        ["space", "github.com", "acme/api", 2],
+        ["space", "github.com", "acme/web", 2],
+        ["space", "github.internal.test", "acme/web", 3],
+      ],
+    );
+    assert.strictEqual(asked.length, 2);
+    // Cached stats for one host cannot answer the other host's identically numbered PR.
+    assert.strictEqual((yield* service.listStats({ refs: [refs[0]!] })).stats[0]?.additions, 2);
+    assert.strictEqual((yield* service.listStats({ refs: [refs[2]!] })).stats[0]?.additions, 3);
+    const legacy = yield* service.listStats({
+      refs: [{ projectId: space.id, repository: "acme/web", number: 1 }],
+    });
+    assert.deepStrictEqual(legacy.stats, []);
+  }),
+);
+
+it.effect(
+  "deduplicates remote listing but keeps the requested project's checkout for actions",
+  () =>
+    Effect.gen(function* () {
+      const listed: string[] = [];
+      const acted: string[] = [];
+      const space = multiRepoSpace([{ path: "services/api", repository: "acme/api" }]);
+      const copy = project({
+        id: "copy",
+        title: "Copy",
+        workspaceRoot: "/copy",
+        repository: "acme/api",
+      });
+      const service = yield* makeService({
+        projects: [copy, space],
+        providers: [
+          fakeProvider("github", {
+            listChangeRequests: ({ cwd }) => {
+              listed.push(cwd);
+              return Effect.succeed({ items: [], truncated: false, continues: false });
+            },
+            runAction: ({ cwd }) =>
+              Effect.sync(() => {
+                acted.push(cwd);
+              }),
+          }),
+        ],
+      });
+      yield* service.list({ state: "open" });
+      yield* service.runAction({
+        projectId: space.id,
+        repository: "acme/api",
+        number: 1,
+        action: "merge",
+      });
+      assert.deepStrictEqual(listed, ["/copy"]);
+      assert.deepStrictEqual(acted, ["/spaces/task/services/api"]);
+    }),
+);
+
+it.effect("refuses a hostless mutation even when one of the matching hosts is unsupported", () =>
+  Effect.gen(function* () {
+    let writes = 0;
+    const initial = multiRepoSpace([
+      { path: "public", repository: "acme/web" },
+      { path: "private", repository: "acme/web", host: "gitlab.internal.test" },
+    ]);
+    const space = {
+      ...initial,
+      stave: {
+        ...initial.stave!,
+        repos: initial.stave!.repos.map((repo, index) =>
+          index === 0
+            ? repo
+            : { ...repo, repositoryIdentity: { ...repo.repositoryIdentity!, provider: "gitlab" } },
+        ),
+      },
+    };
+    const service = yield* makeService({
+      projects: [space],
+      providers: [
+        fakeProvider("github", {
+          runAction: () =>
+            Effect.sync(() => {
+              writes += 1;
+            }),
+        }),
+      ],
+    });
+    const ref = {
+      projectId: space.id,
+      repository: "acme/web",
+      number: 1,
+      action: "merge" as const,
+    };
+    const ambiguous = yield* Effect.flip(service.runAction(ref));
+    assert.strictEqual(ambiguous._tag, "PullRequestOperationError");
+    assert.strictEqual(writes, 0);
+    yield* service.runAction({ ...ref, host: "github.com" });
+    assert.strictEqual(writes, 1);
+  }),
+);
+
+it.effect("reads the old primary projection without assigning its identity to other repos", () =>
+  Effect.gen(function* () {
+    const listed: string[] = [];
+    const initial = multiRepoSpace([
+      { path: "web", repository: "acme/web" },
+      { path: "services/api", repository: "acme/api" },
+    ]);
+    const space = {
+      ...initial,
+      stave: {
+        ...initial.stave!,
+        primaryRepoPath: "/spaces/task/web",
+        primaryRepositoryIdentity: initial.stave!.repos[0]!.repositoryIdentity!,
+        repos: initial.stave!.repos.map(
+          ({ resolvedPath: _resolved, repositoryIdentity: _identity, ...repo }) => repo,
+        ),
+      },
+    };
+    const service = yield* makeService({
+      projects: [space],
+      providers: [
+        fakeProvider("github", {
+          listChangeRequests: ({ cwd }) => {
+            listed.push(cwd);
+            return Effect.succeed({ items: [], truncated: false, continues: false });
+          },
+        }),
+      ],
+    });
+    yield* service.list({ state: "open" });
+    assert.deepStrictEqual(listed, ["/spaces/task/web"]);
+  }),
+);
+
+for (const referenceFirst of [false, true]) {
+  for (const legacy of [false, true]) {
+    it.effect(
+      `refuses reference checkout aliases (${referenceFirst ? "reference" : "edit"} first, ${legacy ? "legacy" : "resolved"} paths)`,
+      () =>
+        Effect.gen(function* () {
+          const listed: string[] = [];
+          const acted: string[] = [];
+          const initial = multiRepoSpace([
+            { path: "web", repository: "acme/web" },
+            { path: "./nested/../web/", repository: "acme/web", mode: "reference" },
+            { path: "api", repository: "acme/api" },
+          ]);
+          const [edit, reference, api] = initial.stave!.repos;
+          const ordered = referenceFirst ? [reference!, edit!, api!] : [edit!, reference!, api!];
+          const space = {
+            ...initial,
+            stave: {
+              ...initial.stave!,
+              primaryRepoPath: "/spaces/task/web",
+              primaryRepositoryIdentity: edit!.repositoryIdentity!,
+              repos: legacy
+                ? ordered.map(
+                    ({ resolvedPath: _resolved, repositoryIdentity: _identity, ...repo }) => repo,
+                  )
+                : ordered,
+            },
+          };
+          const service = yield* makeService({
+            projects: [space],
+            providers: [
+              fakeProvider("github", {
+                listChangeRequests: ({ cwd }) => {
+                  listed.push(cwd);
+                  return Effect.succeed({ items: [], truncated: false, continues: false });
+                },
+                runAction: ({ cwd }) =>
+                  Effect.sync(() => {
+                    acted.push(cwd);
+                  }),
+              }),
+            ],
+          });
+          yield* service.list({ state: "open" });
+          yield* Effect.flip(
+            service.runAction({
+              projectId: space.id,
+              repository: "acme/web",
+              host: "github.com",
+              number: 1,
+              action: "merge",
+            }),
+          );
+          assert.deepStrictEqual(listed, legacy ? [] : ["/spaces/task/api"]);
+          assert.deepStrictEqual(acted, []);
+        }),
+    );
+  }
+}
+
+it.effect("deduplicates normalized editable checkout aliases before selecting PR identity", () =>
+  Effect.gen(function* () {
+    const listed: string[] = [];
+    const acted: string[] = [];
+    const service = yield* makeService({
+      projects: [
+        multiRepoSpace([
+          { path: "web", repository: "acme/web" },
+          { path: "nested/../web/", repository: "acme/incorrect-alias" },
+        ]),
+      ],
+      providers: [
+        fakeProvider("github", {
+          listChangeRequests: ({ repository }) => {
+            listed.push(repository);
+            return Effect.succeed({ items: [], truncated: false, continues: false });
+          },
+          runAction: ({ cwd }) =>
+            Effect.sync(() => {
+              acted.push(cwd);
+            }),
+        }),
+      ],
+    });
+    yield* service.list({ state: "open" });
+    yield* service.runAction({
+      projectId: "space" as ProjectId,
+      repository: "acme/web",
+      number: 1,
+      action: "merge",
+    });
+    yield* Effect.flip(
+      service.runAction({
+        projectId: "space" as ProjectId,
+        repository: "acme/incorrect-alias",
+        number: 1,
+        action: "merge",
+      }),
+    );
+    assert.deepStrictEqual(listed, ["acme/web"]);
+    assert.deepStrictEqual(acted, ["/spaces/task/web"]);
+  }),
+);
+
+it.effect("keeps same-named Azure repositories distinct across projects on one host", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const repositories = ["contoso/payments/_git/api", "contoso/orders/_git/api"];
+    const base = multiRepoSpace([
+      { path: "payments/api", repository: repositories[0]! },
+      { path: "orders/api", repository: repositories[1]! },
+    ]);
+    const space = {
+      ...base,
+      stave: {
+        ...base.stave!,
+        repos: base.stave!.repos.map((repo, index) => ({
+          ...repo,
+          repositoryIdentity: project({
+            id: "fixture",
+            title: "Fixture",
+            workspaceRoot: "/fixture",
+            repository: repositories[index]!,
+            provider: "azure-devops",
+            host: "dev.azure.com",
+          }).repositoryIdentity!,
+        })),
+      },
+    };
+    const service = yield* makeService({
+      projects: [space],
+      providers: [
+        fakeProvider("azure-devops", {
+          listChangeRequests: ({ cwd, repository }) => {
+            calls.push(`list:${cwd}:${repository}`);
+            return Effect.succeed({
+              items: [changeRequest(1, "2026-07-02T00:00:00Z")],
+              truncated: false,
+              continues: false,
+            });
+          },
+          getChangeRequest: ({ cwd }) => {
+            calls.push(`detail:${cwd}`);
+            return Effect.succeed(hostedChangeRequest(cwd));
+          },
+          runAction: ({ cwd }) =>
+            Effect.sync(() => {
+              calls.push(`merge:${cwd}`);
+            }),
+        }),
+      ],
+    });
+    const listing = yield* service.list({ state: "open", projectId: space.id });
+    assert.deepStrictEqual(
+      listing.entries.map((entry) => entry.repository).toSorted(),
+      repositories.toSorted(),
+    );
+    assert.strictEqual(listing.providers[0]?.projectCount, 2);
+    for (const [index, repository] of repositories.entries()) {
+      const reference = { projectId: space.id, repository, host: "dev.azure.com", number: 1 };
+      const detail = yield* service.detail(reference);
+      assert.strictEqual(detail.body, space.stave.repos[index]!.resolvedPath);
+      assert.strictEqual(detail.repository, repository);
+      yield* service.runAction({ ...reference, action: "merge" });
+    }
+    const beforeAmbiguous = calls.length;
+    const legacy = { projectId: space.id, repository: "api", host: "dev.azure.com", number: 1 };
+    assert.strictEqual(
+      (yield* Effect.flip(service.detail(legacy)))._tag,
+      "PullRequestOperationError",
+    );
+    assert.strictEqual(
+      (yield* Effect.flip(service.runAction({ ...legacy, action: "merge" })))._tag,
+      "PullRequestOperationError",
+    );
+    assert.strictEqual(calls.length, beforeAmbiguous);
+    assert.deepStrictEqual(
+      calls.toSorted(),
+      [
+        "list:/spaces/task/payments/api:contoso/payments/_git/api",
+        "list:/spaces/task/orders/api:contoso/orders/_git/api",
+        "detail:/spaces/task/payments/api",
+        "detail:/spaces/task/orders/api",
+        "merge:/spaces/task/payments/api",
+        "merge:/spaces/task/orders/api",
+      ].toSorted(),
+    );
+  }),
+);
+
+it.effect(
+  "accepts an unambiguous legacy Azure name and invalidates its canonical cache alias",
+  () =>
+    Effect.gen(function* () {
+      let reads = 0;
+      const service = yield* makeService({
+        projects: [
+          project({
+            id: "azure",
+            title: "API",
+            workspaceRoot: "/api",
+            repository: "contoso/payments/_git/api",
+            provider: "azure-devops",
+            host: "dev.azure.com",
+          }),
+        ],
+        providers: [
+          fakeProvider("azure-devops", {
+            getChangeRequest: () =>
+              Effect.sync(() => {
+                reads++;
+                return hostedChangeRequest(String(reads));
+              }),
+          }),
+        ],
+      });
+      const legacy = {
+        projectId: "azure" as ProjectId,
+        repository: "api",
+        host: "dev.azure.com",
+        number: 1,
+      };
+      const canonical = { ...legacy, repository: "contoso/payments/_git/api" };
+      assert.strictEqual((yield* service.detail(legacy)).repository, canonical.repository);
+      yield* service.detail(canonical);
+      assert.strictEqual(reads, 2);
+      yield* service.runAction({ ...legacy, action: "merge" });
+      yield* service.summary(canonical);
+      yield* service.summary(legacy);
+      assert.strictEqual(reads, 4);
+    }),
 );

@@ -1,4 +1,7 @@
 import type { EnvironmentId, ThreadId } from "@lecturn/contracts";
+import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
+import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
+import { isStaveProject, resolveProjectGitCwd } from "@lecturn/client-runtime/state/projectGit";
 import { isAtomCommandInterrupted } from "@lecturn/client-runtime/state/runtime";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -9,8 +12,10 @@ import {
   usePullRequestResolution,
 } from "~/lib/sourceControlActions";
 import { cn } from "~/lib/utils";
+import { useComposerDraftStore } from "~/composerDraftStore";
 import { parsePullRequestReference } from "~/pullRequestReference";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
+import { useProject, useThread } from "~/state/entities";
 import { useEnvironmentQuery } from "~/state/query";
 import { vcsEnvironment } from "~/state/vcs";
 import { Button } from "./ui/button";
@@ -40,11 +45,28 @@ export function PullRequestThreadDialog({
   open,
   environmentId,
   threadId,
-  cwd,
+  cwd: cwdProp,
   initialReference,
   onOpenChange,
   onPrepared,
 }: PullRequestThreadDialogProps) {
+  // Git and PR lookups must address the project's primary repo when it is a
+  // Stave space (the space root is not a repository). The project is resolved
+  // from the thread here so the parent keeps passing the workspace root.
+  const threadRef = useMemo(
+    () => scopeThreadRef(environmentId, threadId),
+    [environmentId, threadId],
+  );
+  const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef));
+  const serverThread = useThread(threadRef, { waitForShell: draftThread !== null });
+  const projectRef = serverThread
+    ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
+    : draftThread
+      ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
+      : null;
+  const project = useProject(projectRef);
+  const cwd = project ? resolveProjectGitCwd({ project, thread: null }) : cwdProp;
+  const canPrepare = !isStaveProject(project);
   const referenceInputRef = useRef<HTMLInputElement>(null);
   const [reference, setReference] = useState(initialReference ?? "");
   const [referenceDirty, setReferenceDirty] = useState(false);
@@ -91,7 +113,7 @@ export function PullRequestThreadDialog({
   );
   const pullRequestResolution = usePullRequestResolution({
     ...sourceControlScope,
-    reference: open ? parsedDebouncedReference : null,
+    reference: open && canPrepare ? parsedDebouncedReference : null,
   });
   const cachedPullRequest = useMemo(() => {
     return (
@@ -131,6 +153,7 @@ export function PullRequestThreadDialog({
 
   const handleConfirm = useCallback(
     async (mode: "local" | "worktree") => {
+      if (!canPrepare) return;
       if (!parsedReference) {
         setReferenceDirty(true);
         return;
@@ -158,6 +181,7 @@ export function PullRequestThreadDialog({
       onOpenChange(false);
     },
     [
+      canPrepare,
       cwd,
       onOpenChange,
       onPrepared,
@@ -179,11 +203,31 @@ export function PullRequestThreadDialog({
     validationMessage ??
     (resolvedPullRequest === null && pullRequestResolution.error
       ? pullRequestResolution.error
-      : preparePullRequestThreadAction.error instanceof Error
-        ? preparePullRequestThreadAction.error.message
-        : preparePullRequestThreadAction.error
-          ? `Failed to prepare ${terminology.singular} thread.`
-          : null);
+      : (staveAdmissionErrorMessage(preparePullRequestThreadAction.error) ??
+        (preparePullRequestThreadAction.error instanceof Error
+          ? preparePullRequestThreadAction.error.message
+          : preparePullRequestThreadAction.error
+            ? `Failed to prepare ${terminology.singular} thread.`
+            : null)));
+
+  if (!canPrepare) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogPopup className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>PR checkout unavailable</DialogTitle>
+            <DialogDescription>
+              Stave manages this project's repositories. PR checkout into a thread is unavailable
+              for Stave spaces. Use the Stave repository controls in project settings.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => onOpenChange(false)}>Close</Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog
@@ -282,21 +326,23 @@ export function PullRequestThreadDialog({
           >
             {preparingMode === "local" ? "Preparing local..." : "Local"}
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => {
-              void handleConfirm("worktree");
-            }}
-            disabled={
-              !cwd ||
-              !resolvedPullRequest ||
-              isResolving ||
-              preparePullRequestThreadAction.isPending
-            }
-          >
-            {preparingMode === "worktree" ? "Preparing worktree..." : "Worktree"}
-          </Button>
+          {canPrepare ? (
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                void handleConfirm("worktree");
+              }}
+              disabled={
+                !cwd ||
+                !resolvedPullRequest ||
+                isResolving ||
+                preparePullRequestThreadAction.isPending
+              }
+            >
+              {preparingMode === "worktree" ? "Preparing worktree..." : "Worktree"}
+            </Button>
+          ) : null}
         </DialogFooter>
       </DialogPopup>
     </Dialog>

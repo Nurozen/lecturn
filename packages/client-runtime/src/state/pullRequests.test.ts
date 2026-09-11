@@ -39,7 +39,7 @@ function session(client: WsRpcProtocolClient): RpcSession {
   };
 }
 
-it.effect("refreshes pull request activity after a comment is updated", () =>
+it.effect("refreshes host-qualified pull request activity after a comment is updated", () =>
   Effect.scoped(
     Effect.gen(function* () {
       let commentBody = "old comment";
@@ -113,6 +113,7 @@ it.effect("refreshes pull request activity after a comment is updated", () =>
       const reference = {
         projectId: ProjectId.make("project-1"),
         repository: "acme/web",
+        host: "github.internal.test",
         number: 1,
       } as const;
       const activity = atoms.activity({ environmentId: TARGET.environmentId, input: reference });

@@ -14,6 +14,8 @@ import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Metric from "effect/Metric";
 import * as Option from "effect/Option";
@@ -29,6 +31,8 @@ import {
   orchestrationCommandsTotal,
   orchestrationCommandDuration,
 } from "../../observability/Metrics.ts";
+import { StaveAdmission, type StaveAdmissionInput } from "../../stave/StaveAdmission.ts";
+import { isPathUnder, StaveSpaceLock } from "../../stave/StaveSpaceLock.ts";
 import { toPersistenceSqlError } from "../../persistence/Errors.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepository } from "../../persistence/Services/OrchestrationCommandReceipts.ts";
@@ -59,6 +63,7 @@ interface CommandEnvelope {
   origin: OrchestrationClientOrigin | undefined;
   result: Deferred.Deferred<{ sequence: number }, OrchestrationDispatchError>;
   startedAtMs: number;
+  staveReconciliation: boolean;
 }
 
 function commandToAggregateRef(command: OrchestrationCommand): {
@@ -69,6 +74,7 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "project.create":
     case "project.meta.update":
     case "project.delete":
+    case "project.refresh":
       return {
         aggregateKind: "project",
         aggregateId: command.projectId,
@@ -87,6 +93,128 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const commandReceiptRepository = yield* OrchestrationCommandReceiptRepository;
   const projectionPipeline = yield* OrchestrationProjectionPipeline;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const staveAdmission = yield* Effect.serviceOption(StaveAdmission);
+  const staveLock = yield* Effect.serviceOption(StaveSpaceLock);
+  const filesystem = yield* Effect.serviceOption(FileSystem.FileSystem);
+  const pathService = yield* Effect.serviceOption(Path.Path);
+  const commitAdmissionInput = (command: OrchestrationCommand): StaveAdmissionInput | null => {
+    if (
+      ![
+        "thread.create",
+        "thread.meta.update",
+        "thread.turn.start",
+        "thread.fork",
+        "thread.unsettle",
+        "thread.pin",
+        "thread.unarchive",
+      ].includes(command.type)
+    )
+      return null;
+    const thread =
+      "threadId" in command
+        ? commandReadModel.threads.find((t) => t.id === command.threadId)
+        : undefined;
+    const projectId =
+      command.type === "thread.fork"
+        ? command.thread.projectId
+        : "projectId" in command
+          ? command.projectId
+          : command.type === "thread.turn.start"
+            ? (command.bootstrap?.createThread?.projectId ?? thread?.projectId)
+            : thread?.projectId;
+    const project = commandReadModel.projects.find((p) => p.id === projectId);
+    if (project === undefined) return null;
+    return {
+      projectRoot: project.workspaceRoot,
+      projectId: project.id,
+      intent: command.type as StaveAdmissionInput["intent"],
+      worktreePath:
+        (command.type === "thread.fork"
+          ? command.thread.worktreePath
+          : "worktreePath" in command
+            ? command.worktreePath
+            : thread?.worktreePath) ?? null,
+      ...(command.type === "thread.turn.start"
+        ? { prepareWorktree: command.bootstrap?.prepareWorktree !== undefined }
+        : {}),
+      lockHeld: true,
+    };
+  };
+  const withCommitAdmission = <A, E, R>(
+    command: OrchestrationCommand,
+    effect: Effect.Effect<A, E, R>,
+    staveReconciliation = false,
+  ) => {
+    if (
+      (command.type === "project.create" || command.type === "project.meta.update") &&
+      command.workspaceRoot !== undefined &&
+      !staveReconciliation &&
+      Option.isSome(staveLock)
+    ) {
+      const destination = command.workspaceRoot;
+      return Effect.gen(function* () {
+        const existing = commandReadModel.projects.find(
+          (project) => project.id === command.projectId,
+        );
+        if (command.type === "project.meta.update" && existing?.workspaceRoot === destination)
+          return yield* effect;
+        const roots = [destination, ...(existing ? [existing.workspaceRoot] : [])];
+        for (const project of commandReadModel.projects) {
+          if (yield* isPathUnder(project.workspaceRoot, destination))
+            roots.push(project.workspaceRoot);
+        }
+        if (Option.isSome(filesystem) && Option.isSome(pathService)) {
+          let candidate = pathService.value.resolve(destination);
+          while (true) {
+            if (
+              yield* filesystem.value
+                .exists(pathService.value.join(candidate, ".stave.yaml"))
+                .pipe(Effect.orElseSucceed(() => false))
+            )
+              roots.push(candidate);
+            const parent = pathService.value.dirname(candidate);
+            if (parent === candidate) break;
+            candidate = parent;
+          }
+        }
+        const result = yield* staveLock.value.tryWithWorkspaceLocks(roots, effect);
+        if (Option.isNone(result))
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail:
+              "A Stave operation is changing this workspace or its ancestor. Retry when it finishes.",
+          });
+        return result.value;
+      });
+    }
+    const input = commitAdmissionInput(command);
+    if (input === null || Option.isNone(staveAdmission)) return effect;
+    const checked = staveAdmission.value.check(input).pipe(
+      Effect.mapError(
+        (cause) =>
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: cause.message,
+            cause,
+          }),
+      ),
+      Effect.andThen(effect),
+    );
+    return Option.isSome(staveLock)
+      ? staveLock.value.tryWithSpaceLock(input.projectRoot, checked).pipe(
+          Effect.flatMap((result) =>
+            Option.isSome(result)
+              ? Effect.succeed(result.value)
+              : Effect.fail(
+                  new OrchestrationCommandInvariantError({
+                    commandType: command.type,
+                    detail: "A Stave operation is changing this space. Retry when it finishes.",
+                  }),
+                ),
+          ),
+        )
+      : checked;
+  };
   const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
   const crypto = yield* Crypto.Crypto;
 
@@ -220,54 +348,60 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                 ...planned,
                 metadata: { ...planned.metadata, origin: envelope.origin },
               }));
-        const committedCommand = yield* sql
-          .withTransaction(
-            Effect.gen(function* () {
-              const committedEvents: OrchestrationEvent[] = [];
-              const attachmentCleanups: Effect.Effect<void>[] = [];
-              let nextCommandReadModel = commandReadModel;
+        const committedCommand = yield* withCommitAdmission(
+          envelope.command,
+          sql
+            .withTransaction(
+              Effect.gen(function* () {
+                const committedEvents: OrchestrationEvent[] = [];
+                const attachmentCleanups: Effect.Effect<void>[] = [];
+                let nextCommandReadModel = commandReadModel;
 
-              for (const nextEvent of eventBases) {
-                const savedEvent = yield* eventStore.append(nextEvent);
-                nextCommandReadModel = yield* projectEvent(nextCommandReadModel, savedEvent);
-                const cleanup = yield* projectionPipeline.projectEventDeferred(savedEvent);
-                attachmentCleanups.push(cleanup);
-                committedEvents.push(savedEvent);
-              }
+                for (const nextEvent of eventBases) {
+                  const savedEvent = yield* eventStore.append(nextEvent);
+                  nextCommandReadModel = yield* projectEvent(nextCommandReadModel, savedEvent);
+                  const cleanup = yield* projectionPipeline.projectEventDeferred(savedEvent);
+                  attachmentCleanups.push(cleanup);
+                  committedEvents.push(savedEvent);
+                }
 
-              const lastSavedEvent = committedEvents.at(-1) ?? null;
-              if (lastSavedEvent === null) {
-                return yield* new OrchestrationCommandInvariantError({
-                  commandType: envelope.command.type,
-                  detail: "Command produced no events.",
+                const lastSavedEvent = committedEvents.at(-1) ?? null;
+                if (lastSavedEvent === null) {
+                  return yield* new OrchestrationCommandInvariantError({
+                    commandType: envelope.command.type,
+                    detail: "Command produced no events.",
+                  });
+                }
+
+                yield* commandReceiptRepository.upsert({
+                  commandId: envelope.command.commandId,
+                  aggregateKind: lastSavedEvent.aggregateKind,
+                  aggregateId: lastSavedEvent.aggregateId,
+                  acceptedAt: lastSavedEvent.occurredAt,
+                  resultSequence: lastSavedEvent.sequence,
+                  status: "accepted",
+                  error: null,
                 });
-              }
 
-              yield* commandReceiptRepository.upsert({
-                commandId: envelope.command.commandId,
-                aggregateKind: lastSavedEvent.aggregateKind,
-                aggregateId: lastSavedEvent.aggregateId,
-                acceptedAt: lastSavedEvent.occurredAt,
-                resultSequence: lastSavedEvent.sequence,
-                status: "accepted",
-                error: null,
-              });
-
-              return {
-                committedEvents,
-                attachmentCleanups,
-                lastSequence: lastSavedEvent.sequence,
-                nextCommandReadModel,
-              } as const;
-            }),
-          )
-          .pipe(
-            Effect.catchTag("SqlError", (sqlError) =>
-              Effect.fail(
-                toPersistenceSqlError("OrchestrationEngine.processEnvelope:transaction")(sqlError),
+                return {
+                  committedEvents,
+                  attachmentCleanups,
+                  lastSequence: lastSavedEvent.sequence,
+                  nextCommandReadModel,
+                } as const;
+              }),
+            )
+            .pipe(
+              Effect.catchTag("SqlError", (sqlError) =>
+                Effect.fail(
+                  toPersistenceSqlError("OrchestrationEngine.processEnvelope:transaction")(
+                    sqlError,
+                  ),
+                ),
               ),
             ),
-          );
+          envelope.staveReconciliation,
+        );
 
         commandReadModel = committedCommand.nextCommandReadModel;
         for (const cleanup of committedCommand.attachmentCleanups) {
@@ -380,6 +514,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         origin: options?.origin,
         result,
         startedAtMs: yield* Clock.currentTimeMillis,
+        staveReconciliation: options?.staveReconciliation === true,
       });
       return yield* Deferred.await(result);
     });

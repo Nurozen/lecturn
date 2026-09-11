@@ -144,6 +144,7 @@ const EnvServerConfig = Config.all({
   // Environment-only kill switch, no CLI flag: rollback is an operator
   // action, not a per-invocation option.
   threadForkingEnabled: Config.boolean("LECTURN_THREAD_FORKING").pipe(Config.withDefault(true)),
+  staveEnabled: Config.boolean("LECTURN_STAVE").pipe(Config.withDefault(true)),
 });
 
 export interface CliServerFlags {
@@ -309,6 +310,7 @@ export const resolveServerConfig = (
     const desktopTelemetryFd = bootstrap?.desktopTelemetryFd;
     const desktopTelemetryControlFd = bootstrap?.desktopTelemetryControlFd;
     const resourceMonitorPath = bootstrap?.resourceMonitorPath;
+    const stavePath = bootstrap?.stavePath;
     const autoBootstrapProjectFromCwd = Option.getOrElse(
       resolveOptionPrecedence(
         Option.fromUndefinedOr(options?.forceAutoBootstrapProjectFromCwd),
@@ -385,11 +387,13 @@ export const resolveServerConfig = (
       desktopTelemetryFd,
       desktopTelemetryControlFd,
       resourceMonitorPath,
+      stavePath,
       autoBootstrapProjectFromCwd,
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,
       threadForkingEnabled: env.threadForkingEnabled,
+      staveEnabled: env.staveEnabled,
     };
 
     return config;

@@ -23,6 +23,7 @@ export * from "./vcs.ts";
 export * from "./sourceControl.ts";
 export * from "./pullRequest.ts";
 export * from "./orchestration.ts";
+export * from "./stave.ts";
 export * from "./lecturnProjectFile.ts";
 export * from "./editor.ts";
 export * from "./project.ts";
@@ -36,3 +37,5 @@ export * from "./resourceTelemetry.ts";
 export * from "./usage.ts";
 export * from "./rpc.ts";
 export * from "./relayBilling.ts";
+
+export * from "./sagaWorkbench.ts";

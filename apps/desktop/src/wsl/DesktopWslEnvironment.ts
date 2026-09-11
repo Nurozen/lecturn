@@ -372,6 +372,9 @@ export const buildWslRuntimeInstallScript = (
     'cleanup_runtime_install() { rm -rf "$runtime_tmp"; }',
     "trap cleanup_runtime_install EXIT",
     `tar -xzf ${shellQuote(linuxArchivePath)} -C "$runtime_tmp"`,
+    // A Windows-host tar cannot record the exec bit for the extensionless
+    // Linux Stave binary, so restore it for whichever arch copies shipped.
+    'chmod +x "$runtime_tmp"/apps/server/dist/stave/*/stave 2>/dev/null || true',
     'test -f "$runtime_tmp/apps/server/dist/bin.mjs"',
     'test -f "$runtime_tmp/node_modules/node-pty/package.json"',
 

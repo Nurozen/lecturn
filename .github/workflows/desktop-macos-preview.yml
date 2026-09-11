@@ -82,6 +82,15 @@ jobs:
 
           echo "version=$preview_version" >> "$GITHUB_OUTPUT"
 
+      - name: Fetch Stave binary
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/fetch-stave.ts \
+            --platform-key darwin-arm64 \
+            --version latest \
+            --out "$GITHUB_WORKSPACE/stave-bin"
+
       - id: build
         name: Build unsigned macOS DMG
         shell: bash
@@ -95,6 +104,7 @@ jobs:
             --platform mac \
             --target dmg \
             --arch arm64 \
+            --stave-binary "$GITHUB_WORKSPACE/stave-bin/darwin-arm64/stave" \
             --build-version "$PREVIEW_VERSION" \
             --verbose
 

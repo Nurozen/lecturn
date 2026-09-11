@@ -29,6 +29,22 @@ The root filesystem path for a project. In [the orchestration model][1], it is t
 
 A Git worktree used as an isolated workspace for a thread. If a thread has a `worktreePath` in [the contracts][1], it runs there instead of in the main working tree. Git operations live behind the VCS driver contract in `apps/server/src/vcs/VcsDriver.ts`, implemented by [GitVcsDriverCore.ts][3].
 
+#### Stave space
+
+A project whose workspace root carries a `.stave.yaml` manifest (fork only). The root is a directory of repo checkouts rather than a repository, threads always run in the root, and git surfaces target the first `mode: edit` repo. The server derives `project.stave` from the manifest at read time in [ProjectionSnapshotQuery.ts][10]. See [stave-integration.md][28].
+
+#### Saga
+
+A Stave space that coordinates member spaces (`kind: saga` in its manifest). Its derived `memberOf` relationships and live status drive an environment-scoped project tree in the clients. See [stave-integration.md][28].
+
+#### Den
+
+A ContextMarmot memory store attached to a Stave space through its manifest's `memories` list. Listed on the project today; integration is planned. See [stave-integration.md][28].
+
+#### Stave operation
+
+One long Stave mutation (create a space, register a repo, remove a partial space, set up) run by the application-lifetime `StaveOperations` service under a client-chosen `operationId` and streamed as sequence-numbered progress events. A client starts or reattaches with the same id, so an operation outlives the socket that started it (fork only). See [stave-integration.md][28].
+
 ### Thread timeline
 
 #### Thread
@@ -186,6 +202,7 @@ ships Lecturn already matching it.
 - [Provider architecture][16]
 - [Permission modes][18]
 - [Workspace layout][2]
+- [Stave integration (fork)][28]
 
 [1]: ../../packages/contracts/src/orchestration.ts
 [2]: ./workspace-layout.md
@@ -214,3 +231,4 @@ ships Lecturn already matching it.
 [25]: ../../apps/server/src/environmentTheme.ts
 [26]: ../user/environment-theme.md
 [27]: ../../apps/server/src/orchestration/threadFork.ts
+[28]: ./stave-integration.md

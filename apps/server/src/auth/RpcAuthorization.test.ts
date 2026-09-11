@@ -37,6 +37,28 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.cloudInstallRelayClient)).toBe(AuthRelayWriteScope);
   });
 
+  it("treats Stave status probes as orchestration reads", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.staveGetStatus)).toBe(AuthOrchestrationReadScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.staveSpaceStatus)).toBe(AuthOrchestrationReadScope);
+  });
+
+  it("lets a read-only client list, dry-run and watch Stave operations but not run them", () => {
+    for (const method of [
+      WS_METHODS.staveListRepos,
+      WS_METHODS.staveListSpaces,
+      WS_METHODS.staveListSagas,
+      WS_METHODS.staveSagaStatus,
+      WS_METHODS.staveMemoryProviders,
+      WS_METHODS.staveDryRun,
+      WS_METHODS.staveObserveOperation,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+    }
+    expect(requiredScopeForRpcMethod(WS_METHODS.staveRunOperation)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+  });
+
   it("requires permission to operate on a thread before uploading feedback", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.providerUploadFeedback)).toBe(
       AuthOrchestrationOperateScope,
@@ -52,6 +74,24 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.pullRequestsRequestReviewers)).toBe(
       requiredScopeForRpcMethod(WS_METHODS.pullRequestsComment),
     );
+  });
+
+  it("separates workbench reads from explicitly authorized workflow changes", () => {
+    for (const method of [
+      WS_METHODS.sagaWorkbenchGetSnapshot,
+      WS_METHODS.sagaWorkbenchGetEvidence,
+      WS_METHODS.sagaWorkbenchGetActivity,
+    ])
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+    for (const method of [
+      WS_METHODS.sagaWorkbenchSetStage,
+      WS_METHODS.sagaWorkbenchConfigure,
+      WS_METHODS.sagaWorkbenchApprove,
+      WS_METHODS.sagaWorkbenchComplete,
+      WS_METHODS.sagaWorkbenchReopen,
+      WS_METHODS.sagaWorkbenchSummarize,
+    ])
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
   });
 
   it("rejects unknown RPC method names", () => {

@@ -135,7 +135,8 @@ export const make = Effect.gen(function* () {
       cli
         .listPullRequests({
           cwd: input.cwd,
-          repository: input.repository,
+          // Organization/project stay in the public identity; az detects them from cwd.
+          repository: input.repository.split("/").at(-1) ?? input.repository,
           state: input.state,
           involvement: input.involvement,
           viewer: input.viewer,

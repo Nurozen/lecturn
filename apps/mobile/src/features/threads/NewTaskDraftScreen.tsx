@@ -25,6 +25,12 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
+import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
+import {
+  isStaveProject,
+  staveForcedEnvMode,
+  staveThreadStartMessage,
+} from "@lecturn/client-runtime/state/projectGit";
 import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   resolveEnvironmentMachineKind,
@@ -107,6 +113,8 @@ import { useIncomingShare } from "../sharing/IncomingShareProvider";
 import { selectIncomingShareAttachmentsForServer } from "../sharing/incoming-share-model";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { serverEnvironment } from "../../state/server";
+
+const STAVE_WORKSPACE_MODE_HINT = "Stave spaces always run in the space root";
 
 function NewTaskWorkspaceIcon(props: {
   readonly workspaceMode: "local" | "worktree";
@@ -863,6 +871,11 @@ export function NewTaskDraftScreen(props: {
   async function handleStart(): Promise<void> {
     if (voiceInput.blocksSubmission) return;
     const selectedProject = flow.selectedProject;
+    const staveStartMessage = staveThreadStartMessage(selectedProject);
+    if (staveStartMessage !== null) {
+      Alert.alert("Unarchive to start a thread", staveStartMessage);
+      return;
+    }
     const draftKey = flow.draftKey;
     if (!selectedProject || !draftKey) {
       return;
@@ -875,7 +888,10 @@ export function NewTaskDraftScreen(props: {
         selectedEnvironmentServerConfig,
         draft.modelSelection ?? null,
       ) ?? flow.selectedModel;
-    const workspaceMode = draft.workspaceSelection?.mode ?? flow.workspaceMode;
+    // A Stave space forces local mode and never runs a thread in a worktree,
+    // whatever an older draft snapshot still carries.
+    const workspaceMode =
+      staveForcedEnvMode(selectedProject) ?? draft.workspaceSelection?.mode ?? flow.workspaceMode;
     const selectedBranchName = draft.workspaceSelection?.branch ?? flow.selectedBranchName;
     const selectedWorktreePath =
       draft.workspaceSelection?.worktreePath ?? flow.selectedWorktreePath;
@@ -983,7 +999,10 @@ export function NewTaskDraftScreen(props: {
       modelSelection,
       envMode: workspaceMode,
       branch: creationBranch,
-      worktreePath: workspaceMode === "worktree" ? null : selectedWorktreePath,
+      worktreePath:
+        workspaceMode === "worktree" || isStaveProject(selectedProject)
+          ? null
+          : selectedWorktreePath,
       startFromOrigin,
       runtimeMode,
       interactionMode,
@@ -1011,7 +1030,8 @@ export function NewTaskDraftScreen(props: {
         const error = squashAtomCommandFailure(result);
         Alert.alert(
           "Could not start task",
-          error instanceof Error ? error.message : "The task could not be started.",
+          staveAdmissionErrorMessage(error) ??
+            (error instanceof Error ? error.message : "The task could not be started."),
         );
       }
       return;
@@ -1188,8 +1208,16 @@ export function NewTaskDraftScreen(props: {
     </View>
   );
 
+  // Stave spaces cannot switch to worktree mode; the toggle stays visible
+  // (it names the mode) but is inert and explains why.
+  const workspaceModeLocked = isStaveProject(selectedProject);
   const workspaceControls = (
     <View className="flex-row items-center gap-1 px-2">
+      {selectedProject?.stave?.state === "archived" ? (
+        <Text className="text-xs text-muted-foreground">
+          Unarchive on web or desktop to start a thread.
+        </Text>
+      ) : null}
       {flow.submitting && environmentConnected && flow.workspaceMode === "worktree" ? (
         <View
           accessible
@@ -1206,9 +1234,13 @@ export function NewTaskDraftScreen(props: {
       ) : (
         <>
           <ComposerInlineControl
-            accessibilityHint={`Switches to ${flow.workspaceMode === "local" ? "a new worktree" : "the current checkout"}`}
+            accessibilityHint={
+              workspaceModeLocked
+                ? STAVE_WORKSPACE_MODE_HINT
+                : `Switches to ${flow.workspaceMode === "local" ? "a new worktree" : "the current checkout"}`
+            }
             accessibilityLabel={workspaceLabel}
-            disabled={isComposerInteractionLocked || voiceInput.isBusy}
+            disabled={isComposerInteractionLocked || voiceInput.isBusy || workspaceModeLocked}
             iconNode={
               <NewTaskWorkspaceIcon
                 workspaceMode={flow.workspaceMode}

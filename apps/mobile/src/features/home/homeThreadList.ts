@@ -2,7 +2,10 @@ import {
   buildProjectGroups,
   derivePhysicalProjectKey,
   deriveProjectGroupLabel,
+  buildSagaProjectTree,
+  type SagaProjectIndexEntry,
 } from "@lecturn/client-runtime/state/project-grouping";
+import { buildPhysicalSagaProjectGroups } from "@lecturn/client-runtime/state/sagaWorkbench";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -52,25 +55,29 @@ export function buildHomeProjectScopes(input: {
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly environmentId: EnvironmentId | null;
   readonly projectGroupingMode: SidebarProjectGroupingMode;
+  readonly physicalStaveGroups?: boolean;
 }): ReadonlyArray<HomeProjectScope> {
   const projects = input.projects.filter(
     (project) => input.environmentId === null || project.environmentId === input.environmentId,
   );
-  return buildProjectGroups({
+  const groups = buildProjectGroups({
     projects,
     settings: {
       sidebarProjectGroupingMode: input.projectGroupingMode,
       sidebarProjectGroupingOverrides: {},
     },
-  }).map((group) => {
-    return {
-      key: group.key,
-      title: group.label,
-      representative: group.representative,
-      projects: group.members.map((member) => member.project),
-      projectRefs: group.memberProjectRefs,
-    };
   });
+  return (input.physicalStaveGroups ? buildPhysicalSagaProjectGroups(groups) : groups).map(
+    (group) => {
+      return {
+        key: group.key,
+        title: group.label,
+        representative: group.representative,
+        projects: group.members.map((member) => member.project),
+        projectRefs: group.memberProjectRefs,
+      };
+    },
+  );
 }
 
 export function sortHomeProjectScopes(input: {
@@ -144,6 +151,7 @@ const RECENT_THREAD_WINDOW_MS = 5 * 24 * 60 * 60 * 1000;
 const RECENT_THREAD_FALLBACK_COUNT = 3;
 
 export interface HomeThreadGroup {
+  readonly projectRefs?: ReadonlyArray<ScopedProjectRef>;
   readonly key: string;
   readonly title: string;
   readonly representative: EnvironmentProject;
@@ -165,6 +173,7 @@ export interface HomeThreadGroup {
 }
 
 interface MutableHomeThreadGroup {
+  readonly projectRefs?: ReadonlyArray<ScopedProjectRef>;
   readonly key: string;
   readonly projects: EnvironmentProject[];
   readonly pendingTasks: PendingNewTask[];
@@ -212,17 +221,22 @@ export function buildHomeThreadGroups(input: {
   readonly projectGroupingMode: SidebarProjectGroupingMode;
   /** Current time used for the recency window; defaults to now. Injectable for tests. */
   readonly now?: number;
+  readonly includeStaveProjects?: boolean;
+  readonly sagaIndex?: ReadonlyArray<SagaProjectIndexEntry>;
 }): ReadonlyArray<HomeThreadGroup> {
   const now = input.now ?? Date.now();
   const groups = new Map<string, MutableHomeThreadGroup>();
   const groupTitleByKey = new Map<string, string>();
   const groupKeyByProjectKey = new Map<string, string>();
 
-  for (const scope of buildHomeProjectScopes(input)) {
+  // Search, empty-space visibility, and saga ancestry must see the same physical
+  // groups as the rendered hierarchy. Filter-menu scopes remain logical.
+  for (const scope of buildHomeProjectScopes({ ...input, physicalStaveGroups: true })) {
     groupTitleByKey.set(scope.key, scope.title);
     groups.set(scope.key, {
       key: scope.key,
       projects: [...scope.projects],
+      projectRefs: scope.projectRefs,
       pendingTasks: [],
       threads: [],
     });
@@ -291,10 +305,16 @@ export function buildHomeThreadGroups(input: {
 
   const query = input.searchQuery.trim().toLocaleLowerCase();
   const result: HomeThreadGroup[] = [];
+  const ancestorCandidates = new Set<string>();
 
   for (const group of groups.values()) {
     const representative = group.projects[0];
-    if (!representative || (group.threads.length === 0 && group.pendingTasks.length === 0)) {
+    if (
+      !representative ||
+      (group.threads.length === 0 &&
+        group.pendingTasks.length === 0 &&
+        !(input.includeStaveProjects && representative.stave))
+    ) {
       continue;
     }
 
@@ -323,8 +343,14 @@ export function buildHomeThreadGroups(input: {
           pendingTask.title.toLocaleLowerCase().includes(query),
         );
 
-    if (matchingThreads.length === 0 && matchingPendingTasks.length === 0) {
-      continue;
+    if (
+      matchingThreads.length === 0 &&
+      matchingPendingTasks.length === 0 &&
+      !(input.includeStaveProjects && representative.stave && groupMatches)
+    ) {
+      if (input.includeStaveProjects && group.projects.some((project) => project.stave?.isSaga)) {
+        ancestorCandidates.add(group.key);
+      } else continue;
     }
 
     const sortedThreads = sortThreads(matchingThreads, input.threadSortOrder);
@@ -360,6 +386,7 @@ export function buildHomeThreadGroups(input: {
       title,
       representative,
       projects: group.projects,
+      projectRefs: group.projectRefs,
       pendingTasks: matchingPendingTasks,
       threads: sortedThreads,
       recentThreads,
@@ -369,8 +396,37 @@ export function buildHomeThreadGroups(input: {
     });
   }
 
+  // A matching member keeps its real saga heading during search, even when the
+  // coordinator itself has no matching thread. Unrelated empty sagas stay hidden.
+  const retainedAncestors = new Set<string>();
+  if (ancestorCandidates.size > 0) {
+    const tree = buildSagaProjectTree(
+      result.map((group) => ({
+        key: group.key,
+        label: group.title,
+        representative: group.representative,
+        members: group.projects.map((project) => ({
+          project,
+          physicalProjectKey: derivePhysicalProjectKey(project),
+        })),
+        memberProjectRefs:
+          group.projectRefs ??
+          group.projects.map((project) => ({
+            environmentId: project.environmentId,
+            projectId: project.id,
+          })),
+      })),
+      input.sagaIndex ?? [],
+    );
+    for (const node of tree) {
+      if (node.children.some((child) => !ancestorCandidates.has(child.group.key)))
+        retainedAncestors.add(node.group.key);
+    }
+  }
   return Arr.sort(
-    result,
+    result.filter(
+      (group) => !ancestorCandidates.has(group.key) || retainedAncestors.has(group.key),
+    ),
     Order.mapInput(
       Order.Struct({
         timestamp: Order.flip(Order.Number),

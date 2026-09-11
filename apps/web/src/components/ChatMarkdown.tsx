@@ -159,7 +159,7 @@ import {
   WORKSPACE_BASENAME_LOOKUP_LIMIT,
 } from "../workspaceBasenameLookup";
 import {
-  findProjectForChangeRequest,
+  findChangeRequestTarget,
   matchesLinkedPullRequestUrl,
   parseChangeRequestUrl,
   useOpenChangeRequestLink,
@@ -2136,14 +2136,15 @@ function ChatMarkdown({
       }
       const parsed = parseChangeRequestUrl(href);
       if (parsed === null) return null;
-      const project = findProjectForChangeRequest(
+      const target = findChangeRequestTarget(
         projects.filter((candidate) => candidate.environmentId === threadRef.environmentId),
         parsed,
       );
-      if (project === undefined) return null;
+      if (target === undefined) return null;
       return {
-        projectId: project.id,
-        repository: project.repositoryIdentity?.displayName ?? parsed.repository,
+        projectId: target.project.id,
+        repository: target.repository,
+        host: target.host,
         number: parsed.number,
         url: href,
       };

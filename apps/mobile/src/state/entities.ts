@@ -9,6 +9,7 @@ import type {
   ScopedThreadRef,
   ServerConfig,
 } from "@lecturn/contracts";
+import { environmentSupportsStave } from "@lecturn/client-runtime/state/stave";
 import { Atom } from "effect/unstable/reactivity";
 
 import { environmentProjects } from "./projects";
@@ -51,6 +52,13 @@ export function useEnvironmentServerConfig(
       ? EMPTY_SERVER_CONFIG_ATOM
       : serverEnvironment.configValueAtom(environmentId),
   );
+}
+
+/** Whether the environment's server build ships the Stave integration.
+    Mobile v1 only reads the badge off the project shell, so this is the
+    capability half of the gate; enabled/runnable are web-only concerns. */
+export function useEnvironmentSupportsStave(environmentId: EnvironmentId | null): boolean {
+  return environmentSupportsStave(useEnvironmentServerConfig(environmentId));
 }
 
 export function useServerConfigs(): ReadonlyMap<EnvironmentId, ServerConfig> {

@@ -75,6 +75,11 @@ import {
   setPendingConnectionError,
   useSavedRemoteConnections,
 } from "../../state/use-remote-environment-registry";
+import {
+  isStaveProject,
+  resolveProjectGitCwd,
+  staveForcedEnvMode,
+} from "@lecturn/client-runtime/state/projectGit";
 import { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
 import { type VcsRef } from "@lecturn/client-runtime/state/vcs";
 import {
@@ -90,6 +95,7 @@ import {
 import { useLegacyPlanModeState } from "./use-legacy-plan-mode-enabled";
 import {
   resolveNewTaskBranchWorktreePath,
+  resolveNewTaskGitCwd,
   resolveNewTaskLocalWorkspaceSelection,
 } from "./new-task-context-presentation";
 
@@ -121,7 +127,13 @@ export function branchBadgeLabel(input: {
   if (input.branch.current) {
     return "current";
   }
-  if (input.branch.worktreePath && input.branch.worktreePath !== input.project?.workspaceRoot) {
+  // Compare against the git cwd, not the workspace root: a Stave space's
+  // branches are listed from its primary repo, whose own checkout is not a
+  // worktree.
+  if (
+    input.branch.worktreePath &&
+    input.branch.worktreePath !== resolveProjectGitCwd({ project: input.project })
+  ) {
     return "worktree";
   }
   if (input.branch.isDefault) {
@@ -306,6 +318,12 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       scopedProjectKey(editingPendingProject.environmentId, editingPendingProject.id)
       ? editingPendingProject
       : (projectsForEnvironment[0] ?? null));
+  // A Stave space is not a repository: branch lists and status come from its
+  // primary repo, threads always run in the space root (never a worktree),
+  // and the worktree mode is not offered.
+  const selectedProjectIsStave = isStaveProject(selectedProject);
+  const selectedProjectGitCwd = resolveNewTaskGitCwd(selectedProject);
+  const forcedWorkspaceMode = staveForcedEnvMode(selectedProject);
 
   // Only offer machines that actually host the currently selected repository, so
   // switching computers moves the same repo across machines instead of jumping to
@@ -376,10 +394,13 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   const prompt = selectedProjectDraft.text;
   const attachments = selectedProjectDraft.attachments;
   // Default mode until the user picks one explicitly — same resolution web
-  // uses for new draft threads: per-project setting, then the repo's
-  // checked-in lecturn.json, then the server's configured default.
+  // uses for new draft threads: forced by the environment (Stave), then the
+  // per-project setting, then the repo's checked-in lecturn.json, then the
+  // server's configured default. A forced mode makes the file read moot.
   const lecturnProjectFileQuery = useEnvironmentQuery(
-    selectedProject !== null && selectedProject.workspaceRoot !== ""
+    selectedProject !== null &&
+      selectedProject.workspaceRoot !== "" &&
+      forcedWorkspaceMode === undefined
       ? projectEnvironment.readFile({
           environmentId: selectedProject.environmentId,
           input: { cwd: selectedProject.workspaceRoot, relativePath: LECTURN_PROJECT_FILE_NAME },
@@ -392,6 +413,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     return parseLecturnProjectFile(lecturnProjectFileData.contents)?.defaultThreadEnvMode ?? null;
   }, [lecturnProjectFileData]);
   const defaultWorkspaceMode: WorkspaceMode = resolveDefaultThreadEnvMode({
+    forcedMode: forcedWorkspaceMode,
     projectSetting: selectedProject?.defaultThreadEnvMode,
     projectFile: lecturnProjectFileDefaultMode,
     globalDefault: selectedEnvironmentServerConfig?.settings.defaultThreadEnvMode ?? "local",
@@ -401,12 +423,18 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   // the frozen interim value beats the lecturn.json default once it loads.
   const defaultWorkspaceModeSettled = isDefaultThreadEnvModeSettled({
     explicitMode: selectedProjectDraft.workspaceSelection?.mode,
+    forcedMode: forcedWorkspaceMode,
     projectSetting: selectedProject?.defaultThreadEnvMode,
     projectFilePending: lecturnProjectFileQuery.isPending,
   });
-  const workspaceMode = selectedProjectDraft.workspaceSelection?.mode ?? defaultWorkspaceMode;
+  // The forced mode also beats a stale explicit pick left in the draft.
+  const workspaceMode =
+    forcedWorkspaceMode ?? selectedProjectDraft.workspaceSelection?.mode ?? defaultWorkspaceMode;
   const selectedBranchName = selectedProjectDraft.workspaceSelection?.branch ?? null;
-  const selectedWorktreePath = selectedProjectDraft.workspaceSelection?.worktreePath ?? null;
+  // A Stave thread never has a worktree, whatever an older draft recorded.
+  const selectedWorktreePath = selectedProjectIsStave
+    ? null
+    : (selectedProjectDraft.workspaceSelection?.worktreePath ?? null);
   // Keep the user's explicit choice separate from the resolved display value:
   // only the explicit flag is ever written back to the draft, so the resolved
   // value keeps tracking the server setting when the config loads late.
@@ -571,11 +599,11 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   const branchTarget = useMemo(
     () => ({
       environmentId: selectedProject?.environmentId ?? null,
-      // `|| null` also skips the stand-in project's empty workspaceRoot.
-      cwd: selectedProject?.workspaceRoot || null,
+      // Git cwd (primary repo for Stave); null for the stand-in project.
+      cwd: selectedProjectGitCwd,
       query: debouncedBranchQuery,
     }),
-    [debouncedBranchQuery, selectedProject?.environmentId, selectedProject?.workspaceRoot],
+    [debouncedBranchQuery, selectedProject?.environmentId, selectedProjectGitCwd],
   );
   const branchState = usePaginatedBranches(branchTarget);
   const branchSearchIsDebouncing = branchQuery.trim() !== debouncedBranchQuery.trim();
@@ -677,9 +705,13 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       if (!selectedProject) {
         return;
       }
+      if (mode === "worktree" && selectedProjectIsStave) {
+        return;
+      }
       const localSelection = resolveNewTaskLocalWorkspaceSelection({
         branches: availableBranches,
-        projectCwd: selectedProject.workspaceRoot,
+        projectCwd: selectedProjectGitCwd ?? selectedProject.workspaceRoot,
+        staveProject: selectedProjectIsStave,
       });
       if (mode === "local" && localSelection.awaitsCurrentBranch) {
         pendingLocalBranchSyncDraftKeysRef.current.add(selectedProjectDraftKey);
@@ -701,6 +733,8 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       selectedBranchName,
       selectedProject,
       selectedProjectDraftKey,
+      selectedProjectGitCwd,
+      selectedProjectIsStave,
       selectedWorktreePath,
     ],
   );
@@ -716,7 +750,8 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     }
     const localSelection = resolveNewTaskLocalWorkspaceSelection({
       branches: availableBranches,
-      projectCwd: selectedProject.workspaceRoot,
+      projectCwd: selectedProjectGitCwd ?? selectedProject.workspaceRoot,
+      staveProject: selectedProjectIsStave,
     });
     if (localSelection.awaitsCurrentBranch) {
       return;
@@ -736,6 +771,8 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     draftStartFromOrigin,
     selectedProject,
     selectedProjectDraftKey,
+    selectedProjectGitCwd,
+    selectedProjectIsStave,
     workspaceMode,
   ]);
 
@@ -751,14 +788,22 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
           branch: branch.name,
           worktreePath: resolveNewTaskBranchWorktreePath({
             workspaceMode,
-            projectCwd: selectedProject.workspaceRoot,
+            projectCwd: selectedProjectGitCwd ?? selectedProject.workspaceRoot,
             branchWorktreePath: branch.worktreePath,
+            staveProject: selectedProjectIsStave,
           }),
           ...(draftStartFromOrigin !== undefined ? { startFromOrigin: draftStartFromOrigin } : {}),
         },
       });
     },
-    [draftStartFromOrigin, selectedProject, selectedProjectDraftKey, workspaceMode],
+    [
+      draftStartFromOrigin,
+      selectedProject,
+      selectedProjectDraftKey,
+      selectedProjectGitCwd,
+      selectedProjectIsStave,
+      workspaceMode,
+    ],
   );
 
   const setStartFromOrigin = useCallback(
@@ -886,7 +931,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       const workspaceSelection = draft.workspaceSelection;
       // Fall back to the resolved mode (server default) so queued tasks drain
       // with the same mode the composer displayed.
-      const mode = workspaceSelection?.mode ?? workspaceMode;
+      const mode = forcedWorkspaceMode ?? workspaceSelection?.mode ?? workspaceMode;
       // When the selection is the stand-in built from the queued snapshot,
       // persist the original (possibly absent) snapshot values — the
       // stand-in's placeholder title/workspaceRoot must never be written back
@@ -926,7 +971,10 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
           // out then, so recording a queue-time guess would pin a stale label
           // to a thread that ran somewhere else.
           branch: workspaceSelection?.branch ?? null,
-          worktreePath: mode === "worktree" ? null : (workspaceSelection?.worktreePath ?? null),
+          worktreePath:
+            mode === "worktree" || selectedProjectIsStave
+              ? null
+              : (workspaceSelection?.worktreePath ?? null),
           // The draft only carries the flag when the user touched it; fall
           // back to the resolved default (server settings) so queued tasks
           // drain with the same origin mode the composer displayed.
@@ -940,10 +988,12 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     [
       editingPendingProject,
       editingPendingTask,
+      forcedWorkspaceMode,
       selectedEnvironmentServerConfig,
       selectedModel,
       selectedProject,
       selectedProjectDraftKey,
+      selectedProjectIsStave,
       legacyPlanModeEnabled,
       planModePreferenceLoaded,
       startFromOrigin,

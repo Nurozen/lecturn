@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   changeRequestRepositoryUrl,
   findProjectForChangeRequest,
+  findChangeRequestTarget,
   gitHubPullRequestBrowserUrl,
   matchesLinkedPullRequestUrl,
   openPullRequestLink,
@@ -302,7 +303,7 @@ describe("parseChangeRequestUrl", () => {
 
 describe("findProjectForChangeRequest", () => {
   const project = (identity: Record<string, unknown>) =>
-    ({ id: "p1", repositoryIdentity: identity }) as never;
+    ({ id: "p1", workspaceRoot: "/repo", repositoryIdentity: identity }) as never;
 
   it("matches a nested GitLab group by the whole path below the host", () => {
     // The server identifies a repository by `displayName`, which keeps every group segment; the
@@ -357,6 +358,88 @@ describe("findProjectForChangeRequest", () => {
         host: "github.com-evil.test",
         repository: "nurozen/lecturn",
         number: 1,
+      }),
+    ).toBeUndefined();
+  });
+});
+
+describe("Stave change request links", () => {
+  const remote = (host: string, displayName: string): RepositoryIdentity => ({
+    provider: "github",
+    canonicalKey: `${host}/${displayName.toLowerCase()}`,
+    displayName,
+    owner: displayName.split("/")[0]!,
+    name: displayName.split("/").at(-1)!,
+    locator: {
+      source: "git-remote",
+      remoteName: "origin",
+      remoteUrl: `https://${host}/${displayName}.git`,
+    },
+  });
+  const publicRepo = remote("github.com", "Acme/API");
+  const enterpriseRepo = remote("github.acme.test", "Acme/API");
+  const space = {
+    id: "space",
+    workspaceRoot: "/spaces/test",
+    repositoryIdentity: publicRepo,
+    stave: {
+      spaceId: "test",
+      kind: "ticket",
+      isSaga: false,
+      memories: [],
+      primaryRepoPath: "/spaces/test/api",
+      primaryRepositoryIdentity: publicRepo,
+      repos: [
+        { name: "api", path: "api", mode: "edit", repositoryIdentity: publicRepo },
+        {
+          name: "enterprise-api",
+          path: "nested/api",
+          mode: "edit",
+          repositoryIdentity: enterpriseRepo,
+        },
+        {
+          name: "docs",
+          path: "references/docs",
+          mode: "reference",
+          repositoryIdentity: remote("github.com", "Acme/Docs"),
+        },
+      ],
+    },
+  } as never;
+
+  it("resolves secondary checkout URLs with host and the remote's own repository spelling", () => {
+    expect(
+      findChangeRequestTarget([space], {
+        host: "github.acme.test",
+        repository: "acme/api",
+        number: 7,
+      }),
+    ).toEqual({ project: space, repository: "Acme/API", host: "github.acme.test" });
+    expect(
+      findChangeRequestTarget([space], {
+        host: "github.com",
+        repository: "acme/api",
+        number: 7,
+      }),
+    ).toEqual({ project: space, repository: "Acme/API", host: "github.com" });
+  });
+
+  it("leaves reference repository PRs as ordinary external links", () => {
+    expect(
+      findChangeRequestTarget([space], {
+        host: "github.com",
+        repository: "acme/docs",
+        number: 7,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("does not associate an unknown host with the space", () => {
+    expect(
+      findChangeRequestTarget([space], {
+        host: "github.other.test",
+        repository: "acme/api",
+        number: 7,
       }),
     ).toBeUndefined();
   });

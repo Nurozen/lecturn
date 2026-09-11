@@ -1,3 +1,5 @@
+import { StaveLifecycleBadge } from "./stave/StaveLifecycleBadge";
+import { describeStaveWorkspace } from "./stave/staveWorkspaceContext.logic";
 import { autoAnimate } from "@formkit/auto-animate";
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
@@ -112,7 +114,13 @@ import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import { readEnvironmentSupportsForking, useProjects, useThreadShells } from "../state/entities";
+import {
+  readEnvironmentSupportsForking,
+  useProject,
+  useProjects,
+  useThreadShells,
+} from "../state/entities";
+import { resolveThreadGitTarget } from "../lib/threadGitTarget";
 import { readForkAtLatestTurn, useForkThread } from "../hooks/useForkThread";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
 import { vcsEnvironment } from "../state/vcs";
@@ -197,6 +205,8 @@ import {
   ComboboxTrigger,
   useComboboxFilter,
 } from "./ui/combobox";
+import { useSagaSidebarTree } from "./stave/useSagaSidebarTree";
+import { sagaSidebarThreadOrder } from "./stave/staveSaga.logic";
 import { SidebarContent, SidebarGroup, SidebarMenuButton, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
@@ -281,6 +291,7 @@ function SidebarThreadTooltip({
   projectCwd,
   projectFaviconPath,
   projectIcon,
+  staveWorkspace,
   environmentLabel,
   environmentMachine,
   providerEntry,
@@ -296,6 +307,7 @@ function SidebarThreadTooltip({
   projectCwd: string | null;
   projectFaviconPath: string | null;
   projectIcon: ProjectIconOverride | null;
+  staveWorkspace: ReturnType<typeof describeStaveWorkspace>;
   environmentLabel: string | null;
   environmentMachine: EnvironmentMachineKind;
   providerEntry: ProviderInstanceEntry | null;
@@ -345,7 +357,17 @@ function SidebarThreadTooltip({
               <div className="min-w-0 truncate text-foreground/75">{environmentLabel}</div>
             </div>
           ) : null}
-          {thread.branch ? (
+          {staveWorkspace ? (
+            <div className="flex min-w-0 items-start gap-2">
+              <FolderIcon className="mt-0.5 size-3 shrink-0 stroke-muted-foreground" />
+              <div className="min-w-0 text-foreground/75">
+                <div>{staveWorkspace.label}</div>
+                <div className="mt-1 text-muted-foreground whitespace-pre-line wrap-break-word">
+                  {staveWorkspace.title}
+                </div>
+              </div>
+            </div>
+          ) : thread.branch ? (
             <div className="flex min-w-0 items-center gap-2">
               <GitBranchIcon className="size-3 shrink-0 stroke-muted-foreground" />
               <div className="min-w-0 truncate text-foreground/75">{thread.branch}</div>
@@ -827,13 +849,28 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
   const terminalProcessCount = runningTerminalIds.length;
 
-  const gitCwd = thread.worktreePath ?? props.projectCwd;
+  // The row's own project decides where git looks (a Stave space targets its
+  // primary repo, not the space root); `projectCwd` only covers a project that
+  // has not loaded yet.
+  const threadProject = useProject(
+    useMemo(
+      () => scopeProjectRef(thread.environmentId, thread.projectId),
+      [thread.environmentId, thread.projectId],
+    ),
+  );
+  const gitTarget = resolveThreadGitTarget({
+    project: threadProject,
+    thread,
+    fallbackCwd: props.projectCwd,
+  });
+  const gitCwd = gitTarget.cwd;
+  const staveWorkspace = describeStaveWorkspace(threadProject);
   const linkedPullRequestStatus = useLinkedThreadPullRequest(
     leaseLiveStatus ? thread.environmentId : null,
     leaseLiveStatus ? thread.linkedPullRequest : null,
   );
   const gitStatus = useEnvironmentQuery(
-    leaseLiveStatus && (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
+    leaseLiveStatus && gitTarget.statusEnabled && gitCwd !== null
       ? vcsEnvironment.status({
           environmentId: thread.environmentId,
           input: { cwd: gitCwd },
@@ -845,8 +882,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     gitStatus.data,
   );
   const retainTerminalOnBranchMismatch = thread.worktreePath === null;
+  const threadBranch = gitTarget.branch;
   const pr = resolveDisplayedThreadPr({
-    threadBranch: thread.branch,
+    threadBranch,
     gitStatus: visibleGitStatus,
     snapshot: changeRequestSnapshot,
     retainTerminalOnBranchMismatch,
@@ -945,7 +983,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     currentGitBranch: visibleGitStatus?.refName ?? null,
   });
   const prProvider = resolveDisplayedThreadPrProvider({
-    threadBranch: thread.branch,
+    threadBranch,
     gitStatus: visibleGitStatus,
     snapshot: changeRequestSnapshot,
     retainTerminalOnBranchMismatch,
@@ -956,7 +994,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const settledPrHoverClass = pr ? settledPrHoverColorClass(pr.state) : undefined;
   useEffect(() => {
     const nextSnapshot = nextThreadChangeRequestSnapshot({
-      threadBranch: thread.branch,
+      threadBranch,
       gitStatus: visibleGitStatus,
       snapshot: changeRequestSnapshot,
       retainTerminalOnBranchMismatch,
@@ -971,7 +1009,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     linkedPullRequestStatus,
     onChangeRequestSnapshot,
     retainTerminalOnBranchMismatch,
-    thread.branch,
+    threadBranch,
     thread.linkedPullRequest,
     threadKey,
   ]);
@@ -1002,6 +1040,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       projectCwd={props.projectCwd}
       projectFaviconPath={props.projectFaviconPath}
       projectIcon={props.projectIcon}
+      staveWorkspace={staveWorkspace}
       environmentLabel={props.environmentLabel}
       environmentMachine={props.environmentMachine}
       providerEntry={providerEntry}
@@ -1643,10 +1682,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   </Tooltip>
                 </span>
               ) : null}
-              {/* Always the branch. The plan step used to take this slot while
-                  working, but it truncated to a half-sentence and dropped the
-                  branch, so the row lost its most stable identifier. */}
-              {thread.branch ? (
+              {/* Stave threads span the space; their primary Git branch is only
+                  one repo inside that workspace. */}
+              {staveWorkspace ? (
+                <>
+                  <FolderIcon aria-hidden className="size-3 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate whitespace-nowrap">
+                    {staveWorkspace.label}
+                  </span>
+                </>
+              ) : thread.branch ? (
                 <>
                   <ThreadWorktreeIndicator thread={thread} />
                   <span className="min-w-0 flex-1 truncate whitespace-nowrap">{thread.branch}</span>
@@ -1733,9 +1778,20 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   );
   // Same details tooltip as the regular rows: a search hit is still a thread,
   // and the hover card is how you disambiguate identically-titled results.
-  const gitCwd = thread.worktreePath ?? props.projectCwd;
+  const threadProject = useProject(
+    useMemo(
+      () => scopeProjectRef(thread.environmentId, thread.projectId),
+      [thread.environmentId, thread.projectId],
+    ),
+  );
+  const gitTarget = resolveThreadGitTarget({
+    project: threadProject,
+    thread,
+    fallbackCwd: props.projectCwd,
+  });
+  const gitCwd = gitTarget.cwd;
   const gitStatus = useEnvironmentQuery(
-    leaseLiveStatus && (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
+    leaseLiveStatus && gitTarget.statusEnabled && gitCwd !== null
       ? vcsEnvironment.status({
           environmentId: thread.environmentId,
           input: { cwd: gitCwd },
@@ -1816,6 +1872,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
           projectCwd={props.projectCwd}
           projectFaviconPath={props.projectFaviconPath}
           projectIcon={props.projectIcon}
+          staveWorkspace={describeStaveWorkspace(threadProject)}
           environmentLabel={props.environmentLabel}
           environmentMachine={props.environmentMachine}
           providerEntry={providerEntry}
@@ -2006,6 +2063,23 @@ export default function Sidebar() {
     () => sortLogicalProjectsForSidebar(unsortedProjectGroups, threads, sidebarProjectSortOrder),
     [sidebarProjectSortOrder, threads, unsortedProjectGroups],
   );
+  const {
+    tree: sagaTree,
+    navigationProjects,
+    nest: nestSagaProjects,
+  } = useSagaSidebarTree(projectGroups);
+  const [collapsedProjectKeys, setCollapsedProjectKeys] = useState<ReadonlySet<string>>(new Set());
+  const navigationProjectByKey = useMemo(
+    () => new Map(navigationProjects.map((project) => [project.projectKey, project])),
+    [navigationProjects],
+  );
+  const toggleProject = (key: string) =>
+    setCollapsedProjectKeys((old) => {
+      const next = new Set(old);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   const projectGroupsRef = useRef(projectGroups);
   projectGroupsRef.current = projectGroups;
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
@@ -2177,7 +2251,7 @@ export default function Sidebar() {
       }
       void router.navigate({
         to: "/projects/$projectKey",
-        params: { projectKey: projectGroup.projectKey },
+        params: { projectKey: projectGroup.settingsProjectKey ?? projectGroup.projectKey },
       });
     },
     [isMobile, router, setOpenMobile],
@@ -2391,10 +2465,35 @@ export default function Sidebar() {
     return routeThread === undefined ? [] : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
-  const orderedThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...visibleSnoozedThreads, ...renderedSettledThreads],
-    [pinnedThreads, activeThreads, visibleSnoozedThreads, renderedSettledThreads],
-  );
+  const scopedSagaTree = useMemo(() => {
+    if (!scopedProjectKeys) return sagaTree;
+    const matches = (node: (typeof sagaTree)[number]) =>
+      node.group.memberProjectRefs.some((ref) =>
+        scopedProjectKeys.has(`${ref.environmentId}:${ref.projectId}`),
+      );
+    return sagaTree.flatMap((node) => {
+      const children = node.children.filter(matches);
+      return matches(node) || children.length ? [{ ...node, children }] : [];
+    });
+  }, [sagaTree, scopedProjectKeys]);
+  const orderedThreads = useMemo(() => {
+    const rows = [
+      ...pinnedThreads,
+      ...activeThreads,
+      ...visibleSnoozedThreads,
+      ...renderedSettledThreads,
+    ];
+    if (!nestSagaProjects) return rows;
+    return sagaSidebarThreadOrder(scopedSagaTree, collapsedProjectKeys, rows);
+  }, [
+    pinnedThreads,
+    activeThreads,
+    visibleSnoozedThreads,
+    renderedSettledThreads,
+    nestSagaProjects,
+    scopedSagaTree,
+    collapsedProjectKeys,
+  ]);
   const orderedThreadKeys = useMemo(
     () =>
       orderedThreads.map((thread) =>
@@ -3622,8 +3721,21 @@ export default function Sidebar() {
                         type="button"
                         className="relative focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                         onClick={handleNewThreadClick}
-                        disabled={projects.length === 0}
-                        aria-label="New thread"
+                        disabled={
+                          projects.length === 0 ||
+                          (projectGroups.length === 1 &&
+                            projectGroups[0]?.memberProjects.every(
+                              (member) => member.stave?.state === "archived",
+                            ))
+                        }
+                        aria-label={
+                          projectGroups.length === 1 &&
+                          projectGroups[0]?.memberProjects.every(
+                            (member) => member.stave?.state === "archived",
+                          )
+                            ? "Unarchive to start a thread"
+                            : "New thread"
+                        }
                       />
                     }
                   >
@@ -3634,7 +3746,12 @@ export default function Sidebar() {
                     />
                   </TooltipTrigger>
                   <TooltipPopup side="right">
-                    {projectGroups.length > 1 ? (
+                    {projectGroups.length === 1 &&
+                    projectGroups[0]?.memberProjects.every(
+                      (member) => member.stave?.state === "archived",
+                    ) ? (
+                      "Unarchive to start a thread"
+                    ) : projectGroups.length > 1 ? (
                       <span className="flex flex-col gap-0.5">
                         <span>
                           {newThreadShortcutLabel
@@ -3700,6 +3817,11 @@ export default function Sidebar() {
                     <span className="min-w-0 flex-1 truncate">
                       {scopedProjectGroup?.displayName ?? "All projects"}
                     </span>
+                    {scopedProjectGroup ? (
+                      <StaveLifecycleBadge
+                        notices={scopedProjectGroup.memberProjects.map((member) => member.notice)}
+                      />
+                    ) : null}
                     <ChevronDownIcon className="-mr-px size-4 shrink-0" />
                   </ComboboxTrigger>
                   <ComboboxPopup
@@ -3755,6 +3877,11 @@ export default function Sidebar() {
                               <FolderIcon className="size-4 shrink-0" />
                             )}
                             <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
+                            {project ? (
+                              <StaveLifecycleBadge
+                                notices={project.memberProjects.map((member) => member.notice)}
+                              />
+                            ) : null}
                             {project ? (
                               <Button
                                 size="icon-xs"
@@ -3993,6 +4120,240 @@ export default function Sidebar() {
                       />
                     );
                   };
+                  if (nestSagaProjects) {
+                    const sectionFor = (thread: EnvironmentThreadShell) =>
+                      thread.pinnedAt != null
+                        ? ("pinned" as const)
+                        : snoozedThreads.includes(thread)
+                          ? ("snoozed" as const)
+                          : settledThreads.includes(thread)
+                            ? ("settled" as const)
+                            : ("active" as const);
+                    const renderNode = (
+                      node: (typeof sagaTree)[number],
+                      nested = false,
+                    ): ReactNode => {
+                      const project = navigationProjectByKey.get(node.group.key);
+                      if (!project) return null;
+                      const closed = collapsedProjectKeys.has(node.group.key);
+                      const matches = (thread: EnvironmentThreadShell) =>
+                        node.group.memberProjectRefs.some(
+                          (ref) =>
+                            ref.environmentId === thread.environmentId &&
+                            ref.projectId === thread.projectId,
+                        );
+                      const rows = orderedThreads.filter(matches);
+                      return (
+                        <li
+                          key={node.group.key}
+                          className={
+                            nested ? "lecturn-hierarchy-branch list-none pl-7" : "list-none"
+                          }
+                        >
+                          <div data-thread-selection-safe className="mt-2 flex items-center gap-1">
+                            <button
+                              type="button"
+                              data-lecturn-hover
+                              className="rounded p-1 text-muted-foreground hover:bg-sidebar-row-hover"
+                              aria-label={`${closed ? "Expand" : "Collapse"} ${project.displayName}`}
+                              aria-expanded={!closed}
+                              onClick={() => toggleProject(node.group.key)}
+                            >
+                              <ChevronDownIcon className={cn("size-3.5", closed && "-rotate-90")} />
+                            </button>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <button
+                                    type="button"
+                                    data-lecturn-hover
+                                    className={cn(
+                                      "min-w-0 flex-1 truncate py-1.5 text-left text-xs font-medium",
+                                      project.stave?.isSaga
+                                        ? "text-primary"
+                                        : "text-sidebar-foreground",
+                                    )}
+                                    onClick={() => {
+                                      if (project.stave?.isSaga) {
+                                        if (isMobile) setOpenMobile(false);
+                                        void router.navigate({
+                                          to: "/sagas/$environmentId/$projectId",
+                                          params: {
+                                            environmentId: project.environmentId,
+                                            projectId: project.id,
+                                          },
+                                          search: { view: "board" },
+                                        });
+                                      } else toggleProject(node.group.key);
+                                    }}
+                                  >
+                                    <span
+                                      className={
+                                        project.stave?.isSaga ? "lecturn-saga-sheen" : undefined
+                                      }
+                                    >
+                                      {project.displayName}
+                                    </span>
+                                    {project.stave ? (
+                                      <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                                        ·{" "}
+                                        {environmentLabelById.get(project.environmentId) ??
+                                          project.environmentId}
+                                      </span>
+                                    ) : null}
+                                  </button>
+                                }
+                              />
+                              <TooltipPopup side="right">
+                                <p>
+                                  {environmentLabelById.get(project.environmentId) ??
+                                    project.environmentId}
+                                </p>
+                                <p className="max-w-80 break-all text-xs">
+                                  {project.workspaceRoot}
+                                </p>
+                              </TooltipPopup>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <button
+                                    type="button"
+                                    data-lecturn-hover
+                                    className="rounded px-1 text-xs text-muted-foreground hover:bg-sidebar-row-hover"
+                                    aria-label={`New thread in ${project.displayName}`}
+                                    disabled={project.memberProjects.every(
+                                      (member) => member.stave?.state === "archived",
+                                    )}
+                                    onClick={() =>
+                                      void newThreadContext.handleNewThread(
+                                        scopeProjectRef(project.environmentId, project.id),
+                                      )
+                                    }
+                                  >
+                                    <PlusIcon className="size-3.5" />
+                                  </button>
+                                }
+                              />
+                              <TooltipPopup>
+                                New conversation in {project.displayName}. Starts when you send a
+                                message.
+                              </TooltipPopup>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <button
+                                    type="button"
+                                    data-lecturn-hover
+                                    className="rounded px-1 text-xs text-muted-foreground hover:bg-sidebar-row-hover"
+                                    aria-label={`Settings for ${project.displayName}`}
+                                    onClick={() => openProjectSettings(project)}
+                                  >
+                                    <SettingsIcon aria-hidden className="size-3.5" />
+                                  </button>
+                                }
+                              />
+                              <TooltipPopup>
+                                {project.stave?.isSaga
+                                  ? "Saga settings"
+                                  : project.stave
+                                    ? "Space settings"
+                                    : "Project settings"}
+                              </TooltipPopup>
+                            </Tooltip>
+                          </div>
+                          {!closed ? (
+                            <ul
+                              className={cn(
+                                "flex flex-col",
+                                (project.stave?.isSaga || nested) && "lecturn-hierarchy-children",
+                              )}
+                            >
+                              {rows.length > 0 ? (
+                                <li className="lecturn-hierarchy-conversations list-none">
+                                  <ul className="flex flex-col gap-px">
+                                    {rows.map((thread) => {
+                                      const key = scopedThreadKey(
+                                        scopeThreadRef(thread.environmentId, thread.id),
+                                      );
+                                      return thread.pinnedAt != null &&
+                                        reorderablePinnedKeys.has(key) ? (
+                                        <SortablePinnedThreadRow key={key} id={key}>
+                                          {(bag) => renderThreadRow(thread, "pinned", bag)}
+                                        </SortablePinnedThreadRow>
+                                      ) : (
+                                        renderThreadRow(thread, sectionFor(thread))
+                                      );
+                                    })}
+                                  </ul>
+                                </li>
+                              ) : null}
+                              {node.children.map((child) => renderNode(child, true))}
+                            </ul>
+                          ) : null}
+                        </li>
+                      );
+                    };
+                    return (
+                      <>
+                        <SidebarDraftBlock
+                          projectDisplayNameByKey={projectDisplayNameByKey}
+                          projectCwdByKey={projectCwdByKey}
+                          projectFaviconPathByKey={projectFaviconPathByKey}
+                          projectIconByKey={projectIconByKey}
+                          scopedProjectKeys={scopedProjectKeys}
+                          routeDraftId={routeDraftIdForRows}
+                          onNavigateToDraft={navigateToDraft}
+                        />
+                        <li
+                          data-thread-selection-safe
+                          className="flex list-none items-center gap-2 px-2 py-2 text-xs text-muted-foreground"
+                        >
+                          <span className="mr-auto font-medium">Projects</span>
+                          {snoozedThreads.length ? (
+                            <button
+                              type="button"
+                              data-lecturn-hover
+                              aria-expanded={snoozedShelfExpanded}
+                              onClick={toggleSnoozedShelf}
+                            >
+                              Snoozed ({snoozedThreads.length})
+                            </button>
+                          ) : null}
+                          {settledThreads.length ? (
+                            <button
+                              type="button"
+                              data-lecturn-hover
+                              aria-expanded={settledShelfExpanded}
+                              onClick={toggleSettledShelf}
+                            >
+                              Settled ({settledThreads.length})
+                            </button>
+                          ) : null}
+                        </li>
+                        <li className="list-none">
+                          <DndContext
+                            sensors={pinnedDndSensors}
+                            collisionDetection={closestCenter}
+                            modifiers={[restrictToVerticalAxis, restrictToFirstScrollableAncestor]}
+                            onDragEnd={handlePinnedDragEnd}
+                          >
+                            <SortableContext
+                              items={orderedPinnedThreads
+                                .map((thread) =>
+                                  scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+                                )
+                                .filter((key) => reorderablePinnedKeys.has(key))}
+                              strategy={verticalListSortingStrategy}
+                            >
+                              <ul>{scopedSagaTree.map((node) => renderNode(node))}</ul>
+                            </SortableContext>
+                          </DndContext>
+                        </li>
+                      </>
+                    );
+                  }
                   // Draft block above everything, then the pinned block:
                   // full cards above the inbox, closed by a thin divider (the
                   // pin glyphs carry the meaning, so no header text). Both

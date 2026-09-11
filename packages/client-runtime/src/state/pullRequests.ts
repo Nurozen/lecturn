@@ -74,11 +74,23 @@ export function createPullRequestEnvironmentAtoms<R, E>(
     mode: "serial",
     key: ({ environmentId }: { readonly environmentId: string }) => environmentId,
   } as const;
-  const activity = createEnvironmentRpcQueryAtomFamily(runtime, {
+  const activityQuery = createEnvironmentRpcQueryAtomFamily(runtime, {
     label: "environment-data:pull-requests:activity",
     tag: WS_METHODS.pullRequestsActivity,
     staleTimeMs: 15_000,
   });
+  // Atom keys serialize input records; callers and the mutation refresh must use
+  // the same property order even when the host arrives on a list row first.
+  const activity: typeof activityQuery = ({ environmentId, input }) =>
+    activityQuery({
+      environmentId,
+      input: {
+        projectId: input.projectId,
+        repository: input.repository,
+        number: input.number,
+        ...(input.host === undefined ? {} : { host: input.host }),
+      },
+    });
   return {
     list: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:pull-requests:list",
@@ -109,7 +121,15 @@ export function createPullRequestEnvironmentAtoms<R, E>(
       concurrency: {
         mode: "singleFlight",
         key: ({ environmentId, input }) =>
-          JSON.stringify([environmentId, input.threadId, input.cursor]),
+          JSON.stringify([
+            environmentId,
+            input.projectId,
+            input.repository,
+            input.host ?? null,
+            input.number,
+            input.threadId,
+            input.cursor,
+          ]),
       },
     }),
     diff: createEnvironmentQueryAtomFamily(runtime, {
@@ -139,6 +159,7 @@ export function createPullRequestEnvironmentAtoms<R, E>(
             environmentId,
             input.projectId,
             input.repository,
+            input.host ?? null,
             input.number,
             input.commit ?? null,
             input.changeType,
@@ -170,9 +191,14 @@ export function createPullRequestEnvironmentAtoms<R, E>(
       tag: WS_METHODS.pullRequestsUpdateComment,
       scheduler: commandScheduler,
       concurrency: serialPerEnvironment,
-      onSuccess: ({ environmentId, input: { projectId, repository, number } }, registry) =>
+      onSuccess: ({ environmentId, input: { projectId, repository, number, host } }, registry) =>
         Effect.sync(() =>
-          registry.refresh(activity({ environmentId, input: { projectId, repository, number } })),
+          registry.refresh(
+            activity({
+              environmentId,
+              input: { projectId, repository, number, ...(host === undefined ? {} : { host }) },
+            }),
+          ),
         ),
     }),
     submitReview: createEnvironmentRpcCommand(runtime, {

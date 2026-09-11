@@ -209,6 +209,26 @@ export const make = Effect.gen(function* () {
   const provider: PullRequestProviderApi = {
     kind: "github",
     capabilities: CAPABILITIES,
+    ...(cli.listAcceptanceCandidates === undefined
+      ? {}
+      : {
+          listAcceptanceCandidates: (
+            input: Parameters<NonNullable<PullRequestProviderApi["listAcceptanceCandidates"]>>[0],
+          ) =>
+            cli.listAcceptanceCandidates!(input).pipe(
+              Effect.mapError(fail("listAcceptanceCandidates")),
+            ),
+        }),
+    ...(cli.readAcceptanceEvidence === undefined
+      ? {}
+      : {
+          readAcceptanceEvidence: (
+            input: Parameters<NonNullable<PullRequestProviderApi["readAcceptanceEvidence"]>>[0],
+          ) =>
+            cli.readAcceptanceEvidence!(input).pipe(
+              Effect.mapError(fail("readAcceptanceEvidence")),
+            ),
+        }),
 
     getViewer: (input) =>
       cli.getViewerLogin({ cwd: input.cwd }).pipe(Effect.mapError(fail("getViewer"))),

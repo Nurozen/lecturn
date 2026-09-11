@@ -1,4 +1,5 @@
 import { scopeProjectRef, scopedThreadKey } from "@lecturn/client-runtime/environment";
+import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
 import {
   type AtomCommandResult,
   isAtomCommandInterrupted,
@@ -47,7 +48,9 @@ function failureToast(title: string, error: unknown) {
     stackedThreadToast({
       type: "error",
       title,
-      description: error instanceof Error ? error.message : "An error occurred.",
+      description:
+        staveAdmissionErrorMessage(error) ??
+        (error instanceof Error ? error.message : "An error occurred."),
     }),
   );
 }

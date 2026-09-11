@@ -1283,6 +1283,224 @@ describe("DesktopBackendConfiguration", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("passes the packaged Stave binary to the primary bootstrap", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-desktop-backend-config-test-",
+      });
+      const resourcesPath = path.join(baseDir, "resources");
+      const stavePath = path.join(resourcesPath, "stave/stave");
+      yield* fileSystem.makeDirectory(path.dirname(stavePath), { recursive: true });
+      yield* fileSystem.writeFileString(stavePath, "binary");
+
+      yield* Effect.gen(function* () {
+        const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+        const config = yield* configuration.resolvePrimary;
+        assert.equal(config.bootstrap.stavePath, stavePath);
+      }).pipe(
+        Effect.provide(
+          DesktopBackendConfiguration.layer.pipe(
+            Layer.provideMerge(serverExposureLayer),
+            Layer.provideMerge(DesktopAppSettings.layerTest()),
+            Layer.provideMerge(DesktopWslServerTree.layerTest()),
+            Layer.provideMerge(DesktopWslEnvironment.layerTest()),
+            Layer.provideMerge(
+              makeEnvironmentLayer(baseDir, {
+                appPath: `${resourcesPath}/app.asar`,
+                dirname: `${resourcesPath}/app.asar/apps/desktop/dist-electron`,
+                isPackaged: true,
+                resourcesPath,
+              }),
+            ),
+          ),
+        ),
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("omits stavePath from the primary bootstrap when no packaged binary exists", () =>
+    withHarness(
+      Effect.gen(function* () {
+        const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+        const config = yield* configuration.resolvePrimary;
+        assert.notProperty(config.bootstrap, "stavePath");
+      }),
+    ),
+  );
+
+  it.effect("prefers a GOBIN Stave binary over ~/go/bin in development", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-desktop-backend-config-test-",
+      });
+      const goBinStavePath = path.join(baseDir, "custom-gobin/stave");
+      const homeGoStavePath = path.join(baseDir, "go/bin/stave");
+      yield* fileSystem.makeDirectory(path.dirname(goBinStavePath), { recursive: true });
+      yield* fileSystem.makeDirectory(path.dirname(homeGoStavePath), { recursive: true });
+      yield* fileSystem.writeFileString(goBinStavePath, "gobin");
+      yield* fileSystem.writeFileString(homeGoStavePath, "home");
+
+      const previousGoBin = process.env.GOBIN;
+      const previousGoPath = process.env.GOPATH;
+      try {
+        process.env.GOBIN = path.dirname(goBinStavePath);
+        delete process.env.GOPATH;
+
+        yield* Effect.gen(function* () {
+          const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+          const config = yield* configuration.resolvePrimary;
+          assert.equal(config.bootstrap.stavePath, goBinStavePath);
+        }).pipe(
+          Effect.provide(
+            DesktopBackendConfiguration.layer.pipe(
+              Layer.provideMerge(serverExposureLayer),
+              Layer.provideMerge(DesktopAppSettings.layerTest()),
+              Layer.provideMerge(DesktopWslServerTree.layerTest()),
+              Layer.provideMerge(DesktopWslEnvironment.layerTest()),
+              Layer.provideMerge(
+                makeEnvironmentLayer(baseDir, {
+                  dirname: path.join(baseDir, "apps/desktop/src"),
+                  devServerUrl: "http://127.0.0.1:5733",
+                  isPackaged: false,
+                }),
+              ),
+            ),
+          ),
+        );
+      } finally {
+        restoreEnv("GOBIN", previousGoBin);
+        restoreEnv("GOPATH", previousGoPath);
+      }
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("resolveWsl points stavePath at the Linux binary inside the staged runtime", () => {
+    const linuxAppRoot = "/home/test/.t3/wsl-runtime/1.2.3-x64";
+    return withPackagedWslHarness(
+      {
+        archiveHash: "c".repeat(64),
+        forbidFallback: "A valid WSL archive must not extract the Windows fallback",
+        wsl: () => ({
+          prepareRuntime: () => ({ ok: true, linuxAppRoot }),
+          ensureNodePty: () => ({
+            ok: true,
+            nodePath: "/usr/bin/node",
+            resolvedPath: "/usr/bin:/bin",
+          }),
+        }),
+      },
+      ({ baseDir }) =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+
+          const absent = yield* configuration.resolveWsl({ port: 5000, distro: "Ubuntu" });
+          assert.notProperty(absent.bootstrap, "stavePath");
+
+          // The archive is built from server.asar, so the Windows-side copy
+          // there is the witness that the staged runtime carries the binary.
+          const windowsStavePath = path.join(
+            baseDir,
+            "server.asar/apps/server/dist/stave/linux-x64/stave",
+          );
+          yield* fileSystem.makeDirectory(path.dirname(windowsStavePath), { recursive: true });
+          yield* fileSystem.writeFileString(windowsStavePath, "stave");
+
+          const present = yield* configuration.resolveWsl({ port: 5000, distro: "Ubuntu" });
+          assert.equal(
+            present.bootstrap.stavePath,
+            `${linuxAppRoot}/apps/server/dist/stave/linux-x64/stave`,
+          );
+        }),
+    );
+  });
+
+  it.effect("resolveWsl points stavePath at the Linux binary inside the mounted tree", () =>
+    withPackagedWslHarness(
+      {
+        archiveHash: "d".repeat(64),
+        wsl: () => ({
+          prepareRuntime: () => ({ ok: false, reason: "archive is corrupt" }),
+          ensureNodePty: () => ({
+            ok: true,
+            nodePath: "/usr/bin/node",
+            resolvedPath: "/usr/bin:/bin",
+          }),
+        }),
+      },
+      ({ baseDir, mountedAppRoot }) =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+
+          const absent = yield* configuration.resolveWsl({ port: 5000, distro: "Ubuntu" });
+          assert.notProperty(absent.bootstrap, "stavePath");
+
+          const windowsStavePath = path.join(
+            baseDir,
+            "app.asar.unpacked/apps/server/dist/stave/linux-x64/stave",
+          );
+          yield* fileSystem.makeDirectory(path.dirname(windowsStavePath), { recursive: true });
+          yield* fileSystem.writeFileString(windowsStavePath, "stave");
+
+          const present = yield* configuration.resolveWsl({ port: 5000, distro: "Ubuntu" });
+          assert.equal(
+            present.bootstrap.stavePath,
+            `${mountedAppRoot}/apps/server/dist/stave/linux-x64/stave`,
+          );
+        }),
+    ),
+  );
+
+  it.effect("resolveWsl forwards the LECTURN_STAVE kill switch across the wsl.exe boundary", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-desktop-backend-config-test-",
+      });
+
+      const previousWslEnv = process.env.WSLENV;
+      const previousStave = process.env.LECTURN_STAVE;
+      try {
+        delete process.env.WSLENV;
+        process.env.LECTURN_STAVE = "false";
+
+        yield* Effect.gen(function* () {
+          const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+          const config = yield* configuration.resolveWsl({ port: 5050, distro: null });
+
+          assert.equal(config.env.LECTURN_STAVE, "false");
+          assert.include(config.env.WSLENV?.split(":") ?? [], "LECTURN_STAVE");
+        }).pipe(
+          Effect.provide(
+            DesktopBackendConfiguration.layer.pipe(
+              Layer.provideMerge(serverExposureLayer),
+              Layer.provideMerge(DesktopAppSettings.layerTest()),
+              Layer.provideMerge(DesktopWslServerTree.layerTest()),
+              Layer.provideMerge(
+                DesktopWslEnvironment.layerTest({
+                  isAvailable: true,
+                  windowsToWslPath: () => Option.some("/mnt/c/repo/apps/server/src/index.ts"),
+                  getDistroIp: () => Option.some("172.27.0.99"),
+                }),
+              ),
+              Layer.provideMerge(makeEnvironmentLayer(baseDir, { platform: "win32" })),
+            ),
+          ),
+        );
+      } finally {
+        restoreEnv("WSLENV", previousWslEnv);
+        restoreEnv("LECTURN_STAVE", previousStave);
+      }
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("resolvePrimaryLabel reports the local environment on non-Windows platforms", () =>
     withHarness(
       Effect.gen(function* () {

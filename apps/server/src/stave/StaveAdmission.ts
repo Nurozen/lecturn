@@ -1,0 +1,320 @@
+/**
+ * StaveAdmission - Effect service that fences mutations which would break a
+ * Stave space's invariants, consulted before a command or RPC is dispatched.
+ *
+ * A Stave project is a project whose workspace root carries a `.stave.yaml`
+ * manifest (as reported by `StaveWorkspaceReader`). Threads in a space always
+ * run in the space root, so the worktree rule refuses every intent that would
+ * create or bind a per-thread worktree there: `thread.create` /
+ * `thread.meta.update` with a non-null `worktreePath`, a bootstrap turn start
+ * that prepares a worktree, a fork that would inherit a worktree, and the
+ * worktree-producing git RPCs. Thread creation and turn start also check
+ * current incarnation and lifecycle leases, even for local threads.
+ *
+ * @module StaveAdmission
+ */
+import type { ProjectId } from "@lecturn/contracts";
+import * as FileSystem from "effect/FileSystem";
+import * as Context from "effect/Context";
+import * as Clock from "effect/Clock";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+
+import { StaveLifecycleRepository } from "../persistence/Services/StaveLifecycleRepository.ts";
+import { StaveSpaceLock } from "./StaveSpaceLock.ts";
+import { StaveWorkspaceReader } from "./StaveWorkspaceReader.ts";
+import { sameManifestIncarnation } from "./staveIncarnation.ts";
+
+// ---------------------------------------------------------------------------
+// Errors
+//
+// One class per refusal so callers (and clients matching on `_tag`) can tell
+// them apart. Worktree, archived and transitioning refusals share a closed
+// error channel.
+// ---------------------------------------------------------------------------
+
+export const StaveAdmissionIntent = Schema.Literals([
+  "thread.create",
+  "thread.meta.update",
+  "thread.turn.start",
+  "thread.fork",
+  "thread.unsettle",
+  "thread.pin",
+  "thread.unarchive",
+  "vcs.createWorktree",
+  "pr.prepare",
+]);
+export type StaveAdmissionIntent = typeof StaveAdmissionIntent.Type;
+
+export const STAVE_WORKTREE_FORBIDDEN_MESSAGE =
+  "Stave spaces run threads in the space root; worktrees are not used";
+
+export class StaveWorktreeForbiddenError extends Schema.TaggedErrorClass<StaveWorktreeForbiddenError>()(
+  "StaveWorktreeForbiddenError",
+  {
+    projectRoot: Schema.String,
+    intent: StaveAdmissionIntent,
+    message: Schema.String,
+  },
+) {}
+
+export class StaveArchivedProjectError extends Schema.TaggedErrorClass<StaveArchivedProjectError>()(
+  "StaveArchivedProjectError",
+  { projectRoot: Schema.String, intent: StaveAdmissionIntent, message: Schema.String },
+) {}
+export class StaveSpaceTransitioningError extends Schema.TaggedErrorClass<StaveSpaceTransitioningError>()(
+  "StaveSpaceTransitioningError",
+  { projectRoot: Schema.String, intent: StaveAdmissionIntent, message: Schema.String },
+) {}
+export class StaveProjectIncarnationMismatchError extends Schema.TaggedErrorClass<StaveProjectIncarnationMismatchError>()(
+  "StaveProjectIncarnationMismatchError",
+  { projectRoot: Schema.String, intent: StaveAdmissionIntent, message: Schema.String },
+) {}
+export type StaveAdmissionError =
+  | StaveWorktreeForbiddenError
+  | StaveArchivedProjectError
+  | StaveSpaceTransitioningError
+  | StaveProjectIncarnationMismatchError;
+
+export const isStaveAdmissionError: (cause: unknown) => cause is StaveAdmissionError = Schema.is(
+  Schema.Union([
+    StaveWorktreeForbiddenError,
+    StaveArchivedProjectError,
+    StaveSpaceTransitioningError,
+    StaveProjectIncarnationMismatchError,
+  ]),
+);
+
+// ---------------------------------------------------------------------------
+// Service
+// ---------------------------------------------------------------------------
+
+export interface StaveAdmissionInput {
+  /** Workspace root of the project the mutation targets (exact root, not a cwd inside it). */
+  readonly projectRoot: string;
+  readonly projectId?: ProjectId;
+  readonly intent: StaveAdmissionIntent;
+  /** Worktree the command would bind the thread to; `null`/absent means the project root. */
+  readonly worktreePath?: string | null;
+  /** Whether the command carries a `bootstrap.prepareWorktree` step. */
+  readonly prepareWorktree?: boolean;
+  /** Internal commit recheck already holds the shared space mutex. */
+  readonly lockHeld?: boolean;
+}
+
+export class StaveAdmission extends Context.Service<
+  StaveAdmission,
+  {
+    /**
+     * Succeeds when the intent is admissible for the project; fails with the
+     * typed refusal otherwise. Never fails for a non-Stave root.
+     */
+    readonly check: (input: StaveAdmissionInput) => Effect.Effect<void, StaveAdmissionError>;
+  }
+>()("lecturn/stave/StaveAdmission") {}
+
+/** Intents that exist only to create a worktree, regardless of the payload. */
+const WORKTREE_PRODUCING_INTENTS: ReadonlySet<StaveAdmissionIntent> = new Set([
+  "vcs.createWorktree",
+  "pr.prepare",
+]);
+
+/**
+ * Pure worktree rule: does the intent create or use a per-thread worktree?
+ * The manifest is only read when this is true.
+ */
+export const intentUsesWorktree = (input: StaveAdmissionInput): boolean =>
+  WORKTREE_PRODUCING_INTENTS.has(input.intent) ||
+  input.prepareWorktree === true ||
+  (input.worktreePath !== undefined && input.worktreePath !== null);
+
+export const make = Effect.fn("StaveAdmission.make")(function* () {
+  const reader = yield* StaveWorkspaceReader;
+
+  const lifecycle = yield* Effect.serviceOption(StaveLifecycleRepository);
+  const lock = yield* Effect.serviceOption(StaveSpaceLock);
+  const fs = yield* Effect.serviceOption(FileSystem.FileSystem);
+  const path = yield* Effect.serviceOption(Path.Path);
+  const checkUnderLock = Effect.fn("StaveAdmission.checkUnderLock")(function* (
+    input: StaveAdmissionInput,
+  ) {
+    const transition = () =>
+      new StaveSpaceTransitioningError({
+        projectRoot: input.projectRoot,
+        intent: input.intent,
+        message: "This Stave space is transitioning. Try again after the operation finishes.",
+      });
+    let bindingSpace = yield* reader.load(input.projectRoot);
+    let space = bindingSpace;
+    let ancestorSpace: typeof space = Option.none();
+    // A Stave checkout stays managed after its parent project is removed from
+    // Lecturn. Resolve physical ancestors before admitting worktree/PR writes.
+    if (
+      Option.isNone(space) &&
+      intentUsesWorktree(input) &&
+      Option.isSome(fs) &&
+      Option.isSome(path)
+    ) {
+      let candidate = path.value.resolve(input.projectRoot);
+      const missing: string[] = [];
+      while (true) {
+        const canonical = yield* fs.value.realPath(candidate).pipe(Effect.option);
+        if (Option.isSome(canonical)) {
+          candidate = path.value.join(canonical.value, ...missing.toReversed());
+          break;
+        }
+        const parent = path.value.dirname(candidate);
+        if (parent === candidate) break;
+        missing.push(path.value.basename(candidate));
+        candidate = parent;
+      }
+      while (true) {
+        yield* reader.invalidate(candidate);
+        space = yield* reader.load(candidate);
+        if (Option.isSome(space)) {
+          ancestorSpace = space;
+          break;
+        }
+        const parent = path.value.dirname(candidate);
+        if (parent === candidate) break;
+        candidate = parent;
+      }
+    }
+    if (Option.isSome(lifecycle)) {
+      const canonicalRoot = Option.isSome(fs)
+        ? yield* fs.value
+            .realPath(input.projectRoot)
+            .pipe(Effect.orElseSucceed(() => input.projectRoot))
+        : input.projectRoot;
+      const rootRow = yield* lifecycle.value
+        .getByWorkspaceRoot(canonicalRoot)
+        .pipe(Effect.mapError(transition));
+      let refreshedBinding = false;
+      if (
+        Option.isSome(rootRow) &&
+        (rootRow.value.spaceId !== null || rootRow.value.manifestCreatedAt !== null)
+      ) {
+        yield* reader.invalidate(input.projectRoot);
+        bindingSpace = yield* reader.load(input.projectRoot);
+        space = Option.isSome(bindingSpace) ? bindingSpace : ancestorSpace;
+        refreshedBinding = true;
+      }
+      // A lease belongs to the physical root, even if another project id was
+      // re-added while the previous owner was running.
+      const now = yield* Clock.currentTimeMillis;
+      if (
+        Option.isSome(rootRow) &&
+        rootRow.value.ownerToken !== null &&
+        rootRow.value.leaseUntil !== null &&
+        Date.parse(rootRow.value.leaseUntil) > now
+      )
+        return yield* transition();
+      if (
+        Option.isSome(rootRow) &&
+        (["archiving", "restoring", "destroying"].includes(rootRow.value.disposition) ||
+          (rootRow.value.disposition === "destroyed" &&
+            (input.projectId === undefined || input.projectId === rootRow.value.projectId))) &&
+        (Option.isNone(bindingSpace) ||
+          (rootRow.value.spaceId === bindingSpace.value.spaceId &&
+            (rootRow.value.manifestCreatedAt === null ||
+              bindingSpace.value.createdAt === undefined ||
+              sameManifestIncarnation(
+                rootRow.value.manifestCreatedAt,
+                bindingSpace.value.createdAt,
+              ))))
+      )
+        return yield* transition();
+      const row =
+        input.projectId === undefined
+          ? rootRow
+          : yield* lifecycle.value
+              .getByProjectId(input.projectId)
+              .pipe(Effect.mapError(transition));
+      if (Option.isSome(row)) {
+        const boundRoot = Option.isSome(fs)
+          ? yield* fs.value
+              .realPath(row.value.workspaceRoot)
+              .pipe(Effect.orElseSucceed(() => row.value.workspaceRoot))
+          : row.value.workspaceRoot;
+        if (
+          input.projectId !== undefined &&
+          boundRoot === canonicalRoot &&
+          (row.value.spaceId !== null || row.value.manifestCreatedAt !== null)
+        ) {
+          if (!refreshedBinding) {
+            yield* reader.invalidate(input.projectRoot);
+            bindingSpace = yield* reader.load(input.projectRoot);
+            space = Option.isSome(bindingSpace) ? bindingSpace : ancestorSpace;
+          }
+          if (
+            Option.isSome(bindingSpace) &&
+            ((row.value.spaceId !== null && row.value.spaceId !== bindingSpace.value.spaceId) ||
+              (row.value.manifestCreatedAt !== null &&
+                (bindingSpace.value.createdAt === undefined ||
+                  !sameManifestIncarnation(
+                    row.value.manifestCreatedAt,
+                    bindingSpace.value.createdAt,
+                  ))))
+          )
+            return yield* new StaveProjectIncarnationMismatchError({
+              projectRoot: input.projectRoot,
+              intent: input.intent,
+              message:
+                "This project belongs to an earlier Stave space incarnation. Re-import the current space before starting new work.",
+            });
+        }
+        const sameIncarnation =
+          Option.isNone(bindingSpace) ||
+          (row.value.spaceId === bindingSpace.value.spaceId &&
+            (row.value.manifestCreatedAt === null ||
+              bindingSpace.value.createdAt === undefined ||
+              sameManifestIncarnation(row.value.manifestCreatedAt, bindingSpace.value.createdAt)));
+        if (
+          sameIncarnation &&
+          ["archiving", "restoring", "destroying", "destroyed"].includes(row.value.disposition)
+        )
+          return yield* transition();
+        if (Option.isNone(bindingSpace) && row.value.disposition === "archived")
+          return yield* new StaveArchivedProjectError({
+            projectRoot: input.projectRoot,
+            intent: input.intent,
+            message: "Unarchive this Stave space before starting a thread.",
+          });
+        // The manifest's location determines archived state. A completed
+        // external restore may legitimately leave an old archived row.
+      }
+    }
+    if (Option.isNone(space)) return;
+    if (space.value.state === "archived")
+      return yield* new StaveArchivedProjectError({
+        projectRoot: input.projectRoot,
+        intent: input.intent,
+        message: "Unarchive this Stave space before starting a thread.",
+      });
+    if (intentUsesWorktree(input))
+      return yield* new StaveWorktreeForbiddenError({
+        projectRoot: input.projectRoot,
+        intent: input.intent,
+        message: STAVE_WORKTREE_FORBIDDEN_MESSAGE,
+      });
+  });
+  const check = (input: StaveAdmissionInput) =>
+    input.lockHeld || Option.isNone(lock)
+      ? checkUnderLock(input)
+      : lock.value.withSpaceLock(input.projectRoot, checkUnderLock(input));
+
+  return StaveAdmission.of({ check });
+});
+
+export const layer = Layer.effect(StaveAdmission, make());
+
+/** Admission that admits everything — for tests whose projects are never spaces. */
+export const layerNoop = Layer.succeed(
+  StaveAdmission,
+  StaveAdmission.of({
+    check: () => Effect.void,
+  }),
+);

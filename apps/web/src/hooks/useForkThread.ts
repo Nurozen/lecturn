@@ -1,4 +1,5 @@
 import { scopeThreadRef } from "@lecturn/client-runtime/environment";
+import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
 import {
   isAtomCommandInterrupted,
   settlePromise,
@@ -89,9 +90,10 @@ export function useForkThread() {
               type: "error",
               title: "Could not fork thread",
               description:
-                error instanceof Error
+                staveAdmissionErrorMessage(error) ??
+                (error instanceof Error
                   ? error.message
-                  : "An error occurred while forking the thread.",
+                  : "An error occurred while forking the thread."),
             }),
           );
         }

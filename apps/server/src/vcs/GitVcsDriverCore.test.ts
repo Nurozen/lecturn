@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
@@ -16,6 +17,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { GitCommandError, type ReviewDiffFileContentsInput } from "@lecturn/contracts";
 import { ServerConfig } from "../config.ts";
+import * as StaveRoots from "../stave/StaveRoots.ts";
 import { makeGitVcsDriverCore, splitNullSeparatedGitStdoutPaths } from "./GitVcsDriverCore.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 
@@ -160,7 +162,7 @@ it.effect("uses stable diagnostics for every parsed non-repository command", () 
     yield* driver.listRefs({ cwd });
 
     assert.deepStrictEqual(commands, [
-      { args: ["status", "--porcelain=2", "--branch"], lcAll: "C" },
+      { args: ["status", "--porcelain=2", "--branch", "-z"], lcAll: "C" },
       { args: ["rev-parse", "--abbrev-ref", "HEAD"], lcAll: "C" },
       { args: ["rev-parse", "--git-common-dir"], lcAll: "C" },
     ]);
@@ -922,6 +924,130 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   });
 
   describe("repository status", () => {
+    it.effect("reports staged and unstaged edits without losing whitespace paths", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* writeTextFile(cwd, "tracked file.ts", "base\n");
+        yield* git(cwd, ["add", "--", "tracked file.ts"]);
+        yield* git(cwd, ["commit", "-m", "track file"]);
+        yield* writeTextFile(cwd, "tracked file.ts", "staged\n");
+        yield* git(cwd, ["add", "--", "tracked file.ts"]);
+        yield* writeTextFile(cwd, "tracked file.ts", "staged\nunstaged\n");
+        yield* writeTextFile(cwd, "new file.ts", "untracked\n");
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetailsLocal(cwd);
+        assert.include(
+          status.workingTree.files.find((file) => file.path === "tracked file.ts"),
+          {
+            staged: true,
+            unstaged: true,
+            conflicted: false,
+          },
+        );
+        assert.include(
+          status.workingTree.files.find((file) => file.path === "new file.ts"),
+          {
+            staged: false,
+            unstaged: true,
+            conflicted: false,
+          },
+        );
+      }),
+    );
+
+    it.effect("keeps raw Unicode, tab and newline paths aligned with numstat", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const paths = ["café.txt", "tab\tname.txt", "line\nname.txt"];
+        for (const filePath of paths) yield* writeTextFile(cwd, filePath, "base\n");
+        yield* git(cwd, ["add", "--", ...paths]);
+        yield* git(cwd, ["commit", "-m", "track unusual paths"]);
+        for (const filePath of paths) yield* writeTextFile(cwd, filePath, "changed\nextra\n");
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetailsLocal(cwd);
+        assert.equal(status.workingTree.files.length, paths.length);
+        for (const filePath of paths) {
+          assert.deepStrictEqual(
+            status.workingTree.files.find((file) => file.path === filePath),
+            {
+              path: filePath,
+              insertions: 2,
+              deletions: 1,
+              staged: false,
+              unstaged: true,
+              conflicted: false,
+            },
+          );
+        }
+      }),
+    );
+
+    it.effect("reports the destination of a staged rename once", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* git(cwd, ["mv", "README.md", "renamed café\tfile.md"]);
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetailsLocal(cwd);
+        assert.deepStrictEqual(status.workingTree.files, [
+          {
+            path: "renamed café\tfile.md",
+            insertions: 0,
+            deletions: 0,
+            staged: true,
+            unstaged: false,
+            conflicted: false,
+          },
+        ]);
+      }),
+    );
+
+    it.effect("preserves raw paths in unborn staged and unstaged numstat", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* driver.initRepo({ cwd });
+        const filePath = "café\nnew.txt";
+        yield* writeTextFile(cwd, filePath, "staged\n");
+        yield* git(cwd, ["add", "--", filePath]);
+        yield* writeTextFile(cwd, filePath, "staged\nunstaged\n");
+        const status = yield* driver.statusDetailsLocal(cwd);
+        assert.deepStrictEqual(status.workingTree.files, [
+          {
+            path: filePath,
+            insertions: 2,
+            deletions: 0,
+            staged: true,
+            unstaged: true,
+            conflicted: false,
+          },
+        ]);
+      }),
+    );
+
+    it.effect("reports unresolved merge conflicts in the correct file", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        yield* writeTextFile(cwd, "conflict.txt", "base\n");
+        yield* git(cwd, ["add", "conflict.txt"]);
+        yield* git(cwd, ["commit", "-m", "base"]);
+        yield* git(cwd, ["checkout", "-b", "other"]);
+        yield* writeTextFile(cwd, "conflict.txt", "other\n");
+        yield* git(cwd, ["commit", "-am", "other"]);
+        yield* git(cwd, ["checkout", initialBranch]);
+        yield* writeTextFile(cwd, "conflict.txt", "local\n");
+        yield* git(cwd, ["commit", "-am", "local"]);
+        yield* git(cwd, ["merge", "other"]).pipe(Effect.exit);
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetailsLocal(cwd);
+        assert.include(
+          status.workingTree.files.find((file) => file.path === "conflict.txt"),
+          {
+            conflicted: true,
+          },
+        );
+      }),
+    );
+
     it.effect("reports non-repository directories without failing", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
@@ -968,6 +1094,9 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           path: "HEAD",
           insertions: 1,
           deletions: 0,
+          staged: false,
+          unstaged: true,
+          conflicted: false,
         });
       }),
     );
@@ -1984,6 +2113,154 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         });
         assert.notEqual(originMain.exitCode, 0);
       }),
+    );
+  });
+  describe("GIT_CEILING_DIRECTORIES inside the Stave agent-work dir", () => {
+    const agentWorkDir = "/work/agent-work";
+
+    // Runs one git command through a fake spawner and returns the
+    // GIT_CEILING_DIRECTORIES value the spawn would have received.
+    const capturedCeilingFor = (
+      cwd: string,
+      provider?: Layer.Layer<StaveRoots.StaveRootsProvider>,
+    ) =>
+      Effect.gen(function* () {
+        const captured = yield* Ref.make(Option.none<string>());
+        const spawner = ChildProcessSpawner.make((command) =>
+          Effect.gen(function* () {
+            if (!ChildProcess.isStandardCommand(command)) {
+              return assert.fail("expected a standard Git command");
+            }
+            yield* Ref.set(
+              captured,
+              Option.fromUndefinedOr(command.options.env?.GIT_CEILING_DIRECTORIES),
+            );
+            return makeSuccessfulHandle("");
+          }),
+        );
+        const driver = yield* makeGitVcsDriverCore().pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provide(provider ? Layer.merge(provider, ServerConfigLayer) : ServerConfigLayer),
+        );
+        yield* driver.execute({
+          operation: "GitVcsDriver.test.ceiling",
+          cwd,
+          args: ["status", "--porcelain=2", "--branch", "-z"],
+          timeoutMs: 10_000,
+        });
+        return Option.getOrUndefined(yield* Ref.get(captured));
+      });
+
+    // Whatever the host shell already exports is passed through untouched.
+    const hostCeiling = process.env.GIT_CEILING_DIRECTORIES;
+
+    it.effect("sets the ceiling for a cwd strictly inside the agent-work dir", () =>
+      Effect.gen(function* () {
+        assert.equal(
+          yield* capturedCeilingFor(
+            `${agentWorkDir}/space-a/repo`,
+            StaveRoots.layerFixed(agentWorkDir),
+          ),
+          agentWorkDir,
+        );
+      }),
+    );
+
+    it.effect("leaves the env alone for the agent-work dir itself and unrelated paths", () =>
+      Effect.gen(function* () {
+        for (const cwd of [agentWorkDir, "/work/agent-work-other/x", "/elsewhere"]) {
+          assert.equal(
+            yield* capturedCeilingFor(cwd, StaveRoots.layerFixed(agentWorkDir)),
+            hostCeiling,
+            cwd,
+          );
+        }
+      }),
+    );
+
+    it.effect("leaves the env alone without a provider or with the noop provider", () =>
+      Effect.gen(function* () {
+        const cwd = `${agentWorkDir}/space-a/repo`;
+        assert.equal(yield* capturedCeilingFor(cwd), hostCeiling);
+        assert.equal(yield* capturedCeilingFor(cwd, StaveRoots.layerNoop), hostCeiling);
+      }),
+    );
+
+    it.effect("stops real git at the agent-work dir instead of adopting an ancestor repo", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+        // git prints real paths, so compare against the resolved temp dir.
+        const parent = yield* fileSystem.realPath(yield* makeTmpDir("git-vcs-driver-stave-"));
+        const agentWork = pathService.join(parent, "agent-work");
+        const spaceA = pathService.join(agentWork, "space-a");
+        const spaceB = pathService.join(agentWork, "space-b");
+        yield* fileSystem.makeDirectory(spaceA, { recursive: true });
+        yield* fileSystem.makeDirectory(spaceB, { recursive: true });
+        yield* initRepoWithCommit(parent);
+
+        const showToplevel = (driver: GitVcsDriver.GitVcsDriver["Service"], cwd: string) =>
+          driver.execute({
+            operation: "GitVcsDriver.test.ceiling",
+            cwd,
+            args: ["rev-parse", "--show-toplevel"],
+            allowNonZeroExit: true,
+            timeoutMs: 10_000,
+          });
+
+        const adopted = yield* showToplevel(yield* GitVcsDriver.GitVcsDriver, spaceA);
+        assert.equal(adopted.exitCode, 0);
+        assert.equal(adopted.stdout.trim(), parent);
+
+        const ceilingDriver = yield* makeGitVcsDriverCore().pipe(
+          Effect.provide(Layer.merge(StaveRoots.layerFixed(agentWork), ServerConfigLayer)),
+        );
+        const blocked = yield* showToplevel(ceilingDriver, spaceA);
+        assert.notEqual(blocked.exitCode, 0);
+        assert.include(blocked.stderr, "not a git repository");
+
+        yield* initRepoWithCommit(spaceB).pipe(
+          Effect.provideService(GitVcsDriver.GitVcsDriver, ceilingDriver),
+        );
+        const inside = yield* showToplevel(ceilingDriver, spaceB);
+        assert.equal(inside.exitCode, 0);
+        assert.equal(inside.stdout.trim(), spaceB);
+      }),
+    );
+    it.effect(
+      "honors unconfigured manifest roots through aliases without adopting ancestor Git",
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const parent = yield* fs.realPath(yield* makeTmpDir("git-stave-unconfigured-"));
+          const space = path.join(parent, "space");
+          const repo = path.join(space, "editable");
+          const alias = path.join(parent, "alias");
+          yield* fs.makeDirectory(repo, { recursive: true });
+          yield* initRepoWithCommit(parent);
+          yield* fs.writeFileString(path.join(space, ".stave.yaml"), "id: space\nrepos: []\n");
+          yield* fs.symlink(space, alias);
+          const driver = yield* makeGitVcsDriverCore().pipe(
+            Effect.provide(Layer.merge(StaveRoots.layerNoop, ServerConfigLayer)),
+          );
+          const top = (cwd: string) =>
+            driver.execute({
+              operation: "test.unconfigured",
+              cwd,
+              args: ["rev-parse", "--show-toplevel"],
+              allowNonZeroExit: true,
+            });
+          for (const cwd of [space, alias, repo]) {
+            const blocked = yield* top(cwd);
+            assert.notEqual(blocked.exitCode, 0);
+            assert.include(blocked.stderr, "not a git repository");
+          }
+          yield* initRepoWithCommit(repo).pipe(
+            Effect.provideService(GitVcsDriver.GitVcsDriver, driver),
+          );
+          assert.equal((yield* top(path.join(alias, "editable"))).stdout.trim(), repo);
+        }),
     );
   });
 });

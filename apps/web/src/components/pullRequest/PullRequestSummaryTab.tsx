@@ -357,6 +357,7 @@ function CommentComposer({
       input: {
         projectId: detail.projectId,
         repository: detail.repository,
+        ...(detail.host ? { host: detail.host } : {}),
         number: detail.number,
         body: trimmed,
       },

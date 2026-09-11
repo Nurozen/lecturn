@@ -1,3 +1,4 @@
+import * as SagaWorkbench from "./sagaWorkbench.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -209,6 +210,27 @@ import {
 import { UsagePricing, UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
+  StaveCommandError,
+  StaveDryRunInput,
+  StaveDryRunPlan,
+  StaveListSpacesInput,
+  StaveMemoryProvider,
+  StaveNotSpaceError,
+  StaveObserveOperationInput,
+  StaveOperationRejectedError,
+  StaveProgressEvent,
+  StaveRepoRow,
+  StaveRunOperationInput,
+  StaveSagaListRow,
+  StaveSagaStatus,
+  StaveSagaStatusInput,
+  StaveSpaceListRow,
+  StaveSpaceStatus,
+  StaveSpaceStatusInput,
+  StaveStatus,
+  StaveUnavailableError,
+} from "./stave.ts";
+import {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
   SourceControlDiscoveryResult,
@@ -320,6 +342,27 @@ export const WS_METHODS = {
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
+
+  // Stave methods
+  staveGetStatus: "stave.getStatus",
+  staveSpaceStatus: "stave.spaceStatus",
+  sagaWorkbenchGetSnapshot: "sagaWorkbench.getSnapshot",
+  sagaWorkbenchGetEvidence: "sagaWorkbench.getEvidence",
+  sagaWorkbenchGetActivity: "sagaWorkbench.getActivity",
+  sagaWorkbenchSetStage: "sagaWorkbench.setStage",
+  sagaWorkbenchConfigure: "sagaWorkbench.configure",
+  sagaWorkbenchApprove: "sagaWorkbench.approve",
+  sagaWorkbenchComplete: "sagaWorkbench.complete",
+  sagaWorkbenchReopen: "sagaWorkbench.reopen",
+  sagaWorkbenchSummarize: "sagaWorkbench.summarize",
+  staveSagaStatus: "stave.sagaStatus",
+  staveListRepos: "stave.listRepos",
+  staveListSpaces: "stave.listSpaces",
+  staveListSagas: "stave.listSagas",
+  staveMemoryProviders: "stave.memoryProviders",
+  staveDryRun: "stave.dryRun",
+  staveRunOperation: "stave.runOperation",
+  staveObserveOperation: "stave.observeOperation",
 
   // Pull request methods
   pullRequestsList: "pullRequests.list",
@@ -591,6 +634,106 @@ export const WsServerGetBackgroundPolicyRpc = Rpc.make(WS_METHODS.serverGetBackg
   payload: Schema.Struct({}),
   success: BackgroundPolicySnapshot,
   error: EnvironmentAuthorizationError,
+});
+
+export const WsStaveGetStatusRpc = Rpc.make(WS_METHODS.staveGetStatus, {
+  payload: Schema.Struct({}),
+  success: StaveStatus,
+  error: Schema.Union([StaveUnavailableError, EnvironmentAuthorizationError]),
+});
+
+export const WsStaveSpaceStatusRpc = Rpc.make(WS_METHODS.staveSpaceStatus, {
+  payload: StaveSpaceStatusInput,
+  success: StaveSpaceStatus,
+  error: Schema.Union([
+    StaveUnavailableError,
+    StaveNotSpaceError,
+    StaveCommandError,
+    ServerSettingsError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+export const WsStaveSagaStatusRpc = Rpc.make(WS_METHODS.staveSagaStatus, {
+  payload: StaveSagaStatusInput,
+  success: StaveSagaStatus,
+  error: Schema.Union([
+    StaveUnavailableError,
+    StaveNotSpaceError,
+    StaveCommandError,
+    ServerSettingsError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+// Stave reads run one `--json` read verb each behind the same enablement gate
+// as `stave.spaceStatus`; the operation RPCs stream `StaveProgressEvent`s
+// keyed on the client-supplied operation id.
+const StaveReadError = Schema.Union([
+  StaveUnavailableError,
+  StaveCommandError,
+  ServerSettingsError,
+  EnvironmentAuthorizationError,
+]);
+
+export const WsStaveListReposRpc = Rpc.make(WS_METHODS.staveListRepos, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(StaveRepoRow),
+  error: StaveReadError,
+});
+
+export const WsStaveListSpacesRpc = Rpc.make(WS_METHODS.staveListSpaces, {
+  payload: StaveListSpacesInput,
+  success: Schema.Array(StaveSpaceListRow),
+  error: StaveReadError,
+});
+
+export const WsStaveListSagasRpc = Rpc.make(WS_METHODS.staveListSagas, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(StaveSagaListRow),
+  error: StaveReadError,
+});
+
+export const WsStaveMemoryProvidersRpc = Rpc.make(WS_METHODS.staveMemoryProviders, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(StaveMemoryProvider),
+  error: StaveReadError,
+});
+
+export const WsStaveDryRunRpc = Rpc.make(WS_METHODS.staveDryRun, {
+  payload: StaveDryRunInput,
+  success: StaveDryRunPlan,
+  error: Schema.Union([
+    StaveUnavailableError,
+    StaveNotSpaceError,
+    StaveCommandError,
+    ServerSettingsError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+// Stave failures inside a running operation arrive as `failed` events; the
+// stream itself only fails when the request could not be admitted.
+const StaveOperationStreamError = Schema.Union([
+  StaveUnavailableError,
+  StaveNotSpaceError,
+  StaveOperationRejectedError,
+  ServerSettingsError,
+  EnvironmentAuthorizationError,
+]);
+
+export const WsStaveRunOperationRpc = Rpc.make(WS_METHODS.staveRunOperation, {
+  payload: StaveRunOperationInput,
+  success: StaveProgressEvent,
+  error: StaveOperationStreamError,
+  stream: true,
+});
+
+export const WsStaveObserveOperationRpc = Rpc.make(WS_METHODS.staveObserveOperation, {
+  payload: StaveObserveOperationInput,
+  success: StaveProgressEvent,
+  error: StaveOperationStreamError,
+  stream: true,
 });
 
 const PullRequestRpcError = Schema.Union([
@@ -1150,7 +1293,63 @@ export const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeReso
   stream: true,
 });
 
+export const WsSagaWorkbenchGetSnapshotRpc = Rpc.make(WS_METHODS.sagaWorkbenchGetSnapshot, {
+  payload: SagaWorkbench.SagaWorkbenchSnapshotInput,
+  success: SagaWorkbench.SagaWorkbenchSnapshot,
+  error: Schema.Union([SagaWorkbench.SagaWorkbenchError, EnvironmentAuthorizationError]),
+});
+export const WsSagaWorkbenchGetEvidenceRpc = Rpc.make(WS_METHODS.sagaWorkbenchGetEvidence, {
+  payload: SagaWorkbench.SagaWorkbenchIdentityInput,
+  success: SagaWorkbench.SagaWorkbenchEvidence,
+  error: Schema.Union([SagaWorkbench.SagaWorkbenchError, EnvironmentAuthorizationError]),
+});
+export const WsSagaWorkbenchGetActivityRpc = Rpc.make(WS_METHODS.sagaWorkbenchGetActivity, {
+  payload: SagaWorkbench.SagaWorkbenchIdentityInput,
+  success: Schema.Array(SagaWorkbench.SagaWorkbenchActivity),
+  error: Schema.Union([SagaWorkbench.SagaWorkbenchError, EnvironmentAuthorizationError]),
+});
+export const WsSagaWorkbenchConfigureRpc = Rpc.make(WS_METHODS.sagaWorkbenchConfigure, {
+  payload: SagaWorkbench.SagaWorkbenchConfigureInput,
+  success: SagaWorkbench.SagaWorkbenchWorkflow,
+  error: Schema.Union([SagaWorkbench.SagaWorkbenchError, EnvironmentAuthorizationError]),
+});
+export const WsSagaWorkbenchSetStageRpc = Rpc.make(WS_METHODS.sagaWorkbenchSetStage, {
+  payload: SagaWorkbench.SagaWorkbenchStageInput,
+  success: SagaWorkbench.SagaWorkbenchWorkflow,
+  error: Schema.Union([SagaWorkbench.SagaWorkbenchError, EnvironmentAuthorizationError]),
+});
+export const WsSagaWorkbenchApproveRpc = Rpc.make(WS_METHODS.sagaWorkbenchApprove, {
+  payload: SagaWorkbench.SagaWorkbenchApproveInput,
+  success: SagaWorkbench.SagaWorkbenchWorkflow,
+  error: Schema.Union([SagaWorkbench.SagaWorkbenchError, EnvironmentAuthorizationError]),
+});
+export const WsSagaWorkbenchCompleteRpc = Rpc.make(WS_METHODS.sagaWorkbenchComplete, {
+  payload: SagaWorkbench.SagaWorkbenchMutationInput,
+  success: SagaWorkbench.SagaWorkbenchWorkflow,
+  error: Schema.Union([SagaWorkbench.SagaWorkbenchError, EnvironmentAuthorizationError]),
+});
+export const WsSagaWorkbenchReopenRpc = Rpc.make(WS_METHODS.sagaWorkbenchReopen, {
+  payload: SagaWorkbench.SagaWorkbenchMutationInput,
+  success: SagaWorkbench.SagaWorkbenchWorkflow,
+  error: Schema.Union([SagaWorkbench.SagaWorkbenchError, EnvironmentAuthorizationError]),
+});
+export const WsSagaWorkbenchSummarizeRpc = Rpc.make(WS_METHODS.sagaWorkbenchSummarize, {
+  payload: SagaWorkbench.SagaWorkbenchMutationInput,
+  success: SagaWorkbench.SagaWorkbenchWorkflow,
+  error: Schema.Union([SagaWorkbench.SagaWorkbenchError, EnvironmentAuthorizationError]),
+});
+
 export const WsRpcGroup = RpcGroup.make(
+  WsSagaWorkbenchGetSnapshotRpc,
+  WsSagaWorkbenchGetEvidenceRpc,
+  WsSagaWorkbenchGetActivityRpc,
+  WsSagaWorkbenchSetStageRpc,
+  WsSagaWorkbenchConfigureRpc,
+  WsSagaWorkbenchApproveRpc,
+  WsSagaWorkbenchCompleteRpc,
+  WsSagaWorkbenchReopenRpc,
+  WsSagaWorkbenchSummarizeRpc,
+
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
@@ -1183,6 +1382,16 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,
   WsServerGetBackgroundPolicyRpc,
+  WsStaveGetStatusRpc,
+  WsStaveSpaceStatusRpc,
+  WsStaveSagaStatusRpc,
+  WsStaveListReposRpc,
+  WsStaveListSpacesRpc,
+  WsStaveListSagasRpc,
+  WsStaveMemoryProvidersRpc,
+  WsStaveDryRunRpc,
+  WsStaveRunOperationRpc,
+  WsStaveObserveOperationRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsPullRequestsListRpc,

@@ -1,3 +1,4 @@
+import { StaveMemoryWiring } from "../../stave/StaveMemoryWiring.ts";
 /**
  * CursorDriver — `ProviderDriver` for the Cursor Agent (`cursor-agent`) runtime.
  *
@@ -66,6 +67,7 @@ const UPDATE: ProviderMaintenanceCapabilitiesResolver = {
 };
 
 export type CursorDriverEnv =
+  | StaveMemoryWiring
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
@@ -112,6 +114,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       });
 
       const adapter = yield* makeCursorAdapter(effectiveConfig, {
+        staveMemoryWiring: yield* StaveMemoryWiring,
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,

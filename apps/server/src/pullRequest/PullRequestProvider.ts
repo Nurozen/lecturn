@@ -230,6 +230,17 @@ export interface ProviderRepositoryRef {
   readonly host: string;
 }
 
+/** Fresh, revision-bound facts for explicit workflow acceptance. Never a detail-cache read. */
+export interface ProviderAcceptanceEvidence {
+  readonly headRevision: string | null;
+  readonly baseRevision: string | null;
+  readonly requiredChecks: "passing" | "pending" | "failing" | "none" | "unknown";
+  readonly checksRevision: string | null;
+  readonly merged: boolean | null;
+  readonly mergedSourceRevision: string | null;
+  readonly blockers: ReadonlyArray<string>;
+}
+
 /**
  * One host's change requests. Implementations own their own tool and JSON shapes and hand back
  * the neutral types above; anything a host cannot do is declared in `capabilities` rather than
@@ -238,6 +249,23 @@ export interface ProviderRepositoryRef {
 export interface PullRequestProviderApi {
   readonly kind: SourceControlProviderKind;
   readonly capabilities: PullRequestCapabilities;
+  readonly listAcceptanceCandidates?: (
+    input: ProviderRepositoryRef & {
+      readonly branch: string;
+      readonly headRevision: string | null;
+      readonly sourceHost: string;
+      readonly sourceRepository: string;
+    },
+  ) => Effect.Effect<
+    {
+      readonly items: ReadonlyArray<{ readonly number: number; readonly url: string }>;
+      readonly truncated: boolean;
+    },
+    PullRequestProviderError
+  >;
+  readonly readAcceptanceEvidence?: (
+    input: ProviderRepositoryRef & { readonly number: number },
+  ) => Effect.Effect<ProviderAcceptanceEvidence, PullRequestProviderError>;
 
   /** The signed-in account, which is what involvement filtering compares against. */
   readonly getViewer: (input: {

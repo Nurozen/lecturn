@@ -4,14 +4,23 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { beforeEach, vi } from "vite-plus/test";
 
-const { createClerkBridgeMock, storageAdapter, storageMock } = vi.hoisted(() => ({
-  createClerkBridgeMock: vi.fn(),
-  storageAdapter: {
-    getItem: vi.fn(),
-    setItem: vi.fn(),
-    removeItem: vi.fn(),
-  },
-  storageMock: vi.fn(),
+const { createClerkBridgeMock, existsSyncMock, mkdirSyncMock, storageAdapter, storageMock } =
+  vi.hoisted(() => ({
+    createClerkBridgeMock: vi.fn(),
+    existsSyncMock: vi.fn(),
+    mkdirSyncMock: vi.fn(),
+    storageAdapter: {
+      getItem: vi.fn(),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    },
+    storageMock: vi.fn(),
+  }));
+
+vi.mock("node:fs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:fs")>()),
+  existsSync: existsSyncMock,
+  mkdirSync: mkdirSyncMock,
 }));
 
 vi.mock("@clerk/electron", () => ({
@@ -27,13 +36,23 @@ import * as FileSystem from "effect/FileSystem";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
+import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
-const makeDesktopClerkLayer = (isDevelopment = true, events: string[] = []) => {
+const makeDesktopClerkLayer = (
+  isDevelopment = true,
+  events: string[] = [],
+  userDataPathOverride?: string,
+) => {
+  mkdirSyncMock.mockImplementation((path: string, options: { recursive: boolean }) => {
+    assert.equal(options.recursive, true);
+    events.push(`makeDirectory:${path}`);
+  });
   const environment = DesktopEnvironment.DesktopEnvironment.of({
     stateDir: "/tmp/lecturn-state",
     isDevelopment,
     appDataDirectory: "/tmp/app-data",
+    ...(userDataPathOverride !== undefined ? { userDataPathOverride } : {}),
     userDataDirName: isDevelopment ? "lecturn-dev" : "lecturn",
     legacyUserDataDirName: isDevelopment ? "Lecturn (Dev)" : "Lecturn (Alpha)",
     path: { join: (...parts: ReadonlyArray<string>) => parts.join("/") },
@@ -51,7 +70,11 @@ const makeDesktopClerkLayer = (isDevelopment = true, events: string[] = []) => {
       Layer.mergeAll(
         Layer.succeed(DesktopEnvironment.DesktopEnvironment, environment),
         Layer.succeed(ElectronApp.ElectronApp, electronApp),
-        FileSystem.layerNoop({ exists: () => Effect.succeed(false) }),
+        FileSystem.layerNoop({
+          exists: () => Effect.die("Clerk startup must not perform asynchronous filesystem probes"),
+          makeDirectory: () =>
+            Effect.die("Clerk startup must not create its profile asynchronously"),
+        }),
       ),
     ),
   );
@@ -61,6 +84,9 @@ describe("DesktopClerk", () => {
   beforeEach(() => {
     createClerkBridgeMock.mockReset();
     storageMock.mockReset();
+    existsSyncMock.mockReset();
+    existsSyncMock.mockReturnValue(false);
+    mkdirSyncMock.mockReset();
   });
 
   it("derives the Clerk Frontend API hostname used by the desktop CSP", () => {
@@ -96,7 +122,7 @@ describe("DesktopClerk", () => {
         ],
       ]);
       assert.equal(cleanup.mock.calls.length, 1);
-      // The bridge acquires Electron's single-instance lock at creation, and
+      // On Windows/Linux the bridge acquires the single-instance lock, and
       // the lock both lives in and creates the userData directory — so the
       // real path must be set before the bridge exists.
       assert.deepEqual(events, ["setPath:userData:/tmp/app-data/lecturn-dev", "createClerkBridge"]);
@@ -104,6 +130,47 @@ describe("DesktopClerk", () => {
       createClerkBridgeMock.mockClear();
     });
   });
+
+  it.effect("sets the isolated profile before creating the SDK bridge", () => {
+    const events: string[] = [];
+    storageMock.mockReturnValue(storageAdapter);
+    createClerkBridgeMock.mockImplementation(() => {
+      events.push("createClerkBridge");
+      return { cleanup: vi.fn(), isPrimaryInstance: true };
+    });
+
+    return Effect.gen(function* () {
+      yield* Effect.scoped(
+        Layer.build(makeDesktopClerkLayer(false, events, "/tmp/lecturn/userdata/electron")),
+      );
+      assert.deepEqual(events, [
+        "makeDirectory:/tmp/lecturn/userdata/electron",
+        "setPath:userData:/tmp/lecturn/userdata/electron",
+        "createClerkBridge",
+      ]);
+    });
+  });
+
+  it.effect(
+    "stops before configuring Electron or Clerk if synchronous profile creation fails",
+    () => {
+      const events: string[] = [];
+      const layer = makeDesktopClerkLayer(false, events, "/tmp/lecturn/userdata/electron");
+      const cause = new Error("permission denied");
+      mkdirSyncMock.mockImplementation(() => {
+        throw cause;
+      });
+
+      return Effect.gen(function* () {
+        const error = yield* Effect.scoped(Layer.build(layer)).pipe(Effect.flip);
+        assert.instanceOf(error, DesktopAppIdentity.DesktopUserDataPathCreationError);
+        assert.equal(error.path, "/tmp/lecturn/userdata/electron");
+        assert.strictEqual(error.cause, cause);
+        assert.deepEqual(events, []);
+        assert.equal(createClerkBridgeMock.mock.calls.length, 0);
+      });
+    },
+  );
 
   it.effect("preserves bridge initialization failures", () => {
     const cause = new Error("bridge initialization failed");

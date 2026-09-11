@@ -1,3 +1,4 @@
+import { useMobileSagaIndex, useSidebarNestSagas } from "../../state/stave";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import type {
   EnvironmentProject,
@@ -45,6 +46,7 @@ import {
 import { buildHomeListFilterMenu } from "../home/home-list-filter-menu";
 import {
   buildHomeListLayout,
+  buildHomeHierarchyV2Items,
   DEFAULT_GROUP_DISPLAY_STATE,
   homeListItemsAreEqual,
   nextGroupDisplayState,
@@ -87,10 +89,11 @@ import {
 /** The sidebar list serves both lists: v1 grouped items or, when the Thread
     List v2 beta is on, flat v2 rows with queued tasks spliced in, and a settled
     "Show more" pager. */
-type SidebarListItem =
+type SidebarListItem = (
   | HomeListItem
   | ThreadListV2ListItem
-  | { readonly type: "v2-show-more"; readonly key: string; readonly hiddenCount: number };
+  | { readonly type: "v2-show-more"; readonly key: string; readonly hiddenCount: number }
+) & { readonly depth?: number };
 
 const SIDEBAR_STICKY_HEADER_HEIGHT = 106;
 
@@ -165,6 +168,7 @@ function ThreadNavigationSidebarPane(
     forkThread,
   } = useThreadListActions();
   const threadListV2Enabled = useThreadListV2Enabled();
+  const nestSagas = useSidebarNestSagas();
   const pendingTasks = usePendingNewTasks();
   const { openPendingTask, confirmDeletePendingTask } = usePendingTaskListActions();
   const environments = useMemo(
@@ -300,9 +304,12 @@ function ThreadNavigationSidebarPane(
           ),
     [pendingTasks, selectedProjectRefs],
   );
+  const sagaIndex = useMobileSagaIndex(scopedProjects, nestSagas && props.visible);
   const groups = useMemo(
     () =>
       buildHomeThreadGroups({
+        includeStaveProjects: nestSagas,
+        sagaIndex,
         projects: scopedProjects,
         threads: scopedThreads,
         pendingTasks: scopedPendingTasks,
@@ -314,6 +321,8 @@ function ThreadNavigationSidebarPane(
         projectGroupingMode: options.projectGroupingMode,
       }),
     [
+      nestSagas,
+      sagaIndex,
       matchedThreadKeys,
       options,
       props.searchQuery,
@@ -342,8 +351,9 @@ function ThreadNavigationSidebarPane(
         groups,
         displayStates: groupDisplayStates,
         showAllThreads: hasSearchQuery,
+        sagaIndex,
       }),
-    [groups, groupDisplayStates, hasSearchQuery],
+    [groups, groupDisplayStates, hasSearchQuery, sagaIndex],
   );
   const projectCwdByKey = useMemo(() => {
     const map = new Map<string, string>();
@@ -551,7 +561,7 @@ function ThreadNavigationSidebarPane(
         (v2SearchQuery.length === 0 ||
           pendingTask.title.toLocaleLowerCase().includes(v2SearchQuery)),
     );
-    const items: SidebarListItem[] = buildThreadListV2ListItems({
+    const flatItems = buildThreadListV2ListItems({
       items: threadListV2Layout.items,
       pendingTasks: v2PendingTasks,
       snoozedCount: threadListV2Layout.snoozedCount,
@@ -561,6 +571,14 @@ function ThreadNavigationSidebarPane(
       settledShelfExpanded,
       settledShelfHeaderIndex: threadListV2Layout.settledShelfHeaderIndex,
       snoozeLabelNow: `${nowMinute}:00.000Z`,
+    });
+    const items: SidebarListItem[] = buildHomeHierarchyV2Items({
+      groups,
+      items: flatItems,
+      sagaIndex,
+      displayStates: groupDisplayStates,
+      searching: hasSearchQuery,
+      selectedThreadKey: props.selectedThreadKey,
     });
     if (settledShelfExpanded && threadListV2Layout.hiddenSettledCount > 0) {
       items.push({
@@ -572,6 +590,11 @@ function ThreadNavigationSidebarPane(
     return items;
   }, [
     listLayout.items,
+    groups,
+    sagaIndex,
+    groupDisplayStates,
+    hasSearchQuery,
+    props.selectedThreadKey,
     nowMinute,
     options.selectedEnvironmentId,
     pendingTasks,
@@ -776,6 +799,7 @@ function ThreadNavigationSidebarPane(
   );
   const sidebarItemsAreEqual = useCallback(
     (previous: SidebarListItem, item: SidebarListItem): boolean => {
+      if (previous.depth !== item.depth) return false;
       if (previous.type === "v2-thread" && item.type === "v2-thread") {
         return (
           previous.key === item.key &&
@@ -836,7 +860,7 @@ function ThreadNavigationSidebarPane(
     return true;
   }, [props.nativeChrome, props.onRequestVisibility, props.visible]);
   useHardwareKeyboardCommand("focusSearch", focusSearch);
-  const renderListItem = useCallback(
+  const renderListRow = useCallback(
     ({ item }: { readonly item: SidebarListItem }) => {
       switch (item.type) {
         case "v2-pending": {
@@ -979,6 +1003,8 @@ function ThreadNavigationSidebarPane(
               variant="sidebar"
               collapsed={item.collapsed}
               isFirst={item.isFirst}
+              depth={item.depth}
+              memberStatus={item.memberStatus}
               groupKey={item.group.key}
               onGroupAction={updateGroupDisplay}
               // Same gating as the compact Home list: aggregated groups have no
@@ -989,6 +1015,8 @@ function ThreadNavigationSidebarPane(
               project={item.group.representative}
               threadCount={item.group.threads.length + item.group.pendingTasks.length}
               title={item.group.title}
+              firstThread={item.group.threads[0]}
+              onSelectThread={handleSelectThread}
             />
           );
         case "pending-task":
@@ -1158,6 +1186,34 @@ function ThreadNavigationSidebarPane(
   );
   // Snoozed threads need no special case: the shelf header is a list row
   // even while collapsed.
+  const renderListItem = useCallback(
+    (props: { readonly item: SidebarListItem }) => (
+      <View
+        style={{ paddingLeft: props.item.type === "header" ? 0 : (props.item.depth ?? 0) * 18 }}
+      >
+        {props.item.type !== "header"
+          ? Array.from({ length: props.item.depth ?? 0 }, (_, level) => (
+              <View
+                key={level}
+                pointerEvents="none"
+                accessible={false}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  bottom: 0,
+                  left: level * 18 + 8,
+                  width: 1,
+                  backgroundColor: "#b9893f",
+                }}
+              />
+            ))
+          : null}
+        {renderListRow(props)}
+      </View>
+    ),
+    [renderListRow],
+  );
+
   const listEmpty = (
     <Text className="px-2 py-4 text-sm text-foreground-muted">
       {catalogState.isLoadingConnections

@@ -1,3 +1,4 @@
+import { resolveProjectGitTargets } from "@lecturn/client-runtime/state/projectGit";
 import { scopeThreadRef } from "@lecturn/client-runtime/environment";
 import { pullRequestHostOf, resolveEnvironmentMachineKind, ThreadId } from "@lecturn/contracts";
 import type {
@@ -85,7 +86,10 @@ import {
   type PullRequestListSort,
   writePullRequestListPreferences,
 } from "../components/pullRequest/pullRequestListPreferences";
-import { assignProjectsToEnvironments } from "../components/pullRequest/pullRequestProjectAssignment.logic";
+import {
+  assignProjectsToEnvironments,
+  projectPullRequestRepository,
+} from "../components/pullRequest/pullRequestProjectAssignment.logic";
 import { environmentMachineIcon } from "../components/EnvironmentMachineIcon";
 import { PullRequestDetailPanel } from "../components/pullRequest/PullRequestDetailPanel";
 import {
@@ -158,6 +162,7 @@ export interface PullRequestsSearch extends PullRequestListPreferences {
   readonly repository?: string;
   readonly number?: number;
   readonly selectedProjectId?: ProjectId;
+  readonly selectedHost?: string;
   /**
    * Which server the selected pull request was read from. A project id only names a project on
    * its own server, so this is what tells two servers holding one project apart. Optional: a
@@ -261,6 +266,9 @@ export const Route = createFileRoute("/_chat/pull-requests")({
       ? { environmentId: raw.environmentId as EnvironmentId }
       : {}),
     ...(typeof raw.host === "string" && raw.host ? { host: raw.host.slice(0, 200) } : {}),
+    ...(typeof raw.selectedHost === "string" && raw.selectedHost
+      ? { selectedHost: raw.selectedHost.slice(0, 200) }
+      : {}),
     ...(typeof raw.selectedProjectId === "string" && raw.selectedProjectId
       ? { selectedProjectId: raw.selectedProjectId as ProjectId }
       : {}),
@@ -388,22 +396,27 @@ function PullRequestsRouteView() {
   const projectIdForRepository = useMemo(() => {
     const repository = search.repository?.toLowerCase();
     if (repository === undefined) return undefined;
-    const identity = projects.find(
-      (project) =>
-        project.repositoryIdentity?.owner &&
-        project.repositoryIdentity.name &&
-        `${project.repositoryIdentity.owner}/${project.repositoryIdentity.name}`.toLowerCase() ===
-          repository &&
-        // The same `owner/name` can exist on two hosts. Without this the first match wins, and
-        // a link that named its host opens the pull request from the other one.
-        (search.host === undefined ||
-          pullRequestHostOf(
-            project.repositoryIdentity,
-            project.repositoryIdentity.provider as SourceControlProviderKind,
-          ) === search.host.toLowerCase()),
+    const matches = projects.filter((project) =>
+      projectPullRequestRepository(project, {
+        repository,
+        ...((search.selectedHost ?? search.host)
+          ? { host: search.selectedHost ?? search.host }
+          : {}),
+      }),
     );
-    return identity?.id;
-  }, [projects, search.host, search.repository]);
+    const identities = new Set(
+      matches.map(
+        (project) =>
+          projectPullRequestRepository(project, {
+            repository,
+            ...((search.selectedHost ?? search.host)
+              ? { host: search.selectedHost ?? search.host }
+              : {}),
+          })?.identity?.canonicalKey,
+      ),
+    );
+    return identities.size === 1 ? matches[0]?.id : undefined;
+  }, [projects, search.host, search.selectedHost, search.repository]);
 
   // The selection is resolved the same way the scope is: an id no connected environment has can
   // never be read here, and one that arrived before the projects did is not yet wrong.
@@ -495,6 +508,7 @@ function PullRequestsRouteView() {
             ...(next.projectId ? { projectId: next.projectId } : {}),
             ...(next.environmentId ? { environmentId: next.environmentId } : {}),
             ...(next.host ? { host: next.host } : {}),
+            ...(next.selectedHost ? { selectedHost: next.selectedHost } : {}),
             ...(next.selectedProjectId ? { selectedProjectId: next.selectedProjectId } : {}),
             ...(next.selectedEnvironmentId
               ? { selectedEnvironmentId: next.selectedEnvironmentId }
@@ -516,6 +530,7 @@ function PullRequestsRouteView() {
     repository: undefined,
     number: undefined,
     selectedProjectId: undefined,
+    selectedHost: undefined,
     selectedEnvironmentId: undefined,
   };
   // List controls change the rows behind the detail, not the independent selected surface. The
@@ -1443,11 +1458,14 @@ function PullRequestsRouteView() {
         ? {
             environmentId: selectedProject.environmentId,
             repository: search.repository,
+            ...((search.selectedHost ?? search.host)
+              ? { host: search.selectedHost ?? search.host }
+              : {}),
             number: search.number,
             projectId: selectedProject.id,
           }
         : null,
-    [search.number, search.repository, selectedProject],
+    [search.number, search.repository, search.selectedHost, search.host, selectedProject],
   );
   const rightPanelAvailable = selectedPullRequestSurface !== null;
   useEffect(() => {
@@ -1460,6 +1478,7 @@ function PullRequestsRouteView() {
       ? {
           environmentId: activePullRequestSurface.environmentId,
           repository: activePullRequestSurface.repository,
+          host: activePullRequestSurface.host,
           number: activePullRequestSurface.number,
           projectId: activePullRequestSurface.projectId as ProjectId,
         }
@@ -1471,6 +1490,7 @@ function PullRequestsRouteView() {
         ? clearedSelection
         : {
             repository: surface.repository,
+            selectedHost: surface.host,
             number: surface.number,
             selectedProjectId: surface.projectId as ProjectId,
             ...(surface.environmentId === undefined
@@ -1511,10 +1531,12 @@ function PullRequestsRouteView() {
   const expectedHosts = useMemo(() => {
     const byHost = new Map<string, PullRequestExpectedHost>();
     for (const project of projects) {
-      const kind = project.repositoryIdentity?.provider as SourceControlProviderKind | undefined;
-      if (kind === undefined) continue;
-      const host = pullRequestHostOf(project.repositoryIdentity, kind);
-      if (!byHost.has(host)) byHost.set(host, { host, kind });
+      for (const target of resolveProjectGitTargets({ project })) {
+        const kind = target.repositoryIdentity?.provider as SourceControlProviderKind | undefined;
+        if (kind === undefined) continue;
+        const host = pullRequestHostOf(target.repositoryIdentity, kind);
+        if (!byHost.has(host)) byHost.set(host, { host, kind });
+      }
     }
     return [...byHost.values()];
   }, [projects]);
@@ -1542,6 +1564,7 @@ function PullRequestsRouteView() {
       useRightPanelStore.getState().openPullRequest(rightPanelRef, entry);
       updateSearch({
         repository: entry.repository,
+        selectedHost: entry.host,
         number: entry.number,
         selectedProjectId: entry.projectId,
         selectedEnvironmentId: entry.environmentId,
@@ -1657,6 +1680,7 @@ function PullRequestsRouteView() {
                     selected={
                       selected?.environmentId === entry.environmentId &&
                       selected.repository === entry.repository &&
+                      (selected.host === undefined || selected.host === entry.host) &&
                       selected.number === entry.number
                     }
                     onSelect={selectEntry}
@@ -1937,6 +1961,9 @@ function PullRequestsRouteView() {
               reference={{
                 projectId: renderedPullRequestSurface.projectId as ProjectId,
                 repository: renderedPullRequestSurface.repository,
+                ...(renderedPullRequestSurface.host
+                  ? { host: renderedPullRequestSurface.host }
+                  : {}),
                 number: renderedPullRequestSurface.number,
               }}
               refreshToken={detailRefreshToken}

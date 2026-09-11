@@ -513,3 +513,28 @@ describe("serverSettings helpers", () => {
     expect(resolved.pauseWhenOnBattery).toBe(false);
   });
 });
+
+describe("applyServerSettingsPatch stave", () => {
+  it("deep merges a partial stave patch instead of replacing the block", () => {
+    const current = {
+      ...DEFAULT_SERVER_SETTINGS,
+      stave: {
+        ...DEFAULT_SERVER_SETTINGS.stave,
+        enabled: true,
+        binaryPath: "/usr/local/bin/stave",
+      },
+    };
+
+    const next = applyServerSettingsPatch(current, {
+      stave: { lifecycle: { onProjectDelete: "archive" } },
+    });
+
+    expect(next.stave).toEqual({
+      enabled: true,
+      binaryPath: "/usr/local/bin/stave",
+      configPath: "",
+      lifecycle: { ...DEFAULT_SERVER_SETTINGS.stave.lifecycle, onProjectDelete: "archive" },
+    });
+    expect(applyServerSettingsPatch(next, { stave: { binaryPath: "" } }).stave.binaryPath).toBe("");
+  });
+});

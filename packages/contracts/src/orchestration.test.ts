@@ -31,6 +31,8 @@ import {
   ThreadTurnStartRequestedPayload,
   isProviderSendTurnSupportedImageMimeType,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+  OrchestrationProject,
+  OrchestrationProjectShell,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
@@ -531,6 +533,24 @@ it.effect("decodes thread settle and unsettle commands", () =>
       reason: "activity",
     }).pipe(Effect.flip);
     assert.ok(forged);
+  }),
+);
+
+it.effect("decodes project.refresh only as an internal command", () =>
+  Effect.gen(function* () {
+    const command = {
+      type: "project.refresh",
+      commandId: "server:stave:refresh:project-1:1",
+      projectId: "project-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    const internal = yield* decodeOrchestrationCommand(command);
+    assert.strictEqual(internal.type, "project.refresh");
+
+    // Clients cannot force a shell re-broadcast; only the server dispatches it.
+    const rejected = yield* decodeClientOrchestrationCommand(command).pipe(Effect.flip);
+    assert.ok(rejected);
   }),
 );
 
@@ -1318,5 +1338,72 @@ it.effect("rejects a fork origin missing its turn id", () =>
       }),
     );
     assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
+const decodeOrchestrationProject = Schema.decodeUnknownEffect(OrchestrationProject);
+const decodeOrchestrationProjectShell = Schema.decodeUnknownEffect(OrchestrationProjectShell);
+
+const projectShellPayloadWithoutStave = {
+  id: "project-1",
+  title: "Project",
+  workspaceRoot: "/tmp/project",
+  defaultModelSelection: null,
+  scripts: [],
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+} as const;
+
+it.effect("decodes project payloads from pre-Stave servers without stave or notice", () =>
+  Effect.gen(function* () {
+    const project = yield* decodeOrchestrationProject({
+      ...projectShellPayloadWithoutStave,
+      deletedAt: null,
+    });
+    const shell = yield* decodeOrchestrationProjectShell(projectShellPayloadWithoutStave);
+
+    assert.strictEqual(project.stave, undefined);
+    assert.strictEqual(project.notice, undefined);
+    assert.strictEqual(shell.stave, undefined);
+    assert.strictEqual(shell.notice, undefined);
+  }),
+);
+
+it.effect("decodes Stave project info and drops unknown state and notice kinds", () =>
+  Effect.gen(function* () {
+    const stave = {
+      spaceId: "feature-x",
+      isSaga: false,
+      repos: [{ name: "t3code", mode: "edit", path: "t3code", base: "main" }],
+      memories: [{ name: "notes", provider: "marmot", id: "mem-1", owned: true }],
+      state: "live",
+    };
+    const project = yield* decodeOrchestrationProject({
+      ...projectShellPayloadWithoutStave,
+      deletedAt: null,
+      stave,
+      notice: { kind: "archive_scheduled", at: "2026-01-08T00:00:00.000Z" },
+    });
+    assert.strictEqual(project.stave?.state, "live");
+    assert.strictEqual(project.stave?.repos[0]?.mode, "edit");
+    assert.strictEqual(project.notice?.kind, "archive_scheduled");
+
+    const skewed = yield* decodeOrchestrationProjectShell({
+      ...projectShellPayloadWithoutStave,
+      stave: { ...stave, state: "hibernated" },
+      notice: { kind: "something_new", message: "from a newer server" },
+    });
+    assert.strictEqual(skewed.stave?.state, undefined);
+    assert.strictEqual(skewed.stave?.spaceId, "feature-x");
+    assert.strictEqual(skewed.notice?.kind, undefined);
+    assert.strictEqual(skewed.notice?.message, "from a newer server");
+
+    const nullified = yield* decodeOrchestrationProjectShell({
+      ...projectShellPayloadWithoutStave,
+      stave: null,
+      notice: null,
+    });
+    assert.strictEqual(nullified.stave, null);
+    assert.strictEqual(nullified.notice, null);
   }),
 );

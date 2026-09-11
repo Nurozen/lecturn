@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
+import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -157,6 +158,40 @@ describe("DesktopWslServerTree", () => {
           path.join(root, "lecturn-wsl-server-tree.json"),
         );
         assert.include(marker, '"version":"1.2.3"');
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("marks the bundled Linux Stave binary executable after extraction", () =>
+    withTempDir((tempDir) =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const serverRoot = path.join(tempDir, "resources", "server.asar");
+        yield* fileSystem.makeDirectory(path.join(serverRoot, "apps/server/dist/stave/linux-x64"), {
+          recursive: true,
+        });
+        yield* fileSystem.writeFileString(path.join(serverRoot, "apps/server/dist/bin.mjs"), "");
+        const sourceStave = path.join(serverRoot, "apps/server/dist/stave/linux-x64/stave");
+        yield* fileSystem.writeFileString(sourceStave, "stave-binary");
+        // The source deliberately lacks the exec bit: a Windows-host build
+        // cannot record it, so the extraction must add it on its own.
+        yield* fileSystem.chmod(sourceStave, 0o644);
+
+        const result = yield* ensureWith({
+          baseDir: tempDir,
+          resourcesPath: path.join(tempDir, "resources"),
+        });
+
+        assert.isTrue(result.ok);
+        const root = result.ok ? result.root : "";
+        const extractedStave = path.join(root, "apps/server/dist/stave/linux-x64/stave");
+        assert.equal(yield* fileSystem.readFileString(extractedStave), "stave-binary");
+        // Windows does not model the exec bit, so only the copy is checked there.
+        if ((yield* HostProcessPlatform) !== "win32") {
+          const info = yield* fileSystem.stat(extractedStave);
+          assert.notEqual(info.mode & 0o111, 0);
+        }
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
   );

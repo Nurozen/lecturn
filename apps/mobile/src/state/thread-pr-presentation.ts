@@ -37,3 +37,14 @@ export function presentThreadPr(
     textClassName: PR_STATE_TEXT_CLASS[pr.state],
   };
 }
+
+/** Undefined branch follows a Stave checkout's live HEAD; null disables inferred PRs. */
+export function presentThreadGitStatusPr(
+  status: Pick<VcsStatusResult, "refName" | "pr" | "sourceControlProvider"> | null,
+  branch: string | null | undefined,
+): ThreadPrPresentation | null | undefined {
+  if (branch === null) return null;
+  if (status === null) return undefined;
+  if ((branch !== undefined && status.refName !== branch) || !status.pr) return null;
+  return presentThreadPr(status.pr, status.sourceControlProvider);
+}

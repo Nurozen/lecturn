@@ -1,3 +1,4 @@
+import { StaveMemoryWiring } from "../../stave/StaveMemoryWiring.ts";
 import { GrokSettings, ProviderDriverKind } from "@lecturn/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -49,6 +50,7 @@ const UPDATE = makeStaticProviderMaintenanceResolver(
 );
 
 export type GrokDriverEnv =
+  | StaveMemoryWiring
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
@@ -94,6 +96,7 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
       });
 
       const adapter = yield* makeGrokAdapter(effectiveConfig, {
+        staveMemoryWiring: yield* StaveMemoryWiring,
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,

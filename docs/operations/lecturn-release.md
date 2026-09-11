@@ -24,6 +24,18 @@ Enabling Android submission does not resubmit an existing build. Submit that bui
 
 The workspace and published package use `lecturn`, with the `lecturn` executable. `publish_cli` passes `--package-name lecturn --bin-name lecturn`, and `repository.url` follows `GITHUB_REPOSITORY`. Publishing uses npm trusted publishing (OIDC); the trusted publisher must point at `Nurozen/lecturn` and `release.yml`.
 
+## Bundled Stave
+
+Every release bundles the Stave CLI binary from the [`Nurozen/stave`](https://github.com/Nurozen/stave) GitHub releases so the app never depends on a system-installed `stave`.
+
+- **Choosing the version.** The `stave_version` dispatch input takes a Stave release tag or `latest` (the default). Pin a tag when you need a reproducible rebuild. Tag pushes and the nightly schedule have no inputs and always resolve `latest`.
+- **One pin per run.** `preflight` resolves the tag once (`Resolve Stave release tag`, via `scripts/fetch-stave.ts --resolve-only`) and exposes it as the `stave_tag` job output. Every build and publish job fetches that exact tag, so a Stave release landing mid-run cannot split the artifacts. The resolved tag is written to the run's step summary.
+- **Verification.** Each download is sha256-checked against the release's `checksums.txt` before extraction. A checksum mismatch or a missing asset fails the job.
+- **CLI package.** `publish_cli` fetches all six platform keys (`darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`, `win32-x64`, `win32-arm64`) into `apps/server/dist/stave/<key>/`, and `cli.ts publish --require-stave` refuses to publish if any is missing.
+- **Desktop legs.** Each of the four desktop matrix legs fetches only its own platform key. The Windows leg also fetches `linux-x64` for the WSL backend; the artifact script stages it into the WSL server payload.
+- **Local builds.** `vp run dist:desktop:artifact` requires `--stave-binary <path>` (and `--stave-wsl-binary <path>` on Windows). Pass `--allow-missing-stave` only for local development; CI never does.
+- **Where the tag shows up.** A `stave.version` file containing the tag sits beside each bundled binary, and the app reports the bundled version under Diagnostics.
+
 ## Code signing
 
 - macOS: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER` enable Developer ID signing and notarization. `APPLE_TEAM_ID` and `MACOS_PROVISIONING_PROFILE` configure associated-domain entitlements when supplied. See the release runbook for signing setup.
@@ -32,6 +44,10 @@ The workspace and published package use `lecturn`, with the `lecturn` executable
 ## Application identity
 
 Lecturn uses its own application name and identity. Runtime data lives in `~/.lecturn/userdata`. See [Install Lecturn](../user/lecturn-installation.md) for installation and data-directory configuration.
+
+The resolved Stave release must be v0.4.0 or newer. `fetch-stave` validates both explicit
+`stave_version` pins and the tag returned for `latest` before downloading assets; older releases
+lack the JSON mutation protocol used by this integration.
 
 ## Upgrading installations after the naming change
 

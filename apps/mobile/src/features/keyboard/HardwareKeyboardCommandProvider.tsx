@@ -14,6 +14,7 @@ import { tryCopyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { LecturnKeyboardCommands } from "../../native/LecturnKeyboardCommands";
 import { useProject, useThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
+import { resolveThreadGitTarget } from "../../state/thread-git-target";
 import type { GitActionProgress } from "../../state/use-vcs-action-state";
 import { vcsEnvironment } from "../../state/vcs";
 import { GitActionProgressOverlay } from "../threads/GitActionProgressOverlay";
@@ -51,20 +52,23 @@ export function HardwareKeyboardCommandProvider({
     [activeThread],
   );
   const activeProject = useProject(activeProjectRef);
-  const activeThreadCwd = activeThread?.worktreePath ?? activeProject?.workspaceRoot ?? null;
+  const { cwd: activeThreadGitCwd, branch: activeThreadGitBranch } = resolveThreadGitTarget({
+    project: activeProject,
+    thread: activeThread,
+  });
   const gitStatus = useEnvironmentQuery(
     activeThread !== null &&
       activeThread.linkedPullRequest == null &&
-      activeThread.branch !== null &&
-      activeThreadCwd !== null
+      activeThreadGitBranch !== null &&
+      activeThreadGitCwd !== null
       ? vcsEnvironment.status({
           environmentId: activeThread.environmentId,
-          input: { cwd: activeThreadCwd },
+          input: { cwd: activeThreadGitCwd },
         })
       : null,
   ).data;
   const detectedPullRequestUrl =
-    activeThread?.branch != null && gitStatus?.refName === activeThread.branch
+    activeThreadGitBranch !== null && gitStatus?.refName === activeThreadGitBranch
       ? (gitStatus.pr?.url ?? null)
       : null;
   const copyTarget = useMemo(

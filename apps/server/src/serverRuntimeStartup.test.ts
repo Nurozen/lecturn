@@ -27,16 +27,20 @@ it("uses the canonical Codex default for the auto-bootstrapped welcome thread", 
 it.effect("automatic pull only updates enabled, behind, clean default-branch checkouts", () =>
   Effect.gen(function* () {
     const pulled: string[] = [];
+    const statusChecked: string[] = [];
     const git = {
       statusDetails: (cwd: string) =>
-        Effect.succeed({
-          isRepo: true,
-          isDefaultBranch: cwd !== "/feature",
-          hasUpstream: true,
-          hasWorkingTreeChanges: cwd === "/dirty",
-          aheadCount: cwd === "/ahead" ? 1 : 0,
-          behindCount: cwd === "/current" ? 0 : 1,
-        } as never),
+        Effect.sync(() => {
+          statusChecked.push(cwd);
+          return {
+            isRepo: true,
+            isDefaultBranch: cwd !== "/feature",
+            hasUpstream: true,
+            hasWorkingTreeChanges: cwd === "/dirty",
+            aheadCount: cwd === "/ahead" ? 1 : 0,
+            behindCount: cwd === "/current" ? 0 : 1,
+          } as never;
+        }),
       pullCurrentBranch: (cwd: string) =>
         Effect.sync(() => {
           pulled.push(cwd);
@@ -47,8 +51,8 @@ it.effect("automatic pull only updates enabled, behind, clean default-branch che
           };
         }),
     } as unknown as GitVcsDriver.GitVcsDriver["Service"];
-    const project = (workspaceRoot: string, autoPull = true) =>
-      ({ workspaceRoot, autoPull }) as never;
+    const project = (workspaceRoot: string, autoPull = true, stave: unknown = undefined) =>
+      ({ workspaceRoot, autoPull, stave }) as never;
 
     yield* ServerRuntimeStartup.autoPullProjects([
       project("/clean"),
@@ -57,9 +61,13 @@ it.effect("automatic pull only updates enabled, behind, clean default-branch che
       project("/ahead"),
       project("/feature"),
       project("/disabled", false),
+      // A Stave space root is not a repo; it is refused before any git call.
+      project("/stave", true, { spaceId: "s", isSaga: false, repos: [], memories: [] }),
     ]).pipe(Effect.provideService(GitVcsDriver.GitVcsDriver, git));
 
     assert.deepStrictEqual(pulled, ["/clean"]);
+    assert.isFalse(statusChecked.includes("/stave"));
+    assert.isFalse(statusChecked.includes("/disabled"));
   }),
 );
 
@@ -118,6 +126,8 @@ it.effect("launchStartupHeartbeat does not block the caller while counts are loa
 
       yield* ServerRuntimeStartup.launchStartupHeartbeat.pipe(
         Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+          listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
+          listActiveProjectRootsUnder: () => Effect.succeed([]),
           getCommandReadModel: () => Effect.die("unused"),
           getSnapshot: () => Effect.die("unused"),
           getShellSnapshot: () => Effect.die("unused"),
@@ -141,6 +151,7 @@ it.effect("launchStartupHeartbeat does not block the caller while counts are loa
           getThreadDetailById: () => Effect.succeed(Option.none()),
           getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
           listThreadActivitiesById: () => Effect.succeed([]),
+          getInferenceTurnPairs: () => Effect.succeed([]),
           listThreadTurnsById: () => Effect.succeed([]),
           getThreadForkContextById: () => Effect.succeed(Option.none()),
           listThreadIdsByWorktreePath: () => Effect.succeed([]),
@@ -189,6 +200,8 @@ it.effect("resolveAutoBootstrapWelcomeTargets returns existing project and threa
         autoBootstrapProjectFromCwd: true,
       } as never),
       Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+        listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
+        listActiveProjectRootsUnder: () => Effect.succeed([]),
         getCommandReadModel: () => Effect.die("unused"),
         getSnapshot: () => Effect.die("unused"),
         getShellSnapshot: () => Effect.die("unused"),
@@ -217,6 +230,7 @@ it.effect("resolveAutoBootstrapWelcomeTargets returns existing project and threa
         getThreadDetailById: () => Effect.die("unused"),
         getThreadDetailSnapshot: () => Effect.die("unused"),
         listThreadActivitiesById: () => Effect.die("unused"),
+        getInferenceTurnPairs: () => Effect.succeed([]),
         listThreadTurnsById: () => Effect.die("unused"),
         getThreadForkContextById: () => Effect.die("unused"),
         listThreadIdsByWorktreePath: () => Effect.die("unused"),
@@ -258,6 +272,8 @@ it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when 
         autoBootstrapProjectFromCwd: true,
       } as never),
       Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+        listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
+        listActiveProjectRootsUnder: () => Effect.succeed([]),
         getCommandReadModel: () => Effect.die("unused"),
         getSnapshot: () => Effect.die("unused"),
         getShellSnapshot: () => Effect.die("unused"),
@@ -274,6 +290,7 @@ it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when 
         getThreadDetailById: () => Effect.die("unused"),
         getThreadDetailSnapshot: () => Effect.die("unused"),
         listThreadActivitiesById: () => Effect.die("unused"),
+        getInferenceTurnPairs: () => Effect.succeed([]),
         listThreadTurnsById: () => Effect.die("unused"),
         getThreadForkContextById: () => Effect.die("unused"),
         listThreadIdsByWorktreePath: () => Effect.die("unused"),
@@ -324,6 +341,8 @@ it.effect("resolveAutoBootstrapWelcomeTargets preserves typed UUID generation fa
         autoBootstrapProjectFromCwd: true,
       } as never),
       Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+        listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
+        listActiveProjectRootsUnder: () => Effect.succeed([]),
         getCommandReadModel: () => Effect.die("unused"),
         getSnapshot: () => Effect.die("unused"),
         getShellSnapshot: () => Effect.die("unused"),
@@ -340,6 +359,7 @@ it.effect("resolveAutoBootstrapWelcomeTargets preserves typed UUID generation fa
         getThreadDetailById: () => Effect.die("unused"),
         getThreadDetailSnapshot: () => Effect.die("unused"),
         listThreadActivitiesById: () => Effect.die("unused"),
+        getInferenceTurnPairs: () => Effect.succeed([]),
         listThreadTurnsById: () => Effect.die("unused"),
         getThreadForkContextById: () => Effect.die("unused"),
         listThreadIdsByWorktreePath: () => Effect.die("unused"),
