@@ -292,11 +292,13 @@ class Runner:
         write_json(schema_path, output_schema)
         (folder / f'{name}.prompt.md').write_text(prompt)
         # Each run is a fresh session; never resume/fork a builder into its reviewer.
-        # --strict-mcp-config: never start MCP servers from the reviewed tree's .mcp.json (upstream
-        # text would otherwise run as host code before any sandbox applies) or from user config.
+        # The reviewed tree is upstream text: --strict-mcp-config keeps its .mcp.json from starting
+        # host processes, and an empty --setting-sources keeps its .claude/settings.json hooks (which
+        # run on the host outside every sandbox layer, unlogged) and .claude/agents out of the
+        # session. Only the controller's --settings payload applies.
         command(['claude', '--print', '--model', TOP_MODEL, *access,
                  '--output-format', 'stream-json', '--verbose', '--no-session-persistence',
-                 '--strict-mcp-config',
+                 '--strict-mcp-config', '--setting-sources', '',
                  '--json-schema', json.dumps(output_schema)], repo, log=log_path,
                 stdin=prompt, lock_fd=self.lock_fd,
                 env={**os.environ, 'CLAUDE_CODE_SUBAGENT_MODEL': WORKER_MODEL})

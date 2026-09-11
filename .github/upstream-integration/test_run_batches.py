@@ -130,6 +130,7 @@ class GitSafetyTests(unittest.TestCase):
             self.assertFalse(any(rule.startswith('Write(///') for rule in tools))
             self.assertIn('--no-session-persistence', argv)
             self.assertIn('--strict-mcp-config', argv)
+            self.assertEqual(argv[argv.index('--setting-sources') + 1], '')
             self.assertEqual(json.loads(argv[argv.index('--json-schema') + 1]), schema)
             self.write_events(kwargs['log'], {'verdict': 'approve'})
 
@@ -164,6 +165,7 @@ class GitSafetyTests(unittest.TestCase):
             self.assertEqual((self.folder / 'builder.prompt.md').read_text(), 'Build')
             self.assertEqual(argv[argv.index('--output-format') + 1], 'stream-json')
             self.assertIn('--strict-mcp-config', argv)
+            self.assertEqual(argv[argv.index('--setting-sources') + 1], '')
             self.assertEqual(kwargs['stdin'], 'Build')
             self.write_events(kwargs['log'], {'ready': True})
 
