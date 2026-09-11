@@ -19,6 +19,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
+import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
@@ -134,6 +135,7 @@ interface HarnessOptions {
   readonly snapshot: OrchestrationShellSnapshot;
   readonly settings?: ServerSettings;
   readonly staveMerged?: ReadonlySet<ProjectId>;
+  readonly localStatus?: GitManager["Service"]["localStatus"];
   readonly branchPullRequest?: GitManager["Service"]["branchPullRequest"];
   readonly pullRequestSummary?: PullRequestService["Service"]["summary"];
   readonly onDispatch?: (
@@ -214,6 +216,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
   });
 
   const dependencies = Layer.mergeAll(
+    Path.layer,
     Layer.succeed(StaveMergeSignal, {
       candidates: () => Effect.succeed(options.staveMerged ?? new Set<ProjectId>()),
     }),
@@ -224,7 +227,20 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
           Effect.andThen(Ref.get(snapshots)),
         ),
     }),
-    Layer.mock(GitManager)({ branchPullRequest }),
+    Layer.mock(GitManager)({
+      branchPullRequest,
+      localStatus:
+        options.localStatus ??
+        (() =>
+          Effect.succeed({
+            isRepo: true,
+            hasPrimaryRemote: true,
+            isDefaultRef: false,
+            refName: "stave/s/repo",
+            hasWorkingTreeChanges: false,
+            workingTree: { files: [], insertions: 0, deletions: 0 },
+          })),
+    }),
     Layer.mock(PullRequestService)({
       summary: pullRequestSummary,
       subscribeMerges: PubSub.subscribe(mergedPullRequests).pipe(
@@ -736,7 +752,7 @@ describe("Stave saga settlement", () => {
         }).pipe(Effect.provide(harness.layer));
       }),
   );
-  it.effect("uses the primary repo and manifest branch for ordinary Stave PR lookup", () =>
+  it.effect("uses the editable repo checkout branch for Stave PR lookup", () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(Date.parse(NOW));
       const project = {
@@ -744,7 +760,7 @@ describe("Stave saga settlement", () => {
         stave: {
           spaceId: "s",
           isSaga: false,
-          repos: [],
+          repos: [{ name: "repo", path: "repo", mode: "edit" as const }],
           memories: [],
           state: "live" as const,
           primaryRepoPath: "/workspace/project/repo",
@@ -761,4 +777,112 @@ describe("Stave saga settlement", () => {
       }).pipe(Effect.provide(harness.layer));
     }),
   );
+});
+
+describe("Stave multi-repo settlement", () => {
+  for (const scenario of [
+    {
+      name: "waits for an older explicit open PR",
+      second: "merged",
+      linkedOpen: true,
+      merged: true,
+      expected: 0,
+    },
+    { name: "waits for the second open repo", second: "open", merged: true, expected: 0 },
+    { name: "waits when a repo has no PR", second: null, merged: true, expected: 0 },
+    { name: "waits when a repo lookup fails", second: "error", merged: true, expected: 0 },
+    {
+      name: "settles after every editable repo merges",
+      second: "merged",
+      merged: true,
+      expected: 1,
+    },
+    { name: "honors the merge toggle across repos", second: "merged", merged: false, expected: 0 },
+    {
+      name: "does not bypass the merge toggle with another closed PR",
+      second: "closed",
+      merged: false,
+      expected: 0,
+    },
+  ] as const) {
+    it.effect(scenario.name, () =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const project: OrchestrationProjectShell = {
+          ...makeProject(),
+          stave: {
+            spaceId: "multi",
+            isSaga: false,
+            state: "live",
+            memories: [],
+            repos: [
+              { name: "api", path: "services/api", mode: "edit", branch: "stale-manifest" },
+              { name: "web", path: "web", mode: "edit", branch: "also-stale" },
+              { name: "reference", path: "references/docs", mode: "reference" },
+            ],
+            primaryRepoPath: "/workspace/project/services/api",
+            primaryBranch: "stale-primary",
+          },
+        };
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot(
+            [
+              makeThread("multi-thread", {
+                branch: "stale-thread",
+                linkedPullRequest: {
+                  projectId: PROJECT_ID,
+                  repository: "owner/repository",
+                  number: 42,
+                  url: "https://github.com/owner/repository/pull/42",
+                },
+              }),
+            ],
+            [project],
+          ),
+          settings: {
+            ...DEFAULT_SERVER_SETTINGS,
+            sidebarAutoSettleAfterDays: null,
+            sidebarAutoSettleOnMerge: scenario.merged,
+          },
+          localStatus: ({ cwd }) =>
+            Effect.succeed({
+              isRepo: true,
+              hasPrimaryRemote: true,
+              isDefaultRef: false,
+              refName: cwd.endsWith("/api") ? "api-current" : "web-current",
+              hasWorkingTreeChanges: false,
+              workingTree: { files: [], insertions: 0, deletions: 0 },
+            }),
+          branchPullRequest: ({ cwd }) => {
+            if (cwd.endsWith("/api")) return Effect.succeed({ state: "merged", updatedAt: NOW });
+            if (scenario.second === "error") return Effect.die("repo unavailable");
+            return Effect.succeed(
+              scenario.second === null ? null : { state: scenario.second, updatedAt: NOW },
+            );
+          },
+          pullRequestSummary: (input) =>
+            Effect.succeed(
+              makePullRequestSummary({
+                ...input,
+                state: "linkedOpen" in scenario ? "open" : "merged",
+                updatedAt: NOW,
+              }),
+            ),
+        });
+        yield* Effect.gen(function* () {
+          const reactor = yield* ThreadSettlementReactor.ThreadSettlementReactor;
+          yield* startHarness(reactor, fixture.activation, fixture.snapshotReads);
+          assert.strictEqual((yield* Ref.get(fixture.commands)).length, scenario.expected);
+          assert.deepStrictEqual(yield* Ref.get(fixture.branchCalls), [
+            { cwd: "/workspace/project/services/api", branch: "api-current" },
+            { cwd: "/workspace/project/web", branch: "web-current" },
+          ]);
+          yield* fixture.publishMerge;
+          yield* Queue.take(fixture.snapshotReads);
+          yield* reactor.drain;
+          assert.strictEqual((yield* Ref.get(fixture.commands)).length, scenario.expected * 2);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    );
+  }
 });

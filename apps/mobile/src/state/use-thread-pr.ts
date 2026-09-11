@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { resolveProjectGitTargets } from "@t3tools/client-runtime/state/projectGit";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import {
   createLinkedPullRequestSummaryAtomFamily,
@@ -13,7 +14,11 @@ import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "./atom-registry";
 import { useEnvironmentQuery } from "./query";
 import { resolveThreadGitTarget } from "./thread-git-target";
-import { presentThreadPr, type ThreadPrPresentation } from "./thread-pr-presentation";
+import {
+  presentThreadPr,
+  presentThreadGitStatusPr,
+  type ThreadPrPresentation,
+} from "./thread-pr-presentation";
 import { vcsEnvironment } from "./vcs";
 
 const linkedPullRequestDetailAtom = createLinkedPullRequestSummaryAtomFamily(connectionAtomRuntime);
@@ -44,14 +49,18 @@ export type ThreadPrProject = Pick<OrchestrationProjectShell, "workspaceRoot" | 
  * (environmentId, cwd) by the atom family, so many rows on the same worktree
  * or project root share one stream — and virtualization means only visible
  * rows subscribe at all. The project decides where git runs: a Stave space
- * redirects to its primary repo and supplies the branch for `branch: null`
- * threads.
+ * with several editable repositories shows its PRs in the space Git overview,
+ * rather than representing the whole space with one inferred repo's PR badge.
  */
 export function useThreadPr(
   thread: EnvironmentThreadShell,
   project: ThreadPrProject | null,
 ): ThreadPrPresentation | null {
-  const { cwd, branch } = resolveThreadGitTarget({ project, thread });
+  const target = resolveThreadGitTarget({ project, thread });
+  const ambiguousRepo =
+    project?.stave != null && resolveProjectGitTargets({ project }).length !== 1;
+  const { cwd } = target;
+  const branch = ambiguousRepo ? null : project?.stave ? undefined : target.branch;
   const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
   const snapshotIdentity = JSON.stringify(thread.linkedPullRequest ?? { branch, cwd });
   // Select this row's entry so writes for other rows do not re-render it.
@@ -80,6 +89,7 @@ export function useThreadPr(
             projectId: thread.linkedPullRequest.projectId,
             repository: thread.linkedPullRequest.repository,
             number: thread.linkedPullRequest.number,
+            ...(thread.linkedPullRequest.host ? { host: thread.linkedPullRequest.host } : {}),
           },
         }),
   );
@@ -96,11 +106,7 @@ export function useThreadPr(
           });
     }
 
-    const status = gitStatus.data;
-    if (branch === null) return null;
-    if (status === null) return undefined;
-    if (status.refName !== branch || !status.pr) return null;
-    return presentThreadPr(status.pr, status.sourceControlProvider);
+    return presentThreadGitStatusPr(gitStatus.data, branch);
   }, [branch, gitStatus.data, linkedPullRequest.data, thread.linkedPullRequest]);
 
   useEffect(() => {

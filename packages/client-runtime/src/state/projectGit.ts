@@ -1,15 +1,16 @@
-import type { OrchestrationProjectShell, ThreadEnvMode } from "@t3tools/contracts";
+import type {
+  OrchestrationProjectShell,
+  RepositoryIdentity,
+  ThreadEnvMode,
+} from "@t3tools/contracts";
+import {
+  isWindowsAbsolutePath,
+  normalizeProjectPathForComparison,
+  normalizeProjectPathForDispatch,
+} from "@t3tools/shared/path";
+import { resolveProjectPathForDispatch } from "./projects.ts";
 
-/**
- * Git targeting for a project that may be a Stave space.
- *
- * A Stave space's workspace root is not itself a git repository — it is a
- * directory of repo worktrees described by `.stave.yaml`. Git surfaces
- * (status, PR lookup, branch pickers, commit/push) must therefore address
- * the space's primary repo, while files and terminals keep using the space
- * root. These resolvers are the single place that choice is made so web and
- * mobile cannot disagree.
- */
+/** Git targets follow manifest checkout paths; agent sessions keep the space root. */
 
 type ProjectLike = Pick<OrchestrationProjectShell, "workspaceRoot"> & {
   readonly stave?: OrchestrationProjectShell["stave"];
@@ -19,6 +20,101 @@ type ProjectLike = Pick<OrchestrationProjectShell, "workspaceRoot"> & {
 interface ThreadLike {
   readonly branch?: string | null;
   readonly worktreePath?: string | null;
+}
+
+export interface ProjectGitTarget {
+  readonly key: string;
+  readonly cwd: string;
+  readonly repoName: string;
+  readonly mode: "edit" | "reference";
+  readonly branch: string | null;
+  readonly repositoryIdentity: RepositoryIdentity | null;
+}
+
+/** Resolve old relative manifest paths without using the client's OS or cwd. */
+function resolveManifestRepoPath(root: string, repoPath: string): string | null {
+  const value = repoPath.trim();
+  if (!value || value.includes("\0")) return null;
+  if (isWindowsAbsolutePath(value) || value.startsWith("/")) {
+    return normalizeProjectPathForDispatch(value);
+  }
+  if (!isWindowsAbsolutePath(root) && !root.startsWith("/")) return null;
+  // Reject ambiguous drive-relative paths and paths that escape the manifest root.
+  if (/^[a-zA-Z]:/.test(value) || value.startsWith("\\")) return null;
+  let depth = 0;
+  for (const segment of value.split(/[\\/]+/)) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      if (--depth < 0) return null;
+    } else depth++;
+  }
+  return resolveProjectPathForDispatch(`./${value}`, root);
+}
+
+/** All manifest repositories, with references exposed only for inspection on request. */
+export function resolveProjectGitTargets(input: {
+  readonly project: ProjectLike | null | undefined;
+  readonly includeReferences?: boolean;
+}): readonly ProjectGitTarget[] {
+  const { project, includeReferences = false } = input;
+  if (!project) return [];
+  if (!project.stave) {
+    const cwd = project.workspaceRoot;
+    return [
+      {
+        key: normalizeProjectPathForComparison(cwd),
+        cwd,
+        repoName:
+          project.repositoryIdentity?.displayName ??
+          cwd.split(/[\\/]/).findLast((segment) => segment.length > 0) ??
+          cwd,
+        mode: "edit",
+        branch: null,
+        repositoryIdentity: project.repositoryIdentity ?? null,
+      },
+    ];
+  }
+  const targets = new Map<string, ProjectGitTarget>();
+  for (const repo of project.stave.repos) {
+    const cwd = resolveManifestRepoPath(project.workspaceRoot, repo.resolvedPath ?? repo.path);
+    if (!cwd) continue;
+    const key = normalizeProjectPathForComparison(cwd);
+    const existing = targets.get(key);
+    // Conflicting aliases must never turn a reference checkout into a writable target.
+    if (existing && (existing.mode === "reference" || repo.mode === "edit")) continue;
+    targets.set(key, {
+      key,
+      cwd,
+      repoName: repo.name,
+      mode: repo.mode,
+      branch: repo.branch ?? null,
+      repositoryIdentity:
+        repo.repositoryIdentity ??
+        (normalizeProjectPathForComparison(project.stave.primaryRepoPath ?? "") === key
+          ? (project.stave.primaryRepositoryIdentity ?? null)
+          : null),
+    });
+  }
+  return [...targets.values()].filter((target) => includeReferences || target.mode === "edit");
+}
+
+/** Full remote repository path for PR identity; provider adapters translate CLI selectors. */
+export function resolveRepositoryPullRequestSelector(
+  identity:
+    | {
+        readonly provider?: string;
+        readonly displayName?: string | null;
+        readonly owner?: string | null;
+        readonly name?: string | null;
+      }
+    | null
+    | undefined,
+): string | null {
+  if (!identity) return null;
+  return (
+    identity.displayName ||
+    (identity.owner && identity.name ? `${identity.owner}/${identity.name}` : null)
+  );
 }
 
 export function isStaveProject(project: ProjectLike | null | undefined): boolean {

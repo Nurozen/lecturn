@@ -39,6 +39,7 @@ function makeFakeCodexBinary(
     forbidArg?: string;
     stdinMustContain?: string;
     stdinMustNotContain?: string;
+    requireAccountRouting?: boolean;
   },
 ) {
   return Effect.gen(function* () {
@@ -57,6 +58,8 @@ function makeFakeCodexBinary(
         'seen_image="0"',
         'seen_service_tier=""',
         'seen_reasoning_effort=""',
+        'instructions_path=""',
+        'developer_instructions=""',
         "while [ $# -gt 0 ]; do",
         '  if [ "$1" = "--image" ]; then',
         "    shift",
@@ -68,6 +71,10 @@ function makeFakeCodexBinary(
         "  fi",
         '  if [ "$1" = "--config" ]; then',
         "    shift",
+        '    case "$1" in',
+        '      model_instructions_file=*) instructions_path="${1#model_instructions_file=}" ;;',
+        '      developer_instructions=*) developer_instructions="$1" ;;',
+        "    esac",
         '    case "$1" in',
         "      service_tier=*)",
         '        seen_service_tier="$1"',
@@ -89,6 +96,23 @@ function makeFakeCodexBinary(
         "  fi",
         "  shift",
         "done",
+        'case " $original_args " in *" --ignore-rules "*)',
+        '  case "$PWD" in *lecturn-workflow-inference-*) ;; *) echo "workflow cwd not isolated" >&2; exit 14;; esac',
+        '  case " $original_args " in *" project_doc_max_bytes=0 "*) ;; *) echo "workspace docs enabled" >&2; exit 15;; esac',
+        '  case " $original_args " in *" features.memories=false "*) ;; *) echo "memory enabled" >&2; exit 16;; esac',
+        '  instructions_path="${instructions_path#\\\"}"',
+        '  instructions_path="${instructions_path%\\\"}"',
+        '  test -f "$instructions_path" || { echo "inference instructions missing" >&2; exit 17; }',
+        '  grep -F "Classify only the supplied conversation" "$instructions_path" >/dev/null || exit 18',
+        '  test "$developer_instructions" = \'developer_instructions=""\' || { echo "developer instructions not overridden" >&2; exit 19; }',
+        "esac",
+        ...(input.requireAccountRouting
+          ? [
+              'test "$CODEX_HOME" = "/test/codex-account" || { echo "account home changed" >&2; exit 20; }',
+              'case " $original_args " in *" --profile work "*) ;; *) echo "account profile missing" >&2; exit 21;; esac',
+              'case " $original_args " in *\' model_provider="company" \'*) ;; *) echo "account provider missing" >&2; exit 22;; esac',
+            ]
+          : []),
         'stdin_content="$(cat)"',
         ...(input.requireArg !== undefined
           ? [
@@ -190,6 +214,8 @@ function withFakeCodexEnv<A, E, R>(
     stdinMustContain?: string;
     stdinMustNotContain?: string;
     launchArgs?: string;
+    homePath?: string;
+    requireAccountRouting?: boolean;
     environment?: NodeJS.ProcessEnv;
   },
   effectFn: (textGeneration: TextGeneration.TextGeneration["Service"]) => Effect.Effect<A, E, R>,
@@ -198,13 +224,81 @@ function withFakeCodexEnv<A, E, R>(
     const fs = yield* FileSystem.FileSystem;
     const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-codex-text-" });
     const codexPath = yield* makeFakeCodexBinary(tempDir, input);
-    const config = decodeCodexSettings({ binaryPath: codexPath, launchArgs: input.launchArgs });
+    const config = decodeCodexSettings({
+      binaryPath: codexPath,
+      launchArgs: input.launchArgs,
+      homePath: input.homePath,
+    });
     const textGeneration = yield* makeCodexTextGeneration(config, input.environment);
     return yield* effectFn(textGeneration);
   }).pipe(Effect.scoped);
 }
 
 it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
+  for (const [label, output] of [
+    ["malformed JSON", "not JSON"],
+    ["missing stage", JSON.stringify({ summary: "Working", confidence: 0.8 })],
+    ["missing confidence", JSON.stringify({ summary: "Working", stage: "build" })],
+    ["invalid stage", JSON.stringify({ summary: "Working", stage: "completed", confidence: 0.8 })],
+    [
+      "confidence above one",
+      JSON.stringify({ summary: "Working", stage: "build", confidence: 1.1 }),
+    ],
+    [
+      "negative confidence",
+      JSON.stringify({ summary: "Working", stage: "build", confidence: -0.1 }),
+    ],
+  ]) {
+    it.effect(`rejects workflow inference with ${label}`, () =>
+      withFakeCodexEnv({ output: output! }, (textGeneration) =>
+        Effect.gen(function* () {
+          const failure = yield* textGeneration
+            .generateWorkflowSummary({
+              cwd: process.cwd(),
+              message:
+                '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            })
+            .pipe(Effect.flip);
+          expect(failure.operation).toBe("generateWorkflowSummary");
+        }),
+      ),
+    );
+  }
+  it.effect(
+    "isolates workflow instructions while preserving the account profile and provider",
+    () =>
+      withFakeCodexEnv(
+        {
+          requireArg: "--ignore-rules",
+          forbidArg: "--ignore-user-config",
+          requireAccountRouting: true,
+          homePath: "/test/codex-account",
+          launchArgs:
+            "--profile work --config 'model_provider=\"company\"' --config 'developer_instructions=\"Account-specific instructions\"' --config 'model_instructions_file=\"/test/account-instructions\"'",
+          output: JSON.stringify({
+            summary: " API complete.\n CI remains pending. ",
+            stage: "accept",
+            confidence: 0.8,
+          }),
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const result = yield* textGeneration.generateWorkflowSummary({
+              cwd: process.cwd(),
+              message:
+                '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            });
+            expect(result).toEqual({
+              summary: "API complete. CI remains pending.",
+              stage: "accept",
+              confidence: 0.8,
+            });
+          }),
+      ),
+  );
+
   it.effect("generates and sanitizes commit messages without branch by default", () =>
     withFakeCodexEnv(
       {

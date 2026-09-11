@@ -1,4 +1,6 @@
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import {
@@ -19,6 +21,8 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildWorkflowSummaryPrompt,
+  normalizeWorkflowSummary,
 } from "./TextGenerationPrompts.ts";
 import * as TextGeneration from "./TextGeneration.ts";
 import {
@@ -29,11 +33,15 @@ import {
 import * as OpenCodeRuntime from "../provider/opencodeRuntime.ts";
 import * as OpenCodeServerOwner from "../provider/OpenCodeServerOwner.ts";
 
+const WORKFLOW_INFERENCE_TIMEOUT_MS = 180_000;
+const WORKFLOW_ABORT_TIMEOUT_MS = 5_000;
+
 const OpenCodeTextGenerationOperation = Schema.Literals([
   "generateCommitMessage",
   "generatePrContent",
   "generateBranchName",
   "generateThreadTitle",
+  "generateWorkflowSummary",
 ]);
 
 type OpenCodeTextGenerationOperation = typeof OpenCodeTextGenerationOperation.Type;
@@ -175,6 +183,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
 ) {
   const serverConfig = yield* ServerConfig.ServerConfig;
   const openCodeRuntime = yield* OpenCodeRuntime.OpenCodeRuntime;
+  const fileSystem = yield* FileSystem.FileSystem;
   const serverOwner = yield* OpenCodeServerOwner.OpenCodeServerOwner;
 
   const runOpenCodeJson = Effect.fn("runOpenCodeJson")(function* <S extends Schema.Top>(input: {
@@ -185,6 +194,19 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     readonly modelSelection: ModelSelection;
     readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
   }) {
+    const inference = input.operation === "generateWorkflowSummary";
+    const directory = inference
+      ? yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-workflow-inference-" }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new TextGenerationError({
+                operation: input.operation,
+                detail: "Could not isolate workflow inference.",
+                cause,
+              }),
+          ),
+        )
+      : input.cwd;
     const parsedModel = OpenCodeRuntime.parseOpenCodeModelSlug(input.modelSelection.model);
     if (!parsedModel) {
       return yield* new TextGenerationError({
@@ -208,15 +230,18 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       ) {
         const client = openCodeRuntime.createOpenCodeSdkClient({
           baseUrl: server.url,
-          directory: input.cwd,
+          directory,
           ...(server.serverPassword !== undefined ? { serverPassword: server.serverPassword } : {}),
         });
         const session = yield* Effect.tryPromise({
-          try: () =>
-            client.session.create({
-              title: `Lecturn ${input.operation}`,
-              permission: [{ permission: "*", pattern: "*", action: "deny" }],
-            }),
+          try: (signal) =>
+            client.session.create(
+              {
+                title: `Lecturn ${input.operation}`,
+                permission: [{ permission: "*", pattern: "*", action: "deny" }],
+              },
+              inference ? { signal } : undefined,
+            ),
           catch: (cause) =>
             new OpenCodeTextGenerationSessionRequestError({
               operation: input.operation,
@@ -230,7 +255,9 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
             cwd: input.cwd,
           });
         }
-        const selectedAgent = getModelSelectionStringOptionValue(input.modelSelection, "agent");
+        const selectedAgent = inference
+          ? undefined
+          : getModelSelectionStringOptionValue(input.modelSelection, "agent");
         const selectedVariant = getModelSelectionStringOptionValue(input.modelSelection, "variant");
         const promptContext = {
           operation: input.operation,
@@ -241,20 +268,43 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
         };
 
         const result = yield* Effect.tryPromise({
-          try: () =>
-            client.session.prompt({
-              sessionID: session.data.id,
-              model: parsedModel,
-              ...(selectedAgent ? { agent: selectedAgent } : {}),
-              ...(selectedVariant ? { variant: selectedVariant } : {}),
-              parts: [{ type: "text", text: input.prompt }, ...fileParts],
-            }),
+          try: (signal) =>
+            client.session.prompt(
+              {
+                sessionID: session.data.id,
+                model: parsedModel,
+                ...(selectedAgent ? { agent: selectedAgent } : {}),
+                ...(selectedVariant ? { variant: selectedVariant } : {}),
+                parts: [{ type: "text", text: input.prompt }, ...fileParts],
+              },
+              inference ? { signal } : undefined,
+            ),
           catch: (cause) =>
             new OpenCodeTextGenerationPromptRequestError({
               ...promptContext,
               cause,
             }),
-        });
+        }).pipe(
+          Effect.onInterrupt(() =>
+            inference
+              ? Effect.tryPromise({
+                  try: (signal) => client.session.abort({ sessionID: session.data.id }, { signal }),
+                  catch: (cause) =>
+                    new TextGenerationError({
+                      operation: input.operation,
+                      detail: "Could not cancel OpenCode workflow inference.",
+                      cause,
+                    }),
+                }).pipe(
+                  // Cancellation is best effort; an unresponsive abort endpoint
+                  // must not retain the shared summary queue either.
+                  Effect.interruptible,
+                  Effect.timeoutOption(WORKFLOW_ABORT_TIMEOUT_MS),
+                  Effect.ignore,
+                )
+              : Effect.void,
+          ),
+        );
         const promptFailure = getOpenCodePromptFailure(result.data?.info?.error);
         if (promptFailure) {
           return yield* new OpenCodeTextGenerationPromptResponseError({
@@ -264,6 +314,12 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
           });
         }
         const responseParts = result.data?.parts ?? [];
+        if (inference && responseParts.some((part) => part.type === "tool")) {
+          return yield* new TextGenerationError({
+            operation: input.operation,
+            detail: "Workflow inference used a tool; the result was discarded.",
+          });
+        }
         const rawText = getOpenCodeTextResponse(responseParts);
         if (rawText.length === 0) {
           return yield* new OpenCodeTextGenerationEmptyOutputError({
@@ -323,7 +379,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
         ? openCodeRuntime
             .connectToOpenCodeServer({
               binaryPath: openCodeSettings.binaryPath,
-              directory: input.cwd,
+              directory,
               serverUrl: openCodeSettings.serverUrl,
               ...(openCodeSettings.serverPassword
                 ? { serverPassword: openCodeSettings.serverPassword }
@@ -331,7 +387,24 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
             })
             .pipe(Effect.flatMap(runAgainstServer), Effect.scoped)
         : serverOwner.withServer(runAgainstServer);
-    const rawOutput = yield* serverOutput.pipe(
+    const boundedServerOutput = inference
+      ? serverOutput.pipe(
+          Effect.timeoutOption(WORKFLOW_INFERENCE_TIMEOUT_MS),
+          Effect.flatMap(
+            Option.match({
+              onNone: () =>
+                Effect.fail(
+                  new TextGenerationError({
+                    operation: input.operation,
+                    detail: "OpenCode workflow inference timed out.",
+                  }),
+                ),
+              onSome: Effect.succeed,
+            }),
+          ),
+        )
+      : serverOutput;
+    const rawOutput = yield* boundedServerOutput.pipe(
       Effect.catchTags({
         OpenCodeRuntimeError: (cause) =>
           Effect.fail(
@@ -357,7 +430,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
           ),
       }),
     );
-  });
+  }, Effect.scoped);
 
   const generateCommitMessage: TextGeneration.TextGeneration["Service"]["generateCommitMessage"] =
     Effect.fn("OpenCodeTextGeneration.generateCommitMessage")(function* (input) {
@@ -451,10 +524,38 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       };
     });
 
+  const generateWorkflowSummary: TextGeneration.TextGeneration["Service"]["generateWorkflowSummary"] =
+    Effect.fn("OpenCodeTextGeneration.generateWorkflowSummary")(function* (input) {
+      const { prompt, outputSchema } = yield* Effect.try({
+        try: () => buildWorkflowSummaryPrompt(input),
+        catch: (cause) =>
+          new TextGenerationError({
+            operation: "generateWorkflowSummary",
+            detail: "Workflow inference requires a prior summary and completed textual turns.",
+            cause,
+          }),
+      });
+      const generated = yield* runOpenCodeJson({
+        operation: "generateWorkflowSummary",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      const summary = normalizeWorkflowSummary(generated.summary);
+      if (!summary)
+        return yield* new TextGenerationError({
+          operation: "generateWorkflowSummary",
+          detail: "The provider returned an empty workflow summary.",
+        });
+      return { summary, stage: generated.stage, confidence: generated.confidence };
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateWorkflowSummary,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

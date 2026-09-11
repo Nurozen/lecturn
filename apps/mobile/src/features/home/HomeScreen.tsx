@@ -56,12 +56,13 @@ import {
   buildThreadListV2ListItems,
   THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
   THREAD_LIST_V2_SETTLED_PAGE_COUNT,
-  type ThreadListV2ListItem,
 } from "../threads/threadListV2";
 import { useThreadListV2ShelfPreferences } from "../threads/use-thread-list-v2-shelf-preferences";
 import type { HomeListFilterMenuEnvironment } from "./home-list-filter-menu";
 import {
   buildHomeListLayout,
+  buildHomeHierarchyV2Items,
+  type HomeHierarchyV2Item,
   DEFAULT_GROUP_DISPLAY_STATE,
   homeListItemsAreEqual,
   nextGroupDisplayState,
@@ -372,10 +373,12 @@ export function HomeScreen(props: HomeScreenProps) {
     [props.pendingTasks, selectedProjectRefKeys],
   );
 
+  const sagaIndex = useMobileSagaIndex(scopedProjects, nestSagas);
   const projectGroups = useMemo(
     () =>
       buildHomeThreadGroups({
         includeStaveProjects: nestSagas,
+        sagaIndex,
         projects: scopedProjects,
         threads: scopedThreads,
         pendingTasks: scopedPendingTasks,
@@ -388,6 +391,7 @@ export function HomeScreen(props: HomeScreenProps) {
       }),
     [
       nestSagas,
+      sagaIndex,
       props.projectGroupingMode,
       props.projectSortOrder,
       props.searchQuery,
@@ -400,7 +404,6 @@ export function HomeScreen(props: HomeScreenProps) {
     ],
   );
 
-  const sagaIndex = useMobileSagaIndex(scopedProjects, nestSagas && !threadListV2Enabled);
   const hasSearchQuery = props.searchQuery.trim().length > 0;
   const listLayout = useMemo(
     () =>
@@ -732,7 +735,7 @@ export function HomeScreen(props: HomeScreenProps) {
       ),
     [props.pendingTasks, props.selectedEnvironmentId, v2ScopedProjectKeys, v2SearchQuery],
   );
-  const threadListV2Items = useMemo(
+  const flatThreadListV2Items = useMemo(
     () =>
       buildThreadListV2ListItems({
         items: threadListV2Layout.items,
@@ -748,8 +751,39 @@ export function HomeScreen(props: HomeScreenProps) {
     [settledShelfExpanded, snoozedShelfExpanded, threadListV2Layout, v2PendingTasks],
   );
 
-  const renderV2Item = useCallback(
-    ({ item, index }: { readonly item: ThreadListV2ListItem; readonly index: number }) => {
+  const threadListV2Items = useMemo(
+    () =>
+      buildHomeHierarchyV2Items({
+        groups: projectGroups,
+        items: flatThreadListV2Items,
+        sagaIndex,
+        displayStates: effectiveGroupDisplayStates,
+        searching: hasSearchQuery,
+      }),
+    [projectGroups, flatThreadListV2Items, sagaIndex, effectiveGroupDisplayStates, hasSearchQuery],
+  );
+
+  const renderV2Row = useCallback(
+    ({ item, index }: { readonly item: HomeHierarchyV2Item; readonly index: number }) => {
+      if (item.type === "header")
+        return (
+          <ThreadListGroupHeader
+            variant="compact"
+            collapsed={item.collapsed}
+            isFirst={item.isFirst}
+            depth={item.depth}
+            memberStatus={item.memberStatus}
+            groupKey={item.group.key}
+            onGroupAction={updateGroupDisplay}
+            newThreadTarget={item.group.newThreadTarget}
+            onNewThread={props.onNewThreadInProject}
+            project={item.group.representative}
+            threadCount={item.group.threads.length + item.group.pendingTasks.length}
+            title={item.group.title}
+            firstThread={item.group.threads[0]}
+            onSelectThread={props.onSelectThread}
+          />
+        );
       const nextItem = threadListV2Items[index + 1];
       const showTrailingDivider =
         nextItem?.type === "v2-thread" ||
@@ -899,6 +933,8 @@ export function HomeScreen(props: HomeScreenProps) {
       settlementEnvironmentIds,
       snoozeEnvironmentIds,
       threadListV2Items,
+      updateGroupDisplay,
+      props.onNewThreadInProject,
       threadSearchMatchByKey,
       titleRegenerationEnvironmentIds,
       toggleSettledShelf,
@@ -908,7 +944,34 @@ export function HomeScreen(props: HomeScreenProps) {
       nowMinute,
     ],
   );
-  const v2KeyExtractor = useCallback((item: ThreadListV2ListItem) => item.key, []);
+  const renderV2Item = useCallback(
+    (props: { readonly item: HomeHierarchyV2Item; readonly index: number }) => (
+      <View
+        style={{ paddingLeft: props.item.type === "header" ? 0 : (props.item.depth ?? 0) * 18 }}
+      >
+        {props.item.type !== "header"
+          ? Array.from({ length: props.item.depth ?? 0 }, (_, level) => (
+              <View
+                key={level}
+                pointerEvents="none"
+                accessible={false}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  bottom: 0,
+                  left: level * 18 + 8,
+                  width: 1,
+                  backgroundColor: "#b9893f",
+                }}
+              />
+            ))
+          : null}
+        {renderV2Row(props)}
+      </View>
+    ),
+    [renderV2Row],
+  );
+  const v2KeyExtractor = useCallback((item: HomeHierarchyV2Item) => item.key, []);
 
   // FlatList treats a changed extraData identity as "re-render every visible
   // row", so an inline object literal would invalidate all rows on every
@@ -953,7 +1016,7 @@ export function HomeScreen(props: HomeScreenProps) {
     ],
   );
 
-  const renderItem = useCallback(
+  const renderRow = useCallback(
     ({ item }: LegendListRenderItemProps<HomeListItem>) => {
       switch (item.type) {
         case "header":
@@ -975,6 +1038,8 @@ export function HomeScreen(props: HomeScreenProps) {
               project={item.group.representative}
               threadCount={item.group.threads.length + item.group.pendingTasks.length}
               title={item.group.title}
+              firstThread={item.group.threads[0]}
+              onSelectThread={props.onSelectThread}
             />
           );
         case "pending-task":
@@ -1073,6 +1138,34 @@ export function HomeScreen(props: HomeScreenProps) {
     ],
   );
 
+  const renderItem = useCallback(
+    (props: LegendListRenderItemProps<HomeListItem>) => (
+      <View
+        style={{ paddingLeft: props.item.type === "header" ? 0 : (props.item.depth ?? 0) * 18 }}
+      >
+        {props.item.type !== "header"
+          ? Array.from({ length: props.item.depth ?? 0 }, (_, level) => (
+              <View
+                key={level}
+                pointerEvents="none"
+                accessible={false}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  bottom: 0,
+                  left: level * 18 + 8,
+                  width: 1,
+                  backgroundColor: "#b9893f",
+                }}
+              />
+            ))
+          : null}
+        {renderRow(props)}
+      </View>
+    ),
+    [renderRow],
+  );
+
   const keyExtractor = useCallback((item: HomeListItem) => item.key, []);
 
   /* Empty states */
@@ -1081,7 +1174,9 @@ export function HomeScreen(props: HomeScreenProps) {
   // full-page "No threads yet". Settled threads are unarchived live shells,
   // so the v1 check already covers v2.
   const hasAnyThreads =
-    props.threads.some((thread) => thread.archivedAt === null) || props.pendingTasks.length > 0;
+    props.threads.some((thread) => thread.archivedAt === null) ||
+    props.pendingTasks.length > 0 ||
+    projectGroups.length > 0;
   const hasResults = projectGroups.length > 0;
   const selectedEnvironmentLabel =
     props.selectedEnvironmentId === null

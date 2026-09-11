@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { resolveThreadGitTarget } from "./thread-git-target";
+import { resolveThreadGitTarget, selectThreadGitRepository } from "./thread-git-target";
 
 const staveProject = {
   workspaceRoot: "/spaces/lecturn",
   stave: {
     spaceId: "lecturn",
     isSaga: false,
-    repos: [],
+    repos: [
+      { name: "lecturn", path: "lecturn", mode: "edit" as const, branch: "lecturn/main" },
+      { name: "api", path: "nested/api", mode: "edit" as const, branch: "api/feature" },
+      { name: "docs", path: "references/docs", mode: "reference" as const },
+    ],
     memories: [],
     primaryRepoPath: "/spaces/lecturn/lecturn",
     primaryBranch: "lecturn/main",
@@ -47,7 +51,7 @@ describe("resolveThreadGitTarget", () => {
     ).toEqual({ cwd: "/repo", branch: null });
   });
 
-  it("targets the primary repo and manifest branch for Stave threads", () => {
+  it("defaults to the first editable manifest checkout for Stave threads", () => {
     expect(
       resolveThreadGitTarget({
         project: staveProject,
@@ -56,15 +60,49 @@ describe("resolveThreadGitTarget", () => {
     ).toEqual({ cwd: "/spaces/lecturn/lecturn", branch: "lecturn/main" });
   });
 
-  it("keeps a Stave thread's own branch when it has one", () => {
-    // PR lookup compares status.refName against this branch, so a thread that
-    // was explicitly switched must not be reported against the manifest branch.
+  it("uses the selected nested checkout and ignores stale thread branch metadata", () => {
     expect(
       resolveThreadGitTarget({
         project: staveProject,
-        thread: { branch: "lecturn/feature", worktreePath: null },
+        thread: { branch: "lecturn/feature", worktreePath: "/legacy/unused-worktree" },
+        selectedRepoKey: "/spaces/lecturn/nested/api",
       }),
-    ).toEqual({ cwd: "/spaces/lecturn/lecturn", branch: "lecturn/feature" });
+    ).toEqual({ cwd: "/spaces/lecturn/nested/api", branch: "api/feature" });
+  });
+
+  it("allows reference checkout inspection without inventing a writable target", () => {
+    expect(
+      resolveThreadGitTarget({
+        project: staveProject,
+        thread: null,
+        selectedRepoKey: "/spaces/lecturn/references/docs",
+      }),
+    ).toEqual({ cwd: "/spaces/lecturn/references/docs", branch: null });
+  });
+
+  it("reconciles removed selections using manifest roles", () => {
+    const reference = {
+      key: "docs",
+      cwd: "/docs",
+      repoName: "docs",
+      mode: "reference" as const,
+      branch: null,
+      repositoryIdentity: null,
+    };
+    const editable = {
+      ...reference,
+      key: "api",
+      cwd: "/api",
+      repoName: "api",
+      mode: "edit" as const,
+    };
+    expect(selectThreadGitRepository([reference, editable], "removed")).toBe(editable);
+    expect(selectThreadGitRepository([reference, editable], "docs")).toBe(reference);
+    expect(selectThreadGitRepository([reference], null)).toBe(reference);
+    expect(selectThreadGitRepository([], "removed")).toBeNull();
+    // A confirmation opened for a removed repo must never switch its write target.
+    expect(selectThreadGitRepository([reference, editable], "removed", true)).toBeNull();
+    expect(selectThreadGitRepository([reference, editable], "api", true)).toBe(editable);
   });
 
   it("treats a project shell without stave info as an ordinary repo", () => {

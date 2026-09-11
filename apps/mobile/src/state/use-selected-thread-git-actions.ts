@@ -31,7 +31,7 @@ import { useSelectedThreadWorktree } from "./use-selected-thread-worktree";
 const STAVE_WORKTREE_UNAVAILABLE_MESSAGE =
   "Stave spaces always run in the space root. Threads cannot use a separate worktree here.";
 
-export function useSelectedThreadGitActions() {
+export function useSelectedThreadGitActions(repoKey?: string) {
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -41,7 +41,8 @@ export function useSelectedThreadGitActions() {
   const createWorktree = useAtomCommand(vcsEnvironment.createWorktree, { reportFailure: false });
   const pull = useAtomCommand(vcsEnvironment.pull, { reportFailure: false });
   const { selectedThread, selectedThreadProject } = useThreadSelection();
-  const { selectedThreadGitCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
+  const { selectedThreadGitCwd, selectedThreadWorktreePath, selectedThreadGitRepository } =
+    useSelectedThreadWorktree(repoKey);
   const runStackedAction = useAtomCommand(
     vcsActionManager.runStackedAction({
       environmentId: selectedThread?.environmentId ?? null,
@@ -50,7 +51,9 @@ export function useSelectedThreadGitActions() {
     { reportFailure: false },
   );
 
-  const selectedThreadGitRootCwd = selectedThreadProject?.workspaceRoot ?? null;
+  const selectedThreadGitRootCwd = selectedThreadProject?.stave
+    ? selectedThreadGitCwd
+    : (selectedThreadProject?.workspaceRoot ?? null);
   const branchTarget = useMemo(
     () => ({
       environmentId: selectedThread?.environmentId ?? null,
@@ -144,6 +147,15 @@ export function useSelectedThreadGitActions() {
         return null;
       }
 
+      if (selectedThreadGitRepository?.mode === "reference") {
+        showGitActionResult({
+          type: "error",
+          title: "Read-only repository",
+          description:
+            "Stave references are available for inspection. Select an editable repository for Git actions.",
+        });
+        return null;
+      }
       const target = {
         environmentId: selectedThread.environmentId,
         cwd: selectedThreadGitCwd,
@@ -170,7 +182,7 @@ export function useSelectedThreadGitActions() {
       }
       return result.value;
     },
-    [selectedThread, selectedThreadGitCwd, selectedThreadProject],
+    [selectedThread, selectedThreadGitCwd, selectedThreadGitRepository, selectedThreadProject],
   );
 
   const refreshSelectedThreadBranches = useCallback(async (): Promise<ReadonlyArray<VcsRef>> => {
@@ -189,7 +201,7 @@ export function useSelectedThreadGitActions() {
         readonly worktreePath?: string | null;
       };
     }): Promise<AtomCommandResult<void, unknown>> => {
-      if (input.nextThreadState) {
+      if (input.nextThreadState && !isStaveProject(selectedThreadProject)) {
         const updateResult = await updateThreadGitContext(input.thread, input.nextThreadState);
         if (AsyncResult.isFailure(updateResult)) {
           return AsyncResult.failure(updateResult.cause);
@@ -199,7 +211,7 @@ export function useSelectedThreadGitActions() {
       await refreshSelectedThreadGitStatus({ quiet: true, cwd: input.cwd });
       return AsyncResult.success(undefined);
     },
-    [branchState, refreshSelectedThreadGitStatus, updateThreadGitContext],
+    [branchState, refreshSelectedThreadGitStatus, selectedThreadProject, updateThreadGitContext],
   );
 
   const onCheckoutSelectedThreadBranch = useCallback(

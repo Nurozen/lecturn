@@ -1,6 +1,8 @@
+import { useStaveGitSelection } from "./stave/staveGitSelection";
 import {
   normalizeProjectThreadWorkspace,
   resolveProjectGitRepositoryIdentity,
+  resolveRepositoryPullRequestSelector,
 } from "@t3tools/client-runtime/state/projectGit";
 import {
   type AssistantCitation,
@@ -13,6 +15,8 @@ import {
   type ModelSelection,
   type ProjectScript,
   type ProjectId,
+  type SourceControlProviderKind,
+  pullRequestHostOf,
   type ProviderApprovalDecision,
   type PreviewAnnotationPayload,
   ProviderInstanceId,
@@ -2992,12 +2996,20 @@ function ChatViewContent(props: ChatViewProps) {
     : null;
   // `gitCwd` is where scripts, terminals and provider sessions run (the space
   // root for Stave); git status and the header's git actions target the
-  // thread's repo instead, which for a Stave space is its primary repo.
-  const activeThreadGitTarget = resolveThreadGitTarget({
-    project: activeProject,
-    thread: activeThread,
-  });
-  const gitStatusCwd = activeThreadGitTarget.cwd;
+  // selected repository instead. The overview keeps every space repository visible.
+  const staveGitSelection = useStaveGitSelection(environmentId, activeProject);
+  const activeThreadGitTarget = activeProject?.stave
+    ? {
+        cwd: staveGitSelection.selected?.cwd ?? null,
+        branch: staveGitSelection.selected?.branch ?? null,
+      }
+    : resolveThreadGitTarget({
+        project: activeProject,
+        thread: activeThread,
+      });
+  const gitStatusCwd = activeProject?.stave
+    ? (staveGitSelection.selected?.cwd ?? null)
+    : activeThreadGitTarget.cwd;
   const gitStatusQuery = useEnvironmentQuery(
     gitStatusCwd === null
       ? null
@@ -3763,13 +3775,22 @@ function ChatViewContent(props: ChatViewProps) {
   const persistedLinkedThreadPullRequest = isServerThread
     ? (activeThreadShell?.linkedPullRequest ?? activeThread?.linkedPullRequest ?? null)
     : (activeThread?.linkedPullRequest ?? null);
-  const activeProjectRepository =
-    resolveProjectGitRepositoryIdentity(activeProject)?.displayName ?? null;
+  const activeProjectGitIdentity = activeProject?.stave
+    ? staveGitSelection.selected?.repositoryIdentity
+    : resolveProjectGitRepositoryIdentity(activeProject);
+  const activeProjectRepository = resolveRepositoryPullRequestSelector(activeProjectGitIdentity);
+  const activeProjectGitHost = activeProjectGitIdentity
+    ? pullRequestHostOf(
+        activeProjectGitIdentity,
+        activeProjectGitIdentity.provider as SourceControlProviderKind,
+      )
+    : undefined;
   const persistedLinkedThreadPullRequestStatus = useLinkedThreadPullRequest(
     activeThreadRef?.environmentId ?? null,
     persistedLinkedThreadPullRequest,
   );
   const replacementLinkedThreadPullRequest = useMemo(() => {
+    if (activeProject?.stave) return null;
     const detected = gitStatusQuery.data?.pr;
     const threadBranch = activeThreadGitTarget.branch;
     const projectId = activeProject?.id;
@@ -3792,12 +3813,15 @@ function ChatViewContent(props: ChatViewProps) {
     return {
       projectId,
       repository: activeProjectRepository,
+      ...(activeProjectGitHost ? { host: activeProjectGitHost } : {}),
       number: detected.number,
       url: detected.url,
     };
   }, [
     activeProject?.id,
+    activeProject?.stave,
     activeProjectRepository,
+    activeProjectGitHost,
     activeThreadGitTarget.branch,
     gitStatusQuery.data,
     persistedLinkedThreadPullRequest,
@@ -3809,10 +3833,26 @@ function ChatViewContent(props: ChatViewProps) {
     ? JSON.stringify([
         linkedThreadPullRequest.projectId,
         linkedThreadPullRequest.repository,
+        linkedThreadPullRequest.host ?? null,
         linkedThreadPullRequest.number,
       ])
     : null;
   const threadRepository = linkedThreadPullRequest?.repository ?? activeProjectRepository;
+  const linkedProjectIdentity = linkedThreadPullRequest
+    ? allProjects.find(
+        (project) =>
+          project.id === linkedThreadPullRequest.projectId &&
+          project.environmentId === environmentId,
+      )?.repositoryIdentity
+    : activeProjectGitIdentity;
+  const threadPullRequestHost =
+    linkedThreadPullRequest?.host ??
+    (linkedProjectIdentity
+      ? pullRequestHostOf(
+          linkedProjectIdentity,
+          linkedProjectIdentity.provider as SourceControlProviderKind,
+        )
+      : undefined);
   const openThreadPullRequest = useCallback(
     (number: number) => {
       if (!supportsPullRequests || !activeThreadRef) {
@@ -3824,6 +3864,7 @@ function ChatViewContent(props: ChatViewProps) {
       useRightPanelStore.getState().openPullRequest(activeThreadRef, {
         projectId,
         repository,
+        ...(threadPullRequestHost ? { host: threadPullRequestHost } : {}),
         number,
       });
     },
@@ -3832,6 +3873,7 @@ function ChatViewContent(props: ChatViewProps) {
       activeProjectRepository,
       activeThreadRef,
       linkedThreadPullRequest,
+      threadPullRequestHost,
       supportsPullRequests,
     ],
   );
@@ -3843,7 +3885,7 @@ function ChatViewContent(props: ChatViewProps) {
       threadPrRelinkKeysRef.current.delete(activeThreadKey);
       return;
     }
-    const relinkKey = `${replacementLinkedThreadPullRequest.projectId}:${replacementLinkedThreadPullRequest.repository}#${replacementLinkedThreadPullRequest.number}`;
+    const relinkKey = `${replacementLinkedThreadPullRequest.projectId}:${replacementLinkedThreadPullRequest.host ?? ""}/${replacementLinkedThreadPullRequest.repository}#${replacementLinkedThreadPullRequest.number}`;
     if (threadPrRelinkKeysRef.current.get(activeThreadKey) === relinkKey) return;
     threadPrRelinkKeysRef.current.set(activeThreadKey, relinkKey);
     const openSurface = selectActiveRightPanelSurface(
@@ -3893,18 +3935,19 @@ function ChatViewContent(props: ChatViewProps) {
     updateThreadMetadata,
   ]);
   const openProjectPullRequest = useCallback(
-    (number: number) => {
+    (number: number, target?: { repository: string; host?: string }) => {
       if (
         !supportsPullRequests ||
         !activeThreadRef ||
         !activeProject ||
-        activeProjectRepository === null
+        (!target && activeProjectRepository === null)
       ) {
         return;
       }
       useRightPanelStore.getState().openPullRequest(activeThreadRef, {
         projectId: activeProject.id,
-        repository: activeProjectRepository,
+        repository: target?.repository ?? activeProjectRepository!,
+        ...(target?.host ? { host: target.host } : {}),
         number,
       });
     },
@@ -5032,8 +5075,9 @@ function ChatViewContent(props: ChatViewProps) {
       resizeObserver.disconnect();
     };
   }, [composerOverlayElement, publishComposerOverlayHeight]);
-  const activeThreadPr =
-    replacementLinkedThreadPullRequest !== null
+  const activeThreadPr = activeProject?.stave
+    ? null
+    : replacementLinkedThreadPullRequest !== null
       ? (gitStatusQuery.data?.pr ?? null)
       : resolveDisplayedThreadPr({
           threadBranch: activeThreadGitTarget.branch,
@@ -7602,6 +7646,13 @@ function ChatViewContent(props: ChatViewProps) {
           key={`${activeThreadKey}:${diffPanelGitStatusResolutionKey}`}
           mode="embedded"
           composerDraftTarget={composerDraftTarget}
+          {...(activeProject?.stave
+            ? {
+                projectOverride: activeProject,
+                environmentIdOverride: environmentId,
+                threadRefOverride: activeThreadRef,
+              }
+            : {})}
           initialGitScope={initialDiffPanelGitScope}
           workspaceMutationId={workspaceMutationId}
         />
@@ -7620,24 +7671,28 @@ function ChatViewContent(props: ChatViewProps) {
       // reader's feet. A link the agent wrote can open any other one here, and that one has to be
       // checkable out like it is anywhere else.
       <PullRequestDetailPanel
-        key={`${renderedRightPanelSurface.repository}#${renderedRightPanelSurface.number}`}
+        key={`${renderedRightPanelSurface.host ?? ""}/${renderedRightPanelSurface.repository}#${renderedRightPanelSurface.number}`}
         environmentId={activeThread.environmentId}
         threadRef={activeThreadRef}
         reference={{
           projectId: renderedRightPanelSurface.projectId as ProjectId,
           repository: renderedRightPanelSurface.repository,
+          ...(renderedRightPanelSurface.host ? { host: renderedRightPanelSurface.host } : {}),
           number: renderedRightPanelSurface.number,
         }}
         context={
+          activeProject?.stave ||
           isThreadOwnPullRequest(
             {
               projectId: linkedThreadPullRequest?.projectId ?? activeProject?.id ?? null,
               repository: threadRepository,
+              ...(threadPullRequestHost ? { host: threadPullRequestHost } : {}),
               number: activeThreadPr?.number ?? null,
             },
             {
               projectId: renderedRightPanelSurface.projectId,
               repository: renderedRightPanelSurface.repository,
+              ...(renderedRightPanelSurface.host ? { host: renderedRightPanelSurface.host } : {}),
               number: renderedRightPanelSurface.number,
             },
           )
@@ -7726,7 +7781,8 @@ function ChatViewContent(props: ChatViewProps) {
         >
           {!shouldUseRightPanelSheet || !rightPanelControlsInPanel ? panelLayoutControls : null}
           <ChatHeader
-            {...(!supportsPullRequests || activeProjectRepository === null
+            {...(!supportsPullRequests ||
+            (!activeProject?.stave && activeProjectRepository === null)
               ? {}
               : { onOpenPullRequest: openProjectPullRequest })}
             activeThreadEnvironmentId={activeThread.environmentId}
@@ -7735,6 +7791,18 @@ function ChatViewContent(props: ChatViewProps) {
             activeThreadTitle={activeThread.title}
             isServerThread={isServerThread}
             activeProjectName={activeProject?.title}
+            {...(activeProject?.stave
+              ? {
+                  staveProject: activeProject,
+                  onOpenSpaceDiff: () => {
+                    if (activeThreadRef) {
+                      useDiffPanelStore.getState().selectGitScope(activeThreadRef, "unstaged");
+                      useRightPanelStore.getState().open(activeThreadRef, "diff");
+                    }
+                    onDiffPanelOpen?.();
+                  },
+                }
+              : {})}
             activeProjectCwd={activeProject?.workspaceRoot ?? null}
             activeProjectFaviconPath={activeProject?.faviconPath ?? null}
             activeProjectIcon={activeProject?.projectIcon ?? null}

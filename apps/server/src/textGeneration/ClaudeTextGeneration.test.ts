@@ -49,6 +49,13 @@ function makeFakeClaudeBinary(dir: string) {
         "  process.exit(code);",
         "}",
         "",
+        'if (process.argv.includes("--safe-mode")) {',
+        '  const fs = await import("node:fs");',
+        '  const path = await import("node:path");',
+        '  if (!path.basename(process.cwd()).startsWith("lecturn-workflow-inference-") || fs.readdirSync(process.cwd()).length !== 0) fail("workflow cwd was not isolated", 12);',
+        '  if (process.argv[process.argv.indexOf("--tools") + 1] !== "") fail("workflow tools were not disabled", 13);',
+        '  if (process.argv.includes("--dangerously-skip-permissions") || process.argv.includes("--bare")) fail("workflow lost safe OAuth mode", 14);',
+        "}",
         'let stdinContent = "";',
         "if (!process.stdin.isTTY) {",
         "  const chunks = [];",
@@ -236,6 +243,79 @@ function withFakeClaudeEnv<A, E, R>(
 }
 
 it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
+  for (const [label, output] of [
+    ["malformed JSON", "not JSON"],
+    ["missing stage", JSON.stringify({ summary: "Working", confidence: 0.8 })],
+    ["missing confidence", JSON.stringify({ summary: "Working", stage: "build" })],
+    ["invalid stage", JSON.stringify({ summary: "Working", stage: "completed", confidence: 0.8 })],
+    [
+      "confidence above one",
+      JSON.stringify({ summary: "Working", stage: "build", confidence: 1.1 }),
+    ],
+    [
+      "negative confidence",
+      JSON.stringify({ summary: "Working", stage: "build", confidence: -0.1 }),
+    ],
+  ]) {
+    it.effect(`rejects workflow inference with ${label}`, () =>
+      withFakeClaudeEnv(
+        {
+          output:
+            output === "not JSON"
+              ? output
+              : JSON.stringify({ structured_output: JSON.parse(output!) }),
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const failure = yield* textGeneration
+              .generateWorkflowSummary({
+                cwd: process.cwd(),
+                message:
+                  '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
+                modelSelection: {
+                  instanceId: ProviderInstanceId.make("claudeAgent"),
+                  model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+                },
+              })
+              .pipe(Effect.flip);
+            expect(failure.operation).toBe("generateWorkflowSummary");
+          }),
+      ),
+    );
+  }
+  it.effect("generates an evidence summary without title truncation", () =>
+    withFakeClaudeEnv(
+      {
+        argsMustContain: "--safe-mode --tools  --strict-mcp-config",
+        argsMustNotContain: "--dangerously-skip-permissions",
+        output: JSON.stringify({
+          structured_output: {
+            summary: " API complete.\n CI remains pending. ",
+            stage: "accept",
+            confidence: 0.8,
+          },
+        }),
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const result = yield* textGeneration.generateWorkflowSummary({
+            cwd: process.cwd(),
+            message:
+              '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+            },
+          });
+          expect(result).toEqual({
+            summary: "API complete. CI remains pending.",
+            stage: "accept",
+            confidence: 0.8,
+          });
+        }),
+    ),
+  );
+
   it.effect("forwards Claude thinking settings without passing unsupported effort", () =>
     withFakeClaudeEnv(
       {

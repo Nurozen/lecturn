@@ -13,6 +13,7 @@ import * as ThreadSettlementReactor from "../ThreadSettlementReactor.ts";
 import { OrchestrationReactor } from "../Services/OrchestrationReactor.ts";
 import { makeOrchestrationReactor } from "./OrchestrationReactor.ts";
 import { StaveLifecycleService } from "../Services/StaveLifecycleService.ts";
+import { SagaInferenceReactor } from "../../stave/SagaInferenceReactor.ts";
 import * as AgentAwarenessRelay from "../../relay/AgentAwarenessRelay.ts";
 
 describe("OrchestrationReactor", () => {
@@ -30,6 +31,15 @@ describe("OrchestrationReactor", () => {
 
     runtime = ManagedRuntime.make(
       Layer.effect(OrchestrationReactor, makeOrchestrationReactor).pipe(
+        Layer.provideMerge(
+          Layer.succeed(SagaInferenceReactor, {
+            start: () => {
+              started.push("saga-inference");
+              return Effect.void;
+            },
+            drainThrough: () => Effect.void,
+          }),
+        ),
         Layer.provideMerge(
           Layer.succeed(StaveLifecycleService, {
             start: () => {
@@ -109,6 +119,7 @@ describe("OrchestrationReactor", () => {
       "thread-settlement-reactor",
       "stave-lifecycle",
       "agent-awareness-relay",
+      "saga-inference",
     ]);
 
     await Effect.runPromise(Scope.close(scope, Exit.void));

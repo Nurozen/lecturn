@@ -341,6 +341,7 @@ function ReviewFileNavigator({
 type ReviewSheetProps = StaticScreenProps<{
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
+  readonly repoKey?: string;
 }>;
 
 export function ReviewSheet(props: ReviewSheetProps) {
@@ -357,12 +358,19 @@ export function ReviewSheet(props: ReviewSheetProps) {
   const retryEnvironment = useAtomCommand(environmentCatalog.retryNow, "environment retry");
   const isEnvironmentReady = environment.presentation?.connection.phase === "connected";
   const { draftMessage } = useThreadDraftForThread({ environmentId, threadId });
-  const reviewCache = useReviewCacheForThread({ environmentId, threadId });
   /* ─── Git actions for the toolbar menu (commit/push without leaving review) ── */
-  const { selectedThread } = useThreadSelection();
-  const { selectedThreadGitCwd } = useSelectedThreadWorktree();
-  const gitState = useSelectedThreadGitState();
-  const gitActions = useSelectedThreadGitActions();
+  const { selectedThread, selectedThreadProject } = useThreadSelection();
+  const { selectedThreadGitCwd, selectedThreadGitBranch, selectedThreadGitRepository } =
+    useSelectedThreadWorktree(props.route.params.repoKey);
+  const reviewCache = useReviewCacheForThread({
+    environmentId,
+    threadId,
+    ...(selectedThreadProject?.stave && selectedThreadGitCwd
+      ? { gitCwd: selectedThreadGitCwd }
+      : {}),
+  });
+  const gitState = useSelectedThreadGitState(props.route.params.repoKey);
+  const gitActions = useSelectedThreadGitActions(props.route.params.repoKey);
   const gitStatusQuery = useEnvironmentQuery(
     selectedThread !== null && selectedThreadGitCwd !== null
       ? vcsEnvironment.status({
@@ -374,7 +382,9 @@ export function ReviewSheet(props: ReviewSheetProps) {
   // The selection-based git hooks only apply when this review belongs to the
   // selected thread (it always does when reached from the thread's toolbar).
   const gitMenuAvailable =
-    selectedThread !== null && String(selectedThread.id) === String(threadId);
+    selectedThread !== null &&
+    String(selectedThread.id) === String(threadId) &&
+    selectedThreadGitRepository?.mode !== "reference";
   // With a solid (non-overlay) header the content lays out below the header
   // natively, so no manual top inset is needed. (Android renders its own
   // in-flow AndroidScreenHeader, so it needs no inset either.)
@@ -389,6 +399,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
       environmentId,
       threadId,
       reviewCache,
+      repoKey: props.route.params.repoKey,
     });
   useReviewDiffPrewarming({
     threadKey: reviewCache.threadKey,
@@ -704,7 +715,8 @@ export function ReviewSheet(props: ReviewSheetProps) {
             <ThreadGitMenu
               environmentId={environmentId}
               threadId={threadId}
-              currentBranch={selectedThread.branch ?? null}
+              currentBranch={selectedThreadGitBranch}
+              repoKey={props.route.params.repoKey}
               gitStatus={gitStatusQuery.data}
               gitOperationLabel={gitState.gitOperationLabel}
               onPull={gitActions.onPullSelectedThreadBranch}

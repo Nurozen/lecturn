@@ -1,4 +1,5 @@
 import * as StaveRuntimeFence from "../src/stave/StaveRuntimeFence.ts";
+import { SagaInferenceReactor } from "../src/stave/SagaInferenceReactor.ts";
 import { StaveLifecycleService } from "../src/orchestration/Services/StaveLifecycleService.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeChildProcess from "node:child_process";
@@ -375,6 +376,12 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(VcsProcess.layer),
     );
     const orchestrationReactorLayer = OrchestrationReactorLive.pipe(
+      Layer.provideMerge(
+        Layer.succeed(SagaInferenceReactor, {
+          start: () => Effect.void,
+          drainThrough: () => Effect.void,
+        }),
+      ),
       Layer.provideMerge(
         Layer.succeed(StaveLifecycleService, {
           start: () => Effect.void,

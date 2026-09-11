@@ -162,7 +162,7 @@ it.effect("uses stable diagnostics for every parsed non-repository command", () 
     yield* driver.listRefs({ cwd });
 
     assert.deepStrictEqual(commands, [
-      { args: ["status", "--porcelain=2", "--branch"], lcAll: "C" },
+      { args: ["status", "--porcelain=2", "--branch", "-z"], lcAll: "C" },
       { args: ["rev-parse", "--abbrev-ref", "HEAD"], lcAll: "C" },
       { args: ["rev-parse", "--git-common-dir"], lcAll: "C" },
     ]);
@@ -924,6 +924,130 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   });
 
   describe("repository status", () => {
+    it.effect("reports staged and unstaged edits without losing whitespace paths", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* writeTextFile(cwd, "tracked file.ts", "base\n");
+        yield* git(cwd, ["add", "--", "tracked file.ts"]);
+        yield* git(cwd, ["commit", "-m", "track file"]);
+        yield* writeTextFile(cwd, "tracked file.ts", "staged\n");
+        yield* git(cwd, ["add", "--", "tracked file.ts"]);
+        yield* writeTextFile(cwd, "tracked file.ts", "staged\nunstaged\n");
+        yield* writeTextFile(cwd, "new file.ts", "untracked\n");
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetailsLocal(cwd);
+        assert.include(
+          status.workingTree.files.find((file) => file.path === "tracked file.ts"),
+          {
+            staged: true,
+            unstaged: true,
+            conflicted: false,
+          },
+        );
+        assert.include(
+          status.workingTree.files.find((file) => file.path === "new file.ts"),
+          {
+            staged: false,
+            unstaged: true,
+            conflicted: false,
+          },
+        );
+      }),
+    );
+
+    it.effect("keeps raw Unicode, tab and newline paths aligned with numstat", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const paths = ["café.txt", "tab\tname.txt", "line\nname.txt"];
+        for (const filePath of paths) yield* writeTextFile(cwd, filePath, "base\n");
+        yield* git(cwd, ["add", "--", ...paths]);
+        yield* git(cwd, ["commit", "-m", "track unusual paths"]);
+        for (const filePath of paths) yield* writeTextFile(cwd, filePath, "changed\nextra\n");
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetailsLocal(cwd);
+        assert.equal(status.workingTree.files.length, paths.length);
+        for (const filePath of paths) {
+          assert.deepStrictEqual(
+            status.workingTree.files.find((file) => file.path === filePath),
+            {
+              path: filePath,
+              insertions: 2,
+              deletions: 1,
+              staged: false,
+              unstaged: true,
+              conflicted: false,
+            },
+          );
+        }
+      }),
+    );
+
+    it.effect("reports the destination of a staged rename once", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* git(cwd, ["mv", "README.md", "renamed café\tfile.md"]);
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetailsLocal(cwd);
+        assert.deepStrictEqual(status.workingTree.files, [
+          {
+            path: "renamed café\tfile.md",
+            insertions: 0,
+            deletions: 0,
+            staged: true,
+            unstaged: false,
+            conflicted: false,
+          },
+        ]);
+      }),
+    );
+
+    it.effect("preserves raw paths in unborn staged and unstaged numstat", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* driver.initRepo({ cwd });
+        const filePath = "café\nnew.txt";
+        yield* writeTextFile(cwd, filePath, "staged\n");
+        yield* git(cwd, ["add", "--", filePath]);
+        yield* writeTextFile(cwd, filePath, "staged\nunstaged\n");
+        const status = yield* driver.statusDetailsLocal(cwd);
+        assert.deepStrictEqual(status.workingTree.files, [
+          {
+            path: filePath,
+            insertions: 2,
+            deletions: 0,
+            staged: true,
+            unstaged: true,
+            conflicted: false,
+          },
+        ]);
+      }),
+    );
+
+    it.effect("reports unresolved merge conflicts in the correct file", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        yield* writeTextFile(cwd, "conflict.txt", "base\n");
+        yield* git(cwd, ["add", "conflict.txt"]);
+        yield* git(cwd, ["commit", "-m", "base"]);
+        yield* git(cwd, ["checkout", "-b", "other"]);
+        yield* writeTextFile(cwd, "conflict.txt", "other\n");
+        yield* git(cwd, ["commit", "-am", "other"]);
+        yield* git(cwd, ["checkout", initialBranch]);
+        yield* writeTextFile(cwd, "conflict.txt", "local\n");
+        yield* git(cwd, ["commit", "-am", "local"]);
+        yield* git(cwd, ["merge", "other"]).pipe(Effect.exit);
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetailsLocal(cwd);
+        assert.include(
+          status.workingTree.files.find((file) => file.path === "conflict.txt"),
+          {
+            conflicted: true,
+          },
+        );
+      }),
+    );
+
     it.effect("reports non-repository directories without failing", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
@@ -970,6 +1094,9 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           path: "HEAD",
           insertions: 1,
           deletions: 0,
+          staged: false,
+          unstaged: true,
+          conflicted: false,
         });
       }),
     );
@@ -2015,7 +2142,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         yield* driver.execute({
           operation: "GitVcsDriver.test.ceiling",
           cwd,
-          args: ["status", "--porcelain=2", "--branch"],
+          args: ["status", "--porcelain=2", "--branch", "-z"],
           timeoutMs: 10_000,
         });
         return Option.getOrUndefined(yield* Ref.get(captured));

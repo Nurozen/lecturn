@@ -617,6 +617,8 @@ export type PullRequestListResult = typeof PullRequestListResult.Type;
 
 export const PullRequestRef = Schema.Struct({
   projectId: ProjectId,
+  /** Host disambiguates repositories with the same name inside one workspace. */
+  host: Schema.optional(TrimmedNonEmptyString),
   repository: TrimmedNonEmptyString,
   number: PositiveInt,
 });
@@ -629,6 +631,8 @@ export type PullRequestRef = typeof PullRequestRef.Type;
 export const PullRequestSummary = Schema.Struct({
   provider: SourceControlProviderKind,
   projectId: ProjectId,
+  /** Host disambiguates repositories with the same name inside one workspace. */
+  host: Schema.optional(TrimmedNonEmptyString),
   repository: TrimmedNonEmptyString,
   number: PositiveInt,
   title: TrimmedNonEmptyString,
@@ -650,6 +654,8 @@ export type PullRequestSummary = typeof PullRequestSummary.Type;
  */
 export const PullRequestDiffStat = Schema.Struct({
   projectId: ProjectId,
+  /** Host disambiguates repositories with the same name inside one workspace. */
+  host: Schema.optional(TrimmedNonEmptyString),
   repository: TrimmedNonEmptyString,
   number: PositiveInt,
   additions: NonNegativeInt,
@@ -697,6 +703,8 @@ export const PullRequestDetail = Schema.Struct({
   projectId: ProjectId,
   projectTitle: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
+  /** Host disambiguates repositories with the same name inside one workspace. */
+  host: Schema.optional(TrimmedNonEmptyString),
   repository: TrimmedNonEmptyString,
   number: PositiveInt,
   title: TrimmedNonEmptyString,

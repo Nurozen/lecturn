@@ -164,6 +164,7 @@ it.layer(NodeServices.layer)("StaveWorkspaceReader", (it) => {
             name: "context-marmot",
             mode: "reference",
             path: "references/context-marmot",
+            resolvedPath: path.join(root, "references/context-marmot"),
             ref: "origin/main",
             bareRepoPath: "/Users/nurozen/stave/bare-repos/context-marmot.git",
           },
@@ -171,6 +172,7 @@ it.layer(NodeServices.layer)("StaveWorkspaceReader", (it) => {
             name: "stave",
             mode: "reference",
             path: "references/stave",
+            resolvedPath: path.join(root, "references/stave"),
             ref: "origin/weirwood",
             bareRepoPath: "/Users/nurozen/stave/bare-repos/stave.git",
           },
@@ -178,6 +180,7 @@ it.layer(NodeServices.layer)("StaveWorkspaceReader", (it) => {
             name: "t3code",
             mode: "edit",
             path: "t3code",
+            resolvedPath: path.join(root, "t3code"),
             base: "origin/main",
             branch: "stave/t3code-threads/t3code",
             bareRepoPath: "/Users/nurozen/stave/bare-repos/t3code.git",
@@ -225,6 +228,7 @@ it.layer(NodeServices.layer)("StaveWorkspaceReader", (it) => {
             name: "app",
             mode: "edit",
             path: "app",
+            resolvedPath: path.join(root, "app"),
             base: "origin/main",
             branch: "stave/legacy-space/app",
             bareRepoPath: "/bare/app.git",
@@ -329,7 +333,7 @@ it.layer(NodeServices.layer)("StaveWorkspaceReader", (it) => {
   });
 
   describe("primary repository identity", () => {
-    it.effect("resolves the identity of the first edit repo only", () =>
+    it.effect("resolves every repo identity and retains the first editable primary identity", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const root = yield* makeTempRoot;
@@ -348,12 +352,64 @@ it.layer(NodeServices.layer)("StaveWorkspaceReader", (it) => {
 
         const info = yield* loadSome(root).pipe(Effect.provide(makeReaderLayer(recordingResolver)));
 
-        expect(resolveCalls).toEqual([path.join(root, "t3code")]);
+        expect(resolveCalls.toSorted()).toEqual(
+          [
+            path.join(root, "references/context-marmot"),
+            path.join(root, "references/stave"),
+            path.join(root, "t3code"),
+          ].toSorted(),
+        );
+        expect(
+          info.repos.every((repo) => repo.repositoryIdentity?.rootPath === repo.resolvedPath),
+        ).toBe(true);
         expect(info.primaryRepositoryIdentity).toEqual(fakeIdentity(path.join(root, "t3code")));
       }),
     );
 
-    it.effect("does not consult the resolver when no repo is editable", () =>
+    it.effect("resolves nested checkouts independently and skips paths escaping the space", () =>
+      Effect.gen(function* () {
+        const root = yield* makeTempRoot;
+        const path = yield* Path.Path;
+        yield* writeManifest(
+          root,
+          `id: nested
+repos:
+  - { name: api, mode: edit, path: services/api }
+  - { name: unavailable, mode: edit, path: services/unavailable }
+  - { name: docs, mode: reference, path: references/docs }
+  - { name: escape, mode: edit, path: ../outside }
+`,
+        );
+        const calls: string[] = [];
+        const resolver = Layer.succeed(
+          RepositoryIdentityResolver.RepositoryIdentityResolver,
+          RepositoryIdentityResolver.RepositoryIdentityResolver.of({
+            resolve: (cwd) =>
+              Effect.sync(() => {
+                calls.push(cwd);
+                return cwd.endsWith("unavailable") ? null : fakeIdentity(cwd);
+              }),
+          }),
+        );
+        const info = yield* loadSome(root).pipe(Effect.provide(makeReaderLayer(resolver)));
+        expect(info.repos.map((repo) => repo.name)).toEqual(["api", "unavailable", "docs"]);
+        expect(calls.toSorted()).toEqual(
+          [
+            path.join(root, "services/api"),
+            path.join(root, "services/unavailable"),
+            path.join(root, "references/docs"),
+          ].toSorted(),
+        );
+        expect(info.repos[0]?.repositoryIdentity?.rootPath).toBe(path.join(root, "services/api"));
+        expect(info.repos[1]?.repositoryIdentity).toBeUndefined();
+        expect(info.repos[2]?.repositoryIdentity?.rootPath).toBe(
+          path.join(root, "references/docs"),
+        );
+        expect(info.primaryRepositoryIdentity).toEqual(info.repos[0]?.repositoryIdentity);
+      }),
+    );
+
+    it.effect("does not consult the resolver for an empty space", () =>
       Effect.gen(function* () {
         const root = yield* makeTempRoot;
         yield* writeManifest(root, V2_SAGA_MANIFEST);

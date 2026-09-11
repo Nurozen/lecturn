@@ -21,6 +21,7 @@ const makeStubTextGeneration = (
     generatePrContent: () => Effect.die("generatePrContent stub not configured for this test"),
     generateBranchName: () => Effect.die("generateBranchName stub not configured for this test"),
     generateThreadTitle: () => Effect.die("generateThreadTitle stub not configured for this test"),
+    generateWorkflowSummary: () => Effect.die("generateWorkflowSummary stub not configured"),
     ...overrides,
   });
 
@@ -60,6 +61,40 @@ const makeStubRegistry = (
 };
 
 describe("makeTextGenerationFromRegistry", () => {
+  it.effect("routes workflow summaries through the selected provider instance", () =>
+    Effect.gen(function* () {
+      const id = ProviderInstanceId.make("summary-provider");
+      const instance = makeStubInstance(
+        id,
+        makeStubTextGeneration({
+          generateWorkflowSummary: (input) =>
+            Effect.succeed({
+              summary: `${input.modelSelection.model}: ${input.message}`,
+              stage: "build",
+              confidence: 0.8,
+            }),
+        }),
+      );
+      const service = TextGeneration.makeTextGenerationFromRegistry(makeStubRegistry([instance]));
+      const result = yield* service.generateWorkflowSummary({
+        cwd: process.cwd(),
+        message: "CI pending",
+        modelSelection: createModelSelection(id, "selected-model"),
+      });
+      expect(result.summary).toBe("selected-model: CI pending");
+      const missing = yield* service
+        .generateWorkflowSummary({
+          cwd: process.cwd(),
+          message: "CI pending",
+          modelSelection: createModelSelection(ProviderInstanceId.make("absent"), "selected-model"),
+        })
+        .pipe(Effect.result);
+      expect(Result.isFailure(missing)).toBe(true);
+      if (Result.isFailure(missing))
+        expect(missing.failure.operation).toBe("generateWorkflowSummary");
+    }),
+  );
+
   it.effect("delegates to the matching instance's textGeneration closure", () =>
     Effect.gen(function* () {
       const personalId = ProviderInstanceId.make("codex_personal");

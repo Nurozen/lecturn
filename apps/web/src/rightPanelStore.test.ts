@@ -712,3 +712,14 @@ describe("rightPanelStore", () => {
     ).toEqual(["terminal:term-1", "browser:tab-b", "browser:tab-c"]);
   });
 });
+
+it("keeps same-number pull requests from different hosts in distinct tabs", () => {
+  const base = { projectId: "space", repository: "acme/app", number: 7 };
+  const publicRef = { ...base, host: "github.com" };
+  const privateRef = { ...base, host: "github.acme.dev" };
+  useRightPanelStore.getState().openPullRequest(refA, publicRef);
+  useRightPanelStore.getState().openPullRequest(refA, privateRef);
+  const state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+  expect(state.surfaces).toHaveLength(2);
+  expect(state.activeSurfaceId).toBe(pullRequestSurfaceId(privateRef));
+});

@@ -26,7 +26,7 @@ export function nextPendingReviewCommentId(): string {
 
 /** One pull request's draft, scoped by project as well as repository: a repository can be checked out twice. */
 export function pullRequestReviewKey(reference: PullRequestRef): string {
-  return `${reference.projectId}/${reference.repository}#${reference.number}`;
+  return `${reference.projectId}/${reference.host?.toLowerCase() ?? ""}/${reference.repository}#${reference.number}`;
 }
 
 interface PullRequestReviewStoreState {
@@ -84,6 +84,7 @@ export const usePullRequestReviewStore = create<PullRequestReviewStoreState>()((
 export function usePendingReviewComments(reference: {
   readonly projectId: ProjectId;
   readonly repository: string;
+  readonly host?: string | undefined;
   readonly number: number;
 }): ReadonlyArray<PendingReviewComment> {
   return usePullRequestReviewStore(

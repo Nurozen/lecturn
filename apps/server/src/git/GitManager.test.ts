@@ -295,6 +295,8 @@ function createTextGeneration(
       Effect.succeed({
         title: "Update workflow",
       }),
+    generateWorkflowSummary: () =>
+      Effect.succeed({ summary: "Test workflow", stage: "spec", confidence: 0.8 }),
     ...overrides,
   };
 
@@ -332,6 +334,7 @@ function createTextGeneration(
             }),
         ),
       ),
+    generateWorkflowSummary: (input) => implementation.generateWorkflowSummary(input),
     generateThreadTitle: (input) =>
       implementation.generateThreadTitle(input).pipe(
         Effect.mapError(

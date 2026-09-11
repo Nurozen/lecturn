@@ -129,17 +129,20 @@ export function isThreadOwnPullRequest(
   thread: {
     readonly projectId: string | null;
     readonly repository: string | null;
+    readonly host?: string | undefined;
     readonly number: number | null;
   },
   surface: {
     readonly projectId: string;
     readonly repository: string;
+    readonly host?: string | undefined;
     readonly number: number;
   },
 ): boolean {
   return (
     thread.projectId === surface.projectId &&
     thread.repository === surface.repository &&
+    (thread.host?.toLowerCase() ?? "") === (surface.host?.toLowerCase() ?? "") &&
     thread.number === surface.number
   );
 }
@@ -1018,6 +1021,7 @@ type SnapshotStorage = Pick<Storage, "getItem" | "setItem">;
 export interface PullRequestDetailSnapshotRef {
   readonly projectId: string;
   readonly repository: string;
+  readonly host?: string | undefined;
   readonly number: number;
 }
 
@@ -1025,7 +1029,7 @@ const pullRequestDetailSnapshotKey = (
   environmentId: string,
   reference: PullRequestDetailSnapshotRef,
 ) =>
-  `t3.pullRequests.detail:${environmentId}:${reference.projectId}:${reference.repository}#${reference.number}`;
+  `t3.pullRequests.detail:${environmentId}:${reference.projectId}:${reference.host?.toLowerCase() ?? ""}:${reference.repository}#${reference.number}`;
 
 const decodeDetailSnapshot = Schema.decodeUnknownOption(PullRequestDetail);
 
@@ -1078,7 +1082,8 @@ export function resolveDisplayedPullRequestDetail(input: {
     input.cached !== null &&
     input.cached.projectId === input.reference.projectId &&
     input.cached.repository.toLowerCase() === input.reference.repository.toLowerCase() &&
-    input.cached.number === input.reference.number
+    input.cached.number === input.reference.number &&
+    (input.cached.host?.toLowerCase() ?? "") === (input.reference.host?.toLowerCase() ?? "")
   ) {
     return input.cached;
   }

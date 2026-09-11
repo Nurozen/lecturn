@@ -76,6 +76,24 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("separates workbench reads from explicitly authorized workflow changes", () => {
+    for (const method of [
+      WS_METHODS.sagaWorkbenchGetSnapshot,
+      WS_METHODS.sagaWorkbenchGetEvidence,
+      WS_METHODS.sagaWorkbenchGetActivity,
+    ])
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+    for (const method of [
+      WS_METHODS.sagaWorkbenchSetStage,
+      WS_METHODS.sagaWorkbenchConfigure,
+      WS_METHODS.sagaWorkbenchApprove,
+      WS_METHODS.sagaWorkbenchComplete,
+      WS_METHODS.sagaWorkbenchReopen,
+      WS_METHODS.sagaWorkbenchSummarize,
+    ])
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+  });
+
   it("rejects unknown RPC method names", () => {
     for (const method of ["server.notRegistered", "toString", "constructor"]) {
       expect(() => requiredScopeForRpcMethod(method)).toThrow(

@@ -227,6 +227,7 @@ describe("OrchestrationEngine", () => {
           getThreadDetailById: () => Effect.succeed(Option.none()),
           getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
           listThreadActivitiesById: () => Effect.succeed([]),
+          getInferenceTurnPairs: () => Effect.succeed([]),
           listThreadTurnsById: () => Effect.succeed([]),
           getThreadForkContextById: () => Effect.succeed(Option.none()),
           listThreadIdsByWorktreePath: () => Effect.succeed([]),

@@ -40,12 +40,15 @@ make a new space from the app, see [Create a space](#create-a-space).
   projects are not offered, and the project's default environment mode is fixed to local.
   The composer and chat list show **Stave space** with its editable repo count. Open the
   composer's space control to see the working directory and all editable and reference repos.
-- **The first editable repo drives git.** A space root is not a repository itself, so branch
-  status, the pull request lookup, and the Git actions in the toolbar target the first `edit`
-  repo in the manifest on its manifest branch. Reference checkouts are listed but never
-  targeted. A space without an editable repo has no Git target; Git status and actions stay unavailable.
-  The branch control is labelled **Git: repo-name**; open it to see the branch. A name such as
-  `stave/my-space/my-repo` identifies that repo's branch, not the thread's working directory.
+- **Space Git shows every repo.** Open **Space Git** to see branches, working changes,
+  ahead/behind status, conflicts, and pull requests across the space. Select an editable repo
+  to review its diff, choose files for a commit, push, or change branches. Each action applies
+  to that repo; choosing a Git target keeps the thread in the space root. Reference repos
+  offer inspection without write actions.
+- **Pull requests span editable repos.** The PR manager lists each editable repository under
+  its space, including repositories on different hosts. A thread can show a PR for each repo's
+  branch in Space Git. Automatic PR-based settlement waits for all editable repos' PRs to
+  finish; a single merged PR cannot settle work while another repo's PR remains open or unknown.
 - **Checkpoints are unavailable.** A space spans several repositories, so per-thread checkpoints
   (and the diff and revert built on them) are off in spaces. Use Git in the editable repo
   instead.
@@ -319,3 +322,74 @@ remain visible in operation progress.
 
 - [Customize a project icon](./project-settings.md)
 - [Source control integrations](./source-control.md)
+
+## Saga workbench
+
+Projects organizes a saga, its own conversations, and its member spaces in one hierarchy.
+Expand a space to reach its threads. Standalone spaces and ordinary projects remain available.
+On desktop and web, select a saga to open its workbench; use its settings action for the existing
+project settings. Mobile uses the same Projects hierarchy; the custom workbench page is currently
+available on desktop and web.
+
+The **+** beside a saga or space opens a new conversation there. Send the first message to
+start the thread; clicking **+** again while its empty draft is open focuses the composer.
+The folder label beneath a conversation identifies its workspace: **Stave saga** means the
+saga coordinator directory, while **Stave space** identifies a member or standalone space.
+This label is conversation metadata, not another folder or project in the hierarchy.
+
+The workbench presents the same spaces in Board, List, and Dependencies views. Dependency waves
+show prerequisite ordering, not a promise that agents will run concurrently. Selection follows
+you between views. Each space exposes its conversations, repository evidence, activity, and
+project settings. Saga settings do not silently override the settings of member spaces.
+
+| Stage  | Purpose                                                 |
+| ------ | ------------------------------------------------------- |
+| Spec   | Establish scope and acceptance criteria                 |
+| Plan   | Decide the implementation and dependencies              |
+| Build  | Implement and test                                      |
+| Review | Resolve review findings                                 |
+| Accept | Await explicit acceptance, clean required CI, and merge |
+
+By default, each new prompt in a saga or member-space conversation requests one combined summary
+and phase update. It uses the last three completed exchanges before that prompt, so the newly
+submitted question is included on a later submission after its response has finished. The first
+prompt has no completed exchange to summarize. Each exchange includes only the question and the
+agent's text, including commentary; tool calls, tool results, attachments and other activity are
+excluded. One prior summary provides continuity. Very long exchanges are shortened while keeping
+the beginning and end.
+
+Select a space and turn off **Automatically infer stage** to move it yourself by dragging its handle
+to another board column. Keyboard dragging is available from the same handle. Automatic summaries
+continue when automatic phase movement is off. Pin a space's phase to prevent both automatic and
+manual movement; its summaries still update. Unpin it to allow movement again.
+
+Stages can move in either direction or skip. A phase change does not start an agent, approve work,
+merge a PR, settle a thread, or archive a space. Completed is a separate outcome; completed work
+remains visible and must be explicitly reopened before its phase can change.
+
+Acceptance records approval of specific repository revisions. A human or an authorized automation
+session can approve those revisions. Completion then requires fresh evidence that all required
+PRs have clean required checks and were merged from the accepted revisions. A repository with no
+changes to deliver must have a clean checkout and a verified comparison against its base. Missing
+PRs, unavailable provider evidence, changed revisions, and unknown CI remain visible blockers.
+An empty check list is not proof that CI passed. Reopening clears current acceptance and completion.
+
+GitHub completion verification currently supports readable branch protection and status-check rules.
+If policy cannot be read, or requires workflows, merge queues, deployments, or code-scanning evidence
+that this view cannot verify, completion remains blocked. Other Git hosts currently report unknown
+acceptance evidence. Their existing Git and pull-request controls remain available.
+
+Summary and phase inference uses the same provider account as the conversation. Codex prefers
+GPT-5.6 Luna, Claude prefers Sonnet 5, and Cursor prefers Composer 2.5 or Composer 2 when advertised
+by that account. If a preferred model is unavailable, the conversation's selected model is used.
+Grok and OpenCode keep the conversation's model selection. The environment's general text-generation
+model does not override these account choices.
+
+Each generation returns a summary, an inferred phase and a confidence value together. Confidence
+expresses the model's certainty, not proof of approval, clean CI or merge. The saved summary and
+phase update together when movement is enabled and unpinned. You can also refresh the summary
+explicitly. A failed or malformed response leaves the previous result intact; repository evidence
+and conversation activity remain separate factual views.
+
+A card with a running conversation has an animated gold border. Reduced-motion preferences keep
+the highlight static. Gold connector lines show the Projects hierarchy on desktop, web and mobile.

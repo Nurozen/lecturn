@@ -40,6 +40,11 @@ function makeAcpAgentWrapper(dir: string, env: Record<string, string>): string {
     agentPath,
     [
       "#!/bin/sh",
+      ...(env.T3_ACP_EXPECT_WORKFLOW === "1"
+        ? [
+            'case "$PWD" in *lecturn-workflow-inference-*) ;; *) echo "workflow cwd not isolated" >&2; exit 14;; esac',
+          ]
+        : []),
       ...Object.entries(env).map(([key, value]) => `export ${key}=${shellSingleQuote(value)}`),
       'if [ "$1" != "acp" ]; then',
       '  printf "%s\\n" "unexpected args: $*" >&2',
@@ -91,6 +96,89 @@ function waitForFileContent(path: string): Effect.Effect<string> {
 }
 
 it.layer(CursorTextGenerationTestLayer)("CursorTextGeneration", (it) => {
+  for (const [label, output] of [
+    ["malformed JSON", "not JSON"],
+    ["missing stage", JSON.stringify({ summary: "Working", confidence: 0.8 })],
+    ["missing confidence", JSON.stringify({ summary: "Working", stage: "build" })],
+    ["invalid stage", JSON.stringify({ summary: "Working", stage: "completed", confidence: 0.8 })],
+    [
+      "confidence above one",
+      JSON.stringify({ summary: "Working", stage: "build", confidence: 1.1 }),
+    ],
+    [
+      "negative confidence",
+      JSON.stringify({ summary: "Working", stage: "build", confidence: -0.1 }),
+    ],
+  ]) {
+    it.effect(`rejects workflow inference with ${label}`, () =>
+      withFakeAcpAgent({ T3_ACP_PROMPT_RESPONSE_TEXT: output! }, (textGeneration) =>
+        Effect.gen(function* () {
+          const failure = yield* textGeneration
+            .generateWorkflowSummary({
+              cwd: process.cwd(),
+              message:
+                '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("cursor"),
+                model: "composer-2",
+              },
+            })
+            .pipe(Effect.flip);
+          expect(failure.operation).toBe("generateWorkflowSummary");
+        }),
+      ),
+    );
+  }
+  it.effect("discards inference when the harness emits tool activity", () =>
+    withFakeAcpAgent(
+      {
+        T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS: "1",
+        T3_ACP_PROMPT_RESPONSE_TEXT: '{"summary":"Ready","stage":"accept","confidence":0.8}',
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const failure = yield* textGeneration
+            .generateWorkflowSummary({
+              cwd: process.cwd(),
+              message:
+                '{"priorSummary":null,"turns":[{"question":"Check work","response":"Ready"}]}',
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("cursor"),
+                model: "composer-2",
+              },
+            })
+            .pipe(Effect.flip);
+          expect(failure.detail).toContain("used a tool");
+        }),
+    ),
+  );
+  it.effect("generates an evidence summary without title truncation", () =>
+    withFakeAcpAgent(
+      {
+        T3_ACP_EXPECT_WORKFLOW: "1",
+        T3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
+          summary: " API complete.\n CI remains pending. ",
+          stage: "accept",
+          confidence: 0.8,
+        }),
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const result = yield* textGeneration.generateWorkflowSummary({
+            cwd: process.cwd(),
+            message:
+              '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
+            modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "composer-2" },
+          });
+          expect(result).toEqual({
+            summary: "API complete. CI remains pending.",
+            stage: "accept",
+            confidence: 0.8,
+          });
+        }),
+    ),
+  );
+
   it.effect("uses ACP model config options instead of raw CLI model ids", () => {
     const requestLogDir = NodeFS.mkdtempSync(
       NodePath.join(NodeOS.tmpdir(), "t3code-cursor-text-log-"),

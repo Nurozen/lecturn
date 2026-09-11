@@ -33,7 +33,7 @@ describe("describeStaveWorkspace", () => {
     expect(context?.primaryRepoPath).toBe("/work/feature/web");
     expect(context?.workspaceRoot).toBe("/work/feature");
     expect(context?.title).toBe(
-      "Workspace: /work/feature\nEditable repos: api, web\nReferences: docs\nGit target: web · stave/feature/web",
+      "Workspace: /work/feature\nEditable repos: api, web\nReferences: docs\nGit targets: api, web",
     );
   });
 
@@ -93,7 +93,7 @@ describe("describeStaveWorkspace", () => {
     expect(context?.label).toBe("Stave space · 1 reference");
     expect(context?.primaryRepoName).toBeNull();
     expect(context?.title).toContain("Editable repos: None");
-    expect(context?.title).toContain("Git target: None");
+    expect(context?.title).toContain("Git targets: None");
     expect(context?.primaryRepoPath).toBeNull();
     expect(
       describeStaveWorkspace({ workspaceRoot: "/work/context", stave: { ...base, repos: [] } })
@@ -112,7 +112,7 @@ describe("describeStaveWorkspace", () => {
       stave: { ...stave, primaryRepoPath: "/work/feature/unknown" },
     });
     expect(context?.primaryRepoName).toBeNull();
-    expect(context?.title).toContain("Git target: /work/feature/unknown");
+    expect(context?.title).toContain("Git targets: api, web");
     expect(context?.primaryRepoPath).toBe("/work/feature/unknown");
   });
 });

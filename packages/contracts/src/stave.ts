@@ -26,6 +26,9 @@ export const StaveRepoEntry = Schema.Struct({
   name: TrimmedNonEmptyString,
   mode: StaveRepoMode,
   path: TrimmedNonEmptyString,
+  /** Absolute checkout path resolved by the server; absent in older payloads. */
+  resolvedPath: Schema.optionalKey(TrimmedNonEmptyString),
+  repositoryIdentity: Schema.optionalKey(RepositoryIdentity),
   base: Schema.optionalKey(TrimmedNonEmptyString),
   ref: Schema.optionalKey(TrimmedNonEmptyString),
   branch: Schema.optionalKey(TrimmedNonEmptyString),

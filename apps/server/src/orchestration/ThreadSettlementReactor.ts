@@ -7,6 +7,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schedule from "effect/Schedule";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -39,6 +40,7 @@ export const make = Effect.gen(function* () {
   const git = yield* GitManager.GitManager;
   const pullRequests = yield* PullRequestService.PullRequestService;
   const crypto = yield* Crypto.Crypto;
+  const path = yield* Path.Path;
   const staveMergeSignal = yield* Effect.serviceOption(StaveMergeSignal);
 
   const sweep = Effect.fn("ThreadSettlementReactor.sweep")(function* (
@@ -55,20 +57,29 @@ export const make = Effect.gen(function* () {
       (thread) =>
         isAutoSettlementCandidate(thread, now) &&
         (mergedPullRequest === null ||
+          (projects.get(thread.projectId)?.stave != null &&
+            thread.projectId === mergedPullRequest.projectId) ||
           (thread.linkedPullRequest != null &&
             thread.linkedPullRequest.projectId === mergedPullRequest.projectId &&
             thread.linkedPullRequest.repository.toLowerCase() ===
               mergedPullRequest.repository.toLowerCase() &&
-            thread.linkedPullRequest.number === mergedPullRequest.number)),
+            thread.linkedPullRequest.number === mergedPullRequest.number &&
+            (thread.linkedPullRequest.host === undefined ||
+              mergedPullRequest.host === undefined ||
+              thread.linkedPullRequest.host.toLowerCase() ===
+                mergedPullRequest.host.toLowerCase()))),
     );
     const lookupKey = (thread: (typeof candidates)[number]) => {
       if (staveMerged.has(thread.projectId))
         return JSON.stringify(["stave-merged", thread.projectId]);
+      if (projects.get(thread.projectId)?.stave)
+        return JSON.stringify(["stave-space", thread.projectId, thread.linkedPullRequest ?? null]);
       if (thread.linkedPullRequest != null) {
         return JSON.stringify([
           "linked",
           thread.linkedPullRequest.projectId,
           thread.linkedPullRequest.repository,
+          thread.linkedPullRequest.host ?? null,
           thread.linkedPullRequest.number,
         ]);
       }
@@ -86,8 +97,59 @@ export const make = Effect.gen(function* () {
     const pullRequestFor = Effect.fn("ThreadSettlementReactor.pullRequestFor")(function* (
       thread: (typeof candidates)[number],
     ) {
+      const staveProject = projects.get(thread.projectId);
+      if (staveProject?.stave) {
+        if (staveProject.stave.state !== "live") return null;
+        const repos = staveProject.stave.repos.filter((repo) => repo.mode === "edit");
+        if (repos.length === 0) return null;
+        const repoPullRequests = yield* Effect.forEach(
+          repos,
+          (repo) =>
+            Effect.gen(function* () {
+              const cwd = repo.resolvedPath ?? path.resolve(staveProject.workspaceRoot, repo.path);
+              const status = yield* git.localStatus({ cwd });
+              if (!status.isRepo || !status.refName) return null;
+              return yield* git.branchPullRequest({ cwd, branch: status.refName });
+            }),
+          { concurrency: 4 },
+        );
+        // An explicitly linked PR may outlive the checkout branch it was opened from.
+        // Its completion remains required even when all current checkout PRs have finished.
+        if (thread.linkedPullRequest != null) {
+          const linked = yield* pullRequests.summary(thread.linkedPullRequest, {
+            recoverTransientFailure: false,
+          });
+          repoPullRequests.push({ state: linked.state, updatedAt: linked.updatedAt });
+        }
+        // Any open member keeps the whole space active. Unknown/missing members
+        // cannot supply evidence for PR-based settlement.
+        if (repoPullRequests.some((pr) => pr?.state === "open"))
+          return { state: "open" as const, updatedAt: null };
+        if (repoPullRequests.some((pr) => pr === null)) return null;
+        const completed = repoPullRequests.filter((pr) => pr !== null);
+        const timestamps = completed.map((pr) => pr.updatedAt);
+        const updatedAt = timestamps.every(
+          (value) => value != null && Number.isFinite(Date.parse(value)),
+        )
+          ? (timestamps.reduce((latest, value) =>
+              Date.parse(value!) > Date.parse(latest!) ? value : latest,
+            ) ?? null)
+          : null;
+        return {
+          state: completed.every((pr) => pr.state === "closed")
+            ? ("closed" as const)
+            : ("merged" as const),
+          updatedAt,
+        };
+      }
       if (thread.linkedPullRequest != null) {
-        if (mergedPullRequest !== null) {
+        if (
+          mergedPullRequest !== null &&
+          (!projects.get(thread.linkedPullRequest.projectId)?.stave ||
+            (thread.linkedPullRequest.host !== undefined &&
+              thread.linkedPullRequest.host.toLowerCase() ===
+                mergedPullRequest.host?.toLowerCase()))
+        ) {
           return {
             state: "merged",
             updatedAt: mergedPullRequest.mergedAt,
@@ -100,6 +162,7 @@ export const make = Effect.gen(function* () {
           {
             projectId: thread.linkedPullRequest.projectId,
             repository: thread.linkedPullRequest.repository,
+            ...(thread.linkedPullRequest.host ? { host: thread.linkedPullRequest.host } : {}),
             number: thread.linkedPullRequest.number,
           },
           { recoverTransientFailure: false },

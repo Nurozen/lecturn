@@ -1384,6 +1384,19 @@ describe("cached pull request detail", () => {
     };
   };
 
+  it("never hydrates a same-number pull request from another host", () => {
+    const storage = makeStorage();
+    const publicRef = { ...reference, host: "github.com" };
+    const privateRef = { ...reference, host: "github.acme.dev" };
+    const cached = detail({ host: "github.com" });
+    writePullRequestDetailSnapshot(storage, "env-1", publicRef, cached);
+    expect(readPullRequestDetailSnapshot(storage, "env-1", privateRef)).toBeNull();
+    expect(
+      resolveDisplayedPullRequestDetail({ live: null, cached, reference: privateRef }),
+    ).toBeNull();
+    expect(readPullRequestDetailSnapshot(storage, "env-1", publicRef)?.title).toBe(cached.title);
+  });
+
   it("hydrates the last title, author, and counts so a reopen does not ghost the tab", () => {
     const storage = makeStorage();
     writePullRequestDetailSnapshot(storage, "env-1", reference, detail());

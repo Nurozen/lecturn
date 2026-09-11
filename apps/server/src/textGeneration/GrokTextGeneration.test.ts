@@ -37,6 +37,11 @@ function makeAcpGrokWrapper(dir: string, env: Record<string, string>): string {
     grokPath,
     [
       "#!/bin/sh",
+      ...(env.T3_ACP_EXPECT_WORKFLOW === "1"
+        ? [
+            'case "$PWD" in *lecturn-workflow-inference-*) ;; *) echo "workflow cwd not isolated" >&2; exit 14;; esac',
+          ]
+        : []),
       ...Object.entries(env).map(([key, value]) => `export ${key}=${shellSingleQuote(value)}`),
       'if [ "$1" != "agent" ] || [ "$2" != "stdio" ]; then',
       '  printf "%s\\n" "unexpected args: $*" >&2',
@@ -80,6 +85,83 @@ function readJsonRpcRequests(
 }
 
 it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
+  for (const [label, output] of [
+    ["malformed JSON", "not JSON"],
+    ["missing stage", JSON.stringify({ summary: "Working", confidence: 0.8 })],
+    ["missing confidence", JSON.stringify({ summary: "Working", stage: "build" })],
+    ["invalid stage", JSON.stringify({ summary: "Working", stage: "completed", confidence: 0.8 })],
+    [
+      "confidence above one",
+      JSON.stringify({ summary: "Working", stage: "build", confidence: 1.1 }),
+    ],
+    [
+      "negative confidence",
+      JSON.stringify({ summary: "Working", stage: "build", confidence: -0.1 }),
+    ],
+  ]) {
+    it.effect(`rejects workflow inference with ${label}`, () =>
+      withFakeAcpGrok({ T3_ACP_PROMPT_RESPONSE_TEXT: output! }, (textGeneration) =>
+        Effect.gen(function* () {
+          const failure = yield* textGeneration
+            .generateWorkflowSummary({
+              cwd: process.cwd(),
+              message:
+                '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
+              modelSelection: { instanceId: ProviderInstanceId.make("grok"), model: "grok-build" },
+            })
+            .pipe(Effect.flip);
+          expect(failure.operation).toBe("generateWorkflowSummary");
+        }),
+      ),
+    );
+  }
+  it.effect("discards inference when the harness emits tool activity", () =>
+    withFakeAcpGrok(
+      {
+        T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS: "1",
+        T3_ACP_PROMPT_RESPONSE_TEXT: '{"summary":"Ready","stage":"accept","confidence":0.8}',
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const failure = yield* textGeneration
+            .generateWorkflowSummary({
+              cwd: process.cwd(),
+              message:
+                '{"priorSummary":null,"turns":[{"question":"Check work","response":"Ready"}]}',
+              modelSelection: { instanceId: ProviderInstanceId.make("grok"), model: "grok-build" },
+            })
+            .pipe(Effect.flip);
+          expect(failure.detail).toContain("used a tool");
+        }),
+    ),
+  );
+  it.effect("generates an evidence summary without title truncation", () =>
+    withFakeAcpGrok(
+      {
+        T3_ACP_EXPECT_WORKFLOW: "1",
+        T3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
+          summary: " API complete.\n CI remains pending. ",
+          stage: "accept",
+          confidence: 0.8,
+        }),
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const result = yield* textGeneration.generateWorkflowSummary({
+            cwd: process.cwd(),
+            message:
+              '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
+            modelSelection: createModelSelection(ProviderInstanceId.make("grok"), "grok-mock-alt"),
+          });
+          expect(result).toEqual({
+            summary: "API complete. CI remains pending.",
+            stage: "accept",
+            confidence: 0.8,
+          });
+        }),
+    ),
+  );
+
   it.effect("uses ACP with disabled tool capabilities and forwards the requested model id", () => {
     const requestLogDir = NodeFS.mkdtempSync(
       NodePath.join(NodeOS.tmpdir(), "t3code-grok-text-log-"),

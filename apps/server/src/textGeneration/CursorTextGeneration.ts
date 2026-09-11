@@ -1,5 +1,6 @@
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -16,6 +17,8 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildWorkflowSummaryPrompt,
+  normalizeWorkflowSummary,
 } from "./TextGenerationPrompts.ts";
 import {
   sanitizeCommitSubject,
@@ -41,6 +44,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
 ) {
   const crypto = yield* Crypto.Crypto;
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const fileSystem = yield* FileSystem.FileSystem;
   const resolvedEnvironment = environment ?? process.env;
 
   const runCursorJson = <S extends Schema.Top>({
@@ -54,24 +58,45 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateWorkflowSummary";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
     modelSelection: ModelSelection;
   }): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
     Effect.gen(function* () {
+      const inference = operation === "generateWorkflowSummary";
+      const commandCwd = inference
+        ? yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-workflow-inference-" }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new TextGenerationError({
+                  operation,
+                  detail: "Could not isolate workflow inference.",
+                  cause,
+                }),
+            ),
+          )
+        : cwd;
+      const usedToolRef = yield* Ref.make(false);
       const outputRef = yield* Ref.make("");
       const runtime = yield* makeCursorAcpRuntime({
         cursorSettings,
         environment: resolvedEnvironment,
         childProcessSpawner: commandSpawner,
-        cwd,
+        cwd: commandCwd,
         clientInfo: { name: "t3-code-git-text", version: "0.0.0" },
       }).pipe(Effect.provideService(Crypto.Crypto, crypto));
 
       yield* runtime.handleSessionUpdate((notification) => {
         const update = notification.update;
+        if (
+          inference &&
+          (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update")
+        ) {
+          return Ref.set(usedToolRef, true);
+        }
         if (update.sessionUpdate !== "agent_message_chunk") {
           return Effect.void;
         }
@@ -128,6 +153,12 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
         ),
       );
 
+      if (inference && (yield* Ref.get(usedToolRef))) {
+        return yield* new TextGenerationError({
+          operation,
+          detail: "Workflow inference used a tool; the result was discarded.",
+        });
+      }
       const rawResult = (yield* Ref.get(outputRef)).trim();
       if (!rawResult) {
         return yield* new TextGenerationError({
@@ -259,10 +290,38 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateWorkflowSummary: TextGeneration.TextGeneration["Service"]["generateWorkflowSummary"] =
+    Effect.fn("CursorTextGeneration.generateWorkflowSummary")(function* (input) {
+      const { prompt, outputSchema } = yield* Effect.try({
+        try: () => buildWorkflowSummaryPrompt(input),
+        catch: (cause) =>
+          new TextGenerationError({
+            operation: "generateWorkflowSummary",
+            detail: "Workflow inference requires a prior summary and completed textual turns.",
+            cause,
+          }),
+      });
+      const generated = yield* runCursorJson({
+        operation: "generateWorkflowSummary",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      const summary = normalizeWorkflowSummary(generated.summary);
+      if (!summary)
+        return yield* new TextGenerationError({
+          operation: "generateWorkflowSummary",
+          detail: "The provider returned an empty workflow summary.",
+        });
+      return { summary, stage: generated.stage, confidence: generated.confidence };
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateWorkflowSummary,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

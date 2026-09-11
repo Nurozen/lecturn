@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   assignProjectsToEnvironments,
+  projectPullRequestRepository,
   resolvePickableEnvironments,
   type AssignableProject,
 } from "./pullRequestProjectAssignment.logic";
@@ -256,4 +257,141 @@ describe("where a pull request can be acted on", () => {
       label: "Server env-1",
     });
   });
+});
+
+describe("spaces with several repositories", () => {
+  const identity = (host: string, name: string) => ({
+    canonicalKey: `${host}/acme/${name}`,
+    provider: "github",
+    owner: "acme",
+    name,
+    locator: {
+      source: "git-remote" as const,
+      remoteName: "origin",
+      remoteUrl: `https://${host}/acme/${name}.git`,
+    },
+  });
+  const space = (
+    id: string,
+    env: string,
+    repos: ReadonlyArray<{ host: string; name: string; mode?: "edit" | "reference" }>,
+  ): AssignableProject & { workspaceRoot: string } => ({
+    ...project(id, env, `${repos[0]?.host}/acme/${repos[0]?.name}`),
+    stave: {
+      spaceId: id,
+      isSaga: false,
+      memories: [],
+      repos: repos.map((repo, index) => ({
+        name: repo.name,
+        path: `nested/${index}/${repo.name}`,
+        mode: repo.mode ?? "edit",
+        repositoryIdentity: identity(repo.host, repo.name),
+      })),
+    },
+  });
+  it("does not lose a space's other repository when another environment holds its primary", () => {
+    const a = space("space-a", "env-1", [
+      { host: "github.com", name: "app" },
+      { host: "github.com", name: "api" },
+    ]);
+    const b = space("space-b", "env-2", [
+      { host: "github.com", name: "app" },
+      { host: "github.com", name: "docs" },
+    ]);
+    expect(plain(assignProjectsToEnvironments([a, b], envs("env-1", "env-2")))).toEqual({
+      "env-1": ["space-a"],
+      "env-2": ["space-b"],
+    });
+  });
+  it("matches a secondary nested checkout and host when choosing an action environment", () => {
+    const a = space("space-a", "env-1", [
+      { host: "github.com", name: "web" },
+      { host: "github.acme.dev", name: "api" },
+    ]);
+    const wrongHost = space("space-b", "env-2", [{ host: "github.com", name: "api" }]);
+    const b = space("space-c", "env-2", [{ host: "github.acme.dev", name: "api" }]);
+    const copies = resolvePickableEnvironments(
+      {
+        environmentId: a.environmentId,
+        projectId: a.id,
+        repository: "acme/api",
+        host: "github.acme.dev",
+      },
+      [a, wrongHost, b],
+      envs("env-1", "env-2").map((environmentId) => ({ environmentId, label: environmentId })),
+    );
+    expect(copies.map(({ projectId, workspaceRoot }) => ({ projectId, workspaceRoot }))).toEqual([
+      { projectId: "space-a", workspaceRoot: "/srv/env-1/space-a/nested/1/api" },
+      { projectId: "space-c", workspaceRoot: "/srv/env-2/space-c/nested/0/api" },
+    ]);
+  });
+  it("refuses an ambiguous hostless link and excludes reference checkouts", () => {
+    const a = space("space", "env-1", [
+      { host: "github.com", name: "api" },
+      { host: "github.acme.dev", name: "api" },
+      { host: "github.com", name: "docs", mode: "reference" },
+    ]);
+    expect(projectPullRequestRepository(a, { repository: "acme/api" })).toBeUndefined();
+    expect(
+      projectPullRequestRepository(a, { repository: "acme/docs", host: "github.com" }),
+    ).toBeUndefined();
+    expect(
+      projectPullRequestRepository(a, { repository: "acme/api", host: "GITHUB.ACME.DEV" })
+        ?.workspaceRoot,
+    ).toBe("/srv/env-1/space/nested/1/api");
+  });
+});
+
+describe("provider-native PR checkout selection", () => {
+  it.each([
+    {
+      provider: "gitlab",
+      host: "gitlab.com",
+      displayName: "acme/platform/api",
+      repository: "acme/platform/api",
+    },
+    {
+      provider: "azure-devops",
+      host: "dev.azure.com",
+      displayName: "acme/platform/_git/api",
+      repository: "acme/platform/_git/api",
+    },
+  ])(
+    "routes $provider PR refs to the nested manifest checkout",
+    ({ provider, host, displayName, repository }) => {
+      const workspace = {
+        ...project("space", "env-1"),
+        stave: {
+          spaceId: "space",
+          isSaga: false,
+          memories: [],
+          repos: [
+            {
+              name: "api",
+              path: "nested/api",
+              mode: "edit" as const,
+              repositoryIdentity: {
+                provider,
+                canonicalKey: `${host}/${displayName}`,
+                displayName,
+                owner: "acme",
+                name: "api",
+                locator: {
+                  source: "git-remote" as const,
+                  remoteName: "origin",
+                  remoteUrl: `https://${host}/${displayName}.git`,
+                },
+              },
+            },
+          ],
+        },
+      };
+      expect(projectPullRequestRepository(workspace, { repository, host })?.workspaceRoot).toBe(
+        "/srv/env-1/space/nested/api",
+      );
+      expect(
+        projectPullRequestRepository(workspace, { repository: "acme/api", host }),
+      ).toBeUndefined();
+    },
+  );
 });

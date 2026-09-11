@@ -2245,3 +2245,136 @@ body,
 [data-lecturn-hover] {
   position: relative;
 }
+
+/* Static gold trunks connect each expanded node to its conversations and children. */
+.lecturn-hierarchy-conversations,
+.lecturn-hierarchy-branch {
+  position: relative;
+}
+.lecturn-hierarchy-children > .lecturn-hierarchy-conversations {
+  padding-inline-start: 20px;
+}
+.lecturn-hierarchy-children > .lecturn-hierarchy-conversations::before,
+.lecturn-hierarchy-branch::before,
+.lecturn-hierarchy-branch::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  box-shadow: 0 0 5px 1px #dca64e55;
+}
+.lecturn-hierarchy-children > .lecturn-hierarchy-conversations::before,
+.lecturn-hierarchy-branch::before {
+  inset-block: 0;
+  inset-inline-start: 10px;
+  width: 1px;
+  background: linear-gradient(180deg, #dca64e99, #ffe1a0 45%, #ffe1a0 55%, #dca64e99);
+}
+.lecturn-hierarchy-branch:last-child::before,
+.lecturn-hierarchy-branch-last::before {
+  bottom: auto;
+  height: 22px;
+}
+.lecturn-hierarchy-branch::after {
+  top: 22px;
+  inset-inline-start: 10px;
+  width: 16px;
+  height: 1px;
+  background: linear-gradient(90deg, #dca64e99, #ffe1a0 50%, #dca64e99);
+}
+.lecturn-saga-sheen {
+  color: #ffe1a0;
+  background: linear-gradient(110deg, #e8bd75, #ffe1a0 25%, #ffe1a0 75%, #e8bd75);
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 5px #dca64e55;
+}
+@media (forced-colors: active) {
+  .lecturn-hierarchy-children > .lecturn-hierarchy-conversations::before,
+  .lecturn-hierarchy-branch::before,
+  .lecturn-hierarchy-branch::after {
+    background: CanvasText;
+    box-shadow: none;
+  }
+  .lecturn-saga-sheen {
+    color: CanvasText;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    text-shadow: none;
+  }
+}
+
+.lecturn-running-border {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border: 1px solid #dca64e;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 5px #dca64e44;
+}
+.lecturn-running-edge {
+  position: absolute;
+  animation: lecturn-running-horizontal 4s steps(40) infinite;
+  animation-play-state: paused;
+}
+.lecturn-running-edge::before {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #ffe1a0);
+  border-radius: 50%;
+}
+.lecturn-running-top {
+  top: 0;
+  left: -16px;
+  width: calc(100% + 16px);
+  height: 2px;
+}
+.lecturn-running-bottom {
+  bottom: 0;
+  right: -16px;
+  width: calc(100% + 16px);
+  height: 2px;
+  animation-direction: reverse;
+}
+.lecturn-running-right {
+  right: 0;
+  top: -16px;
+  height: calc(100% + 16px);
+  width: 2px;
+  animation-name: lecturn-running-vertical;
+}
+.lecturn-running-left {
+  left: 0;
+  bottom: -16px;
+  height: calc(100% + 16px);
+  width: 2px;
+  animation-name: lecturn-running-vertical;
+  animation-direction: reverse;
+}
+.lecturn-running-right::before,
+.lecturn-running-left::before {
+  width: 2px;
+  height: 16px;
+  background: linear-gradient(transparent, #ffe1a0);
+}
+.lecturn-running-border[data-moving="true"] .lecturn-running-edge {
+  animation-play-state: running;
+}
+@keyframes lecturn-running-horizontal {
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes lecturn-running-vertical {
+  to {
+    transform: translateY(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lecturn-running-edge {
+    animation: none;
+    display: none;
+  }
+}

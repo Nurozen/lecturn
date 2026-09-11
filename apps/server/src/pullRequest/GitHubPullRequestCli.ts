@@ -1,3 +1,8 @@
+import {
+  listGitHubAcceptanceCandidates,
+  readGitHubAcceptanceEvidence,
+} from "./gitHubAcceptanceEvidence.ts";
+import type { ProviderAcceptanceEvidence, ProviderRepositoryRef } from "./PullRequestProvider.ts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -406,6 +411,23 @@ export interface GitHubPullRequestDiffSlice {
 export class GitHubPullRequestCli extends Context.Service<
   GitHubPullRequestCli,
   {
+    readonly listAcceptanceCandidates?: (
+      input: ProviderRepositoryRef & {
+        readonly branch: string;
+        readonly headRevision: string | null;
+        readonly sourceHost: string;
+        readonly sourceRepository: string;
+      },
+    ) => Effect.Effect<
+      {
+        readonly items: ReadonlyArray<{ readonly number: number; readonly url: string }>;
+        readonly truncated: boolean;
+      },
+      GitHubPullRequestCliError
+    >;
+    readonly readAcceptanceEvidence?: (
+      input: ProviderRepositoryRef & { readonly number: number },
+    ) => Effect.Effect<ProviderAcceptanceEvidence, GitHubPullRequestCliError>;
     readonly getViewerLogin: (input: {
       readonly cwd: string;
     }) => Effect.Effect<string, GitHubPullRequestCliError>;
@@ -1457,6 +1479,30 @@ export const make = Effect.gen(function* () {
         );
 
   return GitHubPullRequestCli.of({
+    listAcceptanceCandidates: (input) =>
+      listGitHubAcceptanceCandidates(github, input).pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitHubPullRequestReadError({
+              command: "gh",
+              cwd: input.cwd,
+              operation: "listAcceptanceCandidates",
+              cause,
+            }),
+        ),
+      ),
+    readAcceptanceEvidence: (input) =>
+      readGitHubAcceptanceEvidence(github, input).pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitHubPullRequestReadError({
+              command: "gh",
+              cwd: input.cwd,
+              operation: "readAcceptanceEvidence",
+              cause,
+            }),
+        ),
+      ),
     getViewerLogin: (input) =>
       github.execute({ cwd: input.cwd, args: ["api", "user", "--jq", ".login"] }).pipe(
         Effect.flatMap((result) => {

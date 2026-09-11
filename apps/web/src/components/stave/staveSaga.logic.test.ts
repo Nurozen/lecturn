@@ -5,7 +5,24 @@ import {
   parseSagaAfter,
   resolveSagaMemberSpace,
   staveSagaMemberBadges,
+  threadsForSagaProject,
 } from "./staveSaga.logic";
+
+it("keeps split legacy navigation shortcuts with their physical project rather than residual logical group", () => {
+  const threads = [
+    { id: "space-thread", environmentId: "local", projectId: "space" },
+    { id: "ordinary-thread", environmentId: "local", projectId: "ordinary" },
+    { id: "remote-thread", environmentId: "remote", projectId: "space" },
+  ];
+  const spaceRefs = [{ environmentId: "local", projectId: "space" }];
+  const ordinaryRefs = [{ environmentId: "local", projectId: "ordinary" }];
+  expect(threadsForSagaProject(spaceRefs, threads).map((thread) => thread.id)).toEqual([
+    "space-thread",
+  ]);
+  expect(threadsForSagaProject(ordinaryRefs, threads).map((thread) => thread.id)).toEqual([
+    "ordinary-thread",
+  ]);
+});
 
 const member: StaveSagaMemberStatus = {
   id: "a",

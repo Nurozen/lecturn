@@ -425,6 +425,16 @@ export function groupPullRequestsByInvolvement<Entry extends ScopedEntry>(
  * the environment on top of that, because two connected machines can hold the same repository and
  * would otherwise contribute two rows under one key.
  */
+/** A remote PR is one row even when several spaces or environments contain its repo. */
+function remotePullRequestKey(entry: PullRequestListEntry): string {
+  return JSON.stringify([
+    entry.provider,
+    entry.host.toLowerCase(),
+    entry.repository.toLowerCase(),
+    entry.number,
+  ]);
+}
+
 export function pullRequestEntryKey(entry: ScopedEntry): string {
   const scope = entry.environmentId === undefined ? "" : `${entry.environmentId}:`;
   return `${scope}${entry.host}:${entry.repository}#${entry.number}`;
@@ -436,6 +446,7 @@ export interface PullRequestStatsTarget {
     readonly refs: ReadonlyArray<{
       readonly projectId: ProjectId;
       readonly repository: string;
+      readonly host?: string;
       readonly number: number;
     }>;
   };
@@ -493,6 +504,7 @@ export function pullRequestStatsBatches(
       ref: {
         projectId: entry.projectId,
         repository: entry.repository,
+        ...(entry.host ? { host: entry.host } : {}),
         number: entry.number,
       },
     });
@@ -592,22 +604,28 @@ export function partitionPullRequestsWithPriority<Entry extends PullRequestListE
   authored: ReadonlyArray<Entry>,
   reviewRequested: ReadonlyArray<Entry>,
 ): ReadonlyArray<PullRequestGroup<Entry>> {
-  const authoredByKey = new Map(authored.map((entry) => [pullRequestEntryKey(entry), entry]));
+  const authoredByKey = new Map(authored.map((entry) => [remotePullRequestKey(entry), entry]));
   // A row can be both authored and review-requested; authored wins, as the local grouping has it.
   const reviewByKey = new Map(
     reviewRequested.flatMap((entry) => {
-      const key = pullRequestEntryKey(entry);
+      const key = remotePullRequestKey(entry);
       return authoredByKey.has(key) ? [] : [[key, entry] as const];
     }),
   );
   const others: Entry[] = [];
   for (const entry of entries) {
-    const key = pullRequestEntryKey(entry);
-    // The feed's copy of a partitioned row is at least as fresh — it replaces in place.
-    if (authoredByKey.has(key)) {
-      authoredByKey.set(key, entry);
-    } else if (reviewByKey.has(key)) {
-      reviewByKey.set(key, entry);
+    const key = remotePullRequestKey(entry);
+    // Keep the account that supplied the priority classification. A feed read through
+    // another environment can carry different viewer permissions and involvement.
+    const partition = authoredByKey.has(key)
+      ? authoredByKey
+      : reviewByKey.has(key)
+        ? reviewByKey
+        : null;
+    if (partition) {
+      if (pullRequestEntryKey(partition.get(key)!) === pullRequestEntryKey(entry)) {
+        partition.set(key, entry);
+      }
     } else {
       others.push(entry);
     }
@@ -640,6 +658,8 @@ export function mergePullRequestDiffStats(
   stats: ReadonlyArray<{
     readonly environmentId: string;
     readonly projectId: string;
+    readonly repository?: string | undefined;
+    readonly host?: string | undefined;
     readonly number: number;
     readonly additions: number;
     readonly deletions: number;
@@ -660,15 +680,18 @@ export function mergePullRequestDiffStats(
 export const pullRequestDiffStatKey = (row: {
   readonly environmentId: string;
   readonly projectId: string;
+  readonly repository?: string | undefined;
+  readonly host?: string | undefined;
   readonly number: number;
-}) => `${row.environmentId} ${row.projectId} ${row.number}`;
+}) =>
+  `${row.environmentId} ${row.projectId} ${row.host?.toLowerCase() ?? ""} ${row.repository?.toLowerCase() ?? ""} ${row.number}`;
 
 /**
  * Every connected environment's listing, read as one list.
  *
  * `nextCursors` is keyed by environment rather than by repository: a cursor only means anything
- * to the host that issued it, and two machines can hold the same repository. `viewers` is not —
- * a host names one account, and the same host reached from two machines is the same account.
+ * to the host that issued it, and two machines can hold the same repository. `viewers` retains
+ * each environment's host account; a deduplicated row keeps the account that actually read it.
  */
 export interface MergedPullRequestList {
   /** Keyed `"<environmentId> <host>"`, so one host's two accounts stay two accounts. */
@@ -693,6 +716,7 @@ export interface MergedPullRequestList {
  */
 export function mergePullRequestLists(
   answers: ReadonlyArray<readonly [EnvironmentId, PullRequestListResult]>,
+  preferredEnvironmentId?: EnvironmentId,
 ): MergedPullRequestList | null {
   if (answers.length === 0) return null;
   const viewers: Record<string, string> = {};
@@ -728,10 +752,30 @@ export function mergePullRequestLists(
       nextCursors[environmentId] = answer.nextCursors;
     }
   }
+  const uniqueEntries = new Map<string, EnvironmentPullRequestEntry>();
+  for (const entry of entries) {
+    const key = remotePullRequestKey(entry);
+    const held = uniqueEntries.get(key);
+    // Deterministic ownership preserves the row's actual project and credentials.
+    // Do not merge viewer-shaped fields from two environments into one synthetic row.
+    if (
+      !held ||
+      (entry.environmentId === preferredEnvironmentId &&
+        held.environmentId !== preferredEnvironmentId) ||
+      (held.environmentId !== preferredEnvironmentId &&
+        entry.environmentId.localeCompare(held.environmentId) < 0)
+    ) {
+      uniqueEntries.set(key, entry);
+    }
+  }
   return {
     viewers,
     providers: [...providers.values()],
-    entries: entries.toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+    entries: [...uniqueEntries.values()].toSorted(
+      (left, right) =>
+        right.updatedAt.localeCompare(left.updatedAt) ||
+        remotePullRequestKey(left).localeCompare(remotePullRequestKey(right)),
+    ),
     errors,
     truncated,
     nextCursors,

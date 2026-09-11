@@ -1,3 +1,4 @@
+import * as SagaWorkbench from "./sagaWorkbench.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -326,6 +327,15 @@ export const WS_METHODS = {
   // Stave methods
   staveGetStatus: "stave.getStatus",
   staveSpaceStatus: "stave.spaceStatus",
+  sagaWorkbenchGetSnapshot: "sagaWorkbench.getSnapshot",
+  sagaWorkbenchGetEvidence: "sagaWorkbench.getEvidence",
+  sagaWorkbenchGetActivity: "sagaWorkbench.getActivity",
+  sagaWorkbenchSetStage: "sagaWorkbench.setStage",
+  sagaWorkbenchConfigure: "sagaWorkbench.configure",
+  sagaWorkbenchApprove: "sagaWorkbench.approve",
+  sagaWorkbenchComplete: "sagaWorkbench.complete",
+  sagaWorkbenchReopen: "sagaWorkbench.reopen",
+  sagaWorkbenchSummarize: "sagaWorkbench.summarize",
   staveSagaStatus: "stave.sagaStatus",
   staveListRepos: "stave.listRepos",
   staveListSpaces: "stave.listSpaces",
@@ -1194,7 +1204,63 @@ export const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeReso
   stream: true,
 });
 
+export const WsSagaWorkbenchGetSnapshotRpc = Rpc.make(WS_METHODS.sagaWorkbenchGetSnapshot, {
+  payload: SagaWorkbench.SagaWorkbenchSnapshotInput,
+  success: SagaWorkbench.SagaWorkbenchSnapshot,
+  error: Schema.Union([SagaWorkbench.SagaWorkbenchError, EnvironmentAuthorizationError]),
+});
+export const WsSagaWorkbenchGetEvidenceRpc = Rpc.make(WS_METHODS.sagaWorkbenchGetEvidence, {
+  payload: SagaWorkbench.SagaWorkbenchIdentityInput,
+  success: SagaWorkbench.SagaWorkbenchEvidence,
+  error: Schema.Union([SagaWorkbench.SagaWorkbenchError, EnvironmentAuthorizationError]),
+});
+export const WsSagaWorkbenchGetActivityRpc = Rpc.make(WS_METHODS.sagaWorkbenchGetActivity, {
+  payload: SagaWorkbench.SagaWorkbenchIdentityInput,
+  success: Schema.Array(SagaWorkbench.SagaWorkbenchActivity),
+  error: Schema.Union([SagaWorkbench.SagaWorkbenchError, EnvironmentAuthorizationError]),
+});
+export const WsSagaWorkbenchConfigureRpc = Rpc.make(WS_METHODS.sagaWorkbenchConfigure, {
+  payload: SagaWorkbench.SagaWorkbenchConfigureInput,
+  success: SagaWorkbench.SagaWorkbenchWorkflow,
+  error: Schema.Union([SagaWorkbench.SagaWorkbenchError, EnvironmentAuthorizationError]),
+});
+export const WsSagaWorkbenchSetStageRpc = Rpc.make(WS_METHODS.sagaWorkbenchSetStage, {
+  payload: SagaWorkbench.SagaWorkbenchStageInput,
+  success: SagaWorkbench.SagaWorkbenchWorkflow,
+  error: Schema.Union([SagaWorkbench.SagaWorkbenchError, EnvironmentAuthorizationError]),
+});
+export const WsSagaWorkbenchApproveRpc = Rpc.make(WS_METHODS.sagaWorkbenchApprove, {
+  payload: SagaWorkbench.SagaWorkbenchApproveInput,
+  success: SagaWorkbench.SagaWorkbenchWorkflow,
+  error: Schema.Union([SagaWorkbench.SagaWorkbenchError, EnvironmentAuthorizationError]),
+});
+export const WsSagaWorkbenchCompleteRpc = Rpc.make(WS_METHODS.sagaWorkbenchComplete, {
+  payload: SagaWorkbench.SagaWorkbenchMutationInput,
+  success: SagaWorkbench.SagaWorkbenchWorkflow,
+  error: Schema.Union([SagaWorkbench.SagaWorkbenchError, EnvironmentAuthorizationError]),
+});
+export const WsSagaWorkbenchReopenRpc = Rpc.make(WS_METHODS.sagaWorkbenchReopen, {
+  payload: SagaWorkbench.SagaWorkbenchMutationInput,
+  success: SagaWorkbench.SagaWorkbenchWorkflow,
+  error: Schema.Union([SagaWorkbench.SagaWorkbenchError, EnvironmentAuthorizationError]),
+});
+export const WsSagaWorkbenchSummarizeRpc = Rpc.make(WS_METHODS.sagaWorkbenchSummarize, {
+  payload: SagaWorkbench.SagaWorkbenchMutationInput,
+  success: SagaWorkbench.SagaWorkbenchWorkflow,
+  error: Schema.Union([SagaWorkbench.SagaWorkbenchError, EnvironmentAuthorizationError]),
+});
+
 export const WsRpcGroup = RpcGroup.make(
+  WsSagaWorkbenchGetSnapshotRpc,
+  WsSagaWorkbenchGetEvidenceRpc,
+  WsSagaWorkbenchGetActivityRpc,
+  WsSagaWorkbenchSetStageRpc,
+  WsSagaWorkbenchConfigureRpc,
+  WsSagaWorkbenchApproveRpc,
+  WsSagaWorkbenchCompleteRpc,
+  WsSagaWorkbenchReopenRpc,
+  WsSagaWorkbenchSummarizeRpc,
+
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,

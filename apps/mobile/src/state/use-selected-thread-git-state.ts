@@ -10,9 +10,9 @@ import { useVcsActionState } from "./use-vcs-action-state";
 import { useThreadSelection } from "./use-thread-selection";
 import { useSelectedThreadWorktree } from "./use-selected-thread-worktree";
 
-export function useSelectedThreadGitState() {
+export function useSelectedThreadGitState(repoKey?: string) {
   const { selectedThread, selectedThreadProject } = useThreadSelection();
-  const { selectedThreadGitCwd } = useSelectedThreadWorktree();
+  const { selectedThreadGitCwd } = useSelectedThreadWorktree(repoKey);
 
   const selectedThreadGitTarget = useMemo(
     () => ({
@@ -31,9 +31,10 @@ export function useSelectedThreadGitState() {
         }),
   );
 
-  // Branches are listed from the project's repository root (the primary repo
-  // for a Stave space), not the thread's worktree.
-  const selectedThreadGitRootCwd = resolveProjectGitCwd({ project: selectedThreadProject });
+  // Ordinary projects list branches from their root; Stave uses the selected checkout.
+  const selectedThreadGitRootCwd = selectedThreadProject?.stave
+    ? selectedThreadGitCwd
+    : resolveProjectGitCwd({ project: selectedThreadProject });
   const selectedThreadBranchTarget = useMemo(
     () => ({
       environmentId: selectedThread?.environmentId ?? null,

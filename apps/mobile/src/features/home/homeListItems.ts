@@ -2,7 +2,10 @@ import {
   buildSagaProjectTree,
   derivePhysicalProjectKey,
   type SagaProjectIndexEntry,
+  type SagaProjectTreeNode,
 } from "@t3tools/client-runtime/state/project-grouping";
+import { buildPhysicalSagaProjectGroups } from "@t3tools/client-runtime/state/sagaWorkbench";
+import type { ThreadListV2ListItem } from "../threads/threadListV2";
 import type { StaveSagaMemberStatus } from "@t3tools/contracts";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 
@@ -36,6 +39,7 @@ export interface HomeHeaderListItem {
 }
 
 export interface HomeThreadListItem {
+  readonly depth?: number;
   readonly type: "thread";
   readonly key: string;
   readonly thread: EnvironmentThreadShell;
@@ -43,6 +47,7 @@ export interface HomeThreadListItem {
 }
 
 export interface HomePendingTaskListItem {
+  readonly depth?: number;
   readonly type: "pending-task";
   readonly key: string;
   readonly pendingTask: PendingNewTask;
@@ -50,6 +55,7 @@ export interface HomePendingTaskListItem {
 }
 
 export interface HomeShowMoreListItem {
+  readonly depth?: number;
   readonly type: "show-more";
   readonly key: string;
   readonly groupKey: string;
@@ -94,6 +100,7 @@ export function nextGroupDisplayState(
  * toggles.
  */
 export function homeListItemsAreEqual(previous: HomeListItem, item: HomeListItem): boolean {
+  if (previous.depth !== item.depth) return false;
   switch (item.type) {
     case "header":
       return (
@@ -126,6 +133,90 @@ export function homeListItemsAreEqual(previous: HomeListItem, item: HomeListItem
   }
 }
 
+/** Split only physical saga members; keep the original thread and pending-task objects. */
+function hierarchyGroups(
+  groups: ReadonlyArray<HomeThreadGroup>,
+  index: ReadonlyArray<SagaProjectIndexEntry>,
+) {
+  const sourceByProject = new Map(
+    groups.flatMap((group) =>
+      group.projects.map(
+        (project) => [JSON.stringify([project.environmentId, project.id]), group] as const,
+      ),
+    ),
+  );
+  const physical = buildPhysicalSagaProjectGroups(
+    groups.map((group) => ({
+      key: group.key,
+      label: group.title,
+      representative: group.representative,
+      members: group.projects.map((project) => ({
+        physicalProjectKey: derivePhysicalProjectKey(project),
+        project,
+      })),
+      memberProjectRefs:
+        group.projectRefs ??
+        group.projects.map((project) => ({
+          environmentId: project.environmentId,
+          projectId: project.id,
+        })),
+    })),
+    index,
+  );
+  return physical.map((group): HomeThreadGroup => {
+    const source = sourceByProject.get(
+      JSON.stringify([group.representative.environmentId, group.representative.id]),
+    )!;
+    if (group.key === source.key && group.members.length === source.projects.length) return source;
+    const refs = new Set(
+      group.memberProjectRefs.map((ref) => JSON.stringify([ref.environmentId, ref.projectId])),
+    );
+    const belongs = (thread: EnvironmentThreadShell) =>
+      refs.has(JSON.stringify([thread.environmentId, thread.projectId]));
+    return {
+      ...source,
+      key: group.key,
+      title: group.label,
+      representative: group.representative,
+      projects: group.members.map((member) => member.project),
+      projectRefs: group.memberProjectRefs,
+      threads: source.threads.filter(belongs),
+      recentThreads: source.recentThreads.filter(belongs),
+      pendingTasks: source.pendingTasks.filter((task) =>
+        refs.has(JSON.stringify([task.message.environmentId, task.creation.projectId])),
+      ),
+      newThreadTarget: source.newThreadTarget === null ? null : group.representative,
+    };
+  });
+}
+
+function homeHierarchy(input: {
+  readonly groups: ReadonlyArray<HomeThreadGroup>;
+  readonly sagaIndex?: ReadonlyArray<SagaProjectIndexEntry>;
+}) {
+  const groups = hierarchyGroups(input.groups, input.sagaIndex ?? []);
+  const groupsByKey = new Map(groups.map((group) => [group.key, group]));
+  const tree = buildSagaProjectTree(
+    groups.map((group) => ({
+      key: group.key,
+      label: group.title,
+      representative: group.representative,
+      members: group.projects.map((project) => ({
+        physicalProjectKey: derivePhysicalProjectKey(project),
+        project,
+      })),
+      memberProjectRefs:
+        group.projectRefs ??
+        group.projects.map((project) => ({
+          environmentId: project.environmentId,
+          projectId: project.id,
+        })),
+    })),
+    input.sagaIndex ?? [],
+  );
+  return { groupsByKey, tree };
+}
+
 export function buildHomeListLayout(input: {
   readonly groups: ReadonlyArray<HomeThreadGroup>;
   readonly displayStates: ReadonlyMap<string, HomeGroupDisplayState>;
@@ -138,23 +229,7 @@ export function buildHomeListLayout(input: {
   const items: HomeListItem[] = [];
   const stickyHeaderIndices: number[] = [];
 
-  const groupsByKey = new Map(input.groups.map((group) => [group.key, group]));
-  const tree = buildSagaProjectTree(
-    input.groups.map((group) => ({
-      key: group.key,
-      label: group.title,
-      representative: group.representative,
-      members: group.projects.map((project) => ({
-        physicalProjectKey: derivePhysicalProjectKey(project),
-        project,
-      })),
-      memberProjectRefs: group.projects.map((project) => ({
-        environmentId: project.environmentId,
-        projectId: project.id,
-      })),
-    })),
-    input.sagaIndex ?? [],
-  );
+  const { groupsByKey, tree } = homeHierarchy(input);
   const ordered = tree.flatMap((node) => {
     const collapsed = input.displayStates.get(node.group.key)?.collapsed && !input.showAllThreads;
     return [
@@ -214,6 +289,7 @@ export function buildHomeListLayout(input: {
     for (const [pendingIndex, pendingTask] of group.pendingTasks.entries()) {
       items.push({
         type: "pending-task",
+        depth: depth + 1,
         key: `pending-task:${pendingTask.message.messageId}`,
         pendingTask,
         isLast:
@@ -226,6 +302,7 @@ export function buildHomeListLayout(input: {
     for (const [threadIndex, thread] of visibleThreads.entries()) {
       items.push({
         type: "thread",
+        depth: depth + 1,
         key: `thread:${thread.environmentId}:${thread.id}`,
         thread,
         isLast: threadIndex === visibleThreads.length - 1 && !hasShowMoreRow,
@@ -235,6 +312,7 @@ export function buildHomeListLayout(input: {
     if (hasShowMoreRow) {
       items.push({
         type: "show-more",
+        depth: depth + 1,
         key: `show-more:${group.key}`,
         groupKey: group.key,
         hiddenCount,
@@ -247,4 +325,96 @@ export function buildHomeListLayout(input: {
   }
 
   return { items, stickyHeaderIndices };
+}
+
+export type HomeHierarchyV2Item = (ThreadListV2ListItem | HomeHeaderListItem) & {
+  readonly depth?: number;
+};
+
+/** Preserve V2 partitioning and row objects while giving each shelf the same Projects hierarchy. */
+export function buildHomeHierarchyV2Items(input: {
+  readonly groups: ReadonlyArray<HomeThreadGroup>;
+  readonly items: ReadonlyArray<ThreadListV2ListItem>;
+  readonly sagaIndex?: ReadonlyArray<SagaProjectIndexEntry>;
+  readonly displayStates: ReadonlyMap<string, HomeGroupDisplayState>;
+  readonly searching?: boolean;
+  readonly selectedThreadKey?: string | null;
+}): HomeHierarchyV2Item[] {
+  const { groupsByKey, tree } = homeHierarchy(input);
+  const groupByProject = new Map(
+    [...groupsByKey.values()].flatMap((group) =>
+      (
+        group.projectRefs ??
+        group.projects.map((project) => ({
+          environmentId: project.environmentId,
+          projectId: project.id,
+        }))
+      ).map((ref) => [JSON.stringify([ref.environmentId, ref.projectId]), group.key] as const),
+    ),
+  );
+  const result: HomeHierarchyV2Item[] = [];
+  let section = "active";
+  let rows: ThreadListV2ListItem[] = [];
+  const flush = () => {
+    const rowsByGroup = new Map<string, ThreadListV2ListItem[]>();
+    const ungrouped: ThreadListV2ListItem[] = [];
+    for (const row of rows) {
+      const ref =
+        row.type === "v2-thread"
+          ? [row.item.thread.environmentId, row.item.thread.projectId]
+          : row.type === "v2-pending"
+            ? [row.pendingTask.message.environmentId, row.pendingTask.creation.projectId]
+            : null;
+      const key = ref === null ? undefined : groupByProject.get(JSON.stringify(ref));
+      if (key === undefined) {
+        ungrouped.push(row);
+        continue;
+      }
+      const owned = rowsByGroup.get(key) ?? [];
+      owned.push(row);
+      rowsByGroup.set(key, owned);
+    }
+    const visible = (node: SagaProjectTreeNode): boolean =>
+      rowsByGroup.has(node.group.key) ||
+      (section === "active" && !input.searching && !!node.group.representative.stave) ||
+      node.children.some(visible);
+    const containsSelection = (node: SagaProjectTreeNode): boolean =>
+      (rowsByGroup.get(node.group.key) ?? []).some(
+        (row) =>
+          row.type === "v2-thread" &&
+          `${row.item.thread.environmentId}:${row.item.thread.id}` === input.selectedThreadKey,
+      ) || node.children.some(containsSelection);
+    const visit = (node: SagaProjectTreeNode, depth: number) => {
+      if (!visible(node)) return;
+      const group = groupsByKey.get(node.group.key)!;
+      const collapsed =
+        !!input.displayStates.get(group.key)?.collapsed &&
+        !input.searching &&
+        !containsSelection(node);
+      result.push({
+        type: "header",
+        key: `v2-${section}-header:${group.key}`,
+        group,
+        collapsed,
+        isFirst: result.length === 0,
+        depth,
+        memberStatus: node.memberStatus,
+      });
+      if (collapsed) return;
+      for (const row of rowsByGroup.get(group.key) ?? []) result.push({ ...row, depth: depth + 1 });
+      for (const child of node.children) visit(child, depth + 1);
+    };
+    for (const node of tree) visit(node, 0);
+    result.push(...ungrouped);
+    rows = [];
+  };
+  for (const item of input.items) {
+    if (item.type === "v2-snoozed-shelf" || item.type === "v2-settled-shelf") {
+      flush();
+      result.push(item);
+      section = item.type;
+    } else rows.push(item);
+  }
+  flush();
+  return result;
 }

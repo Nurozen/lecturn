@@ -3423,6 +3423,45 @@ pending_approval_requests AS (
       ),
     );
 
+  const getInferenceTurnPairs: ProjectionSnapshotQueryShape["getInferenceTurnPairs"] = (input) =>
+    sql<{ question: string; response: string }>`
+      SELECT CASE WHEN length(question.text) <= 12000 THEN question.text
+        ELSE substr(question.text, 1, 6000) || char(10) || '[Middle content truncated]' || char(10) || substr(question.text, -6000) END AS question,
+        (SELECT CASE WHEN length(body) <= 12000 THEN body
+          ELSE substr(body, 1, 6000) || char(10) || '[Middle content truncated]' || char(10) || substr(body, -6000) END
+         FROM (SELECT group_concat(text, char(10) || char(10)) AS body FROM (
+           SELECT segment.text FROM projection_thread_messages AS segment
+           WHERE segment.thread_id = turn.thread_id AND segment.turn_id = turn.turn_id
+             AND segment.role = 'assistant' AND segment.is_streaming = 0
+             AND segment.rowid <= answer.rowid AND trim(segment.text) <> ''
+           ORDER BY segment.created_at, segment.rowid
+         ))) AS response
+      FROM projection_turns AS turn
+      JOIN projection_thread_messages AS question
+        ON question.message_id = turn.pending_message_id AND question.thread_id = turn.thread_id
+      JOIN projection_thread_messages AS answer
+        ON answer.message_id = turn.assistant_message_id AND answer.thread_id = turn.thread_id
+      WHERE turn.thread_id = ${input.threadId}
+        AND turn.turn_id IS NOT NULL AND turn.state = 'completed'
+        AND turn.source_proposed_plan_id IS NULL
+        AND question.role = 'user' AND answer.role = 'assistant'
+        AND answer.turn_id = turn.turn_id
+        AND question.is_streaming = 0 AND answer.is_streaming = 0
+        AND trim(question.text) <> '' AND trim(answer.text) <> ''
+        AND (${input.beforeMessageId ?? null} IS NULL OR EXISTS (
+          SELECT 1 FROM projection_thread_messages AS boundary
+          WHERE boundary.message_id = ${input.beforeMessageId ?? null}
+            AND boundary.thread_id = turn.thread_id AND boundary.role = 'user'
+            AND question.rowid < boundary.rowid AND answer.rowid < boundary.rowid
+            AND turn.completed_at <= boundary.created_at
+        ))
+      ORDER BY question.created_at DESC, question.rowid DESC
+      LIMIT 3
+    `.pipe(
+      Effect.mapError(toPersistenceSqlError("ProjectionSnapshotQuery.getInferenceTurnPairs:query")),
+      Effect.map((rows) => [...rows].reverse()),
+    );
+
   const listThreadTurnsById: ProjectionSnapshotQueryShape["listThreadTurnsById"] = (threadId) =>
     listThreadTurnRowsByThread({ threadId }).pipe(
       Effect.mapError(
@@ -3543,6 +3582,7 @@ pending_approval_requests AS (
     getThreadDetailSnapshot,
     listThreadActivitiesById,
     listThreadTurnsById,
+    getInferenceTurnPairs,
     getThreadForkContextById,
     listThreadIdsByWorktreePath,
     listThreadLifecycleAnchorsByProjectId,

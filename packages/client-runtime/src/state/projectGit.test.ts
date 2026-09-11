@@ -2,8 +2,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   isStaveProject,
+  resolveRepositoryPullRequestSelector,
   normalizeProjectThreadWorkspace,
   resolveProjectGitRepositoryIdentity,
+  resolveProjectGitTargets,
   resolveProjectGitBranch,
   resolveProjectGitCwd,
   staveForcedEnvMode,
@@ -188,5 +190,178 @@ describe("PR repository identity", () => {
       resolveProjectGitRepositoryIdentity({ ...plainProject, repositoryIdentity: outer }),
     ).toBe(outer);
     expect(resolveProjectGitRepositoryIdentity(null)).toBeNull();
+  });
+});
+
+describe("space Git targets", () => {
+  const identity = {
+    canonicalKey: "github.com/acme/api",
+    rootPath: "/work/space/services/api",
+    locator: {
+      source: "git-remote" as const,
+      remoteName: "origin",
+      remoteUrl: "https://github.com/acme/api",
+    },
+  };
+  const repos = [
+    { name: "web", mode: "edit" as const, path: "apps/web", branch: "space/web" },
+    {
+      name: "api",
+      mode: "edit" as const,
+      path: "services/api",
+      branch: "space/api",
+      repositoryIdentity: identity,
+    },
+    { name: "docs", mode: "reference" as const, path: "references/docs", ref: "main" },
+  ];
+  const project = { ...staveProject, stave: { ...staveProject.stave, repos } };
+
+  it("addresses all nested editable repos with their own branch and identity", () => {
+    expect(resolveProjectGitTargets({ project })).toEqual([
+      {
+        key: "/work/space/apps/web",
+        cwd: "/work/space/apps/web",
+        repoName: "web",
+        mode: "edit",
+        branch: "space/web",
+        repositoryIdentity: null,
+      },
+      {
+        key: "/work/space/services/api",
+        cwd: "/work/space/services/api",
+        repoName: "api",
+        mode: "edit",
+        branch: "space/api",
+        repositoryIdentity: identity,
+      },
+    ]);
+    expect(resolveProjectGitTargets({ project, includeReferences: true }).at(-1)).toMatchObject({
+      cwd: "/work/space/references/docs",
+      mode: "reference",
+      branch: null,
+    });
+  });
+
+  it("uses server resolved paths and retains identity from older primary payloads only for the matching checkout", () => {
+    const targets = resolveProjectGitTargets({
+      project: {
+        ...project,
+        stave: {
+          ...project.stave,
+          primaryRepoPath: identity.rootPath,
+          primaryRepositoryIdentity: identity,
+          repos: [
+            { name: "api", mode: "edit", path: "old/api", resolvedPath: identity.rootPath },
+            repos[0] as (typeof repos)[number],
+          ],
+        },
+      },
+    });
+    expect(targets[0]).toMatchObject({ cwd: identity.rootPath, repositoryIdentity: identity });
+    expect(targets[1]?.repositoryIdentity).toBeNull();
+  });
+
+  it("resolves Windows paths from a remote server and deduplicates casing and separators", () => {
+    expect(
+      resolveProjectGitTargets({
+        project: {
+          workspaceRoot: "C:\\work\\space",
+          stave: {
+            ...project.stave,
+            repos: [
+              { name: "web", mode: "edit", path: "apps/web" },
+              { name: "alias", mode: "edit", path: ".\\Apps\\WEB\\" },
+              { name: "api", mode: "edit", path: "services/api" },
+            ],
+          },
+        },
+      }).map(({ cwd }) => cwd),
+    ).toEqual(["C:\\work\\space\\apps\\web", "C:\\work\\space\\services\\api"]);
+    expect(
+      resolveProjectGitTargets({
+        project: {
+          workspaceRoot: "\\\\host\\share\\space",
+          stave: {
+            ...project.stave,
+            repos: [repos[0] as (typeof repos)[number]],
+          },
+        },
+      })[0]?.cwd,
+    ).toBe("\\\\host\\share\\space\\apps\\web");
+  });
+
+  it("rejects relative escapes and keeps conflicting reference aliases read-only", () => {
+    const conflicted = {
+      ...project,
+      stave: {
+        ...project.stave,
+        repos: [
+          { name: "bad", mode: "edit" as const, path: "../outside" },
+          { name: "bad-drive", mode: "edit" as const, path: "C:outside" },
+          { name: "web", mode: "edit" as const, path: "apps/../web" },
+          { name: "web-context", mode: "reference" as const, path: "./web" },
+        ],
+      },
+    };
+    expect(resolveProjectGitTargets({ project: conflicted })).toEqual([]);
+    expect(
+      resolveProjectGitTargets({ project: conflicted, includeReferences: true }),
+    ).toMatchObject([{ cwd: "/work/space/web", mode: "reference" }]);
+  });
+
+  it("does not invent targets for empty spaces or missing project data", () => {
+    expect(resolveProjectGitTargets({ project: staveProject })).toEqual([]);
+    expect(resolveProjectGitTargets({ project: staveProjectWithoutPrimary })).toEqual([]);
+    expect(resolveProjectGitTargets({ project: undefined })).toEqual([]);
+  });
+
+  it("retains a single workspace target for ordinary projects", () => {
+    expect(
+      resolveProjectGitTargets({ project: { ...plainProject, repositoryIdentity: identity } }),
+    ).toEqual([
+      {
+        key: "/work/app",
+        cwd: "/work/app",
+        repoName: "app",
+        mode: "edit",
+        branch: null,
+        repositoryIdentity: identity,
+      },
+    ]);
+  });
+});
+
+describe("resolveRepositoryPullRequestSelector", () => {
+  it("preserves a nested GitLab namespace", () => {
+    expect(
+      resolveRepositoryPullRequestSelector({
+        provider: "gitlab",
+        displayName: "acme/platform/api",
+        owner: "acme",
+        name: "api",
+      }),
+    ).toBe("acme/platform/api");
+  });
+  it("preserves the Azure organization and project in the repository identity", () => {
+    expect(
+      resolveRepositoryPullRequestSelector({
+        provider: "azure-devops",
+        displayName: "org/project/_git/api",
+        name: "api",
+      }),
+    ).toBe("org/project/_git/api");
+    expect(
+      resolveRepositoryPullRequestSelector({
+        provider: "azure-devops",
+        displayName: "org/project/_git/api",
+      }),
+    ).toBe("org/project/_git/api");
+  });
+  it("supports legacy owner/name identities and refuses missing selectors", () => {
+    expect(
+      resolveRepositoryPullRequestSelector({ provider: "github", owner: "acme", name: "api" }),
+    ).toBe("acme/api");
+    expect(resolveRepositoryPullRequestSelector({ provider: "github" })).toBeNull();
+    expect(resolveRepositoryPullRequestSelector(null)).toBeNull();
   });
 });

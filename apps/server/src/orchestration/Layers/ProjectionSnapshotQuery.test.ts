@@ -57,6 +57,134 @@ const projectionSnapshotLayer = it.layer(
 );
 
 projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
+  it.effect("inference reads only the preceding three completed textual turn pairs", () =>
+    Effect.gen(function* () {
+      const query = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("inference-pairs");
+      const stamp = (index: number) => `2026-09-10T00:00:${String(index).padStart(2, "0")}.000Z`;
+      const message = (
+        id: string,
+        turn: string | null,
+        role: string,
+        text: string,
+        index: number,
+        streaming = 0,
+      ) =>
+        sql`INSERT INTO projection_thread_messages
+          (message_id,thread_id,turn_id,role,text,is_streaming,created_at,updated_at,attachments_json)
+          VALUES (${id},${threadId},${turn},${role},${text},${streaming},${stamp(index)},${stamp(index)},'["excluded attachment"]')`;
+      const pair = (
+        index: number,
+        state = "completed",
+        options: {
+          role?: string;
+          streaming?: number;
+          plan?: string;
+          completed?: number;
+          response?: string;
+        } = {},
+      ) =>
+        Effect.gen(function* () {
+          const turn = `inference-turn-${index}`;
+          yield* message(`inference-q-${index}`, null, "user", `Question ${index}`, index * 2);
+          if (index === 4) {
+            yield* message(
+              "inference-commentary",
+              turn,
+              "assistant",
+              "Investigating the implementation.",
+              index * 2,
+            );
+            yield* message("inference-tool-record", turn, "tool", "SECRET TOOL OUTPUT", index * 2);
+          }
+          yield* message(
+            `inference-a-${index}`,
+            turn,
+            options.role ?? "assistant",
+            options.response ?? `Answer ${index}`,
+            index * 2 + 1,
+            options.streaming ?? 0,
+          );
+          yield* sql`INSERT INTO projection_turns
+            (thread_id,turn_id,pending_message_id,assistant_message_id,state,requested_at,completed_at,checkpoint_files_json,source_proposed_plan_id)
+            VALUES (${threadId},${turn},${`inference-q-${index}`},${`inference-a-${index}`},${state},${stamp(index * 2)},${stamp(options.completed ?? index * 2 + 1)},'[]',${options.plan ?? null})`;
+        });
+      yield* pair(1);
+      yield* pair(2);
+      yield* pair(3);
+      yield* pair(4);
+      yield* pair(5, "interrupted");
+      yield* pair(6, "error");
+      yield* pair(7, "running");
+      yield* pair(8, "completed", { role: "tool" });
+      yield* pair(9, "completed", { streaming: 1 });
+      yield* pair(10, "completed", { plan: "synthetic-plan" });
+      yield* pair(11, "completed", { completed: 59 });
+      yield* pair(12, "completed", { response: "  " });
+      yield* message("inference-submitted", null, "user", "Current unanswered question", 30);
+      yield* pair(16);
+      assert.deepEqual(
+        yield* query.getInferenceTurnPairs({
+          threadId,
+          beforeMessageId: MessageId.make("inference-submitted"),
+        }),
+        [
+          { question: "Question 2", response: "Answer 2" },
+          { question: "Question 3", response: "Answer 3" },
+          { question: "Question 4", response: "Investigating the implementation.\n\nAnswer 4" },
+        ],
+      );
+      assert.deepEqual(
+        yield* query.getInferenceTurnPairs({
+          threadId,
+          beforeMessageId: MessageId.make("missing-boundary"),
+        }),
+        [],
+      );
+      assert.deepEqual(
+        yield* query.getInferenceTurnPairs({ threadId: ThreadId.make("empty-inference") }),
+        [],
+      );
+      yield* sql`DELETE FROM projection_thread_messages WHERE thread_id = ${threadId}`;
+      yield* sql`DELETE FROM projection_turns WHERE thread_id = ${threadId}`;
+    }),
+  );
+
+  it.effect("inference bounds text and uses insertion order to break equal timestamps", () =>
+    Effect.gen(function* () {
+      const query = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("inference-bounds");
+      for (const index of [1, 2, 3, 4]) {
+        for (const role of ["user", "assistant"]) {
+          yield* sql`INSERT INTO projection_thread_messages
+            (message_id,thread_id,turn_id,role,text,is_streaming,created_at,updated_at)
+            VALUES (${`bounds-${role}-${index}`},${threadId},${`bounds-turn-${index}`},${role},${`${index}:` + "x".repeat(15000)},0,'2026-09-10T00:00:00.000Z','2026-09-10T00:00:00.000Z')`;
+        }
+        yield* sql`INSERT INTO projection_turns
+          (thread_id,turn_id,pending_message_id,assistant_message_id,state,requested_at,completed_at,checkpoint_files_json)
+          VALUES (${threadId},${`bounds-turn-${index}`},${`bounds-user-${index}`},${`bounds-assistant-${index}`},'completed','2026-09-10T00:00:00.000Z','2026-09-10T00:00:00.000Z','[]')`;
+      }
+      const pairs = yield* query.getInferenceTurnPairs({ threadId });
+      assert.deepEqual(
+        pairs.map((pair) => pair.question.slice(0, 2)),
+        ["2:", "3:", "4:"],
+      );
+      assert.isTrue(
+        pairs.every(
+          (pair) =>
+            pair.question.length < 12100 &&
+            pair.response.length < 12100 &&
+            pair.question.includes("[Middle content truncated]") &&
+            pair.response.includes("[Middle content truncated]"),
+        ),
+      );
+      yield* sql`DELETE FROM projection_thread_messages WHERE thread_id = ${threadId}`;
+      yield* sql`DELETE FROM projection_turns WHERE thread_id = ${threadId}`;
+    }),
+  );
+
   it.effect("hydrates read model from projection tables and computes snapshot sequence", () =>
     Effect.gen(function* () {
       const snapshotQuery = yield* ProjectionSnapshotQuery;

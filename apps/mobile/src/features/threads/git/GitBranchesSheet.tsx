@@ -19,15 +19,17 @@ import { SheetActionButton } from "./gitSheetComponents";
 type GitBranchesSheetProps = StaticScreenProps<{
   readonly environmentId: string;
   readonly threadId: string;
+  readonly repoKey?: string;
 }>;
 
-export function GitBranchesSheet(_props: GitBranchesSheetProps) {
+export function GitBranchesSheet(props: GitBranchesSheetProps) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { selectedThread, selectedThreadProject } = useThreadSelection();
-  const { selectedThreadGitCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
-  const gitState = useSelectedThreadGitState();
-  const gitActions = useSelectedThreadGitActions();
+  const { selectedThreadGitCwd, selectedThreadWorktreePath, selectedThreadGitRepository } =
+    useSelectedThreadWorktree(props.route.params.repoKey);
+  const gitState = useSelectedThreadGitState(props.route.params.repoKey);
+  const gitActions = useSelectedThreadGitActions(props.route.params.repoKey);
   // Stave threads always run in the space root, so there is no worktree to
   // create or move to; the sheet only offers branch switching there.
   const worktreesSupported = !isStaveProject(selectedThreadProject);
@@ -45,7 +47,10 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
   const currentWorktreePath = selectedThreadWorktreePath;
   const availableBranches = gitState.selectedThreadBranches;
   const branchesLoading = gitState.selectedThreadBranchesLoading;
-  const busy = gitState.gitOperationLabel !== null;
+  const busy =
+    gitState.gitOperationLabel !== null ||
+    selectedThreadGitRepository?.mode === "reference" ||
+    selectedThreadGitCwd === null;
 
   const [newBranchName, setNewBranchName] = useState("");
   const [worktreeBaseBranch, setWorktreeBaseBranch] = useState(
@@ -75,6 +80,11 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps) {
         contentInset={{ bottom: Math.max(insets.bottom, 18) + 18 }}
         contentContainerClassName="gap-4 px-5 pt-2"
       >
+        {props.route.params.repoKey ? (
+          <Text className="text-sm font-t3-bold">
+            {selectedThreadGitRepository?.repoName ?? "Repository unavailable"}
+          </Text>
+        ) : null}
         <View className="gap-2 rounded-[18px] border border-border bg-card px-4 py-4">
           <Text className="text-foreground-secondary text-2xs font-t3-bold tracking-[1px] uppercase">
             New branch

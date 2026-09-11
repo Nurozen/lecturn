@@ -83,7 +83,7 @@ export interface MapManifestInput {
   readonly manifest: StaveManifest;
   readonly location: StaveWorkspaceLocation;
   /** Resolves a repo path relative to the workspace root (absolute paths pass through). */
-  readonly resolveRepoPath: (repoPath: string) => string;
+  readonly resolveRepoPath: (repoPath: string) => string | null;
 }
 
 /**
@@ -108,7 +108,9 @@ export function mapManifestToProjectInfo(
   const createdAt = normalizeScalar(manifest.createdAt);
   const repos = (manifest.repos ?? []).flatMap((repo) => {
     const entry = mapRepoEntry(repo);
-    return entry === null ? [] : [entry];
+    if (entry === null) return [];
+    const resolvedPath = resolveRepoPath(entry.path);
+    return resolvedPath === null ? [] : [{ ...entry, resolvedPath }];
   });
   const memories = (manifest.memories ?? []).flatMap((memory) => {
     const entry = mapMemoryEntry(memory);
@@ -125,7 +127,7 @@ export function mapManifestToProjectInfo(
       kind === STAVE_MANIFEST_KIND_SAGA || (manifest.saga !== undefined && manifest.saga !== null),
     repos,
     memories,
-    ...(primaryRepo === undefined ? {} : { primaryRepoPath: resolveRepoPath(primaryRepo.path) }),
+    ...(primaryRepo === undefined ? {} : { primaryRepoPath: primaryRepo.resolvedPath }),
     ...(primaryRepo?.branch === undefined ? {} : { primaryBranch: primaryRepo.branch }),
     state: archived ? "archived" : "live",
     ...(archived ? { archiveBasename: location.basename } : {}),
@@ -270,8 +272,17 @@ export const make = Effect.fn("StaveWorkspaceReader.make")(function* (
         parentBasename: path.basename(path.dirname(workspaceRoot)),
         basename: path.basename(workspaceRoot),
       },
-      resolveRepoPath: (repoPath) =>
-        path.isAbsolute(repoPath) ? repoPath : path.join(workspaceRoot, repoPath),
+      resolveRepoPath: (repoPath) => {
+        if (repoPath.includes("\0")) return null;
+        if (path.isAbsolute(repoPath)) return path.normalize(repoPath);
+        const resolved = path.resolve(workspaceRoot, repoPath);
+        const relative = path.relative(workspaceRoot, resolved);
+        return relative === ".." ||
+          relative.startsWith(`..${path.sep}`) ||
+          path.isAbsolute(relative)
+          ? null
+          : resolved;
+      },
     });
     if (info === null) {
       yield* Effect.logDebug("Stave manifest has no usable space id; ignoring").pipe(
@@ -282,11 +293,20 @@ export const make = Effect.fn("StaveWorkspaceReader.make")(function* (
       );
       return Option.none<StaveProjectInfo>();
     }
+    const repos = yield* Effect.forEach(
+      info.repos,
+      Effect.fn("StaveWorkspaceReader.resolveRepoIdentity")(function* (repo) {
+        if (repo.resolvedPath === undefined) return repo;
+        const identity = yield* repositoryIdentityResolver.resolve(repo.resolvedPath);
+        return identity === null ? repo : { ...repo, repositoryIdentity: identity };
+      }),
+      { concurrency: 4 },
+    );
     const primaryRepositoryIdentity =
-      info.primaryRepoPath === undefined
-        ? null
-        : yield* repositoryIdentityResolver.resolve(info.primaryRepoPath);
-    return Option.some(withPrimaryRepositoryIdentity(info, primaryRepositoryIdentity));
+      repos.find((repo) => repo.mode === "edit")?.repositoryIdentity ?? null;
+    return Option.some(
+      withPrimaryRepositoryIdentity({ ...info, repos }, primaryRepositoryIdentity),
+    );
   });
 
   const cache = yield* Cache.makeWith<string, Option.Option<StaveProjectInfo>>(loadUncached, {

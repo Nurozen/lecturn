@@ -293,7 +293,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
           projectId: asProjectId("project-1"),
           title: "Thread",
           modelSelection: {
-            instanceId: ProviderInstanceId.make("codex"),
+            instanceId: ProviderInstanceId.make("codex-team"),
             model: "gpt-5-codex",
           },
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -345,6 +345,31 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
           { id: "fastMode", value: true },
         ]),
         runtimeMode: "approval-required",
+      });
+      const withoutExplicitSelection = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-turn-captured-account"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("message-captured-account"),
+            role: "user",
+            text: "Follow up",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        },
+        readModel,
+      });
+      const capturedEvents = Array.isArray(withoutExplicitSelection)
+        ? withoutExplicitSelection
+        : [withoutExplicitSelection];
+      const captured = capturedEvents.find((event) => event.type === "thread.turn-start-requested");
+      expect(captured?.payload.modelSelection).toEqual({
+        instanceId: ProviderInstanceId.make("codex-team"),
+        model: "gpt-5-codex",
       });
     }),
   );

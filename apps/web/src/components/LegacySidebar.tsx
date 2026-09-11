@@ -1,6 +1,10 @@
 import { StaveLifecycleBadge } from "./stave/StaveLifecycleBadge";
 import { useSagaSidebarTree } from "./stave/useSagaSidebarTree";
-import { flattenSagaSidebarTree, staveSagaMemberBadges } from "./stave/staveSaga.logic";
+import {
+  flattenSagaSidebarTree,
+  staveSagaMemberBadges,
+  threadsForSagaProject,
+} from "./stave/staveSaga.logic";
 import { StaveConfirmDialog } from "./stave/StaveConfirmDialog";
 import { openStaveWizard } from "../staveWizard";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -15,6 +19,7 @@ import {
 import type { StaveOperation } from "@t3tools/contracts";
 import { prepareStaveProjectDeletion } from "../lib/staveProjectDeletion";
 import {
+  SettingsIcon,
   ArchiveIcon,
   ArrowUpDownIcon,
   ChevronRightIcon,
@@ -2324,7 +2329,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         if (isMobile) setOpenMobile(false);
         void router.navigate({
           to: "/projects/$projectKey",
-          params: { projectKey: project.projectKey },
+          params: { projectKey: project.settingsProjectKey ?? project.projectKey },
         });
         return;
       }
@@ -2432,67 +2437,141 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   return (
     <>
       <div className="group/project-header relative">
-        <SidebarMenuButton
-          ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
-          className={`pr-8 group-hover/project-header:bg-sidebar-row-hover group-hover/project-header:text-sidebar-foreground max-sm:pr-14 ${
-            isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : ""
-          }`}
-          {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.attributes : {})}
-          {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.listeners : {})}
-          onPointerDownCapture={handleProjectButtonPointerDownCapture}
-          onClick={handleProjectButtonClick}
-          onKeyDown={handleProjectButtonKeyDown}
-          onContextMenu={handleProjectButtonContextMenu}
-        >
-          {!projectExpanded && projectStatus ? (
+        {project.stave?.isSaga ? (
+          <div className="flex items-center gap-1 pr-8">
+            {isManualProjectSorting && dragHandleProps ? (
+              <button
+                type="button"
+                ref={dragHandleProps.setActivatorNodeRef}
+                {...dragHandleProps.attributes}
+                {...dragHandleProps.listeners}
+                aria-label={`Reorder ${project.displayName}`}
+                className="cursor-grab px-1 text-xs text-muted-foreground"
+              >
+                ⠿
+              </button>
+            ) : null}
+            <button
+              type="button"
+              data-lecturn-hover
+              className="rounded p-1 text-muted-foreground hover:bg-accent"
+              aria-label={`${projectExpanded ? "Collapse" : "Expand"} ${project.displayName}`}
+              aria-expanded={projectExpanded}
+              onClick={handleProjectButtonClick}
+            >
+              <ChevronRightIcon className={`size-3.5 ${projectExpanded ? "rotate-90" : ""}`} />
+            </button>
+            <button
+              type="button"
+              data-lecturn-hover
+              className="min-w-0 flex-1 truncate py-2 text-left text-sm font-medium text-primary"
+              onContextMenu={handleProjectButtonContextMenu}
+              onClick={() => {
+                if (isMobile) setOpenMobile(false);
+                void router.navigate({
+                  to: "/sagas/$environmentId/$projectId",
+                  params: { environmentId: project.environmentId, projectId: project.id },
+                  search: { view: "board" },
+                });
+              }}
+            >
+              <span className="lecturn-saga-sheen">{project.displayName}</span>
+            </button>
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <span
-                    aria-label={projectStatus.label}
-                    className={`-ml-0.5 relative inline-flex size-3.5 shrink-0 items-center justify-center ${projectStatus.colorClass}`}
-                  />
+                  <button
+                    type="button"
+                    data-lecturn-hover
+                    className="rounded px-1 text-xs text-muted-foreground hover:bg-accent"
+                    aria-label={`Settings for ${project.displayName}`}
+                    onClick={() => {
+                      void router.navigate({
+                        to: "/projects/$projectKey",
+                        params: { projectKey: project.settingsProjectKey ?? project.projectKey },
+                      });
+                    }}
+                  >
+                    <SettingsIcon aria-hidden className="size-3.5" />
+                  </button>
                 }
-              >
-                <span className="absolute inset-0 flex items-center justify-center transition-opacity duration-150 group-hover/project-header:opacity-0">
-                  <span
-                    className={`size-[9px] rounded-full ${projectStatus.dotClass} ${
-                      projectStatus.pulse ? "animate-status-pulse" : ""
-                    }`}
-                  />
-                </span>
-                <ChevronRightIcon className="absolute inset-0 m-auto size-3.5 text-icon-muted opacity-0 transition-opacity duration-150 group-hover/project-header:opacity-100" />
-              </TooltipTrigger>
-              <TooltipPopup side="top">{projectStatus.label}</TooltipPopup>
+              />
+              <TooltipPopup>
+                {project.stave?.isSaga
+                  ? "Saga settings"
+                  : project.stave
+                    ? "Space settings"
+                    : "Project settings"}
+              </TooltipPopup>
             </Tooltip>
-          ) : (
-            <ChevronRightIcon
-              className={`-ml-0.5 size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 ${
-                projectExpanded ? "rotate-90" : ""
+          </div>
+        ) : (
+          <>
+            <SidebarMenuButton
+              ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
+              className={`pr-8 group-hover/project-header:bg-sidebar-row-hover group-hover/project-header:text-sidebar-foreground max-sm:pr-14 ${
+                isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : ""
               }`}
-            />
-          )}
-          <span className="flex shrink-0">
-            <ProjectFavicon
-              environmentId={project.environmentId}
-              cwd={project.workspaceRoot}
-              projectName={project.displayName}
-              faviconPath={project.faviconPath}
-              projectIcon={project.projectIcon}
-            />
-          </span>
-          <span className="flex min-w-0 flex-1 items-center gap-2">
-            <span className="truncate text-sm font-medium text-sidebar-foreground/90">
-              {project.displayName}
-            </span>
-            <StaveLifecycleBadge notices={project.memberProjects.map((member) => member.notice)} />
-            {project.groupedProjectCount > 1 ? (
-              <span className="shrink-0 text-secondary-label text-[10px]">
-                {project.groupedProjectCount} projects
+              {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.attributes : {})}
+              {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.listeners : {})}
+              onPointerDownCapture={handleProjectButtonPointerDownCapture}
+              onClick={handleProjectButtonClick}
+              onKeyDown={handleProjectButtonKeyDown}
+              onContextMenu={handleProjectButtonContextMenu}
+            >
+              {!projectExpanded && projectStatus ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span
+                        aria-label={projectStatus.label}
+                        className={`-ml-0.5 relative inline-flex size-3.5 shrink-0 items-center justify-center ${projectStatus.colorClass}`}
+                      />
+                    }
+                  >
+                    <span className="absolute inset-0 flex items-center justify-center transition-opacity duration-150 group-hover/project-header:opacity-0">
+                      <span
+                        className={`size-[9px] rounded-full ${projectStatus.dotClass} ${
+                          projectStatus.pulse ? "animate-status-pulse" : ""
+                        }`}
+                      />
+                    </span>
+                    <ChevronRightIcon className="absolute inset-0 m-auto size-3.5 text-icon-muted opacity-0 transition-opacity duration-150 group-hover/project-header:opacity-100" />
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">{projectStatus.label}</TooltipPopup>
+                </Tooltip>
+              ) : (
+                <ChevronRightIcon
+                  className={`-ml-0.5 size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 ${
+                    projectExpanded ? "rotate-90" : ""
+                  }`}
+                />
+              )}
+              <span className="flex shrink-0">
+                <ProjectFavicon
+                  environmentId={project.environmentId}
+                  cwd={project.workspaceRoot}
+                  projectName={project.displayName}
+                  faviconPath={project.faviconPath}
+                  projectIcon={project.projectIcon}
+                />
               </span>
-            ) : null}
-          </span>
-        </SidebarMenuButton>
+              <span className="flex min-w-0 flex-1 items-center gap-2">
+                <span className="truncate text-sm font-medium text-sidebar-foreground/90">
+                  {project.displayName}
+                </span>
+                <StaveLifecycleBadge
+                  notices={project.memberProjects.map((member) => member.notice)}
+                />
+                {project.groupedProjectCount > 1 ? (
+                  <span className="shrink-0 text-secondary-label text-[10px]">
+                    {project.groupedProjectCount} projects
+                  </span>
+                ) : null}
+              </span>
+            </SidebarMenuButton>
+          </>
+        )}
         {/* Environment badge – visible by default, crossfades with the
             "new thread" button on hover using the same pointer-events +
             opacity pattern as the thread row archive/timestamp swap. */}
@@ -2556,43 +2635,47 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         </Tooltip>
       </div>
 
-      <SidebarProjectThreadList
-        projectKey={project.projectKey}
-        projectExpanded={projectExpanded}
-        hasOverflowingThreads={hasOverflowingThreads}
-        hiddenThreadStatus={hiddenThreadStatus}
-        orderedProjectThreadKeys={orderedProjectThreadKeys}
-        renderedThreads={renderedThreads}
-        showEmptyThreadState={showEmptyThreadState}
-        shouldShowThreadPanel={shouldShowThreadPanel}
-        isThreadListExpanded={isThreadListExpanded}
-        projectCwd={project.workspaceRoot}
-        activeRouteThreadKey={activeRouteThreadKey}
-        openPullRequestsInRightPanel={openPullRequestsInRightPanel}
-        threadJumpLabelByKey={threadJumpLabelByKey}
-        appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
-        renamingThreadKey={renamingThreadKey}
-        renamingTitle={renamingTitle}
-        setRenamingTitle={setRenamingTitle}
-        startThreadRename={startThreadRename}
-        renamingInputRef={renamingInputRef}
-        renamingCommittedRef={renamingCommittedRef}
-        confirmingArchiveThreadKey={confirmingArchiveThreadKey}
-        setConfirmingArchiveThreadKey={setConfirmingArchiveThreadKey}
-        confirmArchiveButtonRefs={confirmArchiveButtonRefs}
-        attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
-        handleThreadClick={handleThreadClick}
-        navigateToThread={navigateToThread}
-        handleMultiSelectContextMenu={handleMultiSelectContextMenu}
-        handleThreadContextMenu={handleThreadContextMenu}
-        clearSelection={clearSelection}
-        commitRename={commitRename}
-        cancelRename={cancelRename}
-        attemptArchiveThread={attemptArchiveThread}
-        openPrLink={openPrLink}
-        expandThreadListForProject={expandThreadListForProject}
-        collapseThreadListForProject={collapseThreadListForProject}
-      />
+      <div className={project.stave && projectExpanded ? "lecturn-hierarchy-children" : undefined}>
+        <div className="lecturn-hierarchy-conversations">
+          <SidebarProjectThreadList
+            projectKey={project.projectKey}
+            projectExpanded={projectExpanded}
+            hasOverflowingThreads={hasOverflowingThreads}
+            hiddenThreadStatus={hiddenThreadStatus}
+            orderedProjectThreadKeys={orderedProjectThreadKeys}
+            renderedThreads={renderedThreads}
+            showEmptyThreadState={showEmptyThreadState}
+            shouldShowThreadPanel={shouldShowThreadPanel}
+            isThreadListExpanded={isThreadListExpanded}
+            projectCwd={project.workspaceRoot}
+            activeRouteThreadKey={activeRouteThreadKey}
+            openPullRequestsInRightPanel={openPullRequestsInRightPanel}
+            threadJumpLabelByKey={threadJumpLabelByKey}
+            appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
+            renamingThreadKey={renamingThreadKey}
+            renamingTitle={renamingTitle}
+            setRenamingTitle={setRenamingTitle}
+            startThreadRename={startThreadRename}
+            renamingInputRef={renamingInputRef}
+            renamingCommittedRef={renamingCommittedRef}
+            confirmingArchiveThreadKey={confirmingArchiveThreadKey}
+            setConfirmingArchiveThreadKey={setConfirmingArchiveThreadKey}
+            confirmArchiveButtonRefs={confirmArchiveButtonRefs}
+            attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
+            handleThreadClick={handleThreadClick}
+            navigateToThread={navigateToThread}
+            handleMultiSelectContextMenu={handleMultiSelectContextMenu}
+            handleThreadContextMenu={handleThreadContextMenu}
+            clearSelection={clearSelection}
+            commitRename={commitRename}
+            cancelRename={cancelRename}
+            attemptArchiveThread={attemptArchiveThread}
+            openPrLink={openPrLink}
+            expandThreadListForProject={expandThreadListForProject}
+            collapseThreadListForProject={collapseThreadListForProject}
+          />
+        </div>
+      </div>
 
       {sagaConfirmation ? (
         <StaveConfirmDialog
@@ -3074,7 +3157,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     <div
       className={
         nestedProjectKeys.has(project.projectKey)
-          ? "ml-5 border-l border-border/60 pl-1"
+          ? "lecturn-hierarchy-branch lecturn-hierarchy-branch-last pl-7"
           : undefined
       }
     >
@@ -3086,7 +3169,11 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
       <SidebarProjectItem
         project={project}
         isThreadListExpanded={expandedThreadListsByProject.has(project.projectKey)}
-        activeRouteThreadKey={activeRouteProjectKey === project.projectKey ? routeThreadKey : null}
+        activeRouteThreadKey={
+          activeRouteProjectKey === (project.settingsProjectKey ?? project.projectKey)
+            ? routeThreadKey
+            : null
+        }
         openPullRequestsInRightPanel={openPullRequestsInRightPanel}
         newThreadShortcutLabel={newThreadShortcutLabel}
         handleNewThread={handleNewThread}
@@ -3387,25 +3474,6 @@ export default function LegacySidebar() {
     return physicalToLogicalKey.get(physicalKey) ?? physicalKey;
   }, [routeThreadKey, sidebarThreadByKey, physicalToLogicalKey, projectPhysicalKeyByScopedRef]);
 
-  // Group threads by logical project key so all threads from grouped projects
-  // are displayed together.
-  const threadsByProjectKey = useMemo(() => {
-    const next = new Map<string, SidebarThreadSummary[]>();
-    for (const thread of sidebarThreads) {
-      const physicalKey =
-        projectPhysicalKeyByScopedRef.get(
-          scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
-        ) ?? scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId));
-      const logicalKey = physicalToLogicalKey.get(physicalKey) ?? physicalKey;
-      const existing = next.get(logicalKey);
-      if (existing) {
-        existing.push(thread);
-      } else {
-        next.set(logicalKey, [thread]);
-      }
-    }
-    return next;
-  }, [sidebarThreads, physicalToLogicalKey, projectPhysicalKeyByScopedRef]);
   const getCurrentSidebarShortcutContext = useCallback(
     () => ({
       terminalFocus: isTerminalFocused(),
@@ -3458,27 +3526,6 @@ export default function LegacySidebar() {
 
     return closestCorners(args);
   }, []);
-
-  const handleProjectDragEnd = useCallback(
-    (event: DragEndEvent) => {
-      if (sidebarProjectSortOrder !== "manual") {
-        dragInProgressRef.current = false;
-        return;
-      }
-      dragInProgressRef.current = false;
-      const { active, over } = event;
-      if (!over || active.id === over.id) return;
-      const activeProject = sidebarProjects.find((project) => project.projectKey === active.id);
-      const overProject = sidebarProjects.find((project) => project.projectKey === over.id);
-      if (!activeProject || !overProject) return;
-      const activeMemberKeys = activeProject.memberProjects.map(
-        (member) => member.physicalProjectKey,
-      );
-      const overMemberKeys = overProject.memberProjects.map((member) => member.physicalProjectKey);
-      reorderProjects(orderedProjects.map(getProjectOrderKey), activeMemberKeys, overMemberKeys);
-    },
-    [orderedProjects, sidebarProjectSortOrder, reorderProjects, sidebarProjects],
-  );
 
   const handleProjectDragStart = useCallback(
     (_event: DragStartEvent) => {
@@ -3548,7 +3595,11 @@ export default function LegacySidebar() {
     sidebarProjects,
     visibleThreads,
   ]);
-  const { tree: sagaTree } = useSagaSidebarTree(flatSortedProjects);
+  const { tree: sagaTree, navigationProjects } = useSagaSidebarTree(flatSortedProjects);
+  const navigationProjectByKey = useMemo(
+    () => new Map(navigationProjects.map((project) => [project.projectKey, project])),
+    [navigationProjects],
+  );
   const nestedProjectKeys = useMemo(
     () => new Set(sagaTree.flatMap((node) => node.children.map((child) => child.group.key))),
     [sagaTree],
@@ -3569,16 +3620,37 @@ export default function LegacySidebar() {
   const sortedProjects = useMemo(
     () =>
       flattenSagaSidebarTree(sagaTree, (node) => {
-        const project = sidebarProjectByKey.get(node.group.key);
+        const project = navigationProjectByKey.get(node.group.key);
         return (
           !!project &&
           resolveProjectExpanded(projectExpandedById, projectExpansionPreferenceKeys(project))
         );
       }).flatMap((node) => {
-        const project = sidebarProjectByKey.get(node.group.key);
+        const project = navigationProjectByKey.get(node.group.key);
         return project ? [project] : [];
       }),
-    [sagaTree, sidebarProjectByKey, projectExpandedById],
+    [sagaTree, navigationProjectByKey, projectExpandedById],
+  );
+
+  const handleProjectDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      if (sidebarProjectSortOrder !== "manual") {
+        dragInProgressRef.current = false;
+        return;
+      }
+      dragInProgressRef.current = false;
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const activeProject = navigationProjects.find((project) => project.projectKey === active.id);
+      const overProject = navigationProjects.find((project) => project.projectKey === over.id);
+      if (!activeProject || !overProject) return;
+      const activeMemberKeys = activeProject.memberProjects.map(
+        (member) => member.physicalProjectKey,
+      );
+      const overMemberKeys = overProject.memberProjects.map((member) => member.physicalProjectKey);
+      reorderProjects(orderedProjects.map(getProjectOrderKey), activeMemberKeys, overMemberKeys);
+    },
+    [orderedProjects, sidebarProjectSortOrder, reorderProjects, navigationProjects],
   );
 
   const isManualProjectSorting = sidebarProjectSortOrder === "manual";
@@ -3586,7 +3658,7 @@ export default function LegacySidebar() {
     () =>
       sortedProjects.flatMap((project) => {
         const projectThreads = sortThreads(
-          (threadsByProjectKey.get(project.projectKey) ?? []).filter(
+          threadsForSagaProject(project.memberProjectRefs, sidebarThreads).filter(
             (thread) => thread.archivedAt === null,
           ),
           sidebarThreadSortOrder,
@@ -3626,7 +3698,7 @@ export default function LegacySidebar() {
       projectExpandedById,
       routeThreadKey,
       sortedProjects,
-      threadsByProjectKey,
+      sidebarThreads,
     ],
   );
   const threadJumpCommandByKey = useMemo(() => {

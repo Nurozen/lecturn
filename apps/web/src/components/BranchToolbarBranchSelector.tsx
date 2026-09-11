@@ -2,6 +2,7 @@ import { describeStaveWorkspace } from "./stave/staveWorkspaceContext.logic";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { staveAdmissionErrorMessage } from "@t3tools/client-runtime/errors";
 import {
+  type ProjectGitTarget,
   isStaveProject,
   resolveProjectGitCwd,
   staveForcedEnvMode,
@@ -75,6 +76,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 interface BranchToolbarBranchSelectorProps {
   className?: string;
+  repoTarget?: ProjectGitTarget;
   environmentId: EnvironmentId;
   threadId: ThreadId;
   draftId?: DraftId;
@@ -97,6 +99,7 @@ function toBranchActionErrorMessage(error: unknown): string {
 
 export function BranchToolbarBranchSelector({
   className,
+  repoTarget,
   environmentId,
   threadId,
   draftId,
@@ -144,19 +147,21 @@ export function BranchToolbarBranchSelector({
   const staveContext = describeStaveWorkspace(activeProject);
 
   const activeThreadId = serverThread?.id ?? (draftThread ? threadId : undefined);
-  const activeThreadBranch =
-    activeThreadBranchOverride !== undefined
+  const activeThreadBranch = isStaveProject(activeProject)
+    ? null
+    : activeThreadBranchOverride !== undefined
       ? activeThreadBranchOverride
       : (serverThread?.branch ?? draftThread?.branch ?? null);
   const activeWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
-  // Git targets the project's primary repo for a Stave space (the space root
-  // is not a repository); otherwise these are the workspace root and the
-  // thread's worktree, exactly as before.
-  const activeProjectCwd = resolveProjectGitCwd({ project: activeProject, thread: null });
-  const branchCwd = resolveProjectGitCwd({
-    project: activeProject,
-    thread: { worktreePath: activeWorktreePath },
-  });
+  // Space Git supplies a manifest checkout; thread sessions stay in the space root.
+  const activeProjectCwd =
+    repoTarget?.cwd ?? resolveProjectGitCwd({ project: activeProject, thread: null });
+  const branchCwd =
+    repoTarget?.cwd ??
+    resolveProjectGitCwd({
+      project: activeProject,
+      thread: { worktreePath: activeWorktreePath },
+    });
   const hasServerThread = serverThread !== null;
   const effectiveEnvMode = resolveEffectiveEnvMode({
     activeWorktreePath,
@@ -172,7 +177,7 @@ export function BranchToolbarBranchSelector({
   const setThreadBranch = useCallback(
     (branch: string | null, worktreePath: string | null) => {
       if (!activeThreadId || !activeProject) return;
-      if (isStaveProject(activeProject)) worktreePath = null;
+      if (isStaveProject(activeProject)) return;
       if (serverSession && worktreePath !== activeWorktreePath) {
         void stopThreadSession({
           environmentId,
@@ -791,7 +796,7 @@ export function BranchToolbarBranchSelector({
             className="min-w-0 max-w-full font-normal text-muted-foreground/70 text-xs! hover:text-foreground/80"
             aria-label={
               staveContext
-                ? `Git branch for ${staveContext.primaryRepoName ?? "primary repo"}: ${triggerLabel}`
+                ? `Git branch for ${repoTarget?.repoName ?? staveContext.primaryRepoName ?? "repository"}: ${triggerLabel}`
                 : undefined
             }
             disabled={isInitialBranchesLoadPending || isBranchActionPending}
@@ -806,7 +811,7 @@ export function BranchToolbarBranchSelector({
                 className="block w-full min-w-0 max-w-[240px] origin-left truncate transition-[opacity,transform] duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:[transform:translateX(-0.25rem)_scaleX(0.95)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transform-none motion-reduce:transition-opacity"
               >
                 {staveContext
-                  ? `Git: ${staveContext.primaryRepoName ?? "primary repo"}`
+                  ? `Git: ${repoTarget?.repoName ?? staveContext.primaryRepoName ?? "repository"}`
                   : triggerLabel}
               </span>
             </span>
@@ -818,7 +823,7 @@ export function BranchToolbarBranchSelector({
         {staveContext ? (
           <div className="border-b px-3 py-2 text-xs text-muted-foreground">
             <p className="font-medium text-foreground">
-              Git: {staveContext.primaryRepoName ?? "primary repo"}
+              Git: {repoTarget?.repoName ?? staveContext.primaryRepoName ?? "repository"}
             </p>
             <p className="mt-1 break-all">Current branch: {triggerLabel}</p>
             <p className="mt-1">Branch changes apply to this repo. Threads use the whole space.</p>

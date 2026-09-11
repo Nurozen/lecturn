@@ -89,6 +89,8 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
   readonly groupKey: string;
   readonly depth?: number;
   readonly memberStatus?: StaveSagaMemberStatus | null;
+  readonly firstThread?: EnvironmentThreadShell;
+  readonly onSelectThread?: (thread: EnvironmentThreadShell) => void;
   readonly onGroupAction: (key: string, action: HomeGroupDisplayAction) => void;
   /** Project a quick new thread should target; null hides the button. */
   readonly newThreadTarget?: EnvironmentProject | null;
@@ -127,16 +129,46 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
         paddingTop: props.isFirst ? (compact ? 8 : 4) : compact ? 24 : 20,
       }}
     >
+      {Array.from({ length: props.depth ?? 0 }, (_, level) => (
+        <View
+          key={level}
+          pointerEvents="none"
+          accessible={false}
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: level * 18 + 8,
+            width: 1,
+            backgroundColor: "#b9893f",
+          }}
+        />
+      ))}
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded: !props.collapsed }}
-        accessibilityLabel={`${props.title}, ${props.threadCount} threads`}
+        accessibilityLabel={`${props.collapsed ? "Expand" : "Collapse"} ${props.title}`}
         accessibilityHint={props.collapsed ? "Expands the project" : "Collapses the project"}
-        className={
-          compact ? "flex-1 flex-row items-center gap-2.5" : "flex-1 flex-row items-center gap-2"
-        }
+        className={"flex-row items-center pr-2"}
         hitSlop={{ ...verticalHitSlop, left: compact ? 20 : 12 }}
         onPress={handleToggle}
+      >
+        <Text className="text-foreground-muted">{props.collapsed ? "▸" : "▾"}</Text>
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${props.title}, ${props.threadCount} threads`}
+        accessibilityHint={
+          props.firstThread
+            ? "Opens the most recent project thread"
+            : "Expands or collapses the project"
+        }
+        className="flex-1 flex-row items-center gap-2"
+        hitSlop={verticalHitSlop}
+        onPress={() => {
+          if (props.firstThread && props.onSelectThread) props.onSelectThread(props.firstThread);
+          else handleToggle();
+        }}
       >
         <ProjectFavicon
           environmentId={props.project.environmentId}

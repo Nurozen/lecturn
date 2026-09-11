@@ -1,8 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import {
-  buildSagaProjectTree,
-  type SagaProjectIndexEntry,
-} from "@t3tools/client-runtime/state/project-grouping";
+import { type SagaProjectIndexEntry } from "@t3tools/client-runtime/state/project-grouping";
+import { buildPhysicalSagaProjectTree } from "@t3tools/client-runtime/state/sagaWorkbench";
 import {
   environmentSupportsStave,
   staveFeatureAvailable,
@@ -12,12 +10,28 @@ import * as Option from "effect/Option";
 import { useEffect, useMemo } from "react";
 import { useClientSettings } from "../../hooks/useSettings";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
-import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
+import {
+  deriveSidebarEnvironmentMetadata,
+  type SidebarProjectSnapshot,
+} from "../../sidebarProjectGrouping";
+import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
+import { isDesktopLocalConnectionTarget } from "../../connection/desktopLocal";
 import { staveSagaStatus, staveStatus } from "../../state/stave";
 import { serverEnvironment } from "../../state/server";
 import { subscribeStaveMutation } from "../../staveMutation";
 
 export function useSagaSidebarTree(projects: readonly SidebarProjectSnapshot[]) {
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const { environments } = useEnvironments();
+  const desktopLocalEnvironmentIds = useMemo(
+    () =>
+      new Set(
+        environments
+          .filter((environment) => isDesktopLocalConnectionTarget(environment.entry.target))
+          .map((environment) => environment.environmentId),
+      ),
+    [environments],
+  );
   const nest = useClientSettings((settings) => settings.sidebarNestSagas);
   const targets = useMemo(
     () =>
@@ -102,7 +116,7 @@ export function useSagaSidebarTree(projects: readonly SidebarProjectSnapshot[]) 
   }, [nest, targets, enabledKeys, availableKeys]);
   const tree = useMemo(
     () =>
-      buildSagaProjectTree(
+      buildPhysicalSagaProjectTree(
         projects.map((project) => ({
           key: project.projectKey,
           label: project.displayName,
@@ -121,5 +135,37 @@ export function useSagaSidebarTree(projects: readonly SidebarProjectSnapshot[]) 
       ),
     [projects, nest, index],
   );
-  return { tree, enabledKeys, availableKeys, nest };
+  const navigationProjects = useMemo(
+    () =>
+      tree
+        .flatMap((node) => [node, ...node.children])
+        .map((node): SidebarProjectSnapshot => {
+          const original = projects.find((project) =>
+            project.memberProjects.some((member) =>
+              node.group.members.some(
+                (item) => item.physicalProjectKey === member.physicalProjectKey,
+              ),
+            ),
+          )!;
+          const members = node.group.members.map((member) => member.project);
+          return {
+            ...original,
+            ...node.group.representative,
+            projectKey: node.group.key,
+            settingsProjectKey: original.projectKey,
+            displayName: node.group.label,
+            groupedProjectCount: members.length,
+            ...deriveSidebarEnvironmentMetadata({
+              members,
+              primaryEnvironmentId,
+              isDesktopLocalEnvironment: (environmentId) =>
+                desktopLocalEnvironmentIds.has(environmentId),
+            }),
+            memberProjects: members,
+            memberProjectRefs: node.group.memberProjectRefs,
+          };
+        }),
+    [tree, projects, primaryEnvironmentId, desktopLocalEnvironmentIds],
+  );
+  return { tree, navigationProjects, enabledKeys, availableKeys, nest };
 }

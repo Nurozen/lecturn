@@ -144,7 +144,7 @@ layer("AzureDevOpsPullRequestCli.layer", (it) => {
 
       const page = yield* provider.listChangeRequests({
         cwd: "/w",
-        repository: "web",
+        repository: "acme/platform/_git/web",
         host: "dev.azure.com",
         state: "open",
         involvement: "all",
@@ -505,7 +505,7 @@ layer("AzureDevOpsPullRequestCli.layer", (it) => {
       assert.isDefined(provider.updateChangeRequest);
       yield* provider.updateChangeRequest({
         cwd: "/w",
-        repository: "web",
+        repository: "acme/platform/_git/web",
         host: "dev.azure.com",
         number: 42,
         title: "Add the page",

@@ -1,3 +1,4 @@
+import { useComposerHandleContext } from "../composerHandleContext";
 import { useAtomValue } from "@effect/atom-react";
 import {
   isStaveProject,
@@ -62,6 +63,7 @@ function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undef
 }
 
 export function useNewThreadHandler() {
+  const composerHandleRef = useComposerHandleContext();
   // New-thread defaults are a user preference, and the settings UI only ever
   // edits the primary environment's settings.json. Reading the target
   // environment's own settings here would silently reset remote projects to
@@ -342,6 +344,9 @@ export function useNewThreadHandler() {
             routeTargetAfterWrites?.kind === "draft" &&
             routeTargetAfterWrites.draftId === emptyStoredDraftThread.draftId
           ) {
+            // Reusing the visible empty draft should still put the user back
+            // into the composer instead of leaving focus on the New button.
+            composerHandleRef?.current?.focusAtEnd();
             return opened;
           }
           await router.navigate({
@@ -381,6 +386,7 @@ export function useNewThreadHandler() {
           interactionMode: latestActiveDraftThread.interactionMode,
           ...workspaceOptionsForDraft(latestActiveDraftThread),
         });
+        composerHandleRef?.current?.focusAtEnd();
         return Promise.resolve({
           draftId: currentRouteTarget.draftId,
           threadId: latestActiveDraftThread.threadId,
@@ -463,7 +469,13 @@ export function useNewThreadHandler() {
         return { draftId, threadId };
       })();
     },
-    [getCurrentRouteTarget, primaryServerSettings, projectGroupingSettings, router],
+    [
+      composerHandleRef,
+      getCurrentRouteTarget,
+      primaryServerSettings,
+      projectGroupingSettings,
+      router,
+    ],
   );
 }
 

@@ -205,7 +205,8 @@ import {
   ComboboxTrigger,
   useComboboxFilter,
 } from "./ui/combobox";
-import { SagaSidebarSection } from "./stave/SagaSidebarSection";
+import { useSagaSidebarTree } from "./stave/useSagaSidebarTree";
+import { sagaSidebarThreadOrder } from "./stave/staveSaga.logic";
 import { SidebarContent, SidebarGroup, SidebarMenuButton, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
@@ -2062,6 +2063,23 @@ export default function Sidebar() {
     () => sortLogicalProjectsForSidebar(unsortedProjectGroups, threads, sidebarProjectSortOrder),
     [sidebarProjectSortOrder, threads, unsortedProjectGroups],
   );
+  const {
+    tree: sagaTree,
+    navigationProjects,
+    nest: nestSagaProjects,
+  } = useSagaSidebarTree(projectGroups);
+  const [collapsedProjectKeys, setCollapsedProjectKeys] = useState<ReadonlySet<string>>(new Set());
+  const navigationProjectByKey = useMemo(
+    () => new Map(navigationProjects.map((project) => [project.projectKey, project])),
+    [navigationProjects],
+  );
+  const toggleProject = (key: string) =>
+    setCollapsedProjectKeys((old) => {
+      const next = new Set(old);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   const projectGroupsRef = useRef(projectGroups);
   projectGroupsRef.current = projectGroups;
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
@@ -2233,7 +2251,7 @@ export default function Sidebar() {
       }
       void router.navigate({
         to: "/projects/$projectKey",
-        params: { projectKey: projectGroup.projectKey },
+        params: { projectKey: projectGroup.settingsProjectKey ?? projectGroup.projectKey },
       });
     },
     [isMobile, router, setOpenMobile],
@@ -2447,10 +2465,35 @@ export default function Sidebar() {
     return routeThread === undefined ? [] : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
-  const orderedThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...visibleSnoozedThreads, ...renderedSettledThreads],
-    [pinnedThreads, activeThreads, visibleSnoozedThreads, renderedSettledThreads],
-  );
+  const scopedSagaTree = useMemo(() => {
+    if (!scopedProjectKeys) return sagaTree;
+    const matches = (node: (typeof sagaTree)[number]) =>
+      node.group.memberProjectRefs.some((ref) =>
+        scopedProjectKeys.has(`${ref.environmentId}:${ref.projectId}`),
+      );
+    return sagaTree.flatMap((node) => {
+      const children = node.children.filter(matches);
+      return matches(node) || children.length ? [{ ...node, children }] : [];
+    });
+  }, [sagaTree, scopedProjectKeys]);
+  const orderedThreads = useMemo(() => {
+    const rows = [
+      ...pinnedThreads,
+      ...activeThreads,
+      ...visibleSnoozedThreads,
+      ...renderedSettledThreads,
+    ];
+    if (!nestSagaProjects) return rows;
+    return sagaSidebarThreadOrder(scopedSagaTree, collapsedProjectKeys, rows);
+  }, [
+    pinnedThreads,
+    activeThreads,
+    visibleSnoozedThreads,
+    renderedSettledThreads,
+    nestSagaProjects,
+    scopedSagaTree,
+    collapsedProjectKeys,
+  ]);
   const orderedThreadKeys = useMemo(
     () =>
       orderedThreads.map((thread) =>
@@ -3731,7 +3774,6 @@ export default function Sidebar() {
                 </Tooltip>
               </div>
             </div>
-            <SagaSidebarSection projects={projectGroups} onOpen={openProjectSettings} />
             {projectGroups.length > 0 ? (
               <div className="flex items-center gap-1">
                 <Combobox
@@ -4078,6 +4120,240 @@ export default function Sidebar() {
                       />
                     );
                   };
+                  if (nestSagaProjects) {
+                    const sectionFor = (thread: EnvironmentThreadShell) =>
+                      thread.pinnedAt != null
+                        ? ("pinned" as const)
+                        : snoozedThreads.includes(thread)
+                          ? ("snoozed" as const)
+                          : settledThreads.includes(thread)
+                            ? ("settled" as const)
+                            : ("active" as const);
+                    const renderNode = (
+                      node: (typeof sagaTree)[number],
+                      nested = false,
+                    ): ReactNode => {
+                      const project = navigationProjectByKey.get(node.group.key);
+                      if (!project) return null;
+                      const closed = collapsedProjectKeys.has(node.group.key);
+                      const matches = (thread: EnvironmentThreadShell) =>
+                        node.group.memberProjectRefs.some(
+                          (ref) =>
+                            ref.environmentId === thread.environmentId &&
+                            ref.projectId === thread.projectId,
+                        );
+                      const rows = orderedThreads.filter(matches);
+                      return (
+                        <li
+                          key={node.group.key}
+                          className={
+                            nested ? "lecturn-hierarchy-branch list-none pl-7" : "list-none"
+                          }
+                        >
+                          <div data-thread-selection-safe className="mt-2 flex items-center gap-1">
+                            <button
+                              type="button"
+                              data-lecturn-hover
+                              className="rounded p-1 text-muted-foreground hover:bg-sidebar-row-hover"
+                              aria-label={`${closed ? "Expand" : "Collapse"} ${project.displayName}`}
+                              aria-expanded={!closed}
+                              onClick={() => toggleProject(node.group.key)}
+                            >
+                              <ChevronDownIcon className={cn("size-3.5", closed && "-rotate-90")} />
+                            </button>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <button
+                                    type="button"
+                                    data-lecturn-hover
+                                    className={cn(
+                                      "min-w-0 flex-1 truncate py-1.5 text-left text-xs font-medium",
+                                      project.stave?.isSaga
+                                        ? "text-primary"
+                                        : "text-sidebar-foreground",
+                                    )}
+                                    onClick={() => {
+                                      if (project.stave?.isSaga) {
+                                        if (isMobile) setOpenMobile(false);
+                                        void router.navigate({
+                                          to: "/sagas/$environmentId/$projectId",
+                                          params: {
+                                            environmentId: project.environmentId,
+                                            projectId: project.id,
+                                          },
+                                          search: { view: "board" },
+                                        });
+                                      } else toggleProject(node.group.key);
+                                    }}
+                                  >
+                                    <span
+                                      className={
+                                        project.stave?.isSaga ? "lecturn-saga-sheen" : undefined
+                                      }
+                                    >
+                                      {project.displayName}
+                                    </span>
+                                    {project.stave ? (
+                                      <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                                        ·{" "}
+                                        {environmentLabelById.get(project.environmentId) ??
+                                          project.environmentId}
+                                      </span>
+                                    ) : null}
+                                  </button>
+                                }
+                              />
+                              <TooltipPopup side="right">
+                                <p>
+                                  {environmentLabelById.get(project.environmentId) ??
+                                    project.environmentId}
+                                </p>
+                                <p className="max-w-80 break-all text-xs">
+                                  {project.workspaceRoot}
+                                </p>
+                              </TooltipPopup>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <button
+                                    type="button"
+                                    data-lecturn-hover
+                                    className="rounded px-1 text-xs text-muted-foreground hover:bg-sidebar-row-hover"
+                                    aria-label={`New thread in ${project.displayName}`}
+                                    disabled={project.memberProjects.every(
+                                      (member) => member.stave?.state === "archived",
+                                    )}
+                                    onClick={() =>
+                                      void newThreadContext.handleNewThread(
+                                        scopeProjectRef(project.environmentId, project.id),
+                                      )
+                                    }
+                                  >
+                                    <PlusIcon className="size-3.5" />
+                                  </button>
+                                }
+                              />
+                              <TooltipPopup>
+                                New conversation in {project.displayName}. Starts when you send a
+                                message.
+                              </TooltipPopup>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <button
+                                    type="button"
+                                    data-lecturn-hover
+                                    className="rounded px-1 text-xs text-muted-foreground hover:bg-sidebar-row-hover"
+                                    aria-label={`Settings for ${project.displayName}`}
+                                    onClick={() => openProjectSettings(project)}
+                                  >
+                                    <SettingsIcon aria-hidden className="size-3.5" />
+                                  </button>
+                                }
+                              />
+                              <TooltipPopup>
+                                {project.stave?.isSaga
+                                  ? "Saga settings"
+                                  : project.stave
+                                    ? "Space settings"
+                                    : "Project settings"}
+                              </TooltipPopup>
+                            </Tooltip>
+                          </div>
+                          {!closed ? (
+                            <ul
+                              className={cn(
+                                "flex flex-col",
+                                (project.stave?.isSaga || nested) && "lecturn-hierarchy-children",
+                              )}
+                            >
+                              {rows.length > 0 ? (
+                                <li className="lecturn-hierarchy-conversations list-none">
+                                  <ul className="flex flex-col gap-px">
+                                    {rows.map((thread) => {
+                                      const key = scopedThreadKey(
+                                        scopeThreadRef(thread.environmentId, thread.id),
+                                      );
+                                      return thread.pinnedAt != null &&
+                                        reorderablePinnedKeys.has(key) ? (
+                                        <SortablePinnedThreadRow key={key} id={key}>
+                                          {(bag) => renderThreadRow(thread, "pinned", bag)}
+                                        </SortablePinnedThreadRow>
+                                      ) : (
+                                        renderThreadRow(thread, sectionFor(thread))
+                                      );
+                                    })}
+                                  </ul>
+                                </li>
+                              ) : null}
+                              {node.children.map((child) => renderNode(child, true))}
+                            </ul>
+                          ) : null}
+                        </li>
+                      );
+                    };
+                    return (
+                      <>
+                        <SidebarDraftBlock
+                          projectDisplayNameByKey={projectDisplayNameByKey}
+                          projectCwdByKey={projectCwdByKey}
+                          projectFaviconPathByKey={projectFaviconPathByKey}
+                          projectIconByKey={projectIconByKey}
+                          scopedProjectKeys={scopedProjectKeys}
+                          routeDraftId={routeDraftIdForRows}
+                          onNavigateToDraft={navigateToDraft}
+                        />
+                        <li
+                          data-thread-selection-safe
+                          className="flex list-none items-center gap-2 px-2 py-2 text-xs text-muted-foreground"
+                        >
+                          <span className="mr-auto font-medium">Projects</span>
+                          {snoozedThreads.length ? (
+                            <button
+                              type="button"
+                              data-lecturn-hover
+                              aria-expanded={snoozedShelfExpanded}
+                              onClick={toggleSnoozedShelf}
+                            >
+                              Snoozed ({snoozedThreads.length})
+                            </button>
+                          ) : null}
+                          {settledThreads.length ? (
+                            <button
+                              type="button"
+                              data-lecturn-hover
+                              aria-expanded={settledShelfExpanded}
+                              onClick={toggleSettledShelf}
+                            >
+                              Settled ({settledThreads.length})
+                            </button>
+                          ) : null}
+                        </li>
+                        <li className="list-none">
+                          <DndContext
+                            sensors={pinnedDndSensors}
+                            collisionDetection={closestCenter}
+                            modifiers={[restrictToVerticalAxis, restrictToFirstScrollableAncestor]}
+                            onDragEnd={handlePinnedDragEnd}
+                          >
+                            <SortableContext
+                              items={orderedPinnedThreads
+                                .map((thread) =>
+                                  scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+                                )
+                                .filter((key) => reorderablePinnedKeys.has(key))}
+                              strategy={verticalListSortingStrategy}
+                            >
+                              <ul>{scopedSagaTree.map((node) => renderNode(node))}</ul>
+                            </SortableContext>
+                          </DndContext>
+                        </li>
+                      </>
+                    );
+                  }
                   // Draft block above everything, then the pinned block:
                   // full cards above the inbox, closed by a thin divider (the
                   // pin glyphs carry the meaning, so no header text). Both

@@ -481,6 +481,7 @@ export type ThreadTitleRegeneration = typeof ThreadTitleRegeneration.Type;
 export const ThreadLinkedPullRequest = Schema.Struct({
   projectId: ProjectId,
   repository: TrimmedNonEmptyString,
+  host: Schema.optionalKey(TrimmedNonEmptyString),
   number: PositiveInt,
   url: TrimmedNonEmptyString,
 });

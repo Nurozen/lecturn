@@ -8,6 +8,7 @@
  * @module ClaudeTextGeneration
  */
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -24,6 +25,8 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildWorkflowSummaryPrompt,
+  normalizeWorkflowSummary,
 } from "./TextGenerationPrompts.ts";
 import {
   normalizeCliError,
@@ -68,6 +71,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
   modelCatalog: Effect.Effect<ClaudeModelCatalog> = Effect.succeed(BUNDLED_CLAUDE_MODEL_CATALOG),
 ) {
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const fileSystem = yield* FileSystem.FileSystem;
   const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
   const scopedModelCatalog = modelCatalog.pipe(
     Effect.map((catalog) => scopeClaudeModelCatalog(catalog, claudeSettings.customModels)),
@@ -93,7 +97,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "generateWorkflowSummary",
     value: unknown,
     detail: string,
   ): Effect.Effect<string, TextGenerationError> =>
@@ -123,7 +128,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateWorkflowSummary";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -178,6 +184,19 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         : undefined;
 
     const runClaudeCommand = Effect.fn("runClaudeJson.runClaudeCommand")(function* () {
+      const inference = operation === "generateWorkflowSummary";
+      const commandCwd = inference
+        ? yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-workflow-inference-" }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new TextGenerationError({
+                  operation,
+                  detail: "Could not isolate workflow inference.",
+                  cause,
+                }),
+            ),
+          )
+        : cwd;
       const spawnCommand = yield* resolveSpawnCommand(
         claudeSettings.binaryPath || "claude",
         [
@@ -190,13 +209,24 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
           resolveClaudeCatalogApiModelId(catalog, resolvedModelSelection),
           ...(cliEffort ? ["--effort", cliEffort] : []),
           ...(settingsJson ? ["--settings", settingsJson] : []),
-          "--dangerously-skip-permissions",
+          ...(inference
+            ? [
+                "--safe-mode",
+                "--tools",
+                "",
+                "--strict-mcp-config",
+                "--disable-slash-commands",
+                "--no-session-persistence",
+                "--system-prompt",
+                "Classify the supplied conversation and return the requested JSON. You have no tools or external context.",
+              ]
+            : ["--dangerously-skip-permissions"]),
         ],
         { env: claudeEnvironment },
       );
       const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
         env: claudeEnvironment,
-        cwd,
+        cwd: commandCwd,
         shell: spawnCommand.shell,
         stdin: {
           stream: Stream.encodeText(Stream.make(prompt)),
@@ -380,10 +410,38 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       };
     });
 
+  const generateWorkflowSummary: TextGeneration.TextGeneration["Service"]["generateWorkflowSummary"] =
+    Effect.fn("ClaudeTextGeneration.generateWorkflowSummary")(function* (input) {
+      const { prompt, outputSchema } = yield* Effect.try({
+        try: () => buildWorkflowSummaryPrompt(input),
+        catch: (cause) =>
+          new TextGenerationError({
+            operation: "generateWorkflowSummary",
+            detail: "Workflow inference requires a prior summary and completed textual turns.",
+            cause,
+          }),
+      });
+      const generated = yield* runClaudeJson({
+        operation: "generateWorkflowSummary",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      const summary = normalizeWorkflowSummary(generated.summary);
+      if (!summary)
+        return yield* new TextGenerationError({
+          operation: "generateWorkflowSummary",
+          detail: "The provider returned an empty workflow summary.",
+        });
+      return { summary, stage: generated.stage, confidence: generated.confidence };
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateWorkflowSummary,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

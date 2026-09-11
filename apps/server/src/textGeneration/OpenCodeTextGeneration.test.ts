@@ -3,8 +3,12 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as TestClock from "effect/testing/TestClock";
 import * as NetService from "@t3tools/shared/Net";
 import { beforeEach, expect } from "vite-plus/test";
@@ -19,6 +23,8 @@ const runtimeMock = {
   state: {
     startCalls: [] as string[],
     promptUrls: [] as string[],
+    directories: [] as string[],
+    selectedAgents: [] as Array<string | undefined>,
     promptParts: [] as ReadonlyArray<unknown>[],
     authHeaders: [] as Array<string | null>,
     closeCalls: [] as string[],
@@ -27,6 +33,12 @@ const runtimeMock = {
     sessionCreateError: undefined as unknown,
     sessionResult: undefined as { data?: { id: string } } | undefined,
     promptRequestError: undefined as unknown,
+    hangPromptCount: 0,
+    promptStarted: undefined as (() => void) | undefined,
+    requestSignals: [] as Array<AbortSignal | undefined>,
+    abortCalls: [] as string[],
+    abortSignals: [] as Array<AbortSignal | undefined>,
+    hangAbort: false,
     promptResult: undefined as
       | { data?: { info?: { error?: unknown }; parts?: Array<unknown> } }
       | undefined,
@@ -34,6 +46,8 @@ const runtimeMock = {
   reset() {
     this.state.startCalls.length = 0;
     this.state.promptUrls.length = 0;
+    this.state.directories.length = 0;
+    this.state.selectedAgents.length = 0;
     this.state.promptParts.length = 0;
     this.state.authHeaders.length = 0;
     this.state.closeCalls.length = 0;
@@ -42,6 +56,12 @@ const runtimeMock = {
     this.state.sessionCreateError = undefined;
     this.state.sessionResult = undefined;
     this.state.promptRequestError = undefined;
+    this.state.hangPromptCount = 0;
+    this.state.promptStarted = undefined;
+    this.state.requestSignals.length = 0;
+    this.state.abortCalls.length = 0;
+    this.state.abortSignals.length = 0;
+    this.state.hangAbort = false;
     this.state.promptResult = undefined;
   },
 };
@@ -91,7 +111,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntimeShape = {
           external: Boolean(serverUrl),
         }),
   runOpenCodeCommand: () => Effect.succeed({ stdout: "", stderr: "", code: 0 }),
-  createOpenCodeSdkClient: ({ baseUrl, serverPassword }) =>
+  createOpenCodeSdkClient: ({ baseUrl, serverPassword, directory }) =>
     ({
       session: {
         create: async () => {
@@ -101,12 +121,26 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntimeShape = {
           }
           return runtimeMock.state.sessionResult ?? { data: { id: `${baseUrl}/session` } };
         },
-        prompt: async (input: { readonly parts: ReadonlyArray<unknown> }) => {
+        prompt: async (
+          input: {
+            readonly parts: ReadonlyArray<unknown>;
+            readonly agent?: string;
+          },
+          options?: { readonly signal?: AbortSignal },
+        ) => {
+          runtimeMock.state.requestSignals.push(options?.signal);
+          runtimeMock.state.directories.push(directory ?? "");
+          runtimeMock.state.selectedAgents.push(input.agent);
           runtimeMock.state.promptUrls.push(baseUrl);
           runtimeMock.state.promptParts.push(input.parts);
           runtimeMock.state.authHeaders.push(
             serverPassword ? `Basic ${btoa(`opencode:${serverPassword}`)}` : null,
           );
+          runtimeMock.state.promptStarted?.();
+          if (runtimeMock.state.hangPromptCount > 0) {
+            runtimeMock.state.hangPromptCount -= 1;
+            return new Promise<never>(() => {});
+          }
           if (runtimeMock.state.promptRequestError !== undefined) {
             throw runtimeMock.state.promptRequestError;
           }
@@ -125,6 +159,15 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntimeShape = {
               },
             }
           );
+        },
+        abort: async (
+          input: { readonly sessionID: string },
+          options?: { readonly signal?: AbortSignal },
+        ) => {
+          runtimeMock.state.abortCalls.push(input.sessionID);
+          runtimeMock.state.abortSignals.push(options?.signal);
+          if (runtimeMock.state.hangAbort) return new Promise<never>(() => {});
+          return { data: true };
         },
       },
     }) as unknown as ReturnType<OpenCodeRuntime.OpenCodeRuntimeShape["createOpenCodeSdkClient"]>,
@@ -235,6 +278,123 @@ const advanceIdleClock = Effect.gen(function* () {
 });
 
 it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
+  for (const hangAbort of [false, true]) {
+    it.effect(
+      `times out inference and releases the queue when cancellation hangs=${hangAbort}`,
+      () =>
+        withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+          Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            const started = Promise.withResolvers<void>();
+            const lock = yield* Semaphore.make(1);
+            runtimeMock.state.hangPromptCount = 1;
+            runtimeMock.state.hangAbort = hangAbort;
+            runtimeMock.state.promptStarted = () => started.resolve();
+            runtimeMock.state.promptResult = {
+              data: {
+                parts: [
+                  {
+                    type: "text",
+                    text: '{"summary":"Implementing the API.","stage":"build","confidence":0.8}',
+                  },
+                ],
+              },
+            };
+            const request = lock.withPermits(1)(
+              textGeneration.generateWorkflowSummary({
+                cwd: process.cwd(),
+                message:
+                  '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"Implementation is underway."}]}',
+                modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+              }),
+            );
+            const first = yield* request.pipe(Effect.result, Effect.forkScoped);
+            yield* Effect.promise(() => started.promise);
+            const second = yield* request.pipe(Effect.forkScoped);
+            yield* TestClock.adjust(Duration.millis(180_000));
+            yield* TestClock.adjust(Duration.millis(5_000));
+            const failed = yield* Fiber.join(first);
+            expect(Result.isFailure(failed)).toBe(true);
+            if (Result.isFailure(failed)) {
+              expect(failed.failure.operation).toBe("generateWorkflowSummary");
+              expect(failed.failure.detail).toContain("timed out");
+            }
+            expect((yield* Fiber.join(second)).stage).toBe("build");
+            expect(runtimeMock.state.requestSignals[0]?.aborted).toBe(true);
+            expect(runtimeMock.state.abortCalls).toHaveLength(1);
+            if (hangAbort) expect(runtimeMock.state.abortSignals[0]?.aborted).toBe(true);
+            for (const directory of runtimeMock.state.directories) {
+              expect(yield* fs.exists(directory)).toBe(false);
+            }
+          }),
+        ),
+    );
+  }
+  for (const [label, output] of [
+    ["malformed JSON", "not JSON"],
+    ["missing stage", JSON.stringify({ summary: "Working", confidence: 0.8 })],
+    ["missing confidence", JSON.stringify({ summary: "Working", stage: "build" })],
+    ["invalid stage", JSON.stringify({ summary: "Working", stage: "completed", confidence: 0.8 })],
+    [
+      "confidence above one",
+      JSON.stringify({ summary: "Working", stage: "build", confidence: 1.1 }),
+    ],
+    [
+      "negative confidence",
+      JSON.stringify({ summary: "Working", stage: "build", confidence: -0.1 }),
+    ],
+  ]) {
+    it.effect(`rejects workflow inference with ${label}`, () =>
+      withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+        Effect.gen(function* () {
+          runtimeMock.state.promptResult = { data: { parts: [{ type: "text", text: output }] } };
+          const failure = yield* textGeneration
+            .generateWorkflowSummary({
+              cwd: process.cwd(),
+              message:
+                '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            })
+            .pipe(Effect.flip);
+          expect(failure.operation).toBe("generateWorkflowSummary");
+        }),
+      ),
+    );
+  }
+  it.effect("generates a bounded workflow summary through the configured provider", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptResult = {
+          data: {
+            parts: [
+              {
+                type: "text",
+                text: '{"summary":"API complete. CI remains pending.","stage":"accept","confidence":0.8}',
+              },
+            ],
+          },
+        };
+        const result = yield* textGeneration.generateWorkflowSummary({
+          cwd: process.cwd(),
+          message:
+            '{"priorSummary":null,"turns":[{"question":"Implement the API","response":"API implemented; CI pending; approval absent."}]}',
+          modelSelection: {
+            ...DEFAULT_TEST_MODEL_SELECTION,
+            options: [{ id: "agent", value: "my-project-agent" }],
+          },
+        });
+        expect(runtimeMock.state.directories[0]).not.toBe(process.cwd());
+        expect(runtimeMock.state.directories[0]).toContain("lecturn-workflow-inference-");
+        expect(runtimeMock.state.selectedAgents).toEqual([undefined]);
+        expect(result).toEqual({
+          summary: "API complete. CI remains pending.",
+          stage: "accept",
+          confidence: 0.8,
+        });
+      }),
+    ),
+  );
+
   it.effect("excludes generic files from thread title generation", () =>
     withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
       Effect.gen(function* () {

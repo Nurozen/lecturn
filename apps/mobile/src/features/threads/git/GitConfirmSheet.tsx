@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AndroidSheetHeader } from "../../../components/AndroidScreenHeader";
 import { AppText as Text } from "../../../components/AppText";
+import { useSelectedThreadWorktree } from "../../../state/use-selected-thread-worktree";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
 import { useSelectedThreadGitState } from "../../../state/use-selected-thread-git-state";
 import { SheetActionButton } from "./gitSheetComponents";
@@ -17,6 +18,7 @@ import { SheetActionButton } from "./gitSheetComponents";
 type GitConfirmSheetProps = StaticScreenProps<{
   readonly environmentId: string;
   readonly threadId: string;
+  readonly repoKey?: string;
   readonly confirmAction?: string;
   readonly branchName?: string;
   readonly includesCommit?: string;
@@ -27,10 +29,11 @@ type GitConfirmSheetProps = StaticScreenProps<{
 export function GitConfirmSheet(props: GitConfirmSheetProps) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const gitState = useSelectedThreadGitState();
-  const gitActions = useSelectedThreadGitActions();
+  const gitState = useSelectedThreadGitState(props.route.params.repoKey);
+  const gitActions = useSelectedThreadGitActions(props.route.params.repoKey);
 
   const params = props.route.params;
+  const { selectedThreadGitRepository } = useSelectedThreadWorktree(params.repoKey);
 
   const confirmAction = params.confirmAction as
     | "push"
@@ -103,6 +106,11 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
+      {params.repoKey ? (
+        <Text className="px-5 pt-3 text-sm font-t3-bold">
+          {selectedThreadGitRepository?.repoName ?? "Repository unavailable"}
+        </Text>
+      ) : null}
       {Platform.OS === "android" ? (
         <AndroidSheetHeader title="Confirm action" onBack={() => navigation.goBack()} />
       ) : (

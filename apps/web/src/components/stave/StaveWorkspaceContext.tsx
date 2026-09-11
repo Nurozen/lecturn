@@ -8,7 +8,6 @@ export function StaveWorkspaceContext({
 }: {
   context: NonNullable<ReturnType<typeof describeStaveWorkspace>>;
 }) {
-  const gitTarget = context.primaryRepoName ?? context.primaryRepoPath;
   return (
     <Popover>
       <PopoverTrigger
@@ -45,9 +44,9 @@ export function StaveWorkspaceContext({
           ) : null,
         )}
         <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">
-          {gitTarget
-            ? `Git controls target ${gitTarget}, the primary repo. Threads use the whole space.`
-            : "This space has no primary repo for Git controls."}
+          {context.editableRepos.length > 0
+            ? "Open Space Git to inspect every repo and choose where to commit, push, or change branches. Threads use the whole space."
+            : "Reference repos are available for inspection in Space Git. This space has no editable repos."}
         </p>
       </PopoverPopup>
     </Popover>

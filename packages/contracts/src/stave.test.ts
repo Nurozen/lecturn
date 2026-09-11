@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 
 import {
   STAVE_OPERATION_ERROR_CODES,
+  StaveRepoEntry,
   StaveStatus,
   StaveSpaceStatus,
   type StaveManifest,
@@ -492,5 +493,27 @@ describe("Stave compatibility status", () => {
     expect(
       decode({ ...base, memoryWiring: { state: "future", code: "future-code" } }).memoryWiring,
     ).toEqual({ code: "future-code" });
+  });
+});
+
+describe("Stave repo checkout metadata", () => {
+  it("decodes old payloads and round-trips resolved metadata for each repo", () => {
+    const decode = Schema.decodeUnknownSync(StaveRepoEntry);
+    const legacy = { name: "api", mode: "edit", path: "services/api" };
+    expect(decode(legacy)).toEqual(legacy);
+    const enriched = {
+      ...legacy,
+      resolvedPath: "/work/space/services/api",
+      repositoryIdentity: {
+        canonicalKey: "github.com/acme/api",
+        rootPath: "/work/space/services/api",
+        locator: {
+          source: "git-remote",
+          remoteName: "origin",
+          remoteUrl: "https://github.com/acme/api",
+        },
+      },
+    };
+    expect(Schema.encodeSync(StaveRepoEntry)(decode(enriched))).toEqual(enriched);
   });
 });

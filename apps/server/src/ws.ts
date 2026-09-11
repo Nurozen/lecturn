@@ -1,3 +1,4 @@
+import { SagaWorkbenchService } from "./stave/SagaWorkbenchService.ts";
 // @effect-diagnostics nodeBuiltinImport:off - assembleThreadFork mints ids through a synchronous callback, which the Effect Crypto service cannot satisfy
 import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
@@ -1656,10 +1657,48 @@ const makeWsRpcLayer = (
 
       // Stave reads live in their own module; they share this connection's
       // auth/tracing wrapper so scope enforcement stays in one place.
+      const sagaWorkbench = yield* SagaWorkbenchService;
       const staveRpcHandlers = yield* makeStaveRpcHandlers({ observeRpcEffect, observeRpcStream });
 
       return WsRpcGroup.of({
         ...staveRpcHandlers,
+        [WS_METHODS.sagaWorkbenchGetSnapshot]: (input) =>
+          observeRpcEffect(WS_METHODS.sagaWorkbenchGetSnapshot, sagaWorkbench.getSnapshot(input)),
+        [WS_METHODS.sagaWorkbenchGetEvidence]: (input) =>
+          observeRpcEffect(WS_METHODS.sagaWorkbenchGetEvidence, sagaWorkbench.getEvidence(input)),
+        [WS_METHODS.sagaWorkbenchGetActivity]: (input) =>
+          observeRpcEffect(WS_METHODS.sagaWorkbenchGetActivity, sagaWorkbench.getActivity(input)),
+        [WS_METHODS.sagaWorkbenchConfigure]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.sagaWorkbenchConfigure,
+            sagaWorkbench.configure(input, currentSession),
+          ),
+        [WS_METHODS.sagaWorkbenchSetStage]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.sagaWorkbenchSetStage,
+            sagaWorkbench.setStage(input, currentSession),
+          ),
+        [WS_METHODS.sagaWorkbenchApprove]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.sagaWorkbenchApprove,
+            sagaWorkbench.approve(input, currentSession),
+          ),
+        [WS_METHODS.sagaWorkbenchComplete]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.sagaWorkbenchComplete,
+            sagaWorkbench.complete(input, currentSession),
+          ),
+        [WS_METHODS.sagaWorkbenchReopen]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.sagaWorkbenchReopen,
+            sagaWorkbench.reopen(input, currentSession),
+          ),
+        [WS_METHODS.sagaWorkbenchSummarize]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.sagaWorkbenchSummarize,
+            sagaWorkbench.summarize(input, currentSession),
+          ),
+
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,
@@ -3056,6 +3095,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
     });
     const pullRequests = yield* PullRequestService.PullRequestService;
     const staveOperations = yield* StaveOperations.StaveOperations;
+    const sagaWorkbench = yield* SagaWorkbenchService;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -3098,6 +3138,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               // Stave operations outlive the socket that started them, so every
               // connection attaches to the one server-lifetime registry.
               Layer.provide(Layer.succeed(StaveOperations.StaveOperations, staveOperations)),
+              Layer.provide(Layer.succeed(SagaWorkbenchService, sagaWorkbench)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(

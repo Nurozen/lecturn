@@ -17,7 +17,7 @@ function repoPathForComparison(path: string, workspaceRoot: string): string {
   return segments.join(separator);
 }
 
-/** Present the whole Stave workspace separately from its one primary Git repo. */
+/** Present the whole Stave workspace and all of its editable Git targets. */
 export function describeStaveWorkspace(
   project:
     | { readonly workspaceRoot: string; readonly stave?: StaveProjectInfo | null | undefined }
@@ -60,9 +60,7 @@ export function describeStaveWorkspace(
       ...(referenceRepos.length
         ? [`References: ${referenceRepos.map((repo) => repo.name).join(", ")}`]
         : []),
-      primaryPath
-        ? `Git target: ${primaryRepo?.name ?? primaryPath}${stave.primaryBranch ? ` · ${stave.primaryBranch}` : ""}`
-        : "Git target: None",
+      `Git targets: ${editableRepos.length ? editableRepos.map((repo) => repo.name).join(", ") : "None"}`,
     ].join("\n"),
     primaryRepoName: primaryRepo?.name ?? null,
     primaryRepoPath: primaryPath ?? null,

@@ -531,6 +531,8 @@ export function buildReviewSectionItems(input: {
   readonly turnDiffById: Readonly<Record<string, string | undefined>>;
   readonly loadingTurnIds: Readonly<Record<string, boolean | undefined>>;
   readonly loadingGitSections: boolean;
+  /** Scopes inline comments as well as review UI state to a Stave checkout. */
+  readonly gitCwd?: string;
 }): ReadonlyArray<ReviewSectionItem> {
   const turnItems = getReadyReviewCheckpoints(input.checkpoints).map<ReviewSectionItem>(
     (checkpoint) => {
@@ -570,7 +572,14 @@ export function buildReviewSectionItems(input: {
         ]
       : gitItems;
 
-  return [...turnItems, ...visibleGitItems];
+  const scopedGitItems =
+    input.gitCwd === undefined
+      ? visibleGitItems
+      : visibleGitItems.map((section) => ({
+          ...section,
+          id: `git:${JSON.stringify([input.gitCwd, section.kind])}`,
+        }));
+  return [...turnItems, ...scopedGitItems];
 }
 
 export function getDefaultReviewSectionId(

@@ -63,6 +63,7 @@ export function useLinkedThreadPullRequest(
           input: {
             projectId: linkedPullRequest.projectId,
             repository: linkedPullRequest.repository,
+            ...(linkedPullRequest.host ? { host: linkedPullRequest.host } : {}),
             number: linkedPullRequest.number,
           },
         }),

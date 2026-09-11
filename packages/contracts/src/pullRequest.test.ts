@@ -256,3 +256,12 @@ describe("naming the reader as the author to narrow by", () => {
     expect(resolvePullRequestAuthorFilter("me", "  ")).toBe("me");
   });
 });
+
+it("preserves host-qualified PR actions while accepting legacy references", () => {
+  const input = { projectId: "space", repository: "acme/web", number: 1, action: "merge" };
+  expect(decodeAction(input)).toEqual(input);
+  expect(decodeAction({ ...input, host: "github.internal.test" })).toEqual({
+    ...input,
+    host: "github.internal.test",
+  });
+});

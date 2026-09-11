@@ -11211,6 +11211,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               Effect.succeed(
                 threadId === sourceThreadId ? Option.some(sourceDetail) : Option.none(),
               ),
+            getInferenceTurnPairs: () => Effect.succeed([]),
             listThreadTurnsById: () => Effect.succeed([]),
             listThreadActivitiesById: () => Effect.succeed([]),
             getThreadForkContextById: () =>
@@ -11920,6 +11921,7 @@ it.layer(NodeServices.layer)("Stave admission over the server transports", (it) 
               Effect.succeed(
                 threadId === sourceThreadId ? Option.some(sourceDetail) : Option.none(),
               ),
+            getInferenceTurnPairs: () => Effect.succeed([]),
             listThreadTurnsById: () =>
               Effect.succeed([
                 {

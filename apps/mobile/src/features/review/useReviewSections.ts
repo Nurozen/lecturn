@@ -29,12 +29,15 @@ export function useReviewSections(input: {
   readonly environmentId?: EnvironmentId;
   readonly threadId?: ThreadId;
   readonly reviewCache: ReviewCacheForThread;
+  readonly repoKey?: string;
 }) {
   const { environmentId, reviewCache, threadId } = input;
   const enabled = input.enabled ?? true;
   const selectedThread = useSelectedThreadDetail();
   const { selectedThreadProject } = useThreadSelection();
-  const { selectedThreadGitCwd } = useSelectedThreadWorktree();
+  const { selectedThreadGitCwd, selectedThreadGitRepository } = useSelectedThreadWorktree(
+    input.repoKey,
+  );
   const diffPreview = useEnvironmentQuery(
     enabled && environmentId !== undefined && selectedThreadGitCwd !== null
       ? reviewEnvironment.diffPreview({
@@ -78,9 +81,22 @@ export function useReviewSections(input: {
         turnDiffById: reviewCache.turnDiffById,
         loadingTurnIds,
         loadingGitSections: diffPreview.isPending,
-      }),
+        ...(!checkpointsAvailable && selectedThreadGitRepository
+          ? { gitCwd: selectedThreadGitRepository.cwd }
+          : {}),
+      }).map((section) =>
+        checkpointsAvailable || !selectedThreadGitRepository
+          ? section
+          : {
+              ...section,
+              title: `${selectedThreadGitRepository.repoName} / ${section.title}`,
+              subtitle: `${selectedThreadGitRepository.cwd}${section.subtitle ? ` · ${section.subtitle}` : ""}`,
+            },
+      ),
     [
       diffPreview.isPending,
+      checkpointsAvailable,
+      selectedThreadGitRepository,
       loadingTurnIds,
       readyCheckpoints,
       reviewCache.gitSections,

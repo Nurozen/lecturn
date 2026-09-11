@@ -19,7 +19,8 @@
 - **Primary repo.** The first manifest entry with `mode: edit` is the space's primary repo. Its
   `path` (resolved against the space root when relative) becomes `primaryRepoPath` and its
   `branch` becomes `primaryBranch`. `mode: reference` entries are read-only context and are
-  listed but not targeted.
+  available for status/diff inspection but never mutation. Primary fields remain legacy defaults;
+  current Git and PR managers enumerate all manifest repos.
 - **Sagas** (`kind: saga`, or any `saga:` block) are recognised and flagged (`isSaga`), but their
   members are enriched from best-effort Stave roster reads.
 
@@ -44,8 +45,9 @@ with the on-disk schema in `apps/server/src/stave/staveManifest.ts`.
   named `.archive` (Stave moves archived spaces to `<agentWorkDir>/.archive/<space>`), in which
   case `archiveBasename` is the root's basename; otherwise `live`. Optional keys are omitted,
   never set to `undefined`. `memberOf` is enriched from a best-effort display cache; manifest recognition still works without a binary.
-- `primaryRepositoryIdentity` is resolved through `RepositoryIdentityResolver` on
-  `primaryRepoPath` after the pure projection and attached only when non-null.
+- Every repo receives a server-resolved `resolvedPath` and, when available, a
+  `repositoryIdentity` from `RepositoryIdentityResolver`. Identity probes run with concurrency
+  four. The first editable identity is also retained as `primaryRepositoryIdentity` for older clients.
 - **Cache.** An `effect/Cache` keyed by root (capacity 512) with separate TTLs: 30s for a found
   manifest, 60s for a negative result (both overridable via `StaveWorkspaceReaderOptions`).
   `invalidate(root)` drops one entry so the next `load` re-reads disk; `invalidateAll()` drops
@@ -89,8 +91,8 @@ Server consumers of the derived fields in Phase 1:
 
 - `apps/server/src/vcs/VcsStatusBroadcaster.ts`: clients request status for
   `stave.primaryRepoPath`, which the exact-root project lookup cannot find, so the auto-pull
-  policy falls back to a shell-snapshot scan by `primaryRepoPath`; auto-pull applies only to
-  that path for a space, never to the root.
+  policy falls back to a shell-snapshot scan by `primaryRepoPath`. Automatic pulls are disabled
+  for Stave projects; unrecognized nested paths also default to disabled. Synchronization belongs to Stave.
 - `apps/server/src/serverRuntimeStartup.ts`: startup auto-pull skips Stave projects (the root is
   not a repo and edit branches have no upstream), logging `reason: "stave-space"`.
 
@@ -597,7 +599,10 @@ these choices are made so web and mobile cannot disagree:
 
 - `isStaveProject(project)` — `project.stave != null`.
 - `staveForcedEnvMode(project)` — `"local"` for a space, else `undefined`.
-- `resolveProjectGitCwd({ project, thread })` — for Stave, `primaryRepoPath` or explicit `null`
+- `resolveProjectGitTargets({ project, includeReferences })` enumerates each manifest checkout,
+  preserving nested paths and its remote identity. Reference aliases make a duplicate path
+  read-only. Web and mobile use transient per-space selection for Git actions and diff queries.
+- `resolveProjectGitCwd({ project, thread })` — legacy/default target: for Stave, `primaryRepoPath` or explicit `null`
   when no editable repo exists. Ordinary projects retain `thread.worktreePath` then `workspaceRoot`.
 - `resolveProjectGitBranch({ project, thread })` — the thread's `branch`, else
   `stave.primaryBranch`, else `null`; Stave without a primary repo always returns `null`. This is the **effective branch**: new local threads carry
@@ -613,7 +618,12 @@ Rules built on them:
   `BranchToolbarBranchSelector` pin the composer mode. Mobile passes it in
   `apps/mobile/src/features/threads/new-task-flow-provider.tsx`, never persists a worktree path
   for a Stave draft, and refuses a `worktree` mode pick.
-- **Git targeting.** Web wraps the resolvers in `apps/web/src/lib/threadGitTarget.ts`
+- **Git targeting.** The Space Git overview lists all repositories, their actual branches,
+  changes, staged/conflict counts, ahead/behind state, and branch PRs. Selection chooses the
+  checkout for existing branch/commit/push controls and working-tree diffs; references expose
+  inspection only. PR associations are derived from checkout status rather than persisted in
+  a thread array. Selection never changes provider cwd, thread branch, or thread worktree.
+  Legacy consumers wrap the resolvers in `apps/web/src/lib/threadGitTarget.ts`
   (`resolveThreadGitTarget` → `cwd`, `branch`, `isStave`, `statusEnabled`, where a space with an editable repo
   enables status; `resolveThreadGitRepositoryRoot` uses `stave.primaryRepositoryIdentity.rootPath`
   for diff-file links). Mobile wraps them in `apps/mobile/src/state/thread-git-target.ts` and
@@ -705,7 +715,7 @@ thread commands while holding it through commit. A blocked command cannot stall 
 worker that an operation needs for refresh and quiescence. This closes the normalization-to-dispatch race. Archived roots reject thread starts; leased roots
 reject new work. Internal lifecycle refresh/meta/delete and turn-interrupt commands can complete
 while an operation owns the lock. Generic PR preparation is refused for Stave-owned repos in
-both modes; PR resolution uses the primary repo identity and effective branch. Checkpoint diff
+both modes; PR resolution enumerates editable repos and selects by repository plus host. Checkpoint diff
 and revert are explicitly unavailable for spaces.
 
 Space-scoped edits carry `expectedManifestCreatedAt`; destructive execution refuses missing
@@ -771,7 +781,12 @@ manifest incarnations. A member needs at least one editable repo and every repo 
 `baseHealth: merged`; missing, corrupt, replaced, unknown, or partial results are ineligible.
 `ThreadSettlementReactor` retains its ordinary eligibility guards and snapshot-sequenced
 auto-settle commands. The Stave merge toggle is independent of the ordinary PR-merge toggle.
-The existing primary repository path/branch supplies Stave PR fallback queries.
+Stave PR settlement reads the current branch of every editable checkout. An open PR keeps the
+space active; a missing PR or failed lookup cannot prove PR completion. Only completed PRs
+across the full editable set can supply PR-based settlement, using the latest completion
+timestamp. Explicit single-PR merge events trigger the same all-repo check. Missing PRs still
+allow the existing inactivity policy; failed lookups retain the existing protection that skips
+automatic settlement for that check. The saga merge signal already requires every editable repo.
 
 ## Lifecycle automation (Phase 6)
 
@@ -906,8 +921,8 @@ scope after restart and refuses a replacement project at the coordinator root. M
 it cannot silently authorize newly imported member projects or conversations.
 
 The client preserves an explicit null Git target for spaces without editable repositories,
-including through legacy web/mobile wrappers. Branch selection for Stave keeps the primary
-checkout and a null thread worktree; it never reuses a sibling space's checkout. An operation
+including through legacy web/mobile wrappers. Branch selection for Stave targets the selected
+manifest checkout and preserves a null thread worktree; it never reuses a sibling space's checkout. An operation
 request refused before it starts is terminal in the client, while lost access to an already
 admitted operation remains resumable. Failed creates expose guarded partial removal only when
 the server can establish ownership; an uncertain post-command outcome requires inspection.
@@ -929,5 +944,67 @@ Creation checks candidate filesystem entries, including case aliases and danglin
 claiming a new space or saga directory. Explicit binary candidates resolve to absolute paths before
 validation, probing, cache fingerprinting and launch.
 
-Diff actions keep Git cwd and file-viewer root separate. A file relative to a Stave primary checkout
+Diff actions keep Git cwd and file-viewer root separate. A file relative to the selected Stave checkout
 is prefixed with that checkout's path within the space before entering the internal file viewer.
+
+## Multi-repository PR identity
+
+PR listing expands each space into its editable repositories while retaining the space's project
+ID and workspace root. Queries and mutations resolve the selected repository and host to an
+explicit checkout cwd. Reference repos are excluded. Host is optional on wire references for
+backward compatibility; an ambiguous legacy reference is refused. Detail tabs, activity and
+diff caches carry host so equal repository names and PR numbers on different hosts stay separate.
+Cross-environment UI assignment compares complete editable repository sets and resolves actions
+against the selected repository and host. Generic checkout preparation remains unavailable for
+Stave; Ask/Explain conversations use the space root.
+
+## Saga workbench and workflow metadata
+
+Lecturn owns workflow metadata separately from Stave workspace membership and lifecycle. The
+workbench has five active stages (`spec`, `plan`, `build`, `review`, `accept`) plus a separate
+completion record. Durable metadata is keyed by environment-local project/root/space incarnation;
+clients namespace identities by environment. Logical repository grouping remains the settings
+abstraction, while navigation splits physical Stave spaces as necessary to avoid moving unrelated
+checkouts beneath a saga.
+
+The workflow repository uses revision checks and authenticated request receipts for atomic,
+idempotent changes and records bounded activity with server-derived actor provenance. Stage,
+approval, completion, reopen and summary operations require orchestration operate scope. Read
+operations require orchestration read scope. Configuration updates also require operate scope.
+A server reactor observes committed prompt-submission events and runs inference independently of
+prompt dispatch. Its activity uses a distinct system actor; it never invents user authorization.
+There is no autonomous approval or merge action.
+
+Approval pins the manifest requirement vector and source revisions. Completion fetches fresh
+provider evidence and validates every required checkout. Unknown identities and unsupported proof
+remain requirement rows. Clean no-change outcomes require resolved base/head evidence; reference
+aliases are inspection-only. Final publication rechecks manifest/local Git identity under the Stave
+space lock. These operations do not change Stave manifests or dispatch lifecycle/thread/Git writes.
+
+A dedicated workflow-summary operation uses each provider's existing text-generation backend for
+one validated JSON response containing `summary`, `stage` and `confidence`. Model selection preserves
+the triggering conversation's provider instance/account. Provider-specific preferred models are used
+only when advertised; fallback stays within the same account and selected model.
+
+Inference input contains exactly one previous summary and up to three completed textual question/
+response pairs. The projection query uses primary turn message anchors, excludes synthetic plan
+turns and incomplete/interrupted turns, and bounds text before returning it. Assistant commentary
+and final response text are combined in order; tool/activity/attachment payloads, filesystem content
+and Git evidence never enter the model prompt. Automatic requests are bounded by the submitted
+message; no preceding pair means no model call.
+
+`automaticStage` defaults to true for older rows and `stagePinned` defaults to false. Disabling
+movement keeps summary inference enabled. Pins prevent automatic and manual movement, and completed
+work requires explicit reopen. Repository CAS, prompt receipts and the last applied inference
+sequence fence publication. Concurrent pin/configuration changes must not be overwritten by model
+output. Narrative inference cannot write acceptance or completion evidence. Client polling refreshes
+factual state only and never invokes generation. Inference processes submissions serially: a later
+pending submission does not invalidate its predecessor, whose published summary becomes the next
+request’s sole prior summary. Older results cannot overwrite newer published results. The queue is
+in memory and does not replay pending work after a server restart; a later prompt or manual update
+can refresh it. OpenCode inference has a three-minute deadline and bounded remote cancellation.
+Inference uses a temporary empty working directory and supported provider instruction restrictions
+while preserving account routing; configured harness/MCP tool schemas can remain available, but
+tool payloads are never part of the supplied conversation context.
+The web/desktop workbench uses shared projection helpers for stages and dependency waves; native
+mobile shares the Projects hierarchy and defers the custom workbench page.

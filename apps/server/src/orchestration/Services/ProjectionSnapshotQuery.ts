@@ -8,6 +8,7 @@
  */
 import type {
   CheckpointRef,
+  MessageId,
   OrchestrationCheckpointSummary,
   OrchestrationProject,
   OrchestrationProjectShell,
@@ -263,6 +264,15 @@ export interface ProjectionSnapshotQueryShape {
    * null turn id are excluded), including the provider turn anchor.
    * Server-only.
    */
+  /** Last three completed textual question/response pairs, oldest first; no activities or attachments. */
+  readonly getInferenceTurnPairs: (input: {
+    readonly threadId: ThreadId;
+    readonly beforeMessageId?: MessageId;
+  }) => Effect.Effect<
+    ReadonlyArray<{ readonly question: string; readonly response: string }>,
+    ProjectionRepositoryError
+  >;
+
   readonly listThreadTurnsById: (
     threadId: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ProjectionTurn>, ProjectionRepositoryError>;

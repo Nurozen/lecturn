@@ -1,3 +1,7 @@
+import * as SagaInferenceReactor from "./stave/SagaInferenceReactor.ts";
+import * as SagaWorkbenchService from "./stave/SagaWorkbenchService.ts";
+import * as SagaWorkbenchEvidence from "./stave/SagaWorkbenchEvidence.ts";
+import * as SagaWorkbenchRepository from "./persistence/Layers/SagaWorkbenchRepository.ts";
 import * as StaveExecution from "./stave/StaveExecution.ts";
 import * as StaveRuntimeFence from "./stave/StaveRuntimeFence.ts";
 import * as StaveMemoryWiring from "./stave/StaveMemoryWiring.ts";
@@ -283,6 +287,7 @@ const PlatformServicesLive = Layer.unwrap(
 const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(OrchestrationReactorLive),
   Layer.provideMerge(StaveLifecycleService.layer),
+  Layer.provideMerge(SagaInferenceReactor.layer),
   Layer.provideMerge(StaveOperations.layer.pipe(Layer.provide(ProcessRunner.layer))),
   Layer.provideMerge(ProviderRuntimeIngestionLive),
   Layer.provideMerge(ProviderCommandReactorLive),
@@ -509,7 +514,20 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 );
 
+const SagaWorkbenchLayerLive = SagaWorkbenchService.layer.pipe(
+  Layer.provide(SagaWorkbenchRepository.layer.pipe(Layer.provide(PersistenceLayerLive))),
+  Layer.provide(
+    SagaWorkbenchEvidence.layer.pipe(
+      Layer.provide(ProcessRunner.layer),
+      Layer.provide(PullRequestProviderRegistry.layer),
+    ),
+  ),
+);
+
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+  Layer.provideMerge(SagaWorkbenchLayerLive),
+  // RPC and prompt reactors share the same summary serialization and service.
+).pipe(
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),
   Layer.provideMerge(CheckpointingLayerLive),
@@ -604,8 +622,9 @@ export const makeRoutesLayer = Layer.mergeAll(
   ),
   McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer)),
 ).pipe(
-  // Both transports consume the same service instance, so caches single-flight across clients
-  // and mutations observed on WebSocket invalidate patches subsequently read over HTTP.
+  // Reusing the exact layer object shares the runtime instance by memoization;
+  // isolated route harnesses can also supply its dependencies directly.
+  Layer.provide(SagaWorkbenchLayerLive),
   Layer.provide(PullRequestServiceLive),
   // One registry per server: a Stave operation started over one socket keeps
   // running after that socket closes and can be re-attached from any other.
