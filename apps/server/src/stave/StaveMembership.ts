@@ -1,5 +1,5 @@
 /** A fresh, fail-closed roster scan for delete confirmation and destructive admission. */
-import type { StaveSagaMembership } from "@t3tools/contracts";
+import type { StaveSagaMembership } from "@lecturn/contracts";
 import { Effect } from "effect";
 import { StaveCli } from "./StaveCli.ts";
 

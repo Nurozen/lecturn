@@ -19,7 +19,7 @@ import {
   type SagaWorkbenchSnapshot,
   type SagaWorkbenchStageInput,
   type SagaWorkbenchWorkflow,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import {
   Context,
   DateTime,
@@ -212,7 +212,7 @@ export class SagaWorkbenchService extends Context.Service<
       actor: Actor,
     ) => Effect.Effect<SagaWorkbenchWorkflow, SagaWorkbenchError>;
   }
->()("t3/stave/SagaWorkbenchService") {}
+>()("lecturn/stave/SagaWorkbenchService") {}
 
 export const make = Effect.gen(function* () {
   const repo = yield* SagaWorkbenchRepository;

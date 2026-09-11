@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId } from "@lecturn/contracts";
 import { SagaWorkbenchPage } from "../components/stave/SagaWorkbenchPage";
 import { parseSagaWorkbenchSearch } from "../components/stave/sagaWorkbench.logic";
 

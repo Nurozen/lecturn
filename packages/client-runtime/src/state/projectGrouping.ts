@@ -3,8 +3,8 @@ import type {
   EnvironmentId,
   ScopedProjectRef,
   SidebarProjectGroupingMode,
-} from "@t3tools/contracts";
-import type { ClientSettings } from "@t3tools/contracts/settings";
+} from "@lecturn/contracts";
+import type { ClientSettings } from "@lecturn/contracts/settings";
 
 import type { EnvironmentProject } from "./models.ts";
 import { normalizeProjectPathForComparison } from "./projects.ts";
@@ -337,13 +337,13 @@ export function buildProjectGroups<TProject extends EnvironmentProject>(input: {
 export interface SagaProjectIndexEntry {
   readonly environmentId: EnvironmentId;
   readonly sagaRoot: string;
-  readonly status: import("@t3tools/contracts").StaveSagaStatus;
+  readonly status: import("@lecturn/contracts").StaveSagaStatus;
 }
 
 export interface SagaProjectTreeNode<TProject extends EnvironmentProject = EnvironmentProject> {
   readonly group: ProjectGroup<TProject>;
   readonly children: ReadonlyArray<SagaProjectTreeNode<TProject>>;
-  readonly memberStatus: import("@t3tools/contracts").StaveSagaStatus["members"][number] | null;
+  readonly memberStatus: import("@lecturn/contracts").StaveSagaStatus["members"][number] | null;
 }
 
 /** Adds saga nesting without changing physical groups, keys, or navigation targets.

@@ -103,7 +103,7 @@ const makeReaderLayer = (input: {
 
 const makeTempHome = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
-  return yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-stave-config-" });
+  return yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-stave-config-" });
 });
 
 const writeConfig = Effect.fn("writeConfig")(function* (filePath: string, contents: string) {

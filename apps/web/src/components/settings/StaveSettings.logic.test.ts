@@ -1,4 +1,4 @@
-import type { StaveStatus } from "@t3tools/contracts";
+import type { StaveStatus } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { formatStaveBinarySource, summarizeStaveStatus } from "./StaveSettings.logic";
@@ -66,7 +66,7 @@ describe("summarizeStaveStatus", () => {
 
   it("labels every binary source", () => {
     expect(formatStaveBinarySource("settings")).toBe("from settings");
-    expect(formatStaveBinarySource("env")).toBe("from T3CODE_STAVE_PATH");
+    expect(formatStaveBinarySource("env")).toBe("from LECTURN_STAVE_PATH");
     expect(formatStaveBinarySource("bootstrap")).toBe("from the desktop bundle");
     expect(formatStaveBinarySource("bundled")).toBe("bundled");
     expect(formatStaveBinarySource("path")).toBe("on PATH");

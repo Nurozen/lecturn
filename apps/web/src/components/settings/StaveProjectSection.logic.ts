@@ -1,4 +1,4 @@
-import type { StaveSpaceStatusRepo } from "@t3tools/contracts";
+import type { StaveSpaceStatusRepo } from "@lecturn/contracts";
 
 /**
  * One-line drift summary for a repo in the "Status" column of the Stave

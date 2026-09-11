@@ -4,8 +4,8 @@ import type {
   PreviewSessionSnapshot,
   ProjectId,
   PullRequestState,
-} from "@t3tools/contracts";
-import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
+} from "@lecturn/contracts";
+import { getTerminalLabel } from "@lecturn/shared/terminalLabels";
 import {
   Bot,
   ChevronDown,

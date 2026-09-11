@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { StaveSagaMemberStatus, StaveSpaceListRow } from "@t3tools/contracts";
+import type { StaveSagaMemberStatus, StaveSpaceListRow } from "@lecturn/contracts";
 import {
   flattenSagaSidebarTree,
   parseSagaAfter,

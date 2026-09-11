@@ -1,9 +1,9 @@
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import type { AssistantCitation } from "@t3tools/contracts";
+import type { AssistantCitation } from "@lecturn/contracts";
 import {
   serializeAssistantCitation,
   withAssistantCitationComment,
-} from "@t3tools/shared/assistantCitations";
+} from "@lecturn/shared/assistantCitations";
 import {
   $applyNodeReplacement,
   $getNodeByKey,
@@ -47,7 +47,8 @@ export type ComposerCitationCommentTarget = {
 export const ComposerCitationCommentContext = createContext<{
   openComment: ComposerCitationCommentTarget | null;
   onOpenChange: (nodeKey: NodeKey, open: boolean) => void;
-}>({ openComment: null, onOpenChange: () => {} });
+  onSubmitAndSend: () => void;
+}>({ openComment: null, onOpenChange: () => {}, onSubmitAndSend: () => {} });
 
 /** Consume a cite action once its controlled prompt has been committed to the editor. */
 export function $consumeComposerCitationCommentRequest(requestRef: {
@@ -127,6 +128,11 @@ function ComposerCitationDecorator(props: { citation: AssistantCitation; nodeKey
             commentContext.onOpenChange(props.nodeKey, open);
           },
           onSave: onSaveComment,
+          onSaveAndSend: (comment) => {
+            if (!onSaveComment(comment)) return false;
+            commentContext.onSubmitAndSend();
+            return true;
+          },
         }}
         onRemove={onRemove}
       />

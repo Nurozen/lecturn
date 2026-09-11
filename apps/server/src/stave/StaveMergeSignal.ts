@@ -4,7 +4,7 @@ import type {
   ProjectId,
   StaveSagaMemberStatus,
   StaveSagaStatus,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { Context, Effect, Layer } from "effect";
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
@@ -34,7 +34,7 @@ export class StaveMergeSignal extends Context.Service<
       projects: ReadonlyArray<OrchestrationProjectShell>,
     ) => Effect.Effect<ReadonlySet<ProjectId>>;
   }
->()("t3/stave/StaveMergeSignal") {}
+>()("lecturn/stave/StaveMergeSignal") {}
 
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig;

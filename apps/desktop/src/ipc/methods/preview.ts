@@ -24,7 +24,7 @@ import {
   PreviewAutomationSnapshot,
   DEFAULT_BROWSER_PROFILE_ID,
   INCOGNITO_BROWSER_PROFILE_ID,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as NodeURL from "node:url";

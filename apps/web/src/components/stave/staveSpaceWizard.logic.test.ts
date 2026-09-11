@@ -5,7 +5,7 @@ import type {
   StaveRepoRow,
   StaveSagaListRow,
   StaveSpaceListRow,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 
 import {
   buildCreateSagaOperation,

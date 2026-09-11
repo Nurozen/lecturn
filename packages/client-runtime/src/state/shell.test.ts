@@ -1,5 +1,5 @@
-import type { OrchestrationProjectShell, ServerConfig } from "@t3tools/contracts";
-import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import type { OrchestrationProjectShell, ServerConfig } from "@lecturn/contracts";
+import { EnvironmentId, ProjectId } from "@lecturn/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";

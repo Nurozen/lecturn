@@ -1,10 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
-import { type SagaProjectIndexEntry } from "@t3tools/client-runtime/state/project-grouping";
-import { buildPhysicalSagaProjectTree } from "@t3tools/client-runtime/state/sagaWorkbench";
+import { type SagaProjectIndexEntry } from "@lecturn/client-runtime/state/project-grouping";
+import { buildPhysicalSagaProjectTree } from "@lecturn/client-runtime/state/sagaWorkbench";
 import {
   environmentSupportsStave,
   staveFeatureAvailable,
-} from "@t3tools/client-runtime/state/stave";
+} from "@lecturn/client-runtime/state/stave";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import * as Option from "effect/Option";
 import { useEffect, useMemo } from "react";

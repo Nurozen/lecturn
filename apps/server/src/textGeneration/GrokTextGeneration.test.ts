@@ -9,9 +9,9 @@ import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { createModelSelection } from "@t3tools/shared/model";
+import { createModelSelection } from "@lecturn/shared/model";
 import { expect } from "vite-plus/test";
-import { GrokSettings, ProviderInstanceId } from "@t3tools/contracts";
+import { GrokSettings, ProviderInstanceId } from "@lecturn/contracts";
 
 import * as ServerConfig from "../config.ts";
 import * as TextGeneration from "./TextGeneration.ts";
@@ -26,7 +26,7 @@ function shellSingleQuote(value: string): string {
 }
 
 const GrokTextGenerationTestLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
-  prefix: "t3code-grok-text-generation-test-",
+  prefix: "lecturn-grok-text-generation-test-",
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
 function makeAcpGrokWrapper(dir: string, env: Record<string, string>): string {
@@ -37,7 +37,7 @@ function makeAcpGrokWrapper(dir: string, env: Record<string, string>): string {
     grokPath,
     [
       "#!/bin/sh",
-      ...(env.T3_ACP_EXPECT_WORKFLOW === "1"
+      ...(env.LECTURN_ACP_EXPECT_WORKFLOW === "1"
         ? [
             'case "$PWD" in *lecturn-workflow-inference-*) ;; *) echo "workflow cwd not isolated" >&2; exit 14;; esac',
           ]
@@ -61,7 +61,7 @@ function withFakeAcpGrok<A, E, R>(
   effectFn: (textGeneration: TextGeneration.TextGeneration["Service"]) => Effect.Effect<A, E, R>,
 ) {
   return Effect.gen(function* () {
-    const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-grok-text-acp-"));
+    const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "lecturn-grok-text-acp-"));
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
         NodeFS.rmSync(tempDir, { recursive: true, force: true });
@@ -100,7 +100,7 @@ it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
     ],
   ]) {
     it.effect(`rejects workflow inference with ${label}`, () =>
-      withFakeAcpGrok({ T3_ACP_PROMPT_RESPONSE_TEXT: output! }, (textGeneration) =>
+      withFakeAcpGrok({ LECTURN_ACP_PROMPT_RESPONSE_TEXT: output! }, (textGeneration) =>
         Effect.gen(function* () {
           const failure = yield* textGeneration
             .generateWorkflowSummary({
@@ -118,8 +118,8 @@ it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
   it.effect("discards inference when the harness emits tool activity", () =>
     withFakeAcpGrok(
       {
-        T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS: "1",
-        T3_ACP_PROMPT_RESPONSE_TEXT: '{"summary":"Ready","stage":"accept","confidence":0.8}',
+        LECTURN_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS: "1",
+        LECTURN_ACP_PROMPT_RESPONSE_TEXT: '{"summary":"Ready","stage":"accept","confidence":0.8}',
       },
       (textGeneration) =>
         Effect.gen(function* () {
@@ -138,8 +138,8 @@ it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
   it.effect("generates an evidence summary without title truncation", () =>
     withFakeAcpGrok(
       {
-        T3_ACP_EXPECT_WORKFLOW: "1",
-        T3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
+        LECTURN_ACP_EXPECT_WORKFLOW: "1",
+        LECTURN_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
           summary: " API complete.\n CI remains pending. ",
           stage: "accept",
           confidence: 0.8,
@@ -164,14 +164,14 @@ it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
 
   it.effect("uses ACP with disabled tool capabilities and forwards the requested model id", () => {
     const requestLogDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3code-grok-text-log-"),
+      NodePath.join(NodeOS.tmpdir(), "lecturn-grok-text-log-"),
     );
     const requestLogPath = NodePath.join(requestLogDir, "requests.ndjson");
 
     return withFakeAcpGrok(
       {
-        T3_ACP_REQUEST_LOG_PATH: requestLogPath,
-        T3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
+        LECTURN_ACP_REQUEST_LOG_PATH: requestLogPath,
+        LECTURN_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
           subject: "Add Grok provider",
           body: "Wire up the ACP runtime and headless text generation path.",
         }),
@@ -210,7 +210,7 @@ it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
   it.effect("extracts the JSON object when Grok wraps it in conversational text", () =>
     withFakeAcpGrok(
       {
-        T3_ACP_PROMPT_RESPONSE_TEXT:
+        LECTURN_ACP_PROMPT_RESPONSE_TEXT:
           "Sure! Here's a thread title:\n\n" +
           JSON.stringify({ title: "Investigate failing CI" }) +
           "\n\nLet me know if you need anything else.",
@@ -230,7 +230,7 @@ it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
   it.effect("surfaces ACP request failures as text generation errors", () =>
     withFakeAcpGrok(
       {
-        T3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({ branch: "unreachable" }),
+        LECTURN_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({ branch: "unreachable" }),
       },
       (textGeneration) =>
         Effect.gen(function* () {
@@ -253,7 +253,7 @@ it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
   it.effect("fails with TextGenerationError when output is empty", () =>
     withFakeAcpGrok(
       {
-        T3_ACP_PROMPT_RESPONSE_TEXT: "   \n  ",
+        LECTURN_ACP_PROMPT_RESPONSE_TEXT: "   \n  ",
       },
       (textGeneration) =>
         Effect.gen(function* () {
@@ -273,7 +273,7 @@ it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
   it.effect("decodes a structured PR title + body", () =>
     withFakeAcpGrok(
       {
-        T3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
+        LECTURN_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
           title: "feat(grok): wire up session/set_model",
           body: "## Summary\n- Replace `-m` spawn flag with the typed ACP `session/set_model`.\n- Translate `MODEL_SWITCH_INCOMPATIBLE_AGENT` into a validation error.",
         }),
@@ -299,7 +299,7 @@ it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
   it.effect("fails with TextGenerationError when output is unparseable JSON", () =>
     withFakeAcpGrok(
       {
-        T3_ACP_PROMPT_RESPONSE_TEXT: "totally not json output from a confused model",
+        LECTURN_ACP_PROMPT_RESPONSE_TEXT: "totally not json output from a confused model",
       },
       (textGeneration) =>
         Effect.gen(function* () {

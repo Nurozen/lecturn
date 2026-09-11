@@ -36,7 +36,7 @@ export class ManagedReservations extends Context.Service<
       input: ReservationKey & { readonly generation?: number },
     ) => Effect.Effect<boolean, BillingError>;
   }
->()("t3code-relay/billing/ManagedReservations") {}
+>()("lecturn-relay/billing/ManagedReservations") {}
 const now = Clock.currentTimeMillis.pipe(Effect.map((ms) => Math.floor(ms / 1000)));
 const allowed = (account: BillingAccount | undefined, time: number) =>
   effectiveAccountAccess(account, time).allowed;

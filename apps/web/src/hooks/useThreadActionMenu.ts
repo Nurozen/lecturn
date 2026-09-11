@@ -1,13 +1,13 @@
-import { scopeProjectRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { staveAdmissionErrorMessage } from "@t3tools/client-runtime/errors";
+import { scopeProjectRef, scopedThreadKey } from "@lecturn/client-runtime/environment";
+import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
 import {
   type AtomCommandResult,
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
-import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+} from "@lecturn/client-runtime/state/runtime";
+import { canSnooze, effectiveSnoozed } from "@lecturn/client-runtime/state/thread-settled";
+import type { ScopedThreadRef, ThreadId } from "@lecturn/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 

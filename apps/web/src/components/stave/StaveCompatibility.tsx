@@ -1,4 +1,4 @@
-import type { StaveStatus } from "@t3tools/contracts";
+import type { StaveStatus } from "@lecturn/contracts";
 import { staveOperationLabel, staveProviderSupportText } from "./staveCompatibility.logic";
 
 export function StaveCompatibilityNotice({ status }: { status: StaveStatus | null | undefined }) {

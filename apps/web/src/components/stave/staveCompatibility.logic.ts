@@ -1,4 +1,4 @@
-import type { StaveOperation, StaveSpaceStatus, StaveStatus } from "@t3tools/contracts";
+import type { StaveOperation, StaveSpaceStatus, StaveStatus } from "@lecturn/contracts";
 
 const OPERATION_LABELS: Record<StaveOperation["kind"], string> = {
   createSpace: "Create space",

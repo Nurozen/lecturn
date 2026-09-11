@@ -6,7 +6,7 @@ import type {
   StaveLifecycleActionOperation,
   StaveProjectInfo,
   StaveProjectNotice,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { useStaveFeatureAvailable } from "../../state/stave";
 import { Button } from "../ui/button";

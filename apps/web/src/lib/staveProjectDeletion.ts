@@ -1,5 +1,5 @@
-import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
-import type { StaveSagaTeardownAuthorization } from "@t3tools/contracts";
+import { runAtomCommand } from "@lecturn/client-runtime/state/runtime";
+import type { StaveSagaTeardownAuthorization } from "@lecturn/contracts";
 import {
   staveMembershipDeletionWarning,
   staveSagaReviewLines,

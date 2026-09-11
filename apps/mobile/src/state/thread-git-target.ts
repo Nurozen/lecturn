@@ -3,8 +3,8 @@ import {
   resolveProjectGitCwd,
   resolveProjectGitTargets,
   type ProjectGitTarget,
-} from "@t3tools/client-runtime/state/projectGit";
-import type { OrchestrationProjectShell } from "@t3tools/contracts";
+} from "@lecturn/client-runtime/state/projectGit";
+import type { OrchestrationProjectShell } from "@lecturn/contracts";
 
 export interface ThreadGitTarget {
   readonly cwd: string | null;

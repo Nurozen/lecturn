@@ -1,12 +1,12 @@
 import { useAuth } from "@clerk/react";
-import { findErrorTraceId } from "@t3tools/client-runtime/errors";
+import { findErrorTraceId } from "@lecturn/client-runtime/errors";
 import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@lecturn/client-runtime/state/runtime";
 import { useEffect, useRef, useState } from "react";
-import { createBillingClient } from "@t3tools/client-runtime/relay";
+import { createBillingClient } from "@lecturn/client-runtime/relay";
 import { isConnectSubscriptionRequired } from "./connectSubscriptionGate";
 
 import { toastManager } from "../components/ui/toast";
@@ -70,7 +70,11 @@ export function useCloudLinkController() {
     const message =
       cause instanceof Error ? cause.message : "Could not update Lecturn Connect access.";
     const traceId = findErrorTraceId(cause);
-    console.error("[t3-connect] Could not update Lecturn Connect", { message, traceId, cause });
+    console.error("[lecturn-connect] Could not update Lecturn Connect", {
+      message,
+      traceId,
+      cause,
+    });
     setOperationError(traceId ? `${message} Trace ID: ${traceId}` : message);
     toastManager.add({
       type: "error",

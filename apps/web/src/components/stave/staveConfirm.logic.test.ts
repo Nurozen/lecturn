@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { ProjectId, type StaveOperation, type StaveSagaReview } from "@t3tools/contracts";
+import { ProjectId, type StaveOperation, type StaveSagaReview } from "@lecturn/contracts";
 import {
   bindStaveSagaReview,
   canForceStaveOperation,

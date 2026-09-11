@@ -13,8 +13,8 @@
  *
  * @module staveJson
  */
-import { parseStaveVersionOutput, type StaveVersionInfo } from "@t3tools/shared/stave";
-import { formatSchemaError } from "@t3tools/shared/schemaJson";
+import { parseStaveVersionOutput, type StaveVersionInfo } from "@lecturn/shared/stave";
+import { formatSchemaError } from "@lecturn/shared/schemaJson";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";

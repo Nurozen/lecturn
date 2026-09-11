@@ -2,8 +2,8 @@ import { useAtomValue } from "@effect/atom-react";
 import type {
   StaveOperationOutputLine,
   StaveOperationPhaseState,
-} from "@t3tools/client-runtime/state/stave-operation";
-import type { EnvironmentId, StaveOperationError } from "@t3tools/contracts";
+} from "@lecturn/client-runtime/state/stave-operation";
+import type { EnvironmentId, StaveOperationError } from "@lecturn/contracts";
 
 import { cn } from "../../lib/utils";
 import { staveOperations } from "../../state/staveOperations";

@@ -86,7 +86,7 @@ export class ServerConfig extends Context.Service<
     readonly resourceMonitorPath?: string | undefined;
     /**
      * Bundled Stave CLI handed over by the desktop bootstrap envelope only;
-     * `StaveBinary` consults it after settings and `T3CODE_STAVE_PATH`.
+     * `StaveBinary` consults it after settings and `LECTURN_STAVE_PATH`.
      */
     readonly stavePath?: string | undefined;
     readonly autoBootstrapProjectFromCwd: boolean;
@@ -94,19 +94,19 @@ export class ServerConfig extends Context.Service<
     readonly tailscaleServeEnabled: boolean;
     readonly tailscaleServePort: number;
     /**
-     * Kill switch for thread forking (`T3CODE_THREAD_FORKING`, default on):
+     * Kill switch for thread forking (`LECTURN_THREAD_FORKING`, default on):
      * drives the advertised `threadForking` capability and gates the
      * WebSocket fork dispatch, so a modified client cannot bypass it.
      */
     readonly threadForkingEnabled: boolean;
     /**
-     * Kill switch for the Stave integration (`T3CODE_STAVE`, default on):
+     * Kill switch for the Stave integration (`LECTURN_STAVE`, default on):
      * removes the advertised `stave` capability and gates every Stave
      * handler, so a modified client cannot bypass it.
      */
     readonly staveEnabled: boolean;
   }
->()("t3/config/ServerConfig") {
+>()("lecturn/config/ServerConfig") {
   /** @deprecated Import and use `layerTest` from this module. */
   static readonly layerTest = (
     cwd: string,
@@ -208,7 +208,7 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     otlpTracesUrl: undefined,
     otlpMetricsUrl: undefined,
     otlpExportIntervalMs: 10_000,
-    otlpServiceName: "t3-server",
+    otlpServiceName: "lecturn-server",
     cwd,
     baseDir,
     ...derivedPaths,

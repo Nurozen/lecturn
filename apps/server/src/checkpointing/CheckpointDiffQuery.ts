@@ -14,7 +14,7 @@ import {
   type OrchestrationGetTurnDiffInput,
   type OrchestrationGetTurnDiffResult as OrchestrationGetTurnDiffResultType,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -31,7 +31,7 @@ import {
   CheckpointWorkspacePathMissingError,
 } from "./Errors.ts";
 import type { CheckpointServiceError } from "./Errors.ts";
-import { checkpointRefForThreadTurn } from "./Utils.ts";
+import { checkpointBaselineRefForThread } from "./Utils.ts";
 import { StaveWorkspaceReader } from "../stave/StaveWorkspaceReader.ts";
 import * as CheckpointStore from "./CheckpointStore.ts";
 
@@ -57,7 +57,7 @@ export class CheckpointDiffQuery extends Context.Service<
       input: OrchestrationGetFullThreadDiffInput,
     ) => Effect.Effect<OrchestrationGetFullThreadDiffResult, CheckpointServiceError>;
   }
->()("t3/checkpointing/CheckpointDiffQuery") {}
+>()("lecturn/checkpointing/CheckpointDiffQuery") {}
 
 const isTurnDiffResult = Schema.is(OrchestrationGetTurnDiffResult);
 
@@ -153,7 +153,7 @@ export const make = Effect.gen(function* () {
 
       const fromCheckpointRef =
         input.fromTurnCount === 0
-          ? checkpointRefForThreadTurn(input.threadId, 0)
+          ? checkpointBaselineRefForThread(input.threadId, threadContext.value.checkpoints)
           : threadContext.value.checkpoints.find(
               (checkpoint) => checkpoint.checkpointTurnCount === input.fromTurnCount,
             )?.checkpointRef;
@@ -269,10 +269,33 @@ export const make = Effect.gen(function* () {
       });
     }
 
+    let fromCheckpointRef = checkpointBaselineRefForThread(input.threadId, [
+      {
+        checkpointTurnCount: input.toTurnCount,
+        checkpointRef: threadContext.value.toCheckpointRef,
+      },
+    ]);
+    // A thread continued after a namespace change can have its newest turn in
+    // the current namespace while its original baseline remains in the old one.
+    if (
+      !(yield* checkpointStore.hasCheckpointRef({
+        cwd: workspaceCwd,
+        checkpointRef: fromCheckpointRef,
+      }))
+    ) {
+      const history = yield* projectionSnapshotQuery.getThreadCheckpointContext(input.threadId);
+      if (Option.isSome(history)) {
+        fromCheckpointRef = checkpointBaselineRefForThread(
+          input.threadId,
+          history.value.checkpoints,
+        );
+      }
+    }
+
     const diff = yield* checkpointStore
       .diffCheckpoints({
         cwd: workspaceCwd,
-        fromCheckpointRef: checkpointRefForThreadTurn(input.threadId, 0),
+        fromCheckpointRef,
         toCheckpointRef: threadContext.value.toCheckpointRef as CheckpointRef,
         fallbackFromToHead: false,
         ignoreWhitespace,

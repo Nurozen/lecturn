@@ -1,5 +1,5 @@
-import type { AssistantCitation } from "@t3tools/contracts";
-import { serializeAssistantCitation } from "@t3tools/shared/assistantCitations";
+import type { AssistantCitation } from "@lecturn/contracts";
+import { serializeAssistantCitation } from "@lecturn/shared/assistantCitations";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { PencilIcon, QuoteIcon, XIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, type MouseEvent as ReactMouseEvent } from "react";
@@ -42,6 +42,7 @@ export function AssistantCitationChip({
     sourceAnchor?: AssistantCitationSourceAnchor | undefined;
     onOpenChange: (open: boolean) => void;
     onSave: (comment: string) => boolean;
+    onSaveAndSend?: (comment: string) => boolean;
   };
 }) {
   const navigate = useNavigate();
@@ -158,6 +159,15 @@ export function AssistantCitationChip({
                   commentEditor.onOpenChange(false);
                   return true;
                 }}
+                {...(commentEditor.onSaveAndSend
+                  ? {
+                      onSubmitAndSend: (comment: string) => {
+                        if (!commentEditor.onSaveAndSend?.(comment)) return false;
+                        commentEditor.onOpenChange(false);
+                        return true;
+                      },
+                    }
+                  : {})}
                 onCancel={() => commentEditor.onOpenChange(false)}
               />
             </PopoverPopup>

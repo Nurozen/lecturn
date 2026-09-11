@@ -1,7 +1,7 @@
 import {
   clampFileAttachmentUploadBytes,
   fileAttachmentTooLargeMessage,
-} from "@t3tools/client-runtime/state/attachments";
+} from "@lecturn/client-runtime/state/attachments";
 import {
   isProviderSendTurnSupportedImageMimeType,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
@@ -9,7 +9,7 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   type EnvironmentId,
   type UploadChatImageAttachment,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import type { DocumentPickerResult } from "expo-document-picker";
 import { estimateBase64ByteSize } from "./base64";
 import {
@@ -53,7 +53,7 @@ export function toUploadChatImageAttachments(
   }));
 }
 
-const OWNED_PASTED_IMAGE_DIRECTORY = "t3-composer-paste";
+const OWNED_PASTED_IMAGE_DIRECTORY = "lecturn-composer-paste";
 const ATTACHMENT_COPY_CHUNK_BYTES = 64 * 1024;
 
 export async function persistComposerAttachmentFile(

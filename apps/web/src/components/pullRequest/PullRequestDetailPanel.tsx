@@ -1,6 +1,6 @@
-import { isStaveProject, resolveProjectGitTargets } from "@t3tools/client-runtime/state/projectGit";
-import { scopedThreadKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { isStaveProject, resolveProjectGitTargets } from "@lecturn/client-runtime/state/projectGit";
+import { scopedThreadKey, scopeProjectRef } from "@lecturn/client-runtime/environment";
+import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
 import {
   type EnvironmentId,
   type PullRequestAction,
@@ -10,7 +10,7 @@ import {
   type PullRequestState,
   resolveEnvironmentMachineKind,
   type ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import {
   ArrowDownUpIcon,
   ArrowLeftIcon,
@@ -1365,7 +1365,7 @@ export function PullRequestDetailPanel({
   }
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-background">
+    <div className="flex h-full min-h-0 w-full flex-col bg-background lecturn-page-surface">
       <div className="@container/pr-header grid min-w-0 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 border-b border-border/60">
         <div className="ml-4 grid h-7 min-w-0 items-center overflow-hidden">
           <div

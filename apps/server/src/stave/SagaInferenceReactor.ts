@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, Stream, SubscriptionRef, Cause } from "effect";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { makeDrainableWorker } from "@lecturn/shared/DrainableWorker";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { forkParked } from "../serverActivation.ts";
 import { SagaWorkbenchService, type SagaInferenceRequest } from "./SagaWorkbenchService.ts";
@@ -10,7 +10,7 @@ export class SagaInferenceReactor extends Context.Service<
     readonly start: () => Effect.Effect<void, never, import("effect/Scope").Scope>;
     readonly drainThrough: (sequence: number) => Effect.Effect<void>;
   }
->()("t3/stave/SagaInferenceReactor") {}
+>()("lecturn/stave/SagaInferenceReactor") {}
 
 export const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngineService;

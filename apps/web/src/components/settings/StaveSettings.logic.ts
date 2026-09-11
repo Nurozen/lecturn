@@ -1,8 +1,8 @@
-import type { StaveBinarySource, StaveStatus } from "@t3tools/contracts";
+import type { StaveBinarySource, StaveStatus } from "@lecturn/contracts";
 
 const BINARY_SOURCE_LABELS: Readonly<Record<StaveBinarySource, string>> = {
   settings: "from settings",
-  env: "from T3CODE_STAVE_PATH",
+  env: "from LECTURN_STAVE_PATH",
   bootstrap: "from the desktop bundle",
   bundled: "bundled",
   path: "on PATH",

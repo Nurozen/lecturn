@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["LecturnComposerEditorModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.lecturncomposereditor.LecturnComposerEditorModule"]
+  }
+}

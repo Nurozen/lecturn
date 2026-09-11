@@ -10,7 +10,7 @@ import {
   ProviderInstanceId,
   type StaveProjectInfo,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -84,7 +84,7 @@ const threads = new Map([
 const makeTestLayer = (reads: string[]) =>
   Layer.mergeAll(
     WorkspacePaths.layer,
-    ServerConfig.layerTest(process.cwd(), { prefix: "t3-normalizer-stave-" }),
+    ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-normalizer-stave-" }),
     StaveAdmission.layer.pipe(
       Layer.provide(
         Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({

@@ -1,4 +1,4 @@
-import type { StaveOperation, StaveSagaReview } from "@t3tools/contracts";
+import type { StaveOperation, StaveSagaReview } from "@lecturn/contracts";
 
 /** Only refusals that Stave explicitly allows --force to bypass offer a retry. */
 export function canForceStaveOperation(operation: StaveOperation, code: string | undefined) {

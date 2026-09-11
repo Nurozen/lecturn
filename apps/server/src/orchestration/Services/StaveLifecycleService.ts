@@ -9,4 +9,4 @@ export class StaveLifecycleService extends Context.Service<
     readonly drain: Effect.Effect<void>;
     readonly sweep: Effect.Effect<void>;
   }
->()("t3/orchestration/Services/StaveLifecycleService") {}
+>()("lecturn/orchestration/Services/StaveLifecycleService") {}

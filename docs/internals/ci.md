@@ -1,6 +1,6 @@
 # CI quality gates
 
-> For maintainers. Using T3 Code? See [docs/user](../user/).
+> For maintainers. Using Lecturn? See [docs/user](../user/).
 
 [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) runs these quality gates on pull requests
 and pushes to `main`:
@@ -29,5 +29,10 @@ signing only when platform credentials are present. macOS passkey builds additio
 Without the core signing credentials, it still releases unsigned artifacts. Its `preflight` job also
 resolves the Stave release tag to bundle (`stave_version` dispatch input, default `latest`) once,
 and every build and publish job fetches that pinned tag with `scripts/fetch-stave.ts`.
+
+Preflight shares pnpm's lockfile verification results with the desktop build jobs through a small
+artifact. This avoids repeating dependency checks, especially on Windows, without transferring the
+large registry metadata cache. pnpm checks the current lockfile and policy before it reuses a result.
+If the artifact is unavailable, installation runs the checks again.
 
 See [Release Checklist](../operations/release.md) for the full release/signing setup checklist.

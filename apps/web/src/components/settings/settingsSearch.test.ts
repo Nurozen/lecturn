@@ -88,6 +88,8 @@ describe("searchSettings", () => {
     expect(searchSettings("battery saver")[0]?.id).toBe("background-activity");
     // "Stave binary path" outranks the Providers search term on its title.
     expect(searchSettings("binary path").map((item) => item.id)).toContain("providers");
+    expect(searchSettings("Antigravity")[0]?.id).toBe("providers");
+    expect(searchSettings("Google sign in")[0]?.id).toBe("providers");
     expect(searchSettings("authorized clients")[0]?.id).toBe("connections-environment");
     expect(searchSettings("administrative access")[0]?.id).toBe("connections-environment");
   });
@@ -148,7 +150,7 @@ describe("searchSettings", () => {
       "provider-health-check-interval",
       "source-control-writer-model",
       "source-control-writing-style",
-      "t3-connect",
+      "lecturn-connect",
       "tailscale-https",
       "wsl-backend",
       "auto-settle-inactive-threads",

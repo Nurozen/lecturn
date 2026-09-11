@@ -1,4 +1,4 @@
-import { CommandId, EventId, ProjectId, StaveSagaTeardownAuthorization } from "@t3tools/contracts";
+import { CommandId, EventId, ProjectId, StaveSagaTeardownAuthorization } from "@lecturn/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";

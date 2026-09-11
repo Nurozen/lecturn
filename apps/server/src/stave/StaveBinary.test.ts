@@ -8,8 +8,8 @@ import {
   HostProcessEnvironment,
   HostProcessPlatform,
   HostProcessWorkingDirectory,
-} from "@t3tools/shared/hostProcess";
-import { CommandResolutionCache } from "@t3tools/shared/shell";
+} from "@lecturn/shared/hostProcess";
+import { CommandResolutionCache } from "@lecturn/shared/shell";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -108,7 +108,7 @@ const writeExecutable = Effect.fn(function* (filePath: string, mode = 0o755) {
 it.layer(NodeServices.layer)("StaveBinary", (it) => {
   const withTempDir = Effect.fn(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
-    return yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-stave-binary-" });
+    return yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-stave-binary-" });
   });
 
   describe("candidate order", () => {
@@ -132,7 +132,7 @@ it.layer(NodeServices.layer)("StaveBinary", (it) => {
               ...(source === "bootstrap" ? { stavePath: candidate } : {}),
               env: {
                 PATH: pathDir,
-                ...(source === "env" ? { T3CODE_STAVE_PATH: candidate } : {}),
+                ...(source === "env" ? { LECTURN_STAVE_PATH: candidate } : {}),
               },
               bundledBaseDir: path.join(root, "dist"),
               runner,
@@ -177,7 +177,7 @@ it.layer(NodeServices.layer)("StaveBinary", (it) => {
 
         const { service } = yield* makeHarness(baseDir, {
           settingsBinaryPath: fromSettings,
-          env: { T3CODE_STAVE_PATH: fromEnv, PATH: pathBin },
+          env: { LECTURN_STAVE_PATH: fromEnv, PATH: pathBin },
           stavePath: fromBootstrap,
           bundledBaseDir,
         });
@@ -204,7 +204,7 @@ it.layer(NodeServices.layer)("StaveBinary", (it) => {
         yield* writeExecutable(path.join(pathBin, "stave"));
 
         const { service } = yield* makeHarness(baseDir, {
-          env: { T3CODE_STAVE_PATH: fromEnv, PATH: pathBin },
+          env: { LECTURN_STAVE_PATH: fromEnv, PATH: pathBin },
           stavePath: fromBootstrap,
           bundledBaseDir,
         });
@@ -303,7 +303,7 @@ it.layer(NodeServices.layer)("StaveBinary", (it) => {
 
         const { service } = yield* makeHarness(baseDir, {
           settingsBinaryPath: missing,
-          env: { T3CODE_STAVE_PATH: fromEnv },
+          env: { LECTURN_STAVE_PATH: fromEnv },
           bundledBaseDir: path.join(baseDir, "dist"),
         });
         const error = yield* Effect.flip(service.resolve);
@@ -360,7 +360,7 @@ it.layer(NodeServices.layer)("StaveBinary", (it) => {
         yield* writeExecutable(path.join(pathBin, "stave"));
 
         const { service } = yield* makeHarness(baseDir, {
-          env: { T3CODE_STAVE_PATH: notExecutable, PATH: pathBin },
+          env: { LECTURN_STAVE_PATH: notExecutable, PATH: pathBin },
           bundledBaseDir: path.join(baseDir, "dist"),
         });
         const error = yield* Effect.flip(service.resolve);
@@ -379,7 +379,7 @@ it.layer(NodeServices.layer)("StaveBinary", (it) => {
         const bundledBaseDir = path.join(baseDir, "dist");
 
         const { service } = yield* makeHarness(baseDir, {
-          env: { T3CODE_STAVE_PATH: fromEnv, PATH: path.join(baseDir, "empty") },
+          env: { LECTURN_STAVE_PATH: fromEnv, PATH: path.join(baseDir, "empty") },
           stavePath: fromBootstrap,
           bundledBaseDir,
         });
@@ -407,7 +407,7 @@ it.layer(NodeServices.layer)("StaveBinary", (it) => {
         const runner = makeFakeRunner();
 
         const { service } = yield* makeHarness(baseDir, {
-          env: { T3CODE_STAVE_PATH: fromEnv },
+          env: { LECTURN_STAVE_PATH: fromEnv },
           bundledBaseDir: path.join(baseDir, "dist"),
           runner,
         });
@@ -431,7 +431,7 @@ it.layer(NodeServices.layer)("StaveBinary", (it) => {
         const runner = makeFakeRunner(() => versionOutput("stave dev\ncommit: unknown\n"));
 
         const { service } = yield* makeHarness(baseDir, {
-          env: { T3CODE_STAVE_PATH: fromEnv },
+          env: { LECTURN_STAVE_PATH: fromEnv },
           bundledBaseDir: path.join(baseDir, "dist"),
           runner,
         });
@@ -450,7 +450,7 @@ it.layer(NodeServices.layer)("StaveBinary", (it) => {
         const runner = makeFakeRunner(() => versionOutput("boom", 1));
 
         const { service } = yield* makeHarness(baseDir, {
-          env: { T3CODE_STAVE_PATH: fromEnv },
+          env: { LECTURN_STAVE_PATH: fromEnv },
           bundledBaseDir: path.join(baseDir, "dist"),
           runner,
         });
@@ -470,7 +470,7 @@ it.layer(NodeServices.layer)("StaveBinary", (it) => {
         const runner = makeFakeRunner(() => versionOutput("usage: something else\n"));
 
         const { service } = yield* makeHarness(baseDir, {
-          env: { T3CODE_STAVE_PATH: fromEnv },
+          env: { LECTURN_STAVE_PATH: fromEnv },
           bundledBaseDir: path.join(baseDir, "dist"),
           runner,
         });
@@ -490,7 +490,7 @@ it.layer(NodeServices.layer)("StaveBinary", (it) => {
         const runner = makeFakeRunner();
 
         const { service } = yield* makeHarness(baseDir, {
-          env: { T3CODE_STAVE_PATH: fromEnv },
+          env: { LECTURN_STAVE_PATH: fromEnv },
           bundledBaseDir: path.join(baseDir, "dist"),
           runner,
         });
@@ -539,7 +539,7 @@ it.layer(NodeServices.layer)("StaveBinary", (it) => {
         const fromEnv = path.join(baseDir, "env", "stave");
 
         const { service } = yield* makeHarness(baseDir, {
-          env: { T3CODE_STAVE_PATH: fromEnv },
+          env: { LECTURN_STAVE_PATH: fromEnv },
           bundledBaseDir: path.join(baseDir, "dist"),
         });
         assert.instanceOf(yield* Effect.flip(service.resolve), StaveBinary.StaveBinaryNotFound);
@@ -560,7 +560,7 @@ it.layer(NodeServices.layer)("StaveBinary", (it) => {
 
         const { service } = yield* makeHarness(baseDir, {
           settingsBinaryPath: fromSettings,
-          env: { T3CODE_STAVE_PATH: fromEnv },
+          env: { LECTURN_STAVE_PATH: fromEnv },
           bundledBaseDir: path.join(baseDir, "dist"),
         });
 
@@ -579,7 +579,7 @@ it.layer(NodeServices.layer)("StaveBinary", (it) => {
 
         const { service } = yield* makeHarness(baseDir, {
           settingsBinaryPath: path.join(baseDir, "missing", "stave"),
-          env: { T3CODE_STAVE_PATH: fromEnv },
+          env: { LECTURN_STAVE_PATH: fromEnv },
           bundledBaseDir: path.join(baseDir, "dist"),
         });
 

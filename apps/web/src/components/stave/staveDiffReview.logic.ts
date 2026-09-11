@@ -2,7 +2,7 @@ import {
   isWindowsAbsolutePath,
   normalizeProjectPathForComparison,
   normalizeProjectPathForDispatch,
-} from "@t3tools/shared/path";
+} from "@lecturn/shared/path";
 
 interface StaveReviewRepository {
   readonly workspaceRoot: string;

@@ -4,8 +4,8 @@ import type {
   PreviewSessionSnapshot,
   PreviewViewportSetting,
   ScopedThreadRef,
-} from "@t3tools/contracts";
-import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
+} from "@lecturn/contracts";
+import type { AtomCommandResult } from "@lecturn/client-runtime/state/runtime";
 
 import {
   browserDefaultOpenProfileId,

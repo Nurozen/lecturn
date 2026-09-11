@@ -29,7 +29,7 @@ export class StaveMemoryWiring extends Context.Service<
   {
     readonly resolve: (cwd: string) => Effect.Effect<StaveMemoryResolution>;
   }
->()("t3/stave/StaveMemoryWiring") {}
+>()("lecturn/stave/StaveMemoryWiring") {}
 
 export const make = Effect.fn("StaveMemoryWiring.make")(function* () {
   const fs = yield* FileSystem.FileSystem;

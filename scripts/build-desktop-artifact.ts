@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // @effect-diagnostics nodeBuiltinImport:off - Node's typed junction API avoids Windows symlink privileges while keeping the probe isolated.
 
-import { LECTURN_LEGAL_NOTICES } from "@t3tools/shared/legalNotices";
+import { LECTURN_LEGAL_NOTICES } from "@lecturn/shared/legalNotices";
 
 import * as NodeFSP from "node:fs/promises";
 import * as NodeCrypto from "node:crypto";
@@ -15,10 +15,10 @@ import {
   type DirectoryRecord,
 } from "@electron/asar";
 
-import { fromYaml } from "@t3tools/shared/schemaYaml";
-import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { fromYaml } from "@lecturn/shared/schemaYaml";
+import { HostProcessArchitecture, HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import { clerkFrontendApiHostnameFromPublishableKey } from "@lecturn/shared/relayAuth";
+import { resolveSpawnCommand } from "@lecturn/shared/shell";
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
@@ -131,7 +131,7 @@ export function resolveResourceMonitorRustTargets(
 }
 
 export function resourceMonitorExecutableName(platform: typeof BuildPlatform.Type): string {
-  return platform === "win" ? "t3-resource-monitor.exe" : "t3-resource-monitor";
+  return platform === "win" ? "lecturn-resource-monitor.exe" : "lecturn-resource-monitor";
 }
 
 // The Stave CLI ships as a prebuilt binary (fetched by scripts/fetch-stave.ts)
@@ -666,9 +666,9 @@ export class WslNodePtyPrebuildMissingError extends Schema.TaggedErrorClass<WslN
 }
 
 const STAVE_BINARY_ROLE_FLAGS = {
-  primary: "--stave-binary / T3CODE_DESKTOP_STAVE_BINARY",
-  "x64-slice": "--stave-binary-x64 / T3CODE_DESKTOP_STAVE_BINARY_X64",
-  wsl: "--stave-wsl-binary / T3CODE_DESKTOP_STAVE_WSL_BINARY",
+  primary: "--stave-binary / LECTURN_DESKTOP_STAVE_BINARY",
+  "x64-slice": "--stave-binary-x64 / LECTURN_DESKTOP_STAVE_BINARY_X64",
+  wsl: "--stave-wsl-binary / LECTURN_DESKTOP_STAVE_WSL_BINARY",
 } as const;
 
 export class StaveBinaryMissingError extends Schema.TaggedErrorClass<StaveBinaryMissingError>()(
@@ -689,7 +689,7 @@ export class StaveBinaryMissingError extends Schema.TaggedErrorClass<StaveBinary
           ? "the x64 Stave binary for the universal macOS build"
           : `the Stave binary for ${this.platform}/${this.arch}`;
     const location = this.path === undefined ? "was not provided" : `was not found at ${this.path}`;
-    return `${what} ${location}; pass ${flag}, or --allow-missing-stave (T3CODE_DESKTOP_ALLOW_MISSING_STAVE) for a local build without Stave.`;
+    return `${what} ${location}; pass ${flag}, or --allow-missing-stave (LECTURN_DESKTOP_ALLOW_MISSING_STAVE) for a local build without Stave.`;
   }
 }
 
@@ -960,7 +960,7 @@ interface StagePackageJson {
   readonly name: string;
   readonly version: string;
   readonly buildVersion: string;
-  readonly t3codeCommitHash: string;
+  readonly lecturnCommitHash: string;
   readonly private: true;
   readonly packageManager: string;
   readonly description: string;
@@ -1161,7 +1161,7 @@ export class InvalidAppleTeamIdError extends Schema.TaggedErrorClass<InvalidAppl
   },
 ) {
   override get message(): string {
-    return `T3CODE_APPLE_TEAM_ID '${this.teamId}' must be a 10-character Apple Developer Team ID.`;
+    return `LECTURN_APPLE_TEAM_ID '${this.teamId}' must be a 10-character Apple Developer Team ID.`;
   }
 }
 
@@ -1170,7 +1170,7 @@ export class MissingMacPasskeyProvisioningProfileError extends Schema.TaggedErro
   {},
 ) {
   override get message(): string {
-    return "T3CODE_MACOS_PROVISIONING_PROFILE must point to an Associated Domains provisioning profile.";
+    return "LECTURN_MACOS_PROVISIONING_PROFILE must point to an Associated Domains provisioning profile.";
   }
 }
 
@@ -1179,7 +1179,7 @@ export class MissingMacPasskeyDomainConfigurationError extends Schema.TaggedErro
   {},
 ) {
   override get message(): string {
-    return "T3CODE_CLERK_PUBLISHABLE_KEY or T3CODE_CLERK_PASSKEY_RP_DOMAINS is required for signed macOS passkey builds.";
+    return "LECTURN_CLERK_PUBLISHABLE_KEY or LECTURN_CLERK_PASSKEY_RP_DOMAINS is required for signed macOS passkey builds.";
   }
 }
 
@@ -1190,7 +1190,7 @@ export class InvalidMacPasskeyPublishableKeyError extends Schema.TaggedErrorClas
   },
 ) {
   override get message(): string {
-    return "T3CODE_CLERK_PUBLISHABLE_KEY is invalid.";
+    return "LECTURN_CLERK_PUBLISHABLE_KEY is invalid.";
   }
 }
 
@@ -1258,22 +1258,22 @@ function normalizePasskeyRpDomain(value: string): string {
 export function resolveMacPasskeySigningConfiguration(
   env: Readonly<Record<string, string | undefined>>,
 ): MacPasskeySigningConfiguration {
-  const teamId = env.T3CODE_APPLE_TEAM_ID?.trim().toUpperCase() ?? "";
+  const teamId = env.LECTURN_APPLE_TEAM_ID?.trim().toUpperCase() ?? "";
   if (!APPLE_TEAM_ID_PATTERN.test(teamId)) {
     throw new InvalidAppleTeamIdError({ teamId });
   }
 
-  const provisioningProfilePath = env.T3CODE_MACOS_PROVISIONING_PROFILE?.trim() ?? "";
+  const provisioningProfilePath = env.LECTURN_MACOS_PROVISIONING_PROFILE?.trim() ?? "";
   if (provisioningProfilePath.length === 0) {
     throw new MissingMacPasskeyProvisioningProfileError();
   }
 
-  const configuredRpDomains = env.T3CODE_CLERK_PASSKEY_RP_DOMAINS?.trim();
+  const configuredRpDomains = env.LECTURN_CLERK_PASSKEY_RP_DOMAINS?.trim();
   let rpDomains: readonly string[];
   if (configuredRpDomains) {
     rpDomains = configuredRpDomains.split(",").map(normalizePasskeyRpDomain);
   } else {
-    const publishableKey = env.T3CODE_CLERK_PUBLISHABLE_KEY?.trim();
+    const publishableKey = env.LECTURN_CLERK_PUBLISHABLE_KEY?.trim();
     if (!publishableKey) {
       throw new MissingMacPasskeyDomainConfigurationError();
     }
@@ -1300,16 +1300,16 @@ export function resolveMacPasskeySigningConfiguration(
 }
 
 // Passkey signing (associated-domains entitlements + provisioning profile) only
-// serves T3 Connect. With none of its inputs set, signed macOS builds use
+// serves Lecturn Connect. With none of its inputs set, signed macOS builds use
 // electron-builder's default hardened-runtime entitlements; any partial
 // configuration still goes through the strict resolver so mistakes fail loudly.
 export function resolveOptionalMacPasskeySigningConfiguration(
   env: Readonly<Record<string, string | undefined>>,
 ): MacPasskeySigningConfiguration | undefined {
   const hasPasskeyInputs = [
-    env.T3CODE_MACOS_PROVISIONING_PROFILE,
-    env.T3CODE_CLERK_PASSKEY_RP_DOMAINS,
-    env.T3CODE_CLERK_PUBLISHABLE_KEY,
+    env.LECTURN_MACOS_PROVISIONING_PROFILE,
+    env.LECTURN_CLERK_PASSKEY_RP_DOMAINS,
+    env.LECTURN_CLERK_PUBLISHABLE_KEY,
   ].some((value) => (value?.trim() ?? "").length > 0);
   return hasPasskeyInputs ? resolveMacPasskeySigningConfiguration(env) : undefined;
 }
@@ -1533,29 +1533,31 @@ const AzureTrustedSigningOptionsConfig = Config.all({
 });
 
 const BuildEnvConfig = Config.all({
-  platform: Config.schema(BuildPlatform, "T3CODE_DESKTOP_PLATFORM").pipe(Config.option),
-  target: Config.string("T3CODE_DESKTOP_TARGET").pipe(Config.option),
-  arch: Config.schema(BuildArch, "T3CODE_DESKTOP_ARCH").pipe(Config.option),
-  version: Config.string("T3CODE_DESKTOP_VERSION").pipe(Config.option),
-  outputDir: Config.string("T3CODE_DESKTOP_OUTPUT_DIR").pipe(Config.option),
-  skipBuild: Config.boolean("T3CODE_DESKTOP_SKIP_BUILD").pipe(Config.withDefault(false)),
-  keepStage: Config.boolean("T3CODE_DESKTOP_KEEP_STAGE").pipe(Config.withDefault(false)),
-  signed: Config.boolean("T3CODE_DESKTOP_SIGNED").pipe(Config.withDefault(false)),
-  verbose: Config.boolean("T3CODE_DESKTOP_VERBOSE").pipe(Config.withDefault(false)),
-  mockUpdates: Config.boolean("T3CODE_DESKTOP_MOCK_UPDATES").pipe(Config.withDefault(false)),
-  mockUpdateServerPort: Config.string("T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(Config.option),
+  platform: Config.schema(BuildPlatform, "LECTURN_DESKTOP_PLATFORM").pipe(Config.option),
+  target: Config.string("LECTURN_DESKTOP_TARGET").pipe(Config.option),
+  arch: Config.schema(BuildArch, "LECTURN_DESKTOP_ARCH").pipe(Config.option),
+  version: Config.string("LECTURN_DESKTOP_VERSION").pipe(Config.option),
+  outputDir: Config.string("LECTURN_DESKTOP_OUTPUT_DIR").pipe(Config.option),
+  skipBuild: Config.boolean("LECTURN_DESKTOP_SKIP_BUILD").pipe(Config.withDefault(false)),
+  keepStage: Config.boolean("LECTURN_DESKTOP_KEEP_STAGE").pipe(Config.withDefault(false)),
+  signed: Config.boolean("LECTURN_DESKTOP_SIGNED").pipe(Config.withDefault(false)),
+  verbose: Config.boolean("LECTURN_DESKTOP_VERBOSE").pipe(Config.withDefault(false)),
+  mockUpdates: Config.boolean("LECTURN_DESKTOP_MOCK_UPDATES").pipe(Config.withDefault(false)),
+  mockUpdateServerPort: Config.string("LECTURN_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(
+    Config.option,
+  ),
   // Path to a prebuilt Linux node-pty binary (pty.node) for the target arch,
   // produced by the Linux CI job and handed to the Windows packaging job. Placed
   // into the staged node-pty so the WSL backend ships a ready binary and never
   // compiles on the user's machine.
-  wslPrebuild: Config.string("T3CODE_DESKTOP_WSL_PREBUILD").pipe(Config.option),
+  wslPrebuild: Config.string("LECTURN_DESKTOP_WSL_PREBUILD").pipe(Config.option),
   // Prebuilt Stave CLI binaries (scripts/fetch-stave.ts output) for the target
   // platform/arch, the x64 slice of a universal macOS build, and the Linux
   // build that rides along in the Windows WSL payload.
-  staveBinary: Config.string("T3CODE_DESKTOP_STAVE_BINARY").pipe(Config.option),
-  staveBinaryX64: Config.string("T3CODE_DESKTOP_STAVE_BINARY_X64").pipe(Config.option),
-  staveWslBinary: Config.string("T3CODE_DESKTOP_STAVE_WSL_BINARY").pipe(Config.option),
-  allowMissingStave: Config.boolean("T3CODE_DESKTOP_ALLOW_MISSING_STAVE").pipe(
+  staveBinary: Config.string("LECTURN_DESKTOP_STAVE_BINARY").pipe(Config.option),
+  staveBinaryX64: Config.string("LECTURN_DESKTOP_STAVE_BINARY_X64").pipe(Config.option),
+  staveWslBinary: Config.string("LECTURN_DESKTOP_STAVE_WSL_BINARY").pipe(Config.option),
+  allowMissingStave: Config.boolean("LECTURN_DESKTOP_ALLOW_MISSING_STAVE").pipe(
     Config.withDefault(false),
   ),
 });
@@ -1733,7 +1735,7 @@ const rustTargetIsInstalled = Effect.fn("rustTargetIsInstalled")(function* (targ
 export const preflightLinuxDesktopBuild = Effect.fn("preflightLinuxDesktopBuild")(function* (
   arch: typeof BuildArch.Type = "x64",
 ) {
-  const reuseResourceMonitor = yield* Config.boolean("T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR").pipe(
+  const reuseResourceMonitor = yield* Config.boolean("LECTURN_DESKTOP_REUSE_RESOURCE_MONITOR").pipe(
     Config.withDefault(false),
   );
   const rustTarget = resolveResourceMonitorRustTargets("linux", arch)[0]!;
@@ -1768,7 +1770,7 @@ export const preflightMacDesktopBuild = Effect.fn("preflightMacDesktopBuild")(fu
   arch: typeof BuildArch.Type,
 ) {
   const rustTargets = resolveResourceMonitorRustTargets("mac", arch);
-  const reuseResourceMonitor = yield* Config.boolean("T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR").pipe(
+  const reuseResourceMonitor = yield* Config.boolean("LECTURN_DESKTOP_REUSE_RESOURCE_MONITOR").pipe(
     Config.withDefault(false),
   );
   const checks = yield* Effect.all(
@@ -1826,7 +1828,7 @@ export const preflightWindowsDesktopBuild = Effect.fn("preflightWindowsDesktopBu
   function* (input: { readonly arch: typeof BuildArch.Type; readonly bundlesWslRuntime: boolean }) {
     const rustTarget = resolveResourceMonitorRustTargets("win", input.arch)[0]!;
     const reuseResourceMonitor = yield* Config.boolean(
-      "T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR",
+      "LECTURN_DESKTOP_REUSE_RESOURCE_MONITOR",
     ).pipe(Config.withDefault(false));
     const python = yield* resolvePythonForNodeGyp();
     const checks = yield* Effect.all(
@@ -2041,7 +2043,7 @@ const verifyPackagedBundleIsSelfContained = Effect.fn("verifyPackagedBundleIsSel
     const path = yield* Path.Path;
 
     const probeRoot = yield* fs.makeTempDirectoryScoped({
-      prefix: "t3code-bundle-selfcheck-",
+      prefix: "lecturn-bundle-selfcheck-",
     });
     const extractedApp = path.join(probeRoot, "extracted");
     const probeApp = path.join(probeRoot, "app");
@@ -2143,7 +2145,7 @@ export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* 
   const manifestPath = path.join(input.repoRoot, "native/resource-monitor/Cargo.toml");
   const executableName = resourceMonitorExecutableName(input.platform);
   const rustTargets = resolveResourceMonitorRustTargets(input.platform, input.arch);
-  const reuseResourceMonitor = yield* Config.boolean("T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR").pipe(
+  const reuseResourceMonitor = yield* Config.boolean("LECTURN_DESKTOP_REUSE_RESOURCE_MONITOR").pipe(
     Config.withDefault(false),
   );
   const builtBinaries: string[] = [];
@@ -2287,7 +2289,7 @@ export const stageStave = Effect.fn("stageStave")(function* (input: {
       return yield* missing("primary");
     }
     yield* Effect.logWarning(
-      "[desktop-artifact] No Stave binary provided (--stave-binary / T3CODE_DESKTOP_STAVE_BINARY); the packaged app will not bundle Stave.",
+      "[desktop-artifact] No Stave binary provided (--stave-binary / LECTURN_DESKTOP_STAVE_BINARY); the packaged app will not bundle Stave.",
     );
     return { staged: false } as const;
   }
@@ -2381,7 +2383,7 @@ function stageMacIcons(stageResourcesDir: string, sourcePng: string, verbose: bo
     }
 
     const tmpRoot = yield* fs.makeTempDirectoryScoped({
-      prefix: "t3code-icon-build-",
+      prefix: "lecturn-icon-build-",
     });
 
     const iconPngPath = path.join(stageResourcesDir, "icon.png");
@@ -2564,7 +2566,7 @@ export const resolveGitHubPublishConfig = Effect.fn("resolveGitHubPublishConfig"
   updateChannel: "latest" | "nightly",
 ) {
   const env = yield* Config.all({
-    updateRepository: Config.string("T3CODE_DESKTOP_UPDATE_REPOSITORY").pipe(Config.option),
+    updateRepository: Config.string("LECTURN_DESKTOP_UPDATE_REPOSITORY").pipe(Config.option),
     githubRepository: Config.string("GITHUB_REPOSITORY").pipe(Config.option),
   });
   const rawRepo = (
@@ -2816,7 +2818,7 @@ const assertPlatformBuildResources = Effect.fn("assertPlatformBuildResources")(f
 // backend never compiles on the user's machine. node-pty publishes no Linux
 // prebuilt and the WSL Linux Node can't load the Windows/Electron binary, so the
 // Linux CI job builds pty.node and hands it here. We drop it into the staged
-// node-pty's prebuilds/linux-<arch>/ with a t3code marker the WSL preflight
+// node-pty's prebuilds/linux-<arch>/ with a lecturn marker the WSL preflight
 // checks (arch + node-pty version; the binary is N-API, hence ABI-stable across
 // Node versions). A missing prebuild is a warning, not an error, so local and
 // non-Windows builds still succeed — they just won't ship a working WSL backend.
@@ -2830,7 +2832,7 @@ const stageWslNodePtyPrebuild = Effect.fn("stageWslNodePtyPrebuild")(function* (
 
   if (input.prebuildPath === undefined) {
     yield* Effect.logWarning(
-      "[desktop-artifact] No WSL node-pty prebuild provided (--wsl-prebuild / T3CODE_DESKTOP_WSL_PREBUILD); the packaged WSL backend will not start until a Linux pty.node is bundled.",
+      "[desktop-artifact] No WSL node-pty prebuild provided (--wsl-prebuild / LECTURN_DESKTOP_WSL_PREBUILD); the packaged WSL backend will not start until a Linux pty.node is bundled.",
     );
     return;
   }
@@ -2874,7 +2876,7 @@ const stageWslNodePtyPrebuild = Effect.fn("stageWslNodePtyPrebuild")(function* (
   yield* fs.makeDirectory(prebuildDir, { recursive: true });
   yield* fs.copyFile(input.prebuildPath, path.join(prebuildDir, "pty.node"));
   const markerJson = yield* encodeJsonString({ arch: linuxArch, nodePtyVersion });
-  yield* fs.writeFileString(path.join(prebuildDir, "t3code-wsl-node-pty.json"), `${markerJson}\n`);
+  yield* fs.writeFileString(path.join(prebuildDir, "lecturn-wsl-node-pty.json"), `${markerJson}\n`);
 
   yield* Effect.log(
     `[desktop-artifact] Staged WSL node-pty prebuild (linux-${linuxArch}, node-pty ${nodePtyVersion}).`,
@@ -2954,7 +2956,7 @@ export const resolveWslRuntimeRequiredMembers = (input: {
     ? []
     : [
         `node_modules/node-pty/prebuilds/linux-${input.wslArch}/pty.node`,
-        `node_modules/node-pty/prebuilds/linux-${input.wslArch}/t3code-wsl-node-pty.json`,
+        `node_modules/node-pty/prebuilds/linux-${input.wslArch}/lecturn-wsl-node-pty.json`,
         ...(input.expectStave ? [wslStaveMemberPath(input.wslArch)] : []),
       ]),
 ];
@@ -2987,7 +2989,7 @@ const stageWslStave = Effect.fn("stageWslStave")(function* (input: {
     }
     if (input.required) {
       yield* Effect.logWarning(
-        "[desktop-artifact] No Linux Stave binary provided (--stave-wsl-binary / T3CODE_DESKTOP_STAVE_WSL_BINARY); the WSL backend will not bundle Stave.",
+        "[desktop-artifact] No Linux Stave binary provided (--stave-wsl-binary / LECTURN_DESKTOP_STAVE_WSL_BINARY); the WSL backend will not bundle Stave.",
       );
     }
     return false;
@@ -3106,7 +3108,7 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
     sidecarDependencies,
   );
   const sidecarPackageJson = {
-    name: "t3code-server",
+    name: "lecturn-server",
     version: input.appVersion,
     private: true,
     packageManager: rootPackageJson.packageManager,
@@ -3250,7 +3252,7 @@ export const verifyWindowsPrimaryFffNativeLoad = Effect.fn(
   if (hostPlatform !== "win32" || hostArchitecture !== input.targetArch) return;
 
   const probeRoot = yield* fs.makeTempDirectoryScoped({
-    prefix: "t3code-windows-primary-native-probe-",
+    prefix: "lecturn-windows-primary-native-probe-",
   });
   const fffEntryPath = path.join(
     input.asarPath,
@@ -3417,7 +3419,7 @@ export const validateWindowsPackagedPayload = Effect.fn(
     return yield* new WindowsPackagedPayloadValidationError({
       reason: "resource-monitor-missing",
       packagedAppDir,
-      missingFiles: ["resource-monitor/t3-resource-monitor.exe"],
+      missingFiles: ["resource-monitor/lecturn-resource-monitor.exe"],
     });
   }
 
@@ -3643,7 +3645,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const commitHash = yield* resolveGitCommitHash(repoRoot);
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
-    prefix: `t3code-desktop-${options.platform}-stage-`,
+    prefix: `lecturn-desktop-${options.platform}-stage-`,
   });
 
   const stageAppDir = path.join(stageRoot, "app");
@@ -3882,11 +3884,11 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     name: "lecturn",
     version: appVersion,
     buildVersion: appVersion,
-    t3codeCommitHash: commitHash,
+    lecturnCommitHash: commitHash,
     private: true,
     packageManager: rootPackageJson.packageManager,
     description: "Lecturn desktop build",
-    author: "T3 Tools",
+    author: "Cloud Gatherer Labs LLC",
     main: "apps/desktop/dist-electron/main.cjs",
     build: yield* createBuildConfig(
       options.platform,
@@ -4017,7 +4019,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const builderArgs = [
     "exec",
     "--filter",
-    "@t3tools/desktop",
+    "@lecturn/desktop",
     "--",
     "electron-builder",
     "--projectDir",
@@ -4035,7 +4037,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       shell: builderCommand.shell,
     }),
     {
-      label: `vp exec --filter @t3tools/desktop -- electron-builder --projectDir ${stageAppDir} ${platformConfig.cliFlag} --${options.arch} --publish never`,
+      label: `vp exec --filter @lecturn/desktop -- electron-builder --projectDir ${stageAppDir} ${platformConfig.cliFlag} --${options.arch} --publish never`,
       verbose: options.verbose,
     },
   );
@@ -4105,83 +4107,85 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
 const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
   platform: Flag.choice("platform", BuildPlatform.literals).pipe(
-    Flag.withDescription("Build platform (env: T3CODE_DESKTOP_PLATFORM)."),
+    Flag.withDescription("Build platform (env: LECTURN_DESKTOP_PLATFORM)."),
     Flag.optional,
   ),
   target: Flag.string("target").pipe(
     Flag.withDescription(
-      "Artifact target, for example dmg/AppImage/nsis (env: T3CODE_DESKTOP_TARGET).",
+      "Artifact target, for example dmg/AppImage/nsis (env: LECTURN_DESKTOP_TARGET).",
     ),
     Flag.optional,
   ),
   arch: Flag.choice("arch", BuildArch.literals).pipe(
-    Flag.withDescription("Build arch, for example arm64/x64/universal (env: T3CODE_DESKTOP_ARCH)."),
+    Flag.withDescription(
+      "Build arch, for example arm64/x64/universal (env: LECTURN_DESKTOP_ARCH).",
+    ),
     Flag.optional,
   ),
   buildVersion: Flag.string("build-version").pipe(
-    Flag.withDescription("Artifact version metadata (env: T3CODE_DESKTOP_VERSION)."),
+    Flag.withDescription("Artifact version metadata (env: LECTURN_DESKTOP_VERSION)."),
     Flag.optional,
   ),
   outputDir: Flag.string("output-dir").pipe(
-    Flag.withDescription("Output directory for artifacts (env: T3CODE_DESKTOP_OUTPUT_DIR)."),
+    Flag.withDescription("Output directory for artifacts (env: LECTURN_DESKTOP_OUTPUT_DIR)."),
     Flag.optional,
   ),
   skipBuild: Flag.boolean("skip-build").pipe(
     Flag.withDescription(
-      "Skip `vp run build:desktop` and use existing dist artifacts (env: T3CODE_DESKTOP_SKIP_BUILD).",
+      "Skip `vp run build:desktop` and use existing dist artifacts (env: LECTURN_DESKTOP_SKIP_BUILD).",
     ),
     Flag.optional,
   ),
   keepStage: Flag.boolean("keep-stage").pipe(
-    Flag.withDescription("Keep temporary staging files (env: T3CODE_DESKTOP_KEEP_STAGE)."),
+    Flag.withDescription("Keep temporary staging files (env: LECTURN_DESKTOP_KEEP_STAGE)."),
     Flag.optional,
   ),
   signed: Flag.boolean("signed").pipe(
     Flag.withDescription(
-      "Enable signing/notarization discovery; Windows uses Azure Trusted Signing (env: T3CODE_DESKTOP_SIGNED).",
+      "Enable signing/notarization discovery; Windows uses Azure Trusted Signing (env: LECTURN_DESKTOP_SIGNED).",
     ),
     Flag.optional,
   ),
   verbose: Flag.boolean("verbose").pipe(
-    Flag.withDescription("Stream subprocess stdout (env: T3CODE_DESKTOP_VERBOSE)."),
+    Flag.withDescription("Stream subprocess stdout (env: LECTURN_DESKTOP_VERBOSE)."),
     Flag.optional,
   ),
   mockUpdates: Flag.boolean("mock-updates").pipe(
-    Flag.withDescription("Enable mock updates (env: T3CODE_DESKTOP_MOCK_UPDATES)."),
+    Flag.withDescription("Enable mock updates (env: LECTURN_DESKTOP_MOCK_UPDATES)."),
     Flag.optional,
   ),
   mockUpdateServerPort: Flag.integer("mock-update-server-port").pipe(
     Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
-    Flag.withDescription("Mock update server port (env: T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT)."),
+    Flag.withDescription("Mock update server port (env: LECTURN_DESKTOP_MOCK_UPDATE_SERVER_PORT)."),
     Flag.optional,
   ),
   wslPrebuild: Flag.string("wsl-prebuild").pipe(
     Flag.withDescription(
-      "Path to a prebuilt Linux node-pty (pty.node) for the target arch, staged for the WSL backend (env: T3CODE_DESKTOP_WSL_PREBUILD).",
+      "Path to a prebuilt Linux node-pty (pty.node) for the target arch, staged for the WSL backend (env: LECTURN_DESKTOP_WSL_PREBUILD).",
     ),
     Flag.optional,
   ),
   staveBinary: Flag.string("stave-binary").pipe(
     Flag.withDescription(
-      "Path to the Stave CLI binary (stave or stave.exe) for the target platform/arch, bundled at resources/stave (env: T3CODE_DESKTOP_STAVE_BINARY).",
+      "Path to the Stave CLI binary (stave or stave.exe) for the target platform/arch, bundled at resources/stave (env: LECTURN_DESKTOP_STAVE_BINARY).",
     ),
     Flag.optional,
   ),
   staveBinaryX64: Flag.string("stave-binary-x64").pipe(
     Flag.withDescription(
-      "Path to the x64 Stave CLI binary, lipo'd with --stave-binary for --platform mac --arch universal (env: T3CODE_DESKTOP_STAVE_BINARY_X64).",
+      "Path to the x64 Stave CLI binary, lipo'd with --stave-binary for --platform mac --arch universal (env: LECTURN_DESKTOP_STAVE_BINARY_X64).",
     ),
     Flag.optional,
   ),
   staveWslBinary: Flag.string("stave-wsl-binary").pipe(
     Flag.withDescription(
-      "Path to the Linux Stave CLI binary staged into the Windows WSL payload (env: T3CODE_DESKTOP_STAVE_WSL_BINARY).",
+      "Path to the Linux Stave CLI binary staged into the Windows WSL payload (env: LECTURN_DESKTOP_STAVE_WSL_BINARY).",
     ),
     Flag.optional,
   ),
   allowMissingStave: Flag.boolean("allow-missing-stave").pipe(
     Flag.withDescription(
-      "Build without a bundled Stave binary instead of failing; for local development builds (env: T3CODE_DESKTOP_ALLOW_MISSING_STAVE).",
+      "Build without a bundled Stave binary instead of failing; for local development builds (env: LECTURN_DESKTOP_ALLOW_MISSING_STAVE).",
     ),
     Flag.optional,
   ),

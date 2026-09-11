@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { scopeProjectRef } from "@lecturn/client-runtime/environment";
+import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
 import {
   buildSagaDependencyWaves,
   countSagaWorkbenchStages,
@@ -9,14 +9,14 @@ import {
   sagaWorkbenchSummaryFallback,
   sagaWorkbenchStageLabel,
   SAGA_WORKBENCH_STAGES,
-} from "@t3tools/client-runtime/state/sagaWorkbench";
+} from "@lecturn/client-runtime/state/sagaWorkbench";
 import {
   ThreadId,
   type EnvironmentId,
   type ProjectId,
   type SagaWorkbenchSnapshot,
   type SagaWorkbenchWorkflow,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { useProjects, useThreadShells } from "../../state/entities";
 import { useEnvironment } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";

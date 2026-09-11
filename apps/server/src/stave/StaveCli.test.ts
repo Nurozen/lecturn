@@ -15,7 +15,7 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import { HostProcessEnvironment } from "@lecturn/shared/hostProcess";
 
 import * as ProcessRunner from "../processRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -871,7 +871,7 @@ it.layer(NodeServices.layer)("StaveCli real process", (it) => {
   const installFakeStave = Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-stave-cli-" });
+    const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-stave-cli-" });
     const binary = path.join(dir, "stave");
     yield* fileSystem.copyFile(path.join(import.meta.dirname, "testing", "fake-stave.sh"), binary);
     yield* fileSystem.chmod(binary, 0o755);
@@ -894,7 +894,6 @@ it.layer(NodeServices.layer)("StaveCli real process", (it) => {
       ),
     );
 
-  // oxlint-disable-next-line t3code/no-global-process-runtime -- the skip decision needs the real host platform, outside any Effect runtime.
   it.effect.skipIf(process.platform === "win32")(
     "drives a real binary through every output path",
     () =>

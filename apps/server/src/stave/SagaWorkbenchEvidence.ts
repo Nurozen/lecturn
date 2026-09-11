@@ -6,11 +6,11 @@ import {
   type SagaWorkbenchIdentity,
   type SagaWorkbenchRequirement,
   type SourceControlProviderKind,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import {
   detectSourceControlProviderFromGitRemoteUrl,
   normalizeGitRemoteUrl,
-} from "@t3tools/shared/git";
+} from "@lecturn/shared/git";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -40,7 +40,7 @@ export class SagaWorkbenchEvidence extends Context.Service<
       readonly allowPullRequestBaseAdvance?: boolean;
     }) => Effect.Effect<void, SagaWorkbenchError>;
   }
->()("t3/stave/SagaWorkbenchEvidence") {
+>()("lecturn/stave/SagaWorkbenchEvidence") {
   static readonly layer = Layer.effect(
     SagaWorkbenchEvidence,
     Effect.suspend(() => make),

@@ -2,18 +2,23 @@ import {
   ASSISTANT_CITATION_MAX_COMMENT_LENGTH,
   ASSISTANT_CITATION_MAX_TEXT_LENGTH,
   AssistantCitation,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-const CITATION_PROTOCOL = "t3-citation:";
+const CITATION_PROTOCOL = "lecturn-citation:";
 const CITATION_HREF_PREFIX = `${CITATION_PROTOCOL}//v1/`;
+// Stored drafts and messages can outlive a product namespace. Accept citation
+// schemes from those copies while always writing the current scheme.
+const CITATION_PROTOCOL_PATTERN = "[a-z][a-z0-9+.-]*-citation:";
+const CITATION_HREF_PATTERN = new RegExp(`^${CITATION_PROTOCOL_PATTERN}//v1/`, "i");
+const CITATION_PROTOCOL_MATCH = new RegExp(`^${CITATION_PROTOCOL_PATTERN}$`, "i");
 // Percent encoding needs up to nine characters per UTF-16 code unit; 16k covers selectors.
 const MAX_CITATION_HREF_LENGTH =
   9 * (ASSISTANT_CITATION_MAX_TEXT_LENGTH + ASSISTANT_CITATION_MAX_COMMENT_LENGTH) + 16_000;
 const CITATION_LINK = new RegExp(
-  String.raw`\[Assistant quote\]\((${CITATION_HREF_PREFIX}[^\s)]{1,${MAX_CITATION_HREF_LENGTH - CITATION_HREF_PREFIX.length}})\)`,
-  "g",
+  String.raw`\[Assistant quote\]\((${CITATION_PROTOCOL_PATTERN}//v1/[^\s)]{1,${MAX_CITATION_HREF_LENGTH}})\)`,
+  "gi",
 );
 const decodeCitation = Schema.decodeUnknownOption(AssistantCitation);
 
@@ -51,14 +56,14 @@ export function formatAssistantCitationHref(citation: AssistantCitation): string
 }
 
 export function parseAssistantCitationHref(href: string): AssistantCitation | null {
-  if (!href.startsWith(CITATION_HREF_PREFIX) || href.length > MAX_CITATION_HREF_LENGTH) {
+  if (href.length > MAX_CITATION_HREF_LENGTH || !CITATION_HREF_PATTERN.test(href)) {
     return null;
   }
   try {
     const url = new URL(href);
     const parts = url.pathname.slice(1).split("/");
     if (
-      url.protocol !== CITATION_PROTOCOL ||
+      !CITATION_PROTOCOL_MATCH.test(url.protocol) ||
       url.hostname !== "v1" ||
       parts.length !== 3 ||
       url.username ||

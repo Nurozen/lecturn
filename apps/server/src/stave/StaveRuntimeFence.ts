@@ -22,7 +22,7 @@ export class StaveRuntimeFence extends Context.Service<
     ) => Effect.Effect<A, E | StaveRuntimeFenced, R>;
     readonly isUnder: (root: string, cwd: string) => Effect.Effect<boolean>;
   }
->()("t3/stave/StaveRuntimeFence") {}
+>()("lecturn/stave/StaveRuntimeFence") {}
 
 export const makeWithOptions = Effect.fn("StaveRuntimeFence.makeWithOptions")(function* (options?: {
   readonly checkStart?: (cwd: string) => Effect.Effect<void, StaveRuntimeFenced>;

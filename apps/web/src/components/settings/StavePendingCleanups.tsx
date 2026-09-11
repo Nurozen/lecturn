@@ -4,7 +4,7 @@ import type {
   EnvironmentId,
   StaveLifecycleActionOperation,
   StavePendingCleanup,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { usePrimarySettings } from "../../hooks/useSettings";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useStaveFeatureAvailable } from "../../state/stave";

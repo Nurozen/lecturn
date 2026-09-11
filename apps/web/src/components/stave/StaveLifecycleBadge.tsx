@@ -1,4 +1,4 @@
-import type { StaveProjectNotice } from "@t3tools/contracts";
+import type { StaveProjectNotice } from "@lecturn/contracts";
 import { Badge } from "../ui/badge";
 import { lifecycleNoticeLabel } from "./staveLifecycle.logic";
 

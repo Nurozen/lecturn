@@ -9,7 +9,7 @@ import type {
   ProjectId,
   SagaWorkbenchWorkflow,
   SagaWorkbenchSnapshot,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 export const SAGA_VIEWS = ["board", "list", "dependencies", "activity", "settings"] as const;
 export type SagaWorkbenchView = (typeof SAGA_VIEWS)[number];
 export function parseSagaWorkbenchSearch(search: Record<string, unknown>): {

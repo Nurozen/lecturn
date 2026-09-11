@@ -1,12 +1,12 @@
 import { useAtomValue } from "@effect/atom-react";
-import { staveRpcErrorMessage } from "@t3tools/client-runtime/errors";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { staveRpcErrorMessage } from "@lecturn/client-runtime/errors";
+import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
 import type {
   EnvironmentId,
   StaveOperation,
   StaveSagaMembership,
   StaveSagaReview,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { notifyStaveMutation } from "../../staveMutation";

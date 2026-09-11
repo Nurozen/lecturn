@@ -1,4 +1,4 @@
-import { MessageId, ProjectId, ThreadId, TurnId, ProviderInstanceId } from "@t3tools/contracts";
+import { MessageId, ProjectId, ThreadId, TurnId, ProviderInstanceId } from "@lecturn/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -215,9 +215,9 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       const threads = yield* ProjectionThreadRepository;
       const linkedPullRequest = {
         projectId: ProjectId.make("project-linked-pr"),
-        repository: "pingdotgg/t3code",
+        repository: "nurozen/lecturn",
         number: 42,
-        url: "https://github.com/pingdotgg/t3code/pull/42",
+        url: "https://github.com/nurozen/lecturn/pull/42",
       };
 
       yield* threads.upsert({

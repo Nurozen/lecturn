@@ -21,7 +21,7 @@ export class StaveRootsProvider extends Context.Service<
     /** Absolute agent-work directory, or none when Stave is not configured. */
     readonly agentWorkDir: Effect.Effect<Option.Option<string>>;
   }
->()("t3/stave/StaveRoots/StaveRootsProvider") {}
+>()("lecturn/stave/StaveRoots/StaveRootsProvider") {}
 
 export const layer: Layer.Layer<StaveRootsProvider, never, StaveConfigReader> = Layer.effect(
   StaveRootsProvider,

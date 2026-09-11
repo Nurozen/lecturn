@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { ProjectId, type StaveOperation } from "@t3tools/contracts";
+import { ProjectId, type StaveOperation } from "@lecturn/contracts";
 import { staveTelemetryEvent } from "./StaveTelemetry.ts";
 
 const secret = "secret-token-user-space-den-name";

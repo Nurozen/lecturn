@@ -1,5 +1,5 @@
-import { resolveProjectGitCwd } from "@t3tools/client-runtime/state/projectGit";
-import type { OrchestrationProjectShell } from "@t3tools/contracts";
+import { resolveProjectGitCwd } from "@lecturn/client-runtime/state/projectGit";
+import type { OrchestrationProjectShell } from "@lecturn/contracts";
 
 type WorkspaceMode = "local" | "worktree";
 

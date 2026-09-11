@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
-import type { ModelCapabilities } from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { createModelCapabilities } from "@t3tools/shared/model";
+import type { ModelCapabilities } from "@lecturn/contracts";
+import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import { createModelCapabilities } from "@lecturn/shared/model";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
@@ -25,6 +25,9 @@ import { GROK_ADAPTER_CAPABILITIES } from "./Layers/GrokAdapter.ts";
 import { GROK_PRESENTATION } from "./Layers/GrokProvider.ts";
 import { OPENCODE_ADAPTER_CAPABILITIES } from "./Layers/OpenCodeAdapter.ts";
 import { OPENCODE_PRESENTATION } from "./Layers/OpenCodeProvider.ts";
+
+import { ANTIGRAVITY_ADAPTER_CAPABILITIES } from "./Layers/AntigravityAdapter.ts";
+import { ANTIGRAVITY_PRESENTATION } from "./Layers/AntigravityProvider.ts";
 
 const OPENCODE_CUSTOM_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [
@@ -148,6 +151,11 @@ describe("ProviderCommandNotFoundError", () => {
 
 describe("conversationFork capability/presentation parity", () => {
   const drivers = [
+    {
+      driver: "antigravity",
+      capabilities: ANTIGRAVITY_ADAPTER_CAPABILITIES,
+      presentation: ANTIGRAVITY_PRESENTATION,
+    },
     {
       driver: "codex",
       capabilities: CODEX_ADAPTER_CAPABILITIES,

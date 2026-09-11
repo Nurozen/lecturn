@@ -1,9 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { SagaProjectIndexEntry } from "@t3tools/client-runtime/state/project-grouping";
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import { createEnvironmentRpcQueryAtomFamily } from "@t3tools/client-runtime/state/runtime";
-import { environmentSupportsStave } from "@t3tools/client-runtime/state/stave";
-import { EnvironmentId, WS_METHODS } from "@t3tools/contracts";
+import type { SagaProjectIndexEntry } from "@lecturn/client-runtime/state/project-grouping";
+import type { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
+import { createEnvironmentRpcQueryAtomFamily } from "@lecturn/client-runtime/state/runtime";
+import { environmentSupportsStave } from "@lecturn/client-runtime/state/stave";
+import { EnvironmentId, WS_METHODS } from "@lecturn/contracts";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { useEffect, useMemo } from "react";
 import { AppState } from "react-native";

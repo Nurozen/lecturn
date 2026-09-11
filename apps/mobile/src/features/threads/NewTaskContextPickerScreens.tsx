@@ -1,12 +1,12 @@
-import { staveAdmissionErrorMessage } from "@t3tools/client-runtime/errors";
-import { resolveProjectGitCwd } from "@t3tools/client-runtime/state/projectGit";
-import type { VcsRef } from "@t3tools/client-runtime/state/vcs";
-import { resolveEnvironmentMachineKind } from "@t3tools/contracts";
+import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
+import { resolveProjectGitCwd } from "@lecturn/client-runtime/state/projectGit";
+import type { VcsRef } from "@lecturn/client-runtime/state/vcs";
+import { resolveEnvironmentMachineKind } from "@lecturn/contracts";
 import { LegendList } from "@legendapp/list/react-native";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@lecturn/client-runtime/state/runtime";
 import * as Haptics from "expo-haptics";
 import { useNavigation } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -72,7 +72,7 @@ function SelectionRow(props: {
         (props.icon ?? null)
       )}
       <View className="min-w-0 flex-1 gap-0.5">
-        <Text className="text-base font-t3-medium text-foreground" numberOfLines={1}>
+        <Text className="text-base font-lecturn-medium text-foreground" numberOfLines={1}>
           {props.title}
         </Text>
         {props.subtitle ? (
@@ -101,7 +101,10 @@ function ToggleRow(props: {
 }) {
   return (
     <View className="min-h-14 flex-row items-center gap-3 bg-card px-4 py-3">
-      <Text className="min-w-0 flex-1 text-base font-t3-medium text-foreground" numberOfLines={1}>
+      <Text
+        className="min-w-0 flex-1 text-base font-lecturn-medium text-foreground"
+        numberOfLines={1}
+      >
         {props.title}
       </Text>
       <ThemedSwitch
@@ -391,7 +394,7 @@ export function NewTaskBranchPickerRouteScreen() {
               className="rounded-full bg-card px-4 py-2 active:opacity-70"
               onPress={flow.loadBranches}
             >
-              <Text className="text-sm font-t3-medium text-foreground">Try again</Text>
+              <Text className="text-sm font-lecturn-medium text-foreground">Try again</Text>
             </Pressable>
           ) : null}
         </View>

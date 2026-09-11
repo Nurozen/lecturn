@@ -4,7 +4,7 @@ import {
   type SagaWorkbenchSnapshot,
   type SagaWorkbenchWorkflow,
   type StaveSagaStatus,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import type { EnvironmentProject } from "./models.ts";
 import { buildProjectGroups } from "./projectGrouping.ts";

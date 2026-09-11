@@ -1,6 +1,6 @@
 # Voice input
 
-> For maintainers. Using T3 Code? See [voice input on iPhone](../user/composer.md#voice-input-on-iphone).
+> For maintainers. Using Lecturn? See [voice input on iPhone](../user/composer.md#voice-input-on-iphone).
 
 Voice input produces editable composer text. The current implementation records on the client and
 transcribes locally with Apple's `SpeechAnalyzer` and `SpeechTranscriber` on supported iOS 26+
@@ -11,7 +11,7 @@ devices. Environment-provided transcription and transcription on web and desktop
 The shared [`VoiceInputController`][controller] in `packages/client-runtime` owns preparation,
 recording, transcription, cancellation, temporary-file cleanup, and insertion into the captured
 draft selection. Applications import it through the [voice-input entry point][voice-input] as
-`@t3tools/client-runtime/voice-input`. Its dependencies separate capture from transcription; the
+`@lecturn/client-runtime/voice-input`. Its dependencies separate capture from transcription; the
 controller imports neither React Native nor an Apple transcription API.
 
 The shared [transcription contract][transcription] defines `VoiceTranscriber`,

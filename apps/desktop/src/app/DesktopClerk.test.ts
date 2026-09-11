@@ -49,7 +49,7 @@ const makeDesktopClerkLayer = (
     events.push(`makeDirectory:${path}`);
   });
   const environment = DesktopEnvironment.DesktopEnvironment.of({
-    stateDir: "/tmp/t3-state",
+    stateDir: "/tmp/lecturn-state",
     isDevelopment,
     appDataDirectory: "/tmp/app-data",
     ...(userDataPathOverride !== undefined ? { userDataPathOverride } : {}),
@@ -90,11 +90,11 @@ describe("DesktopClerk", () => {
   });
 
   it("derives the Clerk Frontend API hostname used by the desktop CSP", () => {
-    const publishableKey = `pk_test_${btoa("clerk.t3.codes$")}`;
+    const publishableKey = `pk_test_${btoa("clerk.lecturn.cloudgatherer.net$")}`;
 
     assert.equal(
       DesktopClerk.resolveDesktopClerkFrontendApiHostname(publishableKey),
-      "clerk.t3.codes",
+      "clerk.lecturn.cloudgatherer.net",
     );
     assert.equal(DesktopClerk.resolveDesktopClerkFrontendApiHostname(""), undefined);
     assert.equal(DesktopClerk.resolveDesktopClerkFrontendApiHostname("invalid"), undefined);
@@ -183,12 +183,12 @@ describe("DesktopClerk", () => {
       const error = yield* Effect.scoped(Layer.build(makeDesktopClerkLayer())).pipe(Effect.flip);
 
       assert.instanceOf(error, DesktopClerk.DesktopClerkBridgeInitializationError);
-      assert.equal(error.stateDir, "/tmp/t3-state");
+      assert.equal(error.stateDir, "/tmp/lecturn-state");
       assert.equal(error.isDevelopment, true);
       assert.strictEqual(error.cause, cause);
       assert.equal(
         error.message,
-        'Failed to initialize the desktop Clerk bridge for state directory "/tmp/t3-state" (development: true).',
+        'Failed to initialize the desktop Clerk bridge for state directory "/tmp/lecturn-state" (development: true).',
       );
     });
   });
@@ -209,12 +209,12 @@ describe("DesktopClerk", () => {
       if (exit._tag === "Failure") {
         const error = Cause.squash(exit.cause);
         assert.instanceOf(error, DesktopClerk.DesktopClerkBridgeCleanupError);
-        assert.equal(error.stateDir, "/tmp/t3-state");
+        assert.equal(error.stateDir, "/tmp/lecturn-state");
         assert.equal(error.isDevelopment, false);
         assert.strictEqual(error.cause, cause);
         assert.equal(
           error.message,
-          'Failed to clean up the desktop Clerk bridge for state directory "/tmp/t3-state" (development: false).',
+          'Failed to clean up the desktop Clerk bridge for state directory "/tmp/lecturn-state" (development: false).',
         );
       }
     });
@@ -284,8 +284,11 @@ describe("DesktopClerk", () => {
     storageMock.mockReturnValue(storageAdapter);
     createClerkBridgeMock.mockReturnValue(bridge);
 
-    assert.equal(DesktopClerk.createDesktopClerkBridge("/tmp/t3-state", isDevelopment), bridge);
-    assert.deepEqual(storageMock.mock.calls, [[{ path: "/tmp/t3-state" }]]);
+    assert.equal(
+      DesktopClerk.createDesktopClerkBridge("/tmp/lecturn-state", isDevelopment),
+      bridge,
+    );
+    assert.deepEqual(storageMock.mock.calls, [[{ path: "/tmp/lecturn-state" }]]);
     assert.deepEqual(createClerkBridgeMock.mock.calls, [
       [
         {

@@ -1,6 +1,6 @@
 import { useStaveStatus } from "../../../state/stave";
 import { staveOperationUnavailableReason } from "../staveCompatibility.logic";
-import type { EnvironmentId, StaveRepoRow } from "@t3tools/contracts";
+import type { EnvironmentId, StaveRepoRow } from "@lecturn/contracts";
 import { useState } from "react";
 
 import { randomUUID } from "../../../lib/utils";

@@ -2,15 +2,15 @@ import {
   type FilesystemBrowseEntry,
   type KeybindingCommand,
   THREAD_JUMP_KEYBINDING_COMMANDS,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import {
   ADD_PROJECT_STAVE_SOURCES,
   addProjectStaveSourceDescription,
   addProjectStaveSourceLabel,
   type AddProjectStaveSource,
-} from "@t3tools/client-runtime/operations/projects";
-import { filterFilesystemBrowseEntries } from "@t3tools/client-runtime/state/filesystem";
-import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
+} from "@lecturn/client-runtime/operations/projects";
+import { filterFilesystemBrowseEntries } from "@lecturn/client-runtime/state/filesystem";
+import type { SidebarThreadSortOrder } from "@lecturn/contracts/settings";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import { type ReactNode } from "react";

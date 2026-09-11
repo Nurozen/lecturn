@@ -1,7 +1,7 @@
 import { useStaveStatus } from "../../state/stave";
 import { staveOperationUnavailableReason } from "./staveCompatibility.logic";
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@lecturn/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 

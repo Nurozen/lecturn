@@ -3,11 +3,11 @@ import {
   derivePhysicalProjectKey,
   type SagaProjectIndexEntry,
   type SagaProjectTreeNode,
-} from "@t3tools/client-runtime/state/project-grouping";
-import { buildPhysicalSagaProjectGroups } from "@t3tools/client-runtime/state/sagaWorkbench";
+} from "@lecturn/client-runtime/state/project-grouping";
+import { buildPhysicalSagaProjectGroups } from "@lecturn/client-runtime/state/sagaWorkbench";
 import type { ThreadListV2ListItem } from "../threads/threadListV2";
-import type { StaveSagaMemberStatus } from "@t3tools/contracts";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import type { StaveSagaMemberStatus } from "@lecturn/contracts";
+import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
 
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import type { HomeThreadGroup } from "./homeThreadList";

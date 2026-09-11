@@ -1,8 +1,8 @@
-import type { ThreadEnvMode } from "@t3tools/contracts";
+import type { ThreadEnvMode } from "@lecturn/contracts";
 
 /**
  * Canonical priority order for a project's default thread env mode:
- * forced mode > per-project setting > checked-in t3.json > global server setting.
+ * forced mode > per-project setting > checked-in lecturn.json > global server setting.
  *
  * `forcedMode` is set when the project's environment dictates the mode (for
  * example a Stave space, whose repos are already worktrees) and the user must
@@ -26,7 +26,7 @@ export function resolveDefaultThreadEnvMode(sources: {
 
 /**
  * True once the resolved default can no longer change: an explicit pick, a
- * forced mode, or a source that outranks t3.json decided, or the file read
+ * forced mode, or a source that outranks lecturn.json decided, or the file read
  * settled. While false, nothing may persist the provisional default (for
  * example into a draft's workspace selection) — it could differ from the
  * final value.

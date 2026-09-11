@@ -12,14 +12,14 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@lecturn/client-runtime/state/runtime";
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   ServerProcessDiagnosticsEntry,
   ServerProcessResourceHistorySummary,
   ServerProcessSignal,
   StaveBinarySource,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 
@@ -88,7 +88,7 @@ function isStaleProcessSignalMessage(message: string | undefined): boolean {
 
 const STAVE_SOURCE_LABELS: Record<StaveBinarySource, string> = {
   settings: "Settings override",
-  env: "T3CODE_STAVE_PATH",
+  env: "LECTURN_STAVE_PATH",
   bootstrap: "Desktop bootstrap",
   bundled: "Bundled with server",
   path: "Found on PATH",

@@ -22,7 +22,7 @@ describe("tryOpenExternalUrl", () => {
     openURL.mockResolvedValue(undefined);
 
     await expect(
-      tryOpenExternalUrl("https://github.com/pingdotgg/t3code", "pull-request"),
+      tryOpenExternalUrl("https://github.com/nurozen/lecturn", "pull-request"),
     ).resolves.toBe(true);
   });
 
@@ -32,7 +32,7 @@ describe("tryOpenExternalUrl", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     await expect(
-      tryOpenExternalUrl("https://github.com/pingdotgg/t3code/pull/1?token=secret", "pull-request"),
+      tryOpenExternalUrl("https://github.com/nurozen/lecturn/pull/1?token=secret", "pull-request"),
     ).resolves.toBe(false);
 
     expect(consoleError).toHaveBeenCalledTimes(1);
@@ -54,5 +54,21 @@ describe("tryOpenExternalUrl", () => {
       .join("\n");
     expect(diagnosticText).not.toContain("token=secret");
     expect(diagnosticText).not.toContain("browser-unavailable-secret-sentinel");
+  });
+
+  it("keeps provider sign-in URLs unchanged and out of failure logs", async () => {
+    const url =
+      "https://accounts.google.com/o/oauth2/v2/auth?state=private-state&code_challenge=private-challenge&redirect_uri=http%3A%2F%2F127.0.0.1%3A43123%2F";
+    openURL.mockRejectedValue(new Error(`Cannot open ${url}`));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(tryOpenExternalUrl(url, "provider-auth")).resolves.toBe(false);
+
+    expect(openURL).toHaveBeenCalledWith(url);
+    const diagnostics = JSON.stringify(consoleError.mock.calls);
+    expect(diagnostics).toContain("accounts.google.com");
+    expect(diagnostics).not.toContain("private-state");
+    expect(diagnostics).not.toContain("private-challenge");
+    expect(diagnostics).not.toContain("43123");
   });
 });

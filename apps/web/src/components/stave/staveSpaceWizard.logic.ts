@@ -8,8 +8,8 @@ import type {
   StaveRepoRow,
   StaveSagaListRow,
   StaveSpaceListRow,
-} from "@t3tools/contracts";
-import { isValidStaveSpaceId } from "@t3tools/shared/stave";
+} from "@lecturn/contracts";
+import { isValidStaveSpaceId } from "@lecturn/shared/stave";
 
 /**
  * Pure state and rules of the "New Stave space" wizard. The dialog and its

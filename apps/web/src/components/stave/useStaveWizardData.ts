@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@lecturn/contracts";
 import { subscribeStaveMutation } from "../../staveMutation";
 import { useEffect, useMemo } from "react";
 

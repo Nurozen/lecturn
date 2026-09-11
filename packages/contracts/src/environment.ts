@@ -65,7 +65,7 @@ export type ServerSelfUpdateMethod = typeof ServerSelfUpdateMethod.Type;
 
 /** What update path a client should offer for a server: one of the RPC
     self-update methods above, or "desktop-managed" when the backend's
-    version belongs to the T3 Code desktop app supervising it — updating the
+    version belongs to the Lecturn desktop app supervising it — updating the
     app on that machine is the only way to update the server. */
 export const ServerSelfUpdateCapability = Schema.Literals([
   "boot-service",
@@ -144,7 +144,7 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** This server build ships the Stave integration and speaks the given
       Stave CLI protocol version. A static build fact: whether a binary is
       runnable and whether the user enabled it are served live elsewhere.
-      Absent on pre-Stave servers (and builds started with T3CODE_STAVE=false),
+      Absent on pre-Stave servers (and builds started with LECTURN_STAVE=false),
       so clients hide every Stave control instead of probing the RPCs. */
   stave: Schema.optionalKey(Schema.Struct({ protocolVersion: Schema.Number })),
 });

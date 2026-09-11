@@ -14,7 +14,7 @@ Each server stores its own copy of the automatic settlement settings and checks 
 web, desktop, or mobile client is connected. By default, it settles threads after three days without
 activity and when their pull request merges. An eligible idle thread also settles when its pull
 request closes. An open pull request blocks inactivity settlement. Active work, pending input, and
-live background work keep the thread active. T3 Code settles from a closed or merged pull request
+live background work keep the thread active. Lecturn settles from a closed or merged pull request
 only when its timestamp is not older than the user's latest activity. If that timestamp is not
 available, the inactivity rule still applies. A manual un-settle also keeps the thread active.
 
@@ -22,11 +22,13 @@ available, the inactivity rule still applies. A manual un-settle also keeps the 
 sorts by the moment you settled it. A thread that settled on its own sorts by its last message or
 turn, not by when the server noticed it was inactive.
 
-Change these rules in **Settings > General**. The change is written to every environment you are
-connected to at that moment. An environment that is offline keeps its old value. When a connected
-environment holds a different value, **Settings > General** shows a warning that names it. Choose
-**Apply to all** to write your current values to every connected environment. The same applies to
-the new-thread workspace mode and the source control writing style.
+Change these rules in **Settings > General**. The change is written to every connected environment
+whose server supports shared settings. An environment that is offline or needs a server update
+keeps its old value and does not appear in mismatch warnings. When a connected environment whose
+server supports shared settings holds a different value, **Settings > General** shows a warning
+that names it. Choose **Apply to all** to write your current values to the environments named in
+the warning. The same applies to the new-thread workspace mode and the source control writing
+style.
 
 A settings change affects future settlement and does not reopen a settled thread. Settings saved
 by older clients on one device no longer control this behavior.
@@ -42,7 +44,7 @@ On web and desktop, drag a pinned thread to change its position. On mobile, open
 and choose **Move up** or **Move down**. The order is stored by the server and appears on your
 other connected devices.
 
-If reordering is unavailable for one environment, update the T3 Code server running in that
+If reordering is unavailable for one environment, update the Lecturn server running in that
 environment. Older servers can still pin and unpin threads, but do not understand synced ordering;
 their pinned threads keep the default newest-first order below the ones you have arranged.
 
@@ -75,10 +77,10 @@ that server, so every device that connects to it sees the same icon.
 Dev and Nightly environments can identify themselves with artwork at the top of the sidebar and in
 the send button. Choose **Artwork**, **Version pill**, or **None** in Settings under environment
 identification. Artwork is recolored to match each built-in theme. Custom themes use the **Version
-pill** fallback because their colors are not controlled by T3 Code.
+pill** fallback because their colors are not controlled by Lecturn.
 
 To generate a fresh title from the conversation, open a thread's context menu and choose
-**Regenerate title**. While T3 Code is generating it, the action reads **Regenerating…** and cannot
+**Regenerate title**. While Lecturn is generating it, the action reads **Regenerating…** and cannot
 be selected again. The option is hidden when the connected environment needs a server update.
 
 ## Stave lifecycle notices

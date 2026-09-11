@@ -8,7 +8,7 @@ import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as HttpIncomingMessage from "effect/unstable/http/HttpIncomingMessage";
 import * as FileSystem from "effect/FileSystem";
-import { RelayBillingCheckoutRequest, RelayBillingReconcileRequest } from "@t3tools/contracts";
+import { RelayBillingCheckoutRequest, RelayBillingReconcileRequest } from "@lecturn/contracts";
 import { BillingService } from "../billing/BillingService.ts";
 import { BillingError } from "../billing/BillingStore.ts";
 import { canStartBillingCheckout, type BillingConfig } from "../billing/BillingConfig.ts";

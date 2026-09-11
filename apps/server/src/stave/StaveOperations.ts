@@ -53,8 +53,8 @@ import {
   type StaveSetupOperation,
   type StaveSagaReview,
   type StaveDryRunPlan,
-} from "@t3tools/contracts";
-import { stableStringify } from "@t3tools/shared/relaySigning";
+} from "@lecturn/contracts";
+import { stableStringify } from "@lecturn/shared/relaySigning";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -308,7 +308,7 @@ export interface StaveOperationsShape {
 }
 
 export class StaveOperations extends Context.Service<StaveOperations, StaveOperationsShape>()(
-  "t3/stave/StaveOperations",
+  "lecturn/stave/StaveOperations",
 ) {}
 
 type OperationOutcome = StaveOperationResult;

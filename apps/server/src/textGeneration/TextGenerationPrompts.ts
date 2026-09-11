@@ -7,7 +7,7 @@
  * @module textGenerationPrompts
  */
 import * as Schema from "effect/Schema";
-import { SagaWorkbenchInferenceResult, type ChatAttachment } from "@t3tools/contracts";
+import { SagaWorkbenchInferenceResult, type ChatAttachment } from "@lecturn/contracts";
 
 import { limitSection } from "./TextGenerationUtils.ts";
 import type { TextGenerationPolicy } from "./TextGenerationPolicy.ts";

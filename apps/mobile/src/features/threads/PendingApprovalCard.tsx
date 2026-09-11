@@ -2,7 +2,7 @@ import type {
   ApprovalRequestId,
   ProviderApprovalDecision,
   ProviderApprovalOption,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
@@ -17,27 +17,34 @@ export interface PendingApprovalCardProps {
   ) => Promise<unknown>;
 }
 
-const DEFAULT_APPROVAL_OPTIONS = [
+const DEFAULT_APPROVAL_OPTIONS: ReadonlyArray<ProviderApprovalOption> = [
   { decision: "accept", label: "Allow once" },
   { decision: "acceptForSession", label: "Allow session" },
   { decision: "decline", label: "Decline" },
-] satisfies ReadonlyArray<ProviderApprovalOption>;
+];
 
 export function PendingApprovalCard(props: PendingApprovalCardProps) {
-  const options = props.approval.options ?? DEFAULT_APPROVAL_OPTIONS;
+  const options: ReadonlyArray<ProviderApprovalOption> =
+    props.approval.options ?? DEFAULT_APPROVAL_OPTIONS;
+  const warning = options.find((option) => option.warning)?.warning;
   // Opaque for the same reason as PendingUserInputCard: nothing blurs the feed
   // behind this card, so a translucent surface bleeds messages through it.
   return (
     <View className="gap-2.5 rounded-[20px] border border-adaptive-neutral-200-white-a6 bg-adaptive-neutral-100-900 p-4">
-      <Text className="font-t3-bold text-2xs uppercase tracking-[1.1px] text-adaptive-sky-700-300">
+      <Text className="font-lecturn-bold text-2xs uppercase tracking-[1.1px] text-adaptive-sky-700-300">
         Approval needed
       </Text>
-      <Text className="font-t3-bold text-lg text-adaptive-neutral-950-50">
+      <Text className="font-lecturn-bold text-lg text-adaptive-neutral-950-50">
         {props.approval.appName ?? props.approval.requestKind}
       </Text>
       {props.approval.detail ? (
         <Text className="font-sans text-sm leading-normal text-adaptive-neutral-600-400">
           {props.approval.detail}
+        </Text>
+      ) : null}
+      {warning ? (
+        <Text className="font-sans text-xs leading-normal text-adaptive-amber-700-300">
+          {warning}
         </Text>
       ) : null}
       <View className="flex-row flex-wrap gap-2.5">
@@ -57,10 +64,10 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
             <Text
               className={`text-sm ${
                 option.decision === "accept"
-                  ? "font-t3-extrabold text-white"
+                  ? "font-lecturn-extrabold text-white"
                   : option.decision === "decline"
-                    ? "font-t3-bold text-adaptive-rose-700-300"
-                    : "font-t3-bold text-adaptive-neutral-950-50"
+                    ? "font-lecturn-bold text-adaptive-rose-700-300"
+                    : "font-lecturn-bold text-adaptive-neutral-950-50"
               }`}
             >
               {option.label}

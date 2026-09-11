@@ -19,7 +19,7 @@ import type {
   StaveProjectInfo,
   StaveRepoEntry,
   StaveRepoMode,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -68,7 +68,7 @@ export class StaveWorkspaceReader extends Context.Service<
     /** Drop every cached result. */
     readonly invalidateAll: () => Effect.Effect<void>;
   }
->()("t3/stave/StaveWorkspaceReader") {}
+>()("lecturn/stave/StaveWorkspaceReader") {}
 
 /** Where the manifest was found, pre-split so the mapper stays path-library free. */
 export interface StaveWorkspaceLocation {

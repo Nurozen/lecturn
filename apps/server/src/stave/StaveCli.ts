@@ -1,4 +1,4 @@
-import type { StaveLastFailure } from "@t3tools/contracts";
+import type { StaveLastFailure } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Ref from "effect/Ref";
 import { StaveExecutionContext } from "./StaveExecutionContext.ts";
@@ -24,8 +24,8 @@ import { missingStaveFeatures } from "./staveFeatures.ts";
  *
  * @module StaveCli
  */
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
-import { isValidStaveSpaceId, type StaveVersionInfo } from "@t3tools/shared/stave";
+import { HostProcessEnvironment } from "@lecturn/shared/hostProcess";
+import { isValidStaveSpaceId, type StaveVersionInfo } from "@lecturn/shared/stave";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -453,7 +453,9 @@ export interface StaveCliShape {
   ) => Effect.Effect<StaveMutationOutcome<StaveMemoryDetachResult>, StaveError>;
 }
 
-export class StaveCli extends Context.Service<StaveCli, StaveCliShape>()("t3/stave/StaveCli") {}
+export class StaveCli extends Context.Service<StaveCli, StaveCliShape>()(
+  "lecturn/stave/StaveCli",
+) {}
 
 // ── Argv construction (pure) ──────────────────────────────────
 

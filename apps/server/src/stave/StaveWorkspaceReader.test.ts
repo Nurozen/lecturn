@@ -1,4 +1,4 @@
-import type { RepositoryIdentity } from "@t3tools/contracts";
+import type { RepositoryIdentity } from "@lecturn/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Duration from "effect/Duration";
@@ -116,7 +116,7 @@ const readerLayer = makeReaderLayer(nullResolverLayer);
 
 const makeTempRoot = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
-  return yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-stave-reader-" });
+  return yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-stave-reader-" });
 });
 
 const writeManifest = Effect.fn("writeManifest")(function* (root: string, contents: string) {

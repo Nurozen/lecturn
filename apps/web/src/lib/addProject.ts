@@ -1,17 +1,17 @@
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { findExistingAddProject } from "@t3tools/client-runtime/operations/projects";
+import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
+import { findExistingAddProject } from "@lecturn/client-runtime/operations/projects";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
-} from "@t3tools/client-runtime/state/models";
+} from "@lecturn/client-runtime/state/models";
 import {
   isAtomCommandInterrupted,
   runAtomCommand,
   settlePromise,
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, ProjectId, ScopedProjectRef } from "@t3tools/contracts";
+} from "@lecturn/client-runtime/state/runtime";
+import type { EnvironmentId, ProjectId, ScopedProjectRef } from "@lecturn/contracts";
 import type { useNavigate } from "@tanstack/react-router";
 
 import { getClientSettings } from "../hooks/useSettings";

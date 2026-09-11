@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { ProviderDriverKind } from "@lecturn/contracts";
 
 import { DRIVER_OPTION_BY_VALUE } from "./providerDriverMeta";
 import {
@@ -35,6 +35,29 @@ describe("ProviderSettingsForm helpers", () => {
       description: "Stored in plain text on disk.",
       control: "password",
     });
+  });
+
+  it("derives a select control with its choices for the Antigravity sign-in method", () => {
+    const antigravity = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("antigravity")];
+    expect(antigravity).toBeDefined();
+
+    const fields = deriveProviderSettingsFields(antigravity!);
+    expect(fields.map((field) => field.key)).toEqual([
+      "authMethod",
+      "apiKey",
+      "gcpProject",
+      "gcpLocation",
+      "binaryPath",
+    ]);
+    const authMethod = fields.find((field) => field.key === "authMethod");
+    expect(authMethod).toMatchObject({ control: "select", clearWhenEmpty: "omit" });
+    expect(authMethod?.options?.map((option) => option.value)).toEqual([
+      "oauth-personal",
+      "oauth-business",
+      "gemini-api-key",
+      "agent-platform",
+    ]);
+    expect(fields.find((field) => field.key === "apiKey")?.control).toBe("password");
   });
 
   it("shows the auto-compaction threshold for Claude providers", () => {

@@ -40,30 +40,30 @@ describe("DesktopEnvironment", () => {
       const environment = yield* makeEnvironment(
         {},
         {
-          LECTURN_HOME: " /tmp/t3 ",
-          T3CODE_COMMIT_HASH: " 0123456789abcdef ",
-          T3CODE_PORT: "4949",
+          LECTURN_HOME: " /tmp/lecturn ",
+          LECTURN_COMMIT_HASH: " 0123456789abcdef ",
+          LECTURN_PORT: "4949",
           VITE_DEV_SERVER_URL: "http://localhost:5173",
-          T3CODE_DEV_REMOTE_T3_SERVER_ENTRY_PATH: " /remote/server.mjs ",
-          T3CODE_OTLP_TRACES_URL: " http://127.0.0.1:4318/v1/traces ",
-          T3CODE_OTLP_EXPORT_INTERVAL_MS: "2500",
+          LECTURN_DEV_REMOTE_LECTURN_SERVER_ENTRY_PATH: " /remote/server.mjs ",
+          LECTURN_OTLP_TRACES_URL: " http://127.0.0.1:4318/v1/traces ",
+          LECTURN_OTLP_EXPORT_INTERVAL_MS: "2500",
         },
       );
 
       assert.equal(environment.isDevelopment, true);
       assert.equal(environment.appDataDirectory, "/Users/alice/Library/Application Support");
-      assert.equal(environment.baseDir, "/tmp/t3");
-      assert.equal(environment.stateDir, "/tmp/t3/userdata");
-      assert.equal(environment.userDataPathOverride, "/tmp/t3/userdata/electron");
-      assert.equal(environment.desktopSettingsPath, "/tmp/t3/userdata/desktop-settings.json");
-      assert.equal(environment.clientSettingsPath, "/tmp/t3/userdata/client-settings.json");
+      assert.equal(environment.baseDir, "/tmp/lecturn");
+      assert.equal(environment.stateDir, "/tmp/lecturn/userdata");
+      assert.equal(environment.userDataPathOverride, "/tmp/lecturn/userdata/electron");
+      assert.equal(environment.desktopSettingsPath, "/tmp/lecturn/userdata/desktop-settings.json");
+      assert.equal(environment.clientSettingsPath, "/tmp/lecturn/userdata/client-settings.json");
       assert.equal(
         environment.savedEnvironmentRegistryPath,
-        "/tmp/t3/userdata/saved-environments.json",
+        "/tmp/lecturn/userdata/saved-environments.json",
       );
-      assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
-      assert.equal(environment.logDir, "/tmp/t3/userdata/logs");
-      assert.equal(environment.browserArtifactsDir, "/tmp/t3/userdata/browser-artifacts");
+      assert.equal(environment.serverSettingsPath, "/tmp/lecturn/userdata/settings.json");
+      assert.equal(environment.logDir, "/tmp/lecturn/userdata/logs");
+      assert.equal(environment.browserArtifactsDir, "/tmp/lecturn/userdata/browser-artifacts");
       assert.equal(environment.rootDir, "/repo");
       assert.equal(environment.appRoot, "/repo");
       assert.equal(environment.serverRoot, "/repo");
@@ -75,7 +75,10 @@ describe("DesktopEnvironment", () => {
         Option.map(environment.devServerUrl, (url) => url.href),
         Option.some("http://localhost:5173/"),
       );
-      assert.deepEqual(environment.devRemoteT3ServerEntryPath, Option.some("/remote/server.mjs"));
+      assert.deepEqual(
+        environment.devRemoteLecturnServerEntryPath,
+        Option.some("/remote/server.mjs"),
+      );
       assert.deepEqual(environment.configuredBackendPort, Option.some(4949));
       assert.deepEqual(environment.commitHashOverride, Option.some("0123456789abcdef"));
       assert.deepEqual(environment.otlpTracesUrl, Option.some("http://127.0.0.1:4318/v1/traces"));
@@ -88,16 +91,16 @@ describe("DesktopEnvironment", () => {
       const environment = yield* makeEnvironment(
         {},
         {
-          LECTURN_HOME: "/tmp/t3",
+          LECTURN_HOME: "/tmp/lecturn",
         },
       );
 
       assert.equal(environment.isDevelopment, false);
-      assert.equal(environment.stateDir, "/tmp/t3/userdata");
-      assert.equal(environment.userDataPathOverride, "/tmp/t3/userdata/electron");
-      assert.equal(environment.logDir, "/tmp/t3/userdata/logs");
-      assert.equal(environment.browserArtifactsDir, "/tmp/t3/userdata/browser-artifacts");
-      assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
+      assert.equal(environment.stateDir, "/tmp/lecturn/userdata");
+      assert.equal(environment.userDataPathOverride, "/tmp/lecturn/userdata/electron");
+      assert.equal(environment.logDir, "/tmp/lecturn/userdata/logs");
+      assert.equal(environment.browserArtifactsDir, "/tmp/lecturn/userdata/browser-artifacts");
+      assert.equal(environment.serverSettingsPath, "/tmp/lecturn/userdata/settings.json");
     }),
   );
 
@@ -137,7 +140,7 @@ describe("DesktopEnvironment", () => {
       const environment = yield* makeEnvironment(
         {},
         {
-          T3CODE_DESKTOP_APP_USER_MODEL_ID: " com.cloudgatherer.lecturn.dev.local ",
+          LECTURN_DESKTOP_APP_USER_MODEL_ID: " com.cloudgatherer.lecturn.dev.local ",
           VITE_DEV_SERVER_URL: "http://localhost:5173",
         },
       );
@@ -167,17 +170,17 @@ describe("DesktopEnvironment", () => {
   );
 });
 
-it.effect("isolates Lecturn from the installed T3 Code home and OS identity", () =>
+it.effect("uses the configured Lecturn home and application identity", () =>
   Effect.gen(function* () {
     const environment = yield* makeEnvironment(
       { isPackaged: true },
-      { T3CODE_HOME: "/Users/alice/.t3" },
+      { LECTURN_HOME: "/Users/alice/.lecturn" },
     );
     assert.equal(environment.baseDir, "/Users/alice/.lecturn");
     assert.equal(environment.stateDir, "/Users/alice/.lecturn/userdata");
     assert.equal(environment.displayName, "Lecturn");
     assert.equal(environment.userDataDirName, "lecturn");
-    assert.notInclude(environment.legacyUserDataDirName, "T3");
+    assert.equal(environment.legacyUserDataDirName, "Lecturn (Alpha)");
     assert.equal(environment.appUserModelId, "com.cloudgatherer.lecturn");
     assert.equal(environment.linuxDesktopEntryName, "lecturn.desktop");
   }),

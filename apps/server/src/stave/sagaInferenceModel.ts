@@ -1,4 +1,4 @@
-import type { ModelSelection, ProviderDriverKind } from "@t3tools/contracts";
+import type { ModelSelection, ProviderDriverKind } from "@lecturn/contracts";
 
 /** Pick a small inference model within the triggering conversation's account. */
 export function resolveSagaInferenceModel(
@@ -16,7 +16,8 @@ export function resolveSagaInferenceModel(
           : [];
   const model = preferences.find((preferred) => models.some((entry) => entry.slug === preferred));
   // OpenCode's provider/model slug selects a downstream account. Grok may use
-  // custom model endpoints. Preserve both rather than guessing a new provider.
+  // custom model endpoints. Antigravity keeps the account-selected model too.
+  // Preserve these rather than guessing a new provider.
   if (model === undefined) return selection;
   return {
     instanceId: selection.instanceId,

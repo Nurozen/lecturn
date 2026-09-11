@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { ProjectId, ThreadId, type StaveSagaReview } from "@t3tools/contracts";
+import { ProjectId, ThreadId, type StaveSagaReview } from "@lecturn/contracts";
 import {
   staveMembershipDeletionWarning,
   staveSagaReviewLines,

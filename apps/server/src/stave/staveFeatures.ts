@@ -1,4 +1,4 @@
-import type { StaveFeatureCommand, StaveFeatures, StaveOperation } from "@t3tools/contracts";
+import type { StaveFeatureCommand, StaveFeatures, StaveOperation } from "@lecturn/contracts";
 
 /** Flags used by Lecturn, including inherited global flags shown in nested help. */
 export const STAVE_COMMAND_FLAGS = {

@@ -19,7 +19,7 @@ import {
   ThreadLinkedPullRequest,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
@@ -120,4 +120,4 @@ export interface ProjectionThreadRepositoryShape {
 export class ProjectionThreadRepository extends Context.Service<
   ProjectionThreadRepository,
   ProjectionThreadRepositoryShape
->()("t3/persistence/Services/ProjectionThreads/ProjectionThreadRepository") {}
+>()("lecturn/persistence/Services/ProjectionThreads/ProjectionThreadRepository") {}

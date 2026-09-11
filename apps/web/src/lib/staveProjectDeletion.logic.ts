@@ -2,7 +2,7 @@ import type {
   StaveSpaceStatus,
   StaveSagaReview,
   StaveSagaTeardownAuthorization,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 
 export function staveMembershipDeletionWarning(
   status: Pick<StaveSpaceStatus, "sagaMembership" | "membershipUnknown">,

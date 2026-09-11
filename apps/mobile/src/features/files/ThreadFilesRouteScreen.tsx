@@ -10,14 +10,14 @@ import {
   type ProjectListEntriesResult,
   type ProjectReadFileResult,
   ThreadId,
-} from "@t3tools/contracts";
-import { videoMimeType } from "@t3tools/shared/video";
+} from "@lecturn/contracts";
+import { videoMimeType } from "@lecturn/shared/video";
 import {
   isWorkspaceBrowserPreviewPath,
   isWorkspaceImagePreviewPath,
   mediaMimeTypeFromExtension,
-} from "@t3tools/shared/filePreview";
-import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
+} from "@lecturn/shared/filePreview";
+import { mediaFileReference } from "@lecturn/client-runtime/media-reference";
 
 import { AndroidHeaderIconButton, AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { SymbolView } from "../../components/AppSymbol";
@@ -37,6 +37,7 @@ import { useThreadSelection } from "../../state/use-thread-selection";
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import { useEnvironmentQuery } from "../../state/query";
 import { projectEnvironment } from "../../state/projects";
+import type { AssetUrlFailureReason } from "../../state/asset-url-state";
 import {
   useAdaptiveWorkspaceLayout,
   useAdaptiveWorkspacePaneRole,
@@ -56,6 +57,7 @@ import { preloadWorkspaceFileContents } from "./preload-workspace-file";
 import { SourceFileSurface } from "./SourceFileSurface";
 import { ThreadFileNavigatorPane } from "./thread-file-navigator-pane";
 import { WorkspaceFileImagePreview } from "./WorkspaceFileImagePreview";
+import { WorkspaceFilePreviewError } from "./WorkspaceFilePreviewError";
 import { WorkspaceFileVideoPreview } from "./WorkspaceFileVideoPreview";
 import { WorkspaceFileWebPreview } from "./WorkspaceFileWebPreview";
 import {
@@ -104,8 +106,10 @@ function defaultViewMode(path: string | null): FileViewMode {
 
 function FileContent(props: {
   readonly activeMode: FileViewMode;
+  readonly environmentId: EnvironmentId | null;
   readonly previewUri: string | null;
-  readonly previewUnavailable: boolean;
+  readonly previewFailure: AssetUrlFailureReason | null;
+  readonly onRetryPreview: () => void;
   readonly videoSource: MediaVideoPreviewSource | null;
   readonly mediaSource?: MediaActionsSource;
   readonly resolveVideoUri: () => Promise<string | null>;
@@ -121,8 +125,22 @@ function FileContent(props: {
   const isMarkdown = isMarkdownPreviewFile(props.relativePath);
   const isBrowserFile = isWorkspaceBrowserPreviewPath(props.relativePath);
   const isImageFile = isWorkspaceImagePreviewPath(props.relativePath);
+  const isVideoFile = isVideoPreviewFile(props.relativePath);
+  // Only the surfaces that wait on a signed asset URL can be blocked by one.
+  const needsAssetUrl =
+    isVideoFile || (props.activeMode === "preview" && (isImageFile || isBrowserFile));
 
-  if (isVideoPreviewFile(props.relativePath)) {
+  if (needsAssetUrl && props.previewFailure !== null) {
+    return (
+      <WorkspaceFilePreviewError
+        environmentId={props.environmentId}
+        reason={props.previewFailure}
+        onRetry={props.onRetryPreview}
+      />
+    );
+  }
+
+  if (isVideoFile) {
     return (
       <WorkspaceFileVideoPreview
         name={basename(props.relativePath)}
@@ -130,7 +148,6 @@ function FileContent(props: {
         uri={props.previewUri}
         source={props.videoSource}
         resolvePlaybackUri={props.resolveVideoUri}
-        unavailable={props.previewUnavailable}
       />
     );
   }
@@ -173,7 +190,7 @@ function FileContent(props: {
     <View className="flex-1 bg-sheet">
       {props.truncated ? (
         <View className="border-b border-adaptive-amber-200-900-a60 bg-adaptive-amber-50-950-a40 px-4 py-2">
-          <Text className="text-2xs font-t3-bold uppercase text-adaptive-amber-700-300">
+          <Text className="text-2xs font-lecturn-bold uppercase text-adaptive-amber-700-300">
             Partial file
           </Text>
           <Text className="text-xs leading-snug text-adaptive-amber-800-200">
@@ -588,6 +605,10 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
     assetPreviewUri === null || previewRevision === 0
       ? assetPreviewUri
       : `${assetPreviewUri}${assetPreviewUri.includes("?") ? "&" : "?"}revision=${previewRevision}`;
+  // Remounting the preview after a re-mint is what makes a failed asset URL retryable.
+  const handleRetryPreview = () => {
+    void assetPreview.refresh().finally(() => setPreviewRevision((current) => current + 1));
+  };
   const needsFileContents =
     relativePath !== null &&
     !isVideoFile &&
@@ -889,8 +910,10 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
         <FileContent
           key={previewKey}
           activeMode={resolvedActiveMode}
+          environmentId={environmentId}
           previewUri={previewUri}
-          previewUnavailable={assetPreview._tag === "Failure"}
+          previewFailure={assetPreview._tag === "Failure" ? assetPreview.reason : null}
+          onRetryPreview={handleRetryPreview}
           videoSource={videoSource}
           mediaSource={mediaSource}
           resolveVideoUri={assetPreview.refresh}

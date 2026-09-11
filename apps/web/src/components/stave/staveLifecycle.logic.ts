@@ -3,7 +3,7 @@ import type {
   StaveLifecycleActionOperation,
   StaveLifecycleSettings,
   StaveProjectNotice,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 
 export function lifecycleOperation(input: {
   projectId: ProjectId;

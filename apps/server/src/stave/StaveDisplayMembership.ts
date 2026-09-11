@@ -1,5 +1,5 @@
 /** Best-effort display enrichment; destructive admission always performs its own fresh scan. */
-import type { StaveProjectInfo } from "@t3tools/contracts";
+import type { StaveProjectInfo } from "@lecturn/contracts";
 import { Cache, Context, Duration, Effect, Exit, Layer } from "effect";
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
@@ -12,7 +12,7 @@ export class StaveDisplayMembership extends Context.Service<
   {
     readonly enrich: (root: string, info: StaveProjectInfo) => Effect.Effect<StaveProjectInfo>;
   }
->()("t3/stave/StaveDisplayMembership") {}
+>()("lecturn/stave/StaveDisplayMembership") {}
 
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig;

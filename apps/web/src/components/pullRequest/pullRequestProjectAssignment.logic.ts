@@ -5,11 +5,11 @@ import {
   type ProjectId,
   type OrchestrationProjectShell,
   type SourceControlProviderKind,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import {
   resolveProjectGitTargets,
   resolveRepositoryPullRequestSelector,
-} from "@t3tools/client-runtime/state/projectGit";
+} from "@lecturn/client-runtime/state/projectGit";
 
 /** The little of a project this needs: who holds it, and which repository it is a copy of. */
 export interface AssignableProject {

@@ -1,10 +1,10 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 import {
   EnvironmentId,
   ProjectId,
   ProviderInstanceId,
   type ModelSelection,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   resolveThreadActionProjectRef,
@@ -180,7 +180,7 @@ describe("resolveNewThreadEnvModeSources", () => {
     primaryRepoPath: "/spaces/space-1/repo",
   };
 
-  it("forces local for a Stave space and skips the t3.json read", () => {
+  it("forces local for a Stave space and skips the lecturn.json read", () => {
     expect(
       resolveNewThreadEnvModeSources({
         workspaceRoot: "/spaces/space-1",
@@ -190,7 +190,7 @@ describe("resolveNewThreadEnvModeSources", () => {
     ).toEqual({ forcedMode: "local", projectSetting: "worktree", consultProjectFile: false });
   });
 
-  it("skips the t3.json read when the per-project setting decides", () => {
+  it("skips the lecturn.json read when the per-project setting decides", () => {
     expect(
       resolveNewThreadEnvModeSources({
         workspaceRoot: "/repo",
@@ -200,7 +200,7 @@ describe("resolveNewThreadEnvModeSources", () => {
     ).toEqual({ forcedMode: undefined, projectSetting: "worktree", consultProjectFile: false });
   });
 
-  it("consults t3.json only for a known project with no higher-priority source", () => {
+  it("consults lecturn.json only for a known project with no higher-priority source", () => {
     expect(
       resolveNewThreadEnvModeSources({ workspaceRoot: "/repo", defaultThreadEnvMode: null }),
     ).toEqual({

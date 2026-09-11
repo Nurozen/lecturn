@@ -4,14 +4,14 @@ import {
   type ProviderOptionSelection,
   type ScopedThreadRef,
   type ServerProviderModel,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import {
   buildExplicitProviderOptionSelectionsFromDescriptors,
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
   isClaudeUltrathinkPrompt,
   normalizeModelSlug,
-} from "@t3tools/shared/model";
+} from "@lecturn/shared/model";
 import type { VariantProps } from "class-variance-authority";
 import type { ReactNode } from "react";
 
@@ -56,6 +56,7 @@ type TraitsRenderInput = {
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
   isComposerOwned?: boolean;
+  hidden?: boolean;
 };
 
 export function getComposerPromptInjectionState(prompt: string): ComposerPromptInjectionState {
@@ -134,6 +135,7 @@ function renderTraitsControl(
     triggerVariant,
     triggerClassName,
     isComposerOwned,
+    hidden,
   } = input;
   const hasTarget = threadRef !== undefined || draftId !== undefined;
   if (
@@ -165,6 +167,7 @@ function renderTraitsControl(
       {...(triggerVariant !== undefined ? { triggerVariant } : {})}
       {...(triggerClassName !== undefined ? { triggerClassName } : {})}
       {...(isComposerOwned ? { isComposerOwned } : {})}
+      {...(hidden !== undefined ? { hidden } : {})}
     />
   );
 }

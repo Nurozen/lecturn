@@ -2,8 +2,8 @@ import * as Layer from "effect/Layer";
 import { RuntimeDistributionPackage } from "./pinnedRuntime.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { ServerSelfUpdateError, ThreadId } from "@t3tools/contracts";
-import { HostProcessExecutablePath } from "@t3tools/shared/hostProcess";
+import { ServerSelfUpdateError, ThreadId } from "@lecturn/contracts";
+import { HostProcessExecutablePath } from "@lecturn/shared/hostProcess";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -32,7 +32,7 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-self-update-test-" });
+  const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-self-update-test-" });
   const order: string[] = [];
   const runner = ProcessRunner.ProcessRunner.of({
     run: (input) =>
@@ -41,7 +41,7 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
           order.push("install");
           const prefix = input.args[input.args.indexOf("--prefix") + 1];
           if (prefix === undefined) return yield* Effect.die("missing npm prefix");
-          const entry = path.join(prefix, "node_modules", "t3", "dist", "bin.mjs");
+          const entry = path.join(prefix, "node_modules", "lecturn", "dist", "bin.mjs");
           yield* fs.makeDirectory(path.dirname(entry), { recursive: true }).pipe(Effect.orDie);
           yield* fs.writeFileString(entry, "export {};\n").pipe(Effect.orDie);
           return {
@@ -93,7 +93,7 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
   );
   const selfUpdate = yield* ServerSelfUpdate.make().pipe(
     Effect.provideService(ProcessRunner.ProcessRunner, runner),
-    Effect.provideService(RuntimeDistributionPackage, "t3"),
+    Effect.provideService(RuntimeDistributionPackage, "lecturn"),
     Effect.provideService(ServiceLauncherClient.ServiceLauncherClient, launcher),
     Effect.provideService(
       DesktopAppUpdate.DesktopAppUpdate,
@@ -108,7 +108,7 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
   return { selfUpdate, order };
 });
 
-it.layer(Layer.merge(NodeServices.layer, Layer.succeed(RuntimeDistributionPackage, "t3")))(
+it.layer(Layer.merge(NodeServices.layer, Layer.succeed(RuntimeDistributionPackage, "lecturn")))(
   "server self update",
   (it) => {
     it.effect("marks running threads at the boot-service handoff", () =>
@@ -349,7 +349,7 @@ it.layer(Layer.merge(NodeServices.layer, Layer.succeed(RuntimeDistributionPackag
         const web = yield* makeHarness();
         expect(
           (yield* web.selfUpdate.update({ targetVersion: "latest" }).pipe(Effect.flip)).reason,
-        ).toBe("'latest' is not an exact t3 version.");
+        ).toBe("'latest' is not an exact lecturn version.");
         const desktop = yield* makeHarness({ mode: "desktop" });
         expect(
           (yield* desktop.selfUpdate.update({ targetVersion: "1.1.0" }).pipe(Effect.flip)).reason,

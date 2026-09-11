@@ -1,17 +1,17 @@
 import { describeStaveWorkspace } from "./stave/staveWorkspaceContext.logic";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { staveAdmissionErrorMessage } from "@t3tools/client-runtime/errors";
+import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
+import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
 import {
   type ProjectGitTarget,
   isStaveProject,
   resolveProjectGitCwd,
   staveForcedEnvMode,
-} from "@t3tools/client-runtime/state/projectGit";
+} from "@lecturn/client-runtime/state/projectGit";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import type { ContextMenuItem, EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
+} from "@lecturn/client-runtime/state/runtime";
+import type { ContextMenuItem, EnvironmentId, VcsRef, ThreadId } from "@lecturn/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { ChevronDownIcon, GitBranchIcon, RefreshCwIcon, SearchIcon } from "lucide-react";
 import {

@@ -1,4 +1,4 @@
-import { ProviderDriverKind, ProviderInstanceId, type ModelSelection } from "@t3tools/contracts";
+import { ProviderDriverKind, ProviderInstanceId, type ModelSelection } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import { resolveSagaInferenceModel } from "./sagaInferenceModel.ts";
 
@@ -34,7 +34,7 @@ describe("saga account inference model", () => {
       "composer-2",
     );
   });
-  it.each(["codex", "claudeAgent", "cursor", "grok", "opencode", "custom-driver"])(
+  it.each(["codex", "claudeAgent", "cursor", "grok", "opencode", "antigravity", "custom-driver"])(
     "preserves %s's selected account/model/options without an advertised preference",
     (driver) => {
       expect(resolveSagaInferenceModel(selection, ProviderDriverKind.make(driver), [])).toBe(

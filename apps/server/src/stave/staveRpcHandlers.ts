@@ -1,4 +1,4 @@
-import { stableStringify } from "@t3tools/shared/relaySigning";
+import { stableStringify } from "@lecturn/shared/relaySigning";
 import * as Schema from "effect/Schema";
 import * as FileSystem from "effect/FileSystem";
 import { StaveExecutionContext } from "./StaveExecutionContext.ts";
@@ -22,7 +22,7 @@ import { StaveMemoryWiring, noop as noopMemoryWiring } from "./StaveMemoryWiring
  * the socket that started it.
  *
  * Gating: every RPC refuses with `StaveUnavailableError{reason:
- * "disabled_by_server"}` when `T3CODE_STAVE` is off; all but `getStatus`
+ * "disabled_by_server"}` when `LECTURN_STAVE` is off; all but `getStatus`
  * further require `settings.stave.enabled` and a runnable binary. The status
  * RPC deliberately works without those so clients can show what is missing.
  *
@@ -52,7 +52,7 @@ import {
   StaveNotSpaceError,
   StaveUnavailableError,
   WS_METHODS,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -260,7 +260,7 @@ export interface StaveRpcRuntimeShape {
 }
 
 export class StaveRpcRuntime extends Context.Service<StaveRpcRuntime, StaveRpcRuntimeShape>()(
-  "t3/stave/staveRpcHandlers/StaveRpcRuntime",
+  "lecturn/stave/staveRpcHandlers/StaveRpcRuntime",
 ) {}
 
 export interface StaveRpcRuntimeOptions {
@@ -523,7 +523,7 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
     () => noopMemoryWiring,
   );
 
-  // `T3CODE_STAVE=false` is the unbypassable kill switch: the capability is
+  // `LECTURN_STAVE=false` is the unbypassable kill switch: the capability is
   // absent AND every stave RPC refuses, like thread forking.
   const requireKillSwitchOn: Effect.Effect<void, StaveUnavailableError> = config.staveEnabled
     ? Effect.void
@@ -577,6 +577,7 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
         { provider: "codex", supported: true },
         { provider: "cursor", supported: true },
         { provider: "grok", supported: true },
+        { provider: "antigravity", supported: true },
         { provider: "opencode", supported: true, limitation: "external_server_unsupported" },
       ],
       runnable: probe.runnable,

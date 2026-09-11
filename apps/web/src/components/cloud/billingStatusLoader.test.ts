@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vite-plus/test";
-import type { RelayBillingStatus } from "@t3tools/contracts";
+import type { RelayBillingStatus } from "@lecturn/contracts";
 import { createBillingStatusLoader } from "./billingStatusLoader";
 
 function deferred() {

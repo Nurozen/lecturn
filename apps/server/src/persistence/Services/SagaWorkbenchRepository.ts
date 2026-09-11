@@ -4,7 +4,7 @@ import type {
   SagaWorkbenchError,
   SagaWorkbenchIdentity,
   SagaWorkbenchWorkflow,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 export const workflowIdentityKey = (identity: SagaWorkbenchIdentity) =>
   JSON.stringify([
     identity.projectId,
@@ -50,4 +50,4 @@ export class SagaWorkbenchRepository extends Context.Service<
       identity: SagaWorkbenchIdentity,
     ) => Effect.Effect<readonly SagaWorkbenchActivity[], SagaWorkbenchError>;
   }
->()("t3/persistence/Services/SagaWorkbenchRepository") {}
+>()("lecturn/persistence/Services/SagaWorkbenchRepository") {}

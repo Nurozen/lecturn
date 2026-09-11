@@ -253,7 +253,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "stave-binary-path",
     title: "Stave binary path",
     to: "/settings/general",
-    searchTerms: ["stave executable path override T3CODE_STAVE_PATH"],
+    searchTerms: ["stave executable path override LECTURN_STAVE_PATH"],
     requiresStave: true,
   },
   {
@@ -404,7 +404,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Providers",
     to: "/settings/providers",
     searchTerms: [
-      "agents cli codex claude cursor grok opencode instances authentication api key models configuration binary path config directory endpoint arguments environment variables display name accent color custom favorite hidden auto compact",
+      "agents cli codex claude cursor grok opencode antigravity google sign in sign out install subscription instances authentication api key models configuration binary path config directory endpoint arguments environment variables display name accent color custom favorite hidden auto compact",
     ],
   },
   {
@@ -547,7 +547,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     wslAvailableOnly: true,
   },
   {
-    id: "t3-connect",
+    id: "lecturn-connect",
     title: "Lecturn Connect",
     to: "/settings/connections",
     targetId: "connections-environment",
@@ -575,7 +575,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "remote-environments",
     title: "Remote environments",
     to: "/settings/connections",
-    searchTerms: ["add pair backend host code ssh config agent tunnel saved t3 connect"],
+    searchTerms: ["add pair backend host code ssh config agent tunnel saved lecturn connect"],
   },
   {
     id: "archive",

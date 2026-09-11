@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { NodeServices } from "@effect/platform-node";
-import { DEFAULT_SERVER_SETTINGS, type StaveProjectInfo } from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS, type StaveProjectInfo } from "@lecturn/contracts";
 import { Effect, Layer } from "effect";
 import { layerTest } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";

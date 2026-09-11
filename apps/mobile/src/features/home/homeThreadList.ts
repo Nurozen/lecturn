@@ -4,25 +4,25 @@ import {
   deriveProjectGroupLabel,
   buildSagaProjectTree,
   type SagaProjectIndexEntry,
-} from "@t3tools/client-runtime/state/project-grouping";
-import { buildPhysicalSagaProjectGroups } from "@t3tools/client-runtime/state/sagaWorkbench";
+} from "@lecturn/client-runtime/state/project-grouping";
+import { buildPhysicalSagaProjectGroups } from "@lecturn/client-runtime/state/sagaWorkbench";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
-} from "@t3tools/client-runtime/state/shell";
+} from "@lecturn/client-runtime/state/shell";
 import {
   getThreadSortTimestamp,
   sortThreads,
   toSortableTimestamp,
-} from "@t3tools/client-runtime/state/thread-sort";
-import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
+} from "@lecturn/client-runtime/state/thread-sort";
+import { threadSearchMatchKey } from "@lecturn/client-runtime/state/thread-search";
 import type {
   EnvironmentId,
   ScopedProjectRef,
   SidebarProjectGroupingMode,
   SidebarProjectSortOrder,
   SidebarThreadSortOrder,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Order from "effect/Order";

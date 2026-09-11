@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@lecturn/contracts";
 import { deriveSidebarEnvironmentMetadata } from "./sidebarProjectGrouping";
 
 const local = { environmentId: EnvironmentId.make("local"), environmentLabel: "This Mac" };

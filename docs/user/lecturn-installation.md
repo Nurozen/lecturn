@@ -1,8 +1,8 @@
-# Install Lecturn alongside T3 Code
+# Install Lecturn
 
-Drag **Lecturn.app** into Applications. Lecturn has its own application name, URL handler, settings, saved connections, credentials, and conversation database. Installing Lecturn does not migrate or replace an existing T3 Code installation.
+Drag **Lecturn.app** into Applications. Lecturn has its own application name, URL handler, settings, saved connections, credentials, and conversation database.
 
-Lecturn stores runtime data in `~/.lecturn/userdata`. Development sessions use a separate development directory. `LECTURN_HOME` or the explicit `--base-dir` option can select another base directory; an inherited `T3CODE_HOME` does not redirect Lecturn into T3 Code's data.
+Lecturn stores runtime data in `~/.lecturn/userdata`. Development sessions use a separate development directory. `LECTURN_HOME` or the explicit `--base-dir` option can select another base directory.
 
 Open the Lecturn app, sign in to Lecturn Connect, and link this computer to make it available from the Lecturn web and mobile apps. The desktop app must remain running to host the connection.
 

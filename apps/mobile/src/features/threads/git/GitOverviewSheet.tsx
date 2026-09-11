@@ -3,16 +3,16 @@ import {
   buildMenuItems,
   getGitActionDisabledReason,
   requiresDefaultBranchConfirmation,
-} from "@t3tools/client-runtime/state/vcs";
-import { isStaveProject, type ProjectGitTarget } from "@t3tools/client-runtime/state/projectGit";
-import { EnvironmentId, ThreadId, type ProjectId, WS_METHODS } from "@t3tools/contracts";
+} from "@lecturn/client-runtime/state/vcs";
+import { isStaveProject, type ProjectGitTarget } from "@lecturn/client-runtime/state/projectGit";
+import { EnvironmentId, ThreadId, type ProjectId, WS_METHODS } from "@lecturn/contracts";
 import {
   CommonActions,
   StackActions,
   useNavigation,
   type StaticScreenProps,
 } from "@react-navigation/native";
-import { createEnvironmentRpcQueryAtomFamily } from "@t3tools/client-runtime/state/runtime";
+import { createEnvironmentRpcQueryAtomFamily } from "@lecturn/client-runtime/state/runtime";
 import { connectionAtomRuntime } from "../../../connection/runtime";
 import { SymbolView } from "../../../components/AppSymbol";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -60,7 +60,7 @@ function SpacePullRequests(props: {
   }
   return (
     <View className="gap-2 rounded-2xl border border-border bg-card px-4 py-3">
-      <Text className="font-t3-bold text-base">Space pull requests</Text>
+      <Text className="font-lecturn-bold text-base">Space pull requests</Text>
       {query.error ? <Text className="text-foreground-muted text-sm">{query.error}</Text> : null}
       {query.isPending && !query.data ? (
         <Text className="text-foreground-muted text-sm">Loading pull requests…</Text>
@@ -353,7 +353,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
     >
       {!worktreesSupported ? (
         <View className="gap-1 rounded-2xl border border-border bg-card px-4 py-3">
-          <Text className="text-base font-t3-bold">Space repositories</Text>
+          <Text className="text-base font-lecturn-bold">Space repositories</Text>
           <Text className="text-sm text-foreground-muted">
             Select a repository for Git actions. Threads keep working across the whole space.
           </Text>
@@ -555,10 +555,10 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
               weight="medium"
             />
           </Pressable>
-          <Text className="text-xs font-t3-bold tracking-[1px] uppercase text-foreground-muted">
+          <Text className="text-xs font-lecturn-bold tracking-[1px] uppercase text-foreground-muted">
             Repository
           </Text>
-          <Text className="pr-10 text-xl font-t3-bold">{currentBranchLabel}</Text>
+          <Text className="pr-10 text-xl font-lecturn-bold">{currentBranchLabel}</Text>
           <Text className="text-foreground-secondary text-sm font-medium leading-normal">
             {currentStatusSummary}
           </Text>

@@ -52,13 +52,13 @@ jobs:
           run-install: false
 
       - name: Install desktop dependencies
-        run: vp install --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts...
+        run: vp install --filter=@lecturn/desktop... --filter=lecturn... --filter=@lecturn/scripts...
 
       - name: Cache resource monitor
         id: resource_monitor_cache
         uses: actions/cache@v6
         with:
-          path: native/resource-monitor/target/aarch64-apple-darwin/release/t3-resource-monitor
+          path: native/resource-monitor/target/aarch64-apple-darwin/release/lecturn-resource-monitor
           key: resource-monitor-aarch64-apple-darwin-${{ hashFiles('native/resource-monitor/Cargo.lock', 'native/resource-monitor/Cargo.toml', 'native/resource-monitor/src/**') }}
 
       - name: Setup Rust
@@ -82,11 +82,20 @@ jobs:
 
           echo "version=$preview_version" >> "$GITHUB_OUTPUT"
 
+      - name: Fetch Stave binary
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/fetch-stave.ts \
+            --platform-key darwin-arm64 \
+            --version latest \
+            --out "$GITHUB_WORKSPACE/stave-bin"
+
       - id: build
         name: Build unsigned macOS DMG
         shell: bash
         env:
-          T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR: ${{ steps.resource_monitor_cache.outputs.cache-hit == 'true' }}
+          LECTURN_DESKTOP_REUSE_RESOURCE_MONITOR: ${{ steps.resource_monitor_cache.outputs.cache-hit == 'true' }}
           PREVIEW_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
@@ -95,6 +104,7 @@ jobs:
             --platform mac \
             --target dmg \
             --arch arm64 \
+            --stave-binary "$GITHUB_WORKSPACE/stave-bin/darwin-arm64/stave" \
             --build-version "$PREVIEW_VERSION" \
             --verbose
 

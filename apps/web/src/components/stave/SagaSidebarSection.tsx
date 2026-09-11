@@ -1,7 +1,7 @@
 import { StaveLifecycleBadge } from "./StaveLifecycleBadge";
 import { useState } from "react";
 import { ChevronDownIcon, ChevronRightIcon, MoreHorizontalIcon } from "lucide-react";
-import type { StaveOperation } from "@t3tools/contracts";
+import type { StaveOperation } from "@lecturn/contracts";
 import type {
   SidebarProjectSnapshot,
   SidebarProjectGroupMember,

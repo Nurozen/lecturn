@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo } from "react";
 
-import { isStaveProject } from "@t3tools/client-runtime/state/projectGit";
-import type { EnvironmentId, OrchestrationCheckpointSummary, ThreadId } from "@t3tools/contracts";
+import { isStaveProject } from "@lecturn/client-runtime/state/projectGit";
+import type { EnvironmentId, OrchestrationCheckpointSummary, ThreadId } from "@lecturn/contracts";
 
 import { useCheckpointDiff } from "../../state/queries";
 import { useEnvironmentQuery } from "../../state/query";

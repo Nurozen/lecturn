@@ -14,7 +14,7 @@ const workspaceConfig = {
 it("builds the default manifest from the workspace package.json", () => {
   const manifest = buildPublishManifest({ version: "1.2.3", workspaceConfig });
 
-  assert.equal(manifest.name, "t3");
+  assert.equal(manifest.name, "lecturn");
   assert.deepStrictEqual(manifest.bin, { lecturn: "./dist/bin.mjs" });
   assert.deepStrictEqual(manifest.repository, serverPackageJson.repository);
   assert.equal(manifest.version, "1.2.3");
@@ -68,7 +68,7 @@ it("filters pnpm publish by the published package name", () => {
   assert.deepStrictEqual(createVpPmPublishArgs({ ...base, packageName: Option.none() }), [
     "publish",
     "--filter",
-    "t3",
+    "lecturn",
     "--access",
     "public",
     "--tag",

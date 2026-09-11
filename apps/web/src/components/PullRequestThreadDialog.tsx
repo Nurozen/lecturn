@@ -1,8 +1,8 @@
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { staveAdmissionErrorMessage } from "@t3tools/client-runtime/errors";
-import { isStaveProject, resolveProjectGitCwd } from "@t3tools/client-runtime/state/projectGit";
-import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
+import type { EnvironmentId, ThreadId } from "@lecturn/contracts";
+import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
+import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
+import { isStaveProject, resolveProjectGitCwd } from "@lecturn/client-runtime/state/projectGit";
+import { isAtomCommandInterrupted } from "@lecturn/client-runtime/state/runtime";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 

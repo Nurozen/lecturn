@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@lecturn/contracts";
 
 // A completed mutation may have partially changed disk state even when it failed.
 const listeners = new Set<(environmentId: EnvironmentId) => void>();

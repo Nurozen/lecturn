@@ -12,7 +12,7 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeCrypto from "node:crypto";
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessEnvironment, HostProcessPlatform } from "@lecturn/shared/hostProcess";
 
 import {
   AuthAccessTokenType,
@@ -41,8 +41,11 @@ import {
   ORCHESTRATION_WS_METHODS,
   type PreviewEvent,
   ProjectId,
+  type ProviderAuthState,
   ProviderDriverKind,
   ProviderInstanceId,
+  type ProviderInstallState,
+  ProviderSetupError,
   ResolvedKeybindingRule,
   type ServerSettingsError,
   type StaveCommandError,
@@ -54,14 +57,14 @@ import {
   WS_METHODS,
   WsRpcGroup,
   EditorId,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import {
   computeDpopAccessTokenHash,
   computeDpopJwkThumbprint,
   type DpopPublicJwk,
-} from "@t3tools/shared/dpop";
-import { RELAY_HEALTH_REQUEST_TYP, RELAY_MINT_REQUEST_TYP } from "@t3tools/shared/relayJwt";
-import * as RelayClient from "@t3tools/shared/relayClient";
+} from "@lecturn/shared/dpop";
+import { RELAY_HEALTH_REQUEST_TYP, RELAY_MINT_REQUEST_TYP } from "@lecturn/shared/relayJwt";
+import * as RelayClient from "@lecturn/shared/relayClient";
 import { assert, it } from "@effect/vitest";
 import { assertFailure, assertInclude, assertTrue } from "@effect/vitest/utils";
 import * as Clock from "effect/Clock";
@@ -134,6 +137,13 @@ import { PersistenceSqlError } from "./persistence/Errors.ts";
 import { OrchestrationCommandReceiptRepository } from "./persistence/Services/OrchestrationCommandReceipts.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import * as ProviderService from "./provider/Services/ProviderService.ts";
+import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
+import { ProviderInstanceRegistry } from "./provider/Services/ProviderInstanceRegistry.ts";
+import {
+  AntigravityInstallation,
+  AntigravityInstallationError,
+} from "./provider/AntigravityInstallation.ts";
+import type { ProviderInstance } from "./provider/ProviderDriver.ts";
 import { ProviderAdapterRequestError } from "./provider/Errors.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/providerMaintenance.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -146,7 +156,7 @@ import * as PortScanner from "./preview/PortScanner.ts";
 import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
 import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
-import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
+import * as LecturnProjectFileLoader from "./project/LecturnProjectFileLoader.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
@@ -236,6 +246,47 @@ const defaultModelSelection = {
   instanceId: ProviderInstanceId.make("codex"),
   model: "gpt-5-codex",
 } as const;
+
+const providerSetupInstanceId = ProviderInstanceId.make("antigravity-custom-profile");
+const providerSetupDriver = ProviderDriverKind.make("antigravity");
+const providerSetupInstallState: ProviderInstallState = {
+  driver: providerSetupDriver,
+  operationId: "install-operation",
+  phase: "downloading",
+  downloadedBytes: 128,
+  totalBytes: 256,
+  version: "test-release",
+  installedVersion: null,
+  canRemove: false,
+  message: null,
+};
+const providerSetupAuthState: ProviderAuthState = {
+  instanceId: providerSetupInstanceId,
+  phase: "idle",
+  flowId: null,
+  authorizationUrl: null,
+  expiresAt: null,
+  message: null,
+};
+const providerSetupInstance: ProviderInstance = {
+  instanceId: providerSetupInstanceId,
+  driverKind: providerSetupDriver,
+  enabled: false,
+  displayName: "Google account",
+  continuationIdentity: {
+    driverKind: providerSetupDriver,
+    continuationKey: providerSetupInstanceId,
+  },
+  get adapter(): never {
+    throw new Error("Provider setup must not start a chat session.");
+  },
+  get snapshot(): never {
+    throw new Error("Installation routing must not probe the provider.");
+  },
+  get textGeneration(): never {
+    throw new Error("Provider setup must not generate text.");
+  },
+};
 
 const makeLiveToolActivityEvent = (
   sequence: number,
@@ -450,9 +501,9 @@ const makeBrowserOtlpPayload = (spanName: string) =>
         url: collector.url,
         exportInterval: "10 millis",
         resource: {
-          serviceName: "t3-web",
+          serviceName: "lecturn-web",
           attributes: {
-            "service.runtime": "t3-web",
+            "service.runtime": "lecturn-web",
             "service.mode": "browser",
             "service.version": "test",
           },
@@ -482,6 +533,9 @@ const buildAppUnderTest = (options?: {
     environmentTheme?: Partial<EnvironmentTheme.EnvironmentThemeService["Service"]>;
     providerRegistry?: Partial<ProviderRegistry.ProviderRegistry["Service"]>;
     providerService?: Partial<ProviderService.ProviderService["Service"]>;
+    providerAuth?: Partial<ProviderAuthService["Service"]>;
+    providerInstanceRegistry?: Partial<ProviderInstanceRegistry["Service"]>;
+    antigravityInstallation?: Partial<AntigravityInstallation["Service"]>;
     serverSettings?: Partial<ServerSettings.ServerSettingsService["Service"]>;
     externalLauncher?: Partial<ExternalLauncher.ExternalLauncher["Service"]>;
     vcsDriver?: Partial<VcsDriver.VcsDriver["Service"]>;
@@ -533,7 +587,9 @@ const buildAppUnderTest = (options?: {
 }) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
-    const tempBaseDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-router-test-" });
+    const tempBaseDir = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "lecturn-router-test-",
+    });
     const baseDir = options?.config?.baseDir ?? tempBaseDir;
     const devUrl = options?.config?.devUrl;
     const derivedPaths = yield* ServerConfig.deriveServerPaths(baseDir, devUrl);
@@ -547,7 +603,7 @@ const buildAppUnderTest = (options?: {
       otlpTracesUrl: undefined,
       otlpMetricsUrl: undefined,
       otlpExportIntervalMs: 10_000,
-      otlpServiceName: "t3-server",
+      otlpServiceName: "lecturn-server",
       mode: "desktop",
       port: 0,
       host: "127.0.0.1",
@@ -683,7 +739,7 @@ const buildAppUnderTest = (options?: {
       ),
       ProjectFaviconResolver.layer.pipe(
         Layer.provide(WorkspacePaths.layer),
-        Layer.provide(T3ProjectFileLoader.layer),
+        Layer.provide(LecturnProjectFileLoader.layer),
       ),
       NativeAppIconResolver.layer,
     );
@@ -845,6 +901,18 @@ const buildAppUnderTest = (options?: {
           Layer.mock(ProviderService.ProviderService)({
             uploadFeedback: () => Effect.die("Provider feedback is not stubbed in this test"),
             ...options?.layers?.providerService,
+          }),
+          Layer.mock(ProviderAuthService)({
+            ...options?.layers?.providerAuth,
+          }),
+          Layer.mock(ProviderInstanceRegistry)({
+            getInstance: () => Effect.succeed(undefined),
+            listInstances: Effect.succeed([]),
+            ...options?.layers?.providerInstanceRegistry,
+          }),
+          Layer.mock(AntigravityInstallation)({
+            managedDirectory: "unused-test-antigravity-runtime",
+            ...options?.layers?.antigravityInstallation,
           }),
         ),
       ),
@@ -1405,7 +1473,7 @@ const makeCloudMintCredentialRequest = (input: {
 }) => {
   const payload = {
     iss: input.issuer ?? "https://relay.example.test",
-    aud: input.audience ?? `t3-env:${input.environmentId}`,
+    aud: input.audience ?? `lecturn-env:${input.environmentId}`,
     sub: input.subject ?? "user_123",
     jti: input.jti ?? "cloud-mint-jti-1",
     environmentId: input.environmentId,
@@ -1442,7 +1510,7 @@ const makeCloudEnvironmentHealthRequest = (input: {
 }) => {
   const payload = {
     iss: input.issuer ?? "https://relay.example.test",
-    aud: input.audience ?? `t3-env:${input.environmentId}`,
+    aud: input.audience ?? `lecturn-env:${input.environmentId}`,
     sub: input.subject ?? "user_123",
     jti: input.jti ?? "cloud-health-jti-1",
     environmentId: input.environmentId,
@@ -1655,7 +1723,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const staticDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-router-gate-" });
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "lecturn-router-gate-",
+      });
       yield* fileSystem.writeFileString(path.join(staticDir, "index.html"), "ready");
       const entered = yield* Deferred.make<void>();
       const ready = yield* Deferred.make<void>();
@@ -1688,7 +1758,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const staticDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-router-static-" });
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "lecturn-router-static-",
+      });
       const indexPath = path.join(staticDir, "index.html");
       yield* fileSystem.writeFileString(indexPath, "<html>router-static-ok</html>");
 
@@ -1718,7 +1790,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const url = yield* getHttpServerUrl("/.well-known/t3/environment");
+      const url = yield* getHttpServerUrl("/.well-known/lecturn/environment");
       const response = yield* fetchEffect(url);
       const body = yield* responseJsonEffect<typeof testEnvironmentDescriptor>(response);
 
@@ -1776,7 +1848,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         },
       });
 
-      const url = yield* getHttpServerUrl("/.well-known/t3/environment");
+      const url = yield* getHttpServerUrl("/.well-known/lecturn/environment");
       const response = yield* fetchEffect(url, {
         headers: {
           "accept-encoding": "gzip",
@@ -1795,7 +1867,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const url = yield* getHttpServerUrl("/.well-known/t3/environment");
+      const url = yield* getHttpServerUrl("/.well-known/lecturn/environment");
       const response = yield* fetchEffect(url, {
         headers: {
           origin: crossOriginClientOrigin,
@@ -1836,7 +1908,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       ]);
       // Desktop, so port-scoped: instances scan for a free port and share
       // 127.0.0.1, and cookies are not scoped by port.
-      assert.isTrue(body.auth.sessionCookieName.startsWith("t3_session_"));
+      assert.isTrue(body.auth.sessionCookieName.startsWith("lecturn_session_"));
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -1879,7 +1951,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       const { cookie } = yield* bootstrapBrowserSession();
       const currentCookie = cookie?.split(";")[0] ?? "";
-      const legacyCookie = currentCookie.replace(/^t3_session_[^=]+=/, "t3_session=");
+      const legacyCookie = currentCookie.replace(/^lecturn_session_[^=]+=/, "lecturn_session=");
       const sessionUrl = yield* getHttpServerUrl("/api/auth/session");
       const response = yield* fetchEffect(sessionUrl, {
         headers: { cookie: legacyCookie },
@@ -1905,8 +1977,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         const response = yield* fetchEffect(sessionUrl, {
           headers:
             source === "cookie"
-              ? { cookie: `${sessionCookie}; t3_session=stale` }
-              : { authorization: `Bearer ${sessionToken}`, cookie: "t3_session=stale" },
+              ? { cookie: `${sessionCookie}; lecturn_session=stale` }
+              : { authorization: `Bearer ${sessionToken}`, cookie: "lecturn_session=stale" },
         });
         const body = yield* responseJsonEffect<{ readonly authenticated: boolean }>(response);
 
@@ -2048,7 +2120,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           body: new URLSearchParams({
             grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
             subject_token: credential.credential,
-            subject_token_type: "urn:t3:params:oauth:token-type:environment-bootstrap",
+            subject_token_type: "urn:lecturn:params:oauth:token-type:environment-bootstrap",
             requested_token_type: "urn:ietf:params:oauth:token-type:access_token",
             scope: "orchestration:read orchestration:operate terminal:operate review:write",
           }).toString(),
@@ -2315,8 +2387,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             wsBaseUrl: linkProofUrl
               .replace("http://", "ws://")
               .replace("/api/connect/link-proof", "/ws"),
-            // "manual" and "cloudflare_tunnel" are supported; "t3_relay" is not.
-            providerKind: "t3_relay",
+            // "manual" and "cloudflare_tunnel" are supported; "lecturn_relay" is not.
+            providerKind: "lecturn_relay",
           },
           origin: {
             localHttpHost: "127.0.0.1",
@@ -2533,7 +2605,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       Effect.gen(function* () {
         const installedRelayClient = {
           status: "available" as const,
-          executablePath: "/tmp/t3/tools/cloudflared",
+          executablePath: "/tmp/lecturn/tools/cloudflared",
           source: "managed" as const,
           version: RelayClient.CLOUDFLARED_VERSION,
         };
@@ -2632,7 +2704,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "lecturnenv_test_credential",
           cloudMintPublicKey: "not-a-public-key",
           endpointRuntime: null,
         }),
@@ -2680,18 +2752,18 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const insecureRelayUrl = yield* postRelayConfig({
         relayUrl: "http://relay.example.test",
         cloudUserId: "user_123",
-        environmentCredential: "t3env_test_credential",
+        environmentCredential: "lecturnenv_test_credential",
       });
       const insecureRelayIssuer = yield* postRelayConfig({
         relayUrl: "https://relay.example.test",
         cloudUserId: "user_123",
         relayIssuer: "http://relay.example.test",
-        environmentCredential: "t3env_test_credential",
+        environmentCredential: "lecturnenv_test_credential",
       });
       const nonOriginRelayUrl = yield* postRelayConfig({
         relayUrl: "https://relay.example.test/path",
         cloudUserId: "user_123",
-        environmentCredential: "t3env_test_credential",
+        environmentCredential: "lecturnenv_test_credential",
       });
       const emptyCredential = yield* postRelayConfig({
         relayUrl: "https://relay.example.test",
@@ -2751,8 +2823,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           }),
         });
 
-      const firstResponse = yield* postRelayConfig("user_123", "t3env_first_credential");
-      const replacementResponse = yield* postRelayConfig("user_456", "t3env_second_credential");
+      const firstResponse = yield* postRelayConfig("user_123", "lecturnenv_first_credential");
+      const replacementResponse = yield* postRelayConfig(
+        "user_456",
+        "lecturnenv_second_credential",
+      );
       const replacementBody = yield* responseJsonEffect<{
         readonly _tag?: string;
         readonly message?: string;
@@ -2803,7 +2878,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           relayUrl: "https://transport.example.test",
           relayIssuer: "https://relay.example.test",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "lecturnenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -2885,7 +2960,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           relayUrl: "https://transport.example.test",
           relayIssuer: "https://relay.example.test",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "lecturnenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: {
             providerKind: "cloudflare_tunnel",
@@ -2958,7 +3033,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "lecturnenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -3017,7 +3092,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "lecturnenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -3034,7 +3109,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         issuedAt: DateTime.formatIso(now),
         expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
       });
-      const mintUrl = yield* getHttpServerUrl("/api/t3-connect/mint-credential");
+      const mintUrl = yield* getHttpServerUrl("/api/lecturn-connect/mint-credential");
       const response = yield* fetchEffect(mintUrl, {
         method: "POST",
         headers: {
@@ -3076,7 +3151,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "lecturnenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -3092,7 +3167,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         issuedAt: DateTime.formatIso(now),
         expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
       });
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
+      const healthUrl = yield* getHttpServerUrl("/api/lecturn-connect/health");
       const response = yield* fetchEffect(healthUrl, {
         method: "POST",
         headers: {
@@ -3136,7 +3211,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "lecturnenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -3152,7 +3227,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         issuedAt: DateTime.formatIso(now),
         expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
       });
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
+      const healthUrl = yield* getHttpServerUrl("/api/lecturn-connect/health");
       const postHealth = () =>
         fetchEffect(healthUrl, {
           method: "POST",
@@ -3198,7 +3273,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             relayUrl: "https://transport.example.test",
             cloudUserId: "user_123",
             relayIssuer: "https://relay.example.test",
-            environmentCredential: "t3env_test_credential",
+            environmentCredential: "lecturnenv_test_credential",
             cloudMintPublicKey: cloudKeyPair.publicKey,
             endpointRuntime: null,
           }),
@@ -3206,7 +3281,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(relayConfigResponse.status, 200);
 
         const now = yield* DateTime.now;
-        const mintUrl = yield* getHttpServerUrl("/api/t3-connect/mint-credential");
+        const mintUrl = yield* getHttpServerUrl("/api/lecturn-connect/mint-credential");
         const postMint = (request: ReturnType<typeof makeCloudMintCredentialRequest>) =>
           fetchEffect(mintUrl, {
             method: "POST",
@@ -3277,7 +3352,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "lecturnenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: {
             providerKind: "cloudflare_tunnel",
@@ -3306,7 +3381,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         issuedAt: DateTime.formatIso(now),
         expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
       });
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
+      const healthUrl = yield* getHttpServerUrl("/api/lecturn-connect/health");
       const healthResponse = yield* fetchEffect(healthUrl, {
         method: "POST",
         headers: {
@@ -3346,7 +3421,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test/",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "lecturnenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -3381,7 +3456,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           privateKey: cloudKeyPair.privateKey,
           environmentId: testEnvironmentDescriptor.environmentId,
           clientProofKeyThumbprint: "client-proof-key-thumbprint",
-          audience: "t3-env:other-environment",
+          audience: "lecturn-env:other-environment",
           jti: "cloud-mint-jti-wrong-audience",
           nonce: "cloud-mint-nonce-wrong-audience",
           issuedAt: DateTime.formatIso(now),
@@ -3413,7 +3488,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test/",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "lecturnenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -3421,7 +3496,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(relayConfigResponse.status, 200);
 
       const now = yield* DateTime.now;
-      const mintUrl = yield* getHttpServerUrl("/api/t3-connect/mint-credential");
+      const mintUrl = yield* getHttpServerUrl("/api/lecturn-connect/mint-credential");
       const response = yield* fetchEffect(mintUrl, {
         method: "POST",
         headers: {
@@ -3464,7 +3539,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test/",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "lecturnenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -3472,7 +3547,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(relayConfigResponse.status, 200);
 
       const now = yield* DateTime.now;
-      const mintUrl = yield* getHttpServerUrl("/api/t3-connect/mint-credential");
+      const mintUrl = yield* getHttpServerUrl("/api/lecturn-connect/mint-credential");
       const response = yield* fetchEffect(mintUrl, {
         method: "POST",
         headers: {
@@ -3515,7 +3590,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test/",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "lecturnenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -3523,7 +3598,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(relayConfigResponse.status, 200);
 
       const now = yield* DateTime.now;
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
+      const healthUrl = yield* getHttpServerUrl("/api/lecturn-connect/health");
       const postHealth = (request: ReturnType<typeof makeCloudEnvironmentHealthRequest>) =>
         fetchEffect(healthUrl, {
           method: "POST",
@@ -3548,7 +3623,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         makeCloudEnvironmentHealthRequest({
           privateKey: cloudKeyPair.privateKey,
           environmentId: testEnvironmentDescriptor.environmentId,
-          audience: "t3-env:other-environment",
+          audience: "lecturn-env:other-environment",
           jti: "cloud-health-jti-wrong-audience",
           nonce: "cloud-health-nonce-wrong-audience",
           issuedAt: DateTime.formatIso(now),
@@ -3580,7 +3655,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test/",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "lecturnenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -3588,7 +3663,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(relayConfigResponse.status, 200);
 
       const now = yield* DateTime.now;
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
+      const healthUrl = yield* getHttpServerUrl("/api/lecturn-connect/health");
       const response = yield* fetchEffect(healthUrl, {
         method: "POST",
         headers: {
@@ -3630,7 +3705,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         body: jsonRequestBody({
           relayUrl: "https://relay.example.test/",
           cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
+          environmentCredential: "lecturnenv_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
           endpointRuntime: null,
         }),
@@ -3638,7 +3713,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(relayConfigResponse.status, 200);
 
       const now = yield* DateTime.now;
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
+      const healthUrl = yield* getHttpServerUrl("/api/lecturn-connect/health");
       const response = yield* fetchEffect(healthUrl, {
         method: "POST",
         headers: {
@@ -5924,7 +5999,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               attributes: [
                 {
                   key: "service.name",
-                  value: { stringValue: "t3-web" },
+                  value: { stringValue: "lecturn-web" },
                 },
               ],
             },
@@ -6066,7 +6141,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             "rpc.method": "server.getSettings",
           },
           resourceAttributes: {
-            "service.name": "t3-web",
+            "service.name": "lecturn-web",
           },
           scope: {
             name: "effect",
@@ -6194,7 +6269,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.deepEqual(record.links, []);
         assert.equal(record.scope.name, scopeSpan.scope.name);
         assert.deepEqual(record.scope.attributes, {});
-        assert.equal(record.resourceAttributes["service.name"], "t3-web");
+        assert.equal(record.resourceAttributes["service.name"], "lecturn-web");
         assert.equal(record.status?.code, String(span.status.code));
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
@@ -6530,7 +6605,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-auth-required-" });
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "lecturn-ws-auth-required-",
+      });
       yield* fs.writeFileString(
         path.join(workspaceDir, "needle-file.ts"),
         "export const needle = 1;",
@@ -6559,6 +6636,307 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           failureMessage.includes("An error occurred during Open"),
       );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("provider setup lets read-only clients observe installation but not change setup", () =>
+    Effect.gen(function* () {
+      let installStarts = 0;
+      let authCalls = 0;
+      yield* buildAppUnderTest({
+        layers: {
+          providerInstanceRegistry: {
+            getInstance: (instanceId) =>
+              Effect.succeed(
+                instanceId === providerSetupInstanceId ? providerSetupInstance : undefined,
+              ),
+          },
+          antigravityInstallation: {
+            start: Effect.sync(() => {
+              installStarts += 1;
+              return providerSetupInstallState;
+            }),
+            changes: Stream.succeed(providerSetupInstallState),
+          },
+          providerAuth: {
+            start: () =>
+              Effect.sync(() => {
+                authCalls += 1;
+                return providerSetupAuthState;
+              }),
+            subscribe: () =>
+              Stream.fromEffect(
+                Effect.sync(() => {
+                  authCalls += 1;
+                  return providerSetupAuthState;
+                }),
+              ),
+          },
+        },
+      });
+      const token = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+        scope: "orchestration:read",
+      });
+      assert.equal(token.response.status, 200);
+      const ticketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
+        headers: { authorization: `Bearer ${token.body.access_token ?? ""}` },
+      });
+      const { ticket } = yield* responseJsonEffect<{ readonly ticket: string }>(ticketResponse);
+      const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(ticket)}`;
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.gen(function* () {
+            const observed = yield* client[WS_METHODS.providerInstallSubscribe]({
+              instanceId: providerSetupInstanceId,
+            }).pipe(Stream.runHead, Effect.map(Option.getOrThrow));
+            assert.deepEqual(observed, providerSetupInstallState);
+            const errors = [
+              yield* client[WS_METHODS.providerInstallStart]({
+                instanceId: providerSetupInstanceId,
+              }).pipe(Effect.flip),
+              yield* client[WS_METHODS.providerAuthStart]({
+                instanceId: providerSetupInstanceId,
+              }).pipe(Effect.flip),
+              yield* client[WS_METHODS.providerAuthSubscribe]({
+                instanceId: providerSetupInstanceId,
+              }).pipe(Stream.runHead, Effect.flip),
+            ];
+            for (const error of errors) {
+              assert.equal(error._tag, "EnvironmentAuthorizationError");
+              if (error._tag === "EnvironmentAuthorizationError") {
+                assert.equal(error.requiredScope, "orchestration:operate");
+              }
+            }
+          }),
+        ),
+      );
+      assert.equal(installStarts, 0);
+      assert.equal(authCalls, 0);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("provider setup binds private sign-in to the authenticated websocket session", () =>
+    Effect.gen(function* () {
+      const flowId = "private-sign-in-flow";
+      const callbackUrl = "http://127.0.0.1:51234/?state=test-state&code=test-code";
+      const waiting: ProviderAuthState = {
+        ...providerSetupAuthState,
+        phase: "waiting",
+        flowId,
+        authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth?state=test-state",
+        expiresAt: "2026-09-02T00:05:00.000Z",
+      };
+      const calls: Array<{
+        readonly operation: string;
+        readonly instanceId: ProviderInstanceId;
+        readonly ownerSessionId: string;
+      }> = [];
+      const forwardedCallbacks: string[] = [];
+      const logoutInstances: ProviderInstanceId[] = [];
+      let flowOwner = "";
+      yield* buildAppUnderTest({
+        layers: {
+          providerAuth: {
+            start: (input, ownerSessionId) =>
+              Effect.sync(() => {
+                flowOwner = ownerSessionId;
+                calls.push({ operation: "start", instanceId: input.instanceId, ownerSessionId });
+                return waiting;
+              }),
+            subscribe: (input, ownerSessionId) =>
+              Stream.fromEffect(
+                Effect.sync(() => {
+                  calls.push({
+                    operation: "subscribe",
+                    instanceId: input.instanceId,
+                    ownerSessionId,
+                  });
+                  return ownerSessionId === flowOwner
+                    ? waiting
+                    : { ...waiting, flowId: null, authorizationUrl: null, expiresAt: null };
+                }),
+              ),
+            complete: (input, ownerSessionId) =>
+              Effect.gen(function* () {
+                calls.push({ operation: "complete", instanceId: input.instanceId, ownerSessionId });
+                if (ownerSessionId !== flowOwner) {
+                  return yield* new ProviderSetupError({
+                    instanceId: input.instanceId,
+                    operation: "complete",
+                    detail: "This sign-in belongs to another client.",
+                  });
+                }
+                assert.equal(input.flowId, flowId);
+                forwardedCallbacks.push(input.callbackUrl);
+                return { ...waiting, phase: "verifying" as const, authorizationUrl: null };
+              }),
+            cancel: (input, ownerSessionId) =>
+              Effect.sync(() => {
+                assert.equal(input.flowId, flowId);
+                calls.push({ operation: "cancel", instanceId: input.instanceId, ownerSessionId });
+                return { ...providerSetupAuthState, phase: "cancelled" as const, flowId };
+              }),
+            logout: (input) =>
+              Effect.sync(() => {
+                logoutInstances.push(input.instanceId);
+                return providerSetupAuthState;
+              }),
+          },
+        },
+      });
+      const firstCookie = yield* getAuthenticatedSessionCookieHeader();
+      const secondCookie = yield* getAuthenticatedSessionCookieHeader();
+      const firstClients = yield* HttpClient.get("/api/auth/clients", {
+        headers: { cookie: firstCookie },
+      }).pipe(
+        Effect.flatMap(
+          responseJsonEffect<
+            ReadonlyArray<{ readonly sessionId: string; readonly current: boolean }>
+          >,
+        ),
+      );
+      const secondClients = yield* HttpClient.get("/api/auth/clients", {
+        headers: { cookie: secondCookie },
+      }).pipe(
+        Effect.flatMap(
+          responseJsonEffect<
+            ReadonlyArray<{ readonly sessionId: string; readonly current: boolean }>
+          >,
+        ),
+      );
+      const firstOwner = firstClients.find((session) => session.current)?.sessionId;
+      const secondOwner = secondClients.find((session) => session.current)?.sessionId;
+      assert.isString(firstOwner);
+      assert.isString(secondOwner);
+      assert.notEqual(firstOwner, secondOwner);
+      const baseWsUrl = yield* getWsServerUrl("/ws", { authenticated: false });
+      const target = {
+        instanceId: providerSetupInstanceId,
+        ownerSessionId: "client-supplied-owner",
+      };
+      yield* Effect.scoped(
+        withWsRpcClient(appendSessionCookieToWsUrl(baseWsUrl, firstCookie), (client) =>
+          Effect.gen(function* () {
+            const started = yield* client[WS_METHODS.providerAuthStart](target);
+            assert.equal(started.flowId, flowId);
+            const ownState = yield* client[WS_METHODS.providerAuthSubscribe](target).pipe(
+              Stream.runHead,
+              Effect.map(Option.getOrThrow),
+            );
+            assert.equal(ownState.authorizationUrl, waiting.authorizationUrl);
+            yield* Effect.scoped(
+              withWsRpcClient(appendSessionCookieToWsUrl(baseWsUrl, secondCookie), (otherClient) =>
+                Effect.gen(function* () {
+                  const otherState = yield* otherClient[WS_METHODS.providerAuthSubscribe](
+                    target,
+                  ).pipe(Stream.runHead, Effect.map(Option.getOrThrow));
+                  assert.isNull(otherState.authorizationUrl);
+                  assert.isNull(otherState.flowId);
+                  const forged = { ...target, ownerSessionId: firstOwner, flowId, callbackUrl };
+                  const denied = yield* otherClient[WS_METHODS.providerAuthComplete](forged).pipe(
+                    Effect.flip,
+                  );
+                  assert.equal(denied._tag, "ProviderSetupError");
+                  assert.deepEqual(forwardedCallbacks, []);
+                }),
+              ),
+            );
+            const completed = yield* client[WS_METHODS.providerAuthComplete]({
+              ...target,
+              flowId,
+              callbackUrl,
+            });
+            assert.equal(completed.phase, "verifying");
+            const cancelled = yield* client[WS_METHODS.providerAuthCancel]({ ...target, flowId });
+            assert.equal(cancelled.phase, "cancelled");
+            const signedOut = yield* client[WS_METHODS.providerAuthLogout](target);
+            assert.equal(signedOut.phase, "idle");
+          }),
+        ),
+      );
+      assert.deepEqual(forwardedCallbacks, [callbackUrl]);
+      assert.deepEqual(logoutInstances, [providerSetupInstanceId]);
+      assert.isTrue(calls.every((call) => call.instanceId === providerSetupInstanceId));
+      assert.deepEqual(
+        calls.map((call) => call.ownerSessionId),
+        [firstOwner, firstOwner, secondOwner, secondOwner, firstOwner, firstOwner],
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "provider setup routes installation operations and returns only safe typed errors",
+    () =>
+      Effect.gen(function* () {
+        const calls: string[] = [];
+        let state = providerSetupInstallState;
+        yield* buildAppUnderTest({
+          layers: {
+            providerInstanceRegistry: {
+              getInstance: (instanceId) =>
+                Effect.succeed(
+                  instanceId === providerSetupInstanceId ? providerSetupInstance : undefined,
+                ),
+            },
+            antigravityInstallation: {
+              start: Effect.sync(() => {
+                calls.push("start");
+                return state;
+              }),
+              cancel: (operationId) =>
+                Effect.gen(function* () {
+                  calls.push(`cancel:${operationId}`);
+                  if (operationId !== state.operationId) {
+                    return yield* new AntigravityInstallationError({
+                      operation: "cancel",
+                      detail: "This installation is no longer running.",
+                      cause: new Error("Private download diagnostics."),
+                    });
+                  }
+                  state = { ...state, phase: "cancelled" };
+                  return state;
+                }),
+              changes: Stream.fromEffect(Effect.sync(() => state)),
+            },
+          },
+        });
+        const wsUrl = yield* getWsServerUrl("/ws");
+        yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            Effect.gen(function* () {
+              const unknownInstance = yield* client[WS_METHODS.providerInstallStart]({
+                instanceId: ProviderInstanceId.make("unknown-instance"),
+              }).pipe(Effect.flip);
+              assert.equal(unknownInstance._tag, "ProviderSetupError");
+              assert.deepEqual(calls, []);
+              const started = yield* client[WS_METHODS.providerInstallStart]({
+                instanceId: providerSetupInstanceId,
+              });
+              assert.deepEqual(started, providerSetupInstallState);
+              const stale = yield* client[WS_METHODS.providerInstallCancel]({
+                instanceId: providerSetupInstanceId,
+                operationId: "old-operation",
+              }).pipe(Effect.flip);
+              assert.equal(stale._tag, "ProviderSetupError");
+              if (stale._tag === "ProviderSetupError") {
+                assert.equal(stale.instanceId, providerSetupInstanceId);
+                assert.equal(stale.operation, "cancel");
+                assert.equal(stale.detail, "This installation is no longer running.");
+                assert.notProperty(stale, "cause");
+              }
+              const cancelled = yield* client[WS_METHODS.providerInstallCancel]({
+                instanceId: providerSetupInstanceId,
+                operationId: "install-operation",
+              });
+              assert.equal(cancelled.phase, "cancelled");
+              const observed = yield* client[WS_METHODS.providerInstallSubscribe]({
+                instanceId: providerSetupInstanceId,
+              }).pipe(Stream.runHead, Effect.map(Option.getOrThrow));
+              assert.deepEqual(observed, cancelled);
+            }),
+          ),
+        );
+        assert.deepEqual(calls, ["start", "cancel:old-operation", "cancel:install-operation"]);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("routes websocket rpc subscribeServerConfig streams snapshot then update", () =>
@@ -6881,7 +7259,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-search-" });
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "lecturn-ws-project-search-",
+      });
       yield* fs.writeFileString(
         path.join(workspaceDir, "needle-file.ts"),
         "export const needle = 1;",
@@ -6910,7 +7290,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-files-" });
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "lecturn-ws-project-files-",
+      });
       yield* fs.makeDirectory(path.join(workspaceDir, "src"), { recursive: true });
       yield* fs.writeFileString(
         path.join(workspaceDir, "src", "index.ts"),
@@ -6947,7 +7329,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const workspaceDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "t3-ws-project-search-gitignored-",
+        prefix: "lecturn-ws-project-search-gitignored-",
       });
       yield* fs.writeFileString(path.join(workspaceDir, ".gitignore"), ".venv/\n");
       yield* fs.makeDirectory(path.join(workspaceDir, ".venv", "lib"), { recursive: true });
@@ -7004,10 +7386,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const workspaceDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "t3-ws-workspace-errors-",
+        prefix: "lecturn-ws-workspace-errors-",
       });
       const outsideDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "t3-ws-workspace-errors-outside-",
+        prefix: "lecturn-ws-workspace-errors-outside-",
       });
       const outsideFile = path.join(outsideDir, "outside.txt");
       yield* fs.writeFileString(outsideFile, "outside\n");
@@ -7117,7 +7499,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const blockedRoot = yield* fs.makeTempDirectoryScoped({
-        prefix: "t3-ws-workspace-stat-error-",
+        prefix: "lecturn-ws-workspace-stat-error-",
       });
       const workspaceRoot = path.join(blockedRoot, "workspace");
       yield* fs.makeDirectory(workspaceRoot);
@@ -7147,7 +7529,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-write-" });
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "lecturn-ws-project-write-",
+      });
 
       yield* buildAppUnderTest();
 
@@ -7172,7 +7556,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const parentDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-create-" });
+      const parentDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-ws-project-create-" });
       const missingWorkspaceRoot = path.join(parentDir, "nested", "new-project");
 
       yield* buildAppUnderTest();
@@ -7429,7 +7813,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
   it.effect("routes websocket rpc projects.writeFile errors", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-write-" });
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "lecturn-ws-project-write-",
+      });
 
       yield* buildAppUnderTest();
 
@@ -10047,7 +10433,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             isRepo: true,
             hasPrimaryRemote: true,
             isDefaultRef: false,
-            refName: "t3code/bootstrap-refName",
+            refName: "lecturn/bootstrap-refName",
             hasWorkingTreeChanges: false,
             workingTree: {
               files: [],
@@ -10097,7 +10483,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               bootstrapGitOperations.push("create-worktree");
               return {
                 worktree: {
-                  refName: "t3code/bootstrap-refName",
+                  refName: "lecturn/bootstrap-refName",
                   path: "/tmp/bootstrap-worktree",
                 },
               };
@@ -10175,7 +10561,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 prepareWorktree: {
                   projectCwd: "/tmp/project",
                   baseBranch: "main",
-                  branch: "t3code/bootstrap-refName",
+                  branch: "lecturn/bootstrap-refName",
                   startFromOrigin: true,
                 },
                 runSetupScript: true,
@@ -10199,7 +10585,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
           cwd: "/tmp/project",
           refName: fetchedOriginCommit,
-          newRefName: "t3code/bootstrap-refName",
+          newRefName: "lecturn/bootstrap-refName",
           baseRefName: "main",
           path: null,
         });
@@ -10276,7 +10662,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
           Effect.succeed({
             worktree: {
-              refName: "t3code/bootstrap-refName",
+              refName: "lecturn/bootstrap-refName",
               path: "/tmp/bootstrap-worktree",
             },
           }),
@@ -10333,7 +10719,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               prepareWorktree: {
                 projectCwd: "/tmp/project",
                 baseBranch: "main",
-                branch: "t3code/bootstrap-refName",
+                branch: "lecturn/bootstrap-refName",
                 startFromOrigin: true,
               },
             },
@@ -10359,7 +10745,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
         cwd: "/tmp/project",
         refName: "main",
-        newRefName: "t3code/bootstrap-refName",
+        newRefName: "lecturn/bootstrap-refName",
         baseRefName: "main",
         path: null,
       });
@@ -10373,7 +10759,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
           Effect.succeed({
             worktree: {
-              refName: "t3code/bootstrap-refName",
+              refName: "lecturn/bootstrap-refName",
               path: "/tmp/bootstrap-worktree",
             },
           }),
@@ -10444,7 +10830,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               prepareWorktree: {
                 projectCwd: "/tmp/project",
                 baseBranch: "main",
-                branch: "t3code/bootstrap-refName",
+                branch: "lecturn/bootstrap-refName",
               },
               runSetupScript: true,
             },
@@ -10478,7 +10864,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
           Effect.succeed({
             worktree: {
-              refName: "t3code/bootstrap-refName",
+              refName: "lecturn/bootstrap-refName",
               path: "/tmp/bootstrap-worktree",
             },
           }),
@@ -10565,7 +10951,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               prepareWorktree: {
                 projectCwd: "/tmp/project",
                 baseBranch: "main",
-                branch: "t3code/bootstrap-refName",
+                branch: "lecturn/bootstrap-refName",
               },
               runSetupScript: true,
             },
@@ -10672,7 +11058,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 prepareWorktree: {
                   projectCwd: "/tmp/project",
                   baseBranch: "main",
-                  branch: "t3code/bootstrap-refName",
+                  branch: "lecturn/bootstrap-refName",
                 },
                 runSetupScript: false,
               },
@@ -10867,7 +11253,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               prepareWorktree: {
                 projectCwd: "/tmp/project",
                 baseBranch: "main",
-                branch: "t3code/bootstrap-refName",
+                branch: "lecturn/bootstrap-refName",
               },
               runSetupScript: false,
             },
@@ -11730,14 +12116,14 @@ it.live(
 
       const report = formatTransferBudgetReport(runs);
       yield* Effect.logInfo(`\n${report}`);
-      const reportPath = yield* Config.string("T3CODE_TRANSFER_BUDGET_REPORT_PATH").pipe(
+      const reportPath = yield* Config.string("LECTURN_TRANSFER_BUDGET_REPORT_PATH").pipe(
         Config.option,
       );
       if (Option.isSome(reportPath)) {
         const fileSystem = yield* FileSystem.FileSystem;
         yield* fileSystem.writeFileString(reportPath.value, report);
       }
-      const resultPath = yield* Config.string("T3CODE_TRANSFER_BUDGET_RESULT_PATH").pipe(
+      const resultPath = yield* Config.string("LECTURN_TRANSFER_BUDGET_RESULT_PATH").pipe(
         Config.option,
       );
       if (Option.isSome(resultPath)) {
@@ -11759,7 +12145,7 @@ it.layer(NodeServices.layer)("Stave admission over the server transports", (it) 
   const makeStaveRoot = Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const staveRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-stave-space-" });
+    const staveRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-stave-space-" });
     yield* fileSystem.writeFileString(
       path.join(staveRoot, STAVE_MANIFEST_FILE_NAME),
       "version: 1\nid: server-test-space\n",

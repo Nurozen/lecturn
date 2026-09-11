@@ -2,12 +2,12 @@ import type {
   OrchestrationProjectShell,
   RepositoryIdentity,
   ThreadEnvMode,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import {
   isWindowsAbsolutePath,
   normalizeProjectPathForComparison,
   normalizeProjectPathForDispatch,
-} from "@t3tools/shared/path";
+} from "@lecturn/shared/path";
 import { resolveProjectPathForDispatch } from "./projects.ts";
 
 /** Git targets follow manifest checkout paths; agent sessions keep the space root. */

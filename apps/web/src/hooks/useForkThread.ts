@@ -1,11 +1,11 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { staveAdmissionErrorMessage } from "@t3tools/client-runtime/errors";
+import { scopeThreadRef } from "@lecturn/client-runtime/environment";
+import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
 import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import type { MessageId, ScopedThreadRef, TurnId } from "@t3tools/contracts";
+} from "@lecturn/client-runtime/state/runtime";
+import type { MessageId, ScopedThreadRef, TurnId } from "@lecturn/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 

@@ -97,7 +97,7 @@ export const STAVE_RPC_ERROR_TAGS = [
 export type StaveRpcErrorTag = (typeof STAVE_RPC_ERROR_TAGS)[number];
 
 const UNAVAILABLE_MESSAGE_BY_REASON: Record<string, string> = {
-  disabled_by_server: "Stave is turned off on this server (T3CODE_STAVE=false).",
+  disabled_by_server: "Stave is turned off on this server (LECTURN_STAVE=false).",
   disabled_in_settings:
     "Stave is disabled in settings. Turn it on under Settings → General → Stave.",
   binary_missing:

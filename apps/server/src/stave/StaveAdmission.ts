@@ -13,7 +13,7 @@
  *
  * @module StaveAdmission
  */
-import type { ProjectId } from "@t3tools/contracts";
+import type { ProjectId } from "@lecturn/contracts";
 import * as FileSystem from "effect/FileSystem";
 import * as Context from "effect/Context";
 import * as Clock from "effect/Clock";
@@ -114,7 +114,7 @@ export class StaveAdmission extends Context.Service<
      */
     readonly check: (input: StaveAdmissionInput) => Effect.Effect<void, StaveAdmissionError>;
   }
->()("t3/stave/StaveAdmission") {}
+>()("lecturn/stave/StaveAdmission") {}
 
 /** Intents that exist only to create a worktree, regardless of the payload. */
 const WORKTREE_PRODUCING_INTENTS: ReadonlySet<StaveAdmissionIntent> = new Set([

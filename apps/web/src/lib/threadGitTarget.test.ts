@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { RepositoryIdentity, StaveProjectInfo } from "@t3tools/contracts";
+import type { RepositoryIdentity, StaveProjectInfo } from "@lecturn/contracts";
 import {
   STAVE_CHECKPOINTS_UNAVAILABLE_REASON,
   resolveCheckpointsUnavailableReason,

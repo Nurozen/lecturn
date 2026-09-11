@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, FileSystem, Layer, Option, Ref, Result, Schema } from "effect";
 import { TestClock } from "effect/testing";
-import { DEFAULT_SERVER_SETTINGS, StaveSagaStatus, type ServerSettings } from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS, StaveSagaStatus, type ServerSettings } from "@lecturn/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { layerFixed as binaryLayerFixed } from "./StaveBinary.ts";

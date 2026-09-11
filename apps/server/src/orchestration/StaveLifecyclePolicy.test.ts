@@ -3,7 +3,7 @@ import {
   ProjectId,
   ThreadId,
   type StaveProjectInfo,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import type { StaveLifecycleRow } from "../persistence/Services/StaveLifecycleRepository.ts";
 import type { ProjectionThreadLifecycleAnchor } from "./Services/ProjectionSnapshotQuery.ts";

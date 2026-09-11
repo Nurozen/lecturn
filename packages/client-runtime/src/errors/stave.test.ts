@@ -58,7 +58,7 @@ describe("staveRpcErrorMessage", () => {
   it("maps each StaveUnavailableError reason", () => {
     expect(
       staveRpcErrorMessage({ _tag: "StaveUnavailableError", reason: "disabled_by_server" }),
-    ).toBe("Stave is turned off on this server (T3CODE_STAVE=false).");
+    ).toBe("Stave is turned off on this server (LECTURN_STAVE=false).");
     expect(
       staveRpcErrorMessage({ _tag: "StaveUnavailableError", reason: "disabled_in_settings" }),
     ).toMatch(/disabled in settings/);

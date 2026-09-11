@@ -2,13 +2,13 @@ import { useState } from "react";
 import {
   type ProjectGitTarget,
   resolveRepositoryPullRequestSelector,
-} from "@t3tools/client-runtime/state/projectGit";
+} from "@lecturn/client-runtime/state/projectGit";
 import {
   pullRequestHostOf,
   type SourceControlProviderKind,
   type OrchestrationProjectShell,
   type ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { GitBranchIcon, GitPullRequestIcon, RefreshCwIcon } from "lucide-react";
 import type { DraftId } from "~/composerDraftStore";
 import { useEnvironmentQuery } from "~/state/query";

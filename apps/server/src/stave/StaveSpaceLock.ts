@@ -22,7 +22,7 @@ export class StaveSpaceLock extends Context.Service<
       effect: Effect.Effect<A, E, R>,
     ) => Effect.Effect<Option.Option<A>, E, R>;
   }
->()("t3/stave/StaveSpaceLock") {}
+>()("lecturn/stave/StaveSpaceLock") {}
 
 export const layer = Layer.effect(
   StaveSpaceLock,

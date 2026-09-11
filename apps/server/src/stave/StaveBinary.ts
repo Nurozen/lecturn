@@ -1,4 +1,4 @@
-import type { StaveFeatures } from "@t3tools/contracts";
+import type { StaveFeatures } from "@lecturn/contracts";
 import {
   STAVE_FEATURE_VERBS,
   bundledStaveFeatures,
@@ -19,7 +19,7 @@ import {
  *   this machine at all" for settings-independent inventory only,
  *   while status and all execution gates use the authoritative `resolve`.
  *
- * After settings, the order is `T3CODE_STAVE_PATH` → the desktop bootstrap
+ * After settings, the order is `LECTURN_STAVE_PATH` → the desktop bootstrap
  * `stavePath` → binaries bundled next to the server build → `stave` on PATH.
  * Each hit is probed with `stave version`; a failed probe leaves `version`
  * null and does not fail resolution. Successful resolutions are memoised per
@@ -34,9 +34,9 @@ import {
   HostProcessEnvironment,
   HostProcessPlatform,
   HostProcessWorkingDirectory,
-} from "@t3tools/shared/hostProcess";
-import { CommandResolutionCache, resolveCommandPath } from "@t3tools/shared/shell";
-import { isStavePlatformKey, parseStaveVersionOutput } from "@t3tools/shared/stave";
+} from "@lecturn/shared/hostProcess";
+import { CommandResolutionCache, resolveCommandPath } from "@lecturn/shared/shell";
+import { isStavePlatformKey, parseStaveVersionOutput } from "@lecturn/shared/stave";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -53,7 +53,7 @@ import { ProcessRunner } from "../processRunner.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 
 /** Environment override consulted right after the persisted settings path. */
-export const STAVE_BINARY_ENV_VAR = "T3CODE_STAVE_PATH";
+export const STAVE_BINARY_ENV_VAR = "LECTURN_STAVE_PATH";
 /** Command name searched on PATH as the last resort. */
 export const STAVE_COMMAND_NAME = "stave";
 /** Upper bound for the `stave version` probe; a hung binary is reported as version-less, not fatal. */
@@ -128,7 +128,7 @@ export interface StaveBinaryShape {
 }
 
 export class StaveBinary extends Context.Service<StaveBinary, StaveBinaryShape>()(
-  "t3/stave/StaveBinary",
+  "lecturn/stave/StaveBinary",
 ) {}
 
 export interface StaveBinaryOptions {

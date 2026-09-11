@@ -6,7 +6,7 @@ import {
   HostProcessExecutablePath,
   HostProcessPlatform,
   HostProcessUserId,
-} from "@t3tools/shared/hostProcess";
+} from "@lecturn/shared/hostProcess";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -28,7 +28,7 @@ it("keeps systemd pinned to the stable launcher rather than a versioned server",
   const unit = BootService.renderBootServiceUnit({
     nodePath: "/usr/bin/node",
     launcherPath: "/home/theo/.lecturn/runtime/service-launcher.mjs",
-    baseDir: "/home/theo/.t3",
+    baseDir: "/home/theo/.lecturn",
     logPath: "/home/theo/.lecturn/userdata/logs/boot-service.log",
     unitPath: "/home/theo/.config/systemd/user/lecturn.service",
   });
@@ -44,7 +44,7 @@ it("survives the kernel OOM-killing a greedy agent child", () => {
   const unit = BootService.renderBootServiceUnit({
     nodePath: "/usr/bin/node",
     launcherPath: "/home/theo/.lecturn/runtime/service-launcher.mjs",
-    baseDir: "/home/theo/.t3",
+    baseDir: "/home/theo/.lecturn",
     logPath: "/home/theo/.lecturn/userdata/logs/boot-service.log",
     unitPath: "/home/theo/.config/systemd/user/lecturn.service",
   });
@@ -55,7 +55,7 @@ it("survives the kernel OOM-killing a greedy agent child", () => {
 const macPlan = {
   nodePath: "/opt/homebrew/bin/node",
   launcherPath: "/Users/theo/.lecturn/runtime/service-launcher.mjs",
-  baseDir: "/Users/theo/.t3",
+  baseDir: "/Users/theo/.lecturn",
   logPath: "/Users/theo/.lecturn/userdata/logs/boot-service.log",
   unitPath: "/Users/theo/Library/LaunchAgents/com.cloudgatherer.lecturn.service.plist",
 };
@@ -99,11 +99,11 @@ it("appends both stdio streams to the boot service log", () => {
 
 it("escapes XML in host paths", () => {
   const plist = BootService.renderBootServicePlist(
-    { ...macPlan, baseDir: "/Users/theo/T3 & <Co>" },
+    { ...macPlan, baseDir: "/Users/theo/Lecturn & <Co>" },
     { homeDir: "/Users/theo", environmentPath: "/Users/theo/Tools & <Scripts>:/usr/bin" },
   );
 
-  expect(plist).toContain("<string>/Users/theo/T3 &amp; &lt;Co&gt;</string>");
+  expect(plist).toContain("<string>/Users/theo/Lecturn &amp; &lt;Co&gt;</string>");
   expect(plist).toContain("<string>/Users/theo/Tools &amp; &lt;Scripts&gt;:/usr/bin</string>");
 });
 
@@ -114,7 +114,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-boot-service-test-" });
+  const home = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-boot-service-test-" });
   const baseDir = path.join(home, ".lecturn");
   const sourceLauncher = path.join(home, "service-launcher.mjs");
   const statePath = path.join(baseDir, "runtime", "service-state.json");
@@ -148,7 +148,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
         yield* fs.writeFileString(statePath, control.stateAfterStop).pipe(Effect.orDie);
       }
       return {
-        stdout: input.args[1] === "--version" ? "t3 v1.2.3\n" : "",
+        stdout: input.args[1] === "--version" ? "lecturn v1.2.3\n" : "",
         stderr: "",
         code: ChildProcessSpawner.ExitCode(command === control.failCommand ? 1 : 0),
         timedOut: false,
@@ -170,7 +170,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
       },
     }).pipe(
       Effect.provideService(ProcessRunner.ProcessRunner, runner),
-      Effect.provideService(RuntimeDistributionPackage, "t3"),
+      Effect.provideService(RuntimeDistributionPackage, "lecturn"),
       Effect.provide(
         Layer.mergeAll(
           Layer.succeed(HostProcessPlatform, platform),
@@ -189,7 +189,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
   return { service, makeService, fs, statePath, commands, timeouts, control };
 });
 
-it.layer(Layer.merge(NodeServices.layer, Layer.succeed(RuntimeDistributionPackage, "t3")))(
+it.layer(Layer.merge(NodeServices.layer, Layer.succeed(RuntimeDistributionPackage, "lecturn")))(
   "boot service install",
   (it) => {
     it.effect("installs, reports current state, and uninstalls", () =>

@@ -9,7 +9,7 @@ and never edits a space behind its back. This page covers what the integration d
 ## Enable Stave
 
 Open **Settings** and select **General**, then find the **Stave** section. If the section is
-missing, your server was started with the integration switched off (`T3CODE_STAVE=false`).
+missing, your server was started with the integration switched off (`LECTURN_STAVE=false`).
 
 - **Enable** turns the integration on for this server. Leave it off and existing spaces still
   open as projects; only the Stave-specific status and actions stay hidden.
@@ -300,12 +300,12 @@ Codex checks its MCP configuration before starting a session with space memory. 
 fails, startup reports a diagnostic; check the configured Codex executable, launch arguments and
 home. The CLI must support `mcp list --json`.
 
-| Provider        | Memory support                                                                     |
-| --------------- | ---------------------------------------------------------------------------------- |
-| Claude Code     | Reads the space's project configuration                                            |
-| Codex           | Receives memory configuration for the session                                      |
-| Cursor and Grok | Receive memory configuration when starting or resuming a session                   |
-| OpenCode        | Supported with a local server managed by the app; external servers are unsupported |
+| Provider                     | Memory support                                                                     |
+| ---------------------------- | ---------------------------------------------------------------------------------- |
+| Claude Code                  | Reads the space's project configuration                                            |
+| Codex                        | Receives memory configuration for the session                                      |
+| Cursor, Grok and Antigravity | Receive memory configuration when starting or resuming a session                   |
+| OpenCode                     | Supported with a local server managed by the app; external servers are unsupported |
 
 Settings → Stave and Diagnostics show provider support. The project Stave section also shows
 whether its memory configuration can be loaded. **Supported** describes the adapter;
@@ -382,7 +382,7 @@ acceptance evidence. Their existing Git and pull-request controls remain availab
 Summary and phase inference uses the same provider account as the conversation. Codex prefers
 GPT-5.6 Luna, Claude prefers Sonnet 5, and Cursor prefers Composer 2.5 or Composer 2 when advertised
 by that account. If a preferred model is unavailable, the conversation's selected model is used.
-Grok and OpenCode keep the conversation's model selection. The environment's general text-generation
+Grok, OpenCode and Antigravity keep the conversation's model selection. The environment's general text-generation
 model does not override these account choices.
 
 Each generation returns a summary, an inferred phase and a confidence value together. Confidence

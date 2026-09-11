@@ -9,7 +9,7 @@ import {
   normalizeWorkflowSummary,
 } from "./TextGenerationPrompts.ts";
 import { normalizeCliError, sanitizeThreadTitle } from "./TextGenerationUtils.ts";
-import { TextGenerationError } from "@t3tools/contracts";
+import { TextGenerationError } from "@lecturn/contracts";
 
 describe("buildCommitMessagePrompt", () => {
   it("includes staged patch and summary in the prompt", () => {
@@ -197,7 +197,7 @@ describe("buildThreadTitlePrompt", () => {
     "tells the $mode prompt not to title linked PRs from local git history",
     ({ previousTitle }) => {
       const result = buildThreadTitlePrompt({
-        message: "$takeover https://github.com/pingdotgg/t3code/pull/8588",
+        message: "$takeover https://github.com/nurozen/lecturn/pull/8588",
         ...(previousTitle === undefined ? {} : { previousTitle }),
       });
 

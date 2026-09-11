@@ -1,5 +1,5 @@
-import type { StaveStatus } from "@t3tools/contracts";
-import { ProjectId } from "@t3tools/contracts";
+import type { StaveStatus } from "@lecturn/contracts";
+import { ProjectId } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   staveMemoryConfigurationText,

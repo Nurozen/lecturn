@@ -74,7 +74,7 @@ export class StaveConfigReader extends Context.Service<
     /** Drop the cached snapshot so the next `load` asks Stave (or disk) again. */
     readonly invalidate: Effect.Effect<void>;
   }
->()("t3/stave/StaveConfigReader") {}
+>()("lecturn/stave/StaveConfigReader") {}
 
 export const STAVE_CONFIG_CACHE_TTL = Duration.seconds(15);
 

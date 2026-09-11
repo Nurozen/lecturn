@@ -26,7 +26,7 @@ import {
   ServerSettingsError,
   EnvironmentAuthorizationError,
   WS_METHODS,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";

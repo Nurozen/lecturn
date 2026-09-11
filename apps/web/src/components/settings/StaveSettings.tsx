@@ -3,7 +3,7 @@ import { staveOperationUnavailableReason } from "../stave/staveCompatibility.log
 import { StaveLifecycleSettings } from "./StaveLifecycleSettings";
 import { StavePendingCleanups } from "./StavePendingCleanups";
 import { useAtomValue } from "@effect/atom-react";
-import { DEFAULT_UNIFIED_SETTINGS, type EnvironmentId } from "@t3tools/contracts";
+import { DEFAULT_UNIFIED_SETTINGS, type EnvironmentId } from "@lecturn/contracts";
 import { RefreshCwIcon } from "lucide-react";
 
 import { useEffect, useState } from "react";
@@ -189,7 +189,7 @@ function StaveBinaryPathSetting() {
     <SettingsRow
       serverScoped
       {...searchableSetting("stave-binary-path")}
-      description="Leave empty to auto-detect. Resolution order: this path, then T3CODE_STAVE_PATH, then the desktop bundle, then the binary bundled with the server, then `stave` on PATH."
+      description="Leave empty to auto-detect. Resolution order: this path, then LECTURN_STAVE_PATH, then the desktop bundle, then the binary bundled with the server, then `stave` on PATH."
       resetAction={
         settings.stave.binaryPath !== DEFAULT_UNIFIED_SETTINGS.stave.binaryPath ? (
           <SettingResetButton

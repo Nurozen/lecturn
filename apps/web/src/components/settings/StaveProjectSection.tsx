@@ -1,5 +1,5 @@
-import { staveRpcErrorMessage } from "@t3tools/client-runtime/errors";
-import type { EnvironmentId, StaveProjectInfo, StaveSpaceStatus } from "@t3tools/contracts";
+import { staveRpcErrorMessage } from "@lecturn/client-runtime/errors";
+import type { EnvironmentId, StaveProjectInfo, StaveSpaceStatus } from "@lecturn/contracts";
 import { RefreshCwIcon } from "lucide-react";
 
 import { useStaveFeatureAvailable, useStaveSpaceStatus } from "../../state/stave";

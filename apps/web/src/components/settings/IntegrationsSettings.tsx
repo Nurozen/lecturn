@@ -31,8 +31,8 @@ import {
   resolveBrowserProfiles,
   type PreviewAppearancePreference,
   type PreviewViewportSetting,
-} from "@t3tools/contracts";
-import { PREVIEW_VIEWPORT_PRESETS } from "@t3tools/shared/previewViewport";
+} from "@lecturn/contracts";
+import { PREVIEW_VIEWPORT_PRESETS } from "@lecturn/shared/previewViewport";
 import { InfoIcon, Plus as PlusIcon, Trash2 as Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";

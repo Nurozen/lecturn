@@ -1,10 +1,10 @@
 # Scripts
 
-> For maintainers. Using T3 Code? See [docs/user](../user/).
+> For maintainers. Using Lecturn? See [docs/user](../user/).
 
 ## First checkout
 
-T3 Code uses [Vite+](https://viteplus.dev/guide/). Install the global `vp` command, install
+Lecturn uses [Vite+](https://viteplus.dev/guide/). Install the global `vp` command, install
 dependencies, then start the dev stack:
 
 ```bash
@@ -24,11 +24,11 @@ authenticated.
 - `vp run dev`: Starts contracts, server, and web in watch mode.
 - `vp run dev --share`: Also publishes the web port over HTTPS on this machine's tailnet. The
   startup pairing URL is built against the shared origin, and the mapping is removed on exit.
-  Shared runs default to Vite's bundled dev mode (`T3CODE_BUNDLED_DEV=1`): a remote browser pays a
+  Shared runs default to Vite's bundled dev mode (`LECTURN_BUNDLED_DEV=1`): a remote browser pays a
   network round trip per import level in unbundled dev, which turns a cold module graph into
-  minutes of waterfall. Set `T3CODE_BUNDLED_DEV=0` to opt a shared run back out.
+  minutes of waterfall. Set `LECTURN_BUNDLED_DEV=0` to opt a shared run back out.
 - `vp run dev --browser`: Auto-opens a browser. Off by default. The dev runner writes
-  `T3CODE_NO_BROWSER` itself from this flag, so setting `T3CODE_NO_BROWSER=0` in your environment has
+  `LECTURN_NO_BROWSER` itself from this flag, so setting `LECTURN_NO_BROWSER=0` in your environment has
   no effect; use `--browser`.
 - `vp run dev:server`: Starts just the server. It runs on Node (`node --watch src/bin.ts`), so
   without Bun present it selects `NodePtyAdapter` and `NodeHttpServer`.
@@ -36,22 +36,22 @@ authenticated.
 - `vp run dev:desktop`: Starts the Electron shell against the dev server.
 - `vp run dev:marketing`: Starts the Astro marketing site.
 - Pass dev-runner flags directly after the root task name, for example:
-  `vp run dev --home-dir /tmp/t3code-dev`
+  `vp run dev --home-dir /tmp/lecturn-dev`
 
 ### Dev state directories
 
-- Dev commands run from a linked **git worktree** default to that worktree's gitignored `.t3`, even
-  when `T3CODE_HOME` is set, storing state in `<worktree>/.t3/userdata`. Pass `--home-dir <path>` to
+- Dev commands run from a linked **git worktree** default to that worktree's gitignored `.lecturn`, even
+  when `LECTURN_HOME` is set, storing state in `<worktree>/.lecturn/userdata`. Pass `--home-dir <path>` to
   choose another isolated directory explicitly. Submodules are not worktrees and keep the normal
   precedence.
-- From the **main checkout**, dev commands implicitly use `~/.t3/dev`, keeping development state
-  separate from `~/.t3/userdata`. An explicit `--home-dir <path>` stores state under
+- From the **main checkout**, dev commands implicitly use `~/.lecturn/dev`, keeping development state
+  separate from `~/.lecturn/userdata`. An explicit `--home-dir <path>` stores state under
   `<path>/userdata`; the base directory remains available for caches, worktrees, and other shared
   data.
 
 ## Build, check, test
 
-- `vp run build`: Fans out over `apps/*`, `packages/*`, `oxlint-plugin-t3code`, and `scripts`.
+- `vp run build`: Fans out over `apps/*`, `packages/*`, `oxlint-plugin-lecturn`, and `scripts`.
   Workspaces that define a build task run one: desktop, marketing, server (which depends on web), and
   web. Shared packages are consumed and bundled transitively rather than built separately.
 - `vp run build:desktop`: Builds the desktop pipeline (desktop plus server).
@@ -61,8 +61,8 @@ authenticated.
 - `vp run typecheck`: Strict TypeScript checks for all packages.
 - `vp run test`: Runs workspace tests.
 - `vp run lint:mobile`: Mobile native static analysis (`scripts/mobile-native-static-check.ts`).
-- `node apps/server/scripts/t3-sqlite-state.ts <query|exec> --base-dir <path> ...`: Inspects or seeds
-  an isolated T3 SQLite database; writes create a private backup first.
+- `node apps/server/scripts/lecturn-sqlite-state.ts <query|exec> --base-dir <path> ...`: Inspects or seeds
+  an isolated Lecturn SQLite database; writes create a private backup first.
 
 ## Desktop artifacts
 
@@ -145,7 +145,7 @@ rustup target add aarch64-pc-windows-msvc
 
 Windows supplies `tar.exe`; it is checked when `--wsl-prebuild` makes the artifact include the WSL
 runtime. NSIS is downloaded by electron-builder and does not need a separate installation.
-When `T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR=true` points the build at an existing resource monitor,
+When `LECTURN_DESKTOP_REUSE_RESOURCE_MONITOR=true` points the build at an existing resource monitor,
 the artifact script skips the Rust and Visual Studio checks because it does not compile the monitor.
 Unsigned local builds need no Azure credentials. Builds using `--signed` additionally require the
 Azure Trusted Signing configuration described below.
@@ -159,17 +159,17 @@ Azure Trusted Signing configuration described below.
   SVG into standard and Retina PNGs inside the disposable staging directory.
 - The Finder window is 540×412 while its background is 540×380; the extra 32px accounts for the
   title bar included in Finder's window bounds.
-- Desktop production windows load the bundled UI from the `t3code://app/` root URL (not a
+- Desktop production windows load the bundled UI from the `lecturn://app/` root URL (not a
   `127.0.0.1` document URL, and not an explicit `index.html` path).
-- Desktop packaging includes `apps/server/dist` (the `t3` backend) and starts it on loopback with an
+- Desktop packaging includes `apps/server/dist` (the `lecturn` backend) and starts it on loopback with an
   auth token for WebSocket/API traffic.
 - Your tester can still open it on macOS by right-clicking the app and choosing **Open** on first
   launch.
 - To keep staging files for debugging package contents, run: `vp run dist:desktop:dmg --keep-stage`
 - To allow code-signing/notarization when configured in CI/secrets, add: `--signed`.
-- Signed macOS builds also require `T3CODE_APPLE_TEAM_ID` and
-  `T3CODE_MACOS_PROVISIONING_PROFILE`. The passkey RP domain is derived from
-  `T3CODE_CLERK_PUBLISHABLE_KEY` unless `T3CODE_CLERK_PASSKEY_RP_DOMAINS` overrides it.
+- Signed macOS builds also require `LECTURN_APPLE_TEAM_ID` and
+  `LECTURN_MACOS_PROVISIONING_PROFILE`. The passkey RP domain is derived from
+  `LECTURN_CLERK_PUBLISHABLE_KEY` unless `LECTURN_CLERK_PASSKEY_RP_DOMAINS` overrides it.
 - Windows `--signed` uses Azure Trusted Signing and expects:
   `AZURE_TRUSTED_SIGNING_ENDPOINT`, `AZURE_TRUSTED_SIGNING_ACCOUNT_NAME`,
   `AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME`, and `AZURE_TRUSTED_SIGNING_PUBLISHER_NAME`.
@@ -188,12 +188,12 @@ Worktrees derive a preferred port offset from their path.
 
 - Default ports: server `13773`, web `5733`
 - Shifted ports: `base + offset`
-- Example: `T3CODE_DEV_INSTANCE=branch-a vp run dev:desktop`
+- Example: `LECTURN_DEV_INSTANCE=branch-a vp run dev:desktop`
 
 Offset resolution, in order:
 
-1. `T3CODE_PORT_OFFSET`, which must be a non-negative integer. Negative values are rejected.
-2. `T3CODE_DEV_INSTANCE`. An all-digit value is used directly as the offset; any other non-empty
+1. `LECTURN_PORT_OFFSET`, which must be a non-negative integer. Negative values are rejected.
+2. `LECTURN_DEV_INSTANCE`. An all-digit value is used directly as the offset; any other non-empty
    value is hashed into one.
 3. The worktree path hash.
 

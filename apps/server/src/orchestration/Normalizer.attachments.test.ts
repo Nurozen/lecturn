@@ -9,7 +9,7 @@ import {
   CommandId,
   MessageId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
@@ -22,7 +22,7 @@ import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts"
 
 const testLayer = Layer.mergeAll(
   WorkspacePaths.layer,
-  ServerConfig.layerTest(process.cwd(), { prefix: "t3-normalizer-attachments-" }),
+  ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-normalizer-attachments-" }),
   StaveAdmission.layerNoop,
   Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
     getThreadShellById: () => Effect.succeed(Option.none()),

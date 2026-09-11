@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -29,7 +29,7 @@ const launch = {
   launchArgs:
     '-c profile="space" --profile work --enable example --listen off --analytics-default-enabled',
   environment: { PATH: "/selected/bin", KEEP: "present" },
-  appServerArgs: ["-c", 'mcp_servers.t3-code.url="http://localhost/mcp"'],
+  appServerArgs: ["-c", 'mcp_servers.lecturn.url="http://localhost/mcp"'],
 };
 
 it.effect("lists with the session's exact binary, args, home, cwd and explicit environment", () =>
@@ -47,7 +47,7 @@ it.effect("lists with the session's exact binary, args, home, cwd and explicit e
               "--enable",
               "example",
               "-c",
-              'mcp_servers.t3-code.url="http://localhost/mcp"',
+              'mcp_servers.lecturn.url="http://localhost/mcp"',
               "mcp",
               "list",
               "--json",

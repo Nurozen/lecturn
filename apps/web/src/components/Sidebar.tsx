@@ -23,22 +23,22 @@ import {
   canSnooze,
   effectiveSnoozed,
   threadWokeAt,
-} from "@t3tools/client-runtime/state/thread-settled";
-import { resolveSettledThreadTimestamp } from "@t3tools/client-runtime/state/thread-sort";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+} from "@lecturn/client-runtime/state/thread-settled";
+import { resolveSettledThreadTimestamp } from "@lecturn/client-runtime/state/thread-sort";
+import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/models";
 import {
   scopeProjectRef,
   scopeThreadRef,
   scopedThreadKey,
-} from "@t3tools/client-runtime/environment";
+} from "@lecturn/client-runtime/environment";
 import {
   resolveEnvironmentMachineKind,
   type EnvironmentMachineKind,
   type ProjectIconOverride,
   type ScopedThreadRef,
   type ThreadId,
-} from "@t3tools/contracts";
-import type { TimestampFormat } from "@t3tools/contracts/settings";
+} from "@lecturn/contracts";
+import type { TimestampFormat } from "@lecturn/contracts/settings";
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
@@ -79,7 +79,7 @@ import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@lecturn/client-runtime/state/runtime";
 import { isElectron } from "../env";
 import {
   resolveShortcutCommand,
@@ -224,8 +224,8 @@ import {
 const SETTLED_TAIL_INITIAL_COUNT = 10;
 const SETTLED_TAIL_PAGE_COUNT = 25;
 // Fresh keys deliberately reset both shelves to collapsed for existing users.
-const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
-const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
+const SETTLED_SHELF_EXPANDED_KEY = "lecturn:sidebar:settled-expanded";
+const SNOOZED_SHELF_EXPANDED_KEY = "lecturn:sidebar:snoozed-expanded";
 
 function compactSidebarTimeLabel(label: string): string {
   if (label === "just now") return "now";
@@ -1268,7 +1268,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   );
 
   // A real link so cmd/ctrl+click and middle-click open the host in the
-  // browser. A plain click still opens T3's pull request view.
+  // browser. A plain click still opens Lecturn's pull request view.
   const prBadge =
     prStatus && pr ? (
       <a

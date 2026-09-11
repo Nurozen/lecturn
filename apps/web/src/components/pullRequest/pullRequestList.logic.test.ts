@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProjectId, PullRequestListEntry } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId, PullRequestListEntry } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -23,6 +23,7 @@ import {
   rankPullRequestMatches,
   rankPullRequestsByMergeReadiness,
   scorePullRequestMatch,
+  sortPullRequestGroups,
   retainVisiblePullRequestStatsBatches,
   withDiffStat,
   resolveProjectScope,
@@ -47,10 +48,10 @@ function entry(
     provider: "github",
     host: "github.com",
     projectId: "project-1",
-    projectTitle: "t3code",
-    repository: "pingdotgg/t3code",
+    projectTitle: "lecturn",
+    repository: "nurozen/lecturn",
     title: "Add the pull requests page",
-    url: `https://github.com/pingdotgg/t3code/pull/${overrides.number}`,
+    url: `https://github.com/nurozen/lecturn/pull/${overrides.number}`,
     author: { login: "octocat", name: null, avatarUrl: null },
     headBranch: `feat/branch-${overrides.number}`,
     baseBranch: "main",
@@ -78,7 +79,7 @@ describe("visible pull request line-count targets", () => {
         environmentId: ENV_1,
         projectId: "project-1",
         host: "github.com",
-        repository: "pingdotgg/t3code",
+        repository: "nurozen/lecturn",
         number: 1,
         additions: 1,
         deletions: 1,
@@ -93,7 +94,7 @@ describe("visible pull request line-count targets", () => {
     );
     expect([...keys]).toEqual([secondKey]);
     expect(pullRequestStatsBatches(entriesByKey, keys)[0]?.input.refs).toEqual([
-      { projectId: "project-1", repository: "pingdotgg/t3code", host: "github.com", number: 2 },
+      { projectId: "project-1", repository: "nurozen/lecturn", host: "github.com", number: 2 },
     ]);
   });
 
@@ -137,7 +138,7 @@ describe("visible pull request line-count targets", () => {
         environmentId: ENV_1,
         projectId: "project-1",
         host: "github.com",
-        repository: "pingdotgg/t3code",
+        repository: "nurozen/lecturn",
         number: 1,
         additions: 1,
         deletions: 1,
@@ -336,8 +337,8 @@ describe("pull request grouping", () => {
       VIEWERS,
     );
     expect(groups.map((group) => [group.key, group.entries.length])).toEqual([
-      ["reviewRequested", 1],
       ["authored", 1],
+      ["reviewRequested", 1],
     ]);
   });
 
@@ -761,11 +762,68 @@ describe("default merge-readiness ranking", () => {
       rankPullRequestsByMergeReadiness([larger, unknown, smaller]).map((row) => row.number),
     ).toEqual([2, 1, 3]);
   });
+
+  it("keeps authored work first and ranks each group by readiness", () => {
+    const authoredWaiting = entry({ number: 1, checksState: "pending" });
+    const authoredReady = entry({
+      number: 2,
+      checksState: "passing",
+      reviewDecision: "approved",
+    });
+    const otherReady = entry({
+      number: 3,
+      checksState: "passing",
+      reviewDecision: "approved",
+    });
+    const sorted = sortPullRequestGroups(
+      [
+        { key: "authored", label: "Authored", entries: [authoredWaiting, authoredReady] },
+        { key: "others", label: "Others", entries: [otherReady] },
+      ],
+      "ready",
+      "",
+    );
+
+    expect(sorted.map((group) => group.key)).toEqual(["authored", "others"]);
+    expect(sorted.flatMap((group) => group.entries).map((row) => row.number)).toEqual([2, 1, 3]);
+  });
+
+  it.each([
+    ["updated", [1, 2]],
+    ["newest", [2, 1]],
+    ["oldest", [1, 2]],
+    ["largest", [1, 2]],
+    ["smallest", [2, 1]],
+  ] as const)("keeps authored first while applying the %s sort inside groups", (sort, order) => {
+    const olderLarger = entry({
+      number: 1,
+      additions: 20,
+      createdAt: "2026-07-01T00:00:00Z",
+      updatedAt: "2026-08-01T00:00:00Z",
+    });
+    const newerSmaller = entry({
+      number: 2,
+      additions: 2,
+      createdAt: "2026-08-01T00:00:00Z",
+      updatedAt: "2026-07-01T00:00:00Z",
+    });
+    const sorted = sortPullRequestGroups(
+      [
+        { key: "authored", label: "Authored", entries: [olderLarger, newerSmaller] },
+        { key: "others", label: "Others", entries: [entry({ number: 3 })] },
+      ],
+      sort,
+      "",
+    );
+
+    expect(sorted.map((group) => group.key)).toEqual(["authored", "others"]);
+    expect(sorted[0]!.entries.map((row) => row.number)).toEqual(order);
+  });
 });
 
 describe("line counts that arrive after the rows", () => {
   const stats = new Map([
-    ["env-1 project-1 github.com pingdotgg/t3code 7", { additions: 42, deletions: 3 }],
+    ["env-1 project-1 github.com nurozen/lecturn 7", { additions: 42, deletions: 3 }],
   ]);
 
   it("fills in a row whose host left the counts for later", () => {
@@ -791,7 +849,7 @@ describe("merging line counts across keyed stats queries", () => {
         environmentId: "env-1",
         projectId: "project-1",
         host: "github.com",
-        repository: "pingdotgg/t3code",
+        repository: "nurozen/lecturn",
         number: 1,
         additions: 10,
         deletions: 2,
@@ -800,7 +858,7 @@ describe("merging line counts across keyed stats queries", () => {
         environmentId: "env-1",
         projectId: "project-1",
         host: "github.com",
-        repository: "pingdotgg/t3code",
+        repository: "nurozen/lecturn",
         number: 2,
         additions: 5,
         deletions: 1,
@@ -808,11 +866,11 @@ describe("merging line counts across keyed stats queries", () => {
     ]);
     // A third row appeared; its batch is still pending and contributes nothing yet.
     const merged = mergePullRequestDiffStats(held, []);
-    expect(merged.get("env-1 project-1 github.com pingdotgg/t3code 1")).toEqual({
+    expect(merged.get("env-1 project-1 github.com nurozen/lecturn 1")).toEqual({
       additions: 10,
       deletions: 2,
     });
-    expect(merged.get("env-1 project-1 github.com pingdotgg/t3code 2")).toEqual({
+    expect(merged.get("env-1 project-1 github.com nurozen/lecturn 2")).toEqual({
       additions: 5,
       deletions: 1,
     });
@@ -824,7 +882,7 @@ describe("merging line counts across keyed stats queries", () => {
         environmentId: "env-1",
         projectId: "project-1",
         host: "github.com",
-        repository: "pingdotgg/t3code",
+        repository: "nurozen/lecturn",
         number: 1,
         additions: 10,
         deletions: 2,
@@ -835,7 +893,7 @@ describe("merging line counts across keyed stats queries", () => {
         environmentId: "env-1",
         projectId: "project-1",
         host: "github.com",
-        repository: "pingdotgg/t3code",
+        repository: "nurozen/lecturn",
         number: 1,
         additions: 11,
         deletions: 2,
@@ -844,17 +902,17 @@ describe("merging line counts across keyed stats queries", () => {
         environmentId: "env-1",
         projectId: "project-1",
         host: "github.com",
-        repository: "pingdotgg/t3code",
+        repository: "nurozen/lecturn",
         number: 3,
         additions: 7,
         deletions: 0,
       },
     ]);
-    expect(merged.get("env-1 project-1 github.com pingdotgg/t3code 1")).toEqual({
+    expect(merged.get("env-1 project-1 github.com nurozen/lecturn 1")).toEqual({
       additions: 11,
       deletions: 2,
     });
-    expect(merged.get("env-1 project-1 github.com pingdotgg/t3code 3")).toEqual({
+    expect(merged.get("env-1 project-1 github.com nurozen/lecturn 3")).toEqual({
       additions: 7,
       deletions: 0,
     });
@@ -862,20 +920,20 @@ describe("merging line counts across keyed stats queries", () => {
 
   it("does not mutate the map it was handed", () => {
     const held = new Map([
-      ["env-1 project-1 github.com pingdotgg/t3code 1", { additions: 1, deletions: 1 }],
+      ["env-1 project-1 github.com nurozen/lecturn 1", { additions: 1, deletions: 1 }],
     ]);
     mergePullRequestDiffStats(held, [
       {
         environmentId: "env-1",
         projectId: "project-1",
         host: "github.com",
-        repository: "pingdotgg/t3code",
+        repository: "nurozen/lecturn",
         number: 1,
         additions: 2,
         deletions: 2,
       },
     ]);
-    expect(held.get("env-1 project-1 github.com pingdotgg/t3code 1")).toEqual({
+    expect(held.get("env-1 project-1 github.com nurozen/lecturn 1")).toEqual({
       additions: 1,
       deletions: 1,
     });
@@ -918,9 +976,9 @@ describe("partitioning with the hosts' own priority reads", () => {
       updatedAt: "2026-06-02T00:00:00Z",
     });
     const groups = partitionPullRequestsWithPriority([], [both], [both, requestedOlder, requested]);
-    expect(groups.map((group) => group.key)).toEqual(["reviewRequested", "authored"]);
-    expect(groups[0]!.entries.map((item) => item.number)).toEqual([2, 3]);
-    expect(groups[1]!.entries.map((item) => item.number)).toEqual([1]);
+    expect(groups.map((group) => group.key)).toEqual(["authored", "reviewRequested"]);
+    expect(groups[0]!.entries.map((item) => item.number)).toEqual([1]);
+    expect(groups[1]!.entries.map((item) => item.number)).toEqual([2, 3]);
   });
 
   it("lets the feed's copy of a partitioned row replace the partition's", () => {
@@ -945,7 +1003,7 @@ describe("the list snapshot across a reload", () => {
     providers: [],
     errors: [{ projectId: "project-1", message: "boom" }],
     truncated: true,
-    nextCursors: { "pingdotgg/t3code": "cursor-1" },
+    nextCursors: { "nurozen/lecturn": "cursor-1" },
   } as never;
 
   it("hydrates the retained rows so ghosts never replace them", () => {
@@ -973,12 +1031,12 @@ describe("the list snapshot across a reload", () => {
   it("rejects a snapshot whose rows do not decode as entries", () => {
     const storage = makeStorage();
     storage.setItem(
-      "t3.pullRequests.list:env-1",
+      "lecturn.pullRequests.list:env-1",
       JSON.stringify({ scope: "s", data: { entries: [null] } }),
     );
     expect(readPullRequestListSnapshot(storage, "env-1")).toBeNull();
     storage.setItem(
-      "t3.pullRequests.list:env-1",
+      "lecturn.pullRequests.list:env-1",
       JSON.stringify({ scope: "s", data: { entries: [{ host: "github.com" }] } }),
     );
     expect(readPullRequestListSnapshot(storage, "env-1")).toBeNull();
@@ -986,7 +1044,7 @@ describe("the list snapshot across a reload", () => {
 
   it("shrugs off corrupt storage and no storage at all", () => {
     const storage = makeStorage();
-    storage.setItem("t3.pullRequests.list:env-1", "{not json");
+    storage.setItem("lecturn.pullRequests.list:env-1", "{not json");
     expect(readPullRequestListSnapshot(storage, "env-1")).toBeNull();
     expect(readPullRequestListSnapshot(undefined, "env-1")).toBeNull();
   });
@@ -1080,7 +1138,7 @@ describe("remembered pull request list controls", () => {
 
   it("falls back to the default controls when storage is corrupt", () => {
     const storage = makeStorage();
-    storage.setItem("t3.pullRequests.preferences", "{not json");
+    storage.setItem("lecturn.pullRequests.preferences", "{not json");
     expect(readPullRequestListPreferences(storage)).toEqual({ involvement: "all", state: "open" });
   });
 
@@ -1237,11 +1295,11 @@ describe("merging the environments' own listings", () => {
 
   it("keeps each environment's continuation to itself", () => {
     const merged = mergePullRequestLists([
-      [ENV_1, answer({ nextCursors: { "github.com pingdotgg/t3code": "cursor-1" } })],
+      [ENV_1, answer({ nextCursors: { "github.com nurozen/lecturn": "cursor-1" } })],
       [ENV_2, answer()],
     ]);
     expect(merged?.nextCursors).toEqual({
-      [ENV_1]: { "github.com pingdotgg/t3code": "cursor-1" },
+      [ENV_1]: { "github.com nurozen/lecturn": "cursor-1" },
     });
   });
 
@@ -1450,9 +1508,9 @@ describe("colon-namespaced labels typed as a search", () => {
   });
 
   it("leaves a pasted link alone rather than naming a label after its scheme", () => {
-    const parsed = parsePullRequestQuery("https://github.com/pingdotgg/t3code/pull/1");
+    const parsed = parsePullRequestQuery("https://github.com/nurozen/lecturn/pull/1");
     expect(parsed.filters.labels).toBeUndefined();
-    expect(parsed.text).toBe("https://github.com/pingdotgg/t3code/pull/1");
+    expect(parsed.text).toBe("https://github.com/nurozen/lecturn/pull/1");
   });
 
   it("mixes with the keys it does know, and with plain words", () => {

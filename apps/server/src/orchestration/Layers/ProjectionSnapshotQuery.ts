@@ -29,7 +29,7 @@ import {
   ThreadForkProviderSource,
   ThreadLinkedPullRequest,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Arr from "effect/Array";
 import * as Path from "effect/Path";
 import * as FileSystem from "effect/FileSystem";

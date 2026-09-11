@@ -8,7 +8,7 @@ import {
   ProviderInstanceId,
   type ProviderSession,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { Deferred, Effect, Fiber, FileSystem, Layer, Option, Path, Stream } from "effect";
 import { ServerConfig } from "../config.ts";
 import { OrchestrationEngineLive } from "../orchestration/Layers/OrchestrationEngine.ts";

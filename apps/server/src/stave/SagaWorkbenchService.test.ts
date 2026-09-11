@@ -23,7 +23,7 @@ import {
   type SagaWorkbenchIdentity,
   SagaWorkbenchError,
   type SagaWorkbenchRequirement,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
 import { ServerConfig } from "../config.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";

@@ -9,9 +9,9 @@ const sources = [
   "apps/web/THIRD_PARTY_NOTICES.md",
   "native/libghostty-vt/LICENSE",
   "apps/web/src/terminal/ghostty/fonts/LICENSE",
-  "apps/mobile/modules/t3-composer-editor/LICENSE",
-  "apps/mobile/modules/t3-markdown-text/LICENSE",
-  "apps/mobile/modules/t3-terminal/THIRD_PARTY_NOTICES.md",
+  "apps/mobile/modules/lecturn-composer-editor/LICENSE",
+  "apps/mobile/modules/lecturn-markdown-text/LICENSE",
+  "apps/mobile/modules/lecturn-terminal/THIRD_PARTY_NOTICES.md",
   "licenses/Apache-2.0.txt",
 ];
 const notices = sources

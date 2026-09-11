@@ -1,5 +1,5 @@
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, StaveCreateSpaceOperation } from "@t3tools/contracts";
+import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
+import type { EnvironmentId, StaveCreateSpaceOperation } from "@lecturn/contracts";
 import { useEffect, useState } from "react";
 
 import { staveDryRun } from "../../../state/stave";

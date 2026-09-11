@@ -167,7 +167,7 @@ function WorkingDuration(props: { readonly startedAt: string }) {
 
   return (
     <View accessible accessibilityLabel={label} className="h-11 flex-row items-center px-4">
-      <Text className="font-t3-medium text-xs text-foreground">Working for </Text>
+      <Text className="font-lecturn-medium text-xs text-foreground">Working for </Text>
       <SystemText
         className="text-xs text-foreground"
         style={{ fontVariant: ["tabular-nums"], fontWeight: "500" }}

@@ -1,6 +1,6 @@
-# Lecturn fork release workflow (derived from upstream pingdotgg/t3code).
+# Lecturn release workflow.
 # Runs on GitHub-hosted runners only. Removed vs upstream: Blacksmith runners,
-# the T3 Connect relay/Clerk public-config job, AUR publishing, Vercel web
+# AUR publishing, Vercel web
 # deploy, Discord announcements, and the GitHub App release token (finalize
 # uses github.token). Everything else is kept as close to upstream as possible
 # to minimize nightly merge conflicts.
@@ -52,10 +52,10 @@ permissions:
   id-token: none
 
 env:
-  T3CODE_HOSTED_APP_URL: ${{ vars.T3CODE_HOSTED_APP_URL }}
-  VITE_HOSTED_APP_URL: ${{ vars.T3CODE_HOSTED_APP_URL }}
-  T3CODE_POSTHOG_KEY: ${{ vars.T3CODE_POSTHOG_KEY }}
-  T3CODE_POSTHOG_HOST: ${{ vars.T3CODE_POSTHOG_HOST }}
+  LECTURN_HOSTED_APP_URL: ${{ vars.LECTURN_HOSTED_APP_URL }}
+  VITE_HOSTED_APP_URL: ${{ vars.LECTURN_HOSTED_APP_URL }}
+  LECTURN_POSTHOG_KEY: ${{ vars.LECTURN_POSTHOG_KEY }}
+  LECTURN_POSTHOG_HOST: ${{ vars.LECTURN_POSTHOG_HOST }}
 
 jobs:
   check_changes:
@@ -131,6 +131,8 @@ jobs:
           node-version-file: package.json
           cache: true
           run-install: true
+        env:
+          pnpm_config_cache_dir: ${{ runner.temp }}/pnpm-metadata
 
       - id: release_meta
         name: Resolve release version
@@ -215,6 +217,13 @@ jobs:
           STAVE_TAG: ${{ steps.stave_tag.outputs.stave_tag }}
         run: |
           echo "- Bundled Stave: \`${STAVE_TAG}\`" >> "$GITHUB_STEP_SUMMARY"
+      # Share only the verification results, not the large registry metadata cache.
+      - name: Upload dependency verification
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-dependency-verification
+          path: ${{ runner.temp }}/pnpm-metadata/lockfile-verified.jsonl
 
   quality:
     name: Release quality checks
@@ -240,7 +249,7 @@ jobs:
           run-install: true
 
       - name: Ensure Electron runtime is installed
-        run: vp run --filter @t3tools/desktop ensure:electron
+        run: vp run --filter @lecturn/desktop ensure:electron
 
       - name: Check
         run: vp check
@@ -286,7 +295,7 @@ jobs:
           cache: true
           run-install: |
             args:
-              - --filter=t3...
+              - --filter=lecturn...
 
       - name: Build node-pty linux-x64 prebuild
         shell: bash
@@ -324,10 +333,10 @@ jobs:
     timeout-minutes: 30
     environment: production
     env:
-      T3CODE_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
-      T3CODE_CLERK_JWT_TEMPLATE: ${{ vars.CLERK_JWT_TEMPLATE }}
-      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.CLERK_CLI_OAUTH_CLIENT_ID }}
-      T3CODE_RELAY_URL: https://${{ vars.RELAY_DOMAIN }}
+      LECTURN_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
+      LECTURN_CLERK_JWT_TEMPLATE: ${{ vars.CLERK_JWT_TEMPLATE }}
+      LECTURN_CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.CLERK_CLI_OAUTH_CLIENT_ID }}
+      LECTURN_RELAY_URL: https://${{ vars.RELAY_DOMAIN }}
     strategy:
       fail-fast: false
       matrix:
@@ -378,13 +387,13 @@ jobs:
       - name: Verify Lecturn public configuration
         shell: bash
         run: |
-          for name in T3CODE_HOSTED_APP_URL T3CODE_CLERK_PUBLISHABLE_KEY T3CODE_CLERK_JWT_TEMPLATE T3CODE_CLERK_CLI_OAUTH_CLIENT_ID; do
+          for name in LECTURN_HOSTED_APP_URL LECTURN_CLERK_PUBLISHABLE_KEY LECTURN_CLERK_JWT_TEMPLATE LECTURN_CLERK_CLI_OAUTH_CLIENT_ID; do
             if [[ -z "${!name}" ]]; then
               echo "Missing required Lecturn release configuration: $name" >&2
               exit 1
             fi
           done
-          if [[ -z "${T3CODE_RELAY_URL#https://}" ]]; then
+          if [[ -z "${LECTURN_RELAY_URL#https://}" ]]; then
             echo "Missing required Lecturn release configuration: RELAY_DOMAIN" >&2
             exit 1
           fi
@@ -409,14 +418,25 @@ jobs:
           path: ${{ steps.package_cache_path.outputs.path }}
           key: windows-release-packages-v1-${{ matrix.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
 
+      # pnpm checks the lockfile and policy before reusing this result. A missing
+      # artifact leaves the cache empty, so installation runs the checks again.
+      - name: Download dependency verification
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: release-dependency-verification
+          path: ${{ runner.temp }}/pnpm-metadata
+
       - name: Install desktop dependencies
-        run: vp install --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts...
+        env:
+          pnpm_config_cache_dir: ${{ runner.temp }}/pnpm-metadata
+        run: vp install --filter=@lecturn/desktop... --filter=lecturn... --filter=@lecturn/scripts...
 
       - name: Cache resource monitor
         id: resource_monitor_cache
         uses: actions/cache@v6
         with:
-          path: native/resource-monitor/target/${{ matrix.rust_target }}/release/t3-resource-monitor${{ matrix.platform == 'win' && '.exe' || '' }}
+          path: native/resource-monitor/target/${{ matrix.rust_target }}/release/lecturn-resource-monitor${{ matrix.platform == 'win' && '.exe' || '' }}
           key: resource-monitor-${{ matrix.rust_target }}-${{ hashFiles('native/resource-monitor/Cargo.lock', 'native/resource-monitor/Cargo.toml', 'native/resource-monitor/src/**') }}
 
       - name: Setup Rust
@@ -556,7 +576,8 @@ jobs:
       - name: Build desktop artifact
         shell: bash
         env:
-          T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR: ${{ steps.resource_monitor_cache.outputs.cache-hit == 'true' }}
+          pnpm_config_cache_dir: ${{ runner.temp }}/pnpm-metadata
+          LECTURN_DESKTOP_REUSE_RESOURCE_MONITOR: ${{ steps.resource_monitor_cache.outputs.cache-hit == 'true' }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
@@ -633,8 +654,8 @@ jobs:
                 profile_path="$signing_dir/lecturn.provisionprofile"
                 printf '%s' "$MACOS_PROVISIONING_PROFILE" | base64 -D > "$profile_path"
                 security cms -D -i "$profile_path" >/dev/null
-                export T3CODE_APPLE_TEAM_ID="$APPLE_TEAM_ID"
-                export T3CODE_MACOS_PROVISIONING_PROFILE="$profile_path"
+                export LECTURN_APPLE_TEAM_ID="$APPLE_TEAM_ID"
+                export LECTURN_MACOS_PROVISIONING_PROFILE="$profile_path"
               else
                 echo "::notice::macOS passkey entitlements disabled (no team id / provisioning profile)"
               fi
@@ -721,7 +742,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          binary_name="t3-resource-monitor"
+          binary_name="lecturn-resource-monitor"
           if [[ "${{ matrix.platform }}" == "win" ]]; then
             binary_name="${binary_name}.exe"
           fi
@@ -752,10 +773,10 @@ jobs:
     timeout-minutes: 10
     environment: production
     env:
-      T3CODE_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
-      T3CODE_CLERK_JWT_TEMPLATE: ${{ vars.CLERK_JWT_TEMPLATE }}
-      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.CLERK_CLI_OAUTH_CLIENT_ID }}
-      T3CODE_RELAY_URL: https://${{ vars.RELAY_DOMAIN }}
+      LECTURN_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
+      LECTURN_CLERK_JWT_TEMPLATE: ${{ vars.CLERK_JWT_TEMPLATE }}
+      LECTURN_CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.CLERK_CLI_OAUTH_CLIENT_ID }}
+      LECTURN_RELAY_URL: https://${{ vars.RELAY_DOMAIN }}
     permissions:
       contents: read
       id-token: write
@@ -772,13 +793,13 @@ jobs:
       - name: Verify Lecturn public configuration
         shell: bash
         run: |
-          for name in T3CODE_HOSTED_APP_URL T3CODE_CLERK_PUBLISHABLE_KEY T3CODE_CLERK_JWT_TEMPLATE T3CODE_CLERK_CLI_OAUTH_CLIENT_ID; do
+          for name in LECTURN_HOSTED_APP_URL LECTURN_CLERK_PUBLISHABLE_KEY LECTURN_CLERK_JWT_TEMPLATE LECTURN_CLERK_CLI_OAUTH_CLIENT_ID; do
             if [[ -z "${!name}" ]]; then
               echo "Missing required Lecturn release configuration: $name" >&2
               exit 1
             fi
           done
-          if [[ -z "${T3CODE_RELAY_URL#https://}" ]]; then
+          if [[ -z "${LECTURN_RELAY_URL#https://}" ]]; then
             echo "Missing required Lecturn release configuration: RELAY_DOMAIN" >&2
             exit 1
           fi
@@ -790,17 +811,17 @@ jobs:
           cache: true
           run-install: |
             args:
-              - --filter=t3...
-              - --filter=@t3tools/web...
-              - --filter=@t3tools/scripts...
+              - --filter=lecturn...
+              - --filter=@lecturn/web...
+              - --filter=@lecturn/scripts...
 
       - name: Align package versions to release version
         run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
 
-      # The t3 build task depends on @t3tools/web#build, so the web client is
+      # The lecturn build task depends on @lecturn/web#build, so the web client is
       # built (once) as part of this step.
       - name: Build CLI package
-        run: vp run --filter t3 build
+        run: vp run --filter lecturn build
 
       - name: Download resource monitors
         uses: actions/download-artifact@v8
@@ -816,8 +837,8 @@ jobs:
             resource_key="${artifact_dir##*/resource-monitor-}"
             target_dir="apps/server/dist/resource-monitor/${resource_key}"
             mkdir -p "$target_dir"
-            cp "$artifact_dir"/t3-resource-monitor* "$target_dir/"
-            chmod +x "$target_dir"/t3-resource-monitor 2>/dev/null || true
+            cp "$artifact_dir"/lecturn-resource-monitor* "$target_dir/"
+            chmod +x "$target_dir"/lecturn-resource-monitor 2>/dev/null || true
           done
 
       # The CLI package ships Stave for every supported platform key, not just
@@ -859,7 +880,7 @@ jobs:
           cache: true
           run-install: |
             args:
-              - --filter=@t3tools/scripts...
+              - --filter=@lecturn/scripts...
 
       - name: Download all desktop artifacts
         uses: actions/download-artifact@v8
@@ -948,8 +969,8 @@ jobs:
           cache: true
           run-install: |
             args:
-              - --filter=@t3tools/scripts...
-              - --filter=@t3tools/oxlint-plugin-t3code...
+              - --filter=@lecturn/scripts...
+              - --filter=@lecturn/oxlint-plugin-lecturn...
 
       - id: update_versions
         name: Update version strings

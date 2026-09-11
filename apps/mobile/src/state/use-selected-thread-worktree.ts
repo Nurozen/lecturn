@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { resolveProjectGitTargets } from "@t3tools/client-runtime/state/projectGit";
+import { resolveProjectGitTargets } from "@lecturn/client-runtime/state/projectGit";
 import { useThreadGitSelection } from "./thread-git-selection";
 
 import { resolveThreadGitTarget, selectThreadGitRepository } from "./thread-git-target";

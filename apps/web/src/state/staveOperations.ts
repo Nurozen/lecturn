@@ -1,7 +1,7 @@
-import { createRuntimeCommand } from "@t3tools/client-runtime/state/runtime";
-import { waitForProjectVisible } from "@t3tools/client-runtime/state/shell";
-import { createStaveOperationManager } from "@t3tools/client-runtime/state/stave-operation";
-import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { createRuntimeCommand } from "@lecturn/client-runtime/state/runtime";
+import { waitForProjectVisible } from "@lecturn/client-runtime/state/shell";
+import { createStaveOperationManager } from "@lecturn/client-runtime/state/stave-operation";
+import type { EnvironmentId, ProjectId } from "@lecturn/contracts";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { environmentShell } from "./shell";

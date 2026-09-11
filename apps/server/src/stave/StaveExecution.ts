@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off -- same default home as StaveConfigReader
 import * as NodeOS from "node:os";
 import * as NodeCrypto from "node:crypto";
-import { stableStringify } from "@t3tools/shared/relaySigning";
+import { stableStringify } from "@lecturn/shared/relaySigning";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -21,7 +21,7 @@ export class StaveExecution extends Context.Service<
       options?: { readonly writableConfig?: boolean },
     ) => Effect.Effect<A, E | StaveError, R>;
   }
->()("t3/stave/StaveExecution") {}
+>()("lecturn/stave/StaveExecution") {}
 
 export const layer = Layer.effect(
   StaveExecution,

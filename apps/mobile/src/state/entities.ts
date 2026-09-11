@@ -2,14 +2,14 @@ import { useAtomValue } from "@effect/atom-react";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
-} from "@t3tools/client-runtime/state/shell";
+} from "@lecturn/client-runtime/state/shell";
 import type {
   EnvironmentId,
   ScopedProjectRef,
   ScopedThreadRef,
   ServerConfig,
-} from "@t3tools/contracts";
-import { environmentSupportsStave } from "@t3tools/client-runtime/state/stave";
+} from "@lecturn/contracts";
+import { environmentSupportsStave } from "@lecturn/client-runtime/state/stave";
 import { Atom } from "effect/unstable/reactivity";
 
 import { environmentProjects } from "./projects";

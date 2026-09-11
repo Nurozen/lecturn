@@ -3,7 +3,7 @@ import {
   DEFAULT_SERVER_SETTINGS,
   ProjectId,
   type OrchestrationProjectShell,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { Effect, Layer } from "effect";
 import { ServerConfig, layerTest } from "../config.ts";
 import { NodeServices } from "@effect/platform-node";

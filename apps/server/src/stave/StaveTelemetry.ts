@@ -1,4 +1,4 @@
-import type { StaveOperation } from "@t3tools/contracts";
+import type { StaveOperation } from "@lecturn/contracts";
 import { normalizeStaveErrorCode } from "./StaveError.ts";
 
 type StaveTelemetryEvent = {

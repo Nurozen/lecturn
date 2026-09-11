@@ -1,5 +1,5 @@
-import type { StaveProjectInfo, StaveRepoEntry } from "@t3tools/contracts";
-import { isWindowsAbsolutePath, normalizeProjectPathForComparison } from "@t3tools/shared/path";
+import type { StaveProjectInfo, StaveRepoEntry } from "@lecturn/contracts";
+import { isWindowsAbsolutePath, normalizeProjectPathForComparison } from "@lecturn/shared/path";
 
 /** Compare manifest-relative repo paths with the absolute primary Git target. */
 function repoPathForComparison(path: string, workspaceRoot: string): string {

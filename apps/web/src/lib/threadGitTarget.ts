@@ -1,9 +1,9 @@
-import type { OrchestrationProjectShell } from "@t3tools/contracts";
+import type { OrchestrationProjectShell } from "@lecturn/contracts";
 import {
   isStaveProject,
   resolveProjectGitBranch,
   resolveProjectGitCwd,
-} from "@t3tools/client-runtime/state/projectGit";
+} from "@lecturn/client-runtime/state/projectGit";
 
 type ProjectLike = Pick<OrchestrationProjectShell, "workspaceRoot"> & {
   readonly stave?: OrchestrationProjectShell["stave"];

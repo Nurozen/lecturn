@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@lecturn/contracts";
 
 /**
  * Bus between the places that launch the Stave wizard (the command palette's

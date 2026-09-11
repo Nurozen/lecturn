@@ -2,8 +2,8 @@ import type {
   StaveOperationOutputLine,
   StaveOperationPhaseState,
   StaveOperationState,
-} from "@t3tools/client-runtime/state/stave-operation";
-import type { StaveOperationError, StaveRemovePartialSpaceOperation } from "@t3tools/contracts";
+} from "@lecturn/client-runtime/state/stave-operation";
+import type { StaveOperationError, StaveRemovePartialSpaceOperation } from "@lecturn/contracts";
 
 import { buildRemovePartialSpaceOperation, partialSpaceFromError } from "./staveSpaceWizard.logic";
 

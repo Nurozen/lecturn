@@ -5,9 +5,9 @@ import type {
   StaveOperation,
   StaveProjectInfo,
   StaveSpaceListRow,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { useEffect, useState } from "react";
-import { isValidStaveSpaceId } from "@t3tools/shared/stave";
+import { isValidStaveSpaceId } from "@lecturn/shared/stave";
 import { staveSpaces, useStaveSagaStatus } from "../../state/stave";
 import { useEnvironmentQuery } from "../../state/query";
 import { openStaveWizard } from "../../staveWizard";

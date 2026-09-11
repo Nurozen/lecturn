@@ -10,8 +10,8 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { STAVE_PLATFORM_KEYS, staveAssetName } from "@t3tools/shared/stave";
+import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
+import { STAVE_PLATFORM_KEYS, staveAssetName } from "@lecturn/shared/stave";
 
 import {
   STAVE_REPOSITORY,

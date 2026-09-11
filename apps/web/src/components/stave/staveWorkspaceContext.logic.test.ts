@@ -1,4 +1,4 @@
-import type { StaveProjectInfo } from "@t3tools/contracts";
+import type { StaveProjectInfo } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { describeStaveWorkspace } from "./staveWorkspaceContext.logic";

@@ -177,7 +177,7 @@ archive, restore, destroy, and memory actions. Saga operations use the same regi
 and reports which source supplied it: `{ path, source, version, commit }` with `source` one of
 `settings | env | bootstrap | bundled | path`.
 
-- **Resolution order.** `settings.stave.binaryPath` → `T3CODE_STAVE_PATH` → the desktop
+- **Resolution order.** `settings.stave.binaryPath` → `LECTURN_STAVE_PATH` → the desktop
   bootstrap envelope's `stavePath` (`ServerConfig.stavePath`; it never arrives as a CLI flag) →
   bundled candidates relative to the server module (`stave/<platformKey>/stave[.exe]`,
   `../stave/...`, and the dev fallback `../../dist/stave/...` where `fetch-stave` extracts) →
@@ -296,15 +296,15 @@ answers none for hosts and tests without Stave; `layerFixed(dir)` pins one.
 
 Three independent facts, not one (deviation 5):
 
-| Fact      | Where                                          | Nature                                                   |
-| --------- | ---------------------------------------------- | -------------------------------------------------------- |
-| supported | `capabilities.stave: { protocolVersion }`      | static build fact; absent only when `T3CODE_STAVE=false` |
-| runnable  | `stave.getStatus.runnable` (`resolveRunnable`) | live; re-probed per call, memoised until a settings save |
-| enabled   | `settings.stave.enabled`                       | user choice; pushed live via `settingsUpdated`           |
+| Fact      | Where                                          | Nature                                                    |
+| --------- | ---------------------------------------------- | --------------------------------------------------------- |
+| supported | `capabilities.stave: { protocolVersion }`      | static build fact; absent only when `LECTURN_STAVE=false` |
+| runnable  | `stave.getStatus.runnable` (`resolveRunnable`) | live; re-probed per call, memoised until a settings save  |
+| enabled   | `settings.stave.enabled`                       | user choice; pushed live via `settingsUpdated`            |
 
 - **supported.** `apps/server/src/environment/ServerEnvironment.ts` spreads
   `{ stave: { protocolVersion: STAVE_PROTOCOL_VERSION } }` into the descriptor's capabilities
-  when `ServerConfig.staveEnabled` is true (`T3CODE_STAVE`, default on; also carried in the
+  when `ServerConfig.staveEnabled` is true (`LECTURN_STAVE`, default on; also carried in the
   desktop/WSL bootstrap envelope). Nothing about binaries or settings feeds it, because there is
   no `environmentUpdated` push: a capability that depended on either would go stale across
   clients. Bump `STAVE_PROTOCOL_VERSION` when the CLI contract the server speaks changes.
@@ -313,7 +313,7 @@ Three independent facts, not one (deviation 5):
   (space actions, wizard, badges) renders only when
   `staveFeatureAvailable(config, status) = capability && settings.stave.enabled && status.runnable`
   (pure, in `client-runtime`).
-- **Handlers enforce all three.** `T3CODE_STAVE=false` is the unbypassable kill switch: every
+- **Handlers enforce all three.** `LECTURN_STAVE=false` is the unbypassable kill switch: every
   `stave.*` RPC fails `StaveUnavailableError { reason: "disabled_by_server" }`, like thread
   forking. Space-scoped RPCs additionally require `settings.stave.enabled`
   (`disabled_in_settings`) and a runnable binary (`binary_missing`). `stave.getStatus` checks
@@ -612,9 +612,9 @@ Rules built on them:
 
 - **Forced local env mode.** `resolveDefaultThreadEnvMode` in
   `packages/shared/src/threadEnvMode.ts` takes `forcedMode` as the top priority (forced >
-  per-project setting > `t3.json` > global default), and `isDefaultThreadEnvModeSettled` treats
+  per-project setting > `lecturn.json` > global default), and `isDefaultThreadEnvModeSettled` treats
   a forced mode as settled immediately. Web passes it from `chatThreadActions.ts`
-  (`useHandleNewThread`) and skips the `t3.json` read when forced; `BranchToolbar` /
+  (`useHandleNewThread`) and skips the `lecturn.json` read when forced; `BranchToolbar` /
   `BranchToolbarBranchSelector` pin the composer mode. Mobile passes it in
   `apps/mobile/src/features/threads/new-task-flow-provider.tsx`, never persists a worktree path
   for a Stave draft, and refuses a `worktree` mode pick.
@@ -855,11 +855,11 @@ executable, working directory, home, environment and configuration launch argume
 transport flags are excluded from this inventory command. An absent canonical entry receives a
 valid disabled placeholder; an existing entry retains its transport and is disabled. Inventory
 failure refuses startup with a diagnostic that omits inventory contents. No shared Codex
-configuration is written. Cursor and Grok append
+configuration is written. Cursor, Grok and Antigravity append
 an ACP stdio MCP entry for both new and loaded sessions. OpenCode registers a local MCP entry
 before readiness and disconnects it with the session scope, including failed startup and
 unexpected exit. MCP additions have a 10-second bound and Stave disconnection a 1-second bound;
-requests receive abort signals, and interruption still closes the owned server. Existing T3 MCP entries are preserved. External OpenCode servers are excluded:
+requests receive abort signals, and interruption still closes the owned server. Existing Lecturn MCP entries are preserved. External OpenCode servers are excluded:
 the local absolute binary/home configuration is not meaningful on an arbitrary remote server,
 and mutating shared external MCP state would require a separate ownership contract. Claude keeps
 its project cwd and user/project/local settings sources; its SDK test establishes that

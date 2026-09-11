@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { LECTURN_LEGAL_NOTICES } from "@t3tools/shared/legalNotices";
+import { LECTURN_LEGAL_NOTICES } from "@lecturn/shared/legalNotices";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
@@ -17,10 +17,10 @@ import {
   resolveWebIconOverrides,
 } from "../../../scripts/lib/brand-assets.ts";
 import { resolveCatalogDependencies } from "../../../scripts/lib/resolve-catalog.ts";
-import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
-import { fromYaml } from "@t3tools/shared/schemaYaml";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
-import { STAVE_PLATFORM_KEYS } from "@t3tools/shared/stave";
+import { fromJsonStringPretty } from "@lecturn/shared/schemaJson";
+import { fromYaml } from "@lecturn/shared/schemaYaml";
+import { resolveSpawnCommand } from "@lecturn/shared/shell";
+import { STAVE_PLATFORM_KEYS } from "@lecturn/shared/stave";
 import serverPackageJson from "../package.json" with { type: "json" };
 import {
   ServerCliBuildAssetMissingError,
@@ -223,7 +223,7 @@ export const createVpPmPublishArgs = (config: PublishCommandConfig): ReadonlyArr
     "--filter",
     // pnpm matches --filter against the manifest name, which has already been
     // rewritten by the time publish runs, so follow the published name.
-    Option.getOrElse(config.packageName, () => "t3"),
+    Option.getOrElse(config.packageName, () => "lecturn"),
     "--access",
     config.access,
     "--tag",
@@ -368,7 +368,7 @@ const publishCmd = Command.make(
 // ---------------------------------------------------------------------------
 
 const cli = Command.make("cli").pipe(
-  Command.withDescription("T3 server build & publish CLI."),
+  Command.withDescription("Lecturn server build & publish CLI."),
   Command.withSubcommands([buildCmd, publishCmd]),
 );
 

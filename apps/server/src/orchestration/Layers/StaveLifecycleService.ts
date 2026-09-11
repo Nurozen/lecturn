@@ -2,8 +2,8 @@ import {
   CommandId,
   type OrchestrationEvent,
   type StaveLifecycleActionOperation,
-} from "@t3tools/contracts";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+} from "@lecturn/contracts";
+import { makeDrainableWorker } from "@lecturn/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";

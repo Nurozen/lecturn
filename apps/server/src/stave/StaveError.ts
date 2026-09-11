@@ -16,7 +16,7 @@ import {
   STAVE_CLI_ERROR_CODES,
   STAVE_HOST_ERROR_CODES,
   STAVE_OPERATION_ERROR_CODES,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 

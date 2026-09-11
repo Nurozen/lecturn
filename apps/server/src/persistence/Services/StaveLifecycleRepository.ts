@@ -3,7 +3,7 @@ import {
   IsoDateTime,
   NonNegativeInt,
   StaveSagaTeardownAuthorization,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Context from "effect/Context";
 import * as Schema from "effect/Schema";
 import type * as Effect from "effect/Effect";
@@ -123,4 +123,4 @@ export interface StaveLifecycleRepositoryShape {
 export class StaveLifecycleRepository extends Context.Service<
   StaveLifecycleRepository,
   StaveLifecycleRepositoryShape
->()("t3/persistence/Services/StaveLifecycleRepository") {}
+>()("lecturn/persistence/Services/StaveLifecycleRepository") {}

@@ -10,6 +10,6 @@ export interface StaveExecutionSnapshot {
 
 /** Fiber-local binding shared by preflight, CLI calls and reconciliation. */
 export const StaveExecutionContext = Context.Reference<StaveExecutionSnapshot | undefined>(
-  "t3/stave/StaveExecutionContext",
+  "lecturn/stave/StaveExecutionContext",
   { defaultValue: () => undefined },
 );

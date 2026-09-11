@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 
-import { resolveProjectGitCwd } from "@t3tools/client-runtime/state/projectGit";
-import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
+import { resolveProjectGitCwd } from "@lecturn/client-runtime/state/projectGit";
+import { dedupeRemoteBranchesWithLocalMatches } from "@lecturn/shared/git";
 
 import { useBranches } from "./queries";
 import { useEnvironmentQuery } from "./query";

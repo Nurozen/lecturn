@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { ProjectId, type OrchestrationProject } from "@t3tools/contracts";
+import { ProjectId, type OrchestrationProject } from "@lecturn/contracts";
 import { Effect, FileSystem, Layer, Option, Path } from "effect";
 import { checkStaveWorktreeRpcOwnership } from "./ws.ts";
 import { StaveWorktreeForbiddenError } from "./stave/StaveAdmission.ts";

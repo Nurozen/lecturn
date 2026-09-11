@@ -21,13 +21,13 @@ import {
   HttpClientResponse,
 } from "effect/unstable/http";
 
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import {
   STAVE_PLATFORM_KEYS,
   type StavePlatformKey,
   staveAssetName,
   staveAssetTarget,
-} from "@t3tools/shared/stave";
+} from "@lecturn/shared/stave";
 
 export const STAVE_REPOSITORY = "Nurozen/stave";
 export const STAVE_VERSION_FILE_NAME = "stave.version";

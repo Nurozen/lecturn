@@ -27,7 +27,7 @@ it.effect("uses the statically injected relay URL when no runtime override exist
 it.effect("prefers a runtime relay URL override over the statically injected value", () =>
   Effect.gen(function* () {
     const relayUrl = yield* makeRelayUrlConfig("https://embedded.example.test").pipe(
-      provideEnv({ T3CODE_RELAY_URL: "https://runtime.example.test///" }),
+      provideEnv({ LECTURN_RELAY_URL: "https://runtime.example.test///" }),
     );
 
     assert.equal(relayUrl, "https://runtime.example.test");
@@ -40,7 +40,7 @@ it.effect("requires a relay URL when the server bundle has no injected value", (
 
 it.effect("rejects an insecure runtime relay URL override", () =>
   makeRelayUrlConfig("https://embedded.example.test").pipe(
-    provideEnv({ T3CODE_RELAY_URL: "http://runtime.example.test" }),
+    provideEnv({ LECTURN_RELAY_URL: "http://runtime.example.test" }),
     Effect.flip,
   ),
 );
@@ -53,13 +53,13 @@ it.effect("normalizes the hosted app URL to an absolute origin", () =>
   Effect.gen(function* () {
     assert.equal(
       yield* hostedAppUrlConfig.pipe(
-        provideEnv({ T3CODE_HOSTED_APP_URL: "https://nightly.app.t3.codes" }),
+        provideEnv({ LECTURN_HOSTED_APP_URL: "https://nightly.lecturn.cloudgatherer.net" }),
       ),
-      "https://nightly.app.t3.codes",
+      "https://nightly.lecturn.cloudgatherer.net",
     );
     assert.equal(
       yield* hostedAppUrlConfig.pipe(
-        provideEnv({ T3CODE_HOSTED_APP_URL: "http://localhost:5733" }),
+        provideEnv({ LECTURN_HOSTED_APP_URL: "http://localhost:5733" }),
       ),
       "http://localhost:5733",
     );
@@ -69,13 +69,13 @@ it.effect("normalizes the hosted app URL to an absolute origin", () =>
 it.effect("rejects malformed or insecure hosted app URLs", () =>
   Effect.gen(function* () {
     for (const value of [
-      "app.t3.codes",
-      "http://app.t3.codes",
-      "https://app.t3.codes/nested",
-      "https://app.t3.codes?alias=true",
+      "lecturn.cloudgatherer.net",
+      "http://lecturn.cloudgatherer.net",
+      "https://lecturn.cloudgatherer.net/nested",
+      "https://lecturn.cloudgatherer.net?alias=true",
     ]) {
       const result = yield* hostedAppUrlConfig.pipe(
-        provideEnv({ T3CODE_HOSTED_APP_URL: value }),
+        provideEnv({ LECTURN_HOSTED_APP_URL: value }),
         Effect.result,
       );
       assert.isTrue(Result.isFailure(result), value);
@@ -107,8 +107,8 @@ it.effect("prefers runtime Clerk OAuth config overrides over statically injected
       clerkCliOAuthClientIdFallback: "oauth_client_embedded",
     }).pipe(
       provideEnv({
-        T3CODE_CLERK_PUBLISHABLE_KEY: "pk_test_cnVudGltZS5leGFtcGxlLnRlc3Qk",
-        T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_client_runtime",
+        LECTURN_CLERK_PUBLISHABLE_KEY: "pk_test_cnVudGltZS5leGFtcGxlLnRlc3Qk",
+        LECTURN_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_client_runtime",
       }),
     );
 
@@ -156,9 +156,9 @@ it("resolves relay client tracing from runtime config with build-time fallback",
   assert.deepEqual(
     resolveRelayClientTracingConfig(
       {
-        T3CODE_RELAY_CLIENT_OTLP_TRACES_URL: "https://runtime.example.test/v1/traces",
-        T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET: "runtime-dataset",
-        T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: "runtime-token",
+        LECTURN_RELAY_CLIENT_OTLP_TRACES_URL: "https://runtime.example.test/v1/traces",
+        LECTURN_RELAY_CLIENT_OTLP_TRACES_DATASET: "runtime-dataset",
+        LECTURN_RELAY_CLIENT_OTLP_TRACES_TOKEN: "runtime-token",
       },
       fallback,
     ),
@@ -171,9 +171,9 @@ it("resolves relay client tracing from runtime config with build-time fallback",
   assert.equal(
     resolveRelayClientTracingConfig(
       {
-        T3CODE_RELAY_CLIENT_OTLP_TRACES_URL: "http://insecure.example.test/v1/traces",
-        T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET: "runtime-dataset",
-        T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: "runtime-token",
+        LECTURN_RELAY_CLIENT_OTLP_TRACES_URL: "http://insecure.example.test/v1/traces",
+        LECTURN_RELAY_CLIENT_OTLP_TRACES_DATASET: "runtime-dataset",
+        LECTURN_RELAY_CLIENT_OTLP_TRACES_TOKEN: "runtime-token",
       },
       fallback,
     ),
@@ -191,7 +191,7 @@ it.effect(
       );
       assert.equal(
         yield* makeHostedAppUrlConfig("https://lecturn.example.test").pipe(
-          provideEnv({ T3CODE_HOSTED_APP_URL: "https://override.example.test" }),
+          provideEnv({ LECTURN_HOSTED_APP_URL: "https://override.example.test" }),
         ),
         "https://override.example.test",
       );

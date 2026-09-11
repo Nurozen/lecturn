@@ -20,7 +20,7 @@ import {
   type RuntimeMode,
   type ThreadId,
   TurnId,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
@@ -559,7 +559,7 @@ export function makeCursorAdapter(
           if (mcpSession) {
             mcpServers.push({
               type: "http",
-              name: "t3-code",
+              name: "lecturn",
               url: mcpSession.endpoint,
               headers: [{ name: "Authorization", value: mcpSession.authorizationHeader }],
             });
@@ -582,7 +582,7 @@ export function makeCursorAdapter(
             cwd,
             runtimeMode: input.runtimeMode,
             ...(resumeSessionId ? { resumeSessionId } : {}),
-            clientInfo: { name: "t3-code", version: "0.0.0" },
+            clientInfo: { name: "lecturn", version: "0.0.0" },
             ...(mcpServers.length > 0 ? { mcpServers } : {}),
             ...acpNativeLoggers,
           }).pipe(

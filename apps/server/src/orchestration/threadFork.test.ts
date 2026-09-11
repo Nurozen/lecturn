@@ -12,7 +12,7 @@ import {
   type OrchestrationThread,
   type OrchestrationThreadActivity,
   type ThreadForkProviderSource,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 
 import { checkpointRefForThreadTurn } from "../checkpointing/Utils.ts";
 import type { ProjectionTurn } from "../persistence/Services/ProjectionTurns.ts";
@@ -279,9 +279,9 @@ const sourceThread: OrchestrationThread = {
   worktreePath: "/tmp/fork-worktree",
   linkedPullRequest: {
     projectId,
-    repository: "t3tools/t3code",
+    repository: "nurozen/lecturn",
     number: 42,
-    url: "https://github.com/t3tools/t3code/pull/42",
+    url: "https://github.com/nurozen/lecturn/pull/42",
   },
   latestTurn: null,
   createdAt: t(0),
@@ -551,6 +551,32 @@ describe("assembleThreadFork", () => {
           to: checkpointRefForThreadTurn(childThreadId, 3),
         },
       ]),
+    );
+  });
+
+  it("preserves the original baseline and aliases mixed-namespace checkpoint history", () => {
+    const historicRef = CheckpointRef.make("refs/previous-app/checkpoints/source/turn/1");
+    const result = assembleThreadFork(
+      makeInput({
+        sourceTurns: sourceTurns.map((turn) =>
+          turn.turnId === turn1 ? { ...turn, checkpointRef: historicRef } : turn,
+        ),
+      }),
+    );
+    assertOk(result);
+    expect(result.aliasRefs).toEqual([
+      {
+        from: CheckpointRef.make("refs/previous-app/checkpoints/source/turn/0"),
+        to: checkpointRefForThreadTurn(childThreadId, 0),
+      },
+      { from: historicRef, to: checkpointRefForThreadTurn(childThreadId, 1) },
+      {
+        from: checkpointRefForThreadTurn(sourceThreadId, 3),
+        to: checkpointRefForThreadTurn(childThreadId, 3),
+      },
+    ]);
+    expect(result.command.history.turns[0]?.checkpoint?.checkpointRef).toBe(
+      checkpointRefForThreadTurn(childThreadId, 1),
     );
   });
 

@@ -1,5 +1,5 @@
 import type { MenuAction } from "@react-native-menu/menu";
-import type { OrchestrationLatestTurn, OrchestrationSessionStatus } from "@t3tools/contracts";
+import type { OrchestrationLatestTurn, OrchestrationSessionStatus } from "@lecturn/contracts";
 
 export type ThreadForkUnavailableReason =
   | "disconnected"

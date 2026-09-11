@@ -29,7 +29,7 @@ import {
   type StaveOperation,
   type StaveProgressEvent,
   type StaveRunOperationInput,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -422,7 +422,7 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
             }),
           ).pipe(
             Layer.provide(
-              ServerConfig.layerTest(process.cwd(), { prefix: "t3-stave-operations-" }),
+              ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-stave-operations-" }),
             ),
           ),
           Layer.mock(ServerSettings.ServerSettingsService)({

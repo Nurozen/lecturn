@@ -4,14 +4,14 @@ import {
   isStaveProject,
   normalizeProjectThreadWorkspace,
   staveThreadStartMessage,
-} from "@t3tools/client-runtime/state/projectGit";
+} from "@lecturn/client-runtime/state/projectGit";
 import { toastManager } from "../components/ui/toast";
 import {
   scopedProjectKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@t3tools/client-runtime/environment";
-import { DEFAULT_RUNTIME_MODE, type ScopedProjectRef, type ThreadId } from "@t3tools/contracts";
+} from "@lecturn/client-runtime/environment";
+import { DEFAULT_RUNTIME_MODE, type ScopedProjectRef, type ThreadId } from "@lecturn/contracts";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import {
@@ -29,7 +29,7 @@ import {
   getProjectOrderKey,
   selectProjectGroupingSettings,
 } from "../logicalProject";
-import { resolveDefaultThreadEnvMode } from "@t3tools/shared/threadEnvMode";
+import { resolveDefaultThreadEnvMode } from "@lecturn/shared/threadEnvMode";
 import { readProjects, readThreadShell, useProjects, useThread } from "../state/entities";
 import {
   hasExplicitComposerModelSelection,
@@ -37,7 +37,7 @@ import {
   resolveNewThreadEnvModeSources,
   resolveNewThreadModelSelectionOverride,
 } from "../lib/chatThreadActions";
-import { readT3ProjectFileDefaultThreadEnvMode } from "../lib/t3ProjectFileDefaults";
+import { readLecturnProjectFileDefaultThreadEnvMode } from "../lib/lecturnProjectFileDefaults";
 import { primaryServerSettingsAtom } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
@@ -102,6 +102,8 @@ export function useNewThreadHandler() {
         setLogicalProjectDraftThreadId,
         setModelSelection,
       } = useComposerDraftStore.getState();
+      const requestingRouteHref = router.state.location.href;
+      const routeChangedSinceRequest = () => router.state.location.href !== requestingRouteHref;
       const currentRouteTarget = getCurrentRouteTarget();
       // A new thread carries the user's working mode from the thread being
       // viewed. The target project's configured model still wins; runtime and
@@ -160,7 +162,7 @@ export function useNewThreadHandler() {
             currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
           destinationDraftId,
         });
-      // The shared resolver owns the priority order. The t3.json read is
+      // The shared resolver owns the priority order. The lecturn.json read is
       // skipped entirely when a higher-priority source decides (a Stave
       // space forces local, then the per-project setting), and its query
       // atom caches per project after the first call.
@@ -172,7 +174,7 @@ export function useNewThreadHandler() {
           projectSetting,
           projectFile:
             consultProjectFile && project !== undefined
-              ? await readT3ProjectFileDefaultThreadEnvMode(
+              ? await readLecturnProjectFileDefaultThreadEnvMode(
                   project.environmentId,
                   project.workspaceRoot,
                 )
@@ -254,6 +256,9 @@ export function useNewThreadHandler() {
             workspaceContext = workspaceOptionsForDraft(emptyStoredDraftThread);
           } else if (!isDraftAlreadyOpen) {
             const defaultEnvMode = await resolveDefaultEnvMode();
+            if (routeChangedSinceRequest()) {
+              return null;
+            }
             // The await yields. If the draft was opened (a concurrent
             // invocation's navigation landed), promoted to a real thread,
             // remapped away (a concurrent invocation registered a fresh
@@ -398,6 +403,9 @@ export function useNewThreadHandler() {
       const createdAt = new Date().toISOString();
       return (async () => {
         const initialEnvMode = options?.envMode ?? (await resolveDefaultEnvMode());
+        if (routeChangedSinceRequest()) {
+          return null;
+        }
         // The await yields, so a concurrent invocation may have registered a
         // draft for this logical project in the meantime. Registering ours
         // too would evict that draft while its navigation is in flight —

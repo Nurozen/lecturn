@@ -11,7 +11,7 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   type ProjectId,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 
 import {
   createAttachmentId,

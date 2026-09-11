@@ -3,12 +3,12 @@ import { SymbolView } from "../../components/AppSymbol";
 import {
   connectionStatusText,
   type EnvironmentConnectionPhase,
-} from "@t3tools/client-runtime/connection";
+} from "@lecturn/client-runtime/connection";
 import {
   type EnvironmentId,
   type EnvironmentMachineKind,
   resolveEnvironmentMachineKind,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { useCallback, useState } from "react";
 import {
@@ -26,6 +26,8 @@ import { cn } from "../../lib/cn";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import type { ConnectedEnvironmentSummary } from "../../state/remote-runtime-types";
 import { serverEnvironment } from "../../state/server";
+import { ProviderSetupLink } from "../settings/ProviderSetupLink";
+import type { ProviderSetupRouteParams } from "../settings/SettingsProviderSetupRouteScreen";
 import { availableCloudEnvironmentPresentation } from "../cloud/cloudEnvironmentPresentation";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { ConnectionStatusDot } from "./ConnectionStatusDot";
@@ -34,6 +36,7 @@ import { type RelayEnvironmentView, useConnectionController } from "./useConnect
 interface CloudEnvironmentRowsProps {
   readonly connectedCloudEnvironments: ReadonlyArray<ConnectedEnvironmentSummary>;
   readonly onReconnectEnvironment: (environmentId: EnvironmentId) => void;
+  readonly onSetupProvider?: (target: ProviderSetupRouteParams) => void;
   readonly showcaseAvailableEnvironments?: ReadonlyArray<RelayEnvironmentView>;
   readonly showcaseSignedIn?: boolean;
   /**
@@ -112,7 +115,7 @@ function CloudEnvironmentRowsContent(
     <View collapsable={false} className={cn("gap-3", showHeader && "mt-5")}>
       {showHeader ? (
         <View className="flex-row items-center justify-between px-1">
-          <Text className="text-sm font-t3-bold uppercase text-foreground-muted">
+          <Text className="text-sm font-lecturn-bold uppercase text-foreground-muted">
             Lecturn Connect
           </Text>
           {discoveryAvailable ? (
@@ -150,6 +153,7 @@ function CloudEnvironmentRowsContent(
               onDisconnect={() => handleDisconnectCloudEnvironment(environment.environmentId)}
               errorExpanded={expandedErrorId === environment.environmentId}
               onToggleError={() => handleToggleCloudError(environment.environmentId)}
+              onSetupProvider={props.onSetupProvider}
             />
           ))}
           {availableCloudEnvironments.map((environment, index) => (
@@ -184,7 +188,7 @@ function CloudEnvironmentRowsContent(
       controller.relayDiscovery.error &&
       !controller.relayDiscovery.isRefreshing ? (
         <View collapsable={false} className="gap-3 rounded-[24px] bg-card p-5">
-          <Text className="text-base font-t3-bold text-foreground">
+          <Text className="text-base font-lecturn-bold text-foreground">
             Could not load Lecturn Connect environments
           </Text>
           <Text className="text-sm text-foreground-muted">{controller.relayDiscovery.error}</Text>
@@ -198,7 +202,7 @@ function CloudEnvironmentRowsContent(
             }}
             className="self-start rounded-full bg-subtle px-3.5 py-2 active:opacity-70"
           >
-            <Text className="text-xs font-t3-bold text-foreground">Try again</Text>
+            <Text className="text-xs font-lecturn-bold text-foreground">Try again</Text>
           </Pressable>
         </View>
       ) : null}
@@ -213,29 +217,49 @@ function ConnectedCloudEnvironmentRow(props: {
   readonly onConnect: () => void;
   readonly onDisconnect: () => void;
   readonly onToggleError: () => void;
+  readonly onSetupProvider?: (target: ProviderSetupRouteParams) => void;
 }) {
   const serverConfig = useAtomValue(
     serverEnvironment.configValueAtom(props.environment.environmentId),
   );
   return (
-    <CloudEnvironmentRowShell
-      borderTop={props.borderTop}
-      connectionError={props.environment.connectionError}
-      connectionErrorTraceId={props.environment.connectionErrorTraceId}
-      connectionState={props.environment.connectionState}
-      errorExpanded={props.errorExpanded}
-      label={props.environment.environmentLabel}
-      machine={resolveEnvironmentMachineKind(serverConfig)}
-      onValueChange={(enabled) => {
-        if (enabled) {
-          props.onConnect();
-          return;
-        }
-        props.onDisconnect();
-      }}
-      onToggleError={props.onToggleError}
-      value={props.environment.connectionState !== "available"}
-    />
+    <View>
+      <CloudEnvironmentRowShell
+        borderTop={props.borderTop}
+        connectionError={props.environment.connectionError}
+        connectionErrorTraceId={props.environment.connectionErrorTraceId}
+        connectionState={props.environment.connectionState}
+        errorExpanded={props.errorExpanded}
+        label={props.environment.environmentLabel}
+        machine={resolveEnvironmentMachineKind(serverConfig)}
+        onValueChange={(enabled) => {
+          if (enabled) {
+            props.onConnect();
+            return;
+          }
+          props.onDisconnect();
+        }}
+        onToggleError={props.onToggleError}
+        value={props.environment.connectionState !== "available"}
+      />
+      {props.onSetupProvider
+        ? serverConfig?.providers
+            .filter((provider) => provider.setup?.canAuthenticate || provider.setup?.canInstall)
+            .map((provider) => (
+              <ProviderSetupLink
+                key={provider.instanceId}
+                provider={provider}
+                disabled={props.environment.connectionState !== "connected"}
+                onPress={() =>
+                  props.onSetupProvider?.({
+                    environmentId: props.environment.environmentId,
+                    instanceId: provider.instanceId,
+                  })
+                }
+              />
+            ))
+        : null}
+    </View>
   );
 }
 
@@ -346,7 +370,7 @@ function CloudEnvironmentRowShell(props: {
             />
           ) : null}
           <Text
-            className="min-w-0 flex-shrink text-base font-t3-bold leading-snug text-foreground"
+            className="min-w-0 flex-shrink text-base font-lecturn-bold leading-snug text-foreground"
             numberOfLines={1}
           >
             {props.label}
@@ -430,7 +454,7 @@ function CopyTraceIdButton(props: { readonly traceId: string }) {
         tintColorClassName={"accent-icon"}
         type="monochrome"
       />
-      <Text className="text-xs font-t3-bold text-foreground">Copy trace ID</Text>
+      <Text className="text-xs font-lecturn-bold text-foreground">Copy trace ID</Text>
     </Pressable>
   );
 }

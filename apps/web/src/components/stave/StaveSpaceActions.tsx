@@ -3,10 +3,10 @@ import type {
   StaveOperation,
   StaveProjectInfo,
   StaveRepoEntry,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { useState } from "react";
 
-import { isValidStaveSpaceId } from "@t3tools/shared/stave";
+import { isValidStaveSpaceId } from "@lecturn/shared/stave";
 import { staveOperationUnavailableReason } from "./staveCompatibility.logic";
 import { staveRepos, staveSpaces, useStaveStatus } from "../../state/stave";
 import { useEnvironmentQuery } from "../../state/query";

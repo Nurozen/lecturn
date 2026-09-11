@@ -13,7 +13,7 @@ import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { type ProviderApprovalDecision, type ProviderEvent, ThreadId } from "@t3tools/contracts";
+import { type ProviderApprovalDecision, type ProviderEvent, ThreadId } from "@lecturn/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -197,7 +197,7 @@ describe("CodexSessionRuntime collab integration", () => {
         binaryPath: peerPath,
         cwd: "/tmp",
         runtimeMode: "full-access",
-        environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
+        environment: { ...process.env, LECTURNX_COLLAB_SCRIPT: scriptPath },
       });
       const metadataFiber = yield* runtime.events.pipe(
         Stream.filter(
@@ -289,7 +289,7 @@ describe("CodexSessionRuntime collab integration", () => {
         binaryPath: peerPath,
         cwd: "/tmp",
         runtimeMode: "full-access",
-        environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
+        environment: { ...process.env, LECTURNX_COLLAB_SCRIPT: scriptPath },
       });
       const eventsFiber = yield* runtime.events.pipe(
         Stream.takeUntil(
@@ -368,7 +368,7 @@ describe("CodexSessionRuntime collab integration", () => {
             binaryPath: peerPath,
             cwd: "/tmp",
             runtimeMode: "full-access",
-            environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
+            environment: { ...process.env, LECTURNX_COLLAB_SCRIPT: scriptPath },
           });
           const eventsFiber = yield* runtime.events.pipe(
             Stream.takeUntil(
@@ -407,7 +407,7 @@ describe("CodexSessionRuntime collab integration", () => {
         binaryPath: peerPath,
         cwd: "/tmp",
         runtimeMode: "full-access",
-        environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
+        environment: { ...process.env, LECTURNX_COLLAB_SCRIPT: scriptPath },
       });
 
       const eventsFiber = yield* runtime.events.pipe(
@@ -549,7 +549,7 @@ describe("CodexSessionRuntime collab integration", () => {
         binaryPath: peerPath,
         cwd: "/tmp",
         runtimeMode: "full-access",
-        environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
+        environment: { ...process.env, LECTURNX_COLLAB_SCRIPT: scriptPath },
       });
 
       // Wait for both children's turnStarted signals to be processed before
@@ -627,7 +627,7 @@ describe("CodexSessionRuntime collab integration", () => {
         binaryPath: peerPath,
         cwd: "/tmp",
         runtimeMode: "full-access",
-        environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
+        environment: { ...process.env, LECTURNX_COLLAB_SCRIPT: scriptPath },
       });
 
       yield* runtime.start();
@@ -724,7 +724,7 @@ describe("CodexSessionRuntime collab integration", () => {
           binaryPath: peerPath,
           cwd: "/tmp",
           runtimeMode: "auto",
-          environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
+          environment: { ...process.env, LECTURNX_COLLAB_SCRIPT: scriptPath },
         });
         const approvalRequested = yield* Deferred.make<ProviderEvent>();
         const turnCompleted = yield* Deferred.make<void>();

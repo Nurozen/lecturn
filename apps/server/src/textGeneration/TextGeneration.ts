@@ -6,8 +6,8 @@ import type {
   ModelSelection,
   ProviderInstanceId,
   SagaWorkbenchInferenceResult,
-} from "@t3tools/contracts";
-import { TextGenerationError } from "@t3tools/contracts";
+} from "@lecturn/contracts";
+import { TextGenerationError } from "@lecturn/contracts";
 
 import * as ProviderInstanceRegistry from "../provider/Services/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
@@ -123,7 +123,7 @@ export class TextGeneration extends Context.Service<
       input: ThreadTitleGenerationInput,
     ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
   }
->()("t3/textGeneration/TextGeneration") {}
+>()("lecturn/textGeneration/TextGeneration") {}
 
 type TextGenerationOp =
   | "generateCommitMessage"

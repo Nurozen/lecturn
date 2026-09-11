@@ -1,8 +1,8 @@
 import { selectStaveGitTarget } from "./staveGitSelection.logic";
 import { useMemo } from "react";
 import { create } from "zustand";
-import { resolveProjectGitTargets } from "@t3tools/client-runtime/state/projectGit";
-import type { EnvironmentId, OrchestrationProjectShell } from "@t3tools/contracts";
+import { resolveProjectGitTargets } from "@lecturn/client-runtime/state/projectGit";
+import type { EnvironmentId, OrchestrationProjectShell } from "@lecturn/contracts";
 
 // UI selection never changes the thread's working directory or branch metadata.
 const useSelection = create<{

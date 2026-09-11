@@ -20,7 +20,7 @@ export class ManagedAccess extends Context.Service<
       originCreatedAtSeconds?: number,
     ) => Effect.Effect<void, ManagedAccessRequired | ManagedAccessUnavailable>;
   }
->()("t3code-relay/billing/ManagedAccess") {}
+>()("lecturn-relay/billing/ManagedAccess") {}
 
 export const disabled = ManagedAccess.of({ check: () => Effect.void });
 export const layerDisabled = Layer.succeed(ManagedAccess, disabled);

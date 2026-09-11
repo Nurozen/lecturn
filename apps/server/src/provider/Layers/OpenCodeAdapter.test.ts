@@ -25,8 +25,8 @@ import {
   ProviderInstanceId,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
-import { createModelSelection } from "@t3tools/shared/model";
+} from "@lecturn/contracts";
+import { createModelSelection } from "@lecturn/shared/model";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { StaveMemoryWiring, type StaveMemoryResolution } from "../../stave/StaveMemoryWiring.ts";
@@ -48,7 +48,7 @@ import {
 
 // Test-local service tag so the rest of the file can keep using `yield* OpenCodeAdapter`.
 class OpenCodeAdapter extends Context.Service<OpenCodeAdapter, OpenCodeAdapterShape>()(
-  "t3/provider/Layers/OpenCodeAdapter.test/OpenCodeAdapter",
+  "lecturn/provider/Layers/OpenCodeAdapter.test/OpenCodeAdapter",
 ) {}
 
 const asThreadId = (value: string): ThreadId => ThreadId.make(value);
@@ -710,7 +710,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
   );
 
   it.effect(
-    "installs Stave memory alongside t3-code before readiness and disconnects on stop",
+    "installs Stave memory alongside Lecturn before readiness and disconnects on stop",
     () =>
       Effect.gen(function* () {
         const threadId = asThreadId("opencode-stave-both");
@@ -748,7 +748,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         NodeAssert.deepEqual(resolvedCwds, [directory]);
         NodeAssert.deepEqual(runtimeMock.state.mcpAddCalls, [
           {
-            name: "t3-code",
+            name: "lecturn",
             config: {
               type: "remote",
               url: "http://127.0.0.1:3999/mcp",
@@ -768,7 +768,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
           },
         ]);
         NodeAssert.deepEqual(runtimeMock.state.lifecycleCalls, [
-          "mcp.add:t3-code",
+          "mcp.add:lecturn",
           "mcp.add:context-marmot",
           "session.create",
         ]);
@@ -5583,7 +5583,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
 
       // A symlinked cwd (the macOS `/tmp` → `/private/tmp` shape) resolves to
       // the directory it points at, so the two spellings compare equal.
-      const base = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-opencode-dir-" });
+      const base = yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-opencode-dir-" });
       const real = path.join(base, "real");
       const link = path.join(base, "link");
       yield* fileSystem.makeDirectory(real);

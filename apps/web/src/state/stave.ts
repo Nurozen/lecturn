@@ -3,12 +3,12 @@ import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@lecturn/client-runtime/state/runtime";
 import {
   environmentSupportsStave,
   staveFeatureAvailable,
-} from "@t3tools/client-runtime/state/stave";
-import { type EnvironmentId, type StaveSpaceStatus, WS_METHODS } from "@t3tools/contracts";
+} from "@lecturn/client-runtime/state/stave";
+import { type EnvironmentId, type StaveSpaceStatus, WS_METHODS } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";

@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Deferred, Effect, Fiber, FileSystem, Layer, Path, Ref } from "effect";
-import { ProjectId } from "@t3tools/contracts";
+import { ProjectId } from "@lecturn/contracts";
 import * as RuntimeFence from "./StaveRuntimeFence.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { StaveAdmission, StaveSpaceTransitioningError } from "./StaveAdmission.ts";

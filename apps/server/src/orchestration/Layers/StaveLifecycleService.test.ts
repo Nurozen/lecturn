@@ -8,7 +8,7 @@ import {
   type OrchestrationEvent,
   type ServerSettings,
   type StaveLifecycleSettings,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import {
   DateTime,
@@ -93,7 +93,7 @@ const harness = Effect.fn(function* (
   yield* TestClock.setTime(Date.parse(NOW));
   const config = yield* ServerConfig.pipe(
     Effect.provide(
-      configLayerTest("/space", { prefix: "t3-lifecycle-" }).pipe(
+      configLayerTest("/space", { prefix: "lecturn-lifecycle-" }).pipe(
         Layer.provide(NodeServices.layer),
       ),
     ),

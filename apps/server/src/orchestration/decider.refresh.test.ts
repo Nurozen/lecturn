@@ -1,4 +1,4 @@
-import { CommandId, ProjectId, type OrchestrationReadModel } from "@t3tools/contracts";
+import { CommandId, ProjectId, type OrchestrationReadModel } from "@lecturn/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";

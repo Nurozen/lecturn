@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { DEFAULT_UNIFIED_SETTINGS, ProjectId } from "@t3tools/contracts";
+import { DEFAULT_UNIFIED_SETTINGS, ProjectId } from "@lecturn/contracts";
 import {
   lifecycleNoticeDescription,
   lifecycleNoticeLabel,

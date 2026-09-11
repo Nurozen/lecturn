@@ -2,7 +2,7 @@ import type {
   SagaWorkbenchSnapshot,
   SagaWorkbenchStage,
   SagaWorkbenchWorkflow,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { scopeProjectRef } from "../environment/scoped.ts";
 import type { EnvironmentProject } from "./models.ts";
 import {

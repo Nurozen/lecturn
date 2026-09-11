@@ -1,12 +1,12 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@lecturn/contracts";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useNavigate } from "@tanstack/react-router";
 import { useNewThreadHandler } from "../../../hooks/useHandleNewThread";
 import { openExistingProjectAndThread } from "../../../lib/addProject";
 import { notifyStaveMutation } from "../../../staveMutation";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
 import { staveDryRun } from "../../../state/stave";
 import { randomUUID } from "../../../lib/utils";
 import { staveOperations } from "../../../state/staveOperations";

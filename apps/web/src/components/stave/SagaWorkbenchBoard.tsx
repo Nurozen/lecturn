@@ -14,10 +14,10 @@ import { GripVerticalIcon, PinIcon, PinOffIcon } from "lucide-react";
 import {
   SAGA_WORKBENCH_STAGES,
   sagaWorkbenchStageLabel,
-} from "@t3tools/client-runtime/state/sagaWorkbench";
+} from "@lecturn/client-runtime/state/sagaWorkbench";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import type { SagaStageDragGesture } from "./sagaWorkbench.logic";
-import type { SagaWorkbenchStage } from "@t3tools/contracts";
+import type { SagaWorkbenchStage } from "@lecturn/contracts";
 
 /** Keyboard movement targets phase columns, including empty columns. */
 const phaseCoordinates: KeyboardCoordinateGetter = (event, { context, currentCoordinates }) => {

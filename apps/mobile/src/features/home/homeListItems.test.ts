@@ -1,7 +1,7 @@
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
-} from "@t3tools/client-runtime/state/shell";
+} from "@lecturn/client-runtime/state/shell";
 import {
   CommandId,
   EnvironmentId,
@@ -9,7 +9,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

@@ -6,14 +6,14 @@ import { useParams } from "@tanstack/react-router";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+} from "@lecturn/client-runtime/state/runtime";
+import { safeErrorLogAttributes } from "@lecturn/client-runtime/errors";
 import type {
   EnvironmentId,
   OrchestrationProjectShell,
   ScopedThreadRef,
   TurnId,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -99,7 +99,7 @@ import { createGitDiffFileContentsLoader } from "../lib/diffFileContents";
 
 type DiffThemeType = "light" | "dark";
 const AUTOMATIC_BASE_REF = "__automatic_base_ref__";
-const DIFF_FILE_TREE_STORAGE_KEY = "t3code.diffFileTreeOpen";
+const DIFF_FILE_TREE_STORAGE_KEY = "lecturn.diffFileTreeOpen";
 
 interface CollapsedDiffFilesState {
   readonly scopeKey: string | null;

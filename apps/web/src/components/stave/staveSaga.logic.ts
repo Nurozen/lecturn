@@ -1,4 +1,4 @@
-import type { StaveSagaMemberStatus, StaveSpaceListRow } from "@t3tools/contracts";
+import type { StaveSagaMemberStatus, StaveSpaceListRow } from "@lecturn/contracts";
 
 export function staveSagaMemberBadges(member: StaveSagaMemberStatus): readonly string[] {
   return [

@@ -5,9 +5,9 @@ import {
   ThreadId,
   TurnId,
   type OrchestrationThreadActivity,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
-import { resolveWorkEntryToolPresentation } from "@t3tools/client-runtime/work-log/presentation";
+import { resolveWorkEntryToolPresentation } from "@lecturn/client-runtime/work-log/presentation";
 
 import {
   deriveActiveWorkStartedAt,
@@ -250,6 +250,30 @@ describe("derivePendingApprovals", () => {
 });
 
 describe("derivePendingUserInputs", () => {
+  it("preserves native choice values and the custom-answer restriction", () => {
+    const question = {
+      id: "interaction-result",
+      header: "Result",
+      question: "Which result should be used?",
+      options: [
+        { value: " first\t", label: "Result", description: "First result" },
+        { value: "second", label: "Result", description: "Second result" },
+      ],
+      allowCustomAnswer: false,
+      multiSelect: false,
+    };
+    const activities = [
+      makeActivity({
+        id: "native-user-input",
+        kind: "user-input.requested",
+        summary: "User input requested",
+        payload: { requestId: "req-native-choice", questions: [question] },
+      }),
+    ];
+
+    expect(derivePendingUserInputs(activities)[0]?.questions).toEqual([question]);
+  });
+
   it("tracks open structured prompts and removes resolved ones", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -1226,7 +1250,7 @@ describe("deriveWorkLogEntries", () => {
   it("preserves MCP server, tool, arguments, and results for expanded display", () => {
     const item = {
       type: "mcpToolCall",
-      server: "t3-code",
+      server: "lecturn",
       tool: "preview_status",
       arguments: {},
       status: "completed",
@@ -1236,10 +1260,10 @@ describe("deriveWorkLogEntries", () => {
       makeActivity({
         id: "mcp-tool-done",
         kind: "tool.completed",
-        summary: "t3-code · preview_status",
+        summary: "lecturn · preview_status",
         payload: {
           itemType: "mcp_tool_call",
-          title: "t3-code · preview_status",
+          title: "lecturn · preview_status",
           toolSurface: "browser",
           toolIcon: { _tag: "website", pageUrl: "https://example.com/checkout" },
           toolSource: {
@@ -1253,7 +1277,7 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const [entry] = deriveWorkLogEntries(activities);
-    expect(entry?.toolTitle).toBe("t3-code · preview_status");
+    expect(entry?.toolTitle).toBe("lecturn · preview_status");
     expect(entry?.toolSurface).toBe("browser");
     expect(entry?.toolIcon).toEqual({
       _tag: "website",
@@ -1275,7 +1299,7 @@ describe("deriveWorkLogEntries", () => {
     "preserves Claude MCP identity behind generic titles while %s",
     (status, displayName) => {
       const data = {
-        toolName: "mcp__t3_code__preview_click",
+        toolName: "mcp__lecturn_code__preview_click",
         input: { selector: "#submit" },
         ...(status === "inProgress"
           ? {}
@@ -1300,7 +1324,7 @@ describe("deriveWorkLogEntries", () => {
   it("keeps MCP payloads while collapsing lifecycle updates", () => {
     const item = {
       type: "mcpToolCall",
-      server: "t3-code",
+      server: "lecturn",
       tool: "preview_snapshot",
       arguments: { interactiveOnly: true },
       status: "completed",
@@ -1309,7 +1333,7 @@ describe("deriveWorkLogEntries", () => {
       makeActivity({
         id: "mcp-tool-progress",
         kind: "tool.updated",
-        summary: "t3-code · preview_snapshot",
+        summary: "lecturn · preview_snapshot",
         payload: {
           itemType: "mcp_tool_call",
           toolCallId: "call-1",
@@ -1320,7 +1344,7 @@ describe("deriveWorkLogEntries", () => {
       makeActivity({
         id: "mcp-tool-complete",
         kind: "tool.completed",
-        summary: "t3-code · preview_snapshot",
+        summary: "lecturn · preview_snapshot",
         payload: {
           itemType: "mcp_tool_call",
           toolCallId: "call-1",

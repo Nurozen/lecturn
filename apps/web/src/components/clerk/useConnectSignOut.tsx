@@ -1,6 +1,6 @@
 import { useAuth, useClerk } from "@clerk/react";
 import { useRef, useState } from "react";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
 
 import { unpublishBeforeSignOut } from "../../cloud/linkEnvironmentAtoms";
 import { usePrimaryCloudLinkState } from "../../cloud/primaryCloudLinkState";

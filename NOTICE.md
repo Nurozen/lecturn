@@ -1,12 +1,7 @@
-# Lecturn attribution
+# Lecturn notices
 
 Lecturn is independently maintained and operated by Cloud Gatherer Labs LLC.
-It is derived from T3 Code, copyright (c) 2026 T3 Tools Inc., under the MIT license.
-Lecturn is not affiliated with, sponsored by, or endorsed by T3 Tools Inc. or the
-T3 Code project. Upstream names appear only for attribution, source provenance,
-or compatibility information; no trademark rights are claimed.
-
-The original copyright and permission notices are preserved in LICENSE.
+The original copyright and permission notices are preserved in [LICENSE](./LICENSE).
 Cloud Gatherer Labs LLC claims copyright only in its own contributions.
 Third-party libraries and assets retain their respective licenses and notices.
 

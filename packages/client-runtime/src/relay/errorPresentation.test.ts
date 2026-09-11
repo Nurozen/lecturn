@@ -1,5 +1,5 @@
 import { ManagedRelayRequestTimeoutError, ManagedRelayRequestFailedError } from "./managedRelay.ts";
-import { RelayAuthInvalidError } from "@t3tools/contracts/relay";
+import { RelayAuthInvalidError } from "@lecturn/contracts/relay";
 import { describe, expect, it } from "@effect/vitest";
 
 import {

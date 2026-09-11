@@ -7,7 +7,7 @@ export class StaveReadCache extends Context.Service<
     readonly generation: Effect.Effect<number>;
     readonly invalidate: Effect.Effect<void>;
   }
->()("t3/stave/StaveReadCache") {}
+>()("lecturn/stave/StaveReadCache") {}
 
 export const layer = Layer.effect(
   StaveReadCache,

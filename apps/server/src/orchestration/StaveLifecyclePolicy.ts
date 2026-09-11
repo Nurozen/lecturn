@@ -1,5 +1,5 @@
 import * as DateTime from "effect/DateTime";
-import type { StaveLifecycleSettings, StaveProjectInfo } from "@t3tools/contracts";
+import type { StaveLifecycleSettings, StaveProjectInfo } from "@lecturn/contracts";
 import type { StaveLifecycleRow } from "../persistence/Services/StaveLifecycleRepository.ts";
 import type { ProjectionThreadLifecycleAnchor } from "./Services/ProjectionSnapshotQuery.ts";
 

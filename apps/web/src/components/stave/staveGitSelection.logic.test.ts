@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { resolveProjectGitTargets } from "@t3tools/client-runtime/state/projectGit";
+import { resolveProjectGitTargets } from "@lecturn/client-runtime/state/projectGit";
 import { selectStaveGitTarget } from "./staveGitSelection.logic";
 
 describe("Stave Git selection", () => {

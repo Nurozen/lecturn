@@ -9,7 +9,7 @@ import {
   ProviderInstanceId,
   SagaWorkbenchError,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { Deferred, Effect, Fiber, Layer, PubSub, Stream } from "effect";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { emptyWorkflow } from "../persistence/Services/SagaWorkbenchRepository.ts";

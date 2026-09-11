@@ -3,8 +3,8 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
-import type { ChatAttachment } from "@t3tools/contracts";
-import { uuidV5, UUID_NAMESPACE_DNS } from "@t3tools/shared/uuid";
+import type { ChatAttachment } from "@lecturn/contracts";
+import { uuidV5, UUID_NAMESPACE_DNS } from "@lecturn/shared/uuid";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -80,7 +80,7 @@ describe("attachmentStore", () => {
 
   it("resolves attachment path by id using the extension that exists on disk", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-store-"),
+      NodePath.join(NodeOS.tmpdir(), "lecturn-attachment-store-"),
     );
     try {
       const attachmentId = "thread-1-attachment";
@@ -99,7 +99,7 @@ describe("attachmentStore", () => {
 
   it("returns null when no attachment file exists for the id", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-store-"),
+      NodePath.join(NodeOS.tmpdir(), "lecturn-attachment-store-"),
     );
     try {
       const resolved = resolveAttachmentPathById({
@@ -114,7 +114,7 @@ describe("attachmentStore", () => {
 
   it("resolves generic attachments without scanning the attachment directory", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3code-file-attachment-"),
+      NodePath.join(NodeOS.tmpdir(), "lecturn-file-attachment-"),
     );
     try {
       const attachmentId = "thread-1-00000000-0000-4000-8000-000000000001-zip";
@@ -129,7 +129,7 @@ describe("attachmentStore", () => {
 
   it("plans pending attachment claims with direct filename lookups", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-claim-"),
+      NodePath.join(NodeOS.tmpdir(), "lecturn-attachment-claim-"),
     );
     try {
       const uuid = "00000000-0000-4000-8000-000000000001";
@@ -158,7 +158,7 @@ describe("attachmentStore", () => {
 
   it("rejects thread-owned attachments even when thread segments collide", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-ownership-"),
+      NodePath.join(NodeOS.tmpdir(), "lecturn-attachment-ownership-"),
     );
     try {
       const attachmentId = "a-b-00000000-0000-4000-8000-000000000003";
@@ -175,7 +175,7 @@ describe("attachmentStore", () => {
 
   it("plans deterministic child-thread copies of claimed attachments", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-copy-"),
+      NodePath.join(NodeOS.tmpdir(), "lecturn-attachment-copy-"),
     );
     try {
       const sourceId = "parent-thread-00000000-0000-4000-8000-000000000004-pdf";
@@ -226,7 +226,7 @@ describe("attachmentStore", () => {
 
   it("resolves legacy ids without an embedded extension from the full attachment", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-legacy-"),
+      NodePath.join(NodeOS.tmpdir(), "lecturn-attachment-legacy-"),
     );
     try {
       const legacyId = "parent-thread-00000000-0000-4000-8000-000000000005";
@@ -263,7 +263,7 @@ describe("attachmentStore", () => {
 
   it("rejects copy plans whose uuid does not match the store pattern", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-bad-uuid-"),
+      NodePath.join(NodeOS.tmpdir(), "lecturn-attachment-bad-uuid-"),
     );
     try {
       const attachment: ChatAttachment = {
@@ -297,7 +297,7 @@ describe("attachmentStore", () => {
 
   it("removes expired pending and partial files without touching thread attachments", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-sweep-"),
+      NodePath.join(NodeOS.tmpdir(), "lecturn-attachment-sweep-"),
     );
     try {
       const now = 1_800_000_000_000;

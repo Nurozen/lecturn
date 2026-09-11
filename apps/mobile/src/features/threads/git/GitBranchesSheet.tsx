@@ -1,5 +1,5 @@
-import { isStaveProject } from "@t3tools/client-runtime/state/projectGit";
-import { sanitizeFeatureBranchName } from "@t3tools/shared/git";
+import { isStaveProject } from "@lecturn/client-runtime/state/projectGit";
+import { sanitizeFeatureBranchName } from "@lecturn/shared/git";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useState } from "react";
 import { Platform, Pressable, ScrollView, View } from "react-native";
@@ -81,12 +81,12 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
         contentContainerClassName="gap-4 px-5 pt-2"
       >
         {props.route.params.repoKey ? (
-          <Text className="text-sm font-t3-bold">
+          <Text className="text-sm font-lecturn-bold">
             {selectedThreadGitRepository?.repoName ?? "Repository unavailable"}
           </Text>
         ) : null}
         <View className="gap-2 rounded-[18px] border border-border bg-card px-4 py-4">
-          <Text className="text-foreground-secondary text-2xs font-t3-bold tracking-[1px] uppercase">
+          <Text className="text-foreground-secondary text-2xs font-lecturn-bold tracking-[1px] uppercase">
             New branch
           </Text>
           <TextInput
@@ -113,7 +113,7 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
 
         {worktreesSupported ? (
           <View className="gap-2 rounded-[18px] border border-border bg-card px-4 py-4">
-            <Text className="text-foreground-secondary text-2xs font-t3-bold tracking-[1px] uppercase">
+            <Text className="text-foreground-secondary text-2xs font-lecturn-bold tracking-[1px] uppercase">
               New worktree
             </Text>
             <TextInput
@@ -153,7 +153,7 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
         ) : null}
 
         <View className="gap-2">
-          <Text className="text-foreground-secondary text-2xs font-t3-bold tracking-[1px] uppercase">
+          <Text className="text-foreground-secondary text-2xs font-lecturn-bold tracking-[1px] uppercase">
             Existing branches
           </Text>
           {branchesLoading ? (
@@ -191,7 +191,7 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
                 }}
               >
                 <View className="absolute inset-0 rounded-[18px] bg-card" />
-                <Text className="text-foreground text-base font-t3-bold">{branch.name}</Text>
+                <Text className="text-foreground text-base font-lecturn-bold">{branch.name}</Text>
                 <Text className="text-foreground-secondary text-xs font-medium">{subtitle}</Text>
               </Pressable>
             );

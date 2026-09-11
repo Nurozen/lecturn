@@ -6,7 +6,7 @@ import {
   type OrchestrationShellSnapshot,
   type OrchestrationShellStreamItem,
   type ServerConfig,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";

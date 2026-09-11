@@ -93,7 +93,7 @@ export type StaveProjectNotice = typeof StaveProjectNotice.Type;
 
 // ── Stave live status ──────────────────────────────────────────
 // Served by `stave.getStatus`. `capabilities.stave` on the environment
-// descriptor is a static build fact (the T3CODE_STAVE kill switch is on);
+// descriptor is a static build fact (the LECTURN_STAVE kill switch is on);
 // this is the live answer to "is a binary runnable, is it configured, is
 // marmot reachable", re-probed on every call so the settings page and the
 // project sidebar can react to installs and config edits without a restart.
@@ -268,7 +268,7 @@ export type StaveSpaceStatusInput = typeof StaveSpaceStatusInput.Type;
 
 // ── Stave RPC errors ───────────────────────────────────────────
 
-/** Why a Stave RPC cannot run: `disabled_by_server` is the `T3CODE_STAVE=false`
+/** Why a Stave RPC cannot run: `disabled_by_server` is the `LECTURN_STAVE=false`
     kill switch, `disabled_in_settings` is `settings.stave.enabled` turned off,
     `binary_missing` means no runnable binary was found. */
 export const StaveUnavailableReason = Schema.Literals([
@@ -314,7 +314,7 @@ export class StaveCommandError extends Schema.TaggedErrorClass<StaveCommandError
 // project's `workspaceRoot` (the server resolves the manifest there), the
 // create verbs by the id being created.
 
-/** Mirrors `STAVE_NAME_PATTERN` in `@t3tools/shared/stave`; contracts cannot
+/** Mirrors `STAVE_NAME_PATTERN` in `@lecturn/shared/stave`; contracts cannot
     depend on shared. */
 const STAVE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 

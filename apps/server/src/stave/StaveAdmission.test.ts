@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
-import { ProjectId, type StaveProjectInfo } from "@t3tools/contracts";
+import { ProjectId, type StaveProjectInfo } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -271,7 +271,9 @@ it.layer(NodeServices.layer)("StaveAdmission with the real reader", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const base = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-stave-admission-" });
+      const base = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "lecturn-stave-admission-",
+      });
       const spaceRoot = path.join(base, "space");
       const plainRoot = path.join(base, "plain");
       yield* fileSystem.makeDirectory(spaceRoot, { recursive: true });

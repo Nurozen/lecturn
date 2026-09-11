@@ -1,6 +1,6 @@
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import { resolveSnoozePresets } from "@t3tools/client-runtime/state/thread-settled";
+import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
+import { threadSearchMatchKey } from "@lecturn/client-runtime/state/thread-search";
+import { resolveSnoozePresets } from "@lecturn/client-runtime/state/thread-settled";
 import {
   CommandId,
   EnvironmentId,
@@ -9,7 +9,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
@@ -55,9 +55,9 @@ function makeThread(
 const NOW = "2026-06-02T00:00:00.000Z";
 const linkedPullRequest = {
   projectId: ProjectId.make("project-1"),
-  repository: "pingdotgg/t3code",
+  repository: "nurozen/lecturn",
   number: 42,
-  url: "https://github.com/pingdotgg/t3code/pull/42",
+  url: "https://github.com/nurozen/lecturn/pull/42",
 };
 
 describe("resolveThreadListV2SnoozeMenuSelection", () => {

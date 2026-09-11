@@ -6,7 +6,7 @@ import {
   TurnId,
   ProviderInstanceId,
   type SagaWorkbenchWorkflow,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import {
   parseSagaWorkbenchSearch,
   sagaSummarySourceTarget,

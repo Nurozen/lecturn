@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, Clock, DateTime } from "effect";
-import type { RelayBillingStatus } from "@t3tools/contracts";
+import type { RelayBillingStatus } from "@lecturn/contracts";
 import type Stripe from "stripe";
 import { canStartBillingCheckout, type BillingConfig } from "./BillingConfig.ts";
 import {
@@ -53,7 +53,7 @@ export interface BillingServiceShape {
   processPending(limit?: number): Effect.Effect<void, BillingError>;
 }
 export class BillingService extends Context.Service<BillingService, BillingServiceShape>()(
-  "t3code-relay/billing/BillingService",
+  "lecturn-relay/billing/BillingService",
 ) {}
 
 export function makeBillingService(

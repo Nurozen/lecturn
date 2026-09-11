@@ -1,5 +1,5 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { staveForcedEnvMode } from "@t3tools/client-runtime/state/projectGit";
+import { scopeProjectRef } from "@lecturn/client-runtime/environment";
+import { staveForcedEnvMode } from "@lecturn/client-runtime/state/projectGit";
 import type {
   EnvironmentId,
   ModelSelection,
@@ -7,7 +7,7 @@ import type {
   ProjectId,
   ScopedProjectRef,
   ThreadEnvMode,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import type { ComposerThreadDraftState, DraftThreadEnvMode } from "../composerDraftStore";
 
 type ComposerModelSelectionState = Pick<
@@ -42,7 +42,7 @@ export interface ChatThreadActionContext {
 
 /**
  * The default-env-mode sources a new draft can settle without reading
- * t3.json. The file is only consulted when neither a forced mode (Stave
+ * lecturn.json. The file is only consulted when neither a forced mode (Stave
  * space) nor the per-project setting decides, mirroring the priority order in
  * `resolveDefaultThreadEnvMode`.
  */

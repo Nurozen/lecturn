@@ -3,14 +3,14 @@ import type {
   EnvironmentProject,
   EnvironmentThread,
   EnvironmentThreadShell,
-} from "@t3tools/client-runtime/state/shell";
+} from "@lecturn/client-runtime/state/shell";
 import {
   type EnvironmentThreadStatus,
   mergeEnvironmentThread,
-} from "@t3tools/client-runtime/state/threads";
-import { environmentSupportsStave } from "@t3tools/client-runtime/state/stave";
-import type { ScopedProjectRef, ScopedThreadRef, ServerConfig } from "@t3tools/contracts";
-import type { EnvironmentId, ServerProvider } from "@t3tools/contracts";
+} from "@lecturn/client-runtime/state/threads";
+import { environmentSupportsStave } from "@lecturn/client-runtime/state/stave";
+import type { ScopedProjectRef, ScopedThreadRef, ServerConfig } from "@lecturn/contracts";
+import type { EnvironmentId, ServerProvider } from "@lecturn/contracts";
 import { Atom } from "effect/unstable/reactivity";
 import { useMemo } from "react";
 import { appAtomRegistry } from "../rpc/atomRegistry";
