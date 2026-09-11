@@ -15,7 +15,7 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { HostProcessEnvironment } from "@lecturn/shared/hostProcess";
+import { HostProcessEnvironment, HostProcessPlatform } from "@lecturn/shared/hostProcess";
 
 import * as ProcessRunner from "../processRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -894,52 +894,45 @@ it.layer(NodeServices.layer)("StaveCli real process", (it) => {
       ),
     );
 
-  it.effect.skipIf(process.platform === "win32")(
-    "drives a real binary through every output path",
-    () =>
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem;
-        const { binary, argvFile } = yield* installFakeStave;
+  it.effect("drives a real binary through every output path", () =>
+    Effect.gen(function* () {
+      // This integration fixture is a POSIX shell executable.
+      if ((yield* HostProcessPlatform) === "win32") return;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const { binary, argvFile } = yield* installFakeStave;
 
-        yield* Effect.gen(function* () {
-          const cli = yield* StaveCli.StaveCli;
+      yield* Effect.gen(function* () {
+        const cli = yield* StaveCli.StaveCli;
 
-          const status = yield* withFakeStaveEnv(
-            {
-              FAKE_STAVE_MODE: "json",
-              FAKE_STAVE_STDOUT: SAMPLE_SPACE_STATUS,
-              FAKE_STAVE_ARGV_FILE: argvFile,
-            },
-            cli.spaceStatus("s-1"),
-          );
-          expect(status.spaceId).toBe("s-1");
-          const argv = (yield* fileSystem.readFileString(argvFile)).trimEnd().split("\n");
-          expect(argv).toEqual([
-            "--config",
-            "/cfg/config.yaml",
-            "space",
-            "status",
-            "--json",
-            "s-1",
-          ]);
+        const status = yield* withFakeStaveEnv(
+          {
+            FAKE_STAVE_MODE: "json",
+            FAKE_STAVE_STDOUT: SAMPLE_SPACE_STATUS,
+            FAKE_STAVE_ARGV_FILE: argvFile,
+          },
+          cli.spaceStatus("s-1"),
+        );
+        expect(status.spaceId).toBe("s-1");
+        const argv = (yield* fileSystem.readFileString(argvFile)).trimEnd().split("\n");
+        expect(argv).toEqual(["--config", "/cfg/config.yaml", "space", "status", "--json", "s-1"]);
 
-          const notFound = yield* withFakeStaveEnv(
-            { FAKE_STAVE_MODE: "error", FAKE_STAVE_STDOUT: SAMPLE_ERROR_SPACE_NOT_FOUND },
-            cli.spaceSync({ id: "nope" }).pipe(Effect.flip),
-          );
-          expect(expectStaveError(notFound).code).toBe("space_not_found");
-          expect(notFound.exitCode).toBe(1);
+        const notFound = yield* withFakeStaveEnv(
+          { FAKE_STAVE_MODE: "error", FAKE_STAVE_STDOUT: SAMPLE_ERROR_SPACE_NOT_FOUND },
+          cli.spaceSync({ id: "nope" }).pipe(Effect.flip),
+        );
+        expect(expectStaveError(notFound).code).toBe("space_not_found");
+        expect(notFound.exitCode).toBe(1);
 
-          const prose = yield* withFakeStaveEnv(
-            { FAKE_STAVE_MODE: "prose" },
-            cli.spaceStatus("s-1").pipe(Effect.flip),
-          );
-          const proseError = expectStaveError(prose);
-          expect(proseError.code).toBe("non_json_output");
-          expect(proseError.exitCode).toBe(1);
-          expect(proseError.stderrTail).toBe("hello");
-        }).pipe(Effect.provide(realCli(binary)));
-      }),
+        const prose = yield* withFakeStaveEnv(
+          { FAKE_STAVE_MODE: "prose" },
+          cli.spaceStatus("s-1").pipe(Effect.flip),
+        );
+        const proseError = expectStaveError(prose);
+        expect(proseError.code).toBe("non_json_output");
+        expect(proseError.exitCode).toBe(1);
+        expect(proseError.stderrTail).toBe("hello");
+      }).pipe(Effect.provide(realCli(binary)));
+    }),
   );
 });
 

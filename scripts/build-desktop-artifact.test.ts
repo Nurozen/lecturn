@@ -2245,8 +2245,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         assert.equal(error.reason, "wsl-runtime-invalid");
         assert.include(String(error.cause), "is not executable");
 
+        // Cross-build validation skips the Windows executable probe: this
+        // fixture exercises archive mode handling, not a runnable Electron app.
         const onWindowsHost = yield* validate.pipe(
           Effect.provideService(HostProcessPlatform, "win32"),
+          Effect.provideService(HostProcessArchitecture, "arm64"),
         );
         assert.equal(onWindowsHost.packagedAppDir, fixture.packagedAppDir);
       }),

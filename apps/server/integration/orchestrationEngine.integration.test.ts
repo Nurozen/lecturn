@@ -1346,7 +1346,8 @@ it.live("reverts claudeAgent turns and rolls back provider conversation state", 
           text: "First Claude edit",
           modelSelection: {
             instanceId: ProviderInstanceId.make("claudeAgent"),
-            model: "claude-sonnet-4-6",
+            // Keep both turns on the seeded model: this exercises rollback, not a session restart.
+            model: DEFAULT_MODEL_BY_PROVIDER[CLAUDE_AGENT_PROVIDER]!,
           },
         });
 

@@ -4788,6 +4788,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           { provider: "codex", supported: true },
           { provider: "cursor", supported: true },
           { provider: "grok", supported: true },
+          { provider: "antigravity", supported: true },
           { provider: "opencode", supported: true, limitation: "external_server_unsupported" },
         ]);
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
