@@ -9,7 +9,7 @@ import {
   type OrchestrationEvent,
   type ProviderRuntimeEvent,
   type VcsStatusLocalResult,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -18,12 +18,13 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import type * as PlatformError from "effect/PlatformError";
 import * as Stream from "effect/Stream";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
+import { makeDrainableWorker } from "@lecturn/shared/DrainableWorker";
+import { isTemporaryWorktreeBranch } from "@lecturn/shared/git";
 
 import { parseTurnDiffFilesFromUnifiedDiff } from "../../checkpointing/Diffs.ts";
 import {
   checkpointRefForThreadTurn,
+  checkpointBaselineRefForThread,
   resolveThreadWorkspaceCwd,
 } from "../../checkpointing/Utils.ts";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
@@ -557,7 +558,7 @@ const make = Effect.gen(function* () {
   });
 
   // A `git checkout` run inside a thread's dedicated worktree (by an agent or
-  // the user) bypasses T3's commands, so the thread's recorded branch goes
+  // the user) bypasses Lecturn's commands, so the thread's recorded branch goes
   // stale. Since #4460 the client only attributes PR state to a thread when
   // the checked-out branch equals the recorded one, so stale metadata silently
   // orphans the thread's PR. Follow the drift here: adopt the checked-out
@@ -743,7 +744,7 @@ const make = Effect.gen(function* () {
 
     const targetCheckpointRef =
       event.payload.turnCount === 0
-        ? checkpointRefForThreadTurn(event.payload.threadId, 0)
+        ? checkpointBaselineRefForThread(event.payload.threadId, thread.checkpoints)
         : thread.checkpoints.find(
             (checkpoint) => checkpoint.checkpointTurnCount === event.payload.turnCount,
           )?.checkpointRef;

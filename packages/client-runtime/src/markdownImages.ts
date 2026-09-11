@@ -1,4 +1,4 @@
-import { isWindowsAbsolutePath } from "@t3tools/shared/path";
+import { isWindowsAbsolutePath } from "@lecturn/shared/path";
 
 import {
   normalizeMarkdownLinkDestination,

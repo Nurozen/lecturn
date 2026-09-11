@@ -1,6 +1,6 @@
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { useNavigation } from "@react-navigation/native";
-import type { DailyTotals, MergedUsage } from "@t3tools/shared/usageMerge";
+import type { DailyTotals, MergedUsage } from "@lecturn/shared/usageMerge";
 import {
   enumerateDays,
   enumerateHourStarts,
@@ -11,7 +11,7 @@ import {
   formatTokens,
   formatUsd,
   makeWindow,
-} from "@t3tools/shared/usageFormat";
+} from "@lecturn/shared/usageFormat";
 import { useMemo, useState } from "react";
 import { Platform, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -173,7 +173,9 @@ function SegmentedControl<Value extends number | string>(props: {
           >
             <Text
               className={
-                active ? "text-sm font-t3-medium text-foreground" : "text-sm text-foreground-muted"
+                active
+                  ? "text-sm font-lecturn-medium text-foreground"
+                  : "text-sm text-foreground-muted"
               }
             >
               {option.label}
@@ -208,7 +210,7 @@ function ChartCard(props: {
           <Text className="text-sm text-foreground-muted">
             {metric === "cost" ? "Raw token cost" : "Processed tokens"}
           </Text>
-          <Text className="text-4xl font-t3-bold tabular-nums text-foreground">
+          <Text className="text-4xl font-lecturn-bold tabular-nums text-foreground">
             {metric === "cost" ? `${formatUsd(merged.costUsd)}*` : formatTokens(merged.totalTokens)}
           </Text>
           <Text className="text-sm text-foreground-muted">
@@ -281,7 +283,7 @@ function MetricToggle(props: {
             <Text
               className={
                 active
-                  ? "text-xs font-t3-medium uppercase text-foreground"
+                  ? "text-xs font-lecturn-medium uppercase text-foreground"
                   : "text-xs uppercase text-foreground-muted"
               }
             >
@@ -409,7 +411,9 @@ function MetricCell(props: {
   return (
     <View className="w-1/2 gap-0.5 p-4">
       <Text className="text-sm text-foreground-muted">{props.label}</Text>
-      <Text className="text-xl font-t3-medium tabular-nums text-foreground">{props.value}</Text>
+      <Text className="text-xl font-lecturn-medium tabular-nums text-foreground">
+        {props.value}
+      </Text>
       <Text className="text-xs text-foreground-tertiary">{props.detail}</Text>
     </View>
   );

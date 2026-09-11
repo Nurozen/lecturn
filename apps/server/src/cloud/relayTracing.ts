@@ -1,4 +1,4 @@
-import { makeRelayClientTracingLayer } from "@t3tools/shared/relayTracing";
+import { makeRelayClientTracingLayer } from "@lecturn/shared/relayTracing";
 
 import { resolveRelayClientTracingConfig } from "./publicConfig.ts";
 
@@ -7,14 +7,14 @@ const relayClientTracingConfig = resolveRelayClientTracingConfig();
 export const headlessRelayClientTracingLayer = makeRelayClientTracingLayer(
   relayClientTracingConfig,
   {
-    serviceName: "t3-headless-relay-client",
+    serviceName: "lecturn-headless-relay-client",
     runtime: "node",
     client: "headless-cli",
   },
 );
 
 export const serverRelayBrokerTracingLayer = makeRelayClientTracingLayer(relayClientTracingConfig, {
-  serviceName: "t3-server",
+  serviceName: "lecturn-server",
   runtime: "node",
   client: "environment-server",
   component: "relay-broker",

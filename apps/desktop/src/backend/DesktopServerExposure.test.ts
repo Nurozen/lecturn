@@ -131,7 +131,7 @@ const withHarness = <A, E, R>(
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-      prefix: "t3-desktop-server-exposure-test-",
+      prefix: "lecturn-desktop-server-exposure-test-",
     });
     return yield* effect.pipe(
       Effect.provide(
@@ -366,8 +366,8 @@ describe("DesktopServerExposure", () => {
         );
       }),
       {
-        T3CODE_DESKTOP_LAN_HOST: "10.0.0.7",
-        T3CODE_DESKTOP_HTTPS_ENDPOINTS: "https://public.example.test",
+        LECTURN_DESKTOP_LAN_HOST: "10.0.0.7",
+        LECTURN_DESKTOP_HTTPS_ENDPOINTS: "https://public.example.test",
       },
     ),
   );
@@ -466,7 +466,7 @@ describe("DesktopServerExposure", () => {
         ]);
       }),
       {
-        T3CODE_DESKTOP_HTTPS_ENDPOINTS:
+        LECTURN_DESKTOP_HTTPS_ENDPOINTS:
           "https://desktop.example.ts.net,http://desktop.example.test:3773,not-a-url",
       },
     ),

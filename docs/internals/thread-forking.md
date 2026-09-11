@@ -1,6 +1,6 @@
 # Thread forking
 
-> For maintainers. Using T3 Code? See [Forking threads](../user/forking-threads.md).
+> For maintainers. Using Lecturn? See [Forking threads](../user/forking-threads.md).
 
 A fork is a new thread aggregate that carries a copy of its source thread's history through a
 fork point (a turn boundary, inclusive), plus lineage, and whose provider session is forked
@@ -78,7 +78,7 @@ Each adapter maps that input onto its provider's native mechanism
 (capability declarations in [providers.md](./providers.md#adapter-capabilities)):
 
 - **Codex** passes a `fork` runtime option whose `lastTurnId` is the recorded provider turn ref
-  (falling back to the T3 turn id). The child never inherits the source's resume cursor — the
+  (falling back to the Lecturn turn id). The child never inherits the source's resume cursor — the
   forked session mints its own.
 - **Claude** resumes the parent session with `forkSession: true`, plus `resumeSessionAt` set to
   the fork point's provider turn ref for mid-thread forks; the SDK mints the child session id at
@@ -101,7 +101,7 @@ replacement is allowed.
 
 ## Kill-switch
 
-The `T3CODE_THREAD_FORKING` server config toggle (default on) drives the `threadForking`
+The `LECTURN_THREAD_FORKING` server config toggle (default on) drives the `threadForking`
 capability advertised by [`ServerEnvironment.ts`][env] and is enforced again inside the ws fork
 branch with a typed "unsupported" rejection, so disabling it both hides the action on clients
 and hard-stops forks from older or misbehaving ones.

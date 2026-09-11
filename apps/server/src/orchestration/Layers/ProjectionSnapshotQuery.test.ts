@@ -6,7 +6,7 @@ import {
   ThreadId,
   TurnId,
   ProviderInstanceId,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
@@ -104,7 +104,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           'default',
           NULL,
           NULL,
-          '{"projectId":"project-1","repository":"pingdotgg/t3code","number":42,"url":"https://github.com/pingdotgg/t3code/pull/42"}',
+          '{"projectId":"project-1","repository":"nurozen/lecturn","number":42,"url":"https://github.com/nurozen/lecturn/pull/42"}',
           'turn-1',
           '2026-02-24T00:00:04.000Z',
           1,
@@ -311,9 +311,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           worktreePath: null,
           linkedPullRequest: {
             projectId: asProjectId("project-1"),
-            repository: "pingdotgg/t3code",
+            repository: "nurozen/lecturn",
             number: 42,
-            url: "https://github.com/pingdotgg/t3code/pull/42",
+            url: "https://github.com/nurozen/lecturn/pull/42",
           },
           latestTurn: {
             turnId: asTurnId("turn-1"),
@@ -439,9 +439,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           worktreePath: null,
           linkedPullRequest: {
             projectId: asProjectId("project-1"),
-            repository: "pingdotgg/t3code",
+            repository: "nurozen/lecturn",
             number: 42,
-            url: "https://github.com/pingdotgg/t3code/pull/42",
+            url: "https://github.com/nurozen/lecturn/pull/42",
           },
           latestTurn: {
             turnId: asTurnId("turn-1"),

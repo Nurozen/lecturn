@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@lecturn/contracts";
 
 import { browserProfileRemovalAvailable, clearBrowserProfileData } from "./IntegrationsSettings";
 

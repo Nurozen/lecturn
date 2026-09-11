@@ -9,14 +9,14 @@ import {
   ThreadId,
   TurnId,
   type ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { Atom } from "effect/unstable/reactivity";
 
 import type { Thread, ThreadShell, TurnDiffSummary } from "../types";
 import type { TimelineEntry } from "../session-logic";
 import { deriveProviderInstanceEntries, NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
-import type { CodexArtifactTemplate } from "@t3tools/client-runtime/codex-artifact-templates";
+import type { CodexArtifactTemplate } from "@lecturn/client-runtime/codex-artifact-templates";
 import type { RightPanelSurface } from "../rightPanelStore";
 import {
   MAX_HIDDEN_MOUNTED_PREVIEW_THREADS,
@@ -983,7 +983,7 @@ describe("buildRevertTurnCountByUserMessageId", () => {
       {
         turnId,
         checkpointTurnCount: 1,
-        checkpointRef: CheckpointRef.make("refs/t3/checkpoints/rewind-turn"),
+        checkpointRef: CheckpointRef.make("refs/lecturn/checkpoints/rewind-turn"),
         status: "ready",
         files: [],
         assistantMessageId,

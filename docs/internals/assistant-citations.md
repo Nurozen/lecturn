@@ -1,6 +1,6 @@
 # Assistant citations
 
-> For maintainers. Using T3 Code? See [Quote an assistant response](../user/composer.md#quote-an-assistant-response).
+> For maintainers. Using Lecturn? See [Quote an assistant response](../user/composer.md#quote-an-assistant-response).
 
 Assistant citations store a selected excerpt and its source in ordinary message text. They need
 no database migration, citation table, or sidecar draft metadata. The saved excerpt remains
@@ -12,7 +12,7 @@ available even when the source response is missing or has changed.
 as a Markdown link with the literal label `Assistant quote`:
 
 ```text
-[Assistant quote](t3-citation://v1/<environmentId>/<threadId>/<messageId>?text=<quote>&start=<start>&end=<end>&prefix=<prefix>&suffix=<suffix>&comment=<optional-user-comment>)
+[Assistant quote](lecturn-citation://v1/<environmentId>/<threadId>/<messageId>?text=<quote>&start=<start>&end=<end>&prefix=<prefix>&suffix=<suffix>&comment=<optional-user-comment>)
 ```
 
 The formatter percent-encodes each path segment and uses `URLSearchParams` for the query. The

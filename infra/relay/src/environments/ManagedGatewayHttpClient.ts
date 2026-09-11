@@ -8,7 +8,7 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 export class ManagedGatewayHttpClient extends Context.Service<
   ManagedGatewayHttpClient,
   HttpClient.HttpClient
->()("t3code-relay/environments/ManagedGatewayHttpClient") {}
+>()("lecturn-relay/environments/ManagedGatewayHttpClient") {}
 
 export function makeManagedGatewayHttpClient<E>(options: {
   readonly fallback: HttpClient.HttpClient;

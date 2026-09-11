@@ -1,7 +1,7 @@
 # Claude
 
-This guide is for people who want to use more than one Claude setup in T3 Code. For Codex, see
-[Codex](./providers-codex.md). For first-time setup, see [Install T3 Code](./install.md).
+This guide is for people who want to use more than one Claude setup in Lecturn. For Codex, see
+[Codex](./providers-codex.md). For first-time setup, see [Install Lecturn](./install.md).
 
 Common reasons:
 
@@ -20,7 +20,7 @@ Log in with Claude Code normally:
 claude auth login
 ```
 
-In T3 Code Settings, your Claude provider can stay like this:
+In Lecturn Settings, your Claude provider can stay like this:
 
 ```text
 Display name: Claude
@@ -28,9 +28,9 @@ Binary path: claude
 CLAUDE_CONFIG_DIR path: empty
 ```
 
-An empty `CLAUDE_CONFIG_DIR path` means T3 Code uses Claude Code's normal config directory.
+An empty `CLAUDE_CONFIG_DIR path` means Lecturn uses Claude Code's normal config directory.
 
-When you set this field, T3 Code points Claude Code at that directory with the
+When you set this field, Lecturn points Claude Code at that directory with the
 `CLAUDE_CONFIG_DIR` environment variable. It does not change `HOME`, so your system keychain and
 the rest of your environment stay as they are.
 
@@ -41,7 +41,7 @@ In Settings, open your Claude provider and set **Auto-compact after** to a token
 reaches about 300,000 tokens, without changing the model's context window. Leave the field
 empty to keep Claude Code's default behavior.
 
-On web and desktop, when you return to an older Claude thread with a large context, T3 Code
+On web and desktop, when you return to an older Claude thread with a large context, Lecturn
 offers to compact the conversation before you continue. You can also select **Compact context**
 from the context meter. On every client, you can enter `/compact` in the message composer, and
 Claude can show its own resume prompt when you continue an old session.
@@ -51,7 +51,7 @@ Claude can show its own resume prompt when you continue an old session.
 You can send a Claude slash command such as `/my-skill explain this` with an image or file
 attached. The attachments stay available to Claude, and the command still runs as a skill.
 
-T3 Code looks for Claude skills in the Claude config directory's `skills` folder and
+Lecturn looks for Claude skills in the Claude config directory's `skills` folder and
 `<workspace>/.claude/skills`, the two places Claude Code loads them from.
 
 If the same skill name exists in more than one folder, the one in the Claude config directory
@@ -82,7 +82,7 @@ Log in normally:
 claude auth login
 ```
 
-In T3 Code Settings:
+In Lecturn Settings:
 
 ```text
 Display name: Claude Work
@@ -100,9 +100,9 @@ CLAUDE_CONFIG_DIR=~/.claude_personal_home claude auth login
 ```
 
 Use `CLAUDE_CONFIG_DIR`, not `HOME`. Setting `HOME` writes the login to
-`~/.claude_personal_home/.claude`, which is not where T3 Code looks.
+`~/.claude_personal_home/.claude`, which is not where Lecturn looks.
 
-Then add another Claude provider in T3 Code:
+Then add another Claude provider in Lecturn:
 
 ```text
 Display name: Claude Personal
@@ -117,11 +117,11 @@ blurred by default; click the blurred email to reveal it.
 
 Usually, no.
 
-T3 Code only offers Claude providers that use the same config directory for an existing thread. A
+Lecturn only offers Claude providers that use the same config directory for an existing thread. A
 different config directory is treated as a different Claude environment.
 
 This is different from the recommended Codex setup. Claude Code keeps account and local state across
-multiple files under its config directory, so T3 Code keeps separate config directories isolated
+multiple files under its config directory, so Lecturn keeps separate config directories isolated
 instead of trying to share part of the state.
 
 ## I Want To Use OpenRouter
@@ -134,7 +134,7 @@ variables.
 
 ### Configure A Claude OpenRouter Provider
 
-Add or edit a Claude provider in T3 Code Settings:
+Add or edit a Claude provider in Lecturn Settings:
 
 ```text
 Display name: Claude OpenRouter
@@ -150,7 +150,7 @@ ANTHROPIC_AUTH_TOKEN sk-or-...                Sensitive
 ANTHROPIC_API_KEY                              Empty value
 ```
 
-Mark `ANTHROPIC_AUTH_TOKEN` as sensitive. T3 Code stores the value as a server secret and does not
+Mark `ANTHROPIC_AUTH_TOKEN` as sensitive. Lecturn stores the value as a server secret and does not
 send it back to the app after saving.
 
 If you want this setup isolated from your normal Claude account, create that home first:
@@ -209,7 +209,7 @@ OpenRouter's setup can change over time. Use its upstream Claude Code guide for 
 Claude Code Router is useful when you want a local routing layer with more control than a direct
 OpenRouter setup.
 
-T3 Code does not need a special Claude Code Router provider. Treat the router as a Claude
+Lecturn does not need a special Claude Code Router provider. Treat the router as a Claude
 environment: give a Claude provider its own `CLAUDE_CONFIG_DIR path`, and put whatever variables
 the router tells you to export into that provider's Environment variables section. Mark tokens
 and API keys as sensitive.

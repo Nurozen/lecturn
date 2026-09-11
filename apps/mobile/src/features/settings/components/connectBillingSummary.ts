@@ -1,4 +1,4 @@
-import type { RelayBillingStatus } from "@t3tools/contracts";
+import type { RelayBillingStatus } from "@lecturn/contracts";
 
 export function connectBillingSummary(status: RelayBillingStatus, now = Date.now()) {
   const expiry = status.accessUntil ? Date.parse(status.accessUntil) : NaN;

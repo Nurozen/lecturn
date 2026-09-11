@@ -456,7 +456,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     wslAvailableOnly: true,
   },
   {
-    id: "t3-connect",
+    id: "lecturn-connect",
     title: "Lecturn Connect",
     to: "/settings/connections",
     targetId: "connections-environment",
@@ -484,7 +484,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "remote-environments",
     title: "Remote environments",
     to: "/settings/connections",
-    searchTerms: ["add pair backend host code ssh config agent tunnel saved t3 connect"],
+    searchTerms: ["add pair backend host code ssh config agent tunnel saved lecturn connect"],
   },
   {
     id: "archive",

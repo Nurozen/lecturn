@@ -41,8 +41,8 @@ describe("parseFileUrlHref", () => {
   it.each([
     ["file:///Users/julius/project/src/main.ts#L42", "/Users/julius/project/src/main.ts", "#L42"],
     [
-      "file:///D:/Programme/t3code/OpenInPicker.tsx#L69",
-      "D:/Programme/t3code/OpenInPicker.tsx",
+      "file:///D:/Programme/lecturn/OpenInPicker.tsx#L69",
+      "D:/Programme/lecturn/OpenInPicker.tsx",
       "#L69",
     ],
     ["file://server/share/workspace-image.svg", "\\\\server\\share\\workspace-image.svg", ""],
@@ -89,8 +89,8 @@ describe("parseMarkdownFileLink", () => {
     ["C:\\Users\\mike\\project\\src\\main.ts", "C:\\Users\\mike\\project\\src\\main.ts"],
     ["C:%5Crepo%5Cimage.png", "C:\\repo\\image.png"],
     ["\\\\server\\share\\image.png", "\\\\server\\share\\image.png"],
-    ["/D:/Programme/t3code/OpenInPicker.tsx", "D:/Programme/t3code/OpenInPicker.tsx"],
-    ["</D:/Programme/t3code/ChatMarkdown.tsx:1>", "D:/Programme/t3code/ChatMarkdown.tsx"],
+    ["/D:/Programme/lecturn/OpenInPicker.tsx", "D:/Programme/lecturn/OpenInPicker.tsx"],
+    ["</D:/Programme/lecturn/ChatMarkdown.tsx:1>", "D:/Programme/lecturn/ChatMarkdown.tsx"],
     ["file:///Users/julius/project/file%2520name.md", "/Users/julius/project/file%20name.md"],
     ["file://server/share/workspace-image.svg", "\\\\server\\share\\workspace-image.svg"],
     ["file://localhost/home/me/notes.md", "/home/me/notes.md"],
@@ -158,8 +158,8 @@ describe("workspaceRelativeFilePath", () => {
   it.each([
     ["/repo/project/src/main.ts", "/repo/project", "src/main.ts"],
     ["/repo/project/src/main.ts", "/repo/project/", "src/main.ts"],
-    ["C:\\Users\\mike\\t3code\\apps\\web\\a.ts", "C:/Users/mike/t3code", "apps/web/a.ts"],
-    ["/C:/Users/mike/t3code/apps/web/a.ts", "C:/Users/mike/t3code", "apps/web/a.ts"],
+    ["C:\\Users\\mike\\lecturn\\apps\\web\\a.ts", "C:/Users/mike/lecturn", "apps/web/a.ts"],
+    ["/C:/Users/mike/lecturn/apps/web/a.ts", "C:/Users/mike/lecturn", "apps/web/a.ts"],
     ["/Repo/Project/src/main.ts", "/repo/project", "src/main.ts"],
     ["/tmp/report.ts", "/repo/project", null],
     ["/repo/project-two/a.ts", "/repo/project", null],

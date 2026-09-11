@@ -7,12 +7,12 @@ describe("resolveThreadReferenceCopyTarget", () => {
     expect(
       resolveThreadReferenceCopyTarget({
         threadId: "thread-1",
-        linkedPullRequestUrl: "https://github.com/t3/pr/12",
-        detectedPullRequestUrl: "https://github.com/t3/pr/13",
+        linkedPullRequestUrl: "https://github.com/lecturn/pr/12",
+        detectedPullRequestUrl: "https://github.com/lecturn/pr/13",
       }),
     ).toMatchObject({
       kind: "pull-request",
-      value: "https://github.com/t3/pr/12",
+      value: "https://github.com/lecturn/pr/12",
       successTitle: "PR link copied",
     });
   });
@@ -21,11 +21,11 @@ describe("resolveThreadReferenceCopyTarget", () => {
     expect(
       resolveThreadReferenceCopyTarget({
         threadId: "thread-1",
-        detectedPullRequestUrl: "https://github.com/t3/pr/13",
+        detectedPullRequestUrl: "https://github.com/lecturn/pr/13",
       }),
     ).toMatchObject({
       kind: "pull-request",
-      value: "https://github.com/t3/pr/13",
+      value: "https://github.com/lecturn/pr/13",
     });
   });
 

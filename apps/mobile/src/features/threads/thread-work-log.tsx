@@ -27,11 +27,11 @@ import {
   View,
 } from "react-native";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
-import type { EnvironmentId, ToolActivityIcon } from "@t3tools/contracts";
-import { toolActivityFaviconUrl } from "@t3tools/shared/favicon";
+import type { EnvironmentId, ToolActivityIcon } from "@lecturn/contracts";
+import { toolActivityFaviconUrl } from "@lecturn/shared/favicon";
 
 import { AppText as Text } from "../../components/AppText";
-import { T3Wordmark } from "../../components/T3Wordmark";
+import { LecturnWordmark } from "../../components/LecturnWordmark";
 import { cn } from "../../lib/cn";
 import { THREAD_WORK_ROW_MIN_HEIGHT, type deriveThreadWorkLogSizing } from "../../lib/layout";
 import type { ThreadFeedActivity } from "../../lib/threadActivity";
@@ -44,8 +44,8 @@ import {
   resolveWorkEntryToolPresentation,
   type ToolGroupSummaryKind,
   workEntryViewedImagePath,
-} from "@t3tools/client-runtime/work-log/presentation";
-import { resolveWorkGroupScrollAnchor } from "@t3tools/client-runtime/work-log/scroll-anchor";
+} from "@lecturn/client-runtime/work-log/presentation";
+import { resolveWorkGroupScrollAnchor } from "@lecturn/client-runtime/work-log/scroll-anchor";
 import type { MarkdownImageRenderer } from "../../native/SelectableMarkdownText";
 import Animated, {
   cancelAnimation,
@@ -71,16 +71,16 @@ export const THREAD_DISCLOSURE_TRANSITION_MS = 180;
 const WORK_LOG_LAYOUT_TRANSITION = LinearTransition.duration(THREAD_DISCLOSURE_TRANSITION_MS);
 const WORK_LOG_DETAIL_ENTER_TRANSITION = FadeIn.duration(140);
 const WORK_LOG_DETAIL_EXIT_TRANSITION = FadeOut.duration(120);
-type WorkContentIcon = AppSymbolName | "browser" | "t3-code";
+type WorkContentIcon = AppSymbolName | "browser" | "lecturn";
 
 function WorkLogIcon(props: {
   readonly icon: WorkContentIcon;
   readonly color: ColorValue;
   readonly highlighted?: boolean;
 }) {
-  if (props.icon === "t3-code") {
+  if (props.icon === "lecturn") {
     return (
-      <T3Wordmark
+      <LecturnWordmark
         height={10}
         {...(props.highlighted ? { colorClassName: "accent-foreground" } : { color: props.color })}
       />
@@ -768,7 +768,7 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
               <Text
                 className={cn(
                   "min-w-0 flex-1 text-sm text-foreground-muted",
-                  iconIsDestructive && "font-t3-medium text-adaptive-rose-600-400",
+                  iconIsDestructive && "font-lecturn-medium text-adaptive-rose-600-400",
                 )}
                 numberOfLines={1}
               >
@@ -779,7 +779,7 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
 
           <View className="shrink-0 flex-row items-center gap-px">
             {props.copied ? (
-              <Text className="pr-1 font-t3-medium text-3xs text-adaptive-emerald-600-400">
+              <Text className="pr-1 font-lecturn-medium text-3xs text-adaptive-emerald-600-400">
                 Copied
               </Text>
             ) : null}
@@ -848,9 +848,9 @@ export function ThreadWorkGroupToggle(props: {
   readonly iconSubtleColor: import("react-native").ColorValue;
   readonly summary: string;
   readonly summaryKind: ToolGroupSummaryKind;
-  readonly summaryToolIcon?: "browser" | "t3-code";
+  readonly summaryToolIcon?: "browser" | "lecturn";
   readonly themeAppearance: "light" | "dark";
-  readonly toolSurface?: import("@t3tools/contracts").ToolActivitySurface;
+  readonly toolSurface?: import("@lecturn/contracts").ToolActivitySurface;
   readonly toolIcon?: ToolActivityIcon;
   readonly hasFailure: boolean;
   readonly shimmer: boolean;

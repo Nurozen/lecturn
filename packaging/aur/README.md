@@ -1,13 +1,15 @@
 # AUR packaging
 
-This directory maintains the [`t3code-bin`](https://aur.archlinux.org/packages/t3code-bin) and
-[`t3code-nightly-bin`](https://aur.archlinux.org/packages/t3code-nightly-bin) packages. Both
-repackage the official x86_64 AppImage from GitHub Releases.
+This directory contains packaging templates for `lecturn-bin` and
+`lecturn-nightly-bin`, using the x86_64 Lecturn AppImage from GitHub Releases.
+These templates do not establish that either package is published on the AUR.
+Refresh their version and checksums for a Lecturn release before building.
 
 ## Publishing
 
-The release workflow calls `.github/workflows/publish-aur.yml` after publishing a GitHub release;
-the workflow can also be run manually for a specific tag. It selects the stable or nightly
+The Lecturn release workflow does not publish AUR packages automatically.
+`.github/workflows/publish-aur.yml` can be run manually for a specific tag after
+configuring an AUR account and `AUR_SSH_PRIVATE_KEY` for the target package. It selects the stable or nightly
 package, then updates its version and checksums, builds it, regenerates `.SRCINFO`, and pushes it
 to the AUR.
 

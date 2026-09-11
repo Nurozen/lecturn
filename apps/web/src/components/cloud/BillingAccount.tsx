@@ -1,13 +1,13 @@
 import { useAuth, useClerk, useUser } from "@clerk/react";
-import { createBillingClient } from "@t3tools/client-runtime/relay";
-import type { RelayBillingStatus } from "@t3tools/contracts";
+import { createBillingClient } from "@lecturn/client-runtime/relay";
+import type { RelayBillingStatus } from "@lecturn/contracts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { resolveCloudPublicConfig, resolveRelayClerkTokenOptions } from "../../cloud/publicConfig";
 import { configuredHostedAppUrl, isHostedStaticApp } from "../../hostedPairing";
 import { CreditCardIcon, RadioTowerIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { useConnectSignOut } from "../clerk/useConnectSignOut";
-import { useT3ConnectAuthPrompt } from "../clerk/useT3ConnectAuthPrompt";
+import { useLecturnConnectAuthPrompt } from "../clerk/useLecturnConnectAuthPrompt";
 import { createBillingStatusLoader } from "./billingStatusLoader";
 
 export function BillingAccount({ embedded = false }: { embedded?: boolean }) {
@@ -46,7 +46,7 @@ function SignedBillingAccount({
   const { requestSignOut, signOutDialog } = useConnectSignOut(
     hosted ? `${window.location.origin}/account/billing` : undefined,
   );
-  const { authPrompt, openAuthPrompt } = useT3ConnectAuthPrompt();
+  const { authPrompt, openAuthPrompt } = useLecturnConnectAuthPrompt();
   const { user } = useUser();
   const [status, setStatus] = useState<RelayBillingStatus | null>(null);
   const [error, setError] = useState<string | null>(null);

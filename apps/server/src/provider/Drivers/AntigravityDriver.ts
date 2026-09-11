@@ -1,4 +1,4 @@
-import { AntigravitySettings, ProviderDriverKind, ProviderSetupError } from "@t3tools/contracts";
+import { AntigravitySettings, ProviderDriverKind, ProviderSetupError } from "@lecturn/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -184,7 +184,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
         input: Pick<AntigravityAcpRuntimeInput, "onAuthorizationUrl">,
       ) {
         const cwd = yield* fileSystem
-          .makeTempDirectoryScoped({ prefix: "t3-antigravity-setup-" })
+          .makeTempDirectoryScoped({ prefix: "lecturn-antigravity-setup-" })
           .pipe(
             Effect.mapError(
               () =>
@@ -208,7 +208,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
         );
         const runtime = yield* makeRuntime({
           cwd,
-          clientInfo: { name: "t3-code-provider-setup", version: "0.0.0" },
+          clientInfo: { name: "lecturn-provider-setup", version: "0.0.0" },
           mcpServers: [],
           ...(input.onAuthorizationUrl ? { onAuthorizationUrl: input.onAuthorizationUrl } : {}),
         });
@@ -263,7 +263,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
             Effect.gen(function* () {
               const runtime = yield* makeRuntime({
                 cwd: serverConfig.stateDir,
-                clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
+                clientInfo: { name: "lecturn-provider-probe", version: "0.0.0" },
                 mcpServers: [],
               });
               return yield* runtime.initialize();
@@ -312,7 +312,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
         makeRuntime: (cwd) =>
           makeRuntime({
             cwd,
-            clientInfo: { name: "t3-code-text", version: "0.0.0" },
+            clientInfo: { name: "lecturn-text", version: "0.0.0" },
             mcpServers: [],
           }),
       });

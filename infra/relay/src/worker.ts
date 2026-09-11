@@ -42,7 +42,7 @@ import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import * as HttpApiScalar from "effect/unstable/httpapi/HttpApiScalar";
 
-import { RelayApi } from "@t3tools/contracts/relay";
+import { RelayApi } from "@lecturn/contracts/relay";
 
 import {
   clientApi,
@@ -133,7 +133,7 @@ class ManagedGatewayRuntime extends Context.Service<
     readonly store: Effect.Success<ReturnType<typeof makeManagedGatewayStore>>;
     readonly sync: (userId: string) => Effect.Effect<void, ManagedAccess.ManagedAccessUnavailable>;
   }
->()("t3code-relay/worker/ManagedGatewayRuntime") {}
+>()("lecturn-relay/worker/ManagedGatewayRuntime") {}
 
 export class Api extends Cloudflare.Worker<Api, {}>()("Api") {}
 

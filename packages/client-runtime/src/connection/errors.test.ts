@@ -1,8 +1,8 @@
-import { EnvironmentAuthInvalidError } from "@t3tools/contracts";
+import { EnvironmentAuthInvalidError } from "@lecturn/contracts";
 import {
   RelayAuthInvalidError,
   RelayConnectSubscriptionRequiredError,
-} from "@t3tools/contracts/relay";
+} from "@lecturn/contracts/relay";
 import { describe, expect, it } from "@effect/vitest";
 
 import { mapManagedRelayError, mapRemoteDpopEnvironmentError } from "./errors.ts";

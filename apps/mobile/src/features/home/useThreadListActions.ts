@@ -1,7 +1,7 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
-import { ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
+import { scopeThreadRef } from "@lecturn/client-runtime/environment";
+import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
+import { canSnooze } from "@lecturn/client-runtime/state/thread-settled";
+import { ThreadId, type ScopedThreadRef } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
 import * as Haptics from "expo-haptics";
 import { useCallback, useRef } from "react";
@@ -15,7 +15,7 @@ import {
   pinOrderKeyBetween,
   planPinnedMove,
   sortPinnedThreadsByOrderKey,
-} from "@t3tools/client-runtime/state/thread-sort";
+} from "@lecturn/client-runtime/state/thread-sort";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { environmentServerConfigsAtom } from "../../state/server";
 import { environmentThreadShells, threadEnvironment } from "../../state/threads";

@@ -1,7 +1,7 @@
 import { useAuth } from "@clerk/expo";
 import { useFocusEffect } from "@react-navigation/native";
-import { createBillingClient } from "@t3tools/client-runtime/relay";
-import type { RelayBillingStatus } from "@t3tools/contracts";
+import { createBillingClient } from "@lecturn/client-runtime/relay";
+import type { RelayBillingStatus } from "@lecturn/contracts";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 import { connectBillingSummary } from "./connectBillingSummary";

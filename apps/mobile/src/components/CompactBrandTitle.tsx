@@ -37,14 +37,14 @@ export function CompactBrandTitle(
     >
       <Text
         allowFontScaling={props.allowFontScaling}
-        className="font-t3-medium text-[21px] tracking-[-0.5px] text-foreground-muted"
+        className="font-lecturn-medium text-[21px] tracking-[-0.5px] text-foreground-muted"
       >
         Lecturn
       </Text>
       <View className="rounded-full bg-subtle px-1.5 py-0.5">
         <Text
           allowFontScaling={props.allowFontScaling}
-          className="font-t3-bold text-[9px] tracking-[0.9px] text-foreground-muted uppercase"
+          className="font-lecturn-bold text-[9px] tracking-[0.9px] text-foreground-muted uppercase"
         >
           {stageLabel}
         </Text>

@@ -1,6 +1,6 @@
 import * as Equal from "effect/Equal";
-import { renderCodexDirectivesForCopy } from "@t3tools/client-runtime/codex-markdown-directives";
-import { commandProgramName } from "@t3tools/client-runtime/work-log/command-label";
+import { renderCodexDirectivesForCopy } from "@lecturn/client-runtime/codex-markdown-directives";
+import { commandProgramName } from "@lecturn/client-runtime/work-log/command-label";
 import {
   liveActivityToolStatus,
   normalizeCompactToolLabel,
@@ -11,13 +11,13 @@ import {
   toolGroupSummaryKind,
   workEntryViewedImagePath,
   type ToolGroupSummaryKind,
-} from "@t3tools/client-runtime/work-log/presentation";
+} from "@lecturn/client-runtime/work-log/presentation";
 export {
   normalizeCompactToolLabel,
   summarizeToolGroup,
   toolGroupAction,
   workLogEntryIsLocalCodeSearch,
-} from "@t3tools/client-runtime/work-log/presentation";
+} from "@lecturn/client-runtime/work-log/presentation";
 import {
   formatDuration,
   workEntryDisplayIndicatesToolFailure,
@@ -28,7 +28,7 @@ import {
   type WorkLogEntry,
 } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
-import { type MessageId, type OrchestrationLatestTurn, type TurnId } from "@t3tools/contracts";
+import { type MessageId, type OrchestrationLatestTurn, type TurnId } from "@lecturn/contracts";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 
 export const TIMELINE_MINIMAP_ITEM_SPACING = 8;
@@ -321,7 +321,7 @@ export type MessagesTimelineRow =
       summaryKind: ToolGroupSummaryKind;
       toolSurface?: WorkLogEntry["toolSurface"];
       toolIcon?: WorkLogEntry["toolIcon"];
-      summaryToolIcon?: "browser" | "t3-code";
+      summaryToolIcon?: "browser" | "lecturn";
       hasFailure: boolean;
     }
   | {

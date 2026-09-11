@@ -4,8 +4,8 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
-} from "@t3tools/contracts";
-import { serializeAssistantCitation } from "@t3tools/shared/assistantCitations";
+} from "@lecturn/contracts";
+import { serializeAssistantCitation } from "@lecturn/shared/assistantCitations";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {

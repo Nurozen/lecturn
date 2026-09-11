@@ -1,0 +1,12 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["LecturnNativeControlsModule", "LecturnKeyboardCommandsModule"]
+  },
+  "android": {
+    "modules": [
+      "expo.modules.lecturnnativecontrols.LecturnNativeControlsModule",
+      "expo.modules.lecturnnativecontrols.LecturnKeyboardCommandsModule"
+    ]
+  }
+}

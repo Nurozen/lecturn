@@ -8,7 +8,7 @@ import {
   TurnId,
   type OrchestrationEvent,
   type ThreadForkedPayload,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 
@@ -46,9 +46,9 @@ function makeEvent(input: {
 
 const linkedPullRequest = {
   projectId,
-  repository: "t3tools/t3code",
+  repository: "nurozen/lecturn",
   number: 7,
-  url: "https://github.com/t3tools/t3code/pull/7",
+  url: "https://github.com/nurozen/lecturn/pull/7",
 };
 
 const inheritedPlan = {

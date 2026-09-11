@@ -51,13 +51,13 @@ const testState = vi.hoisted(() => {
 vi.mock("@effect/atom-react", () => ({
   useAtomValue: () => ({ defaultThreadEnvMode: "local", newWorktreesStartFromOrigin: false }),
 }));
-vi.mock("@t3tools/client-runtime/environment", () => ({
+vi.mock("@lecturn/client-runtime/environment", () => ({
   scopedProjectKey: () => "remote-project",
   scopeProjectRef: (environmentId: string, projectId: string) => ({ environmentId, projectId }),
   scopeThreadRef: (environmentId: string, threadId: string) => ({ environmentId, threadId }),
 }));
-vi.mock("@t3tools/contracts", () => ({ DEFAULT_RUNTIME_MODE: "default" }));
-vi.mock("@t3tools/shared/threadEnvMode", () => ({
+vi.mock("@lecturn/contracts", () => ({ DEFAULT_RUNTIME_MODE: "default" }));
+vi.mock("@lecturn/shared/threadEnvMode", () => ({
   resolveDefaultThreadEnvMode: (input: {
     readonly projectFile: "local" | "worktree" | null;
     readonly globalDefault: "local" | "worktree";
@@ -87,8 +87,8 @@ vi.mock("../lib/chatThreadActions", () => ({
   resolveNewDraftStartFromOrigin: () => false,
   resolveNewThreadModelSelectionOverride: () => null,
 }));
-vi.mock("../lib/t3ProjectFileDefaults", () => ({
-  readT3ProjectFileDefaultThreadEnvMode: () => testState.projectFileRead,
+vi.mock("../lib/lecturnProjectFileDefaults", () => ({
+  readLecturnProjectFileDefaultThreadEnvMode: () => testState.projectFileRead,
 }));
 vi.mock("../lib/utils", () => ({
   newDraftId: () => "draft-delayed",

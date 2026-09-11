@@ -4,7 +4,7 @@
 per coherent checkpoint, launches fresh integration and review agents, opens a
 PR, waits for review and hosted CI, and merges it before selecting the next
 checkpoint. By default it continues until Lecturn main contains the captured
-mirror tip. The independent `t3mirror-sync.yml` updater remains available.
+mirror tip. The independent `upstream-mirror-sync.yml` updater remains available.
 
 ## Start or resume
 
@@ -32,8 +32,14 @@ python3 .github/upstream-integration/run-batches.py \
   --spaces-dir /absolute/stave/agent-work \
   --accepted FULL_PREVIOUSLY_ACCEPTED_UPSTREAM_SHA \
   --bootstrap-note 'Verified target ancestry in the merge of PR NUMBER' \
-  --refresh-mirror
+  --refresh-mirror \
+  --upstream-repository OWNER/REPOSITORY
 ```
+
+`--refresh-mirror` requires an explicit source via `--upstream-repository` or the
+`UPSTREAM_REPOSITORY` environment variable. The scheduled mirror workflow uses
+the `UPSTREAM_REPOSITORY` repository variable and stays disabled until configured.
+Both reject the Lecturn repository itself as the source.
 
 Resume with the same paths and omit the bootstrap arguments. `progress.json`
 points to the active manifest, so interrupted builds, commits, pushes and PR
@@ -108,8 +114,8 @@ before/after GitHub attachment URLs. The current operator has authorized browser
 and computer use. Motion or timing changes also require short video evidence;
 builders return `motion_changed` and `video_urls` on every round, including
 repairs. The controller requires videos for motion changes and renders their
-actual attachment URLs as separate PR paragraphs. Follow `test-t3-app`; never
-write live T3 state. Screenshots
+actual attachment URLs as separate PR paragraphs. Follow `test-lecturn-app`; never
+write live Lecturn state. Screenshots
 are PR evidence, not repository assets. An upload failure leaves the batch
 blocked with evidence retained; the controller cannot substitute a local path
 or claim an image was attached. Reviewers judge whether UI evidence applies.

@@ -8,9 +8,9 @@ import type {
   PullRequestMergeMethod,
   PullRequestMergeability,
   PullRequestState,
-} from "@t3tools/contracts";
-import { TrimmedNonEmptyString } from "@t3tools/contracts";
-import { decodeJsonResult } from "@t3tools/shared/schemaJson";
+} from "@lecturn/contracts";
+import { TrimmedNonEmptyString } from "@lecturn/contracts";
+import { decodeJsonResult } from "@lecturn/shared/schemaJson";
 
 import {
   azureDevOpsOrganizationBaseFromRestApiUrl,

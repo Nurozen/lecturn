@@ -7,7 +7,7 @@ import {
   type ServerProvider,
   type ServerSettings,
   type ServerSettingsPatch,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 
 /** Read the configured method from an instance config. Unknown values fall back to personal. */
 export function readAntigravityAuthMethod(config: unknown): AntigravityAuthMethod {

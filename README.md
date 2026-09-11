@@ -36,14 +36,14 @@ The iOS app is a companion to your existing account access. Notification deliver
 
 ## Installation and access
 
-- **Desktop:** use a Lecturn installer from [this fork's releases](https://github.com/Nurozen/lecturn/releases). Follow [Install Lecturn alongside T3 Code](./docs/user/lecturn-installation.md) for application identity, data isolation, and first connection instructions.
+- **Desktop:** use a Lecturn installer from [Lecturn releases](https://github.com/Nurozen/lecturn/releases). Follow [Install Lecturn](./docs/user/lecturn-installation.md) for application identity, data isolation, and first connection instructions.
 - **Web:** [lecturn.cloudgatherer.net](https://lecturn.cloudgatherer.net). Sign in and connect to a computer hosting Lecturn.
 - **iPhone and iPad:** TestFlight access is invitation-only. There is no public Lecturn App Store release yet.
 - **Android:** source is included in [`apps/mobile`](./apps/mobile); distribution is currently source-only.
 
-Lecturn uses its own app identity and `~/.lecturn/userdata`, so it can coexist with T3 Code. It does not automatically migrate your existing T3 Code data.
+Lecturn stores its runtime data in `~/.lecturn/userdata`. See the installation guide for application identity and data-directory configuration.
 
-The standalone runtime is available as `npx lecturn`. Use this fork's releases and package names for Lecturn.
+The standalone CLI command is `lecturn`. See the installation guide for runtime distribution and hosting details.
 
 ## Development
 
@@ -68,8 +68,8 @@ Read [AGENTS.md](./AGENTS.md) and [CONTRIBUTING.md](./CONTRIBUTING.md) before ma
 - [Source control integrations](./docs/user/source-control.md)
 - Multiple provider accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)
 
-Some inherited documentation describes upstream T3 Code distribution and services. Use the Lecturn installation guide above for this fork's application and deployment details. Report Lecturn issues in [this repository](https://github.com/Nurozen/lecturn/issues).
+Report Lecturn issues in [this repository](https://github.com/Nurozen/lecturn/issues).
 
-## Attribution and license
+## License
 
-Lecturn is based on [T3 Code](https://github.com/pingdotgg/t3code) by T3 Tools and its contributors. Their work and copyright notices are preserved. Lecturn is independently maintained and operated by Cloud Gatherer Labs LLC; it is not affiliated with, sponsored by, or endorsed by T3 Tools Inc. or the T3 Code project. The project is available under the [MIT license](./LICENSE).
+Lecturn is independently maintained and operated by Cloud Gatherer Labs LLC. The project is available under the [MIT license](./LICENSE), which preserves the original copyright and permission notices. See [NOTICE.md](./NOTICE.md) for bundled third-party notices.

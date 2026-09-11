@@ -7,10 +7,10 @@ import {
   type ChatAttachment,
   type ModelSelection,
   type OpenCodeSettings,
-} from "@t3tools/contracts";
-import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
-import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
-import { extractJsonObject } from "@t3tools/shared/schemaJson";
+} from "@lecturn/contracts";
+import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@lecturn/shared/git";
+import { getModelSelectionStringOptionValue } from "@lecturn/shared/model";
+import { extractJsonObject } from "@lecturn/shared/schemaJson";
 
 import * as ServerConfig from "../config.ts";
 import { resolveAttachmentPath } from "../attachmentStore.ts";

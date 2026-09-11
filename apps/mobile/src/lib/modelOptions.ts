@@ -1,12 +1,12 @@
 import type {
   ModelCapabilities,
   ModelSelection,
-  ServerConfig as T3ServerConfig,
-} from "@t3tools/contracts";
+  ServerConfig as LecturnServerConfig,
+} from "@lecturn/contracts";
 import {
   buildExplicitProviderOptionSelectionsFromDescriptors,
   getProviderOptionDescriptors,
-} from "@t3tools/shared/model";
+} from "@lecturn/shared/model";
 
 export type ModelOption = {
   readonly key: string;
@@ -62,7 +62,7 @@ function normalizeSelectionOptions(
 }
 
 function findAdvertisedModel(
-  models: T3ServerConfig["providers"][number]["models"],
+  models: LecturnServerConfig["providers"][number]["models"],
   selectedModel: string,
 ) {
   return (
@@ -73,7 +73,7 @@ function findAdvertisedModel(
 
 /** Whether a known Antigravity selection needs setup or a different model. */
 export function isModelSelectionUnavailable(
-  config: T3ServerConfig | null | undefined,
+  config: LecturnServerConfig | null | undefined,
   selection: ModelSelection | null | undefined,
 ): boolean {
   if (!config || !selection) {
@@ -101,7 +101,7 @@ export function isModelSelectionUnavailable(
  * are disabled, missing, or signed out. Without config, keep stored selections.
  */
 export function resolveSelectableModelSelection(
-  config: T3ServerConfig | null | undefined,
+  config: LecturnServerConfig | null | undefined,
   selection: ModelSelection | null,
 ): ModelSelection | null {
   if (!selection || !config) {
@@ -129,7 +129,7 @@ export function resolveSelectableModelSelection(
  * the settings sheet are unaffected.
  */
 export function resolveDefaultableModelSelection(
-  config: T3ServerConfig | null | undefined,
+  config: LecturnServerConfig | null | undefined,
   selection: ModelSelection | null,
 ): ModelSelection | null {
   const usable = resolveSelectableModelSelection(config, selection);
@@ -158,7 +158,7 @@ export function resolveNewTaskModelSelection(input: {
 }
 
 export function buildModelOptions(
-  config: T3ServerConfig | null | undefined,
+  config: LecturnServerConfig | null | undefined,
   fallbackModelSelection: ModelSelection | null,
 ): ReadonlyArray<ModelOption> {
   const options = new Map<string, ModelOption>();

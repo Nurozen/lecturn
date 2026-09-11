@@ -2,7 +2,7 @@ import {
   EnvironmentAuthInvalidError,
   type PullRequestDiffInput,
   type PullRequestDiffResult,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -32,7 +32,7 @@ export class PullRequestDiffCredentialRejectedError extends Schema.TaggedErrorCl
   },
 ) {
   override get message(): string {
-    return "This environment session is no longer valid (invalid_credential). Refresh the page or quit and reopen T3 Code.";
+    return "This environment session is no longer valid (invalid_credential). Refresh the page or quit and reopen Lecturn.";
   }
 }
 
@@ -87,7 +87,7 @@ export class PullRequestDiffLoader extends Context.Service<
       input: PullRequestDiffInput,
     ) => Effect.Effect<PullRequestDiffResult, PullRequestDiffLoadError>;
   }
->()("@t3tools/client-runtime/state/pullRequestDiffHttp/PullRequestDiffLoader") {}
+>()("@lecturn/client-runtime/state/pullRequestDiffHttp/PullRequestDiffLoader") {}
 
 export const pullRequestDiffLoaderLayer: Layer.Layer<
   PullRequestDiffLoader,

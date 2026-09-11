@@ -1,5 +1,5 @@
 import { StackActions, useNavigation } from "@react-navigation/native";
-import { resolveThreadReferenceCopyTarget } from "@t3tools/shared/threadReference";
+import { resolveThreadReferenceCopyTarget } from "@lecturn/shared/threadReference";
 import {
   useCallback,
   useEffect,
@@ -11,7 +11,7 @@ import {
 } from "react";
 
 import { tryCopyTextWithHaptic } from "../../lib/copyTextWithHaptic";
-import { T3KeyboardCommands } from "../../native/T3KeyboardCommands";
+import { LecturnKeyboardCommands } from "../../native/LecturnKeyboardCommands";
 import { useProject, useThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import type { GitActionProgress } from "../../state/use-vcs-action-state";
@@ -182,9 +182,9 @@ export function HardwareKeyboardCommandProvider({
 
   return (
     <>
-      <T3KeyboardCommands enabledCommands={enabledCommands} onCommand={onCommand}>
+      <LecturnKeyboardCommands enabledCommands={enabledCommands} onCommand={onCommand}>
         {children}
-      </T3KeyboardCommands>
+      </LecturnKeyboardCommands>
       <GitActionProgressOverlay progress={copyFeedback} onDismiss={dismissCopyFeedback} />
     </>
   );

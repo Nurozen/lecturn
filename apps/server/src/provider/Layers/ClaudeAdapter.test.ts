@@ -21,8 +21,8 @@ import {
   ThreadId,
   TurnId,
   ProviderInstanceId,
-} from "@t3tools/contracts";
-import { createModelSelection } from "@t3tools/shared/model";
+} from "@lecturn/contracts";
+import { createModelSelection } from "@lecturn/shared/model";
 import { assert, describe, it } from "@effect/vitest";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -51,7 +51,7 @@ const encodeUnknownJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.U
 
 // Test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
 class ClaudeAdapter extends Context.Service<ClaudeAdapter, ClaudeAdapterShape>()(
-  "t3/provider/Layers/ClaudeAdapter.test/ClaudeAdapter",
+  "lecturn/provider/Layers/ClaudeAdapter.test/ClaudeAdapter",
 ) {}
 
 class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
@@ -1397,7 +1397,7 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("anchors a synthetic turn without stamping the T3 turn id", () => {
+  it.effect("anchors a synthetic turn without stamping the Lecturn turn id", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
@@ -1439,7 +1439,7 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(turnStarted?.type, "turn.started");
       if (turnStarted?.type === "turn.started") {
         // providerTurnId means "provider-side anchor"; the synthetic start
-        // must not stamp the T3 turn id into it.
+        // must not stamp the Lecturn turn id into it.
         assert.equal(turnStarted.providerRefs?.providerTurnId, undefined);
       }
 
@@ -3045,8 +3045,8 @@ describe("ClaudeAdapterLive", () => {
           type: "system",
           subtype: "code_change_published",
           provider: "github",
-          url: "https://github.com/pingdotgg/t3code/pull/1",
-          repo: "pingdotgg/t3code",
+          url: "https://github.com/nurozen/lecturn/pull/1",
+          repo: "nurozen/lecturn",
           identifier: "1",
           session_id: "session",
           uuid: "ccp",

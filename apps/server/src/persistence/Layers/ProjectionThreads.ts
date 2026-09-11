@@ -19,7 +19,7 @@ import {
   ThreadForkOrigin,
   ThreadForkProviderSource,
   ThreadLinkedPullRequest,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 
 const ProjectionThreadDbRow = ProjectionThread.mapFields(
   Struct.assign({

@@ -1,6 +1,6 @@
 import type { ManagedRelayClientError } from "./managedRelay.ts";
-import type { DpopFailureReason } from "@t3tools/contracts";
-import type { RelayProtectedError } from "@t3tools/contracts/relay";
+import type { DpopFailureReason } from "@lecturn/contracts";
+import type { RelayProtectedError } from "@lecturn/contracts/relay";
 
 export const DPOP_CLOCK_HINT =
   "Hint: Check that automatic date and time is enabled on both devices, then try again.";

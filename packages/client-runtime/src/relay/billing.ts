@@ -2,8 +2,8 @@ import {
   RelayBillingRedirect,
   RelayBillingStatus,
   type RelayBillingInterval,
-} from "@t3tools/contracts";
-import { normalizeSecureRelayUrl } from "@t3tools/shared/relayUrl";
+} from "@lecturn/contracts";
+import { normalizeSecureRelayUrl } from "@lecturn/shared/relayUrl";
 import * as Schema from "effect/Schema";
 
 const decodeBillingStatus = Schema.decodeUnknownSync(RelayBillingStatus);

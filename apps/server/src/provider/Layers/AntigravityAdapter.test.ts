@@ -7,7 +7,7 @@ import {
   ThreadId,
   TurnId,
   type ProviderRuntimeEvent,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -278,7 +278,7 @@ const makeHarness = Effect.fn("makeAntigravityAdapterHarness")(function* (option
 });
 
 const layer = ServerConfig.layerTest(process.cwd(), {
-  prefix: "t3-antigravity-adapter-test-",
+  prefix: "lecturn-antigravity-adapter-test-",
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
 it.layer(layer)("AntigravityAdapter", (it) => {
@@ -291,7 +291,7 @@ it.layer(layer)("AntigravityAdapter", (it) => {
         const crypto = yield* Crypto.Crypto;
         const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
         const cwd = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "t3-antigravity-transport-",
+          prefix: "lecturn-antigravity-transport-",
         });
         const mockAgentPath = yield* path.fromFileUrl(
           new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
@@ -313,8 +313,8 @@ it.layer(layer)("AntigravityAdapter", (it) => {
                 cwd: input.cwd,
                 env: {
                   ...process.env,
-                  T3_ACP_ANTIGRAVITY: "1",
-                  T3_ACP_REQUEST_LOG_PATH: requestLog,
+                  LECTURN_ACP_ANTIGRAVITY: "1",
+                  LECTURN_ACP_REQUEST_LOG_PATH: requestLog,
                 },
                 extendEnv: false,
               },
@@ -873,8 +873,8 @@ it.layer(layer)("AntigravityAdapter", (it) => {
       const path = yield* Path.Path;
       const h = yield* makeHarness();
       const { attachmentsDir } = yield* ServerConfig;
-      const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "t3-agy-fs-" });
-      const outside = yield* fs.makeTempDirectoryScoped({ prefix: "t3-agy-outside-" });
+      const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-agy-fs-" });
+      const outside = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-agy-outside-" });
       yield* fs.writeFileString(path.join(cwd, "notes.txt"), "one\ntwo\nthree\n");
       yield* h.adapter.startSession({ threadId, cwd, runtimeMode: "approval-required" });
       expect(h.launches[0]?.clientFileSystem).toBe(true);
