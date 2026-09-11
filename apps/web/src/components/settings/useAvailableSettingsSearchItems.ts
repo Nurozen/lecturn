@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useAtomValue } from "@effect/atom-react";
-import { AuthAccessWriteScope } from "@t3tools/contracts";
+import { AuthAccessWriteScope } from "@lecturn/contracts";
 
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { isElectron } from "~/env";

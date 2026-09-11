@@ -10,8 +10,8 @@ import {
   EnvironmentHttpForbiddenError,
   EnvironmentHttpInternalServerError,
   EnvironmentHttpUnauthorizedError,
-} from "@t3tools/contracts";
-import { stripPairingTokenFromUrl } from "@t3tools/shared/remote";
+} from "@lecturn/contracts";
+import { stripPairingTokenFromUrl } from "@lecturn/shared/remote";
 import {
   type RelayEnvironmentConnectResponse as RelayEnvironmentConnectResponseType,
   type RelayEnvironmentLinkResponse as RelayEnvironmentLinkResponseType,
@@ -21,16 +21,16 @@ import {
   type RelayClientEnvironmentRecord,
   type RelayEnvironmentStatusResponse as RelayEnvironmentStatusResponseType,
   type RelayManagedEndpointProviderKind,
-} from "@t3tools/contracts/relay";
-import { exchangeRemoteDpopAccessToken } from "@t3tools/client-runtime/authorization";
-import { fetchRemoteEnvironmentDescriptor } from "@t3tools/client-runtime/environment";
-import { findErrorTraceId } from "@t3tools/client-runtime/errors";
+} from "@lecturn/contracts/relay";
+import { exchangeRemoteDpopAccessToken } from "@lecturn/client-runtime/authorization";
+import { fetchRemoteEnvironmentDescriptor } from "@lecturn/client-runtime/environment";
+import { findErrorTraceId } from "@lecturn/client-runtime/errors";
 import {
   dpopFailureMessage,
   ManagedRelay,
   relayClientErrorDetail,
-} from "@t3tools/client-runtime/relay";
-import { makeEnvironmentHttpApiClient } from "@t3tools/client-runtime/rpc";
+} from "@lecturn/client-runtime/relay";
+import { makeEnvironmentHttpApiClient } from "@lecturn/client-runtime/rpc";
 
 import { authClientMetadata } from "../../lib/authClientMetadata";
 import type { SavedRemoteConnection } from "../../lib/connection";

@@ -11,12 +11,16 @@ import type {
   ThreadForkProviderSource,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
-import { EventId, MessageId } from "@t3tools/contracts";
-import { UUID_NAMESPACE_DNS, uuidV5 } from "@t3tools/shared/uuid";
+} from "@lecturn/contracts";
+import { EventId, MessageId } from "@lecturn/contracts";
+import { UUID_NAMESPACE_DNS, uuidV5 } from "@lecturn/shared/uuid";
 
 import { deriveCopiedAttachmentId } from "../attachmentStore.ts";
-import { CHECKPOINT_REFS_PREFIX, checkpointRefForThreadTurn } from "../checkpointing/Utils.ts";
+import {
+  checkpointBaselineRefForThread,
+  isThreadCheckpointRef,
+  checkpointRefForThreadTurn,
+} from "../checkpointing/Utils.ts";
 import type { ProjectionTurn } from "../persistence/Services/ProjectionTurns.ts";
 import type { ProviderRuntimeBinding } from "../provider/Services/ProviderSessionDirectory.ts";
 
@@ -306,7 +310,7 @@ export function assembleThreadFork(input: AssembleThreadForkInput): AssembleThre
         ? {
             turnId: row.turnId,
             checkpointTurnCount: row.checkpointTurnCount,
-            checkpointRef: row.checkpointRef.startsWith(CHECKPOINT_REFS_PREFIX)
+            checkpointRef: isThreadCheckpointRef(row.checkpointRef)
               ? checkpointRefForThreadTurn(input.childThreadId, row.checkpointTurnCount)
               : row.checkpointRef,
             status: row.checkpointStatus,
@@ -353,13 +357,20 @@ export function assembleThreadFork(input: AssembleThreadForkInput): AssembleThre
     if (
       row.checkpointRef === null ||
       row.checkpointTurnCount === null ||
-      !row.checkpointRef.startsWith(CHECKPOINT_REFS_PREFIX)
+      !isThreadCheckpointRef(row.checkpointRef)
     ) {
       continue;
     }
     if (aliasRefs.length === 0) {
       pushAlias(
-        checkpointRefForThreadTurn(source.id, 0),
+        checkpointBaselineRefForThread(
+          source.id,
+          keptRows.flatMap((row) =>
+            row.checkpointRef !== null && row.checkpointTurnCount !== null
+              ? [{ checkpointRef: row.checkpointRef, checkpointTurnCount: row.checkpointTurnCount }]
+              : [],
+          ),
+        ),
         checkpointRefForThreadTurn(input.childThreadId, 0),
       );
     }

@@ -5,6 +5,7 @@ import fcntl
 import json
 import hashlib
 import os
+import re
 from pathlib import Path
 import subprocess
 import shutil
@@ -200,16 +201,21 @@ class Runner:
         return command(['gh', *args], self.repo).stdout.strip()
 
     def fetch(self):
-        git(self.repo, 'fetch', '--no-tags', 'origin',
-            'refs/heads/main:refs/remotes/origin/main', 'refs/heads/t3mirror:refs/remotes/origin/t3mirror')
         if self.args.refresh_mirror:
-            git(self.repo, 'fetch', '--no-tags', 'https://github.com/pingdotgg/t3code.git',
+            require(bool(re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', self.args.upstream_repository or '')),
+                    '--refresh-mirror requires --upstream-repository owner/repository or UPSTREAM_REPOSITORY')
+            require(self.args.upstream_repository.lower() != self.args.github_repo.lower(),
+                    'Upstream repository must differ from the fork repository')
+        git(self.repo, 'fetch', '--no-tags', 'origin',
+            'refs/heads/main:refs/remotes/origin/main', 'refs/heads/upstream-mirror:refs/remotes/origin/upstream-mirror')
+        if self.args.refresh_mirror:
+            git(self.repo, 'fetch', '--no-tags', f'https://github.com/{self.args.upstream_repository}.git',
                 'refs/heads/main:refs/upstream-integration/source')
             tip = git(self.repo, 'rev-parse', 'refs/upstream-integration/source')
-            require(ancestor(self.repo, 'origin/t3mirror', tip), 'Upstream mirror rewrite requires investigation')
-            git(self.repo, 'push', 'origin', f'{tip}:refs/heads/t3mirror')
-            git(self.repo, 'fetch', '--no-tags', 'origin', 'refs/heads/t3mirror:refs/remotes/origin/t3mirror')
-        return git(self.repo, 'rev-parse', 'origin/main'), git(self.repo, 'rev-parse', 'origin/t3mirror')
+            require(ancestor(self.repo, 'origin/upstream-mirror', tip), 'Upstream mirror rewrite requires investigation')
+            git(self.repo, 'push', 'origin', f'{tip}:refs/heads/upstream-mirror')
+            git(self.repo, 'fetch', '--no-tags', 'origin', 'refs/heads/upstream-mirror:refs/remotes/origin/upstream-mirror')
+        return git(self.repo, 'rev-parse', 'origin/main'), git(self.repo, 'rev-parse', 'origin/upstream-mirror')
 
     def agent(self, repo, folder, name, prompt, output_schema, readonly=False):
         permissions = ['-s', 'danger-full-access', '--add-dir', str(folder)]
@@ -354,7 +360,7 @@ Return motion_changed false and video_urls [] when no motion/timing evidence is 
 Upload authorized screenshots/videos before PR creation using authenticated gh and the BATCH_PROMPT endpoint instructions.
 Use the verified origin OWNER/REPO and derive its numeric ID with gh api repos/OWNER/REPO --jq .id.
 Browser sign-in is not required. Retain upload JSON receipts, returned URLs and file SHA-256 hashes in {folder}.
-If upload unavailable, report not ready with retained evidence; no waiver. Follow test-t3-app skill.
+If upload unavailable, report not ready with retained evidence; no waiver. Follow test-lecturn-app skill.
 Any published migration collision requires a designed compatible upgrade, and existing/fresh database tests, not mechanical renumbering.
 Stage source deliberately. Return ready only if complete, exact git write-tree, concise PR summary, focused check argv arrays
 (no shell interpolation), cwd relative to worktree, and UI evidence assessment. Include docs changes for behavior.
@@ -657,6 +663,8 @@ def main():
     parser.add_argument('--target', help='One explicit full checkpoint SHA instead of planner')
     parser.add_argument('--oversized-reason', default='', help='Explicit risk/review rationale for oversized single atomic target')
     parser.add_argument('--once', action='store_true', help='Process one batch (default: until caught up)')
+    parser.add_argument('--upstream-repository', default=os.environ.get('UPSTREAM_REPOSITORY'),
+                        help='Original owner/repository for --refresh-mirror; defaults to UPSTREAM_REPOSITORY')
     parser.add_argument('--refresh-mirror', action='store_true', help='Fast-forward pristine fork mirror from original upstream before selecting')
     parser.add_argument('--candidate-window', type=int, default=30)
     parser.add_argument('--max-commits', type=int, default=50)

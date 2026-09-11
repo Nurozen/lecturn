@@ -3,7 +3,7 @@
 Lecturn integrates upstream through sequential, reviewed checkpoint PRs. The
 current runbook is [Integrating upstream in reviewable batches](upstream-batches.md).
 
-`t3mirror` remains a pristine reference to `pingdotgg/t3code` main. The mirror
+`upstream-mirror` remains a pristine reference to the configured upstream repository and branch. The mirror
 updater never merges into Lecturn main. Local integration uses a fresh Stave
 space and new Codex agents for each checkpoint, preserves real merge ancestry,
 and automatically merges only after independent review and protected CI pass.

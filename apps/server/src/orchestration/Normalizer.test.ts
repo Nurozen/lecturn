@@ -7,7 +7,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 
 import { canonicalizeClientCommandTimestamps } from "./Normalizer.ts";
 

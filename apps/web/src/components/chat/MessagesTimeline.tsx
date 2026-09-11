@@ -6,28 +6,28 @@ import {
   type ServerProviderSkill,
   type ToolActivityIcon,
   type TurnId,
-} from "@t3tools/contracts";
-import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { CodexArtifactTemplate } from "@t3tools/client-runtime/codex-artifact-templates";
+} from "@lecturn/contracts";
+import { parseScopedThreadKey } from "@lecturn/client-runtime/environment";
+import type { CodexArtifactTemplate } from "@lecturn/client-runtime/codex-artifact-templates";
 import {
   resolveWorkEntryToolPresentation,
   resolveViewedImageAsset,
   workEntryViewedImagePath,
-} from "@t3tools/client-runtime/work-log/presentation";
-import { resolveWorkGroupScrollAnchor } from "@t3tools/client-runtime/work-log/scroll-anchor";
-import type { AgentPanelModel } from "@t3tools/client-runtime/state/subagentRuntime";
+} from "@lecturn/client-runtime/work-log/presentation";
+import { resolveWorkGroupScrollAnchor } from "@lecturn/client-runtime/work-log/scroll-anchor";
+import type { AgentPanelModel } from "@lecturn/client-runtime/state/subagentRuntime";
 import {
   emptyAgentPanelModel,
   formatSubagentTokenCount,
-} from "@t3tools/client-runtime/state/subagentRuntime";
+} from "@lecturn/client-runtime/state/subagentRuntime";
 
 const EMPTY_AGENT_PANEL_MODEL = emptyAgentPanelModel();
 const NOOP_OPEN_AGENTS = () => {};
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
-import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
-import { toolActivityFaviconUrl } from "@t3tools/shared/favicon";
-import { getProjectFaviconCacheKey } from "@t3tools/shared/projectFavicon";
+import { resolveChatListAnchoredEndSpace } from "@lecturn/shared/chatList";
+import { toolActivityFaviconUrl } from "@lecturn/shared/favicon";
+import { getProjectFaviconCacheKey } from "@lecturn/shared/projectFavicon";
 import {
   createContext,
   Fragment,
@@ -73,7 +73,7 @@ import {
 } from "../../lib/diffRendering";
 import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
 import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
-import { T3Wordmark } from "../T3Wordmark";
+import { LecturnWordmark } from "../LecturnWordmark";
 import {
   BotIcon,
   BrainIcon,
@@ -160,7 +160,7 @@ import {
 } from "~/lib/previewAnnotation";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
-import { type TimestampFormat } from "@t3tools/contracts/settings";
+import { type TimestampFormat } from "@lecturn/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
 import {
   buildInlineTerminalContextText,
@@ -1982,7 +1982,7 @@ function LiveActivityContent({
   highlighted?: boolean;
 }) {
   const isSpecialToolIcon =
-    iconName === "browser" || iconName === "computer" || iconName === "t3-code";
+    iconName === "browser" || iconName === "computer" || iconName === "lecturn";
   const resolvedIconName = failed && !isSpecialToolIcon ? "circle-alert" : iconName;
 
   return (
@@ -2645,7 +2645,7 @@ type WorkEntryIconName =
   | "search"
   | "square-pen"
   | "terminal"
-  | "t3-code"
+  | "lecturn"
   | "wrench"
   | "x"
   | "zap";
@@ -2857,8 +2857,8 @@ function WorkEntryIcon({ name, className }: { name: WorkEntryIconName; className
       return <BrowserAppIcon className={className} />;
     case "computer":
       return <ComputerUseAppIcon className={className} />;
-    case "t3-code":
-      return <T3Wordmark className={className} aria-hidden />;
+    case "lecturn":
+      return <LecturnWordmark className={className} aria-hidden />;
     case "check":
       return <CheckIcon className={className} aria-hidden />;
     case "circle-alert":

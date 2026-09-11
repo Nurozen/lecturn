@@ -1,15 +1,15 @@
 "use client";
 
-import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { scopedThreadKey } from "@lecturn/client-runtime/environment";
+import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
 import {
   DEFAULT_BROWSER_PROFILE_ID,
   FILL_PREVIEW_VIEWPORT,
   type PreviewAnnotationPayload,
   type PreviewViewportSetting,
   type ScopedThreadRef,
-} from "@t3tools/contracts";
-import { normalizePreviewUrl } from "@t3tools/shared/preview";
+} from "@lecturn/contracts";
+import { normalizePreviewUrl } from "@lecturn/shared/preview";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {

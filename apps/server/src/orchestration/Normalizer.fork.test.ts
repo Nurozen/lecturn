@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
-import { type ClientOrchestrationCommand, CommandId, ThreadId, TurnId } from "@t3tools/contracts";
+import { type ClientOrchestrationCommand, CommandId, ThreadId, TurnId } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
@@ -10,7 +10,7 @@ import { normalizeDispatchCommand } from "./Normalizer.ts";
 
 const testLayer = Layer.mergeAll(
   WorkspacePaths.layer,
-  ServerConfig.layerTest(process.cwd(), { prefix: "t3-normalizer-fork-" }),
+  ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-normalizer-fork-" }),
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
 describe("normalizeDispatchCommand thread.fork", () => {

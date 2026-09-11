@@ -1,0 +1,10 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["LecturnTerminalModule"],
+    "podspecPath": "LecturnTerminalNative.podspec"
+  },
+  "android": {
+    "modules": ["expo.modules.lecturnterminal.LecturnTerminalModule"]
+  }
+}

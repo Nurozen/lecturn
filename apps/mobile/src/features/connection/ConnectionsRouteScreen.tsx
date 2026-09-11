@@ -2,7 +2,7 @@ import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { NativeHeaderToolbar } from "../../native/StackHeader";
 import { useNavigation } from "@react-navigation/native";
 import { SymbolView } from "../../components/AppSymbol";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@lecturn/contracts";
 import { useCallback, useState } from "react";
 import { Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -99,7 +99,7 @@ export function ConnectionsRouteScreen() {
             </View>
             <Text className="text-center text-sm leading-normal text-foreground-muted">
               No environments connected yet.{"\n"}Tap{" "}
-              <Text className="font-t3-bold text-foreground">+</Text> to add one.
+              <Text className="font-lecturn-bold text-foreground">+</Text> to add one.
             </Text>
           </View>
         )}

@@ -1,6 +1,6 @@
 # Customize a project icon
 
-T3 Code selects a project icon automatically. It checks `t3.json`, common favicon and app icon
+Lecturn selects a project icon automatically. It checks `lecturn.json`, common favicon and app icon
 paths, and icon links in project HTML files. If it does not find an image, it chooses a built-in
 emoji from the project name.
 
@@ -15,7 +15,7 @@ To choose a different icon or emoji:
 To use an image from the project instead, select **Choose file**, search for an image, and select
 it.
 
-T3 Code supports SVG, PNG, ICO, JPEG, GIF, AVIF, and WebP files. The selected path applies to
+Lecturn supports SVG, PNG, ICO, JPEG, GIF, AVIF, and WebP files. The selected path applies to
 each checkout in the project group and appears on your connected clients.
 
 To use automatic detection again, select **Automatic**.
@@ -23,7 +23,7 @@ To use automatic detection again, select **Automatic**.
 ## Keep the default branch current
 
 Turn on **Automatically pull** in a project's settings to keep its default-branch checkout current.
-T3 Code checks in the background and when the server starts. It uses the branch's configured
+Lecturn checks in the background and when the server starts. It uses the branch's configured
 upstream and only performs a fast-forward pull when the checkout has no working-tree changes,
 untracked files, or local commits.
 

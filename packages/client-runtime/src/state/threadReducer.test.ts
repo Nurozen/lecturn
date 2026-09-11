@@ -9,8 +9,8 @@ import {
   ProviderInstanceId,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
-import type { OrchestrationThread } from "@t3tools/contracts";
+} from "@lecturn/contracts";
+import type { OrchestrationThread } from "@lecturn/contracts";
 
 import { applyThreadDetailEvent } from "./threadReducer.ts";
 
@@ -57,7 +57,7 @@ describe("applyThreadDetailEvent", () => {
         type: "project.created",
         payload: {
           projectId: ProjectId.make("project-1"),
-          title: "T3 Code",
+          title: "Lecturn",
           workspaceRoot: "/repo",
           repositoryIdentity: null,
           defaultModelSelection: null,
@@ -309,9 +309,9 @@ describe("applyThreadDetailEvent", () => {
     it("sets and clears a linked pull request", () => {
       const linkedPullRequest = {
         projectId: ProjectId.make("project-1"),
-        repository: "pingdotgg/t3code",
+        repository: "nurozen/lecturn",
         number: 42,
-        url: "https://github.com/pingdotgg/t3code/pull/42",
+        url: "https://github.com/nurozen/lecturn/pull/42",
       };
       const linked = applyThreadDetailEvent(baseThread, {
         ...baseEventFields,

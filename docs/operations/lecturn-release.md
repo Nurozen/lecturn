@@ -1,22 +1,16 @@
-# Lecturn releases (fork)
+# Lecturn releases
 
-Lecturn is a fork of [T3 Code](https://github.com/pingdotgg/t3code). This page covers only what differs from upstream's [release runbook](./release.md); everything not mentioned here works as upstream documents it.
+The [release runbook](./release.md) describes packaging and publishing. This page covers Lecturn-specific release configuration.
 
 ## Branch model
 
-- `main` is the product line. Fork releases are cut from it.
-- `t3mirror` is a pristine mirror of upstream `main`, force-updated by the nightly `t3mirror-sync.yml` workflow (09:23 UTC). It replaces the old `upstream-main` branch. Cut upstream-bound PR branches from it, never from `main`, so they cannot carry fork-only commits.
-- Nothing from upstream lands on `main` automatically. A nightly launchd job runs `.github/upstream-integration/integrate-local.sh` on your machine, inside the `lecturn-upstream` Stave space: it merges `t3mirror` in, has Claude resolve conflicts and typecheck the result, and opens a PR assigned to you. CI gates it; you merge it. `upstream-integrate.yml` is the same flow in Actions, kept disabled as a travel fallback. See [upstream integration](./upstream-integration.md).
-- Upstream tags are never fetched or pushed here. Pushing an upstream `v*.*.*` tag would trigger this fork's release pipeline.
+- `main` is the product line; releases are cut from it.
+- `upstream-mirror` holds the configured upstream source for reviewed integration. See [upstream integration](./upstream-integration.md) for the current checkpoint workflow.
+- Upstream tags are never fetched or pushed here, because matching release tags trigger the release pipeline.
 
-## What the fork's `release.yml` removes
+## Release configuration
 
-- Blacksmith runners → GitHub-hosted (`ubuntu-24.04`, `macos-26`, `macos-26-intel`, `windows-2025`).
-- T3 Connect relay/Clerk configuration. The build simply omits those values; the app hides Connect UI and CLI commands when they are absent.
-- AUR publishing, Vercel web deploy, Discord announcements, and the GitHub App used by `finalize` (it uses the workflow token instead).
-- The nightly cron runs once a day (10:38 UTC, after the upstream sync) instead of every three hours. `check_changes` still skips it when `main` has not moved.
-
-Upstream workflows that still depend on upstream infrastructure can be disabled in the repository's Actions settings rather than deleted. The fork's mobile EAS production workflow is active.
+The workflow uses GitHub-hosted runners and publishes desktop artifacts and the `lecturn` CLI package. Hosted-app, relay, and Clerk configuration comes from repository variables and the production environment. Review `.github/workflows/release.yml` for required configuration before dispatching a release.
 
 ## Mobile production builds
 
@@ -28,15 +22,24 @@ Enabling Android submission does not resubmit an existing build. Submit that bui
 
 ## npm package
 
-The workspace package keeps its upstream name `t3` so build filters and task graphs stay untouched. Only the published manifest is rewritten: `publish_cli` passes `--package-name lecturn --bin-name lecturn`, and `repository.url` follows `GITHUB_REPOSITORY`. Publishing uses npm trusted publishing (OIDC) — no token is stored; the trusted publisher on npm must point at `Nurozen/lecturn` and `release.yml`.
+The workspace and published package use `lecturn`, with the `lecturn` executable. `publish_cli` passes `--package-name lecturn --bin-name lecturn`, and `repository.url` follows `GITHUB_REPOSITORY`. Publishing uses npm trusted publishing (OIDC); the trusted publisher must point at `Nurozen/lecturn` and `release.yml`.
 
 ## Code signing
 
-Builds are unsigned until the secrets exist; nothing fails without them.
+- macOS: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER` enable Developer ID signing and notarization. `APPLE_TEAM_ID` and `MACOS_PROVISIONING_PROFILE` configure associated-domain entitlements when supplied. See the release runbook for signing setup.
+- Windows: Azure Trusted Signing configuration is described in the release runbook.
 
-- macOS: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER` enable Developer ID signing and notarization. `APPLE_TEAM_ID` and `MACOS_PROVISIONING_PROFILE` are optional: they only add the T3 Connect passkey entitlements, which the fork does not ship. electron-updater refuses to update unsigned macOS apps, so mac auto-update requires these.
-- Windows: the Azure Trusted Signing secrets work as upstream documents; unsigned builds install with a SmartScreen warning.
+## Application identity
 
-## Before the first stable release
+Lecturn uses its own application name and identity. Runtime data lives in `~/.lecturn/userdata`. See [Install Lecturn](../user/lecturn-installation.md) for installation and data-directory configuration.
 
-The desktop build still carries upstream's app identity (bundle id, product name, protocol scheme, data directory). Installing it replaces a real T3 Code install. Use nightly prereleases for testing until the identity is changed.
+## Upgrading installations after the naming change
+
+Rebuild and deploy the server, relay, web, desktop, and mobile clients together: package scopes, native module names, connection endpoints, and token identifiers now use Lecturn names. A mobile binary rebuild is required; an OTA update cannot rename native modules.
+
+- Update deployment settings to the `LECTURN_` environment variables documented in `.env.example`, and the corresponding web and mobile build variables. Update external CI configuration before publishing.
+- Rename checked-in project configuration to `lecturn.json` and use the schema at `/schema/lecturn.json`.
+- Existing data in `~/.lecturn/userdata` remains in place. Historical checkpoint refs and citation links remain readable through their stored structure.
+- Renamed browser and mobile storage keys do not automatically import earlier saved connections, credentials, caches, or preferences. Sign in and pair again where necessary; no existing data is deleted.
+- Existing temporary worktree branches retain their names and may need a manual rename; automatic branch recognition applies to the current `lecturn/` naming convention.
+- Reconcile existing cloud resources and deployment state before deploying renamed infrastructure. See the [relay deployment notes](../../infra/relay/README.md).

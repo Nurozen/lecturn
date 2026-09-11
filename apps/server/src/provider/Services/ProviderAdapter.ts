@@ -21,7 +21,7 @@ import type {
   ThreadId,
   ProviderTurnStartResult,
   TurnId,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
 
@@ -45,7 +45,7 @@ export interface ProviderAdapterCapabilities {
   /**
    * Whether a mid-thread fork needs the provider-side turn ref recorded on
    * the fork turn. Providers that can address a turn positionally (or by the
-   * T3 turn id) fork anchor-less history fine; Claude cannot, so its
+   * Lecturn turn id) fork anchor-less history fine; Claude cannot, so its
    * pre-anchor sessions only fork at the end. Server-internal: never
    * surfaced on `ServerProvider` presentations.
    */

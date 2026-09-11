@@ -1,6 +1,6 @@
 # Product analytics
 
-T3 Code sends anonymous product events from the server to PostHog. The server
+Lecturn sends anonymous product events from the server to PostHog. The server
 uses the first available hashed Codex account ID, hashed Claude user ID, or
 installation-scoped anonymous ID as the distinct ID. It also keeps the
 telemetry opt-out, event buffer, and batch delivery. Clients do not load the
@@ -32,7 +32,7 @@ reports them. Older clients can omit every client property.
 | Property               | Values and meaning                                                                                                                                                                              |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `surface`              | Product client: `web`, `desktop`, or `mobile`.                                                                                                                                                  |
-| `webDeployment`        | Web delivery: `hosted` for the hosted app or `server` for web files served by a T3 server. Web only. This does not describe connection distance.                                                |
+| `webDeployment`        | Web delivery: `hosted` for the hosted app or `server` for web files served by a Lecturn server. Web only. This does not describe connection distance.                                           |
 | `clientOs`             | `macOS`, `Windows`, `Linux`, `iOS`, `Android`, `ChromeOS`, `other`, or `unknown`.                                                                                                               |
 | `clientDeviceType`     | `desktop`, `phone`, `tablet`, or `unknown`. This is separate from `surface`.                                                                                                                    |
 | `clientBrowser`        | Normalized browser family. Web only. Browser detection is best effort.                                                                                                                          |
@@ -49,7 +49,7 @@ events.
 | `serverOs`         | Server process OS, normalized to the same names as `clientOs`. |
 | `serverArch`       | Server process architecture.                                   |
 | `serverWslDistro`  | WSL distribution from `WSL_DISTRO_NAME`, when present.         |
-| `serverAppVersion` | T3 server version.                                             |
+| `serverAppVersion` | Lecturn server version.                                        |
 | `serverMode`       | Server runtime mode: `desktop` or `web`.                       |
 
 ## Legacy properties
@@ -59,7 +59,7 @@ Existing property meanings do not change:
 - `clientType` describes how the server runs. It is `desktop-app` for a desktop
   server and `cli-web-client` for a CLI web server. It does not describe the
   connected client. Use `surface` and `webDeployment` for new reports.
-- `platform`, `arch`, `wsl`, and `t3CodeVersion` describe the server. Use the
+- `platform`, `arch`, `wsl`, and `lecturnVersion` describe the server. Use the
   new `server*` names for new reports.
 - `appVersion` describes the connected client. Use `clientAppVersion` for new
   reports.

@@ -9,7 +9,7 @@ import {
   TurnId,
   type OrchestrationCommand,
   type ThreadForkHistory,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
@@ -36,9 +36,9 @@ const forkTurnId = TurnId.make("turn-fork-1");
 
 const linkedPullRequest = {
   projectId,
-  repository: "t3tools/t3code",
+  repository: "nurozen/lecturn",
   number: 7,
-  url: "https://github.com/t3tools/t3code/pull/7",
+  url: "https://github.com/nurozen/lecturn/pull/7",
 };
 
 const modelSelection = {

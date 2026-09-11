@@ -8,14 +8,14 @@ import {
   ProviderInstanceId,
   type ServerProvider,
   type ServerSettingsPatch,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import {
   createModelSelection,
   normalizeCustomModelSlug,
   resolveSelectableModel,
-} from "@t3tools/shared/model";
+} from "@lecturn/shared/model";
 import { getComposerProviderState } from "./components/chat/composerProviderState";
-import { UnifiedSettings } from "@t3tools/contracts/settings";
+import { UnifiedSettings } from "@lecturn/contracts/settings";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import {

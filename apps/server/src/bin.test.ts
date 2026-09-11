@@ -11,9 +11,9 @@ import {
   EnvironmentOrchestrationHttpApi,
   ProviderInstanceId,
   ThreadId,
-} from "@t3tools/contracts";
-import * as NetService from "@t3tools/shared/Net";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+} from "@lecturn/contracts";
+import * as NetService from "@lecturn/shared/Net";
+import { HostProcessEnvironment } from "@lecturn/shared/hostProcess";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
@@ -99,7 +99,7 @@ const makeCliTestServerConfig = (baseDir: string) =>
       otlpTracesUrl: undefined,
       otlpMetricsUrl: undefined,
       otlpExportIntervalMs: 10_000,
-      otlpServiceName: "t3-server",
+      otlpServiceName: "lecturn-server",
       mode: "web",
       port: 0,
       host: "127.0.0.1",
@@ -255,7 +255,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
   it.effect("reports fresh headless connect state without requiring local configuration", () =>
     Effect.gen(function* () {
       const baseDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "t3-cli-cloud-status-test-"),
+        NodePath.join(NodeOS.tmpdir(), "lecturn-cli-cloud-status-test-"),
       );
       const { output } = yield* captureStdout(
         runConnectCli(["connect", "status", "--base-dir", baseDir, "--json"]),
@@ -280,7 +280,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
   it.effect("reports actionable human-readable headless connect state", () =>
     Effect.gen(function* () {
       const baseDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "t3-cli-cloud-status-human-test-"),
+        NodePath.join(NodeOS.tmpdir(), "lecturn-cli-cloud-status-human-test-"),
       );
       const { output } = yield* captureStdout(
         runConnectCli(["connect", "status", "--base-dir", baseDir]),
@@ -299,7 +299,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
   it.effect("accepts the --headless login override without enabling access", () =>
     Effect.gen(function* () {
       const baseDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "t3-cli-cloud-login-test-"),
+        NodePath.join(NodeOS.tmpdir(), "lecturn-cli-cloud-login-test-"),
       );
       const { secretsDir } = yield* ServerConfig.deriveServerPaths(baseDir, undefined);
       NodeFS.mkdirSync(secretsDir, { recursive: true });
@@ -334,7 +334,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
   it.effect("disables headless connect without a running server", () =>
     Effect.gen(function* () {
       const baseDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "t3-cli-cloud-unlink-test-"),
+        NodePath.join(NodeOS.tmpdir(), "lecturn-cli-cloud-unlink-test-"),
       );
       const { output } = yield* captureStdout(
         runConnectCli(["connect", "unlink", "--base-dir", baseDir]),
@@ -347,7 +347,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
   it.effect("logs out of headless connect and removes the stored CLI authorization", () =>
     Effect.gen(function* () {
       const baseDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "t3-cli-cloud-logout-test-"),
+        NodePath.join(NodeOS.tmpdir(), "lecturn-cli-cloud-logout-test-"),
       );
       const { secretsDir } = yield* ServerConfig.deriveServerPaths(baseDir, undefined);
       const tokenPath = NodePath.join(secretsDir, "cloud-cli-oauth-token.bin");
@@ -369,7 +369,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
   it.effect("executes auth pairing subcommands and redacts secrets from list output", () =>
     Effect.gen(function* () {
       const baseDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "t3-cli-auth-pairing-test-"),
+        NodePath.join(NodeOS.tmpdir(), "lecturn-cli-auth-pairing-test-"),
       );
 
       const createdOutput = yield* captureStdout(
@@ -401,7 +401,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
   it.effect("executes auth session subcommands and redacts secrets from list output", () =>
     Effect.gen(function* () {
       const baseDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "t3-cli-auth-session-test-"),
+        NodePath.join(NodeOS.tmpdir(), "lecturn-cli-auth-session-test-"),
       );
 
       const issuedOutput = yield* captureStdout(
@@ -478,10 +478,10 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
   it.effect("adds, renames, and removes projects offline through the orchestration engine", () =>
     Effect.gen(function* () {
       const baseDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "t3-cli-projects-offline-test-"),
+        NodePath.join(NodeOS.tmpdir(), "lecturn-cli-projects-offline-test-"),
       );
       const workspaceRoot = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "t3-cli-projects-workspace-"),
+        NodePath.join(NodeOS.tmpdir(), "lecturn-cli-projects-workspace-"),
       );
 
       yield* runCliWithRuntime([
@@ -526,10 +526,10 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
   it.effect("force removes projects that still contain threads", () =>
     Effect.gen(function* () {
       const baseDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "t3-cli-projects-force-remove-test-"),
+        NodePath.join(NodeOS.tmpdir(), "lecturn-cli-projects-force-remove-test-"),
       );
       const workspaceRoot = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "t3-cli-projects-force-remove-workspace-"),
+        NodePath.join(NodeOS.tmpdir(), "lecturn-cli-projects-force-remove-workspace-"),
       );
 
       yield* runCliWithRuntime(["project", "add", workspaceRoot, "--base-dir", baseDir]);
@@ -583,10 +583,10 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
   it.effect("routes project commands through a running server when runtime state is present", () =>
     Effect.gen(function* () {
       const baseDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "t3-cli-projects-live-test-"),
+        NodePath.join(NodeOS.tmpdir(), "lecturn-cli-projects-live-test-"),
       );
       const workspaceRoot = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "t3-cli-projects-live-workspace-"),
+        NodePath.join(NodeOS.tmpdir(), "lecturn-cli-projects-live-workspace-"),
       );
 
       yield* withLiveProjectCliServer(baseDir, () =>
@@ -615,7 +615,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
   it.effect("rejects dev-url on project commands", () =>
     Effect.gen(function* () {
       const workspaceRoot = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "t3-cli-projects-unknown-option-workspace-"),
+        NodePath.join(NodeOS.tmpdir(), "lecturn-cli-projects-unknown-option-workspace-"),
       );
       const error = yield* runCliWithRuntime([
         "project",

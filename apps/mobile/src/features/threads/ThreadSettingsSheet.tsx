@@ -6,7 +6,7 @@ import type {
   ProviderOptionSelection,
   RuntimeMode,
   ServerProvider,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import type { LegendListRenderItemProps } from "@legendapp/list/react-native";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
@@ -15,7 +15,7 @@ import {
   getProviderOptionCurrentLabel,
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
-} from "@t3tools/shared/model";
+} from "@lecturn/shared/model";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import {
   createNativeStackNavigator,
@@ -131,19 +131,19 @@ function ModelRow(props: {
       <View className="min-w-0 flex-1">
         <View className="flex-row items-center gap-2">
           <Text
-            className="min-w-0 shrink text-base font-t3-medium text-foreground"
+            className="min-w-0 shrink text-base font-lecturn-medium text-foreground"
             numberOfLines={1}
           >
             {props.option.label}
           </Text>
           {props.option.isDefault ? (
             <View className="rounded-md bg-subtle-strong px-1.5 py-0.5">
-              <Text className="text-3xs font-t3-bold text-foreground-muted">Default</Text>
+              <Text className="text-3xs font-lecturn-bold text-foreground-muted">Default</Text>
             </View>
           ) : null}
           {props.option.isLegacy ? (
             <View className="rounded-md bg-subtle px-1.5 py-0.5">
-              <Text className="text-3xs font-t3-bold text-foreground-muted">Legacy</Text>
+              <Text className="text-3xs font-lecturn-bold text-foreground-muted">Legacy</Text>
             </View>
           ) : null}
           {props.option.isUnavailable ? (
@@ -181,12 +181,12 @@ function ProviderHeader(props: {
   const content = (
     <>
       <ProviderIcon provider={props.driver} size={15} />
-      <Text className="text-sm font-t3-medium text-foreground-muted">{props.label}</Text>
+      <Text className="text-sm font-lecturn-medium text-foreground-muted">{props.label}</Text>
       {props.collapsible ? (
         <>
           <View className="flex-1" />
           {props.collapsed ? (
-            <Text className="text-2xs font-t3-medium text-foreground-muted">
+            <Text className="text-2xs font-lecturn-medium text-foreground-muted">
               {props.modelCount}
             </Text>
           ) : null}
@@ -238,7 +238,7 @@ function DisclosureRow(props: {
         !props.isLast && "border-b border-border-subtle",
       )}
     >
-      <Text className="text-sm font-t3-medium text-foreground">{props.label}</Text>
+      <Text className="text-sm font-lecturn-medium text-foreground">{props.label}</Text>
       <View className="flex-1" />
       {props.value ? (
         <Text className="text-sm text-foreground-muted" numberOfLines={1}>
@@ -275,7 +275,7 @@ function ChoiceRow(props: {
       )}
     >
       <View className="min-w-0 flex-1 gap-0.5">
-        <Text className="text-base font-t3-medium text-foreground">{props.label}</Text>
+        <Text className="text-base font-lecturn-medium text-foreground">{props.label}</Text>
         {props.description ? (
           <Text className="text-sm leading-5 text-foreground-muted">{props.description}</Text>
         ) : null}
@@ -306,7 +306,7 @@ function SwitchRow(props: {
         !props.isLast && "border-b border-border-subtle",
       )}
     >
-      <Text className="text-sm font-t3-medium text-foreground">{props.label}</Text>
+      <Text className="text-sm font-lecturn-medium text-foreground">{props.label}</Text>
       <ThemedSwitch
         accessibilityLabel={props.label}
         onValueChange={props.onValueChange}
@@ -722,7 +722,9 @@ function ThreadSettingsOptionsItem(props: {
 
   return (
     <View style={{ paddingBottom: insets.bottom + bottomToolbarInset + 12 }}>
-      <Text className="px-5 pb-2 pt-2 text-sm font-t3-medium text-foreground-muted">Options</Text>
+      <Text className="px-5 pb-2 pt-2 text-sm font-lecturn-medium text-foreground-muted">
+        Options
+      </Text>
       <Animated.View
         className="mx-4 overflow-hidden rounded-2xl bg-card"
         layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}
@@ -775,7 +777,7 @@ function ThreadSettingsOptionsItem(props: {
 
       {Platform.OS !== "ios" && session.hasLegacyModels ? (
         <>
-          <Text className="px-5 pb-2 pt-7 text-sm font-t3-medium text-foreground-muted">
+          <Text className="px-5 pb-2 pt-7 text-sm font-lecturn-medium text-foreground-muted">
             Catalog
           </Text>
           <View className="mx-4 overflow-hidden rounded-2xl bg-card">

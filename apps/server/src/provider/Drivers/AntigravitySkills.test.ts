@@ -19,7 +19,7 @@ const makeWorkspace = Effect.fn("makeWorkspace")(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const temporaryDirectory = yield* fileSystem.makeTempDirectoryScoped({
-    prefix: "t3-antigravity-skills-",
+    prefix: "lecturn-antigravity-skills-",
   });
   return {
     cwd: path.join(temporaryDirectory, "workspace"),

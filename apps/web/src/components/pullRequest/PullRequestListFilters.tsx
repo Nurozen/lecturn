@@ -6,7 +6,7 @@ import type {
   PullRequestListFilters,
   PullRequestListState,
   SourceControlProviderKind,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import {
   CircleCheckIcon,
   CircleDashedIcon,

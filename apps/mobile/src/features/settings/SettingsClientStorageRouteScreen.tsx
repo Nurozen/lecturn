@@ -1,6 +1,6 @@
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import { type EnvironmentMachineKind, resolveEnvironmentMachineKind } from "@t3tools/contracts";
+import { type EnvironmentMachineKind, resolveEnvironmentMachineKind } from "@lecturn/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useMemo } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, View } from "react-native";
@@ -202,7 +202,7 @@ function CacheEnvironmentRow(props: {
         onPress={props.onClear}
         className="rounded-full px-3 py-2 disabled:opacity-40"
       >
-        <Text className="font-t3-medium tabular-nums text-danger-foreground" numberOfLines={1}>
+        <Text className="font-lecturn-medium tabular-nums text-danger-foreground" numberOfLines={1}>
           Clear {formatBytes(props.environment.payloadBytes)}
         </Text>
       </Pressable>

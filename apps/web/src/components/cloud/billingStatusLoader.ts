@@ -1,4 +1,4 @@
-import type { RelayBillingStatus } from "@t3tools/contracts";
+import type { RelayBillingStatus } from "@lecturn/contracts";
 
 /** Account changes and overlapping refreshes must not publish an older request's result. */
 export function createBillingStatusLoader(

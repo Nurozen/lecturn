@@ -45,4 +45,4 @@ export class ManagedGatewayEnrollment extends Context.Service<
     readonly finalizeRemove: (input: Generation) => Operation<boolean>;
     readonly sync: (userId: string) => Operation<void>;
   }
->()("t3code-relay/environments/ManagedGatewayEnrollment") {}
+>()("lecturn-relay/environments/ManagedGatewayEnrollment") {}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { RelayBillingStatus } from "@t3tools/contracts";
+import type { RelayBillingStatus } from "@lecturn/contracts";
 import { connectBillingSummary } from "./connectBillingSummary";
 const now = Date.parse("2026-09-09T00:00:00Z");
 const status: RelayBillingStatus = {

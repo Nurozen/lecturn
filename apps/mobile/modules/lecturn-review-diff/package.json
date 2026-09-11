@@ -1,0 +1,17 @@
+{
+  "name": "@lecturn/mobile-review-diff-native",
+  "version": "0.0.0",
+  "private": true,
+  "expo-module": {
+    "ios": {
+      "modules": [
+        "LecturnReviewDiffModule"
+      ]
+    },
+    "android": {
+      "modules": [
+        "expo.modules.lecturnreviewdiff.LecturnReviewDiffModule"
+      ]
+    }
+  }
+}

@@ -55,6 +55,29 @@ class GitSafetyTests(unittest.TestCase):
              'target': self.target, 'tree': self.merged(), 'phase': 'reviewed'}
         return runner, m
 
+    def test_mirror_refresh_requires_explicit_distinct_upstream_before_fetching(self):
+        runner = batches.Runner.__new__(batches.Runner)
+        runner.repo = self.repo
+        runner.args = SimpleNamespace(github_repo='example/fork', refresh_mirror=True)
+        for upstream in (None, '', 'https://github.com/example/source', 'Example/Fork'):
+            runner.args.upstream_repository = upstream
+            with self.subTest(upstream=upstream), patch.object(batches, 'git') as git:
+                with self.assertRaises(batches.Blocked):
+                    runner.fetch()
+                git.assert_not_called()
+
+    def test_mirror_refresh_fetches_configured_upstream(self):
+        runner = batches.Runner.__new__(batches.Runner)
+        runner.repo = self.repo
+        runner.args = SimpleNamespace(github_repo='example/fork', refresh_mirror=True,
+                                      upstream_repository='example/source')
+        with patch.object(batches, 'git', return_value=self.target) as git, \
+                patch.object(batches, 'ancestor', return_value=True):
+            runner.fetch()
+        git.assert_any_call(self.repo, 'fetch', '--no-tags',
+                            'https://github.com/example/source.git',
+                            'refs/heads/main:refs/upstream-integration/source')
+
     def test_checkpoint_counts_all_reachable_history(self):
         result = batches.check_selection(self.repo, self.base, self.accepted, self.target, self.target, 1, 100)
         self.assertEqual(result, (self.accepted, 1, 1))

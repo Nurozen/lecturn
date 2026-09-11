@@ -13,7 +13,7 @@
  *
  * @module CheckpointStore
  */
-import { VcsUnsupportedOperationError, type CheckpointRef } from "@t3tools/contracts";
+import { VcsUnsupportedOperationError, type CheckpointRef } from "@lecturn/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -112,7 +112,7 @@ export class CheckpointStore extends Context.Service<
       input: AliasCheckpointRefsInput,
     ) => Effect.Effect<ReadonlyArray<CheckpointRef>, CheckpointStoreError>;
   }
->()("t3/checkpointing/CheckpointStore") {}
+>()("lecturn/checkpointing/CheckpointStore") {}
 
 export const make = Effect.gen(function* () {
   const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;

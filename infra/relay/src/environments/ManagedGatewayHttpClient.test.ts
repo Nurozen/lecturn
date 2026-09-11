@@ -16,7 +16,7 @@ describe("managed environment internal HTTP transport", () => {
         fallback: HttpClient.make(() => Effect.die("Managed hostname must never use DNS fetch")),
         dispatch: (request) =>
           Effect.promise(async () => {
-            expect(request.url).toBe(`https://${hostname}/api/t3-connect/mint-credential`);
+            expect(request.url).toBe(`https://${hostname}/api/lecturn-connect/mint-credential`);
             expect(request.method).toBe("POST");
             expect(request.headers.get("authorization")).toBe("Bearer test-token");
             expect(await request.json()).toEqual({ proof: "signed-environment-proof" });
@@ -24,7 +24,7 @@ describe("managed environment internal HTTP transport", () => {
           }),
       });
       const response = yield* client.execute(
-        HttpClientRequest.post(`https://${hostname}/api/t3-connect/mint-credential`).pipe(
+        HttpClientRequest.post(`https://${hostname}/api/lecturn-connect/mint-credential`).pipe(
           HttpClientRequest.setHeader("authorization", "Bearer test-token"),
           HttpClientRequest.bodyJsonUnsafe({ proof: "signed-environment-proof" }),
         ),

@@ -1,4 +1,4 @@
-import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts";
+import { DEFAULT_CLIENT_SETTINGS } from "@lecturn/contracts";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 function createLocalStorageStub(): Storage {
@@ -54,7 +54,7 @@ describe("clientPersistenceStorage", () => {
 
   it("reports structured decode failures while preserving the fallback", async () => {
     const testWindow = getTestWindow();
-    testWindow.localStorage.setItem("t3code:client-settings:v1", "not-json");
+    testWindow.localStorage.setItem("lecturn:client-settings:v1", "not-json");
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { readBrowserClientSettings } = await import("./clientPersistenceStorage");
 
@@ -64,7 +64,7 @@ describe("clientPersistenceStorage", () => {
       expect.objectContaining({
         _tag: "LocalStorageOperationError",
         operation: "decode",
-        storageKey: "t3code:client-settings:v1",
+        storageKey: "lecturn:client-settings:v1",
         cause: expect.anything(),
       }),
     );
@@ -73,7 +73,7 @@ describe("clientPersistenceStorage", () => {
   it("defaults word wrap on and discards obsolete wrapping preferences", async () => {
     const testWindow = getTestWindow();
     testWindow.localStorage.setItem(
-      "t3code:client-settings:v1",
+      "lecturn:client-settings:v1",
       JSON.stringify({
         chatWordWrap: false,
         diffWordWrap: false,
@@ -97,7 +97,7 @@ describe("clientPersistenceStorage", () => {
       await import("./clientPersistenceStorage");
 
     expect(readBrowserClientSettings()).toBeNull();
-    testWindow.localStorage.setItem("t3code:client-settings:v1", JSON.stringify({}));
+    testWindow.localStorage.setItem("lecturn:client-settings:v1", JSON.stringify({}));
     expect(readBrowserClientSettings()?.diffLayout).toBe("stacked");
 
     writeBrowserClientSettings({ ...DEFAULT_CLIENT_SETTINGS, diffLayout: "split" });

@@ -1,5 +1,5 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { pullRequestHostOf, resolveEnvironmentMachineKind, ThreadId } from "@t3tools/contracts";
+import { scopeThreadRef } from "@lecturn/client-runtime/environment";
+import { pullRequestHostOf, resolveEnvironmentMachineKind, ThreadId } from "@lecturn/contracts";
 import type {
   EnvironmentId,
   ProjectId,
@@ -10,7 +10,7 @@ import type {
   PullRequestListResult,
   PullRequestListState,
   SourceControlProviderKind,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
@@ -1889,7 +1889,7 @@ function PullRequestsRouteView() {
           <RightPanelTabs
             mode="inline"
             open={rightPanelState.isOpen}
-            widthStorageKey="t3code:pull-request-panel-width"
+            widthStorageKey="lecturn:pull-request-panel-width"
             // Default to roughly half the viewport: the PR list needs more
             // room than a chat, so the 540px chat-preview default squashes
             // it. SSR has no window, so fall back to a reasonable width.

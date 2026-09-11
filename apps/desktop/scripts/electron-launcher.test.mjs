@@ -15,8 +15,8 @@ describe("electron development launcher", () => {
       desktopRoot: "/repo/apps/desktop",
       environment: {
         VITE_DEV_SERVER_URL: "http://127.0.0.1:8526",
-        T3CODE_PORT: "16566",
-        LECTURN_HOME: "/tmp/t3",
+        LECTURN_PORT: "16566",
+        LECTURN_HOME: "/tmp/lecturn",
       },
     });
 

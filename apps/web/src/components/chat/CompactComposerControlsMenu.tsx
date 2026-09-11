@@ -1,4 +1,4 @@
-import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
+import { ProviderInteractionMode, RuntimeMode } from "@lecturn/contracts";
 import { memo, type ReactNode, useState } from "react";
 import { EllipsisIcon } from "lucide-react";
 import {

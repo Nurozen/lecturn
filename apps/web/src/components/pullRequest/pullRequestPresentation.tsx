@@ -5,7 +5,7 @@ import type {
   PullRequestChecksState,
   PullRequestMergeability,
   PullRequestState,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import {
   CircleCheckIcon,
   CircleDashedIcon,

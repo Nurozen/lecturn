@@ -1,8 +1,8 @@
 # Provider architecture
 
-> For maintainers. Using T3 Code? See [docs/user](../user/).
+> For maintainers. Using Lecturn? See [docs/user](../user/).
 
-A provider is the agent runtime that does the actual work. T3 Code supports several, and the
+A provider is the agent runtime that does the actual work. Lecturn supports several, and the
 orchestration layer does not know which one is behind a thread.
 
 ## Built-in drivers
@@ -105,7 +105,7 @@ Lazy `yauzl` entry streams extract only that pair, with member names, types, dup
 sizes checked. Validation runs ACP `initialize` in a temporary profile without authentication
 or a session. Progress updates are bounded, not sent for every network chunk.
 
-Complete releases live in immutable version directories under the T3 home
+Complete releases live in immutable version directories under the Lecturn home
 `tools/antigravity-acp/<platform>-<arch>/versions`. An atomic `active.json` change selects the
 release for new processes. Each process holds a version lease until it exits. Updates do not
 replace running executables. Removal refuses active leases or explicit binary paths that still
@@ -137,7 +137,7 @@ protocol output remains fatal. Authorization URLs are validated before use. The 
 login request with a sign-in-required error instead of waiting for consent.
 
 [`AntigravityAuth`][antigravity-auth] owns each sign-in process and deadline in the instance
-scope. Only the initiating T3 auth session receives its URL and flow ID or can complete or
+scope. Only the initiating Lecturn auth session receives its URL and flow ID or can complete or
 cancel it. Other clients receive busy state without those values. Subscriptions follow
 controller replacement when settings rebuild an instance.
 
@@ -168,18 +168,18 @@ explicit sign-out followed by sign-in.
 native `session/resume` without transcript replay and reapplies the persisted model and
 permission mode after new or resumed setup. An unavailable explicit model fails instead of
 accepting the native default. Steering cancels the previous prompt, waits for its result and
-event drain, then sends the replacement. Native background commands use T3's existing
+event drain, then sends the replacement. Native background commands use Lecturn's existing
 background-task state.
 
 The permission mapping is `approval-required` and `auto` to `default`, `auto-accept-edits` to
 `auto_edit`, and `full-access` to `yolo`. Native requests still need replies in `yolo`.
-`interaction_` requests are user questions, not approvals. T3 keeps opaque option IDs in
+`interaction_` requests are user questions, not approvals. Lecturn keeps opaque option IDs in
 `UserInputQuestion.options[].value` and sets `allowCustomAnswer=false`. Both clients preserve
 these values. Ordinary approval replies use only offered option IDs, including `allow_always`
 only when present. Existing providers keep their prior behavior when the optional fields are
 absent.
 
-`showInteractionModeToggle=false` keeps native `/plan` separate from T3 Plan mode.
+`showInteractionModeToggle=false` keeps native `/plan` separate from Lecturn Plan mode.
 `supportsConversationRollback=false` hides unsupported client actions and makes checkpoint
 revert fail before filesystem changes. Checkpoint capture and diffs remain supported.
 
@@ -235,7 +235,7 @@ session operations start. The response must contain a valid version at or above 
 owners cache this result for the lifetime of the spawned process. External actions check once when
 they create their server connection, not for each model or SDK request.
 
-Chat adapters keep their own server per thread. They register a thread-specific `t3-code` MCP
+Chat adapters keep their own server per thread. They register a thread-specific `lecturn` MCP
 connection, while OpenCode stores MCP connections by directory. Sharing these chat servers
 without changing MCP routing would let two threads in one directory replace each other's
 connection.
@@ -252,8 +252,8 @@ active text-generation work can extend process reuse. Changes to the provider co
 environment replace the instance and start a new discovery. Changes to unrelated settings only
 update snapshot enrichment. Other providers retain their existing refresh policy.
 
-T3 Code does not own an external OpenCode process. Native configuration changes there can require
-an external reload or restart before T3 Code's next refresh sees them.
+Lecturn does not own an external OpenCode process. Native configuration changes there can require
+an external reload or restart before Lecturn's next refresh sees them.
 
 The shared server's idle shutdown does not clear the catalog. Failed discovery keeps the last
 known models, slash commands, and skills through the registry's existing merge rules. A successful

@@ -2,11 +2,11 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   type ProviderInteractionMode,
   type ServerProvider,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 
 type InteractionModeProvider = Pick<ServerProvider, "showInteractionModeToggle">;
 
-/** Normalize saved T3 mode choices without changing native slash commands. */
+/** Normalize saved Lecturn mode choices without changing native slash commands. */
 export function resolveProviderInteractionMode(
   provider: InteractionModeProvider | null | undefined,
   interactionMode: ProviderInteractionMode | null | undefined,

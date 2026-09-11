@@ -2,14 +2,14 @@ import {
   scopeProjectRef,
   scopedThreadKey,
   scopeThreadRef,
-} from "@t3tools/client-runtime/environment";
-import { pullRequestDetailToVcsStatus } from "@t3tools/client-runtime/state/pull-requests";
+} from "@lecturn/client-runtime/environment";
+import { pullRequestDetailToVcsStatus } from "@lecturn/client-runtime/state/pull-requests";
 import {
   type EnvironmentId,
   resolveEnvironmentMachineKind,
   type ThreadLinkedPullRequest,
   type VcsStatusResult,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { Atom } from "effect/unstable/reactivity";
 import { FolderGit2Icon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
 import { useMemo } from "react";

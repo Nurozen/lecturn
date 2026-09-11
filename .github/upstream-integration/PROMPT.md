@@ -12,7 +12,7 @@ rather than being told it, so the same file works unchanged in both places.
 ---
 
 You are resolving a git merge in this repository's working tree. This is the
-Lecturn fork of `pingdotgg/t3code`. A `git merge` of the upstream mirror has
+Lecturn repository. A `git merge` of the configured upstream mirror has
 already run and left conflicts. Your job ends at a resolved working tree.
 
 ## Orient yourself first

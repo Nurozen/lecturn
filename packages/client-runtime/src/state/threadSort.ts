@@ -1,5 +1,5 @@
-import type { OrchestrationThreadShell, ProjectId } from "@t3tools/contracts";
-import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
+import type { OrchestrationThreadShell, ProjectId } from "@lecturn/contracts";
+import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@lecturn/contracts/settings";
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
 

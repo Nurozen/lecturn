@@ -1,8 +1,8 @@
-import type { EnvironmentId, ProjectIconColor, ProjectIconOverride } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectIconColor, ProjectIconOverride } from "@lecturn/contracts";
 import {
   getProjectFaviconCacheKey,
   isProjectFaviconFallbackUrl,
-} from "@t3tools/shared/projectFavicon";
+} from "@lecturn/shared/projectFavicon";
 import {
   BotIcon,
   BookOpenIcon,

@@ -6,7 +6,7 @@ import {
   TurnId,
   type OrchestrationShellSnapshot,
   type OrchestrationThread,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";

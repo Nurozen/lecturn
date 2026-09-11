@@ -11,7 +11,7 @@ import type {
   ProviderTurnStartResult,
   ProviderUploadFeedbackInput,
   ProviderUploadFeedbackResult,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import {
   ASSISTANT_CITATION_MAX_TEXT_LENGTH,
   AssistantCitation,
@@ -25,12 +25,12 @@ import {
   ProviderSessionStartInput,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import {
   expandAssistantCitationsForProvider,
   serializeAssistantCitation,
-} from "@t3tools/shared/assistantCitations";
-import { createModelSelection } from "@t3tools/shared/model";
+} from "@lecturn/shared/assistantCitations";
+import { createModelSelection } from "@lecturn/shared/model";
 import { it, assert, describe, vi } from "@effect/vitest";
 
 import * as Cause from "effect/Cause";
@@ -881,7 +881,7 @@ it.effect("ProviderServiceLive writes canonical events to the emitting thread se
 
 it.effect("ProviderServiceLive keeps persisted resumable sessions on startup", () =>
   Effect.gen(function* () {
-    const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-service-"));
+    const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "lecturn-provider-service-"));
     const dbPath = NodePath.join(tempDir, "orchestration.sqlite");
 
     const codex = makeFakeCodexAdapter();
@@ -953,7 +953,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const tempDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "t3-provider-service-restart-"),
+        NodePath.join(NodeOS.tmpdir(), "lecturn-provider-service-restart-"),
       );
       const dbPath = NodePath.join(tempDir, "orchestration.sqlite");
       const persistenceLayer = makeSqlitePersistenceLive(dbPath);
@@ -1802,7 +1802,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
   it.effect("reuses persisted resume cursor when startSession is called after a restart", () =>
     Effect.gen(function* () {
       const tempDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "t3-provider-service-start-"),
+        NodePath.join(NodeOS.tmpdir(), "lecturn-provider-service-start-"),
       );
       const dbPath = NodePath.join(tempDir, "orchestration.sqlite");
       const persistenceLayer = makeSqlitePersistenceLive(dbPath);
@@ -1910,7 +1910,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
     () =>
       Effect.gen(function* () {
         const tempDir = NodeFS.mkdtempSync(
-          NodePath.join(NodeOS.tmpdir(), "t3-provider-service-cwd-"),
+          NodePath.join(NodeOS.tmpdir(), "lecturn-provider-service-cwd-"),
         );
         const dbPath = NodePath.join(tempDir, "orchestration.sqlite");
         const persistenceLayer = makeSqlitePersistenceLive(dbPath);
@@ -2218,7 +2218,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
       const snapshots = yield* Metric.snapshot;
 
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_provider_turns_total", {
+        hasMetricSnapshot(snapshots, "lecturn_provider_turns_total", {
           provider: ProviderDriverKind.make("claudeAgent"),
           operation: "interrupt",
           outcome: "success",
@@ -2226,7 +2226,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_provider_turns_total", {
+        hasMetricSnapshot(snapshots, "lecturn_provider_turns_total", {
           provider: ProviderDriverKind.make("claudeAgent"),
           operation: "approval-response",
           outcome: "success",
@@ -2234,7 +2234,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_provider_turns_total", {
+        hasMetricSnapshot(snapshots, "lecturn_provider_turns_total", {
           provider: ProviderDriverKind.make("claudeAgent"),
           operation: "user-input-response",
           outcome: "success",
@@ -2242,7 +2242,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_provider_turns_total", {
+        hasMetricSnapshot(snapshots, "lecturn_provider_turns_total", {
           provider: ProviderDriverKind.make("claudeAgent"),
           operation: "rollback",
           outcome: "success",
@@ -2250,7 +2250,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         true,
       );
       assert.equal(
-        hasMetricSnapshot(snapshots, "t3_provider_sessions_total", {
+        hasMetricSnapshot(snapshots, "lecturn_provider_sessions_total", {
           provider: ProviderDriverKind.make("claudeAgent"),
           operation: "stop",
           outcome: "success",
@@ -2283,7 +2283,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         const snapshots = yield* Metric.snapshot;
 
         assert.equal(
-          hasMetricSnapshot(snapshots, "t3_provider_turns_total", {
+          hasMetricSnapshot(snapshots, "lecturn_provider_turns_total", {
             provider: ProviderDriverKind.make("claudeAgent"),
             operation: "send",
             outcome: "success",
@@ -2291,7 +2291,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
           true,
         );
         assert.equal(
-          hasMetricSnapshot(snapshots, "t3_provider_turn_duration", {
+          hasMetricSnapshot(snapshots, "lecturn_provider_turn_duration", {
             provider: ProviderDriverKind.make("claudeAgent"),
             operation: "send",
           }),
@@ -2354,7 +2354,7 @@ citations.layer("ProviderServiceLive assistant citations", (it) => {
           turnText,
           /citation\.comment[^\n]*user-authored (?:request|comment)[^\n]*quote/,
         );
-        assert.notInclude(turnText, "t3-citation://");
+        assert.notInclude(turnText, "lecturn-citation://");
         assert.notInclude(turnText, "<system>");
         assert.notInclude(turnText, "<comment>");
         assert.deepStrictEqual(turnText.match(/<\/?assistant_citations>/g), [
@@ -2393,7 +2393,7 @@ citations.layer("ProviderServiceLive assistant citations", (it) => {
       );
       const prompts = [
         "Ordinary text with [a documentation link](https://example.com/docs).",
-        `Explain ${malformedCitation} and [Assistant quote](t3-citation://v1/broken).`,
+        `Explain ${malformedCitation} and [Assistant quote](lecturn-citation://v1/broken).`,
       ];
 
       citations.codex.sendTurn.mockClear();

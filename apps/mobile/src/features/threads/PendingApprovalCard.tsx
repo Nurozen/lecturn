@@ -2,7 +2,7 @@ import type {
   ApprovalRequestId,
   ProviderApprovalDecision,
   ProviderApprovalOption,
-} from "@t3tools/contracts";
+} from "@lecturn/contracts";
 import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
@@ -31,10 +31,10 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
   // behind this card, so a translucent surface bleeds messages through it.
   return (
     <View className="gap-2.5 rounded-[20px] border border-adaptive-neutral-200-white-a6 bg-adaptive-neutral-100-900 p-4">
-      <Text className="font-t3-bold text-2xs uppercase tracking-[1.1px] text-adaptive-sky-700-300">
+      <Text className="font-lecturn-bold text-2xs uppercase tracking-[1.1px] text-adaptive-sky-700-300">
         Approval needed
       </Text>
-      <Text className="font-t3-bold text-lg text-adaptive-neutral-950-50">
+      <Text className="font-lecturn-bold text-lg text-adaptive-neutral-950-50">
         {props.approval.appName ?? props.approval.requestKind}
       </Text>
       {props.approval.detail ? (
@@ -64,10 +64,10 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
             <Text
               className={`text-sm ${
                 option.decision === "accept"
-                  ? "font-t3-extrabold text-white"
+                  ? "font-lecturn-extrabold text-white"
                   : option.decision === "decline"
-                    ? "font-t3-bold text-adaptive-rose-700-300"
-                    : "font-t3-bold text-adaptive-neutral-950-50"
+                    ? "font-lecturn-bold text-adaptive-rose-700-300"
+                    : "font-lecturn-bold text-adaptive-neutral-950-50"
               }`}
             >
               {option.label}

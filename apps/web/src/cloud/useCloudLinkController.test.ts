@@ -26,7 +26,7 @@ vi.mock("react", () => ({
     effect();
   },
 }));
-vi.mock("@t3tools/client-runtime/relay", () => ({
+vi.mock("@lecturn/client-runtime/relay", () => ({
   createBillingClient: () => ({ getStatus: mocks.billingStatus }),
 }));
 vi.mock("../components/ui/toast", () => ({ toastManager: { add: vi.fn() } }));
