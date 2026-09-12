@@ -1,6 +1,7 @@
 """Hermetic controller safety/recovery tests; no agents, network or GitHub writes."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -182,6 +183,15 @@ class GitSafetyTests(unittest.TestCase):
         with patch.object(batches, 'command', side_effect=lambda argv, cwd, **kw: self.write_events(kw['log'], {'ready': True, 'extra': 1})):
             with self.assertRaisesRegex(batches.Blocked, 'Incomplete structured'):
                 runner.agent(self.repo, self.folder, 'builder', 'Build', {'required': ['ready']})
+
+    def test_check_env_resolves_worktree_package_binaries_first(self):
+        cwd = self.repo / 'apps' / 'server'
+        env = batches.check_env(self.repo, cwd)
+        parts = env['PATH'].split(os.pathsep)
+        self.assertEqual(parts[:2], [str(cwd / 'node_modules' / '.bin'), str(self.repo / 'node_modules' / '.bin')])
+        self.assertEqual(parts[2:], os.environ.get('PATH', '').split(os.pathsep))
+        self.assertEqual(batches.check_env(self.repo, self.repo)['PATH'].split(os.pathsep)[:2],
+                         [str(self.repo / 'node_modules' / '.bin'), os.environ.get('PATH', '').split(os.pathsep)[0]])
 
     def test_agent_result_requires_successful_result_event(self):
         log = self.folder / 'x.events.log'
