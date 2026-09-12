@@ -5,6 +5,7 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -42,6 +43,7 @@ export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const path = yield* Path.Path;
   const staveMergeSignal = yield* Effect.serviceOption(StaveMergeSignal);
+  const fileSystem = yield* FileSystem.FileSystem;
 
   const sweep = Effect.fn("ThreadSettlementReactor.sweep")(function* (
     mergedPullRequest: PullRequestService.PullRequestMergeEvent | null,
@@ -69,6 +71,28 @@ export const make = Effect.gen(function* () {
               thread.linkedPullRequest.host.toLowerCase() ===
                 mergedPullRequest.host.toLowerCase()))),
     );
+    // Use the same cwd as the sidebar so both paths share GitManager's PR cache.
+    // Stave spaces resolve pull requests per edit repo below and never read this map.
+    const lookupCwdByThreadId = new Map<string, string>();
+    yield* Effect.forEach(
+      candidates,
+      (thread) =>
+        Effect.gen(function* () {
+          const project = projects.get(thread.projectId);
+          if (project === undefined || project.stave != null || thread.linkedPullRequest != null)
+            return;
+          const worktreeExists =
+            thread.worktreePath !== null &&
+            (yield* fileSystem.exists(thread.worktreePath).pipe(Effect.orElseSucceed(() => false)));
+          lookupCwdByThreadId.set(
+            thread.id,
+            worktreeExists && thread.worktreePath !== null
+              ? thread.worktreePath
+              : project.workspaceRoot,
+          );
+        }),
+      { concurrency: 8, discard: true },
+    );
     const lookupKey = (thread: (typeof candidates)[number]) => {
       if (staveMerged.has(thread.projectId))
         return JSON.stringify(["stave-merged", thread.projectId]);
@@ -83,13 +107,10 @@ export const make = Effect.gen(function* () {
           thread.linkedPullRequest.number,
         ]);
       }
-      const project = projects.get(thread.projectId);
-      const branch = thread.branch ?? project?.stave?.primaryBranch;
-      if (branch == null) return JSON.stringify(["none", thread.id]);
+      if (thread.branch === null) return JSON.stringify(["none", thread.id]);
+      const cwd = lookupCwdByThreadId.get(thread.id);
       return JSON.stringify(
-        project === undefined
-          ? ["missing-project", thread.id]
-          : ["branch", project.stave?.primaryRepoPath ?? project.workspaceRoot, branch],
+        cwd === undefined ? ["missing-project", thread.id] : ["branch", cwd, thread.branch],
       );
     };
     const groups = Map.groupBy(candidates, lookupKey);
@@ -172,18 +193,12 @@ export const make = Effect.gen(function* () {
           updatedAt: summary.updatedAt,
         } satisfies SettlementPullRequest;
       }
-      const project = projects.get(thread.projectId);
-      const branch = thread.branch ?? project?.stave?.primaryBranch;
-      if (branch == null) return null;
-      if (project === undefined) {
+      if (thread.branch === null) return null;
+      const cwd = lookupCwdByThreadId.get(thread.id);
+      if (cwd === undefined) {
         return yield* Effect.die(new Error("thread project not found"));
       }
-      if (project.stave && (project.stave.state !== "live" || !project.stave.primaryRepoPath))
-        return null;
-      return yield* git.branchPullRequest({
-        cwd: project.stave?.primaryRepoPath ?? project.workspaceRoot,
-        branch,
-      });
+      return yield* git.branchPullRequest({ cwd, branch: thread.branch });
     });
 
     yield* Effect.forEach(
