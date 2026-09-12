@@ -20,6 +20,7 @@
     "@lecturn/shared": "workspace:*",
     "@lecturn/ssh": "workspace:*",
     "@lecturn/tailscale": "workspace:*",
+    "@napi-rs/keyring": "^1.3.0",
     "effect": "catalog:",
     "electron": "43.4.1",
     "electron-store": "^8.2.0",

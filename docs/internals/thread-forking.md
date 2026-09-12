@@ -31,7 +31,11 @@ ids for copied messages, activities, and proposed plans — turn ids are preserv
 fork-point reference and checkpoint turn numbering stay stable across the copy — re-namespaces
 canonical checkpoint refs to the child's `turn/<n>` names, plans deterministic attachment copies (child attachment ids are uuid-v5 of the source id
 and child thread id, so retries land on the same files), and snapshots the provider session into
-`forkSource`. It returns the materialized command plus the side-effect plans. The dispatcher
+`forkSource`. Open async questions (a message-mode `user-input.requested` with no later
+`user-input.resolved` in the copied range) stay with the source: the decider derives the
+answer's activity and message ids from the request id alone, so a copied request answered in both
+threads would re-parent the first answer's rows onto the second thread. Answered questions copy
+as request/resolution pairs, so the child rejects a second answer the same way the source does. It returns the materialized command plus the side-effect plans. The dispatcher
 runs those side effects before dispatch — checkpoint ref aliasing all-or-nothing with
 compensation of partial aliases, attachment file copies rolled back on failure — then dispatches
 and records the `client.thread.forked` analytics event once on success.

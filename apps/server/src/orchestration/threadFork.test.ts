@@ -704,6 +704,107 @@ describe("assembleThreadFork", () => {
     expect(activitySummaries).not.toContain("queued after fork");
   });
 
+  it("leaves open async questions with the source and copies answered ones", () => {
+    const question = { id: "q1", header: "Scope", question: "Which scope?", options: [] };
+    const answeredRequest = {
+      id: EventId.make("aaaaaaa2-0000-4000-8000-000000000010"),
+      tone: "info" as const,
+      kind: "user-input.requested",
+      summary: "Agent asked a question",
+      payload: {
+        requestId: "codex-async:native:item-1",
+        responseMode: "message",
+        questions: [question],
+      },
+      turnId: turn1,
+      createdAt: t(1, 21),
+    };
+    const answeredResolution = {
+      id: EventId.make("async-answer:codex-async:native:item-1"),
+      tone: "info" as const,
+      kind: "user-input.resolved",
+      summary: "User input submitted",
+      payload: {
+        requestId: "codex-async:native:item-1",
+        responseMode: "message",
+        answers: { q1: "all" },
+      },
+      turnId: turn1,
+      createdAt: t(1, 40),
+    };
+    const blockingRequest = {
+      id: EventId.make("aaaaaaa2-0000-4000-8000-000000000011"),
+      tone: "info" as const,
+      kind: "user-input.requested",
+      summary: "Agent needs input",
+      payload: { requestId: "codex-blocking:1", questions: [question] },
+      turnId: turn2,
+      createdAt: t(2, 10),
+    };
+    const blockingResolution = {
+      id: EventId.make("aaaaaaa2-0000-4000-8000-000000000012"),
+      tone: "info" as const,
+      kind: "user-input.resolved",
+      summary: "User input submitted",
+      payload: { requestId: "codex-blocking:1", answers: { q1: "some" } },
+      turnId: turn2,
+      createdAt: t(2, 20),
+    };
+    const openRequest = {
+      id: EventId.make("aaaaaaa2-0000-4000-8000-000000000013"),
+      tone: "info" as const,
+      kind: "user-input.requested",
+      summary: "Agent asked an open question",
+      payload: {
+        requestId: "codex-async:native:item-2",
+        responseMode: "message",
+        questions: [question],
+      },
+      turnId: turn3,
+      createdAt: t(3, 25),
+    };
+    const result = assembleThreadFork(
+      makeInput({
+        sourceActivities: [
+          ...sourceActivities,
+          answeredRequest,
+          answeredResolution,
+          blockingRequest,
+          blockingResolution,
+          openRequest,
+        ],
+      }),
+    );
+    assertOk(result);
+
+    // The answered async question copies as a request/resolution pair, so the
+    // child still rejects a second answer as "already answered"; the blocking
+    // pair copies untouched. The open async question stays with the source:
+    // its answer ids derive from the request id alone, so a copy answered in
+    // both threads would re-parent the first answer onto the second thread.
+    const summaries = result.command.history.activities.map((activity) => activity.summary);
+    expect(summaries).toEqual([
+      "created",
+      "ran a tool",
+      "ran another tool",
+      "Agent asked a question",
+      "User input submitted",
+      "Agent needs input",
+      "User input submitted",
+    ]);
+    const copiedRequestIds = result.command.history.activities.flatMap((activity) =>
+      typeof activity.payload === "object" &&
+      activity.payload !== null &&
+      "requestId" in activity.payload
+        ? [activity.payload.requestId]
+        : [],
+    );
+    expect(copiedRequestIds).not.toContain("codex-async:native:item-2");
+    for (const activity of result.command.history.activities) {
+      expect(activity.id).toMatch(UUID_PATTERN);
+    }
+  });
+
   it("fails assembly when a copied attachment id cannot be derived", () => {
     const result = assembleThreadFork(makeInput({ childThreadId: ThreadId.make("!!!") }));
     expect(result.ok).toBe(false);

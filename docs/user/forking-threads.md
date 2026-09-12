@@ -28,6 +28,9 @@ On mobile, fork from the thread menus: the thread list row menu or the open thre
 A fork opens as a new thread with the inherited conversation already in place, a "Forked here"
 divider at the fork point, and a chip in the header linking back to the original.
 
+If the agent asked you a question that you have not answered yet, the question stays with the
+original thread and is not repeated in the fork. Answer it in the original thread.
+
 ## Shared files
 
 A fork works in the same folder as the original thread. That keeps the code the conversation was

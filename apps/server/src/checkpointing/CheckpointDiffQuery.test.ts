@@ -87,6 +87,7 @@ describe("CheckpointDiffQuery.layer", () => {
               listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
               listActiveProjectRootsUnder: () => Effect.succeed([]),
               getInferenceTurnPairs: () => Effect.succeed([]),
+              getUserInputActivity: () => Effect.die("unused"),
               getCommandReadModel: () =>
                 Effect.die("CheckpointDiffQuery should not request the command read model"),
               getSnapshot: () =>
@@ -224,6 +225,7 @@ describe("CheckpointDiffQuery.layer", () => {
               listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
               listActiveProjectRootsUnder: () => Effect.succeed([]),
               getInferenceTurnPairs: () => Effect.succeed([]),
+              getUserInputActivity: () => Effect.die("unused"),
               getCommandReadModel: () =>
                 Effect.die("CheckpointDiffQuery should not request the command read model"),
               getSnapshot: () =>
@@ -325,6 +327,7 @@ describe("CheckpointDiffQuery.layer", () => {
             listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
             listActiveProjectRootsUnder: () => Effect.succeed([]),
             getInferenceTurnPairs: () => Effect.succeed([]),
+            getUserInputActivity: () => Effect.die("unused"),
             getCommandReadModel: () =>
               Effect.die("CheckpointDiffQuery should not request the command read model"),
             getSnapshot: () =>
@@ -403,6 +406,7 @@ describe("CheckpointDiffQuery.layer", () => {
             listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
             listActiveProjectRootsUnder: () => Effect.succeed([]),
             getInferenceTurnPairs: () => Effect.succeed([]),
+            getUserInputActivity: () => Effect.die("unused"),
             getCommandReadModel: () =>
               Effect.die("CheckpointDiffQuery should not request the command read model"),
             getSnapshot: () =>
@@ -466,6 +470,7 @@ describe("CheckpointDiffQuery.layer", () => {
             listThreadLifecycleAnchorsByProjectId: () => Effect.succeed([]),
             listActiveProjectRootsUnder: () => Effect.succeed([]),
             getInferenceTurnPairs: () => Effect.succeed([]),
+            getUserInputActivity: () => Effect.die("unused"),
             getCommandReadModel: () =>
               Effect.die("CheckpointDiffQuery should not request the command read model"),
             getSnapshot: () =>
