@@ -17,6 +17,7 @@ import * as SubscriptionRef from "effect/SubscriptionRef";
 import { AppState, type AppStateStatus } from "react-native";
 
 import * as MobileStorage from "../persistence/mobile-storage";
+import { runMobileActivityReports } from "./activity-report-worker";
 import {
   observeMobileBackgroundActivitySubscription,
   onRetainedMobileBackgroundScopesChange,
@@ -103,9 +104,7 @@ export const mobileBackgroundActivityReporterLayer = Layer.effectDiscard(
       Stream.runForEach(() => Effect.sync(requestReport)),
       Effect.forkScoped,
     );
-    yield* Stream.fromQueue(reportRequests).pipe(
-      Stream.debounce("250 millis"),
-      Stream.runForEach(() => report),
+    yield* runMobileActivityReports(Stream.fromQueue(reportRequests), report).pipe(
       Effect.forkScoped,
     );
     yield* Effect.sync(requestReport).pipe(

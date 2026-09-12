@@ -10,7 +10,7 @@ import { SymbolView } from "../../components/AppSymbol";
 import * as Effect from "effect/Effect";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Alert, Linking, Platform, Pressable, ScrollView, View } from "react-native";
+import { Alert, AppState, Linking, Platform, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
@@ -24,9 +24,10 @@ import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
 import { supportsAgentAwarenessPush } from "../agent-awareness/capabilities";
 import { setLiveActivityUpdatesEnabled } from "../agent-awareness/liveActivityPreferences";
-import { requestAgentNotificationPermission } from "../agent-awareness/notificationPermissions";
+import { enableAgentNotifications } from "../agent-awareness/notificationPermissions";
 import {
   getAgentAwarenessRegistrationStatus,
+  getAgentNotificationRegistrationEnabled,
   refreshAgentAwarenessRegistration,
   subscribeAgentAwarenessRegistrationStatus,
 } from "../agent-awareness/remoteRegistration";
@@ -68,9 +69,8 @@ type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
 type LiveActivityStatus = "checking" | "enabled" | "disabled" | "signed-out" | "linking";
 
 // Reflects whether the relay actually accepted this device's registration.
-// The notification and Live Activity switches are gated on this so they can
-// never read as enabled when the device cannot receive anything (e.g. the
-// registration request timed out).
+// Live Activities depend on relay registration; notification permission has
+// its own switch and delivery status.
 function useDeviceRegistered(): boolean {
   const status = useSyncExternalStore(
     subscribeAgentAwarenessRegistrationStatus,
@@ -171,6 +171,12 @@ function ConfiguredSettingsRouteScreen() {
   const [notificationStatus, setNotificationStatus] = useState<NotificationStatus>("checking");
   const [liveActivityStatus, setLiveActivityStatus] = useState<LiveActivityStatus>("checking");
   const deviceRegistered = useDeviceRegistered();
+  const notificationsRegistered = useSyncExternalStore(
+    subscribeAgentAwarenessRegistrationStatus,
+    getAgentNotificationRegistrationEnabled,
+    () => false,
+  );
+  const [requestingNotifications, setRequestingNotifications] = useState(false);
   const liveActivitiesPreferenceEnabled = AsyncResult.isSuccess(preferencesResult)
     ? preferencesResult.value.liveActivitiesEnabled !== false
     : true;
@@ -195,10 +201,18 @@ function ConfiguredSettingsRouteScreen() {
       return;
     }
     setNotificationStatus(result.value.granted ? "enabled" : "disabled");
+    if (result.value.granted) {
+      // Reopening Settings retries delivery setup without delaying permission UI.
+      void runtime.runPromiseExit(refreshAgentAwarenessRegistration());
+    }
   }, []);
 
   useEffect(() => {
     void refreshNotifications();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void refreshNotifications();
+    });
+    return () => subscription.remove();
   }, [refreshNotifications]);
 
   useEffect(() => {
@@ -224,16 +238,34 @@ function ConfiguredSettingsRouteScreen() {
     );
   }, [isLoaded, isSignedIn, preferencesResult]);
 
+  const promptSignIn = useCallback(() => {
+    Alert.alert(
+      "Sign in to Lecturn Connect",
+      "Notifications and Live Activities require Lecturn Connect to deliver updates to this device.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Continue",
+          onPress: () => navigation.navigate("SettingsSheet", { screen: "SettingsAuth" }),
+        },
+      ],
+    );
+  }, [navigation]);
+
   const requestNotifications = useCallback(async () => {
+    if (!isSignedIn) {
+      promptSignIn();
+      return;
+    }
+    setRequestingNotifications(true);
     const result = await settleAsyncResult(() =>
       runtime.runPromiseExit(
-        requestAgentNotificationPermission.pipe(
-          Effect.tap((permission) =>
-            permission.type === "granted" ? refreshAgentAwarenessRegistration() : Effect.void,
-          ),
+        enableAgentNotifications(refreshAgentAwarenessRegistration(), () =>
+          setNotificationStatus("enabled"),
         ),
       ),
     );
+    setRequestingNotifications(false);
     if (result._tag === "Failure") {
       if (!isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
@@ -246,17 +278,14 @@ function ConfiguredSettingsRouteScreen() {
     }
     if (result.value.type === "granted") {
       setNotificationStatus("enabled");
-      // Permission alone is not enough: the switch stays off until the relay
-      // registration succeeds, so tell the user the truth about which happened.
-      if (getAgentAwarenessRegistrationStatus() === "registered") {
-        Alert.alert(
-          "Notifications enabled",
-          "Live Activity notifications are enabled for this device.",
-        );
+      // The switch already reflects permission. Report delivery readiness
+      // separately from the access the user just allowed.
+      if (getAgentNotificationRegistrationEnabled()) {
+        Alert.alert("Notifications enabled", "Agent notifications are enabled for this device.");
       } else {
         Alert.alert(
           "Couldn't finish enabling notifications",
-          "Notification access was granted, but this device could not be registered with Lecturn Connect. Notifications will start once registration succeeds.",
+          "iOS permission is allowed, but push notification setup hasn't completed. Check your internet connection and reopen Settings to retry. Push delivery will start once Lecturn Connect accepts this device's push token.",
         );
       }
       return;
@@ -282,21 +311,7 @@ function ConfiguredSettingsRouteScreen() {
         { text: "Open Settings", onPress: () => void Linking.openSettings() },
       ],
     );
-  }, []);
-
-  const promptSignIn = useCallback(() => {
-    Alert.alert(
-      "Sign in to Lecturn Connect",
-      "Live Activity updates require Lecturn Connect so relay can deliver updates to this device.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Continue",
-          onPress: () => navigation.navigate("SettingsSheet", { screen: "SettingsAuth" }),
-        },
-      ],
-    );
-  }, [navigation]);
+  }, [isSignedIn, promptSignIn]);
 
   const linkEnvironments = useCallback(async () => {
     if (!isSignedIn) {
@@ -496,16 +511,21 @@ function ConfiguredSettingsRouteScreen() {
             disabled={
               !agentAwarenessPlatform.supported ||
               !agentAwarenessPushAvailable ||
+              requestingNotifications ||
               notificationStatus === "checking" ||
               notificationStatus === "unsupported"
             }
-            subtitle={agentAwarenessPlatform.subtitle}
-            // Only reads as on when this device is actually registered with the
-            // relay; otherwise notifications cannot be delivered regardless of
-            // the local iOS permission.
-            value={
-              agentAwarenessPushAvailable && notificationStatus === "enabled" && deviceRegistered
+            subtitle={
+              agentAwarenessPlatform.subtitle ??
+              (requestingNotifications
+                ? "Enabling notifications…"
+                : notificationStatus === "enabled" && !notificationsRegistered
+                  ? "Notification permission allowed. Push delivery setup is still pending."
+                  : undefined)
             }
+            // This is the iOS permission switch. Relay delivery readiness is
+            // shown separately so allowing permission responds immediately.
+            value={agentAwarenessPushAvailable && notificationStatus === "enabled"}
             onValueChange={handleDeviceNotificationsChange}
           />
           <SettingsSwitchRow

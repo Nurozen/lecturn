@@ -850,6 +850,39 @@ describe("EnvironmentSupervisor", () => {
     }).pipe(Effect.provide(TestClock.layer())),
   );
 
+  for (const stage of ["preparing", "synchronizing"] as const) {
+    it.effect(`restarts suspended mobile ${stage} immediately after a short resume`, () =>
+      Effect.gen(function* () {
+        const setupStarted = yield* Deferred.make<void>();
+        const setupInterrupted = yield* Deferred.make<void>();
+        const stalledSetup = Deferred.succeed(setupStarted, undefined).pipe(
+          Effect.andThen(Effect.never),
+          Effect.ensuring(Deferred.succeed(setupInterrupted, undefined)),
+        );
+        const harness = yield* makeHarness({
+          prepare: (attempt) =>
+            stage === "preparing" && attempt === 1
+              ? stalledSetup
+              : Effect.succeed(PREPARED_CONNECTION),
+          ready: (attempt) =>
+            stage === "synchronizing" && attempt === 1 ? stalledSetup : Effect.void,
+        });
+        const supervisor = yield* EnvironmentSupervisor.make(RELAY_ENTRY, {
+          initiallyDesired: true,
+        }).pipe(Effect.provide(harness.dependencies));
+
+        yield* Deferred.await(setupStarted);
+        yield* harness.wake("application-active-probe");
+        // No clock advance: resuming a suspended handshake must not wait for
+        // its original connection timeout or the retry backoff.
+        yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+        expect(yield* Deferred.isDone(setupInterrupted)).toBe(true);
+        expect(yield* Ref.get(harness.prepareCount)).toBe(2);
+        expect(yield* Ref.get(harness.releaseCount)).toBe(stage === "synchronizing" ? 1 : 0);
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+  }
+
   it.effect("probes the active session without reconnecting on application activation", () =>
     Effect.gen(function* () {
       const probeCount = yield* Ref.make(0);

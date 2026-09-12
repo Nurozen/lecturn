@@ -37,6 +37,7 @@ import { supportsAgentAwarenessPush } from "./capabilities";
 import { makeRelayDeviceRegistrationRequest, resolveApsEnvironment } from "./registrationPayload";
 
 const REMOTE_ACTIVITY_REGISTRATION_RETRY_MS = 15_000;
+const NATIVE_PUSH_TOKEN_TIMEOUT_MS = 15_000;
 
 const AgentAwarenessOperation = Schema.Literals([
   "read-notification-permissions",
@@ -83,19 +84,22 @@ let pushTokenSubscription: { remove: () => void } | null = null;
 let appStateSubscription: { remove: () => void } | null = null;
 
 // Whether the relay has actually accepted this device's registration. The
-// notification/Live Activity settings toggles must reflect this rather than
-// only local iOS permission or saved preferences: if the registration request
-// never succeeded, the device cannot receive anything, so the switches must
-// not read as enabled.
+// delivery status and Live Activity toggle reflect this. The notification
+// permission switch separately reflects iOS permission.
 export type AgentAwarenessRegistrationStatus = "unknown" | "pending" | "registered" | "failed";
 let registrationStatus: AgentAwarenessRegistrationStatus = "unknown";
+let notificationRegistrationEnabled = false;
 const registrationStatusListeners = new Set<() => void>();
 
-function setRegistrationStatus(next: AgentAwarenessRegistrationStatus): void {
-  if (registrationStatus === next) {
+function setRegistrationStatus(
+  next: AgentAwarenessRegistrationStatus,
+  notificationsEnabled = next === "registered" && notificationRegistrationEnabled,
+): void {
+  if (registrationStatus === next && notificationRegistrationEnabled === notificationsEnabled) {
     return;
   }
   registrationStatus = next;
+  notificationRegistrationEnabled = notificationsEnabled;
   for (const listener of registrationStatusListeners) {
     listener();
   }
@@ -103,6 +107,12 @@ function setRegistrationStatus(next: AgentAwarenessRegistrationStatus): void {
 
 export function getAgentAwarenessRegistrationStatus(): AgentAwarenessRegistrationStatus {
   return registrationStatus;
+}
+
+// Live Activities can register without an APNs device token. Only an accepted
+// payload containing that token and enabled notifications makes delivery ready.
+export function getAgentNotificationRegistrationEnabled(): boolean {
+  return registrationStatus === "registered" && notificationRegistrationEnabled;
 }
 
 export function subscribeAgentAwarenessRegistrationStatus(listener: () => void): () => void {
@@ -115,6 +125,7 @@ let activeLiveActivityRegistrationRetry: ReturnType<typeof setTimeout> | null = 
 let relayTokenProvider: (() => Promise<string | null>) | null = null;
 let relayTokenProviderIdentity: string | null = null;
 let deviceRegistrationGeneration = 0;
+let latestObservedPushToken: string | null = null;
 let activeDeviceRegistration: {
   readonly input: DeviceRegistrationInput;
   operation: Promise<void>;
@@ -179,9 +190,11 @@ export function setAgentAwarenessRelayTokenProvider(
     !shouldRegisterAgentAwarenessDeviceForProvider(relayTokenProviderIdentity, identity);
   if (!isExistingIdentity) {
     deviceRegistrationGeneration++;
+    latestObservedPushToken = null;
     activeDeviceRegistration = null;
     pendingDeviceRegistration = null;
     registeredActivityPushTokens.clear();
+    setRegistrationStatus("unknown");
   }
   relayTokenProvider = provider;
   relayTokenProviderIdentity = provider ? (identity ?? null) : null;
@@ -250,7 +263,10 @@ function iosMajorVersion(): number {
   return Number.isFinite(major) ? major : 18;
 }
 
-function nativePushTokenRegistration(observedPushToken?: string) {
+function nativePushTokenRegistration(
+  observedPushToken: string | undefined,
+  expectedGeneration: number,
+) {
   return Effect.gen(function* () {
     if (!canRegisterRemoteLiveActivities() || !supportsAgentAwarenessPush()) {
       return { notificationsEnabled: false, pushToken: null };
@@ -269,7 +285,8 @@ function nativePushTokenRegistration(observedPushToken?: string) {
     if (!permissions.granted) {
       return { notificationsEnabled: false, pushToken: null };
     }
-    const token = yield* Effect.tryPromise({
+    const observedAtStart = latestObservedPushToken;
+    const tokenResult = yield* Effect.tryPromise({
       try: () => Notifications.getDevicePushTokenAsync(),
       catch: (cause) =>
         new AgentAwarenessOperationError({
@@ -277,18 +294,48 @@ function nativePushTokenRegistration(observedPushToken?: string) {
           cause,
         }),
     }).pipe(
+      // APNs registration can remain unresolved while iOS waits for connectivity.
+      // Let the native listener complete registration later instead of blocking
+      // Settings (and the registration queue) indefinitely after permission.
+      Effect.timeout(NATIVE_PUSH_TOKEN_TIMEOUT_MS),
       Effect.tapError((error) =>
         Effect.sync(() => {
           logRegistrationError("native APNs token lookup failed", error);
         }),
       ),
-      Effect.orElseSucceed(() => null),
+      Effect.match({
+        onSuccess: (token) => ({ type: "success" as const, token }),
+        onFailure: (error) => ({ type: "failure" as const, error }),
+      }),
     );
-    const pushToken =
+    const token = tokenResult.type === "success" ? tokenResult.token : null;
+    const resolvedToken =
       token?.type === "ios" && typeof token.data === "string" && token.data.trim().length > 0
         ? token.data.trim()
         : null;
-    return { notificationsEnabled: pushToken !== null, pushToken };
+    // A token listener may finish registration while this native request waits.
+    // Never replace its newer accepted token with a timed-out or stale lookup.
+    const pushToken =
+      expectedGeneration === deviceRegistrationGeneration
+        ? latestObservedPushToken !== observedAtStart
+          ? (latestObservedPushToken ?? resolvedToken)
+          : (resolvedToken ?? latestObservedPushToken)
+        : resolvedToken;
+    if (!pushToken) {
+      // Permission has not been revoked. An unavailable token must not overwrite
+      // a working relay registration with notifications disabled.
+      return yield* Effect.fail(
+        new AgentAwarenessOperationError({
+          operation: "read-native-push-token",
+          cause:
+            tokenResult.type === "failure"
+              ? tokenResult.error
+              : new Error("iOS did not return a push notification token."),
+        }),
+      );
+    }
+    if (expectedGeneration === deviceRegistrationGeneration) latestObservedPushToken = pushToken;
+    return { notificationsEnabled: true, pushToken };
   });
 }
 
@@ -383,7 +430,10 @@ function registerDeviceWithRelay(
     // invalidates the record and re-registers there.
     const signature = `${relayConfig.url}|${registrationSignature(payload)}`;
     if (persisted && persisted.identity === identity && persisted.signature === signature) {
-      setRegistrationStatus("registered");
+      setRegistrationStatus(
+        "registered",
+        Boolean(payload.pushToken) && payload.preferences.notificationsEnabled,
+      );
       logRegistrationDebug("relay device registration skipped; already registered for account", {
         expectedGeneration,
       });
@@ -408,7 +458,10 @@ function registerDeviceWithRelay(
       });
       return;
     }
-    setRegistrationStatus("registered");
+    setRegistrationStatus(
+      "registered",
+      Boolean(payload.pushToken) && payload.preferences.notificationsEnabled,
+    );
     yield* Effect.promise(() =>
       saveAgentAwarenessRegistrationRecord({
         identity,
@@ -722,7 +775,10 @@ function registerDevice(
       storedPreferences,
       input.preferencesOverride,
     );
-    const pushTokenRegistration = yield* nativePushTokenRegistration(input?.observedPushToken);
+    const pushTokenRegistration = yield* nativePushTokenRegistration(
+      input?.observedPushToken,
+      expectedGeneration,
+    );
     logRegistrationDebug("device registration local state ready", {
       expectedGeneration,
       notificationsEnabled: pushTokenRegistration.notificationsEnabled,
@@ -760,6 +816,7 @@ function ensurePushTokenListener(): void {
 
   pushTokenSubscription = Notifications.addPushTokenListener((token) => {
     if (token.type === "ios" && typeof token.data === "string" && token.data.trim().length > 0) {
+      latestObservedPushToken = token.data.trim();
       enqueueDeviceRegistration(
         { observedPushToken: token.data.trim() },
         "native APNs token rotation registration failed",
@@ -875,9 +932,11 @@ export function __resetAgentAwarenessRemoteRegistrationForTest(): void {
   relayTokenProvider = null;
   relayTokenProviderIdentity = null;
   deviceRegistrationGeneration++;
+  latestObservedPushToken = null;
   activeDeviceRegistration = null;
   pendingDeviceRegistration = null;
   registrationStatus = "unknown";
+  notificationRegistrationEnabled = false;
   registrationStatusListeners.clear();
   registeredActivityPushTokens.clear();
 }

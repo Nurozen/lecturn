@@ -156,6 +156,43 @@ export function resolvePublicConfig(...sources: readonly Environment[]): Lecturn
   };
 }
 
+/** Hosted production must never silently ship the local, signed-out-only UI. */
+export function assertHostedWebPublicConfig(env: Environment): void {
+  // Ordinary production bundles also serve local/offline desktop and CLI installs.
+  // Only the hosted deployment opts into this requirement.
+  if (env.VERCEL_ENV !== "production") return;
+
+  assertRequiredConnectConfig(env, "Hosted web build");
+}
+
+/** Store builds must include Connect even when local development uses direct pairing only. */
+export function assertProductionMobilePublicConfig(env: Environment): void {
+  if (env.EAS_BUILD !== "true" || env.APP_VARIANT !== "production") return;
+  assertRequiredConnectConfig(env, "Production mobile build");
+}
+
+function assertRequiredConnectConfig(env: Environment, buildName: string): void {
+  const config = resolvePublicConfig(env);
+  const missing = [
+    !config.clerkPublishableKey && "LECTURN_CLERK_PUBLISHABLE_KEY",
+    !config.clerkJwtTemplate && "LECTURN_CLERK_JWT_TEMPLATE",
+    !config.relayUrl && "LECTURN_RELAY_URL",
+  ].filter(Boolean);
+  if (missing.length > 0) {
+    throw new Error(`${buildName} requires Connect configuration: ${missing.join(", ")}.`);
+  }
+
+  let relayUrl: URL;
+  try {
+    relayUrl = new URL(config.relayUrl ?? "");
+  } catch {
+    throw new Error(`${buildName} requires a valid HTTPS LECTURN_RELAY_URL.`);
+  }
+  if (relayUrl.protocol !== "https:" || relayUrl.username || relayUrl.password) {
+    throw new Error(`${buildName} requires a valid HTTPS LECTURN_RELAY_URL.`);
+  }
+}
+
 function firstNonEmpty(sources: readonly Environment[], ...names: readonly string[]) {
   for (const source of sources) {
     for (const name of names) {

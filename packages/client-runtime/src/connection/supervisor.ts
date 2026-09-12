@@ -378,7 +378,13 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         case "ConnectRequested":
           break;
         case "Wakeup":
-          if (next.reason === "application-active-reconnect") {
+          if (
+            next.reason === "application-active-reconnect" ||
+            next.reason === "application-active-probe"
+          ) {
+            // A suspended mobile handshake has no live session to probe.
+            // Replace it on short resumes too, rather than waiting for the
+            // original setup timeout before the app can become usable again.
             return true;
           }
           if (next.reason === "credentials-changed" && target._tag === "RelayConnectionTarget") {
