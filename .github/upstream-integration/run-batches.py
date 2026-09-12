@@ -545,6 +545,8 @@ transient infrastructure failure that should be rerun. Otherwise return ci_retry
                 # Written right before the grok run (the first reviewer may write in this folder) and
                 # hash-checked after it: this file is grok's only view of the change.
                 diff_path = folder / f'{prefix}-diff.patch'
+                diff_path.unlink(missing_ok=True)  # never follow a pre-planted symlink
+                require(not diff_path.exists(), 'Outside review diff path is not a plain file slot')
                 command(['git', 'diff', f'--output={diff_path}', m['review_base'], tree], repo)
                 diff_hash = hashlib.sha256(diff_path.read_bytes()).hexdigest()
                 outside_prompt = review_prompt + OUTSIDE_REVIEW_NOTE.format(
