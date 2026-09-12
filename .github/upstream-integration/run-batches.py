@@ -85,6 +85,17 @@ def path_rule(tool, path):
     return f"{tool}(//{str(path).lstrip('/')}/**)"
 
 
+def check_env(repo, cwd):
+    """Environment for controller-rerun checks: the worktree's own package binaries (vp, tsc, ...)
+    resolve first, like CI's installed toolchain, so builders may return plain tool names."""
+    bins = []
+    for base in (cwd, repo):
+        candidate = str(Path(base) / 'node_modules' / '.bin')
+        if candidate not in bins:
+            bins.append(candidate)
+    return {**os.environ, 'PATH': os.pathsep.join([*bins, os.environ.get('PATH', '')])}
+
+
 def agent_result(log_path):
     """Structured result of a Claude Code stream-json run; the event log is the durable evidence."""
     result = None
@@ -445,7 +456,8 @@ Explain the actual failed job/log evidence; do not use ci_retry to dismiss a sou
             cwd = (repo / check['cwd']).resolve()
             require(cwd == repo or repo in cwd.parents, 'Check cwd escapes worktree')
             require(check['argv'] and all(isinstance(x, str) for x in check['argv']), 'Invalid check command')
-            command(check['argv'], cwd, log=folder / f'{prefix}-check-{index}.log', lock_fd=self.lock_fd)
+            command(check['argv'], cwd, log=folder / f'{prefix}-check-{index}.log', lock_fd=self.lock_fd,
+                    env=check_env(repo, cwd))
         require(staged_tree(repo, m['expected_head'], m['merge_parent']) == tree, 'Checks changed reviewed tree')
         review_prompt = f"""Fresh independent review. Read AGENTS.md, {folder}/RESOLUTION_GUIDE.md and {folder}/manifest.json.
 You are one bounded leaf reviewer in the controller-orchestrated review process. Inspect source directly; do not launch
