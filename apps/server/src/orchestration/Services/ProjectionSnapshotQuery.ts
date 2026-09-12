@@ -7,6 +7,7 @@
  * @module ProjectionSnapshotQuery
  */
 import type {
+  ApprovalRequestId,
   CheckpointRef,
   MessageId,
   OrchestrationCheckpointSummary,
@@ -107,6 +108,11 @@ export interface ProjectionSnapshotQueryShape {
     ReadonlyArray<{ readonly projectId: ProjectId; readonly workspaceRoot: string }>,
     ProjectionRepositoryError
   >;
+  /** Read the latest request or resolution without loading the thread history. */
+  readonly getUserInputActivity: (input: {
+    readonly threadId: ThreadId;
+    readonly requestId: ApprovalRequestId;
+  }) => Effect.Effect<Option.Option<OrchestrationThreadActivity>, ProjectionRepositoryError>;
 
   /**
    * Read the lightweight command snapshot used to bootstrap the in-memory
