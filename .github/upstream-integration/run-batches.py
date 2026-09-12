@@ -71,6 +71,22 @@ WORKER_MODEL = 'claude-opus-5'
 # binary that does not trust the sandbox TLS proxy, so it fails inside. Nothing here writes files.
 REVIEW_GH_COMMANDS = ('gh api', 'gh run view', 'gh run list', 'gh pr view', 'gh pr list',
                       'gh pr checks', 'gh pr diff', 'gh issue view')
+# Outside perspective: the round-level outside reviewer runs on a different model family (xAI Grok via
+# the grok CLI) with read-only built-in tools only. It cannot run git, gh or shell commands, so the
+# controller writes the complete reviewed diff next to the manifest for it.
+GROK_TOOLS = 'read_file,list_dir,grep'
+OUTSIDE_REVIEW_NOTE = '''
+
+Outside perspective from a different model family. You have only read_file, list_dir and grep on the worktree
+(no shell, git, gh or network). The controller wrote the complete reviewed diff (git diff {base} {tree}) to
+{diff}; the working files match the staged tree {tree}. Return tree exactly "{tree}". You cannot download
+evidence assets: set ui_evidence_valid true when every UI change visible in the diff has corresponding listed
+evidence in the builder report {builder}, false when a UI change has none; hash verification is done by the
+other reviewers. Never return blocked because you lack a tool (gh, git, shell, network): those gates belong to
+the other reviewers. ci_retry_safe: true only when the builder proposes ci_retry and the controller-written
+{ci} shows a transient infrastructure failure; otherwise false. Read the diff file before answering; a verdict
+without having read it is invalid.
+'''
 REVIEW_ENVIRONMENT_NOTE = '''Environment: shell commands run in a read-only OS sandbox (source and git data are
 read-only; only your report folder is writable). The gh CLI cannot use the sandbox network proxy, so
 for read-only gh subcommands (api, run view/list, pr view/list/checks/diff, issue view) set the Bash
@@ -94,6 +110,28 @@ def check_env(repo, cwd):
         if candidate not in bins:
             bins.append(candidate)
     return {**os.environ, 'PATH': os.pathsep.join([*bins, os.environ.get('PATH', '')])}
+
+
+def grok_result(log_path):
+    """Structured result of a grok --output-format json run; the log keeps the argv header and stderr."""
+    text = Path(log_path).read_text(errors='replace')
+    result, start, decoder = None, text.find('\n{'), json.JSONDecoder()
+    while start >= 0:
+        try:
+            candidate, _ = decoder.raw_decode(text[start + 1:])
+        except ValueError:
+            candidate = None
+        if isinstance(candidate, dict) and 'stopReason' in candidate:
+            result = candidate
+        start = text.find('\n{', start + 1)
+    require(result is not None, 'Grok produced no JSON result envelope')
+    require(result.get('stopReason') == 'end_turn', f"Grok run did not finish: {result.get('stopReason')}")
+    # With --json-schema grok can answer on turn one without touching a file; a review needs tool turns.
+    require(isinstance(result.get('num_turns'), int) and result['num_turns'] > 1, 'Grok answered without inspecting anything')
+    require(any(model.startswith('grok') for model in (result.get('modelUsage') or {})), 'Grok run reported no grok model')
+    value = result.get('structuredOutput')
+    require(isinstance(value, dict), f"Grok returned no structured output: {result.get('structuredOutputError')}")
+    return value
 
 
 def agent_result(log_path):
@@ -272,7 +310,10 @@ class Runner:
             git(self.repo, 'fetch', '--no-tags', 'origin', 'refs/heads/upstream-mirror:refs/remotes/origin/upstream-mirror')
         return git(self.repo, 'rev-parse', 'origin/main'), git(self.repo, 'rev-parse', 'origin/upstream-mirror')
 
-    def agent(self, repo, folder, name, prompt, output_schema, readonly=False):
+    def agent(self, repo, folder, name, prompt, output_schema, readonly=False, runtime='claude'):
+        if runtime == 'grok':
+            return self.grok_agent(repo, folder, name, prompt, output_schema)
+        require(runtime == 'claude', f'Unknown agent runtime {runtime}')
         access = ['--permission-mode', 'bypassPermissions', '--dangerously-skip-permissions',
                   '--add-dir', str(folder)]
         if readonly:
@@ -314,6 +355,26 @@ class Runner:
                 stdin=prompt, lock_fd=self.lock_fd,
                 env={**os.environ, 'CLAUDE_CODE_SUBAGENT_MODEL': WORKER_MODEL})
         value = agent_result(log_path)
+        write_json(output_path, value)
+        require(set(value) == set(output_schema['required']), 'Incomplete structured agent response')
+        return value
+
+    def grok_agent(self, repo, folder, name, prompt, output_schema):
+        # Read-only by construction: only read_file/list_dir/grep are enabled, no subagents, no web.
+        # bypassPermissions is required because headless grok cancels at any permission prompt.
+        source, reports = repo.resolve(), folder.resolve()
+        require(source != reports and source not in reports.parents and reports not in source.parents,
+                'Reviewer report directory must be separate from source')
+        schema_path, output_path = folder / f'{name}.schema.json', folder / f'{name}.json'
+        prompt_path, log_path = folder / f'{name}.prompt.md', folder / f'{name}.events.log'
+        write_json(schema_path, output_schema)
+        prompt_path.write_text(prompt)
+        command(['grok', '--prompt-file', str(prompt_path), '--cwd', str(repo),
+                 '--permission-mode', 'bypassPermissions', '--tools', GROK_TOOLS,
+                 '--no-subagents', '--disable-web-search', '--max-turns', '300',
+                 '--output-format', 'json', '--json-schema', json.dumps(output_schema)],
+                repo, log=log_path, lock_fd=self.lock_fd)
+        value = grok_result(log_path)
         write_json(output_path, value)
         require(set(value) == set(output_schema['required']), 'Incomplete structured agent response')
         return value
@@ -480,7 +541,21 @@ transient infrastructure failure that should be rerun. Otherwise return ci_retry
 """
         reviews = []
         for label in ('reviewer', 'outside-reviewer'):
-            review = self.agent(repo, folder, prefix + '-' + label, review_prompt, REVIEW_SCHEMA, True)
+            if label == 'outside-reviewer':
+                # Written right before the grok run (the first reviewer may write in this folder) and
+                # hash-checked after it: this file is grok's only view of the change.
+                diff_path = folder / f'{prefix}-diff.patch'
+                diff_path.unlink(missing_ok=True)  # never follow a pre-planted symlink
+                require(not diff_path.exists(), 'Outside review diff path is not a plain file slot')
+                command(['git', 'diff', f'--output={diff_path}', m['review_base'], tree], repo)
+                diff_hash = hashlib.sha256(diff_path.read_bytes()).hexdigest()
+                outside_prompt = review_prompt + OUTSIDE_REVIEW_NOTE.format(
+                    base=m['review_base'], tree=tree, diff=diff_path, builder=folder / f'{prefix}-builder.json',
+                    ci=folder / 'latest-ci.json')
+                review = self.agent(repo, folder, prefix + '-' + label, outside_prompt, REVIEW_SCHEMA, True, runtime='grok')
+                require(hashlib.sha256(diff_path.read_bytes()).hexdigest() == diff_hash, 'Outside review diff changed during review')
+            else:
+                review = self.agent(repo, folder, prefix + '-' + label, review_prompt, REVIEW_SCHEMA, True)
             require(staged_tree(repo, m['expected_head'], m['merge_parent']) == tree, 'Reviewer changed worktree')
             require(review['tree'] == tree, 'Review tree mismatch')
             if review['verdict'] == 'blocked':
