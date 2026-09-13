@@ -38,7 +38,7 @@ export function StaveSettingsSection() {
   const primaryServerConfig = useAtomValue(primaryServerConfigAtom);
   if (primaryServerConfig?.environment.capabilities.stave === undefined) return null;
   return (
-    <SettingsSection title="Stave">
+    <SettingsSection id="stave" title="Stave">
       <StaveEnabledSetting />
       <StaveLifecycleSettings />
       <StaveStatusRow />

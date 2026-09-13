@@ -53,6 +53,7 @@ import { OpenCodeDriver } from "../Drivers/OpenCodeDriver.ts";
 import * as ModelManifest from "../ModelManifest.ts";
 import * as StaveMemoryWiring from "../../stave/StaveMemoryWiring.ts";
 import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
+import * as CodexResetCredit from "./codexResetCredit.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { makeProviderInstanceRegistry } from "./ProviderInstanceRegistryLive.ts";
 
@@ -154,6 +155,7 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
     Layer.provideMerge(ModelManifest.layerTest),
     Layer.provideMerge(StaveMemoryWiring.layerNoop),
+    Layer.provideMerge(CodexResetCredit.layerTest),
   );
 
   it.live("boots two independent codex instances from a ProviderInstanceConfigMap", () =>
@@ -324,6 +326,7 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
     Layer.provideMerge(ModelManifest.layerTest),
     Layer.provideMerge(StaveMemoryWiring.layerNoop),
+    Layer.provideMerge(CodexResetCredit.layerTest),
   );
 
   it.live("boots one instance of every shipped driver from a single config map", () =>
