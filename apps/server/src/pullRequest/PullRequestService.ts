@@ -11,6 +11,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import {
   PullRequestOperationError,
   PullRequestUnavailableError,
@@ -150,6 +151,8 @@ export class PullRequestService extends Context.Service<
       never,
       Scope.Scope
     >;
+    readonly subscribeRefreshes: Stream.Stream<number>;
+    readonly refreshAfterTurn: Effect.Effect<void>;
     readonly detail: (input: PullRequestRef) => Effect.Effect<PullRequestDetail, PullRequestError>;
     readonly activity: (
       input: PullRequestRef,
@@ -592,6 +595,7 @@ function projectRepositories(
 export const make = Effect.gen(function* () {
   const mergedPullRequests = yield* PubSub.sliding<PullRequestMergeEvent>(64);
   const path = yield* Path.Path;
+  const pullRequestRefreshes = yield* SubscriptionRef.make(0);
   const registry = yield* PullRequestProviderRegistry;
   const projections = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
@@ -1343,6 +1347,7 @@ export const make = Effect.gen(function* () {
             title: changeRequest.title,
             url: changeRequest.url,
             state: changeRequest.state,
+            ...(changeRequest.isDraft === true ? { isDraft: true } : {}),
             headBranch: changeRequest.headBranch,
             baseBranch: changeRequest.baseBranch,
             updatedAt: changeRequest.updatedAt,
@@ -2237,6 +2242,7 @@ export const make = Effect.gen(function* () {
   // scope re-entering `refEpochs` after eviction can never mint a key an old entry still has.
   let epochCounter = 0;
   let listingsEpoch = 0;
+  let turnRefreshEpoch = 0;
   const refEpochs = new Map<string, number>();
   const REF_EPOCH_CAPACITY = 2_048;
   // Invalidation covers hostless and legacy bare Azure aliases. Full paths and hosts
@@ -2247,7 +2253,8 @@ export const make = Effect.gen(function* () {
       ref.repository.trim().toLowerCase().split("/").at(-1),
       ref.number,
     ]);
-  const refEpoch = (ref: PullRequestRef) => refEpochs.get(refScope(ref)) ?? 0;
+  const refEpoch = (ref: PullRequestRef) =>
+    Math.max(turnRefreshEpoch, refEpochs.get(refScope(ref)) ?? 0);
   const refCacheKey = (ref: PullRequestRef) =>
     JSON.stringify([refEpoch(ref), ref.projectId, ref.repository, ref.number, ref.host ?? null]);
   const bumpRefEpoch = (ref: PullRequestRef) => {
@@ -2416,6 +2423,7 @@ export const make = Effect.gen(function* () {
     title: detail.title,
     url: detail.url,
     state: detail.state,
+    ...(detail.isDraft === true ? { isDraft: true } : {}),
     headBranch: detail.headBranch,
     baseBranch: detail.baseBranch,
     updatedAt: detail.updatedAt,
@@ -2560,6 +2568,11 @@ export const make = Effect.gen(function* () {
     }).pipe(Effect.andThen(Cache.invalidateAll(viewerFlights)));
   };
 
+  const refreshAfterTurn: PullRequestService["Service"]["refreshAfterTurn"] = Effect.suspend(() => {
+    turnRefreshEpoch = listingsEpoch = ++epochCounter;
+    return SubscriptionRef.set(pullRequestRefreshes, turnRefreshEpoch);
+  });
+
   // A mutation's own client re-reads right after it, and every other client's next read must
   // see the action too — so a write forgets the change request it touched and the listings its
   // state change reorders, for everyone, without any client asking.
@@ -2600,6 +2613,10 @@ export const make = Effect.gen(function* () {
     subscribeMerges: PubSub.subscribe(mergedPullRequests).pipe(
       Effect.map((subscription) => Stream.fromSubscription(subscription)),
     ),
+    subscribeRefreshes: SubscriptionRef.changes(pullRequestRefreshes).pipe(
+      Stream.filter((revision) => revision > 0),
+    ),
+    refreshAfterTurn,
     detail,
     activity,
     threadComments,
