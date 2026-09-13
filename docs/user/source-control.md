@@ -47,6 +47,9 @@ checkouts. The walkthrough is in [Create a space](./stave.md#create-a-space).
 **Stay on top of open reviews**
 
 - See if your current branch already has an open PR/MR
+- When an agent finishes a turn on your thread's branch, Lecturn checks for a newly opened
+  PR/MR if background activity is enabled for that repository. Known reviews keep their normal
+  refresh schedule.
 - Open several reviews from the **Pull requests** page as tabs in the right panel
 - Your authored reviews stay at the top and use the selected sort within their group. By default,
   see passing and approved reviews first, passing reviews awaiting approval next, and conflicting

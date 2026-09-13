@@ -14,6 +14,9 @@ Lecturn settings. See [Providers](#providers) below.
 Start with the [Lecturn installation guide](./lecturn-installation.md) for desktop downloads,
 mobile access, and runtime distribution. The standalone CLI command is `lecturn`.
 
+If the web or desktop app shows "Lecturn could not load", check your connection and select
+**Reload** to try again.
+
 ## Open a project in the desktop app
 
 When the Lecturn desktop app is running on the same machine, open the current directory with:
