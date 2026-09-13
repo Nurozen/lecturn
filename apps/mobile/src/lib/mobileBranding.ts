@@ -1,7 +1,7 @@
-export type MobileStageLabel = "Alpha" | "Dev" | "Nightly";
+export type MobileStageLabel = "Dev" | "Nightly";
 
-export function resolveMobileStageLabel(appVariant: unknown): MobileStageLabel {
+export function resolveMobileStageLabel(appVariant: unknown): MobileStageLabel | null {
   if (appVariant === "development") return "Dev";
   if (appVariant === "preview") return "Nightly";
-  return "Alpha";
+  return null;
 }
