@@ -65,3 +65,31 @@ export const requestAgentNotificationPermission: Effect.Effect<
     ? { type: "granted" }
     : { type: "denied", canAskAgain: requested.canAskAgain };
 });
+
+// Update the permission UI before waiting for APNs or the relay. Permission is
+// controlled by iOS; successful remote registration is a separate delivery state.
+export function enableAgentNotifications<R>(
+  register: Effect.Effect<void, unknown, R>,
+  onPermissionGranted: () => void,
+) {
+  return requestAgentNotificationPermission.pipe(
+    Effect.tap((permission) => {
+      if (permission.type !== "granted") return Effect.void;
+      return Effect.sync(onPermissionGranted).pipe(
+        Effect.andThen(
+          register.pipe(
+            Effect.timeoutOrElse({
+              duration: "30 seconds",
+              orElse: () =>
+                Effect.fail(
+                  new Error(
+                    "Notification setup is taking too long. Check your internet connection and try again.",
+                  ),
+                ),
+            }),
+          ),
+        ),
+      );
+    }),
+  );
+}

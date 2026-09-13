@@ -266,6 +266,10 @@
     "./legalNotices": {
       "types": "./src/legalNotices.ts",
       "import": "./src/legalNotices.ts"
+    },
+    "./providerEmblems": {
+      "types": "./src/providerEmblems.ts",
+      "import": "./src/providerEmblems.ts"
     }
   },
   "scripts": {
