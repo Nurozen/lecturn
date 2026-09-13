@@ -242,7 +242,7 @@ describe("EnvironmentLinker", () => {
       const result = yield* linker.link({ userId: "user_123", request });
       // This is an externally deployed protocol identifier, deliberately not derived from shared constants.
       expect(
-        Schema.decodeUnknownSync(Schema.UnknownFromJsonString)(
+        yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
           Buffer.from(request.proof.split(".")[0]!, "base64url").toString(),
         ),
       ).toEqual({ alg: "EdDSA", typ: "lecturn-env-link+jwt" });

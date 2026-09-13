@@ -92,7 +92,7 @@ function signTestJwt(payload: object, typ: string, privateKey: string): string {
 function verifyHostRequest(proof: string, typ: string): void {
   const [header, payload, signature] = proof.split(".");
   expect(
-    Schema.decodeUnknownSync(Schema.UnknownFromJsonString)(
+    Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(
       Buffer.from(header!, "base64url").toString(),
     ),
   ).toEqual({ alg: "EdDSA", typ });
