@@ -18,6 +18,7 @@ import { describe, expect } from "vite-plus/test";
 
 import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
 import type * as EffectAcpProtocol from "effect-acp/protocol";
+import * as EffectAcpErrors from "effect-acp/errors";
 
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
 const mockAgentPath = NodePath.join(__dirname, "../../../scripts/acp-mock-agent.ts");
@@ -69,17 +70,35 @@ describe("AcpSessionRuntime", () => {
         expect(events.map((event) => event._tag)).toEqual([
           "AvailableCommandsUpdated",
           "ModeChanged",
+          "ConfigOptionsUpdated",
         ]);
         expect(events[0]).toMatchObject({
           availableCommands: [{ name: "plan", description: "Native command" }],
         });
         expect(yield* runtime.getModeState).toMatchObject({ currentModeId: "code" });
+        expect(events[2]).toMatchObject({
+          configOptions: yield* runtime.getConfigOptions,
+        });
         expect(
           (yield* runtime.getConfigOptions).find((option) => option.category === "model"),
         ).toMatchObject({ currentValue: "gpt-5.4" });
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
     );
   }
+
+  it.effect("publishes model changes returned by a config request and live notifications", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.make(mockRuntimeOptions);
+      yield* runtime.start();
+      const updates = yield* Stream.toPull(
+        runtime.getEvents().pipe(Stream.filter((event) => event._tag === "ConfigOptionsUpdated")),
+      );
+      const selected = yield* runtime.setConfigOption("model", "composer-2");
+      expect((yield* updates)[0]?.configOptions).toEqual(selected.configOptions);
+      yield* runtime.request("_test/startup-metadata", {});
+      expect((yield* updates)[0]?.configOptions).toEqual(yield* runtime.getConfigOptions);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
 
   it.effect("awaits native resume instead of using the load replay idle fallback", () =>
     Effect.gen(function* () {
@@ -324,6 +343,28 @@ describe("AcpSessionRuntime", () => {
           })
           .pipe(Effect.flip),
       ).toBe(events[0]?.error);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("fails a pending request when the stderr handler rejects the runtime", () =>
+    Effect.gen(function* () {
+      const failure = new EffectAcpErrors.AcpTransportError({
+        detail: "Sign in before continuing.",
+        cause: undefined,
+      });
+      const runtime = yield* AcpSessionRuntime.make({
+        ...mockRuntimeOptions,
+        spawn: { ...mockRuntimeOptions.spawn, env: { LECTURN_ACP_FLOOD_STDERR: "1" } },
+        onStderr: () => Effect.fail(failure),
+      });
+      expect(yield* runtime.start().pipe(Effect.flip)).toBe(failure);
+      const events = yield* runtime.getEvents().pipe(
+        Stream.filter((event) => event._tag === "ConnectionTerminated"),
+        Stream.take(1),
+        Stream.runCollect,
+      );
+      expect(events[0]?.error).toBe(failure);
+      expect(yield* runtime.initialize().pipe(Effect.flip)).toBe(failure);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

@@ -160,6 +160,35 @@ type IdentifiedTurnRow = ProjectionTurn & {
 };
 
 /**
+ * Async questions (message-mode `user-input.requested` with no later
+ * `user-input.resolved`) the source's agent left open stay with the source.
+ * The child would otherwise carry a second answerable request under the same
+ * requestId, and the decider mints the answer's activity and message ids from
+ * that requestId alone, so answering in both threads would re-parent the
+ * first answer's rows onto the second thread. Mirrors the projector's
+ * pending-question retention.
+ */
+function collectOpenAsyncQuestions(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ReadonlySet<OrchestrationThreadActivity> {
+  const pending = new Map<string, OrchestrationThreadActivity>();
+  for (const activity of activities) {
+    const payload =
+      typeof activity.payload === "object" && activity.payload !== null
+        ? (activity.payload as Record<string, unknown>)
+        : null;
+    const requestId = typeof payload?.requestId === "string" ? payload.requestId : null;
+    if (requestId === null) continue;
+    if (activity.kind === "user-input.requested" && payload?.responseMode === "message") {
+      pending.set(requestId, activity);
+    } else if (activity.kind === "user-input.resolved") {
+      pending.delete(requestId);
+    }
+  }
+  return new Set(pending.values());
+}
+
+/**
  * Pure fork assembler: slices the source history through the fork turn, mints
  * child-side ids for every copied row, re-namespaces canonical checkpoint
  * refs, plans deterministic attachment copies and snapshots the provider
@@ -270,8 +299,12 @@ export function assembleThreadFork(input: AssembleThreadForkInput): AssembleThre
     };
   }
 
-  const activities = input.sourceActivities
-    .filter((activity) => keepsRow(activity.turnId, activity.createdAt))
+  const keptActivities = input.sourceActivities.filter((activity) =>
+    keepsRow(activity.turnId, activity.createdAt),
+  );
+  const openAsyncQuestions = collectOpenAsyncQuestions(keptActivities);
+  const activities = keptActivities
+    .filter((activity) => !openAsyncQuestions.has(activity))
     .map((activity) => ({ ...activity, id: EventId.make(input.mintUuid()) }));
 
   const planIdMap = new Map<string, string>();

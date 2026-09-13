@@ -81,8 +81,8 @@ Managed downloads are available for these environment hosts:
 Google does not publish a local Intel Mac runtime. Use an Intel Mac as a client connected to
 a supported remote environment.
 
-The current Linux x64 runtime downloads about 543 MB and uses about 1.65 GB after extraction.
-Allow at least 2.5 GB free for installation. An update keeps the previous runtime too.
+The current Linux x64 runtime downloads about 682 MB and uses about 2.01 GB after extraction.
+Allow at least 3 GB free for installation. An update keeps the previous runtime too.
 Lecturn does not download it until you choose to install it.
 
 On web or desktop, **Update Antigravity** appears when Lecturn has a newer managed release.
@@ -107,6 +107,7 @@ installations. Clear **Binary path** to use managed installation controls.
 The current official ACP exposes Gemini models only. Lecturn uses the model IDs and names
 returned for your account, including any model choices with different thinking levels. Models
 available in other Antigravity apps might not be available through this agent.
+The model picker updates when a running session reports new model choices.
 
 New threads use Gemini 3.8 Flash (High) when your account offers it. Older Gemini generations
 stay available under **Legacy models** in the picker.
@@ -146,6 +147,17 @@ follow-up message or start a new thread instead.
 Antigravity does not support thread forking. Existing Codex, Claude, and OpenCode threads
 retain their provider-specific fork support.
 
+### Subagents
+
+Antigravity subagent calls appear in **Agents** on web and desktop, and in the work log on
+mobile. Each call shows its status and the result or error returned by Antigravity. Calls
+that run at the same time have separate entries.
+
+The official ACP agent does not report subagent names, models, token usage, or parent links.
+Entries use the name **Antigravity subagent**. Child tool calls cannot be assigned to an entry
+because ACP does not include their owning subagent. These entries track each invocation,
+not a separate thread you can open or control.
+
 ## Accounts and removal
 
 Each Antigravity provider instance has its own Google sign-in on its environment. Use
@@ -180,6 +192,9 @@ uses saved Google sign-in and does not open a login page. If sign-in is required
 provider's setup controls. Automatic status checks verify the installation only.
 Missing API credentials do not count as an installed runtime: install Antigravity first,
 then complete the selected authentication method's configuration.
+
+The packaged runtime can be slow to start, especially on Windows. Health checks, model refresh,
+and sign-out each allow up to 90 seconds before reporting a timeout.
 
 If Google reports `SUBSCRIPTION_REQUIRED`, an account restriction, or a usage limit, read the
 provider's message. A finished turn can contain an upstream error instead of completed work.
