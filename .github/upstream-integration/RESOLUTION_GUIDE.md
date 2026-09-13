@@ -145,6 +145,11 @@ database and fixtures representing already-upgraded fork databases and upstream
 databases. If those paths cannot be proven safe, preserve the batch and explain
 the unresolved design; never merge based only on fresh-database tests.
 
+- `apps/mobile/package.json` pins `expo-audio` to the exact patched version (upstream uses a
+  tilde range). Keep the exact pin: `scripts/release-smoke.ts` re-resolves a fresh lockfile, and a
+  newer patch release makes pnpm reject the unused `patches/expo-audio@<version>.patch`. When
+  upstream bumps expo-audio and its patch, take theirs and pin the new exact version.
+
 **Test fixtures.** Incoming fixtures may hardcode upstream product names and
 domains. The fork's copies expect Lecturn strings. Take upstream's assertion _logic_, keep
 the fork's expected strings. Files:
