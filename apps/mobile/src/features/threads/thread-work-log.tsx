@@ -76,13 +76,15 @@ type WorkContentIcon = AppSymbolName | "browser" | "lecturn";
 function WorkLogIcon(props: {
   readonly icon: WorkContentIcon;
   readonly color: ColorValue;
+  readonly colorClassName?: string;
   readonly highlighted?: boolean;
 }) {
+  const colorClassName = props.highlighted ? "accent-foreground" : props.colorClassName;
   if (props.icon === "lecturn") {
     return (
       <LecturnWordmark
         height={10}
-        {...(props.highlighted ? { colorClassName: "accent-foreground" } : { color: props.color })}
+        {...(colorClassName ? { colorClassName } : { color: props.color })}
       />
     );
   }
@@ -91,9 +93,7 @@ function WorkLogIcon(props: {
       name={props.icon === "browser" ? { ios: "globe", android: "public" } : props.icon}
       size={14}
       weight="medium"
-      {...(props.highlighted
-        ? { tintColorClassName: "accent-foreground" }
-        : { tintColor: props.color })}
+      {...(colorClassName ? { tintColorClassName: colorClassName } : { tintColor: props.color })}
       type="monochrome"
     />
   );
@@ -707,11 +707,7 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
   const iconIsDestructive = row.icon === "alert" || row.icon === "warning";
   const failed = row.status === "failure";
   const toolIcon = row.workEntry.toolIcon ?? row.workEntry.toolSource?.icon;
-  const hasSpecialToolIcon =
-    toolPresentation !== null || row.workEntry.toolSurface !== undefined || toolIcon !== undefined;
-  const icon =
-    toolPresentation?.icon ??
-    (failed && !hasSpecialToolIcon ? "xmark" : workRowSymbolName(row.icon));
+  const icon = toolPresentation?.icon ?? workRowSymbolName(row.icon);
 
   return (
     <Animated.View
@@ -750,18 +746,25 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
           ) : (
             <>
               <View className="h-6 w-6 shrink-0 items-center justify-center">
-                {failed && !hasSpecialToolIcon ? (
-                  <WorkLogIcon
-                    icon={icon}
-                    color={iconIsDestructive ? "#e11d48" : props.iconSubtleColor}
-                  />
-                ) : (
+                {toolIcon ? (
                   <ToolActivityIconView
                     environmentId={props.environmentId}
                     icon={toolIcon}
                     fallback={icon}
                     fallbackColor={props.iconSubtleColor}
                     themeAppearance={props.themeAppearance}
+                  />
+                ) : (
+                  <WorkLogIcon
+                    icon={icon}
+                    color={props.iconSubtleColor}
+                    colorClassName={
+                      iconIsDestructive
+                        ? "accent-adaptive-rose-600-400"
+                        : failed
+                          ? "accent-danger-foreground/40"
+                          : undefined
+                    }
                   />
                 )}
               </View>
@@ -783,7 +786,7 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
                 Copied
               </Text>
             ) : null}
-            {failed && hasSpecialToolIcon ? (
+            {failed && toolIcon !== undefined ? (
               <View
                 className="h-4 w-4 items-center justify-center"
                 accessibilityElementsHidden
@@ -792,7 +795,7 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
                 <SymbolView
                   name="xmark"
                   size={11}
-                  tintColorClassName="accent-adaptive-rose-600-400"
+                  tintColorClassName="accent-danger-foreground/40"
                   type="monochrome"
                 />
               </View>
