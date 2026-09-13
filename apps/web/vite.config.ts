@@ -11,7 +11,7 @@ import pkg from "./package.json" with { type: "json" };
 
 import { DEV_PROXIED_PATH_PREFIXES } from "@lecturn/shared/devProxy";
 
-import { loadRepoEnv } from "../../scripts/lib/public-config";
+import { assertHostedWebPublicConfig, loadRepoEnv } from "../../scripts/lib/public-config";
 import { tailwindPlugins } from "./vite/tailwind";
 
 const repoEnv = loadRepoEnv();
@@ -151,7 +151,8 @@ const configuredAllowedHosts = (process.env.LECTURN_DEV_ALLOWED_HOSTS ?? "")
   .filter((entry) => entry.length > 0);
 const allowedHosts = [".ts.net", ...configuredAllowedHosts];
 
-export default defineConfig(() => {
+export default defineConfig(({ command }) => {
+  if (command === "build") assertHostedWebPublicConfig(repoEnv);
   return {
     assetsInclude: ["**/*.wasm"],
     plugins: [

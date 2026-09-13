@@ -3,3 +3,6 @@
 
 # Preserve upstream whitespace and blank context lines inside dependency patches.
 patches/*.patch -whitespace
+
+# Third-party license texts are stored verbatim (the SIL OFL has trailing spaces).
+licenses/*.txt -whitespace

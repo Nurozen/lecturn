@@ -123,6 +123,8 @@ const builtInTokens = [...builtInSprite.matchAll(/<symbol id="file-tree-builtin-
   .sort();
 
 for (const token of builtInTokens) {
+  // Custom artwork is authoritative; never rasterize the overridden vendor mark.
+  if (Object.hasOwn(customIcons, token)) continue;
   renderIcon(
     token,
     symbolFromSprite(builtInSprite, `file-tree-builtin-${token}`),

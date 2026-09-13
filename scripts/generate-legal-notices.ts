@@ -13,6 +13,7 @@ const sources = [
   "apps/mobile/modules/lecturn-markdown-text/LICENSE",
   "apps/mobile/modules/lecturn-terminal/THIRD_PARTY_NOTICES.md",
   "licenses/Apache-2.0.txt",
+  "licenses/DM-Sans-OFL-1.1.txt",
 ];
 const notices = sources
   .map((source) => `${source}\n\n${NodeFS.readFileSync(new URL(source, root), "utf8").trim()}`)
