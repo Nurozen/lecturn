@@ -193,33 +193,46 @@ class GitSafetyTests(unittest.TestCase):
         self.assertEqual(batches.check_env(self.repo, self.repo)['PATH'].split(os.pathsep)[:2],
                          [str(self.repo / 'node_modules' / '.bin'), os.environ.get('PATH', '').split(os.pathsep)[0]])
 
-    def test_grok_outside_reviewer_is_read_only_and_parsed_from_json_envelope(self):
+    def grok_env(self, **fields):
+        return json.dumps({'stopReason': 'end_turn', 'num_turns': 5, 'text': 'Findings...\nVerdict: changes',
+                           'modelUsage': {'grok-4.6-build': {}}, **fields}, indent=2)
+
+    def test_grok_outside_reviewer_is_read_only_two_phase(self):
         runner = batches.Runner.__new__(batches.Runner)
         runner.lock_fd = None
         schema = {'required': ['verdict']}
+        calls = []
 
         def launch(argv, cwd, **kwargs):
+            calls.append(argv)
             self.assertEqual(argv[0], 'grok')
             self.assertEqual(cwd, self.repo)
-            self.assertEqual(argv[argv.index('--prompt-file') + 1], str(self.folder / 'outside.prompt.md'))
             self.assertEqual(argv[argv.index('--cwd') + 1], str(self.repo))
-            self.assertEqual(argv[argv.index('--tools') + 1], 'read_file,list_dir,grep')
             self.assertEqual(argv[argv.index('--permission-mode') + 1], 'bypassPermissions')
-            self.assertNotIn('run_terminal_command', argv[argv.index('--tools') + 1])
+            self.assertEqual(argv[argv.index('--tools') + 1], 'read_file,list_dir,grep')
             self.assertIn('--no-subagents', argv)
             self.assertIn('--disable-web-search', argv)
             self.assertEqual(argv[argv.index('--output-format') + 1], 'json')
-            self.assertEqual(json.loads(argv[argv.index('--json-schema') + 1]), schema)
             self.assertIsNone(kwargs.get('stdin'))
-            Path(kwargs['log']).write_text(json.dumps(argv) + '\nwarning: noise\n' + json.dumps(
-                {'stopReason': 'end_turn', 'num_turns': 5, 'structuredOutput': {'verdict': 'changes'},
-                 'modelUsage': {'grok-4.6-build': {}}}, indent=2) + '\n')
+            if '--json-schema' not in argv:
+                self.assertEqual(argv[argv.index('--prompt-file') + 1], str(self.folder / 'outside.prompt.md'))
+                Path(kwargs['log']).write_text(json.dumps(argv) + '\nwarning: noise\n' + self.grok_env())
+            else:
+                self.assertEqual(json.loads(argv[argv.index('--json-schema') + 1]), schema)
+                structure = Path(argv[argv.index('--prompt-file') + 1]).read_text()
+                self.assertIn('Findings...', structure)
+                self.assertIn(json.dumps(schema), structure)
+                Path(kwargs['log']).write_text(json.dumps(argv) + '\n' + self.grok_env(
+                    num_turns=1, structuredOutput={'verdict': 'changes'}))
 
-        with patch.object(batches, 'command', side_effect=launch) as command:
+        with patch.object(batches, 'command', side_effect=launch):
             result = runner.agent(self.repo, self.folder, 'outside', 'Review', schema, True, runtime='grok')
-        command.assert_called_once()
+        self.assertEqual(len(calls), 2)
+        self.assertNotIn('--json-schema', calls[0])
+        self.assertIn('--json-schema', calls[1])
         self.assertEqual(result, {'verdict': 'changes'})
         self.assertEqual((self.folder / 'outside.prompt.md').read_text(), 'Review')
+        self.assertEqual((self.folder / 'outside.analysis.md').read_text(), 'Findings...\nVerdict: changes')
         self.assertEqual(json.loads((self.folder / 'outside.json').read_text()), {'verdict': 'changes'})
         for folder in (self.repo, self.repo / 'reports', self.repo.parent):
             with self.subTest(folder=folder), patch.object(batches, 'command') as command:
@@ -227,25 +240,51 @@ class GitSafetyTests(unittest.TestCase):
                     runner.agent(self.repo, folder, 'outside', 'Review', schema, True, runtime='grok')
                 command.assert_not_called()
 
-    def test_grok_result_rejects_cancelled_or_unstructured_runs(self):
+    def test_grok_analysis_retries_once_with_nudge_then_blocks(self):
+        runner = batches.Runner.__new__(batches.Runner)
+        runner.lock_fd = None
+        calls = []
+
+        def launch(argv, cwd, **kwargs):
+            calls.append(argv)
+            Path(kwargs['log']).write_text(json.dumps(argv) + '\n' + self.grok_env(num_turns=1, text='{"verdict": "blocked"}'))
+
+        with patch.object(batches, 'command', side_effect=launch):
+            with self.assertRaisesRegex(batches.Blocked, 'without inspecting'):
+                runner.agent(self.repo, self.folder, 'outside', 'Review', {'required': ['verdict']}, True, runtime='grok')
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(all('--json-schema' not in argv for argv in calls))
+        self.assertEqual(calls[1][calls[1].index('--prompt-file') + 1], str(self.folder / 'outside.retry.prompt.md'))
+        self.assertTrue((self.folder / 'outside.retry.prompt.md').read_text().startswith('Review'))
+        self.assertIn('answered without reading', (self.folder / 'outside.retry.prompt.md').read_text())
+        self.assertFalse((self.folder / 'outside.json').exists())
+
+    def test_grok_envelope_rejects_cancelled_or_unstructured_runs(self):
         log = self.folder / 'g.events.log'
-        ok = {'stopReason': 'end_turn', 'num_turns': 3, 'structuredOutput': {'a': 1}, 'modelUsage': {'grok-4.6-build': {}}}
+        ok = {'stopReason': 'end_turn', 'num_turns': 3, 'text': 'review', 'structuredOutput': {'a': 1},
+              'modelUsage': {'grok-4.6-build': {}}}
         cases = [
             ('["grok"]\nno json here\n', 'no JSON result'),
             ('["grok"]\n' + json.dumps({**ok, 'stopReason': 'cancelled'}) + '\n', 'did not finish'),
-            ('["grok"]\n' + json.dumps({**ok, 'num_turns': 1}) + '\n', 'without inspecting'),
-            ('["grok"]\n' + json.dumps({**ok, 'num_turns': None}) + '\n', 'without inspecting'),
-            ('["grok"]\n' + json.dumps({**ok, 'structuredOutput': None, 'structuredOutputError': 'x'}) + '\n', 'no structured output'),
             ('["grok"]\n' + json.dumps({**ok, 'modelUsage': {'claude-opus-5': {}}}) + '\n', 'no grok model'),
             ('["grok"]\n{broken\n', 'no JSON result'),
         ]
         for text, message in cases:
             log.write_text(text)
             with self.subTest(message=message), self.assertRaisesRegex(batches.Blocked, message):
-                batches.grok_result(log)
+                batches.grok_envelope(log)
+        log.write_text('["grok"]\n' + json.dumps({**ok, 'structuredOutput': None, 'structuredOutputError': 'x'}) + '\n')
+        with self.assertRaisesRegex(batches.Blocked, 'no structured output'):
+            batches.grok_result(log)
+        log.write_text('["grok"]\n' + json.dumps({**ok, 'num_turns': 1}) + '\n')
+        self.assertIsNone(batches.grok_analysis(log))
+        log.write_text('["grok"]\n' + json.dumps({**ok, 'text': '  '}) + '\n')
+        with self.assertRaisesRegex(batches.Blocked, 'analysis is empty'):
+            batches.grok_analysis(log)
         # Stderr JSON lines (e.g. MCP server chatter) before the envelope are skipped; pretty-printed envelope parses.
         log.write_text('["grok"]\n{"level": "info", "msg": "mcp ready"}\n{broken\n' + json.dumps(ok, indent=2) + '\ntrailing text\n')
         self.assertEqual(batches.grok_result(log), {'a': 1})
+        self.assertEqual(batches.grok_analysis(log), 'review')
 
     def test_agent_result_requires_successful_result_event(self):
         log = self.folder / 'x.events.log'

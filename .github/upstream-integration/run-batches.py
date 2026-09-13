@@ -85,7 +85,23 @@ evidence in the builder report {builder}, false when a UI change has none; hash 
 other reviewers. Never return blocked because you lack a tool (gh, git, shell, network): those gates belong to
 the other reviewers. ci_retry_safe: true only when the builder proposes ci_retry and the controller-written
 {ci} shows a transient infrastructure failure; otherwise false. Read the diff file before answering; a verdict
-without having read it is invalid.
+without having read it is invalid. Write the review as text: findings first, then a final "Verdict" section
+stating verdict (approve, changes or blocked), tree, ui_evidence_valid (true/false) and ci_retry_safe (true/false).
+'''
+GROK_NUDGE = '''
+
+Your previous attempt answered without reading anything. Start by reading the diff file and the builder report
+with read_file, inspect the source with read_file/grep, and only then write the review.
+'''
+GROK_STRUCTURE_PROMPT = '''Convert the review below into a JSON object matching this schema exactly, using no tools:
+{schema}
+
+Copy verdict, tree, ui_evidence_valid and ci_retry_safe exactly as the review's Verdict section states them;
+findings is the review's findings text (condense only if it exceeds a few thousand words). Do not add, soften or
+re-judge anything.
+
+REVIEW:
+{analysis}
 '''
 REVIEW_ENVIRONMENT_NOTE = '''Environment: shell commands run in a read-only OS sandbox (source and git data are
 read-only; only your report folder is writable). The gh CLI cannot use the sandbox network proxy, so
@@ -112,8 +128,8 @@ def check_env(repo, cwd):
     return {**os.environ, 'PATH': os.pathsep.join([*bins, os.environ.get('PATH', '')])}
 
 
-def grok_result(log_path):
-    """Structured result of a grok --output-format json run; the log keeps the argv header and stderr."""
+def grok_envelope(log_path):
+    """Result envelope of a grok --output-format json run; the log keeps the argv header and stderr."""
     text = Path(log_path).read_text(errors='replace')
     result, start, decoder = None, text.find('\n{'), json.JSONDecoder()
     while start >= 0:
@@ -126,9 +142,23 @@ def grok_result(log_path):
         start = text.find('\n{', start + 1)
     require(result is not None, 'Grok produced no JSON result envelope')
     require(result.get('stopReason') == 'end_turn', f"Grok run did not finish: {result.get('stopReason')}")
-    # With --json-schema grok can answer on turn one without touching a file; a review needs tool turns.
-    require(isinstance(result.get('num_turns'), int) and result['num_turns'] > 1, 'Grok answered without inspecting anything')
     require(any(model.startswith('grok') for model in (result.get('modelUsage') or {})), 'Grok run reported no grok model')
+    return result
+
+
+def grok_analysis(log_path):
+    """Free-form review text; grok must have spent tool turns on it, not answered from the prompt alone."""
+    result = grok_envelope(log_path)
+    if not (isinstance(result.get('num_turns'), int) and result['num_turns'] > 1):
+        return None
+    text = result.get('text')
+    require(isinstance(text, str) and text.strip(), 'Grok analysis is empty')
+    return text
+
+
+def grok_result(log_path):
+    """Structured output of a schema-constrained grok run."""
+    result = grok_envelope(log_path)
     value = result.get('structuredOutput')
     require(isinstance(value, dict), f"Grok returned no structured output: {result.get('structuredOutputError')}")
     return value
@@ -362,19 +392,36 @@ class Runner:
     def grok_agent(self, repo, folder, name, prompt, output_schema):
         # Read-only by construction: only read_file/list_dir/grep are enabled, no subagents, no web.
         # bypassPermissions is required because headless grok cancels at any permission prompt.
+        # Two phases: a schema-constrained grok can answer on turn one without reading anything, so
+        # the review itself runs free-form (and must spend tool turns), then a second call only
+        # converts that text into the schema.
         source, reports = repo.resolve(), folder.resolve()
         require(source != reports and source not in reports.parents and reports not in source.parents,
                 'Reviewer report directory must be separate from source')
         schema_path, output_path = folder / f'{name}.schema.json', folder / f'{name}.json'
-        prompt_path, log_path = folder / f'{name}.prompt.md', folder / f'{name}.events.log'
+        prompt_path = folder / f'{name}.prompt.md'
         write_json(schema_path, output_schema)
         prompt_path.write_text(prompt)
-        command(['grok', '--prompt-file', str(prompt_path), '--cwd', str(repo),
-                 '--permission-mode', 'bypassPermissions', '--tools', GROK_TOOLS,
-                 '--no-subagents', '--disable-web-search', '--max-turns', '300',
-                 '--output-format', 'json', '--json-schema', json.dumps(output_schema)],
-                repo, log=log_path, lock_fd=self.lock_fd)
-        value = grok_result(log_path)
+        base = ['grok', '--cwd', str(repo), '--permission-mode', 'bypassPermissions', '--tools', GROK_TOOLS,
+                '--no-subagents', '--disable-web-search', '--output-format', 'json']
+        analysis = None
+        for attempt, (prompt_file, log_path) in enumerate((
+                (prompt_path, folder / f'{name}.events.log'),
+                (folder / f'{name}.retry.prompt.md', folder / f'{name}.retry.events.log'))):
+            if attempt:
+                prompt_file.write_text(prompt + GROK_NUDGE)
+            command([*base, '--max-turns', '300', '--prompt-file', str(prompt_file)], repo, log=log_path, lock_fd=self.lock_fd)
+            analysis = grok_analysis(log_path)
+            if analysis is not None:
+                break
+        require(analysis is not None, 'Grok answered without inspecting anything')
+        (folder / f'{name}.analysis.md').write_text(analysis)
+        structure_path = folder / f'{name}.structure.prompt.md'
+        structure_path.write_text(GROK_STRUCTURE_PROMPT.format(schema=json.dumps(output_schema), analysis=analysis))
+        structure_log = folder / f'{name}.structure.events.log'
+        command([*base, '--max-turns', '5', '--prompt-file', str(structure_path),
+                 '--json-schema', json.dumps(output_schema)], repo, log=structure_log, lock_fd=self.lock_fd)
+        value = grok_result(structure_log)
         write_json(output_path, value)
         require(set(value) == set(output_schema['required']), 'Incomplete structured agent response')
         return value
