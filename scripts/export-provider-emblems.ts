@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - Standalone asset export.
 import * as NodeFS from "node:fs";
-import { CLAUDE_EMBLEM } from "../packages/shared/src/providerEmblems.ts";
+import { CLAUDE_EMBLEM } from "@lecturn/shared/providerEmblems";
 const root = new URL("../", import.meta.url);
 const target = new URL("assets/provider-emblems/", root);
 NodeFS.mkdirSync(target, { recursive: true });
