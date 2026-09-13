@@ -3,6 +3,7 @@ import { Image } from "expo-image";
 import { View } from "react-native";
 
 import { AppText as Text } from "./AppText";
+import { resolveMobileStageLabel } from "../lib/mobileBranding";
 
 const appVariant = Constants.expoConfig?.extra?.appVariant;
 const BRAND_MARK_SOURCE =
@@ -11,8 +12,7 @@ const BRAND_MARK_SOURCE =
     : appVariant === "preview"
       ? require("../../../../assets/nightly/nightly-ios-1024.png")
       : require("../../../../assets/prod/black-ios-1024.png");
-const DEFAULT_STAGE_LABEL =
-  appVariant === "development" ? "Dev" : appVariant === "preview" ? "Preview" : "Alpha";
+const DEFAULT_STAGE_LABEL = resolveMobileStageLabel(appVariant);
 
 export function BrandMark(props: { readonly compact?: boolean; readonly stageLabel?: string }) {
   const compact = props.compact ?? false;
@@ -35,11 +35,13 @@ export function BrandMark(props: { readonly compact?: boolean; readonly stageLab
           <Text className="text-lg font-lecturn-bold tracking-[-0.4px] text-foreground">
             Lecturn
           </Text>
-          <View className="rounded-full bg-subtle px-2 py-1">
-            <Text className="text-3xs font-lecturn-bold tracking-[1.1px] uppercase text-foreground-muted">
-              {stageLabel}
-            </Text>
-          </View>
+          {stageLabel ? (
+            <View className="rounded-full bg-subtle px-2 py-1">
+              <Text className="text-3xs font-lecturn-bold tracking-[1.1px] uppercase text-foreground-muted">
+                {stageLabel}
+              </Text>
+            </View>
+          ) : null}
         </View>
         {!compact ? (
           <Text className="text-xs font-medium text-foreground-muted">

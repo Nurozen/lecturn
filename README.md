@@ -32,6 +32,13 @@ _Forking is available for Codex, Claude, and OpenCode. Cursor, Grok, and Antigra
 
 Lecturn Connect links your hosting computers to your account for remote access, managed notifications, and Live Activities. The hosting app must remain running. Local connections, direct pairing, SSH, and Tailscale remain free; managed Connect requires an active subscription, trial, or explicit complimentary access. Connect costs $10/month or $100/year for three managed environments, with a 14-day card-required trial.
 
+<p align="center">
+  <img src="./docs/images/lecturn-mobile-thread.webp" alt="Lecturn on iPhone showing a synthetic coding conversation." width="32%" />
+  <img src="./docs/images/lecturn-mobile-review.webp" alt="Lecturn on iPhone reviewing changes in a synthetic project." width="32%" />
+</p>
+
+_Current iPhone interface, captured with synthetic projects and conversations._
+
 The iOS app is a companion to your existing account access. Notification delivery also needs device permission and the corresponding settings enabled. See [Connect access](./docs/user/connect-subscription.md) and [remote access](./docs/user/remote-access.md) for details.
 
 ## Installation and access

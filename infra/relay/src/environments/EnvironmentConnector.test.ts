@@ -13,7 +13,7 @@ import {
 } from "@lecturn/contracts/relay";
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
-import { RELAY_HEALTH_RESPONSE_TYP, RELAY_MINT_RESPONSE_TYP } from "@lecturn/shared/relayJwt";
+
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -88,6 +88,24 @@ function signTestJwt(payload: object, typ: string, privateKey: string): string {
   return `${input}.${NodeCrypto.sign(null, Buffer.from(input), privateKey).toString("base64url")}`;
 }
 
+// Model an independently deployed host: do not import the relay's protocol constants here.
+function verifyHostRequest(proof: string, typ: string): void {
+  const [header, payload, signature] = proof.split(".");
+  expect(
+    Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(
+      Buffer.from(header!, "base64url").toString(),
+    ),
+  ).toEqual({ alg: "EdDSA", typ });
+  expect(
+    NodeCrypto.verify(
+      null,
+      Buffer.from(`${header}.${payload}`),
+      cloudKeyPair.publicKey,
+      Buffer.from(signature!, "base64url"),
+    ),
+  ).toBe(true);
+}
+
 function decodeRequestProof<T>(proof: string): T {
   const payload = proof.split(".")[1];
   if (!payload) throw new Error("Missing JWT payload.");
@@ -116,7 +134,7 @@ function signMintResponse(
   return {
     credential: payload.credential,
     expiresAt: DateTime.formatIso(DateTime.makeUnsafe(payload.exp * 1_000)),
-    proof: signTestJwt(payload, RELAY_MINT_RESPONSE_TYP, privateKey),
+    proof: signTestJwt(payload, "lecturn-env-mint+jwt", privateKey),
   };
 }
 
@@ -152,7 +170,7 @@ function signHealthResponse(
     status: "online",
     descriptor: payload.descriptor,
     checkedAt: payload.checkedAt,
-    proof: signTestJwt(payload, RELAY_HEALTH_RESPONSE_TYP, privateKey),
+    proof: signTestJwt(payload, "lecturn-env-health+jwt", privateKey),
     ...overrides,
   };
 }
@@ -366,6 +384,7 @@ describe("EnvironmentConnector", () => {
     const execute = (request: HttpClientRequest.HttpClientRequest) =>
       Effect.sync(() => {
         const healthRequest = decodeHealthRequestBody(requestBodyText(request));
+        verifyHostRequest(healthRequest.proof, "lecturn-cloud-health+jwt");
         seenUrls.push(request.url);
         seenProofs.push(decodeRequestProof(healthRequest.proof));
         return HttpClientResponse.fromWeb(
@@ -729,6 +748,7 @@ describe("EnvironmentConnector", () => {
     const execute = (request: HttpClientRequest.HttpClientRequest) =>
       Effect.sync(() => {
         const mintRequest = decodeMintRequestBody(requestBodyText(request));
+        verifyHostRequest(mintRequest.proof, "lecturn-cloud-mint+jwt");
         seenUrls.push(request.url);
         seenProofs.push(decodeRequestProof(mintRequest.proof));
         return HttpClientResponse.fromWeb(

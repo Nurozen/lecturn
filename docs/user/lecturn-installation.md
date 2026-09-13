@@ -34,4 +34,4 @@ Lecturn is available to invited internal testers through TestFlight. Install App
 
 Sign in to Lecturn Connect in both the desktop and mobile apps. Keep the desktop app running and link the computer to your account, then select that computer in Lecturn on your phone. In desktop Settings → Connections, enable **Publish agent activity**. Allow notifications when iOS asks; enable the activity notification or Live Activity options you want in Lecturn Settings. Start an agent task on the connected computer to check activity updates and notification delivery on your device.
 
-Push credentials and production signing are configured. Notification delivery still needs validation on a physical iPhone or iPad; successful TestFlight installation alone does not verify it.
+The **Device Notifications** switch reflects notification permission on your phone. It turns on after you allow permission; delivery setup may finish separately. If Settings shows setup is pending, check your connection and reopen Settings to retry. Notifications can arrive even while the app is reconnecting to a computer, so test both notification delivery and opening a conversation on your device.
