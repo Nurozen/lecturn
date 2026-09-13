@@ -41,6 +41,18 @@ _Current iPhone interface, captured with synthetic projects and conversations._
 
 The iOS app is a companion to your existing account access. Notification delivery also needs device permission and the corresponding settings enabled. See [Connect access](./docs/user/connect-subscription.md) and [remote access](./docs/user/remote-access.md) for details.
 
+## Stay connected to your agents
+
+Step away without losing track. Live Activities show which agents are working, need your attention, or have finished on your iPhone Lock Screen and, on supported devices, Dynamic Island. Tap the activity to return to the linked conversation and respond in Lecturn.
+
+<p align="center">
+  <img src="./docs/images/lecturn-live-activity-preview.png" alt="Native layout preview with sample agents marked Approval, Input, Failed, Working, and Done." width="560" />
+</p>
+
+_Native layout preview with synthetic activity data, not a device screenshot. System surroundings are not shown; presentation varies by device._
+
+Managed notifications and Live Activities are included in the paid **Lecturn Connect** plan described above, including its trial and complimentary access. They require an online hosting computer, device setup, and enabled activity publishing. Standard notification banners retain the system appearance. [Set up notifications and Live Activities](./docs/user/notifications-and-live-activities.md).
+
 ## Installation and access
 
 - **Desktop:** use a Lecturn installer from [Lecturn releases](https://github.com/Nurozen/lecturn/releases). Follow [Install Lecturn](./docs/user/lecturn-installation.md) for application identity, data isolation, and first connection instructions.
@@ -68,6 +80,7 @@ Read [AGENTS.md](./AGENTS.md) and [CONTRIBUTING.md](./CONTRIBUTING.md) before ma
 - [Lecturn installation and data isolation](./docs/user/lecturn-installation.md)
 - [Forking conversations](./docs/user/forking-threads.md)
 - [Connect access](./docs/user/connect-subscription.md)
+- [Notifications and Live Activities](./docs/user/notifications-and-live-activities.md)
 - [Permission modes](./docs/user/permission-modes.md)
 - [Keyboard shortcuts](./docs/user/keybindings.md)
 - [Project settings](./docs/user/project-settings.md)
