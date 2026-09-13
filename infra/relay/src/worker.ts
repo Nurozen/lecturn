@@ -141,6 +141,8 @@ export const ApiLive = Api.make(
   RelayDeploymentConfig.pipe(
     Effect.map(({ relayPublicDomain }) => ({
       main: import.meta.filename,
+      // Requires Workers Paid; cap each invocation at one second of CPU time.
+      limits: { cpuMs: 1_000 },
       compatibility: {
         date: "2026-05-22",
         flags: ["nodejs_compat"],

@@ -3,7 +3,7 @@ import type {
   RelayEnvironmentLinkProofPayload,
   RelayEnvironmentLinkRequest,
 } from "@lecturn/contracts/relay";
-import { RELAY_LINK_PROOF_TYP } from "@lecturn/shared/relayJwt";
+import { RELAY_LINK_PROOF_TYP, signRelayJwt } from "@lecturn/shared/relayJwt";
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -98,7 +98,11 @@ const makeRequest = Effect.gen(function* () {
   } satisfies RelayEnvironmentLinkProofPayload;
   return {
     request: {
-      proof: signTestJwt(payload, RELAY_LINK_PROOF_TYP, environmentKeyPair.privateKey),
+      proof: yield* signRelayJwt({
+        payload,
+        typ: RELAY_LINK_PROOF_TYP,
+        privateKey: environmentKeyPair.privateKey,
+      }),
       notificationsEnabled: true,
       liveActivitiesEnabled: true,
       managedTunnelsEnabled: false,
@@ -236,6 +240,13 @@ describe("EnvironmentLinker", () => {
       const { request, payload } = yield* makeRequest;
       const linker = yield* EnvironmentLinker.EnvironmentLinker;
       const result = yield* linker.link({ userId: "user_123", request });
+      // This is an externally deployed protocol identifier, deliberately not derived from shared constants.
+      expect(
+        Schema.decodeUnknownSync(Schema.UnknownFromJsonString)(
+          Buffer.from(request.proof.split(".")[0]!, "base64url").toString(),
+        ),
+      ).toEqual({ alg: "EdDSA", typ: "lecturn-env-link+jwt" });
+      expect(payload.iss).toBe("lecturn-env:env-link-test");
       expect(result.environmentId).toBe(payload.environmentId);
       expect(result.environmentCredential).toBe("lecturnenv_credential_secret");
       expect(persistedEnvironmentId).toBe(payload.environmentId);
@@ -250,6 +261,58 @@ describe("EnvironmentLinker", () => {
       ),
     );
   });
+
+  for (const invalid of [
+    { label: "legacy JWT type", typ: "t3-env-link+jwt", issuer: "lecturn-env:env-link-test" },
+    { label: "legacy issuer", typ: "lecturn-env-link+jwt", issuer: "t3-env:env-link-test" },
+    {
+      label: "another environment issuer",
+      typ: "lecturn-env-link+jwt",
+      issuer: "lecturn-env:other",
+    },
+  ]) {
+    it.effect(
+      `rejects a correctly signed link proof with ${invalid.label} before persistence`,
+      () => {
+        let persisted = false;
+        return Effect.gen(function* () {
+          const { request, payload } = yield* makeRequest;
+          const linker = yield* EnvironmentLinker.EnvironmentLinker;
+          const result = yield* Effect.result(
+            linker.link({
+              userId: "user_123",
+              request: {
+                ...request,
+                proof: signTestJwt(
+                  { ...payload, iss: invalid.issuer },
+                  invalid.typ,
+                  environmentKeyPair.privateKey,
+                ),
+              },
+            }),
+          );
+          expect(result._tag).toBe("Failure");
+          if (result._tag === "Failure") {
+            expect(result.failure).toMatchObject({
+              _tag: "EnvironmentLinkProofInvalid",
+              reason: "invalid_signature_or_scope",
+              stage: "verify_proof",
+            });
+          }
+          expect(persisted).toBe(false);
+        }).pipe(
+          Effect.provide(
+            testLayer({
+              upsert: () =>
+                Effect.sync(() => {
+                  persisted = true;
+                }),
+            }),
+          ),
+        );
+      },
+    );
+  }
 
   it.effect("links a publish-only environment with a non-secure nominal endpoint", () => {
     let persistedEndpoint: string | null = null;
