@@ -30,7 +30,7 @@ export async function clerkPreviewProxy(
   ) {
     return fail(403, "Open the exact preview deployment URL to sign in.");
   }
-  const path = url.pathname.replace(/^\/(?:api\/)?__clerk(?=\/|$)/, "");
+  const path = url.pathname.replace(/^\/(?:__clerk|api\/clerk-proxy)(?=\/|$)/, "");
   if (path === url.pathname || !path.startsWith("/")) return fail(404, "Not found.");
   const secret = env.CLERK_SECRET_KEY?.trim();
   if (!secret) return fail(503, "Preview authentication is not configured.");

@@ -114,7 +114,7 @@ describe("Clerk preview proxy", () => {
 
   it("keeps encoded and double-slash paths on the fixed Clerk upstream", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response("ok"));
-    await clerkPreviewProxy(request("/api/__clerk//evil.test/v1/client"), env, fetcher);
+    await clerkPreviewProxy(request("/api/clerk-proxy//evil.test/v1/client"), env, fetcher);
     expect((fetcher.mock.calls[0]![0] as Request).url).toBe(
       "https://frontend-api.clerk.dev//evil.test/v1/client",
     );
