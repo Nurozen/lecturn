@@ -10,11 +10,14 @@ import type { RelayTeamOrganization } from "@lecturn/contracts";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Pressable, View } from "react-native";
 import { AppText as Text } from "../../components/AppText";
-import { resolveCloudPublicConfig, resolveRelayClerkTokenOptions } from "./publicConfig";
+import { resolveCloudPublicConfig } from "./publicConfig";
+
+import { useSessionRelayToken } from "./useSessionRelayToken";
 
 /** Native companion: account selection and access status, without purchase links. */
 export function TeamSelector() {
-  const { userId, isSignedIn, getToken } = useAuth();
+  const { userId, sessionId, isSignedIn, getToken } = useAuth();
+  const tokenProvider = useSessionRelayToken({ userId, sessionId, isSignedIn, getToken });
   const selected = useSyncExternalStore(
     subscribeTeamSelection,
     () => selectedTeam(userId),
@@ -39,7 +42,7 @@ export function TeamSelector() {
     if (isSignedIn && userId)
       void createTeamsClient({
         relayUrl: resolveCloudPublicConfig().relay.url ?? "",
-        getToken: () => getToken(resolveRelayClerkTokenOptions()),
+        getToken: tokenProvider,
       })
         .list()
         .then(
@@ -59,7 +62,7 @@ export function TeamSelector() {
     return () => {
       disposed = true;
     };
-  }, [getToken, isSignedIn, userId]);
+  }, [tokenProvider, isSignedIn, userId]);
   if (!isSignedIn || !userId) return null;
   const organizations = result?.userId === userId ? result.organizations : [];
   const organization = organizations.find((org) => org.organizationId === selected);

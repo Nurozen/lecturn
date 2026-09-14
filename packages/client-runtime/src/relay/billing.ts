@@ -4,7 +4,11 @@ import {
   type RelayBillingInterval,
 } from "@lecturn/contracts";
 import { normalizeSecureRelayUrl } from "@lecturn/shared/relayUrl";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+
+const BILLING_REQUEST_TIMEOUT_MS = 15_000;
 
 const decodeBillingStatus = Schema.decodeUnknownSync(RelayBillingStatus);
 const decodeBillingRedirect = Schema.decodeUnknownSync(RelayBillingRedirect);
@@ -33,33 +37,60 @@ export function createBillingClient(options: {
   const fetcher = options.fetch ?? globalThis.fetch;
   async function request(path: string, body?: unknown): Promise<unknown> {
     if (!relayUrl) throw new BillingRequestError("unavailable");
-    const token = await options.getToken();
-    if (!token) throw new BillingRequestError("unauthenticated");
-    let response: Response;
-    try {
-      response = await fetcher(`${relayUrl}/v1/billing/${path}`, {
-        method: body === undefined ? "GET" : "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-        },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        cache: "no-store",
-        redirect: "error",
-      });
-    } catch {
-      throw new BillingRequestError("unavailable");
-    }
-    if (response.status === 401) throw new BillingRequestError("unauthenticated");
-    if (response.status === 404 || response.status >= 500)
-      throw new BillingRequestError("unavailable");
-    if (!response.ok) throw new BillingRequestError("rejected");
-    try {
-      return await response.json();
-    } catch {
-      throw new BillingRequestError("unavailable");
-    }
+    // Bound token acquisition and body reads too. Never submit after a late token resolves.
+    const execute = async (signal: AbortSignal) => {
+      const token = await options.getToken();
+      if (signal.aborted) throw new BillingRequestError("unavailable");
+      if (!token) throw new BillingRequestError("unauthenticated");
+      let response: Response;
+      try {
+        response = await fetcher(`${relayUrl}/v1/billing/${path}`, {
+          method: body === undefined ? "GET" : "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          cache: "no-store",
+          redirect: "error",
+          signal,
+        });
+      } catch {
+        throw new BillingRequestError("unavailable");
+      }
+      if (response.status === 401) throw new BillingRequestError("unauthenticated");
+      if (response.status === 404 || response.status >= 500)
+        throw new BillingRequestError("unavailable");
+      if (!response.ok) throw new BillingRequestError("rejected");
+      try {
+        return await response.json();
+      } catch {
+        throw new BillingRequestError("unavailable");
+      }
+    };
+    const result = await Effect.runPromise(
+      Effect.tryPromise({
+        try: execute,
+        catch: (error) =>
+          error instanceof BillingRequestError ? error : new BillingRequestError("unavailable"),
+      }).pipe(
+        Effect.timeoutOption(BILLING_REQUEST_TIMEOUT_MS),
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.fail(new BillingRequestError("unavailable")),
+            onSome: Effect.succeed,
+          }),
+        ),
+        Effect.match({
+          onFailure: (error) => ({ ok: false, error }) as const,
+          onSuccess: (value) => ({ ok: true, value }) as const,
+        }),
+      ),
+    );
+    if (!result.ok) throw result.error;
+    return result.value;
   }
+
   async function status(path: string, body?: unknown) {
     const raw = await request(path, body);
     try {
