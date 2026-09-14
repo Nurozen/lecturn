@@ -1,7 +1,12 @@
 import { Clock, Context, Effect, Schema } from "effect";
 import { operationId } from "../billing/BillingStore.ts";
 import { RelayDb } from "../db.ts";
-import { TeamError, type TeamAccount } from "./TeamStore.ts";
+import {
+  TeamError,
+  decodeTeamDatabaseRowEffect,
+  type TeamDatabaseRow,
+  type TeamAccount,
+} from "./TeamStore.ts";
 import {
   InvalidTeamWebhookError,
   type TeamBillingConfig,
@@ -49,13 +54,15 @@ export const makeTeamBillingRepository = Effect.gen(function* () {
     acquire: (org: string, time: number) =>
       Effect.gen(function* () {
         const rows = yield* query(
-          sql<BillingTeam>`UPDATE relay_team_accounts SET billing_lease_owner=${yield* operationId},billing_lease_expires_at=${time + 120},reconcile_after=${time + 300},generation=generation+1 WHERE organization_id=${org} AND billing_lease_expires_at<=${time} RETURNING *`,
+          sql<
+            TeamDatabaseRow<BillingTeam>
+          >`UPDATE relay_team_accounts SET billing_lease_owner=${yield* operationId},billing_lease_expires_at=${time + 120},reconcile_after=${time + 300},generation=generation+1 WHERE organization_id=${org} AND billing_lease_expires_at<=${time} RETURNING *`,
         );
         if (!rows[0])
           return yield* fail(
             "Another billing operation is running or the organization does not exist",
           );
-        return rows[0];
+        return yield* decodeTeamDatabaseRowEffect<BillingTeam>(rows[0]);
       }),
     save: (a: BillingTeam, time: number) =>
       Effect.gen(function* () {

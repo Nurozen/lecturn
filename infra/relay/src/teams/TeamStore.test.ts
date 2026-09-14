@@ -3,7 +3,8 @@ import { Effect, Layer, Redacted } from "effect";
 import * as PgClient from "@effect/sql-pg/PgClient";
 import { RelayDb } from "../db.ts";
 import { operationId } from "../billing/BillingStore.ts";
-import { makeTeamStore } from "./TeamStore.ts";
+import { decodeTeamDatabaseRow, makeTeamStore } from "./TeamStore.ts";
+import { makeTeamBillingRepository } from "./TeamBillingService.ts";
 
 const databaseUrl = process.env.BILLING_TEST_DATABASE_URL;
 const database = Layer.effect(
@@ -26,6 +27,33 @@ const fixture = Effect.gen(function* () {
   return { store, sql, organizationId, actorUserId: "owner" };
 });
 describe.skipIf(!databaseUrl)("TeamStore PostgreSQL", () => {
+  it.effect("returns numeric timestamps from actual PostgreSQL bigint columns", () =>
+    run(
+      Effect.gen(function* () {
+        const { store, sql, organizationId, actorUserId } = yield* fixture;
+        yield* sql`UPDATE relay_team_accounts SET current_period_end=1000 WHERE organization_id=${organizationId}`;
+        yield* store.assignSeat({ organizationId, actorUserId, userId: organizationId });
+        const account = yield* store.get(organizationId);
+        const billing = yield* makeTeamBillingRepository;
+        const acquired = yield* billing.acquire(organizationId, 0);
+        expect(acquired.current_period_end).toBe(1000);
+        expect(acquired.billing_lease_expires_at).toBe(120);
+        expect(typeof acquired.generation).toBe("number");
+        for (const value of [
+          account?.access_until,
+          account?.current_period_end,
+          account?.created_at,
+          account?.updated_at,
+          account?.billing_lease_expires_at,
+          account?.reconcile_after,
+          (yield* store.seats(organizationId))[0]?.assigned_at,
+          (yield* store.history(organizationId))[0]?.created_at,
+        ])
+          expect(typeof value).toBe("number");
+      }),
+    ),
+  );
+
   it.effect("serializes concurrent assignments against paid seat capacity", () =>
     run(
       Effect.gen(function* () {
@@ -208,5 +236,46 @@ describe.skipIf(!databaseUrl)("TeamStore user deletion", () => {
           expect((yield* store.funding(deletedUser, other))?.organizationId).toBe(other);
         }),
       ),
+  );
+});
+
+describe("Teams PostgreSQL numeric decoding", () => {
+  it("converts driver bigint strings without changing JSON policy, IDs, or nulls", () => {
+    const decoded = decodeTeamDatabaseRow({
+      organization_id: "1789410878",
+      purchased_seats: 5,
+      access_until: "1789411000",
+      access_window_start: "1789410000",
+      current_period_end: null,
+      pending_seats: null,
+      generation: 2,
+      reconcile_after: "0",
+      billing_lease_expires_at: "1789410900",
+      created_at: "1789410878",
+      updated_at: "1789410879",
+      assigned_at: "1789410878",
+      policy: { allowedProviders: null, publishAgentActivity: true },
+      billing_state: { operation: { createdAt: 1789410878 } },
+    });
+    expect(JSON.parse(JSON.stringify(decoded))).toEqual({
+      organization_id: "1789410878",
+      purchased_seats: 5,
+      access_until: 1789411000,
+      access_window_start: 1789410000,
+      current_period_end: null,
+      pending_seats: null,
+      generation: 2,
+      reconcile_after: 0,
+      billing_lease_expires_at: 1789410900,
+      created_at: 1789410878,
+      updated_at: 1789410879,
+      assigned_at: 1789410878,
+      policy: { allowedProviders: null, publishAgentActivity: true },
+      billing_state: { operation: { createdAt: 1789410878 } },
+    });
+  });
+  it.each(["", "1.5", "9007199254740993", "not-a-number", Infinity])(
+    "rejects invalid or lossy database integers: %s",
+    (created_at) => expect(() => decodeTeamDatabaseRow({ created_at })).toThrow(),
   );
 });
