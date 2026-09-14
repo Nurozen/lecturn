@@ -178,13 +178,12 @@ export function threadActivityRows(
     | "modelSelection"
     | "session"
     | "archivedAt"
+    | "settledOverride"
     | "backgroundLiveness"
     | "hasPendingApprovals"
     | "hasPendingUserInput"
   > &
-    Partial<
-      Pick<EnvironmentThreadShell, "planProgress" | "latestUserMessageAt" | "settledOverride">
-    >)[],
+    Partial<Pick<EnvironmentThreadShell, "planProgress" | "latestUserMessageAt">>)[],
   connected: ReadonlySet<EnvironmentId>,
   interactions: Readonly<Record<string, string>> = {},
 ): DesktopActivityRow[] {
@@ -195,9 +194,14 @@ export function threadActivityRows(
       .filter((at): at is string => typeof at === "string")
       .sort()
       .at(-1) ?? "";
+  // Settled conversations remain in the live shell stream. Exclude them before
+  // choosing recent slots, even if stale session metadata still reports activity.
+  const eligible = threads.filter(
+    (thread) => !thread.archivedAt && thread.settledOverride !== "settled",
+  );
   const recent = new Set(
-    threads
-      .filter((thread) => !thread.archivedAt && interactedAt(thread))
+    eligible
+      .filter((thread) => interactedAt(thread))
       .toSorted(
         (a, b) =>
           interactedAt(b).localeCompare(interactedAt(a)) || keyOf(a).localeCompare(keyOf(b)),
@@ -205,18 +209,17 @@ export function threadActivityRows(
       .slice(0, 3)
       .map(keyOf),
   );
-  return threads
+  return eligible
     .filter(
       (thread) =>
-        !thread.archivedAt &&
-        (recent.has(keyOf(thread)) ||
-          (connected.has(thread.environmentId) &&
-            (thread.session?.status === "running" ||
-              thread.session?.status === "starting" ||
-              thread.session?.status === "error" ||
-              thread.backgroundLiveness ||
-              thread.hasPendingApprovals ||
-              thread.hasPendingUserInput))),
+        recent.has(keyOf(thread)) ||
+        (connected.has(thread.environmentId) &&
+          (thread.session?.status === "running" ||
+            thread.session?.status === "starting" ||
+            thread.session?.status === "error" ||
+            thread.backgroundLiveness ||
+            thread.hasPendingApprovals ||
+            thread.hasPendingUserInput)),
     )
     .toSorted(
       (a, b) =>
@@ -232,25 +235,21 @@ export function threadActivityRows(
       title: thread.title,
       subtitle: thread.modelSelection.model,
       detail: describeThreadActivity(thread),
-      status:
-        thread.settledOverride === "settled"
-          ? "Settled"
-          : thread.hasPendingApprovals
-            ? "Needs approval"
-            : thread.hasPendingUserInput
-              ? "Needs input"
-              : thread.session?.status === "error"
-                ? "Agent error"
-                : thread.backgroundLiveness === "monitoring"
-                  ? "Monitoring"
-                  : thread.session?.status === "running" ||
-                      thread.session?.status === "starting" ||
-                      thread.backgroundLiveness === "working"
-                    ? "Working"
-                    : thread.session?.status === "interrupted" ||
-                        thread.session?.status === "stopped"
-                      ? "Stopped"
-                      : "Idle",
+      status: thread.hasPendingApprovals
+        ? "Needs approval"
+        : thread.hasPendingUserInput
+          ? "Needs input"
+          : thread.session?.status === "error"
+            ? "Agent error"
+            : thread.backgroundLiveness === "monitoring"
+              ? "Monitoring"
+              : thread.session?.status === "running" ||
+                  thread.session?.status === "starting" ||
+                  thread.backgroundLiveness === "working"
+                ? "Working"
+                : thread.session?.status === "interrupted" || thread.session?.status === "stopped"
+                  ? "Stopped"
+                  : "Idle",
       actions: [
         { id: "open", label: "Open thread" },
         { id: "steer", label: "Steer thread" },

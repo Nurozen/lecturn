@@ -37,6 +37,7 @@ export interface ProjectThreadAwarenessInput {
     | "modelSelection"
     | "session"
     | "latestTurn"
+    | "settledOverride"
     | "updatedAt"
     | "hasPendingApprovals"
     | "hasPendingUserInput"
@@ -54,6 +55,9 @@ export function projectThreadAwareness(
   input: ProjectThreadAwarenessInput,
 ): AgentAwarenessState | null {
   const { environmentId, project, thread } = input;
+  // Putting a conversation away removes its activity; finishing a turn still
+  // publishes Done until the user settles the conversation.
+  if (thread.settledOverride === "settled") return null;
   const phase = resolveThreadAwarenessPhase(thread);
   if (!phase) {
     return null;

@@ -54,9 +54,11 @@ An automatic merge authorization created by an earlier version remains visible. 
 
 CI facts can be stale while the host is offline or the Git provider is unavailable. Open the CI disclosure for individual jobs and the information control for observation details.
 
+Settling a conversation removes its thread activity from Live Activities and the Mac panel. An ordinary completed turn still reports that the agent finished. Watched PRs remain available independently of whether their managing conversation is settled.
+
 ## Mac activity panel
 
-The desktop app has its own compact activity panel, independent of iPhone mirroring. It retains your three most recently interacted conversations, including idle or stopped work, alongside other active conversations and watched PRs. Expand a PR’s CI indicator to see individual jobs. Status icons and gold borders give a quick overview; information and message controls reveal context and steering.
+The desktop app has its own compact activity panel, independent of iPhone mirroring. It retains your three most recently interacted unsettled conversations, including idle or stopped work, alongside other active conversations and watched PRs. Expand a PR’s CI indicator to see individual jobs. Status icons and gold borders give a quick overview; information and message controls reveal context and steering.
 
 Use **Show activity notch** or **Hide activity notch** in Pull Requests or the **Lecturn activity** menu-bar menu to enable or hide it. On an internal display with a recognizable notch area, the panel joins the top edge around the camera housing, with compact controls beside the camera and expanded content extending downward. On other displays, or when that area cannot be identified, use **Show activity** from the menu bar. The celestial background and illuminated-book logo match Lecturn. A moving gold border marks active work; it stops when hidden or when reduced motion is enabled. Approval, input and error states keep explicit labels.
 

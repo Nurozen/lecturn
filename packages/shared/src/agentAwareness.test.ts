@@ -26,6 +26,7 @@ function thread(
   | "modelSelection"
   | "session"
   | "latestTurn"
+  | "settledOverride"
   | "updatedAt"
   | "hasPendingApprovals"
   | "hasPendingUserInput"
@@ -36,6 +37,7 @@ function thread(
     modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
     session: null,
     latestTurn: null,
+    settledOverride: null,
     updatedAt: NOW,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
@@ -44,6 +46,29 @@ function thread(
 }
 
 describe("projectThreadAwareness", () => {
+  it("removes settled conversation activity and restores it on unsettle without hiding ordinary completion", () => {
+    const finished = thread({
+      latestTurn: {
+        turnId: "turn-1" as TurnId,
+        state: "completed",
+        requestedAt: NOW,
+        startedAt: NOW,
+        completedAt: NOW,
+        assistantMessageId: null,
+      },
+    });
+    const projectState = (settledOverride: OrchestrationThreadShell["settledOverride"]) =>
+      projectThreadAwareness({
+        environmentId: "env-1" as EnvironmentId,
+        project,
+        thread: { ...finished, settledOverride },
+      });
+
+    expect(projectState(null)?.phase).toBe("completed");
+    expect(projectState("settled")).toBeNull();
+    expect(projectState("active")?.phase).toBe("completed");
+  });
+
   it("returns null for idle threads without an active awareness state", () => {
     expect(
       projectThreadAwareness({

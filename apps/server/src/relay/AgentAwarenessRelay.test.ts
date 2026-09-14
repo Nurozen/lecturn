@@ -304,7 +304,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
     });
   });
 
-  it("selects only active shell snapshot threads for startup catch-up", () => {
+  it("excludes settled conversations from startup catch-up and projects their activity tombstone", () => {
     const now = "2026-05-25T00:00:00.000Z";
     const environmentId = "env-1" as EnvironmentId;
     const projectId = "project-1" as ProjectId;
@@ -332,6 +332,39 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
       hasActionableProposedPlan: false,
     } satisfies Omit<OrchestrationThreadShell, "id">;
 
+    const settledThread = {
+      ...baseThread,
+      id: "thread-settled" as ThreadId,
+      settledOverride: "settled",
+      settledAt: now,
+      latestTurn: {
+        turnId: "turn-settled" as TurnId,
+        state: "completed",
+        requestedAt: now,
+        startedAt: now,
+        completedAt: now,
+        assistantMessageId: null,
+      },
+    } satisfies OrchestrationThreadShell;
+
+    expect(
+      AgentAwarenessRelay.resolveAgentAwarenessRelayPublishSnapshot({
+        environmentId,
+        threadId: settledThread.id,
+        thread: Option.some(settledThread),
+        project: Option.some({
+          id: projectId,
+          title: "Lecturn",
+          workspaceRoot: "/workspace",
+          repositoryIdentity: null,
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        }),
+      }),
+    ).toEqual({ projectId, state: null, reason: "snapshot" });
+
     expect(
       AgentAwarenessRelay.resolveAgentAwarenessRelayActiveThreadIds({
         environmentId,
@@ -342,6 +375,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
           },
         ],
         threads: [
+          settledThread,
           {
             ...baseThread,
             id: activeThreadId,
