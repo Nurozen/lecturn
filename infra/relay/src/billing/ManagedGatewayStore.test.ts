@@ -41,6 +41,26 @@ const fixture = Effect.gen(function* () {
   return { sql, userId, config, mapping, store };
 });
 describe.skipIf(!databaseUrl)("ManagedGatewayStore PostgreSQL", () => {
+  it.effect("cuts off revoked company funding without changing the owner's personal window", () =>
+    run(
+      Effect.gen(function* () {
+        const { mapping, userId, sql, config } = yield* fixture;
+        const store = yield* makeManagedGatewayStore({ ...config, teamsEnabled: true });
+        yield* sql`INSERT INTO relay_team_accounts(organization_id,owner_user_id,purchased_seats,access_until,access_window_start,created_at,updated_at) VALUES (${userId},${userId},5,200,0,0,0)`;
+        yield* sql`INSERT INTO relay_team_seats(organization_id,user_id,assigned_at) VALUES (${userId},${userId},0)`;
+        yield* sql`INSERT INTO relay_team_environment_funding(organization_id,user_id,environment_id,created_at) VALUES (${userId},${userId},${mapping.environmentId},0)`;
+        const pending = yield* store.registerPending(mapping);
+        yield* store.markReady(pending);
+        const active = yield* store.capture(userId);
+        expect(active.accessUntilMs).toBe(100000);
+        expect(active.environments[0]?.accessUntilMs).toBe(200000);
+        yield* sql`DELETE FROM relay_team_seats WHERE organization_id=${userId}`;
+        const revoked = yield* store.capture(userId);
+        expect(revoked.accessUntilMs).toBe(100000);
+        expect(revoked.environments[0]?.accessUntilMs).toBeNull();
+      }),
+    ),
+  );
   it.effect("only explicitly ready mappings enter finite authoritative snapshots", () =>
     run(
       Effect.gen(function* () {

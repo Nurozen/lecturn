@@ -212,6 +212,16 @@ ships Lecturn already matching it.
 - [Workspace layout][2]
 - [Stave integration (fork)][28]
 
+## Teams terminology
+
+- **Company / organization**: a Clerk organization with a relay Teams account for centralized Connect purchasing and policy. It is not a shared environment.
+- **Purchased seat**: one unit of company subscription capacity. Purchasing a seat does not assign it to a member.
+- **Assigned seat**: an explicit allocation to one current member; paid entitlement and live membership are also required for company access.
+- **Funding organization**: the company bound to an environment link. It remains fixed until explicit unlink/relink and never replaces the environment's user owner.
+- **Company policy**: allowed providers and activity-publishing rules enforced by company-funded hosts and the relay.
+
+See [Teams architecture](teams.md) for enforcement boundaries.
+
 [1]: ../../packages/contracts/src/orchestration.ts
 [2]: ./workspace-layout.md
 [3]: ../../apps/server/src/vcs/GitVcsDriverCore.ts

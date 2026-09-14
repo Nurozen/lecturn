@@ -63,7 +63,7 @@ const run = (request: Request, service = makeService(), activeConfig = config) =
     const handler = yield* HttpRouter.toHttpEffect(
       Layer.merge(
         billingRoutes(activeConfig, "whsec_test"),
-        makeRelayCors(activeConfig.appOrigin),
+        makeRelayCors(activeConfig.appOrigin, activeConfig.additionalAppOrigins),
       ).pipe(
         Layer.provide(
           Layer.merge(
@@ -91,6 +91,75 @@ const post = (path: string, payload: unknown, origin = config.appOrigin) =>
     body: JSON.stringify(payload),
   });
 describe("billing HTTP boundary", () => {
+  it.effect(
+    "permits an explicitly configured preview for status, preflight and authenticated mutation",
+    () =>
+      Effect.gen(function* () {
+        auth();
+        const preview = "https://pr-33.preview.lecturn.cloudgatherer.net";
+        const activeConfig = parseBillingConfig({ BILLING_ADDITIONAL_APP_ORIGINS: preview });
+        const portal = vi.fn(() => Effect.succeed({ url: "https://billing.stripe.com/test" }));
+        for (const method of ["GET", "OPTIONS"]) {
+          const response = yield* run(
+            new Request("https://relay.test/v1/billing/status", {
+              method,
+              headers: {
+                origin: preview,
+                authorization: "Bearer test",
+                "access-control-request-method": "GET",
+              },
+            }),
+            makeService(),
+            activeConfig,
+          );
+          expect(response.status).toBe(method === "GET" ? 200 : 204);
+          expect(response.headers.get("access-control-allow-origin")).toBe(preview);
+        }
+        const signedOut = yield* run(
+          new Request("https://relay.test/v1/billing/status", { headers: { origin: preview } }),
+          makeService(),
+          activeConfig,
+        );
+        expect(signedOut.status).toBe(401);
+        expect(signedOut.headers.get("access-control-allow-origin")).toBe(preview);
+        const response = yield* run(
+          post("portal", {}, preview),
+          makeService({ portal }),
+          activeConfig,
+        );
+        expect(response.status).toBe(200);
+        expect(portal).toHaveBeenCalledWith("user_verified");
+        expect(activeConfig.appOrigin).toBe(config.appOrigin);
+      }),
+  );
+  it.effect("does not grant wildcard, sibling or suffix origins access", () =>
+    Effect.gen(function* () {
+      auth();
+      const preview = "https://pr-33.preview.lecturn.cloudgatherer.net";
+      const activeConfig = parseBillingConfig({ BILLING_ADDITIONAL_APP_ORIGINS: preview });
+      const portal = vi.fn(() => Effect.succeed({ url: "https://billing.stripe.com/test" }));
+      for (const origin of [
+        "https://pr-34.preview.lecturn.cloudgatherer.net",
+        `${preview}.evil.test`,
+        "https://attacker.test",
+      ]) {
+        const preflight = yield* run(
+          new Request("https://relay.test/v1/billing/portal", {
+            method: "OPTIONS",
+            headers: { origin },
+          }),
+          makeService(),
+          activeConfig,
+        );
+        expect(preflight.status).toBe(403);
+        expect(preflight.headers.has("access-control-allow-origin")).toBe(false);
+        expect(
+          (yield* run(post("portal", {}, origin), makeService({ portal }), activeConfig)).status,
+        ).toBe(403);
+      }
+      expect(portal).not.toHaveBeenCalled();
+    }),
+  );
   it.effect("billing preflight only permits the account origin", () =>
     Effect.gen(function* () {
       const allowed = yield* run(

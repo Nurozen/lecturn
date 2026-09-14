@@ -14,6 +14,7 @@ import { CloudEnvironmentRows } from "../connection/CloudEnvironmentRows";
 import { splitEnvironmentSections } from "../connection/environmentSections";
 import { useConnectionController } from "../connection/useConnectionController";
 import { optOutOfConnectOnboarding } from "./connectOnboardingOptOut";
+import { TeamSelector } from "./TeamSelector";
 import { hasCloudPublicConfig } from "./publicConfig";
 
 /**
@@ -143,6 +144,7 @@ function ConfiguredConnectOnboardingRouteScreen() {
             <Text className="text-xs text-foreground-muted">{"Don't show this again"}</Text>
           </Pressable>
         ) : null}
+        <TeamSelector />
       </ScrollView>
     </View>
   );

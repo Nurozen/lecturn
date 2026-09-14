@@ -1,3 +1,4 @@
+import { makeTeamStore, type TeamError } from "../teams/TeamStore.ts";
 import { effectiveAccountAccess } from "./BillingGrants.ts";
 import { Clock, Context, Effect, Layer, Schema } from "effect";
 import { makeBillingStore, type BillingError, type BillingAccount } from "./BillingStore.ts";
@@ -18,6 +19,7 @@ export class ManagedAccess extends Context.Service<
       userId: string,
       feature: ManagedFeature,
       originCreatedAtSeconds?: number,
+      environmentId?: string,
     ) => Effect.Effect<void, ManagedAccessRequired | ManagedAccessUnavailable>;
   }
 >()("lecturn-relay/billing/ManagedAccess") {}
@@ -30,60 +32,97 @@ export const make = (
   load: (userId: string) => Effect.Effect<BillingAccount | undefined, BillingError>,
   enforcementUsers?: readonly string[],
   enforcePayment = true,
+  teamAccess?: (
+    userId: string,
+    environmentId: string,
+    now: number,
+  ) => Effect.Effect<
+    | {
+        allowed: boolean;
+        validUntil: number;
+        windowStart: number;
+        policy: { publishAgentActivity: boolean };
+      }
+    | undefined,
+    TeamError
+  >,
 ) =>
   ManagedAccess.of({
-    check: Effect.fn("ManagedAccess.check")(function* (userId, _feature, originCreatedAtSeconds) {
-      const account = yield* load(userId).pipe(
-        Effect.mapError(
-          () =>
-            new ManagedAccessUnavailable({
-              message: "Connect subscription status is temporarily unavailable. Please retry.",
-            }),
-        ),
-      );
-      const now = Math.floor((yield* Clock.currentTimeMillis) / 1000);
-      if (account?.deleted_at != null)
-        return yield* new ManagedAccessRequired({ message: "This account was deleted." });
-      if (
-        !enforcePayment ||
-        (enforcementUsers !== undefined &&
-          !enforcementUsers.includes("*") &&
-          !enforcementUsers.includes(userId))
-      )
-        return;
-      const access = effectiveAccountAccess(account, now);
-      if (!access.available)
-        return yield* new ManagedAccessUnavailable({
-          message: "Connect subscription status needs reconciliation. Please retry.",
-        });
-      if (!access.allowed)
-        return yield* new ManagedAccessRequired({
-          message: "An active Connect subscription is required.",
-        });
-      if (
-        originCreatedAtSeconds !== undefined &&
-        (!Number.isFinite(originCreatedAtSeconds) ||
-          originCreatedAtSeconds >= now + 1 ||
-          !Number.isFinite(access.windowStart) ||
-          originCreatedAtSeconds < (access.windowStart ?? Infinity))
-      )
-        return yield* new ManagedAccessRequired({
-          message: "This notification belongs to an expired Connect access window.",
-        });
-    }),
+    check: Effect.fn("ManagedAccess.check")(
+      function* (userId, feature, originCreatedAtSeconds, environmentId) {
+        const account = yield* load(userId).pipe(
+          Effect.mapError(
+            () =>
+              new ManagedAccessUnavailable({
+                message: "Connect subscription status is temporarily unavailable. Please retry.",
+              }),
+          ),
+        );
+        const now = Math.floor((yield* Clock.currentTimeMillis) / 1000);
+        if (account?.deleted_at != null)
+          return yield* new ManagedAccessRequired({ message: "This account was deleted." });
+        const team =
+          environmentId && teamAccess
+            ? yield* teamAccess(userId, environmentId, now).pipe(
+                Effect.mapError(
+                  () =>
+                    new ManagedAccessUnavailable({
+                      message: "Team access is temporarily unavailable.",
+                    }),
+                ),
+              )
+            : undefined;
+        if (
+          !team &&
+          (!enforcePayment ||
+            (enforcementUsers !== undefined &&
+              !enforcementUsers.includes("*") &&
+              !enforcementUsers.includes(userId)))
+        )
+          return;
+        const access = team
+          ? {
+              available: true,
+              allowed:
+                team.allowed && (feature === "managedConnect" || team.policy.publishAgentActivity),
+              windowStart: team.windowStart,
+            }
+          : effectiveAccountAccess(account, now);
+        if (!access.available)
+          return yield* new ManagedAccessUnavailable({
+            message: "Connect subscription status needs reconciliation. Please retry.",
+          });
+        if (!access.allowed)
+          return yield* new ManagedAccessRequired({
+            message: "An active Connect subscription is required.",
+          });
+        if (
+          originCreatedAtSeconds !== undefined &&
+          (!Number.isFinite(originCreatedAtSeconds) ||
+            originCreatedAtSeconds >= now + 1 ||
+            !Number.isFinite(access.windowStart) ||
+            originCreatedAtSeconds < (access.windowStart ?? Infinity))
+        )
+          return yield* new ManagedAccessRequired({
+            message: "This notification belongs to an expired Connect access window.",
+          });
+      },
+    ),
   });
 
 export const layer = (
   enabled: boolean,
   enforcementUsers?: readonly string[],
   enforcePayment = true,
+  teamsEnabled = false,
 ) =>
   enabled
     ? Layer.effect(
         ManagedAccess,
         Effect.gen(function* () {
           const store = yield* makeBillingStore;
-          return make(store.load, enforcementUsers, enforcePayment);
+          const teams = teamsEnabled ? yield* makeTeamStore : undefined;
+          return make(store.load, enforcementUsers, enforcePayment, teams?.access);
         }),
       )
     : layerDisabled;

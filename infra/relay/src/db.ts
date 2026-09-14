@@ -10,6 +10,8 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
+import { RELAY_PRODUCTION_DATABASE_NAME } from "./physicalIdentity.ts";
+
 import { relayDatabaseMode } from "./dbConfig.ts";
 
 export class RelayDb extends Context.Service<
@@ -48,7 +50,7 @@ export const PlanetscaleDatabase = Effect.gen(function* () {
   const database =
     mode === "shared-database"
       ? yield* Planetscale.PostgresDatabase("RelayPostgresDatabase", {
-          name: "lecturnrelay",
+          name: RELAY_PRODUCTION_DATABASE_NAME,
           region: { slug: "us-west" },
           clusterSize: "PS_5",
           migrationsDir: schema.out,
@@ -69,7 +71,8 @@ export const PlanetscaleDatabase = Effect.gen(function* () {
       : undefined;
 
   const runtimeRole = yield* Planetscale.PostgresRole("RelayPostgresRuntimeRole", {
-    database,
+    // A schema migration changes database outputs, not the role identity.
+    database: mode === "shared-database" ? RELAY_PRODUCTION_DATABASE_NAME : database,
     ...(branch ? { branch } : {}),
     inheritedRoles: ["pg_read_all_data", "pg_write_all_data"],
   });

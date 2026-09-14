@@ -173,6 +173,7 @@ export const RelayLinkProofRequest = Schema.Struct({
 export type RelayLinkProofRequest = typeof RelayLinkProofRequest.Type;
 
 export const RelayEnvironmentConfigRequest = Schema.Struct({
+  organizationId: Schema.optionalKey(TrimmedNonEmptyString),
   relayUrl: Schema.String,
   relayIssuer: Schema.optional(Schema.String),
   cloudUserId: Schema.String,
@@ -218,6 +219,7 @@ export const RelayEnvironmentLinkScope = Schema.Literals([
 export type RelayEnvironmentLinkScope = typeof RelayEnvironmentLinkScope.Type;
 
 export const RelayEnvironmentLinkProofPayload = Schema.Struct({
+  teamPolicyVersion: Schema.optionalKey(Schema.Literal(1)),
   ...RelaySignedJwtRegisteredClaims,
   challenge: TrimmedNonEmptyString,
   descriptor: ExecutionEnvironmentDescriptor,
@@ -253,6 +255,7 @@ export type RelayEnvironmentLinkChallengeResponse =
   typeof RelayEnvironmentLinkChallengeResponse.Type;
 
 export const RelayEnvironmentLinkRequest = Schema.Struct({
+  organizationId: Schema.optionalKey(TrimmedNonEmptyString),
   deviceId: Schema.optional(
     TrimmedNonEmptyString.annotate({
       description: "Optional client device identifier associated with this link.",
@@ -268,6 +271,7 @@ export const RelayEnvironmentLinkRequest = Schema.Struct({
 export type RelayEnvironmentLinkRequest = typeof RelayEnvironmentLinkRequest.Type;
 
 export const RelayEnvironmentLinkResponse = Schema.Struct({
+  organizationId: Schema.optionalKey(TrimmedNonEmptyString),
   ok: Schema.Boolean,
   cloudUserId: TrimmedNonEmptyString,
   environmentId: EnvironmentId,

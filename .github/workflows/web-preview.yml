@@ -1,19 +1,15 @@
 name: Web Preview
 
 # Label a PR `preview:web` to get a hosted-web preview deployment on Vercel for
-# that push and every subsequent push. The deployment is a plain (non-prod,
-# non-aliased) deploy into the existing hosted-web Vercel project, so the
-# latest/nightly channel aliases are never touched.
+# that push and every subsequent push. Each PR gets its own controlled subdomain;
+# the latest/nightly channel aliases are never touched.
 #
-# The build intentionally omits the Lecturn Connect cloud config (Clerk keys, relay
-# URL): previews boot as the hosted-static app with manual pairing only. Pair a
-# server into a preview with `lecturn pair --tailscale` (or any reachable HTTPS
-# backend) and open the pairing URL against the preview origin.
+# Builds inherit the Vercel project's Preview public Clerk/relay configuration.
+# Production Clerk accounts require a preview on the same root domain. No Clerk
+# secret or frontend API proxy is needed. These previews use real account data.
 #
-# The preview must be opened at the exact deployment URL from the PR comment.
-# Vite bakes that URL in as the hosted origin (via VERCEL_URL), and
-# `isHostedStaticApp` matches on origin, so branch-alias URLs will not
-# self-identify as the hosted app.
+# Open the custom preview URL from the PR comment. Vite bakes that exact origin
+# into the build; the generated vercel.app URL is not an authenticated preview.
 
 on:
   pull_request:
@@ -44,6 +40,8 @@ jobs:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -76,10 +74,12 @@ jobs:
           fi
 
           vercel_scope="${VERCEL_TEAM_SLUG:-$VERCEL_ORG_ID}"
+          preview_origin="https://pr-${PR_NUMBER}.preview.lecturn.cloudgatherer.net"
 
           deployment_url="$(
             vp dlx vercel@53.1.1 deploy \
               --archive=tgz \
+              --build-env "VITE_HOSTED_APP_URL=$preview_origin" \
               --yes \
               --token "$VERCEL_TOKEN" \
               --scope "$vercel_scope"
@@ -88,10 +88,16 @@ jobs:
           echo "Deployed $deployment_url"
           echo "deployment_url=$deployment_url" >> "$GITHUB_OUTPUT"
 
+      - id: alias
+        name: Assign the PR preview domain
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment_url }}
+        run: node scripts/assign-web-preview.ts
+
       - name: Comment deployment URL
         uses: actions/github-script@v8
         env:
-          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment_url }}
+          DEPLOYMENT_URL: ${{ steps.alias.outputs.preview_url }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         with:
           script: |
@@ -102,7 +108,8 @@ jobs:
               "",
               `${process.env.DEPLOYMENT_URL} (for ${process.env.HEAD_SHA.slice(0, 7)})`,
               "",
-              "Open this exact URL — the hosted-app origin is baked in at build time.",
+              "Open this exact URL — sign-in uses the existing production Lecturn account.",
+              "This preview uses real account data. The generated vercel.app URL is not supported for sign-in.",
               "Pair a server into it with `lecturn pair --tailscale`, or paste a host + pairing",
               "code under Settings → Connections.",
             ].join("\n");

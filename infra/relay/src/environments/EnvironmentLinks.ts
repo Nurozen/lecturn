@@ -112,6 +112,8 @@ export class EnvironmentLinks extends Context.Service<
     }) => Effect.Effect<void, EnvironmentLinkUpsertPersistenceError>;
     readonly listUsersForEnvironment: (input: {
       readonly environmentId: string;
+      readonly includeAllLinkedUsers?: boolean;
+      readonly environmentPublicKey?: string;
     }) => Effect.Effect<ReadonlyArray<string>, EnvironmentLinkUserListPersistenceError>;
     readonly listDeliveryUsersForEnvironment: (input: {
       readonly environmentId: string;
@@ -226,7 +228,19 @@ const make = Effect.gen(function* () {
         return yield* db
           .select({ userId: relayEnvironmentLinks.userId })
           .from(relayEnvironmentLinks)
-          .where(agentAwarenessDeliveryUserCondition(input.environmentId))
+          .where(
+            and(
+              input.includeAllLinkedUsers
+                ? and(
+                    eq(relayEnvironmentLinks.environmentId, input.environmentId),
+                    isNull(relayEnvironmentLinks.revokedAt),
+                  )
+                : agentAwarenessDeliveryUserCondition(input.environmentId),
+              input.environmentPublicKey === undefined
+                ? undefined
+                : eq(relayEnvironmentLinks.environmentPublicKey, input.environmentPublicKey),
+            ),
+          )
           .pipe(
             Effect.map((rows) => rows.map((row) => row.userId)),
             Effect.mapError(

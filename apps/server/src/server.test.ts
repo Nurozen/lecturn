@@ -1,3 +1,4 @@
+import { decodeRelayJwt, verifyRelayJwt, RELAY_LINK_PROOF_TYP } from "@lecturn/shared/relayJwt";
 import * as Context from "effect/Context";
 import { OrchestrationEngineLive } from "./orchestration/Layers/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./orchestration/Layers/ProjectionPipeline.ts";
@@ -2363,6 +2364,44 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(bootstrap.body.reason, "invalid_credential");
       assert.equal(bootstrap.body.dpopFailureReason, "request_mismatch");
       assert.equal(typeof bootstrap.body.traceId, "string");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("signs team policy capability into environment link proofs", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+      const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
+      const origin = new URL(linkProofUrl);
+      const response = yield* fetchEffect(linkProofUrl, {
+        method: "POST",
+        headers: { cookie: ownerCookie, "content-type": "application/json" },
+        body: jsonRequestBody({
+          challenge: "team-capability-challenge",
+          relayIssuer: "https://relay.example.test",
+          endpoint: {
+            httpBaseUrl: origin.origin,
+            wsBaseUrl: origin.origin.replace(/^http/, "ws") + "/ws",
+            providerKind: "cloudflare_tunnel",
+          },
+          origin: { localHttpHost: origin.hostname, localHttpPort: Number(origin.port) },
+        }),
+      });
+      assert.equal(response.status, 200);
+      const token = yield* responseJsonEffect<string>(response);
+      const decoded = decodeRelayJwt(token);
+      assert.equal(typeof decoded.environmentPublicKey, "string");
+      const now = yield* DateTime.now;
+      const verified = yield* verifyRelayJwt({
+        token,
+        publicKey: String(decoded.environmentPublicKey),
+        issuer: String(decoded.iss),
+        audience: "https://relay.example.test",
+        typ: RELAY_LINK_PROOF_TYP,
+        nowEpochSeconds: Math.floor(now.epochMilliseconds / 1000),
+      });
+      assert.equal(verified.teamPolicyVersion, 1);
+      assert.equal(verified.challenge, "team-capability-challenge");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

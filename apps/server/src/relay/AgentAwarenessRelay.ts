@@ -1,3 +1,4 @@
+import { TeamPolicy, TeamPolicyLive } from "../cloud/TeamPolicy.ts";
 import type {
   EnvironmentId,
   OrchestrationEvent,
@@ -297,6 +298,7 @@ export function resolveAgentAwarenessRelayActiveThreadIds(input: {
 }
 
 export const make = Effect.gen(function* () {
+  const teamPolicy = yield* TeamPolicy;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
   const snapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
@@ -362,6 +364,12 @@ export const make = Effect.gen(function* () {
       yield* Effect.logDebug("agent activity publish skipped; relay link credentials unavailable", {
         threadId,
       });
+      return;
+    }
+    if (!(yield* teamPolicy.canPublishActivity.pipe(Effect.orElseSucceed(() => false)))) {
+      yield* Effect.logDebug(
+        "agent activity publish skipped; organization policy unavailable or disabled",
+      );
       return;
     }
     const relayClient = yield* makeRelayClient(relayConfig);
@@ -645,4 +653,6 @@ export const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(AgentAwarenessRelay, make);
+export const layer = Layer.effect(AgentAwarenessRelay, make).pipe(
+  Layer.provide(TeamPolicyLive.pipe(Layer.provide(FetchHttpClient.layer))),
+);

@@ -9,6 +9,8 @@ export interface GatewaySnapshot {
     readonly environmentId: string;
     readonly publicHostname: string;
     readonly originHostname: string;
+    /** Explicit per-environment payer deadline; absent for older personal snapshots. */
+    readonly accessUntilMs?: number | null;
   }>;
 }
 
@@ -33,6 +35,9 @@ const normalize = (input: GatewaySnapshot): GatewaySnapshot => {
   const ids = new Set<string>();
   for (const env of input.environments) {
     if (
+      (env.accessUntilMs !== undefined &&
+        env.accessUntilMs !== null &&
+        (!Number.isSafeInteger(env.accessUntilMs) || env.accessUntilMs <= 0)) ||
       !env.environmentId ||
       ids.has(env.environmentId) ||
       hosts.has(env.publicHostname) ||
@@ -92,17 +97,25 @@ export function createManagedGateway(options: GatewayOptions) {
   const connections = new Set<Connection>();
   let snapshot: GatewaySnapshot | null = null;
   let updates = Promise.resolve();
-  const active = (state = snapshot) =>
-    state?.enabled === true &&
-    state.guardVerified &&
-    state.accessUntilMs !== null &&
-    now() < state.accessUntilMs;
+  const active = (state = snapshot, hostname?: string) => {
+    const mapping = state?.environments.find((env) => env.publicHostname === hostname);
+    const deadline =
+      mapping?.accessUntilMs === undefined ? state?.accessUntilMs : mapping.accessUntilMs;
+    return state?.enabled === true && state.guardVerified && deadline != null && now() < deadline;
+  };
+  const nextAlarm = (state: GatewaySnapshot) => {
+    if (!state.enabled || !state.guardVerified) return null;
+    const deadlines = state.environments
+      .map((env) => (env.accessUntilMs === undefined ? state.accessUntilMs : env.accessUntilMs))
+      .filter((deadline): deadline is number => deadline != null && deadline > now());
+    return deadlines.length ? Math.min(...deadlines) : null;
+  };
   const environment = (hostname: string) =>
     snapshot?.environments.find((env) => env.publicHostname === hostname);
   const sweep = (state = snapshot) => {
     for (const connection of connections) {
       if (
-        !active(state) ||
+        !active(state, connection.hostname) ||
         state?.environments.find((env) => env.publicHostname === connection.hostname)
           ?.originHostname !== connection.originHostname
       ) {
@@ -114,8 +127,10 @@ export function createManagedGateway(options: GatewayOptions) {
   const ready = options.storage.load().then((value) => {
     snapshot = value ? normalize(value) : null;
   });
+  let pendingUpdates = 0;
   const update = (input: GatewaySnapshot): Promise<"applied" | "unchanged" | "stale"> => {
     const next = normalize(input);
+    pendingUpdates++;
     const operation = updates.then(async () => {
       await ready;
       if (snapshot && snapshot.userId !== next.userId)
@@ -131,7 +146,7 @@ export function createManagedGateway(options: GatewayOptions) {
       sweep();
       sweep(next);
       try {
-        await options.storage.commit(next, active(next) ? next.accessUntilMs : null);
+        await options.storage.commit(next, nextAlarm(next));
         // Never extend existing transport access using state that is not durable yet.
         snapshot = next;
         sweep();
@@ -143,14 +158,28 @@ export function createManagedGateway(options: GatewayOptions) {
       return "applied" as const;
     });
     updates = operation.then(
-      () => undefined,
-      () => undefined,
+      () => {
+        pendingUpdates--;
+      },
+      () => {
+        pendingUpdates--;
+      },
     );
     return operation;
   };
   const alarm = async () => {
     await ready;
+    // Cut off idle streams immediately, even while a renewal is waiting for storage.
     sweep();
+    if (pendingUpdates > 0) return;
+    const operation = updates.then(async () => {
+      if (snapshot) await options.storage.commit(snapshot, nextAlarm(snapshot));
+    });
+    updates = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    await operation;
   };
   const gatewayFetch = async (request: Request): Promise<Response> => {
     await ready;
@@ -158,7 +187,8 @@ export function createManagedGateway(options: GatewayOptions) {
     sweep();
     const requested = new URL(request.url);
     const mapping = environment(requested.hostname);
-    if (!active()) return new Response("Connect access expired", { status: 402 });
+    if (!active(snapshot, requested.hostname))
+      return new Response("Connect access expired", { status: 402 });
     if (requested.protocol !== "https:" || requested.port || !mapping)
       return new Response("Unknown managed environment", { status: 404 });
     const abort = new AbortController();
@@ -196,9 +226,12 @@ export function createManagedGateway(options: GatewayOptions) {
       upstream = await options.fetch.call(globalThis, requested, init);
     } catch {
       dispose();
-      return new Response(active() ? "Origin unavailable" : "Connect access expired", {
-        status: active() ? 502 : 402,
-      });
+      return new Response(
+        active(snapshot, mapping.publicHostname) ? "Origin unavailable" : "Connect access expired",
+        {
+          status: active(snapshot, mapping.publicHostname) ? 502 : 402,
+        },
+      );
     }
     sweep();
     if (abort.signal.aborted) {

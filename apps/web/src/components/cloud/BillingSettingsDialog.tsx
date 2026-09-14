@@ -4,18 +4,22 @@ import { useState } from "react";
 import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { Dialog, DialogPopup, DialogTitle, DialogDescription } from "../ui/dialog";
 import { SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
+import { TeamsAccount } from "./TeamsAccount";
 import { BillingAccount } from "./BillingAccount";
 
 export function BillingSettingsDialog({
   open,
   onOpenChange,
   onConnections,
+  initialTab = "billing",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConnections?: () => void;
+  initialTab?: "billing" | "teams";
 }) {
   const navigate = useNavigate();
+  const [tab, setTab] = useState<"billing" | "teams">(initialTab);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPopup
@@ -30,13 +34,23 @@ export function BillingSettingsDialog({
           <aside className="lecturn-celestial-sidebar shrink-0 border-b bg-sidebar/70 p-4 sm:w-52 sm:border-e sm:border-b-0 sm:p-5">
             <p className="mb-4 pe-8 font-heading text-lg font-semibold">Account settings</p>
             <nav aria-label="Account settings" className="flex gap-2 sm:flex-col">
-              <div
-                aria-current="page"
+              <button
+                type="button"
+                onClick={() => setTab("billing")}
+                aria-current={tab === "billing" ? "page" : undefined}
                 className="flex items-center gap-2 rounded-lg border border-primary/25 bg-primary/10 px-3 py-2 text-sm font-medium"
               >
                 <CreditCardIcon className="size-4" />
                 Billing
-              </div>
+              </button>
+              <button
+                type="button"
+                aria-current={tab === "teams" ? "page" : undefined}
+                onClick={() => setTab("teams")}
+                className="rounded-lg px-3 py-2 text-left text-sm hover:bg-muted"
+              >
+                Teams
+              </button>
               <button
                 type="button"
                 data-lecturn-hover
@@ -58,7 +72,7 @@ export function BillingSettingsDialog({
             </p>
           </aside>
           <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain sm:pt-3">
-            <BillingAccount embedded />
+            {tab === "billing" ? <BillingAccount embedded /> : <TeamsAccount />}
           </div>
         </div>
       </DialogPopup>

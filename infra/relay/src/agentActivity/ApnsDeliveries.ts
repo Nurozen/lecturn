@@ -1,3 +1,4 @@
+import { filterPermittedActivity } from "../teams/TeamNotifications.ts";
 import type {
   RelayAgentActivityAggregateState,
   RelayAgentAwarenessPreferences,
@@ -698,7 +699,12 @@ export class ApnsDeliveries extends Context.Service<
 
 export const make = Effect.gen(function* () {
   const managedAccess = yield* ManagedAccess;
-  const permitted = (userId: string, kind: RelayDeliveryKind, originCreatedAtSeconds?: number) =>
+  const permitted = (
+    userId: string,
+    kind: RelayDeliveryKind,
+    originCreatedAtSeconds?: number,
+    environmentId?: string,
+  ) =>
     kind === "live_activity_end"
       ? Effect.succeed(true)
       : managedAccess
@@ -706,6 +712,7 @@ export const make = Effect.gen(function* () {
             userId,
             kind === "push_notification" ? "pushNotifications" : "liveActivities",
             originCreatedAtSeconds,
+            environmentId,
           )
           .pipe(
             Effect.as(true),
@@ -716,13 +723,29 @@ export const make = Effect.gen(function* () {
     userId: string,
     feature: "pushNotifications" | "liveActivities",
     originCreatedAtSeconds?: number,
+    environmentId?: string,
   ) =>
-    managedAccess.check(userId, feature, originCreatedAtSeconds).pipe(
+    managedAccess.check(userId, feature, originCreatedAtSeconds, environmentId).pipe(
       Effect.as(true),
       Effect.catchTag(["ManagedAccessRequired", "ManagedAccessUnavailable"], () =>
         Effect.succeed(false),
       ),
     );
+  const aggregatePermitted = (
+    userId: string,
+    kind: RelayDeliveryKind,
+    aggregate: RelayAgentActivityAggregateState | null,
+    origin?: number,
+  ) =>
+    kind === "live_activity_end"
+      ? Effect.succeed(true)
+      : aggregate === null || aggregate.activities.length === 0
+        ? permitted(userId, kind, origin)
+        : Effect.forEach(
+            aggregate.activities,
+            (row) => permitted(userId, kind, origin, row.environmentId),
+            { concurrency: 4 },
+          ).pipe(Effect.map((results) => results.every(Boolean)));
   const attempts = yield* DeliveryAttempts.DeliveryAttempts;
   const discardDeniedJob = Effect.fnUntraced(function* (input: {
     readonly target: LiveActivityDeliveryTarget;
@@ -883,8 +906,45 @@ export const make = Effect.gen(function* () {
       "relay.delivery.kind": input.kind,
       ...(input.sourceJobId ? { "relay.delivery.job_id": input.sourceJobId } : {}),
     });
+    const permittedAggregate = yield* filterPermittedActivity(
+      managedAccess,
+      input.target.user_id,
+      input.aggregate,
+      input.originCreatedAtSeconds,
+    ).pipe(
+      Effect.catchTag("ManagedAccessUnavailable", (error) =>
+        input.kind === "live_activity_end" ? Effect.succeed(null) : Effect.fail(error),
+      ),
+    );
+    if (
+      input.aggregate !== null &&
+      permittedAggregate === null &&
+      input.kind !== "live_activity_end"
+    ) {
+      yield* discardDeniedJob(input);
+      if (input.kind === "live_activity_start")
+        yield* liveActivities.clearStartQueued({
+          userId: input.target.user_id,
+          deviceId: input.target.device_id,
+        });
+      return staleJobResult({ deviceId: input.target.device_id, kind: input.kind });
+    }
+    // Alerts may contain a thread title removed by authorization filtering.
+    if (permittedAggregate !== input.aggregate)
+      input = {
+        ...input,
+        aggregate: permittedAggregate,
+        alert: null,
+      } as SendLiveActivityDeliveryInput;
     // Check before claiming too: a provider/database outage must leave the queued job retryable.
-    if (!(yield* permitted(input.target.user_id, input.kind, input.originCreatedAtSeconds))) {
+    if (
+      !(yield* aggregatePermitted(
+        input.target.user_id,
+        input.kind,
+        input.aggregate,
+        input.originCreatedAtSeconds,
+      ))
+    ) {
       yield* discardDeniedJob(input);
       if (input.kind === "live_activity_start")
         yield* liveActivities.clearStartQueued({
@@ -969,7 +1029,14 @@ export const make = Effect.gen(function* () {
       }
       return staleJobResult({ deviceId: input.target.device_id, kind: input.kind });
     }
-    if (!(yield* permitted(input.target.user_id, input.kind, input.originCreatedAtSeconds))) {
+    if (
+      !(yield* aggregatePermitted(
+        input.target.user_id,
+        input.kind,
+        input.aggregate,
+        input.originCreatedAtSeconds,
+      ))
+    ) {
       if (input.kind === "live_activity_start")
         yield* liveActivities.clearStartQueued({
           userId: input.target.user_id,
@@ -988,8 +1055,9 @@ export const make = Effect.gen(function* () {
         input.target.user_id,
         "liveActivities",
         input.originCreatedAtSeconds,
+        input.aggregate?.activities[0]?.environmentId,
       ))
-        ? makeLiveActivityDeliveryRequest(apns, { ...input, alert: null }, now).request
+        ? makeLiveActivityDeliveryRequest(apns, { ...input, aggregate, alert: null }, now).request
         : request;
     const result = yield* apns
       .sendLiveActivityRequest({
@@ -1060,7 +1128,12 @@ export const make = Effect.gen(function* () {
       ...(input.sourceJobId ? { "relay.delivery.job_id": input.sourceJobId } : {}),
     });
     if (
-      !(yield* permitted(input.target.user_id, "push_notification", input.originCreatedAtSeconds))
+      !(yield* permitted(
+        input.target.user_id,
+        "push_notification",
+        input.originCreatedAtSeconds,
+        input.notification.environmentId,
+      ))
     ) {
       yield* discardDeniedJob({ ...input, kind: "push_notification" });
       return staleJobResult({ deviceId: input.target.device_id, kind: "push_notification" });
@@ -1136,7 +1209,12 @@ export const make = Effect.gen(function* () {
       }
     }
     if (
-      !(yield* permitted(input.target.user_id, "push_notification", input.originCreatedAtSeconds))
+      !(yield* permitted(
+        input.target.user_id,
+        "push_notification",
+        input.originCreatedAtSeconds,
+        input.notification.environmentId,
+      ))
     ) {
       if (input.sourceJobId)
         yield* attempts.completeSourceJob({
@@ -1302,7 +1380,16 @@ export const make = Effect.gen(function* () {
         nowMs: now.epochMilliseconds,
       });
       const token = input.target.push_token;
-      if (notification && token && !(yield* permitted(input.target.user_id, "push_notification")))
+      if (
+        notification &&
+        token &&
+        !(yield* permitted(
+          input.target.user_id,
+          "push_notification",
+          undefined,
+          notification.environmentId,
+        ))
+      )
         return null;
       return yield* notification && token
         ? deliveryQueue.enqueuePushNotification({
@@ -1316,12 +1403,28 @@ export const make = Effect.gen(function* () {
         : Effect.succeed(null);
     }),
     sendForTarget: Effect.fnUntraced(function* (input) {
+      const aggregate = yield* filterPermittedActivity(
+        managedAccess,
+        input.target.user_id,
+        input.aggregate,
+      );
+      input = { ...input, aggregate };
       const delivery = chooseDelivery({
         target: input.target,
         aggregate: input.aggregate,
         nowMs: input.nowMs,
       });
-      if (!delivery || !(yield* permitted(input.target.user_id, delivery.kind))) {
+      if (
+        !delivery ||
+        !(yield* delivery.kind === "push_notification"
+          ? permitted(
+              input.target.user_id,
+              delivery.kind,
+              undefined,
+              delivery.notification.environmentId,
+            )
+          : aggregatePermitted(input.target.user_id, delivery.kind, delivery.aggregate))
+      ) {
         return null;
       }
       if (delivery.kind === "push_notification") {
@@ -1346,7 +1449,12 @@ export const make = Effect.gen(function* () {
       // users still get the buzz.
       const endAlertsAllowed =
         delivery.kind !== "live_activity_end" ||
-        (yield* cleanupAlertsPermitted(input.target.user_id, "liveActivities"));
+        (yield* cleanupAlertsPermitted(
+          input.target.user_id,
+          "liveActivities",
+          undefined,
+          delivery.aggregate?.activities[0]?.environmentId,
+        ));
       const alert = !endAlertsAllowed
         ? null
         : delivery.kind === "live_activity_end"
@@ -1371,7 +1479,12 @@ export const make = Effect.gen(function* () {
         delivery.kind === "live_activity_end" &&
         notification &&
         input.target.push_token &&
-        (yield* cleanupAlertsPermitted(input.target.user_id, "pushNotifications"))
+        (yield* cleanupAlertsPermitted(
+          input.target.user_id,
+          "pushNotifications",
+          undefined,
+          notification.environmentId,
+        ))
       ) {
         yield* deliveryQueue.enqueuePushNotification({
           userId: input.target.user_id,

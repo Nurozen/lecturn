@@ -49,6 +49,7 @@ export function ConnectBillingStatus() {
   const summary = status ? connectBillingSummary(status) : null;
   return (
     <View className="gap-2 px-2 py-2">
+      <Text className="text-sm font-medium text-foreground">Personal Connect subscription</Text>
       <View className="flex-row items-center justify-between gap-3">
         <Text
           className="flex-1 text-sm font-medium text-foreground"

@@ -1,4 +1,5 @@
 import { Clock, Context, Effect, Layer, Schema } from "effect";
+import { makeTeamStore } from "../teams/TeamStore.ts";
 import { RelayDb } from "../db.ts";
 import { effectiveAccountAccess } from "./BillingGrants.ts";
 import { BillingError, type BillingAccount } from "./BillingStore.ts";
@@ -8,6 +9,7 @@ export interface ManagedReservation {
   readonly environmentId: string;
   readonly generation: number;
   readonly accountGeneration: number;
+  readonly fundingOrganizationId?: string;
   readonly state: "pending" | "active";
 }
 interface ReservationRow {
@@ -15,6 +17,7 @@ interface ReservationRow {
   environment_id: string;
   generation: number;
   account_generation: number;
+  funding_organization_id?: string | null;
   enabled: boolean;
   state: "pending" | "active" | "disabled";
 }
@@ -51,6 +54,7 @@ const publicReservation = (row: ReservationRow): ManagedReservation => ({
   environmentId: row.environment_id,
   generation: row.generation,
   accountGeneration: row.account_generation,
+  ...(row.funding_organization_id ? { fundingOrganizationId: row.funding_organization_id } : {}),
   state: row.state === "active" ? "active" : "pending",
 });
 
@@ -63,11 +67,13 @@ const disabled = ManagedReservations.of({
 
 export const make = (config: {
   readonly enabled: boolean;
+  readonly teamsEnabled?: boolean;
   readonly enforcementUsers?: ReadonlyArray<string> | undefined;
 }) =>
   Effect.gen(function* () {
     if (!config.enabled) return disabled;
     const { $client: sql } = yield* RelayDb;
+    const teams = config.teamsEnabled ? yield* makeTeamStore : undefined;
     const query = <A, E>(effect: Effect.Effect<A, E>) => effect.pipe(Effect.mapError(unavailable));
     const transaction = <A>(effect: Effect.Effect<A, BillingError>) =>
       sql
@@ -77,12 +83,29 @@ export const make = (config: {
       query(
         sql<BillingAccount>`SELECT * FROM relay_billing_accounts WHERE user_id=${userId} FOR UPDATE`,
       ).pipe(Effect.map((rows) => rows[0]));
+    const teamAccess = (input: ReservationKey, time: number) =>
+      Effect.gen(function* () {
+        if (!teams) return undefined;
+        // Lock the payer and funding provenance while checking its assigned seat.
+        yield* query(
+          sql`SELECT account.organization_id FROM relay_team_accounts account JOIN relay_team_environment_funding funding ON funding.organization_id=account.organization_id WHERE funding.user_id=${input.userId} AND funding.environment_id=${input.environmentId} FOR UPDATE OF account,funding`,
+        );
+        return yield* teams
+          .access(input.userId, input.environmentId, time)
+          .pipe(Effect.mapError(unavailable));
+      });
     return ManagedReservations.of({
       get: Effect.fn("ManagedReservations.get")(function* (input) {
         if (
           config.enforcementUsers &&
           !config.enforcementUsers.includes("*") &&
-          !config.enforcementUsers.includes(input.userId)
+          !config.enforcementUsers.includes(input.userId) &&
+          !(
+            teams &&
+            (yield* teams
+              .funding(input.userId, input.environmentId)
+              .pipe(Effect.mapError(unavailable)))
+          )
         )
           return null;
         const row = (yield* query(
@@ -94,14 +117,24 @@ export const make = (config: {
         if (
           config.enforcementUsers &&
           !config.enforcementUsers.includes("*") &&
-          !config.enforcementUsers.includes(input.userId)
+          !config.enforcementUsers.includes(input.userId) &&
+          !(
+            teams &&
+            (yield* teams
+              .funding(input.userId, input.environmentId)
+              .pipe(Effect.mapError(unavailable)))
+          )
         )
           return null;
         return yield* transaction(
           Effect.gen(function* () {
             const account = yield* lock(input.userId);
             const time = yield* now;
-            const access = effectiveAccountAccess(account, time);
+            const team = yield* teamAccess(input, time);
+            const access = team
+              ? { available: true, allowed: team.allowed, limit: 3 }
+              : effectiveAccountAccess(account, time);
+            const accountGeneration = team?.generation ?? account?.generation ?? 0;
             if (!access.available) return yield* unavailable();
             if (!access.allowed)
               return yield* new BillingError({
@@ -117,7 +150,7 @@ export const make = (config: {
             const existing = (yield* query(
               sql<ReservationRow>`SELECT * FROM relay_managed_reservations WHERE user_id=${input.userId} AND environment_id=${input.environmentId}`,
             ))[0];
-            if (!existing?.enabled) {
+            if (!existing?.enabled && !team) {
               // Legacy allocations without a reservation count, including incomplete/offline hosts.
               // An explicit disabled reservation supersedes its retained legacy allocation.
               const used =
@@ -125,7 +158,8 @@ export const make = (config: {
             SELECT environment_id FROM relay_managed_reservations WHERE user_id=${input.userId} AND enabled=true AND environment_id<>${input.environmentId}
             UNION
             SELECT environment_id FROM relay_managed_endpoint_allocations AS allocation WHERE user_id=${input.userId} AND environment_id<>${input.environmentId} AND NOT EXISTS (SELECT 1 FROM relay_managed_reservations AS reservation WHERE reservation.user_id=allocation.user_id AND reservation.environment_id=allocation.environment_id)
-          ) AS capacity`))[0]?.count ?? 0;
+          ) AS capacity ${teams ? sql`WHERE NOT EXISTS (SELECT 1 FROM relay_team_environment_funding funding WHERE funding.user_id=${input.userId} AND funding.environment_id=capacity.environment_id)` : sql``}`))[0]
+                  ?.count ?? 0;
               if (used >= access.limit)
                 return yield* new BillingError({
                   code: "quota",
@@ -134,8 +168,13 @@ export const make = (config: {
             }
             const rows =
               yield* query(sql<ReservationRow>`INSERT INTO relay_managed_reservations(user_id,environment_id,generation,account_generation,enabled,state,updated_at)
-          VALUES (${input.userId},${input.environmentId},1,${account!.generation},true,'pending',${time})
-          ON CONFLICT(user_id,environment_id) DO UPDATE SET generation=relay_managed_reservations.generation+1,account_generation=${account!.generation},enabled=true,state='pending',updated_at=${time} RETURNING *`);
+          VALUES (${input.userId},${input.environmentId},1,${accountGeneration},true,'pending',${time})
+          ON CONFLICT(user_id,environment_id) DO UPDATE SET generation=relay_managed_reservations.generation+1,account_generation=${accountGeneration},enabled=true,state='pending',updated_at=${time} RETURNING *`);
+            if (teams)
+              yield* query(
+                sql`UPDATE relay_managed_reservations SET funding_organization_id=${team?.organizationId ?? null} WHERE user_id=${input.userId} AND environment_id=${input.environmentId}`,
+              );
+            if (team) rows[0]!.funding_organization_id = team.organizationId;
             return publicReservation(rows[0]!);
           }),
         );
@@ -146,7 +185,16 @@ export const make = (config: {
           Effect.gen(function* () {
             const account = yield* lock(reservation.userId);
             const time = yield* now;
-            if (!allowed(account, time) || account!.generation !== reservation.accountGeneration)
+            const team = yield* teamAccess(reservation, time);
+            if (
+              team
+                ? !team.allowed ||
+                  team.organizationId !== reservation.fundingOrganizationId ||
+                  team.generation !== reservation.accountGeneration
+                : reservation.fundingOrganizationId !== undefined ||
+                  !allowed(account, time) ||
+                  account!.generation !== reservation.accountGeneration
+            )
               return false;
             // Reuse the capacity slot, but fence each new provisioning attempt.
             const rows = yield* query(
@@ -160,8 +208,9 @@ export const make = (config: {
         return yield* transaction(
           Effect.gen(function* () {
             const account = yield* lock(input.userId);
-            if (!account) return false;
             const time = yield* now;
+            const team = yield* teamAccess(input, time);
+            if (!account && !team) return false;
             const current = (yield* query(
               sql<ReservationRow>`SELECT * FROM relay_managed_reservations WHERE user_id=${input.userId} AND environment_id=${input.environmentId}`,
             ))[0];
@@ -169,7 +218,7 @@ export const make = (config: {
               return false;
             if (current && !current.enabled) return true;
             yield* query(sql`INSERT INTO relay_managed_reservations(user_id,environment_id,generation,account_generation,enabled,state,updated_at)
-          VALUES (${input.userId},${input.environmentId},1,${account.generation},false,'disabled',${time})
+          VALUES (${input.userId},${input.environmentId},1,${team?.generation ?? account!.generation},false,'disabled',${time})
           ON CONFLICT(user_id,environment_id) DO UPDATE SET generation=relay_managed_reservations.generation+1,enabled=false,state='disabled',updated_at=${time}`);
             return true;
           }),
@@ -180,10 +229,12 @@ export const make = (config: {
 export function layer(config: { readonly enabled: false }): Layer.Layer<ManagedReservations>;
 export function layer(config: {
   readonly enabled: boolean;
+  readonly teamsEnabled?: boolean;
   readonly enforcementUsers?: ReadonlyArray<string> | undefined;
 }): Layer.Layer<ManagedReservations, never, RelayDb>;
 export function layer(config: {
   readonly enabled: boolean;
+  readonly teamsEnabled?: boolean;
   readonly enforcementUsers?: ReadonlyArray<string> | undefined;
 }) {
   return config.enabled
