@@ -25,6 +25,43 @@ function setup(response: Response) {
   return { client, fetch };
 }
 describe("account billing client", () => {
+  it.each(["token", "fetch", "body"])(
+    "bounds a stalled %s without reporting free access",
+    async (stage) => {
+      vi.useFakeTimers();
+      try {
+        let resolveToken!: (token: string) => void;
+        const pendingToken = new Promise<string>((resolve) => {
+          resolveToken = resolve;
+        });
+        const response = Response.json(status);
+        if (stage === "body") vi.spyOn(response, "json").mockReturnValue(new Promise(() => {}));
+        const fetch = vi
+          .fn<typeof globalThis.fetch>()
+          .mockImplementation(() =>
+            stage === "fetch" ? new Promise(() => {}) : Promise.resolve(response),
+          );
+        const client = createBillingClient({
+          relayUrl: "https://relay.example.test",
+          getToken: () => (stage === "token" ? pendingToken : Promise.resolve("token")),
+          fetch,
+        });
+        const checked = expect(client.getStatus()).rejects.toMatchObject({ reason: "unavailable" });
+        await vi.advanceTimersByTimeAsync(15_000);
+        await checked;
+        if (stage === "token") {
+          resolveToken("late-token");
+          await Promise.resolve();
+          expect(fetch).not.toHaveBeenCalled();
+        } else {
+          expect(fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+        }
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
   it("uses account bearer auth without environment credentials", async () => {
     const { client, fetch } = setup(Response.json(status));
     expect(await client.getStatus()).toEqual(status);
