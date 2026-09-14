@@ -336,9 +336,23 @@ export class GitHubWorkflowApprovalHeadChangedError extends Schema.TaggedErrorCl
   }
 }
 
+export class GitHubPullRequestMergeRefusedError extends Schema.TaggedErrorClass<GitHubPullRequestMergeRefusedError>()(
+  "GitHubPullRequestMergeRefusedError",
+  { command: Schema.Literal("gh"), cwd: Schema.String, number: Schema.Int },
+) {
+  get detail(): string {
+    return `GitHub did not confirm an immediate merge of #${this.number}.`;
+  }
+
+  override get message(): string {
+    return `GitHub CLI refused mergePullRequest: ${this.detail}`;
+  }
+}
+
 export type GitHubPullRequestCliError =
   | GitHubCli.GitHubCliError
   | GitHubPullRequestReadError
+  | GitHubPullRequestMergeRefusedError
   | GitHubDiffCursorError
   | GitHubDiffCommitError
   | GitHubDiffRevisionsUnavailableError
@@ -643,6 +657,7 @@ export class GitHubPullRequestCli extends Context.Service<
     }) => Effect.Effect<void, GitHubPullRequestCliError>;
 
     readonly runPullRequestAction: (input: {
+      readonly expectedHeadRevision?: string;
       readonly cwd: string;
       readonly repository: string;
       readonly host: string;
@@ -1003,6 +1018,55 @@ function actionArgs(
 export const make = Effect.gen(function* () {
   const github = yield* GitHubCli.GitHubCli;
   const graphQlBudget = yield* GitHubGraphQlBudget.GitHubGraphQlBudget;
+  const decodeMergeResult = Schema.decodeUnknownEffect(
+    Schema.fromJsonString(Schema.Struct({ merged: Schema.Boolean })),
+  );
+  const mergeAtRevision = Effect.fn("GitHubPullRequestCli.mergeAtRevision")(function* (
+    input: Parameters<GitHubPullRequestCli["Service"]["runPullRequestAction"]>[0],
+    revision: string,
+  ) {
+    const { owner, name } = parseRepositorySelector(input.repository);
+    // `gh pr merge` can enable automation or enqueue a PR. This endpoint only attempts a merge.
+    const result = yield* github.execute({
+      cwd: input.cwd,
+      args: [
+        "api",
+        "--method",
+        "PUT",
+        "--hostname",
+        input.host,
+        `repos/${owner}/${name}/pulls/${input.number}/merge`,
+        "-f",
+        `sha=${revision}`,
+        "-f",
+        `merge_method=${input.mergeMethod ?? "merge"}`,
+      ],
+    });
+    if (result.stdoutTruncated || result.stdoutInvalidUtf8)
+      return yield* new GitHubPullRequestReadError({
+        command: "gh",
+        cwd: input.cwd,
+        operation: "mergePullRequest",
+        cause: "The merge response was truncated or contained invalid UTF-8.",
+      });
+    const confirmation = yield* decodeMergeResult(result.stdout).pipe(
+      Effect.mapError(
+        (cause) =>
+          new GitHubPullRequestReadError({
+            command: "gh",
+            cwd: input.cwd,
+            operation: "mergePullRequest",
+            cause,
+          }),
+      ),
+    );
+    if (!confirmation.merged)
+      return yield* new GitHubPullRequestMergeRefusedError({
+        command: "gh",
+        cwd: input.cwd,
+        number: input.number,
+      });
+  });
 
   /**
    * The pull request's own node id, which is what a mutation against the pull request itself is
@@ -2098,6 +2162,8 @@ export const make = Effect.gen(function* () {
     },
 
     runPullRequestAction: (input) => {
+      if (input.action === "merge" && input.expectedHeadRevision !== undefined)
+        return mergeAtRevision(input, input.expectedHeadRevision);
       if (input.action === "revert") {
         return pullRequestNodeId({ ...input, operation: "revertPullRequest" }).pipe(
           Effect.flatMap((pullRequestId) =>

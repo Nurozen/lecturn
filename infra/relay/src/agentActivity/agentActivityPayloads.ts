@@ -1,3 +1,4 @@
+import { stableStringify } from "@lecturn/shared/relaySigning";
 import type {
   RelayAgentActivityAggregateRow,
   RelayAgentActivityAggregateState,
@@ -73,13 +74,23 @@ export function sanitizeAgentActivityAggregateRow(
     modelTitle: truncateText(row.modelTitle, MAX_SUMMARY_TEXT_LENGTH),
     status: truncateText(row.status, MAX_STATUS_TEXT_LENGTH),
     deepLink: sanitizeDeepLink(row.deepLink),
+    ...(row.pullRequest
+      ? {
+          pullRequest: {
+            ...row.pullRequest,
+            repository: truncateText(row.pullRequest.repository, 80),
+            watchId: truncateText(row.pullRequest.watchId, 80),
+            projectId: truncateText(row.pullRequest.projectId, 80),
+          },
+        }
+      : {}),
   };
 }
 
 export function sanitizeAgentActivityAggregateState(
   aggregate: RelayAgentActivityAggregateState,
 ): RelayAgentActivityAggregateState {
-  return {
+  const sanitized = {
     ...aggregate,
     title: truncateText(aggregate.title, MAX_SUMMARY_TEXT_LENGTH),
     subtitle: truncateText(aggregate.subtitle, MAX_SUMMARY_TEXT_LENGTH),
@@ -87,6 +98,16 @@ export function sanitizeAgentActivityAggregateState(
       .slice(0, MAX_ACTIVITY_ROWS)
       .map(sanitizeAgentActivityAggregateRow),
   };
+  // ActivityKit's 4 KB envelope includes APS metadata and attributes. Keep
+  // content below 3.2 KB including UTF-8 expansion; activeCount stays truthful
+  // when only the first cards fit.
+  while (
+    sanitized.activities.length > 0 &&
+    new TextEncoder().encode(stableStringify(sanitized)).byteLength > 3_200
+  ) {
+    sanitized.activities.pop();
+  }
+  return sanitized;
 }
 
 export function sanitizeApnsNotificationPayload(

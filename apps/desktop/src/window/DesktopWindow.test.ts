@@ -14,6 +14,8 @@ import * as TestClock from "effect/testing/TestClock";
 import * as Electron from "electron";
 import { vi } from "vite-plus/test";
 
+vi.mock("../activity/DesktopActivity.ts", () => ({ installDesktopActivity: () => () => {} }));
+
 vi.mock("electron", async (importOriginal) => ({
   ...(await importOriginal<typeof import("electron")>()),
   session: {

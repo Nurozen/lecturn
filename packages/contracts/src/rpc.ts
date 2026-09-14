@@ -1,3 +1,4 @@
+import * as PullRequestWatch from "./pullRequestWatch.ts";
 import * as SagaWorkbench from "./sagaWorkbench.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
@@ -368,6 +369,11 @@ export const WS_METHODS = {
   staveDryRun: "stave.dryRun",
   staveRunOperation: "stave.runOperation",
   staveObserveOperation: "stave.observeOperation",
+
+  pullRequestWatchList: "pullRequestWatch.list",
+  pullRequestWatchTrack: "pullRequestWatch.track",
+  pullRequestWatchCommand: "pullRequestWatch.command",
+  pullRequestWatchConfigure: "pullRequestWatch.configure",
 
   // Pull request methods
   pullRequestsList: "pullRequests.list",
@@ -769,6 +775,27 @@ export const WsPullRequestsListStatsRpc = Rpc.make(WS_METHODS.pullRequestsListSt
   payload: PullRequestListStatsInput,
   success: PullRequestListStatsResult,
   error: PullRequestRpcError,
+});
+
+export const WsPullRequestWatchListRpc = Rpc.make(WS_METHODS.pullRequestWatchList, {
+  payload: PullRequestWatch.PullRequestWatchListInput,
+  success: PullRequestWatch.PullRequestWatchSnapshot,
+  error: Schema.Union([PullRequestWatch.PullRequestWatchError, EnvironmentAuthorizationError]),
+});
+export const WsPullRequestWatchTrackRpc = Rpc.make(WS_METHODS.pullRequestWatchTrack, {
+  payload: PullRequestWatch.PullRequestWatchTrackInput,
+  success: PullRequestWatch.PullRequestWatch,
+  error: Schema.Union([PullRequestWatch.PullRequestWatchError, EnvironmentAuthorizationError]),
+});
+export const WsPullRequestWatchCommandRpc = Rpc.make(WS_METHODS.pullRequestWatchCommand, {
+  payload: PullRequestWatch.PullRequestWatchCommandInput,
+  success: PullRequestWatch.PullRequestWatch,
+  error: Schema.Union([PullRequestWatch.PullRequestWatchError, EnvironmentAuthorizationError]),
+});
+export const WsPullRequestWatchConfigureRpc = Rpc.make(WS_METHODS.pullRequestWatchConfigure, {
+  payload: PullRequestWatch.PullRequestWatchConfigureInput,
+  success: PullRequestWatch.PullRequestWatchSnapshot,
+  error: Schema.Union([PullRequestWatch.PullRequestWatchError, EnvironmentAuthorizationError]),
 });
 
 export const WsPullRequestsSummaryRpc = Rpc.make(WS_METHODS.pullRequestsSummary, {
@@ -1421,6 +1448,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsCloudInstallRelayClientRpc,
   WsPullRequestsListRpc,
   WsPullRequestsListStatsRpc,
+  WsPullRequestWatchListRpc,
+  WsPullRequestWatchTrackRpc,
+  WsPullRequestWatchCommandRpc,
+  WsPullRequestWatchConfigureRpc,
   WsPullRequestsSummaryRpc,
   WsPullRequestsDetailRpc,
   WsPullRequestsActivityRpc,

@@ -559,6 +559,9 @@ export const make = Effect.gen(function* () {
     runAction: (input) =>
       cli
         .runPullRequestAction({
+          ...(input.expectedHeadRevision === undefined
+            ? {}
+            : { expectedHeadRevision: input.expectedHeadRevision }),
           cwd: input.cwd,
           repository: input.repository,
           host: input.host,

@@ -1,5 +1,14 @@
+import { StaveIcon } from "./StaveIcon";
+import {
+  selectThreadPullRequestWatches,
+  threadPullRequestLinks,
+} from "@lecturn/client-runtime/state/threadPullRequests";
+import { useEnvironmentQuery } from "../../state/query";
+import { pullRequestWatchEnvironment } from "../../state/pull-request-watch";
+import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
+import { ActiveThreadBorder } from "./ActiveThreadBorder";
 import type { StaveSagaMemberStatus } from "@lecturn/contracts";
-import { useRecyclingState } from "@legendapp/list/react-native";
+import { useRecyclingState, useViewabilityAmount } from "@legendapp/list/react-native";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -23,7 +32,7 @@ import { HOME_HORIZONTAL_INSET } from "../../lib/layoutMetrics";
 import { relativeTime } from "../../lib/time";
 import { themeColorWithAlpha } from "../../lib/mobileTheme";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
-import { useProject } from "../../state/entities";
+import { useProject, useProjects } from "../../state/entities";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import { useThreadPr, type ThreadPrPresentation } from "../../state/use-thread-pr";
 import type { HomeGroupDisplayAction } from "../home/homeListItems";
@@ -44,6 +53,7 @@ export type ThreadListVariant = "compact" | "sidebar";
 /** Left inset that aligns compact secondary rows with the title column. */
 export const THREAD_LIST_COMPACT_INSET = HOME_HORIZONTAL_INSET;
 const SIDEBAR_ROW_RADIUS = 12;
+export const THREAD_ACTIVITY_VIEWABILITY_CONFIG = { itemVisiblePercentThreshold: 0 };
 
 function pullRequestTintColor(
   pr: Pick<ThreadPrPresentation, "state" | "isDraft">,
@@ -132,7 +142,7 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
         // rows' trailing chevron column (18 + 13/2 ≈ 24.5 from the edge).
         paddingRight: compact ? 14 : 12,
         paddingBottom: compact ? 12 : 8,
-        paddingTop: props.isFirst ? (compact ? 8 : 4) : compact ? 24 : 20,
+        paddingTop: compact ? (props.isFirst ? 8 : 24) : 8,
       }}
     >
       {Array.from({ length: props.depth ?? 0 }, (_, level) => (
@@ -176,14 +186,21 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
           else handleToggle();
         }}
       >
-        <ProjectFavicon
-          environmentId={props.project.environmentId}
-          faviconPath={props.project.faviconPath}
-          open={!props.collapsed}
-          size={compact ? 22 : 18}
-          projectTitle={props.project.title}
-          workspaceRoot={props.project.workspaceRoot}
-        />
+        {props.project.stave ? (
+          <View accessibilityLabel={props.project.stave.isSaga ? "Stave saga" : "Stave space"}>
+            <StaveIcon size={compact ? 22 : 18} />
+          </View>
+        ) : null}
+        {!props.project.stave || props.project.faviconPath ? (
+          <ProjectFavicon
+            environmentId={props.project.environmentId}
+            faviconPath={props.project.faviconPath}
+            open={!props.collapsed}
+            size={compact ? 22 : 18}
+            projectTitle={props.project.title}
+            workspaceRoot={props.project.workspaceRoot}
+          />
+        ) : null}
         <Text
           className={
             compact
@@ -194,24 +211,6 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
         >
           {props.title}
         </Text>
-        {props.project.stave ? (
-          <Text className="max-w-[150px] text-xs text-foreground-tertiary" numberOfLines={2}>
-            {props.project.stave.isSaga ? "Saga" : "Space"} {props.project.stave.spaceId}
-            {props.project.stave.kind && !props.project.stave.isSaga
-              ? ` · ${props.project.stave.kind}`
-              : ""}
-            {` · ${props.memberStatus?.state ?? props.project.stave.state ?? "unknown"}`}
-            {props.memberStatus?.dirty ? " · dirty" : ""}
-            {props.project.notice?.kind === "archive_scheduled" ? " · archive reminder" : ""}
-            {props.project.notice?.kind === "refused" ? " · cleanup needs attention" : ""}
-            {props.project.notice?.kind === "pending_cleanup" ? " · cleanup pending" : ""}
-            {props.memberStatus?.state === "live" &&
-            props.memberStatus.repos.length > 0 &&
-            props.memberStatus.repos.every((repo) => repo.baseHealth === "merged")
-              ? " · merged"
-              : ""}
-          </Text>
-        ) : null}
         <Text
           className={
             compact
@@ -507,6 +506,8 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   // Recycling-safe: resets when the list container is reused for another
   // thread, so a hover highlight can't leak across rows.
   const [hovered, setHovered] = useRecyclingState(false);
+  const [visible, setVisible] = useRecyclingState(false);
+  useViewabilityAmount(useCallback((token) => setVisible(token.sizeVisible > 0), [setVisible]));
 
   const theme = useUniwindTheme();
   const screenColor = theme["--color-screen"];
@@ -538,13 +539,36 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
     [project, props.projectCwd],
   );
   const pr = useThreadPr(thread, prProject);
+  const projects = useProjects();
+  const watches = useEnvironmentQuery(
+    visible
+      ? pullRequestWatchEnvironment.list({ environmentId: thread.environmentId, input: {} })
+      : null,
+  );
+  const requests = threadPullRequestLinks(
+    selectThreadPullRequestWatches({
+      projects,
+      environmentId: thread.environmentId,
+      thread,
+      watches: watches.data?.watches ?? [],
+    }),
+    pr ? { ...pr, repository: thread.linkedPullRequest?.repository } : null,
+  );
   const timestamp = relativeTime(
     thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
   );
-  const threadAccessibilityLabel = pr ? `${thread.title}, ${pr.accessibilityLabel}` : thread.title;
-  const subtitleParts = [props.environmentLabel, thread.branch].filter((part): part is string =>
-    Boolean(part),
-  );
+  const threadAccessibilityLabel = [
+    thread.title,
+    thread.settledOverride === "settled" ? "Settled" : status?.label,
+    ...requests.map((request) => `${request.repository} #${request.number} ${request.state}`),
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const subtitleParts = [
+    thread.settledOverride === "settled" ? "✓ Settled" : null,
+    props.environmentLabel,
+    thread.branch,
+  ].filter((part): part is string => Boolean(part));
 
   const backgroundColor = compact ? screenColor : drawerColor;
   const effectivePressedBackground = selected
@@ -606,16 +630,17 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
     [handleArchive, handleDelete, handleFork, handleRegenerateTitle],
   );
 
-  const statusPill = effectiveStatus ? (
-    <View className={`${effectiveStatus.pillClassName} rounded-full px-1.5 py-0.5`}>
-      <Text className={`text-3xs font-lecturn-bold ${effectiveStatus.textClassName}`}>
-        {effectiveStatus.label}
-      </Text>
-    </View>
-  ) : null;
+  const statusPill =
+    effectiveStatus && status?.kind !== "working" ? (
+      <View className={`${effectiveStatus.pillClassName} rounded-full px-1.5 py-0.5`}>
+        <Text className={`text-3xs font-lecturn-bold ${effectiveStatus.textClassName}`}>
+          {effectiveStatus.label}
+        </Text>
+      </View>
+    ) : null;
 
   const subtitleRow =
-    subtitleParts.length > 0 || pr !== null ? (
+    subtitleParts.length > 0 || requests.length > 0 ? (
       <View className="mt-px flex-row items-center gap-1.5">
         {subtitleParts.length > 0 ? (
           <>
@@ -640,28 +665,49 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
                   (selected ? "text-user-bubble-foreground-muted" : "text-foreground-muted"),
               )}
               numberOfLines={1}
+              style={thread.settledOverride === "settled" ? { color: "#a2a6ab" } : undefined}
             >
               {subtitleParts.join(" · ")}
             </Text>
           </>
         ) : null}
-        {pr !== null ? (
-          <View className="flex-row items-center gap-0.5">
-            <PullRequestIcon
-              size={compact ? 13 : 11}
-              color={
-                selected ? String(selectedForegroundColor) : pullRequestTintColor(pr, colorScheme)
-              }
-            />
-            <Text
-              className={`${compact ? "text-sm" : "text-xs"} font-lecturn-medium ${
-                selected ? "text-user-bubble-foreground" : pr.textClassName
-              }`}
+        <View className="flex-1 flex-row flex-wrap items-center gap-1.5">
+          {requests.map((request) => (
+            <Pressable
+              key={request.key}
+              accessibilityRole="link"
+              accessibilityLabel={`${request.repository} #${request.number} · ${request.state}: ${request.title}`}
+              hitSlop={6}
+              onPress={(event) => {
+                event.stopPropagation();
+                void tryOpenExternalUrl(request.url, "pull-request");
+              }}
+              className="flex-row items-center gap-0.5"
             >
-              {pr.label}
-            </Text>
-          </View>
-        ) : null}
+              <PullRequestIcon
+                size={compact ? 13 : 11}
+                color={
+                  selected
+                    ? String(selectedForegroundColor)
+                    : request.state === "unknown"
+                      ? "#a1a1aa"
+                      : pullRequestTintColor(
+                          { state: request.state, isDraft: request.isDraft },
+                          colorScheme,
+                        )
+                }
+              />
+              <Text
+                className={`${compact ? "text-sm" : "text-xs"} font-lecturn-medium ${selected ? "text-user-bubble-foreground" : "text-primary"}`}
+              >
+                {new Set(requests.map((value) => value.repository)).size > 1 && request.repository
+                  ? `${request.repository} `
+                  : ""}
+                #{request.number}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
       </View>
     ) : null;
 
@@ -677,10 +723,15 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
           onSelectThread(thread);
         }}
       >
+        {status?.kind === "working" ? <ActiveThreadBorder visible={visible} /> : null}
         <View className="pr-[18px] pt-[10px]" style={{ paddingLeft: THREAD_LIST_COMPACT_INSET }}>
           <View className={cn("gap-[3px] pb-[10px]", !props.isLast && "border-b border-separator")}>
             <View className="flex-row items-center justify-between gap-2">
-              <Text className="flex-1 text-lg font-lecturn-bold text-foreground" numberOfLines={1}>
+              <Text
+                className="flex-1 text-lg font-lecturn-bold text-foreground"
+                numberOfLines={1}
+                style={thread.settledOverride === "settled" ? { color: "#a2a6ab" } : undefined}
+              >
                 {thread.title}
               </Text>
               <View className="flex-row items-center gap-2">
@@ -731,6 +782,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
           paddingVertical: 10,
         })}
       >
+        {status?.kind === "working" ? <ActiveThreadBorder visible={visible} /> : null}
         <View className="gap-[3px]">
           <View className="flex-row items-center justify-between gap-2">
             <Text
@@ -739,6 +791,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
                 selected ? "text-user-bubble-foreground" : "text-foreground",
               )}
               numberOfLines={1}
+              style={thread.settledOverride === "settled" ? { color: "#a2a6ab" } : undefined}
             >
               {thread.title}
             </Text>

@@ -1,4 +1,4 @@
-import { BoxesIcon, ChevronDownIcon } from "lucide-react";
+import { FolderGit2Icon, ChevronDownIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "../ui/popover";
 import type { describeStaveWorkspace } from "./staveWorkspaceContext.logic";
@@ -16,8 +16,10 @@ export function StaveWorkspaceContext({
         aria-label={context.label}
         data-composer-context-control
       >
-        <BoxesIcon className="size-3 shrink-0" />
-        <span className="min-w-0 truncate">{context.label}</span>
+        <FolderGit2Icon className="size-3 shrink-0" />
+        <span className="min-w-0 truncate">
+          Repositories · {context.editableRepos.length + context.referenceRepos.length}
+        </span>
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </PopoverTrigger>
       <PopoverPopup side="top" align="start" className="w-80 max-w-[calc(100vw-2rem)]">

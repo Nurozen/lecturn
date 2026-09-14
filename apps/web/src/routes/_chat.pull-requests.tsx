@@ -1,3 +1,11 @@
+import { useSagaRepositoryIndex } from "../state/stave";
+import { scopedPullRequestProjectIds } from "../components/pullRequest/desktopActivity.logic";
+import { selectProjectGroupingSettings } from "../logicalProject";
+import { useClientSettings } from "../hooks/useSettings";
+import {
+  PullRequestWatchButton,
+  PullRequestWatchSection,
+} from "../components/pullRequest/PullRequestWatchControls";
 import { resolveProjectGitTargets } from "@lecturn/client-runtime/state/projectGit";
 import { scopeThreadRef } from "@lecturn/client-runtime/environment";
 import { pullRequestHostOf, resolveEnvironmentMachineKind, ThreadId } from "@lecturn/contracts";
@@ -347,6 +355,8 @@ function PullRequestsRouteView() {
   const capabilityKnown = environments.some((environment) => environment.serverConfig !== null);
   const pullRequestsSupported = environmentIds.length > 0;
   const allProjects = useProjects();
+  const sagaIndex = useSagaRepositoryIndex(allProjects);
+  const groupingSettings = useClientSettings(selectProjectGroupingSettings);
   // Whether the workspace has said what it holds yet. Until it has, an empty project list is
   // "not loaded" rather than "none", and telling a reader to add a project they already have is
   // the one wrong answer the empty state can give.
@@ -620,7 +630,21 @@ function PullRequestsRouteView() {
     readonly projectIds?: ReadonlyArray<ProjectId>;
   }> => {
     const plain = queryEnvironmentIds.map((environmentId) => ({ environmentId }));
-    if (!projectsKnown || scopedProjectId !== undefined) return plain;
+    if (!projectsKnown) return plain;
+    if (scopedProjectId !== undefined) {
+      return queryEnvironmentIds.map((environmentId) => {
+        const projectIds = scopedPullRequestProjectIds(
+          projects,
+          { environmentId, projectId: scopedProjectId },
+          groupingSettings,
+          sagaIndex,
+        );
+        return {
+          environmentId,
+          projectIds,
+        };
+      });
+    }
     const assignment = assignProjectsToEnvironments(
       projects,
       queryEnvironmentIds,
@@ -638,7 +662,7 @@ function PullRequestsRouteView() {
       if (projectIds.length === (totals.get(environmentId) ?? 0)) return [{ environmentId }];
       return [{ environmentId, projectIds }];
     });
-  }, [projects, projectsKnown, queryEnvironmentIds, scopedProjectId]);
+  }, [projects, projectsKnown, queryEnvironmentIds, scopedProjectId, groupingSettings, sagaIndex]);
   // Part of the scope, since a different split is a different question and its answers must not
   // be filed under the same page state.
   const assignmentKey = useMemo(
@@ -708,7 +732,7 @@ function PullRequestsRouteView() {
               // and a page of everything with the answer somewhere further down it.
               involvement: search.involvement,
               limit: pageSize,
-              ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
+              ...(scopedProjectId && !projectIds ? { projectId: scopedProjectId } : {}),
               ...(projectIds ? { projectIds } : {}),
               ...(search.host ? { host: search.host } : {}),
               ...(hasFilters ? { filters } : {}),
@@ -752,7 +776,7 @@ function PullRequestsRouteView() {
           state: search.state,
           involvement: search.involvement,
           limit: PAGE_SIZE,
-          ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
+          ...(scopedProjectId && !projectIds ? { projectId: scopedProjectId } : {}),
           ...(projectIds ? { projectIds } : {}),
           ...(search.host ? { host: search.host } : {}),
           ...(menuFiltered ? { filters: menuFilters } : {}),
@@ -777,7 +801,7 @@ function PullRequestsRouteView() {
         state: "all",
         involvement: search.involvement,
         limit: PAGE_SIZE,
-        ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
+        ...(scopedProjectId && !projectIds ? { projectId: scopedProjectId } : {}),
         ...(projectIds ? { projectIds } : {}),
         ...(search.host ? { host: search.host } : {}),
       } satisfies PullRequestListInput,
@@ -811,7 +835,7 @@ function PullRequestsRouteView() {
           state: search.state,
           involvement,
           limit: PAGE_SIZE,
-          ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
+          ...(scopedProjectId && !projectIds ? { projectId: scopedProjectId } : {}),
           ...(projectIds ? { projectIds } : {}),
           ...(search.host ? { host: search.host } : {}),
           ...(menuFiltered ? { filters: menuFilters } : {}),
@@ -999,11 +1023,27 @@ function PullRequestsRouteView() {
     }
     const entries = narrowPullRequestsToFilters(loaded.data.entries, {
       state: search.state,
-      projectId: scopedProjectId,
+      projectId: undefined,
       host: search.host,
     });
-    return entries.length === 0 ? null : { ...loaded.data, entries };
-  }, [environmentKey, loaded, scopeKey, scopedProjectId, search.host, search.state]);
+    const scopedEntries =
+      scopedProjectId === undefined
+        ? entries
+        : entries.filter((entry) =>
+            environmentQueries
+              .find((query) => query.environmentId === entry.environmentId)
+              ?.projectIds?.includes(entry.projectId),
+          );
+    return scopedEntries.length === 0 ? null : { ...loaded.data, entries: scopedEntries };
+  }, [
+    environmentKey,
+    environmentQueries,
+    loaded,
+    scopeKey,
+    scopedProjectId,
+    search.host,
+    search.state,
+  ]);
   // With nothing typed and nothing to carry on from, the answer is taken from the read that is
   // keyed to exactly that question. Otherwise a search's answer lingers for a render after the
   // text has gone — the data cannot say which question it belongs to, but the read it came from
@@ -1647,6 +1687,12 @@ function PullRequestsRouteView() {
     showingCarried && listQuery.isPending && entries.length === 0 && typedQuery.length === 0;
   const listBody = (
     <>
+      {pullRequestsSupported ? (
+        <PullRequestWatchSection
+          environmentIds={queryEnvironmentIds}
+          {...(scopedProjectId ? { projectIdsByEnvironment: environmentQueries } : {})}
+        />
+      ) : null}
       {!capabilityKnown ? (
         <PullRequestListGhost rows={7} />
       ) : !pullRequestsSupported ? (
@@ -1691,31 +1737,44 @@ function PullRequestsRouteView() {
               {group.entries.map((entry) => {
                 const entryKey = pullRequestEntryKey(entry);
                 return (
-                  <PullRequestRow
-                    key={entryKey}
-                    statsKey={entryKey}
-                    statsRef={registerStatsRow}
-                    entry={entry}
-                    showProjectTitle
-                    showProvider={showProvider}
-                    {...(capableEnvironments.length > 1 &&
-                    environmentLabels.get(entry.environmentId) !== undefined
-                      ? { environmentLabel: environmentLabels.get(entry.environmentId)! }
-                      : {})}
-                    // Ten is the floor the ranking gives a row whose own fields say nothing
-                    // about the search: the host matched something this row cannot show.
-                    matchedElsewhere={
-                      typedParsed.text.length > 0 &&
-                      scorePullRequestMatch(entry, typedParsed.text) <= MATCHED_ELSEWHERE_SCORE
-                    }
-                    selected={
-                      selected?.environmentId === entry.environmentId &&
-                      selected.repository === entry.repository &&
-                      (selected.host === undefined || selected.host === entry.host) &&
-                      selected.number === entry.number
-                    }
-                    onSelect={selectEntry}
-                  />
+                  <div key={entryKey} className="flex items-center gap-2">
+                    <div className="min-w-0 flex-1">
+                      <PullRequestRow
+                        key={entryKey}
+                        statsKey={entryKey}
+                        statsRef={registerStatsRow}
+                        entry={entry}
+                        showProjectTitle
+                        showProvider={showProvider}
+                        {...(capableEnvironments.length > 1 &&
+                        environmentLabels.get(entry.environmentId) !== undefined
+                          ? { environmentLabel: environmentLabels.get(entry.environmentId)! }
+                          : {})}
+                        // Ten is the floor the ranking gives a row whose own fields say nothing
+                        // about the search: the host matched something this row cannot show.
+                        matchedElsewhere={
+                          typedParsed.text.length > 0 &&
+                          scorePullRequestMatch(entry, typedParsed.text) <= MATCHED_ELSEWHERE_SCORE
+                        }
+                        selected={
+                          selected?.environmentId === entry.environmentId &&
+                          selected.repository === entry.repository &&
+                          (selected.host === undefined || selected.host === entry.host) &&
+                          selected.number === entry.number
+                        }
+                        onSelect={selectEntry}
+                      />
+                    </div>
+                    <PullRequestWatchButton
+                      environmentId={entry.environmentId}
+                      reference={{
+                        projectId: entry.projectId,
+                        repository: entry.repository,
+                        host: entry.host,
+                        number: entry.number,
+                      }}
+                    />
+                  </div>
                 );
               })}
             </div>

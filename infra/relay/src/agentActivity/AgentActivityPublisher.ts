@@ -210,16 +210,27 @@ function aggregateRowForState(state: RelayAgentActivityState) {
     threadTitle: state.threadTitle,
     modelTitle: state.modelTitle,
     phase: state.phase,
-    status: statusForPhase(state.phase),
+    status: state.pullRequest
+      ? state.pullRequest.stale
+        ? "Stale"
+        : state.pullRequest.state !== "open"
+          ? state.pullRequest.state
+          : `CI ${state.pullRequest.checks}`
+      : statusForPhase(state.phase),
     updatedAt: state.updatedAt,
     deepLink: state.deepLink,
+    ...(state.pullRequest ? { pullRequest: state.pullRequest } : {}),
   };
 }
 
 function terminalAggregateState(state: RelayAgentActivityState): RelayAgentActivityAggregateState {
   return sanitizeAgentActivityAggregateState({
     title: "Lecturn",
-    subtitle: state.phase === "failed" ? "Agent work failed" : "Agent work completed",
+    subtitle: state.pullRequest
+      ? `Pull request ${state.pullRequest.state}`
+      : state.phase === "failed"
+        ? "Agent work failed"
+        : "Agent work completed",
     activeCount: 0,
     updatedAt: state.updatedAt,
     activities: [aggregateRowForState(state)],
@@ -271,7 +282,11 @@ export function makeAggregateState(input: {
     }
     return sanitizeAgentActivityAggregateState({
       title: "Lecturn",
-      subtitle: newest.phase === "failed" ? "Agent work failed" : "Agent work completed",
+      subtitle: newest.pullRequest
+        ? `Pull request ${newest.pullRequest.state}`
+        : newest.phase === "failed"
+          ? "Agent work failed"
+          : "Agent work completed",
       activeCount: 0,
       updatedAt: newest.updatedAt,
       activities: recentTerminal.slice(0, MAX_ACTIVITY_ROWS).map(aggregateRowForState),
@@ -292,7 +307,9 @@ export function makeAggregateState(input: {
   ).updatedAt;
   return sanitizeAgentActivityAggregateState({
     title: "Lecturn",
-    subtitle: "Agent work in progress",
+    subtitle: activeStates.some((state) => state.pullRequest)
+      ? "Agents and pull requests"
+      : "Agent work in progress",
     activeCount: activeStates.length,
     updatedAt,
     activities: displayedStates.map(aggregateRowForState),

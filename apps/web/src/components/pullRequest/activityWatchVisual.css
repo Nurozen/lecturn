@@ -1,0 +1,58 @@
+.lecturn-watch-activity {
+  position: relative;
+  isolation: isolate;
+  border-color: color-mix(in srgb, var(--watch-state-color) 50%, transparent);
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+}
+.lecturn-watch-activity::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  padding: 1px;
+  background: var(--watch-state-color);
+  opacity: 0.55;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+.lecturn-watch-activity[data-activity-state="active"]::before {
+  opacity: 1;
+  background: conic-gradient(
+    from var(--lecturn-active-angle),
+    #e6bc6322 0deg 245deg,
+    #e6bc63 312deg,
+    #ffedc4 345deg,
+    #e6bc6322 360deg
+  );
+}
+.lecturn-watch-activity[data-activity-state="active"][data-moving="true"]::before {
+  animation: lecturn-active-perimeter 4s steps(40) infinite;
+}
+.lecturn-watch-activity[data-activity-state="attention"][data-moving="true"]::before {
+  animation: lecturn-watch-attention 2.4s ease-in-out infinite;
+}
+@keyframes lecturn-watch-attention {
+  50% {
+    opacity: 0.2;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lecturn-watch-activity::before {
+    animation: none !important;
+  }
+}
+@media (forced-colors: active) {
+  .lecturn-watch-activity {
+    border-color: CanvasText;
+  }
+  .lecturn-watch-activity::before {
+    background: CanvasText;
+    animation: none !important;
+  }
+  .lecturn-watch-state {
+    color: CanvasText !important;
+  }
+}
