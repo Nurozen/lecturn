@@ -27,6 +27,8 @@ export const config: VercelConfig = {
     },
   ],
   rewrites: [
+    // Clerk's automatic vercel.app proxy must run before the SPA fallback.
+    routes.rewrite("/__clerk/:path*", "/api/__clerk/:path*"),
     routes.rewrite("/privacy-policy", "/privacy-policy/index.html"),
     routes.rewrite("/privacy-policy/", "/privacy-policy/index.html"),
     routes.rewrite("/terms-of-service", "/terms-of-service/index.html"),

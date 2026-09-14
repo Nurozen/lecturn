@@ -5,10 +5,10 @@ name: Web Preview
 # non-aliased) deploy into the existing hosted-web Vercel project, so the
 # latest/nightly channel aliases are never touched.
 #
-# The build intentionally omits the Lecturn Connect cloud config (Clerk keys, relay
-# URL): previews boot as the hosted-static app with manual pairing only. Pair a
-# server into a preview with `lecturn pair --tailscale` (or any reachable HTTPS
-# backend) and open the pairing URL against the preview origin.
+# Builds inherit the Vercel project's Preview environment. Connect previews need
+# public Clerk/relay config and a server-only CLERK_SECRET_KEY for /__clerk.
+# Without cloud configuration, previews support manual pairing only. Never put
+# the secret in VITE_ variables or pass it to the browser bundle.
 #
 # The preview must be opened at the exact deployment URL from the PR comment.
 # Vite bakes that URL in as the hosted origin (via VERCEL_URL), and
@@ -80,6 +80,7 @@ jobs:
           deployment_url="$(
             vp dlx vercel@53.1.1 deploy \
               --archive=tgz \
+              --build-env VITE_HOSTED_APP_URL= \
               --yes \
               --token "$VERCEL_TOKEN" \
               --scope "$vercel_scope"
