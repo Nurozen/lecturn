@@ -135,6 +135,7 @@ const settings: RelayConfiguration["Service"] = {
 const webhookKey = Buffer.from("test-clerk-webhook-key").toString("base64");
 const routeConfig = {
   appOrigin: "https://app.test",
+  additionalAppOrigins: ["https://pr-33.preview.lecturn.cloudgatherer.net"],
   clerkWebhookSecret: `whsec_${webhookKey}`,
   checkoutEnabled: true,
 };
@@ -302,6 +303,29 @@ describe("Teams HTTP authorization boundary", () => {
           (yield* run(post("org_team/checkout", { interval: "month", seats }), f, billing)).status,
         ).toBeGreaterThanOrEqual(400);
       expect(billing.checkout).not.toHaveBeenCalled();
+    }),
+  );
+  it.effect("permits only the explicitly listed preview origin for Teams mutations", () =>
+    Effect.gen(function* () {
+      auth("owner");
+      const f = fixture();
+      const billing = makeBilling();
+      const preview = routeConfig.additionalAppOrigins[0]!;
+      const response = yield* run(
+        post("org_team/checkout", { interval: "month", seats: 5 }, preview),
+        f,
+        billing,
+      );
+      expect(response.status).toBe(200);
+      expect(billing.checkout).toHaveBeenCalledTimes(1);
+      expect(
+        (yield* run(
+          post("org_team/checkout", { interval: "month", seats: 5 }, `${preview}.evil.test`),
+          f,
+          billing,
+        )).status,
+      ).toBe(403);
+      expect(billing.checkout).toHaveBeenCalledTimes(1);
     }),
   );
   it.effect(

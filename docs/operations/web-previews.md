@@ -19,9 +19,19 @@ Infrastructure prerequisites:
 - Each project domain is pinned to its PR branch, so a production deployment
   cannot automatically take over the preview alias.
 
-Authentication does not grant preview origins permission to make Teams changes.
-The relay's existing origin checks still apply; do not weaken those checks to
-make a preview pass. Any production-data mutation needs its normal authorization.
+Authentication does not grant preview origins permission to use Billing or make
+Teams changes. To enable a reviewed preview, add its exact HTTPS origin to the
+relay's comma-separated `BILLING_ADDITIONAL_APP_ORIGINS` setting and redeploy the
+relay. The production GitHub environment variable with the same name supplies
+this setting to the relay deployment workflow. The default list is empty;
+wildcards, paths, and non-HTTPS origins are rejected.
 
-When a preview is retired, remove its PR-specific alias and project domain.
+The allowlist permits browser requests from only those exact origins. Account
+authentication, organization membership, and admin role checks still apply.
+Stripe Checkout and portal return URLs continue to use the canonical production
+app origin. This setting does not change native clients or grant access to
+another account's environments.
+
+When a preview is retired, remove its origin from the relay allowlist and
+redeploy, then remove its PR-specific alias and project domain.
 Never remove the production or nightly domains as part of preview cleanup.

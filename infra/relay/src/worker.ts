@@ -240,6 +240,7 @@ export const ApiLive = Api.make(
           "BILLING_COUNTRY_RESTRICTION_VERIFIED",
           "BILLING_ENFORCEMENT_USERS",
           "BILLING_CHECKOUT_USERS",
+          "BILLING_ADDITIONAL_APP_ORIGINS",
         ].map((key) => [key, Config.string(key).pipe(Config.withDefault(""))]),
       ),
     );
@@ -759,6 +760,7 @@ export const ApiLive = Api.make(
           ? [
               teamsRoutes({
                 appOrigin: billingConfig.appOrigin,
+                additionalAppOrigins: billingConfig.additionalAppOrigins ?? [],
                 clerkWebhookSecret: Redacted.value(teamClerkWebhook),
                 checkoutEnabled: billingConfig.checkoutEnabled,
               }).pipe(Layer.provide(runtimeLayer)),
@@ -771,7 +773,7 @@ export const ApiLive = Api.make(
         Layer.provide([
           Etag.layerWeak,
           httpPlatformNotSupportedLayer,
-          makeRelayCors(billingConfig.appOrigin),
+          makeRelayCors(billingConfig.appOrigin, billingConfig.additionalAppOrigins),
         ]),
       ),
       relayNotFoundRoute,

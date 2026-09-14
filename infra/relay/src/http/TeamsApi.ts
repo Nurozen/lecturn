@@ -15,9 +15,11 @@ import { TeamStore, TeamError } from "../teams/TeamStore.ts";
 import { TeamDirectory } from "../teams/TeamDirectory.ts";
 import { TeamBillingService } from "../teams/TeamBillingService.ts";
 import { makeTeamAdmin } from "../teams/TeamAdmin.ts";
+import { isBillingAppOrigin } from "../billing/BillingConfig.ts";
 
 export interface TeamsRouteConfig {
   appOrigin: string;
+  additionalAppOrigins?: readonly string[];
   clerkWebhookSecret: string;
   checkoutEnabled: boolean;
 }
@@ -203,7 +205,14 @@ export function teamsRoutes(routeConfig: TeamsRouteConfig) {
           return json(yield* admin.detail(organizationId, userId, routeConfig.checkoutEnabled));
         }
         if (request.method !== "POST") return json({ message: "Not found" }, 404);
-        if (request.headers.origin && request.headers.origin !== routeConfig.appOrigin)
+        if (
+          request.headers.origin &&
+          !isBillingAppOrigin(
+            request.headers.origin,
+            routeConfig.appOrigin,
+            routeConfig.additionalAppOrigins,
+          )
+        )
           return json({ message: "Manage Teams from your Lecturn account" }, 403);
         if (!(request.headers["content-type"] ?? "").startsWith("application/json"))
           return json({ message: "JSON required" }, 400);
