@@ -9,8 +9,8 @@ import { resolveCloudPublicConfig } from "../../cloud/publicConfig";
 import { useSessionRelayToken } from "../../cloud/useSessionRelayToken";
 
 export function useConnectBillingStatus() {
-  const { getToken, userId, sessionId, isSignedIn } = useAuth();
-  const getRelayToken = useSessionRelayToken({ userId, sessionId, isSignedIn, getToken });
+  const { userId, sessionId, isSignedIn } = useAuth();
+  const getRelayToken = useSessionRelayToken({ userId, sessionId, isSignedIn });
   const [refreshKey, setRefreshKey] = useState(0);
   const [result, setResult] = useState<{
     accountId: string;

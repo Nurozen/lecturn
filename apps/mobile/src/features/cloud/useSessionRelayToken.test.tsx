@@ -1,22 +1,39 @@
+import { useAuth } from "@clerk/expo";
 import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { useSessionRelayToken } from "./useSessionRelayToken";
 
+const clerk = vi.hoisted(() => ({
+  active: null as null | {
+    id: string;
+    user: { id: string };
+    token: string;
+    getToken(): Promise<string>;
+  },
+}));
+vi.mock("@clerk/expo", () => ({
+  useSession: () => ({ session: clerk.active }),
+  // Clerk's real useAuth getter reads the active session at invocation time.
+  useAuth: () => ({ getToken: () => clerk.active?.getToken() ?? Promise.resolve(null) }),
+}));
 vi.mock("./publicConfig", () => ({
   resolveRelayClerkTokenOptions: () => ({ template: "relay" }),
 }));
 
 let root: Root;
 let tokenProvider: () => Promise<string | null>;
+let activeTokenProvider: () => Promise<string | null>;
 const connect = vi.fn();
 function Probe(props: { account: string | null; session: string | null; token: string }) {
+  const { getToken } = useAuth();
+  useEffect(() => {
+    activeTokenProvider = getToken;
+  }, [getToken]);
   const provider = useSessionRelayToken({
     userId: props.account,
     sessionId: props.session,
     isSignedIn: props.account !== null,
-    // Like Clerk Expo, this closure changes on every render.
-    getToken: async () => props.token,
   });
   useEffect(() => {
     tokenProvider = provider;
@@ -25,11 +42,24 @@ function Probe(props: { account: string | null; session: string | null; token: s
   return null;
 }
 async function render(account: string | null, session: string | null, token: string) {
+  if (account && session) {
+    if (clerk.active?.id === session) clerk.active.token = token;
+    else
+      clerk.active = {
+        id: session,
+        user: { id: account },
+        token,
+        async getToken() {
+          return this.token;
+        },
+      };
+  } else clerk.active = null;
   await act(() => root.render(<Probe account={account} session={session} token={token} />));
 }
 
 beforeEach(() => {
   connect.mockClear();
+  clerk.active = null;
   const document = { nodeType: 9, addEventListener() {}, removeEventListener() {} };
   const container = {
     nodeType: 1,
@@ -50,6 +80,17 @@ afterEach(async () => {
 });
 
 describe("session-scoped relay credentials", () => {
+  it("restarts relay effects when the matching session resource becomes available", async () => {
+    await act(() => root.render(<Probe account="account-a" session="session-a" token="unused" />));
+    const waiting = tokenProvider;
+    expect(await waiting()).toBeNull();
+    await render("account-a", "session-a", "available-token");
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(tokenProvider).not.toBe(waiting);
+    expect(await tokenProvider()).toBe("available-token");
+    expect(await waiting()).toBeNull();
+  });
+
   it("uses refreshed credentials without restarting relay effects on every render", async () => {
     await render("account-a", "session-a", "first-token");
     const original = tokenProvider;
@@ -62,7 +103,9 @@ describe("session-scoped relay credentials", () => {
   it("keeps delayed old-account cleanup bound to the old account", async () => {
     await render("account-a", "session-a", "account-a-token");
     const cleanupToken = tokenProvider;
+    const unsafeCleanupToken = activeTokenProvider;
     await render("account-b", "session-b", "account-b-token");
+    expect(await unsafeCleanupToken()).toBe("account-b-token");
     expect(await cleanupToken()).toBe("account-a-token");
     expect(await tokenProvider()).toBe("account-b-token");
     expect(connect).toHaveBeenCalledTimes(2);

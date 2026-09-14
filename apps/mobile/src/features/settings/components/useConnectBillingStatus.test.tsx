@@ -13,7 +13,20 @@ const mocks = vi.hoisted(() => ({
   listeners: new Set<(state: string) => void>(),
 }));
 vi.mock("@clerk/expo", () => ({
+  useSession: () => ({
+    session: mocks.userId
+      ? {
+          id: `session-${mocks.userId}`,
+          user: { id: mocks.userId },
+          getToken: () => {
+            mocks.getToken(mocks.token);
+            return Promise.resolve(mocks.token);
+          },
+        }
+      : null,
+  }),
   useAuth: () => ({
+    sessionId: mocks.userId ? `session-${mocks.userId}` : null,
     userId: mocks.userId,
     isSignedIn: !!mocks.userId,
     // Match the real Clerk Expo hook: a fresh wrapper on each render.

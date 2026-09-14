@@ -1,44 +1,41 @@
+import { useSession } from "@clerk/expo";
 import { useLayoutEffect, useMemo } from "react";
 import { resolveRelayClerkTokenOptions } from "./publicConfig";
 
-type ClerkTokenProvider = (
-  options: ReturnType<typeof resolveRelayClerkTokenOptions>,
-) => Promise<string | null>;
+type ClerkSession = NonNullable<ReturnType<typeof useSession>["session"]>;
 
-function createSessionTokenProvider(
-  userId: string | null | undefined,
-  signedIn: boolean | undefined,
-) {
-  let current: ClerkTokenProvider | null = null;
+function createSessionTokenProvider() {
+  let current: ClerkSession | null = null;
   return {
-    update(provider: ClerkTokenProvider) {
-      current = provider;
+    update(session: ClerkSession) {
+      current = session;
     },
     read() {
-      return signedIn && userId && current
-        ? current(resolveRelayClerkTokenOptions())
-        : Promise.resolve(null);
+      return current ? current.getToken(resolveRelayClerkTokenOptions()) : Promise.resolve(null);
     },
   };
 }
 
-/** Clerk Expo wraps getToken on every render. Keep relay effects tied to the session. */
+/** Keep relay effects stable and token reads bound to their original Clerk session. */
 export function useSessionRelayToken(auth: {
   readonly userId: string | null | undefined;
   readonly sessionId: string | null | undefined;
   readonly isSignedIn: boolean | undefined;
-  readonly getToken: ClerkTokenProvider;
 }): () => Promise<string | null> {
-  const { userId, sessionId, isSignedIn, getToken } = auth;
-  const session = useMemo(
-    () => ({ sessionId, ...createSessionTokenProvider(userId, isSignedIn) }),
-    [userId, sessionId, isSignedIn],
+  const { session } = useSession();
+  const { userId, sessionId, isSignedIn } = auth;
+  const ready = Boolean(isSignedIn && session?.id === sessionId && session?.user.id === userId);
+  const provider = useMemo(
+    () => ({ userId, sessionId, ready, ...createSessionTokenProvider() }),
+    [userId, sessionId, ready],
   );
   useLayoutEffect(() => {
-    session.update(getToken);
-  }, [session, getToken]);
+    if (ready && session) {
+      provider.update(session);
+    }
+  }, [provider, session, ready]);
 
-  // Old-account cleanup retains its own holder; it must never read the next
-  // account's token through a shared latest-value ref.
-  return session.read;
+  // useAuth().getToken reads Clerk's mutable active session even through an old
+  // closure. Retain the actual resource so delayed cleanup cannot use a new account.
+  return provider.read;
 }

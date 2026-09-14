@@ -16,8 +16,8 @@ import { useSessionRelayToken } from "./useSessionRelayToken";
 
 /** Native companion: account selection and access status, without purchase links. */
 export function TeamSelector() {
-  const { userId, sessionId, isSignedIn, getToken } = useAuth();
-  const tokenProvider = useSessionRelayToken({ userId, sessionId, isSignedIn, getToken });
+  const { userId, sessionId, isSignedIn } = useAuth();
+  const tokenProvider = useSessionRelayToken({ userId, sessionId, isSignedIn });
   const selected = useSyncExternalStore(
     subscribeTeamSelection,
     () => selectedTeam(userId),

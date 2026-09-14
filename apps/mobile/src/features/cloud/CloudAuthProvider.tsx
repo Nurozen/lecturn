@@ -52,10 +52,10 @@ export function activateCloudRelayAccount(
 }
 
 function CloudAuthBridge(props: { readonly children: ReactNode }) {
-  const { getToken, isLoaded, isSignedIn, userId, sessionId } = useAuth({
+  const { isLoaded, isSignedIn, userId, sessionId } = useAuth({
     treatPendingAsSignedOut: false,
   });
-  const tokenProvider = useSessionRelayToken({ getToken, isSignedIn, userId, sessionId });
+  const tokenProvider = useSessionRelayToken({ isSignedIn, userId, sessionId });
   const removeRelayEnvironments = useAtomCommand(removeCloudEnvironments, {
     reportFailure: false,
     reportDefect: false,
