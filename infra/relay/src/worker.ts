@@ -1,3 +1,13 @@
+import { TeamStore, makeTeamStore, TeamError } from "./teams/TeamStore.ts";
+import { TeamDirectory, makeTeamDirectory } from "./teams/TeamDirectory.ts";
+import { TeamRuntime } from "./teams/TeamRuntime.ts";
+import {
+  TeamBillingService,
+  makeTeamBillingService,
+  makeTeamBillingRepository,
+} from "./teams/TeamBillingService.ts";
+import { createTeamStripeClient } from "./teams/TeamStripeClient.ts";
+import { teamsRoutes, TeamGatewaySync } from "./http/TeamsApi.ts";
 import {
   ManagedGatewayHttpClient,
   makeManagedGatewayHttpClient,
@@ -251,6 +261,48 @@ export const ApiLive = Api.make(
         STRIPE_PORTAL_CONFIGURATION_ID: portalConfiguration,
       }),
     ).pipe(Effect.orDie);
+    const teamsEnabled = yield* Config.boolean("TEAMS_ENABLED").pipe(Config.withDefault(false));
+    const teamMonthlyPrice = yield* Config.string("STRIPE_TEAM_MONTHLY_PRICE_ID").pipe(
+      Config.withDefault(""),
+    );
+    const teamAnnualPrice = yield* Config.string("STRIPE_TEAM_ANNUAL_PRICE_ID").pipe(
+      Config.withDefault(""),
+    );
+    const teamPortal = yield* Config.string("STRIPE_TEAM_PORTAL_CONFIGURATION_ID").pipe(
+      Config.withDefault(""),
+    );
+    const teamStripeWebhook = yield* Config.redacted("STRIPE_TEAM_WEBHOOK_SECRET").pipe(
+      Config.withDefault(Redacted.make("")),
+    );
+    const teamClerkWebhook = yield* Config.redacted("CLERK_TEAM_WEBHOOK_SECRET").pipe(
+      Config.withDefault(Redacted.make("")),
+    );
+    if (
+      teamsEnabled &&
+      (!teamMonthlyPrice ||
+        !teamAnnualPrice ||
+        !teamPortal ||
+        !Redacted.value(teamStripeWebhook) ||
+        !Redacted.value(teamClerkWebhook) ||
+        billingConfig.mode === "disabled")
+    )
+      return yield* Effect.die(
+        "Teams requires configured prices, portal, signed webhooks and enabled billing.",
+      );
+    const teamBillingConfig = {
+      secretKey: Redacted.value(stripeSecret),
+      webhookSecret: Redacted.value(teamStripeWebhook),
+      livemode: billingConfig.livemode,
+      appOrigin: billingConfig.appOrigin,
+      monthlyPriceId: teamMonthlyPrice,
+      annualPriceId: teamAnnualPrice,
+      portalConfigurationId: teamPortal,
+      minimumSeats: 5,
+      ...(billingConfig.automaticTax === undefined
+        ? {}
+        : { automaticTax: billingConfig.automaticTax }),
+      ...(billingConfig.accountId === undefined ? {} : { accountId: billingConfig.accountId }),
+    };
     const gatewayFlags = yield* Effect.all(
       Object.fromEntries(
         [
@@ -306,6 +358,7 @@ export const ApiLive = Api.make(
       Effect.gen(function* () {
         const store = yield* makeManagedGatewayStore({
           ...gatewayConfig,
+          teamsEnabled,
           stage,
           baseDomain: yield* managedEndpointZoneName,
         });
@@ -434,58 +487,136 @@ export const ApiLive = Api.make(
       }),
     ).pipe(Layer.provide(gatewayRuntimeLayer));
 
-    const runtimeLayer = Layer.empty.pipe(
-      Layer.provideMerge(
-        Layer.merge(BillingService.layer(billingConfig), MobileRegistrations.layer),
-      ),
-      Layer.provideMerge(AgentActivityPublisher.layer),
-      Layer.provideMerge(EnvironmentConnector.layer.pipe(Layer.provide(gatewayHttpClientLayer))),
-      Layer.provideMerge(EnvironmentLinker.layer),
-      Layer.provideMerge(EnvironmentPublishSignatures.layer),
-      Layer.provideMerge(
-        ManagedEndpointProvider.layerCloudflareBindings(
-          managedEndpointTunnelBinding,
-          managedEndpointDnsBinding,
-          alchemyRuntimeContext,
-        ).pipe(Layer.provideMerge(gatewayEnrollmentLayer), Layer.provideMerge(gatewayRuntimeLayer)),
-      ),
-      Layer.provideMerge(DpopProofs.layer),
-      Layer.provideMerge(ApnsDeliveries.layer),
-      Layer.provideMerge(ApnsClient.layer.pipe(Layer.provideMerge(ApnsProviderTokens.layer))),
-      Layer.provideMerge(
-        ApnsDeliveryQueue.layerCloudflareQueues(apnsDeliveryQueueSender, alchemyRuntimeContext),
-      ),
-      Layer.provideMerge(AgentActivityRows.layer),
-      Layer.provideMerge(Devices.layer),
-      Layer.provideMerge(EnvironmentCredentials.layer),
-      Layer.provideMerge(
-        Layer.mergeAll(
-          EnvironmentLinks.layer,
-          ManagedEndpointAllocations.layer,
-          ManagedTunnelLimits.layer,
-          ManagedAccess.layer(
-            billingConfig.mode !== "disabled",
-            billingConfig.mode === "enforce" ? billingConfig.enforcementUsers : undefined,
-            billingConfig.managedAccessEnabled === true,
+    const teamLayer = teamsEnabled
+      ? Layer.mergeAll(
+          TeamRuntime.layer,
+          Layer.effect(
+            TeamBillingService,
+            Effect.gen(function* () {
+              const store = yield* TeamStore;
+              const gateway = yield* TeamGatewaySync;
+              return makeTeamBillingService(
+                teamBillingConfig,
+                yield* makeTeamBillingRepository,
+                createTeamStripeClient(teamBillingConfig),
+                (organizationId) =>
+                  store
+                    .inventory(organizationId)
+                    .pipe(
+                      Effect.flatMap((environments) =>
+                        Effect.forEach(
+                          new Set(environments.map((env) => env.user_id)),
+                          (userId) => gateway.sync(userId),
+                          { concurrency: 4, discard: true },
+                        ),
+                      ),
+                    ),
+              );
+            }),
           ),
-          ManagedReservations.layer({
-            enabled: billingConfig.managedAccessEnabled === true,
-            enforcementUsers:
+        ).pipe(
+          Layer.provideMerge(Layer.effect(TeamStore, makeTeamStore)),
+          Layer.provideMerge(
+            Layer.succeed(TeamDirectory, makeTeamDirectory(Redacted.value(clerkSecretKey))),
+          ),
+          Layer.provideMerge(
+            Layer.effect(
+              TeamGatewaySync,
+              Effect.gen(function* () {
+                const runtime = yield* ManagedGatewayRuntime;
+                return {
+                  sync: (userId: string) =>
+                    runtime.sync(userId).pipe(
+                      Effect.mapError(
+                        () =>
+                          new TeamError({
+                            code: "unavailable",
+                            message: "Team connection update is pending. Please retry.",
+                          }),
+                      ),
+                    ),
+                };
+              }),
+            ).pipe(Layer.provide(gatewayRuntimeLayer)),
+          ),
+        )
+      : Layer.succeed(TeamBillingService, {
+          checkout: () =>
+            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
+          preview: () =>
+            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
+          confirm: () =>
+            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
+          reconcile: () =>
+            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
+          portal: () =>
+            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
+          receiveWebhook: () =>
+            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
+          closeOrganization: () =>
+            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
+          processPending: () => Effect.void,
+        });
+
+    const runtimeLayer = Layer.empty
+      .pipe(
+        Layer.provideMerge(
+          Layer.merge(BillingService.layer(billingConfig), MobileRegistrations.layer),
+        ),
+        Layer.provideMerge(AgentActivityPublisher.layer),
+        Layer.provideMerge(EnvironmentConnector.layer.pipe(Layer.provide(gatewayHttpClientLayer))),
+        Layer.provideMerge(EnvironmentLinker.layer),
+        Layer.provideMerge(EnvironmentPublishSignatures.layer),
+        Layer.provideMerge(
+          ManagedEndpointProvider.layerCloudflareBindings(
+            managedEndpointTunnelBinding,
+            managedEndpointDnsBinding,
+            alchemyRuntimeContext,
+          ).pipe(
+            Layer.provideMerge(gatewayEnrollmentLayer),
+            Layer.provideMerge(gatewayRuntimeLayer),
+          ),
+        ),
+        Layer.provideMerge(DpopProofs.layer),
+        Layer.provideMerge(ApnsDeliveries.layer),
+        Layer.provideMerge(ApnsClient.layer.pipe(Layer.provideMerge(ApnsProviderTokens.layer))),
+        Layer.provideMerge(
+          ApnsDeliveryQueue.layerCloudflareQueues(apnsDeliveryQueueSender, alchemyRuntimeContext),
+        ),
+        Layer.provideMerge(AgentActivityRows.layer),
+        Layer.provideMerge(Devices.layer),
+        Layer.provideMerge(EnvironmentCredentials.layer),
+        Layer.provideMerge(
+          Layer.mergeAll(
+            EnvironmentLinks.layer,
+            ManagedEndpointAllocations.layer,
+            ManagedTunnelLimits.layer,
+            ManagedAccess.layer(
+              billingConfig.mode !== "disabled",
               billingConfig.mode === "enforce" ? billingConfig.enforcementUsers : undefined,
-          }),
+              billingConfig.managedAccessEnabled === true,
+              teamsEnabled,
+            ),
+            ManagedReservations.layer({
+              teamsEnabled,
+              enabled: billingConfig.managedAccessEnabled === true,
+              enforcementUsers:
+                billingConfig.mode === "enforce" ? billingConfig.enforcementUsers : undefined,
+            }),
+          ),
         ),
-      ),
-      Layer.provideMerge(LiveActivities.layer),
-      Layer.provideMerge(DeliveryAttempts.layer),
-      Layer.provideMerge(RelayTokens.layer),
-      Layer.provideMerge(
-        RelayDb.RelayTransactions.layer.pipe(
-          Layer.provideMerge(Layer.succeed(RelayDb.RelayDb, db)),
+        Layer.provideMerge(teamLayer),
+        Layer.provideMerge(LiveActivities.layer),
+        Layer.provideMerge(DeliveryAttempts.layer),
+        Layer.provideMerge(RelayTokens.layer),
+        Layer.provideMerge(
+          RelayDb.RelayTransactions.layer.pipe(
+            Layer.provideMerge(Layer.succeed(RelayDb.RelayDb, db)),
+          ),
         ),
-      ),
-      Layer.provideMerge(Layer.effect(RelayConfiguration.RelayConfiguration, loadSettings)),
-      Layer.provideMerge(webcryptoLayer),
-    );
+        Layer.provideMerge(Layer.effect(RelayConfiguration.RelayConfiguration, loadSettings)),
+      )
+      .pipe(Layer.provideMerge(webcryptoLayer));
 
     const appLayer = relayApiLayer.pipe(
       Layer.provideMerge(relayClientAuthLayer),
@@ -551,10 +682,20 @@ export const ApiLive = Api.make(
             ),
             reportBillingHealth(operations.health()),
           ];
+          if (teamsEnabled) {
+            const teams = yield* TeamBillingService;
+            tasks.push(
+              teams.processPending().pipe(
+                Effect.timeout("45 seconds"),
+                Effect.catch(() => Effect.logWarning("Team billing reconciliation deferred")),
+              ),
+            );
+          }
           if (identityReconciliation)
             tasks.push(operations.reconcileIdentities(5).pipe(Effect.asVoid));
           if (billingConfig.suspensionEnabled) {
             const suspensions = yield* makeManagedSuspensions({
+              teamsEnabled,
               enabled: () =>
                 Effect.succeed(
                   billingConfig.mode === "enforce" && billingConfig.suspensionEnabled === true,
@@ -614,6 +755,15 @@ export const ApiLive = Api.make(
         ),
         HttpApiScalar.layer(RelayApi, { path: "/docs" }),
         relayDocsRedirectRoute,
+        ...(teamsEnabled
+          ? [
+              teamsRoutes({
+                appOrigin: billingConfig.appOrigin,
+                clerkWebhookSecret: Redacted.value(teamClerkWebhook),
+                checkoutEnabled: billingConfig.checkoutEnabled,
+              }).pipe(Layer.provide(runtimeLayer)),
+            ]
+          : []),
         billingRoutes(billingConfig, Redacted.value(clerkBillingWebhook)).pipe(
           Layer.provide(runtimeLayer),
         ),

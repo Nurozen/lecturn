@@ -230,6 +230,7 @@ export const relayManagedReservations = pgTable(
     environmentId: varchar("environment_id", { length: 191 }).notNull(),
     generation: integer("generation").notNull(),
     accountGeneration: integer("account_generation").notNull(),
+    fundingOrganizationId: text("funding_organization_id"),
     enabled: boolean("enabled").notNull(),
     state: varchar("state", { length: 16 }).notNull().$type<"pending" | "active" | "disabled">(),
     updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
@@ -355,3 +356,83 @@ export const relayManagedGatewayEnvironments = pgTable(
     uniqueIndex("idx_relay_managed_gateway_origin_hostname").on(table.originHostname),
   ],
 );
+
+export const relayTeamAccounts = pgTable(
+  "relay_team_accounts",
+  {
+    organizationId: text("organization_id").primaryKey(),
+    ownerUserId: text("owner_user_id").notNull(),
+    customerId: text("customer_id").unique(),
+    subscriptionId: text("subscription_id").unique(),
+    purchasedSeats: integer("purchased_seats").notNull().default(0),
+    accessUntil: bigint("access_until", { mode: "number" }),
+    accessWindowStart: bigint("access_window_start", { mode: "number" }),
+    interval: text("interval"),
+    currentPeriodEnd: bigint("current_period_end", { mode: "number" }),
+    pendingSeats: integer("pending_seats"),
+    policy: jsonb("policy")
+      .notNull()
+      .default({ allowedProviders: null, publishAgentActivity: true }),
+    generation: integer("generation").notNull().default(0),
+    billingState: jsonb("billing_state").notNull().default({}),
+    status: text("status").notNull().default("free"),
+    suspended: boolean("suspended").notNull().default(false),
+    reconcileAfter: bigint("reconcile_after", { mode: "number" }).notNull().default(0),
+    billingLeaseOwner: text("billing_lease_owner"),
+    billingLeaseExpiresAt: bigint("billing_lease_expires_at", { mode: "number" })
+      .notNull()
+      .default(0),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    check("relay_team_accounts_purchased_seats_check", sql`${table.purchasedSeats} >= 0`),
+    check("relay_team_accounts_pending_seats_check", sql`${table.pendingSeats} >= 0`),
+    check("relay_team_accounts_interval_check", sql`${table.interval} IN ('month','year')`),
+  ],
+);
+export const relayTeamSeats = pgTable(
+  "relay_team_seats",
+  {
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => relayTeamAccounts.organizationId),
+    userId: text("user_id").notNull(),
+    assignedAt: bigint("assigned_at", { mode: "number" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.organizationId, table.userId] })],
+);
+export const relayTeamEnvironmentFunding = pgTable(
+  "relay_team_environment_funding",
+  {
+    userId: text("user_id").notNull(),
+    environmentId: text("environment_id").notNull(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => relayTeamAccounts.organizationId),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.environmentId] }),
+    index("relay_team_funding_org").on(table.organizationId, table.userId),
+  ],
+);
+export const relayTeamAudit = pgTable(
+  "relay_team_audit",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => relayTeamAccounts.organizationId),
+    actorUserId: text("actor_user_id").notNull(),
+    action: text("action").notNull(),
+    subjectId: text("subject_id"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (table) => [index("relay_team_audit_org").on(table.organizationId, table.createdAt)],
+);
+
+export const relayTeamDeletedUsers = pgTable("relay_team_deleted_users", {
+  userId: text("user_id").primaryKey(),
+  deletedAt: bigint("deleted_at", { mode: "number" }).notNull(),
+});

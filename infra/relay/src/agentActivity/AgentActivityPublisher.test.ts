@@ -8,6 +8,8 @@ import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
 import * as LiveActivities from "./LiveActivities.ts";
 import * as AgentActivityPublisher from "./AgentActivityPublisher.ts";
 import * as ApnsDeliveries from "./ApnsDeliveries.ts";
+import { TeamRuntime } from "../teams/TeamRuntime.ts";
+import { TeamError } from "../teams/TeamStore.ts";
 
 const state: RelayAgentActivityState = {
   environmentId: "env" as RelayAgentActivityState["environmentId"],
@@ -811,4 +813,133 @@ describe("makeAggregateState", () => {
       { threadId: "a-5" },
     ]);
   });
+});
+
+describe("company activity ingestion", () => {
+  function fixture(policy: TeamRuntime["Service"]["policy"], owners = ["owner"]) {
+    const writes: string[] = [];
+    const ownerQueries: unknown[] = [];
+    const service = AgentActivityPublisher.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.succeed(
+            AgentActivityRows.AgentActivityRows,
+            makeAgentActivityRows({
+              upsert: () =>
+                Effect.sync(() => {
+                  writes.push("upsert");
+                }),
+              remove: () =>
+                Effect.sync(() => {
+                  writes.push("remove");
+                }),
+            }),
+          ),
+          Layer.succeed(
+            EnvironmentLinks.EnvironmentLinks,
+            makeEnvironmentLinks({
+              // Delivery flags are deliberately off; they are not the source of company ownership.
+              listDeliveryUsersForEnvironment: () => Effect.succeed([]),
+              listUsersForEnvironment: (input) =>
+                Effect.sync(() => {
+                  ownerQueries.push(input);
+                  return owners;
+                }),
+            }),
+          ),
+          Layer.succeed(LiveActivities.LiveActivities, makeLiveActivities()),
+          Layer.succeed(ApnsDeliveries.ApnsDeliveries, makeApnsDeliveries()),
+          Layer.succeed(TeamRuntime, {
+            prepareLink: () => Effect.succeed(undefined),
+            access: () => Effect.succeed(undefined),
+            funding: () => Effect.succeed(undefined),
+            unlinked: () => Effect.void,
+            policy,
+          }),
+        ),
+      ),
+    );
+    const publish = (value: RelayAgentActivityState | null = state) =>
+      Effect.gen(function* () {
+        const publisher = yield* AgentActivityPublisher.AgentActivityPublisher;
+        return yield* publisher.publish({
+          environmentId: "env",
+          environmentPublicKey: "verified-key",
+          threadId: "thread",
+          state: value,
+        });
+      }).pipe(Effect.provide(service));
+    return { publish, writes, ownerQueries };
+  }
+  it.effect(
+    "does not retain activity when company publishing is disabled, even with delivery flags off",
+    () =>
+      Effect.gen(function* () {
+        const checked: string[] = [];
+        const h = fixture((userId, environmentId) =>
+          Effect.sync(() => {
+            checked.push(`${userId}:${environmentId}`);
+            return {
+              organizationId: "org",
+              hasAccess: true,
+              allowedProviders: null,
+              publishAgentActivity: false,
+            };
+          }),
+        );
+        expect(yield* h.publish()).toEqual({ ok: true, deliveries: [] });
+        expect(h.writes).toEqual([]);
+        expect(checked).toEqual(["owner:env"]);
+        expect(h.ownerQueries).toEqual([
+          {
+            environmentId: "env",
+            environmentPublicKey: "verified-key",
+            includeAllLinkedUsers: true,
+          },
+        ]);
+      }),
+  );
+  it.effect("revoked company access prevents new rows while null cleanup remains available", () =>
+    Effect.gen(function* () {
+      const h = fixture(() =>
+        Effect.succeed({
+          organizationId: "org",
+          hasAccess: false,
+          allowedProviders: null,
+          publishAgentActivity: true,
+        }),
+      );
+      yield* h.publish();
+      expect(h.writes).toEqual([]);
+      yield* h.publish(null);
+      expect(h.writes).toEqual(["remove"]);
+    }),
+  );
+  it.effect("preserves personal ingestion and permits an active company policy", () =>
+    Effect.gen(function* () {
+      const personal = fixture(() => Effect.succeed(null));
+      yield* personal.publish();
+      expect(personal.writes).toEqual(["upsert"]);
+      const company = fixture(() =>
+        Effect.succeed({
+          organizationId: "org",
+          hasAccess: true,
+          allowedProviders: null,
+          publishAgentActivity: true,
+        }),
+      );
+      yield* company.publish();
+      expect(company.writes).toEqual(["upsert"]);
+    }),
+  );
+  it.effect("policy lookup failure is retryable and never writes the incoming activity", () =>
+    Effect.gen(function* () {
+      const h = fixture(() =>
+        Effect.fail(new TeamError({ code: "unavailable", message: "unavailable" })),
+      );
+      const error = yield* Effect.flip(h.publish());
+      expect(error._tag).toBe("ManagedAccessUnavailable");
+      expect(h.writes).toEqual([]);
+    }),
+  );
 });

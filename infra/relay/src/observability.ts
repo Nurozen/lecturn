@@ -11,6 +11,8 @@ import * as Schema from "effect/Schema";
 import * as Tracer from "effect/Tracer";
 import { OtlpExporter, OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
 
+import { relayPhysicalName } from "./physicalIdentity.ts";
+
 import { relayResourceNameForStage } from "./deploymentConfig.ts";
 
 const relayRecentSpansQuery = (dataset: string) =>
@@ -27,7 +29,7 @@ const relayRecentSpansQuery = (dataset: string) =>
 export const RelayObservability = Effect.gen(function* () {
   const { stage } = yield* Alchemy.Stack;
   const traces = yield* Axiom.Dataset("RelayTracesDataset", {
-    name: relayResourceNameForStage("lecturn-relay-traces", stage),
+    name: relayResourceNameForStage(relayPhysicalName("lecturn-relay-traces", stage), stage),
     kind: "otel:traces:v1",
     description: "Lecturn relay Worker HTTP request spans.",
     retentionDays: 30,
@@ -35,7 +37,7 @@ export const RelayObservability = Effect.gen(function* () {
   });
 
   const workerIngestToken = yield* Axiom.ApiToken("RelayWorkerAxiomIngestToken", {
-    name: relayResourceNameForStage("lecturn-relay-otel-ingest", stage),
+    name: relayResourceNameForStage(relayPhysicalName("lecturn-relay-otel-ingest", stage), stage),
     description: "Owned by Alchemy. Scoped OTLP ingest token for relay HTTP spans.",
     datasetCapabilities: Output.map(traces.name, (dataset) => ({
       [dataset]: { ingest: ["create" as const] },
@@ -43,15 +45,21 @@ export const RelayObservability = Effect.gen(function* () {
   });
 
   const mobileIngestToken = yield* Axiom.ApiToken("RelayMobileAxiomIngestToken", {
-    name: relayResourceNameForStage("lecturn-mobile-otel-ingest", stage),
-    description: "Owned by Alchemy. Scoped OTLP ingest token for Lecturn mobile spans.",
+    name: relayResourceNameForStage(relayPhysicalName("lecturn-mobile-otel-ingest", stage), stage),
+    description:
+      stage === "prod"
+        ? "Owned by Alchemy. Scoped OTLP ingest token for T3 Code mobile spans."
+        : "Owned by Alchemy. Scoped OTLP ingest token for Lecturn mobile spans.",
     datasetCapabilities: Output.map(traces.name, (dataset) => ({
       [dataset]: { ingest: ["create" as const] },
     })),
   });
 
   const clientIngestToken = yield* Axiom.ApiToken("RelayClientAxiomIngestToken", {
-    name: relayResourceNameForStage("lecturn-relay-client-otel-ingest", stage),
+    name: relayResourceNameForStage(
+      relayPhysicalName("lecturn-relay-client-otel-ingest", stage),
+      stage,
+    ),
     description: "Owned by Alchemy. Scoped OTLP ingest token for first-party relay client spans.",
     datasetCapabilities: Output.map(traces.name, (dataset) => ({
       [dataset]: { ingest: ["create" as const] },
@@ -59,7 +67,7 @@ export const RelayObservability = Effect.gen(function* () {
   });
 
   yield* Axiom.View("RelayRecentSpansView", {
-    name: relayResourceNameForStage("lecturn-relay-recent-spans", stage),
+    name: relayResourceNameForStage(relayPhysicalName("lecturn-relay-recent-spans", stage), stage),
     description: "Recent relay HTTP request spans.",
     datasets: [traces.name],
     aplQuery: Output.map(traces.name, relayRecentSpansQuery),

@@ -76,13 +76,13 @@ dependencies represented at their boundary rather than mocking internal behavior
 
 ## Deployment
 
-The deployment identity is the `LecturnRelay` Alchemy stack, with the production
-PlanetScale database named `lecturnrelay`. The rebrand changes resource names and
-public environment-variable names to the Lecturn namespace; it does not migrate
-existing cloud state. For an existing installation, reconcile Alchemy state,
-database adoption, managed endpoints, and Actions configuration before deploying
-these renamed resources. Clients and relay must use the same Lecturn protocol
-identifiers. Local test results do not validate an existing deployment upgrade.
+Production retains the `T3CodeRelay` Alchemy stack, `t3coderelay` PlanetScale database,
+and original `t3-code-*` Axiom resource names. These are persisted infrastructure
+identifiers, not product branding. `src/physicalIdentity.ts` centralizes them; all
+stages share the stack identity so references to production remain valid. Renaming
+these resources requires a separate state migration and must not accompany a
+normal application deployment. Inspect the production dry run: existing keys,
+database, queues, and Worker must be retained rather than recreated.
 
 The relay deploys through Alchemy:
 

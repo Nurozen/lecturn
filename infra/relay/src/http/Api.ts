@@ -1,3 +1,4 @@
+import { TeamRuntime } from "../teams/TeamRuntime.ts";
 import { createClerkClient, verifyToken } from "@clerk/backend";
 import { sql as drizzleSql } from "drizzle-orm";
 import * as Crypto from "effect/Crypto";
@@ -509,6 +510,11 @@ export const unlinkEnvironmentRecord = Effect.fn("relay.api.client.unlinkEnviron
       environmentId: input.environmentId,
       target: deprovisionTarget,
     });
+    const teams = yield* Effect.serviceOption(TeamRuntime);
+    if (Option.isSome(teams))
+      yield* teams.value
+        .unlinked(input.userId, input.environmentId)
+        .pipe(Effect.catch(() => relayInternalErrorResponse("persistence_failed")));
     return unlinked;
   },
 );
@@ -613,6 +619,7 @@ export const clientApi = HttpApiBuilder.group(
               endpointRuntime: result.endpointRuntime,
               relayIssuer: config.relayIssuer,
               environmentCredential: result.environmentCredential,
+              ...(payload.organizationId ? { organizationId: payload.organizationId } : {}),
               cloudMintPublicKey: config.cloudMintPublicKey,
             };
           },

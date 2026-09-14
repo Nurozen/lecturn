@@ -1,12 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const mocks = vi.hoisted(() => ({
+  selectedTeam: null as string | null,
+  teamList: vi.fn(async () => ({
+    organizations: [
+      { organizationId: "org_test", hasAccess: true, policy: { publishAgentActivity: true } },
+    ],
+  })),
   billingStatus: vi.fn(async () => ({ state: "active", hasAccess: true })),
   userId: "account-b",
   isSignedIn: true,
   getToken: vi.fn(async (): Promise<string | null> => "token"),
   state: {
     linked: true,
+    organizationId: null as string | null,
     cloudUserId: "account-a",
     managedTunnelActive: true,
     publishAgentActivity: true,
@@ -28,6 +35,8 @@ vi.mock("react", () => ({
 }));
 vi.mock("@lecturn/client-runtime/relay", () => ({
   createBillingClient: () => ({ getStatus: mocks.billingStatus }),
+  selectedTeam: () => mocks.selectedTeam,
+  createTeamsClient: () => ({ list: mocks.teamList }),
 }));
 vi.mock("../components/ui/toast", () => ({ toastManager: { add: vi.fn() } }));
 vi.mock("../state/relay", () => ({ relayEnvironmentDiscovery: { refresh: "refresh" } }));
@@ -56,6 +65,8 @@ import { useCloudLinkController } from "./useCloudLinkController";
 describe("Connect account ownership during reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.selectedTeam = null;
+    mocks.state.organizationId = null;
     mocks.billingStatus.mockResolvedValue({ state: "active", hasAccess: true });
     mocks.userId = "account-b";
     mocks.isSignedIn = true;
@@ -124,6 +135,8 @@ describe("Connect account ownership during reconciliation", () => {
 describe("Connect subscription preflight", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.selectedTeam = null;
+    mocks.state.organizationId = null;
     mocks.userId = "account-a";
     mocks.state.linked = false;
     mocks.isSignedIn = true;
@@ -157,4 +170,99 @@ describe("Connect subscription preflight", () => {
     ).toBe(false);
     expect(mocks.link).not.toHaveBeenCalled();
   });
+});
+
+describe("company funding", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.userId = "account-a";
+    mocks.isSignedIn = true;
+    mocks.state.linked = false;
+    mocks.selectedTeam = "org_test";
+    mocks.getToken.mockResolvedValue("token");
+    mocks.teamList.mockResolvedValue({
+      organizations: [
+        { organizationId: "org_test", hasAccess: true, policy: { publishAgentActivity: true } },
+      ],
+    });
+  });
+  it("publishes with the explicitly selected company without consulting personal billing", async () => {
+    expect(
+      await useCloudLinkController().reconcileCloudState({ managedTunnel: true, publish: true }),
+    ).toBe(true);
+    expect(mocks.billingStatus).not.toHaveBeenCalled();
+    expect(mocks.link).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "org_test" }),
+    );
+  });
+  it("does not publish for a member without company access", async () => {
+    mocks.teamList.mockResolvedValue({
+      organizations: [
+        { organizationId: "org_test", hasAccess: false, policy: { publishAgentActivity: true } },
+      ],
+    });
+    expect(
+      await useCloudLinkController().reconcileCloudState({ managedTunnel: true, publish: true }),
+    ).toBe(false);
+    expect(mocks.link).not.toHaveBeenCalled();
+  });
+  it("does not publish after funding context changes during preflight", async () => {
+    mocks.teamList.mockImplementationOnce(async () => {
+      mocks.selectedTeam = null;
+      mocks.state.organizationId = null;
+      return {
+        organizations: [
+          { organizationId: "org_test", hasAccess: true, policy: { publishAgentActivity: true } },
+        ],
+      };
+    });
+    expect(
+      await useCloudLinkController().reconcileCloudState({ managedTunnel: true, publish: true }),
+    ).toBe(false);
+    expect(mocks.link).not.toHaveBeenCalled();
+  });
+});
+
+it("links a company tunnel without requesting notification capabilities forbidden by policy", async () => {
+  vi.clearAllMocks();
+  mocks.userId = "account-a";
+  mocks.isSignedIn = true;
+  mocks.state.linked = false;
+  mocks.selectedTeam = "org_test";
+  mocks.teamList.mockResolvedValue({
+    organizations: [
+      { organizationId: "org_test", hasAccess: true, policy: { publishAgentActivity: false } },
+    ],
+  });
+  expect(
+    await useCloudLinkController().reconcileCloudState({ managedTunnel: true, publish: true }),
+  ).toBe(true);
+  expect(mocks.link).toHaveBeenCalledWith(
+    expect.objectContaining({ organizationId: "org_test", publishAgentActivity: false }),
+  );
+  expect(mocks.preferences).toHaveBeenCalledWith(
+    expect.objectContaining({ publishAgentActivity: false }),
+  );
+});
+
+it("preserves company funding on an existing link when Personal is selected", async () => {
+  vi.clearAllMocks();
+  mocks.userId = "account-a";
+  mocks.isSignedIn = true;
+  mocks.state.linked = true;
+  mocks.state.organizationId = "org_test";
+  mocks.state.cloudUserId = "account-a";
+  mocks.state.managedTunnelActive = false;
+  mocks.selectedTeam = null;
+  mocks.teamList.mockResolvedValue({
+    organizations: [
+      { organizationId: "org_test", hasAccess: true, policy: { publishAgentActivity: true } },
+    ],
+  });
+  expect(
+    await useCloudLinkController().reconcileCloudState({ managedTunnel: true, publish: true }),
+  ).toBe(true);
+  expect(mocks.billingStatus).not.toHaveBeenCalled();
+  expect(mocks.link).toHaveBeenCalledWith(expect.objectContaining({ organizationId: "org_test" }));
+  mocks.state.organizationId = null;
 });

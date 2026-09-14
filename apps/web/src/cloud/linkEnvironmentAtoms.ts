@@ -27,6 +27,8 @@ export const linkPrimaryEnvironment = createRuntimeCommand(connectionAtomRuntime
     readonly target: CloudLinkTarget;
     readonly clerkToken: string;
     readonly mode?: CloudLinkMode;
+    readonly organizationId?: string;
+    readonly publishAgentActivity?: boolean;
   }) => linkPrimaryEnvironmentToCloud(input),
 });
 

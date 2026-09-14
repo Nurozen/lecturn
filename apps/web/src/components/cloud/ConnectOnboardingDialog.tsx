@@ -27,6 +27,7 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
+import { TeamSelector } from "./TeamSelector";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 
@@ -226,6 +227,7 @@ function ConfiguredConnectOnboardingDialog() {
             active subscription, trial, or complimentary access. Local and direct connections remain
             free.
           </DialogDescription>
+          <TeamSelector />
           {steps.length > 1 ? (
             <OnboardingStepper
               steps={steps}

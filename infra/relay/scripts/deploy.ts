@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { RELAY_STACK_NAME } from "../src/physicalIdentity.ts";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import { AdoptPolicy } from "alchemy/AdoptPolicy";
@@ -340,7 +341,7 @@ export function publicConfigFromOutput(output: unknown): RelayPublicConfig | nul
 const readRelayPublicConfig = Effect.fn("relay.deploy.readState")(function* (stage: string) {
   const state = yield* State.State;
   const service = yield* state;
-  const output = yield* service.getOutput({ stack: "LecturnRelay", stage });
+  const output = yield* service.getOutput({ stack: RELAY_STACK_NAME, stage });
   const publicConfig = publicConfigFromOutput(output);
   if (publicConfig === null) {
     return yield* new RelayDeployError({

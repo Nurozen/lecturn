@@ -36,6 +36,10 @@ jobs:
       APNS_BUNDLE_ID: ${{ vars.APNS_BUNDLE_ID }}
       ALCHEMY_TELEMETRY_DISABLED: "1"
       # Flags default off; production rollout requires reviewed configuration.
+      TEAMS_ENABLED: ${{ vars.TEAMS_ENABLED || 'false' }}
+      STRIPE_TEAM_MONTHLY_PRICE_ID: ${{ vars.STRIPE_TEAM_MONTHLY_PRICE_ID }}
+      STRIPE_TEAM_ANNUAL_PRICE_ID: ${{ vars.STRIPE_TEAM_ANNUAL_PRICE_ID }}
+      STRIPE_TEAM_PORTAL_CONFIGURATION_ID: ${{ vars.STRIPE_TEAM_PORTAL_CONFIGURATION_ID }}
       BILLING_MODE: ${{ vars.BILLING_MODE || 'disabled' }}
       BILLING_CHECKOUT_ENABLED: ${{ vars.BILLING_CHECKOUT_ENABLED || 'false' }}
       STRIPE_LIVEMODE: ${{ vars.STRIPE_LIVEMODE || 'false' }}
@@ -87,6 +91,8 @@ jobs:
           APNS_PRIVATE_KEY: ${{ secrets.APNS_PRIVATE_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          STRIPE_TEAM_WEBHOOK_SECRET: ${{ secrets.STRIPE_TEAM_WEBHOOK_SECRET }}
+          CLERK_TEAM_WEBHOOK_SECRET: ${{ secrets.CLERK_TEAM_WEBHOOK_SECRET }}
           CLERK_BILLING_WEBHOOK_SECRET: ${{ secrets.CLERK_BILLING_WEBHOOK_SECRET }}
 
       - name: Publish relay deploy commit status
