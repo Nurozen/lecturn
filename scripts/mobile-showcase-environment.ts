@@ -10,8 +10,16 @@ const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 export const SHOWCASE_PROJECT_ID = "lecturn";
 export const SHOWCASE_THREAD_ID = "remote-command-center";
 export const SHOWCASE_TERMINAL_ID = "term-1";
+export const SHOWCASE_WATCH_ID = "showcase-remote-handoff";
 
-export const SHOWCASE_SCENES = ["threads", "thread", "terminal", "review", "environments"] as const;
+export const SHOWCASE_SCENES = [
+  "threads",
+  "thread",
+  "terminal",
+  "review",
+  "environments",
+  "pr-watch",
+] as const;
 export type ShowcaseScene = (typeof SHOWCASE_SCENES)[number];
 
 const PROJECTOR_NAMES = [
@@ -93,10 +101,10 @@ export function RemoteHandoffCard(props: { machine: string; latencyMs: number })
 `;
 
 const PROJECT_FAVICONS = {
-  lecturn: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="10" fill="#000"/>
-  <path d="M33.4509 93V47.56H15.5309V37H64.3309V47.56H46.4109V93H33.4509ZM86.7253 93.96C82.832 93.96 78.9653 93.4533 75.1253 92.44C71.2853 91.3733 68.032 89.88 65.3653 87.96L70.4053 78.04C72.5386 79.5867 75.0186 80.8133 77.8453 81.72C80.672 82.6267 83.5253 83.08 86.4053 83.08C89.6586 83.08 92.2186 82.44 94.0853 81.16C95.952 79.88 96.8853 78.12 96.8853 75.88C96.8853 73.7467 96.0586 72.0667 94.4053 70.84C92.752 69.6133 90.0853 69 86.4053 69H80.4853V60.44L96.0853 42.76L97.5253 47.4H68.1653V37H107.365V45.4L91.8453 63.08L85.2853 59.32H89.0453C95.9253 59.32 101.125 60.8667 104.645 63.96C108.165 67.0533 109.925 71.0267 109.925 75.88C109.925 79.0267 109.099 81.9867 107.445 84.76C105.792 87.48 103.259 89.6933 99.8453 91.4C96.432 93.1067 92.0586 93.96 86.7253 93.96Z" fill="#fff"/>
-</svg>`,
+  lecturn: await NodeFSP.readFile(
+    new URL("../apps/web/public/lecturn-mark.svg", import.meta.url),
+    "utf8",
+  ),
   react: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <rect width="64" height="64" rx="15" fill="#20232a"/>
   <g fill="none" stroke="#61dafb" stroke-width="2.8"><ellipse cx="32" cy="32" rx="25" ry="9"/><ellipse cx="32" cy="32" rx="25" ry="9" transform="rotate(60 32 32)"/><ellipse cx="32" cy="32" rx="25" ry="9" transform="rotate(120 32 32)"/></g>
@@ -183,10 +191,11 @@ export const SHOWCASE_THREADS = [
     title: "Make Suspense transitions buttery",
     branch: "perf/buttery-suspense",
     minutesAgo: 12,
-    state: "working" as const,
+    state: "approval" as const,
     request:
       "Trace the last few dropped frames in nested Suspense transitions and make them disappear.",
-    response: null,
+    response:
+      "Nested transitions now keep the previous screen visible until the next one is ready. The interaction is ready for review.",
   },
   {
     id: "hydration-haikus",
@@ -448,6 +457,14 @@ function hasSeedableSchema(dbPath: string): boolean {
       )
       .get(...SEEDED_PROJECTION_TABLES) as { count: number };
     if (tableCount.count !== SEEDED_PROJECTION_TABLES.length) return false;
+    if (
+      !database
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'pull_request_watches'",
+        )
+        .get()
+    )
+      return false;
 
     const threadColumns = database.prepare("PRAGMA table_info(projection_threads)").all() as Array<{
       name: string;
@@ -552,6 +569,71 @@ function seedDatabase(
           responseTime,
         );
       }
+    }
+
+    if (projects.some((project) => project.id === SHOWCASE_PROJECT_ID)) {
+      // A paused watch keeps the synthetic observation local: the host must
+      // never contact GitHub or perform a PR action for a marketing fixture.
+      const observedAt = minutesBefore(now, 1);
+      const watch = {
+        id: SHOWCASE_WATCH_ID,
+        reference: { projectId: SHOWCASE_PROJECT_ID, repository: "moonbase/lecturn", number: 42 },
+        revision: 1,
+        binding: JSON.stringify([
+          SHOWCASE_PROJECT_ID,
+          workspaceRoots.get(SHOWCASE_PROJECT_ID),
+          null,
+          null,
+          workspaceRoots.get(SHOWCASE_PROJECT_ID),
+          "github.com/moonbase/lecturn",
+        ]),
+        watching: false,
+        threadIds: [SHOWCASE_THREAD_ID],
+        managerThreadId: SHOWCASE_THREAD_ID,
+        managerStatus: "idle",
+        observation: {
+          provider: "github",
+          title: "Make remote handoffs feel instant",
+          url: "https://github.com/moonbase/lecturn/pull/42",
+          state: "open",
+          headRevision: "a".repeat(40),
+          baseBranch: "main",
+          reviewDecision: "APPROVED",
+          checks: [
+            { name: "Typecheck", status: "success", description: "All workspaces", url: null },
+            { name: "Mobile native", status: "success", description: "iOS and Android", url: null },
+            { name: "Server tests", status: "success", description: "612 passed", url: null },
+            {
+              name: "Release smoke",
+              status: "pending",
+              description: "Packaging preview",
+              url: null,
+            },
+          ],
+          checksState: "pending",
+          requiredChecks: "pending",
+          checksRevision: "a".repeat(40),
+          mergeable: true,
+          autoMergeEnabled: false,
+          supportsAutoMerge: false,
+          supportsRevisionMerge: false,
+          observedAt,
+        },
+        authorization: null,
+        lastAttemptAt: null,
+        error: null,
+        createdAt: observedAt,
+        updatedAt: observedAt,
+      };
+      database
+        .prepare(
+          "INSERT OR REPLACE INTO pull_request_watches (id, project_id, state_json) VALUES (?, ?, ?)",
+        )
+        .run(
+          SHOWCASE_WATCH_ID,
+          SHOWCASE_PROJECT_ID,
+          JSON.stringify({ watch, revokePending: false }),
+        );
     }
 
     const turnId = `${SHOWCASE_THREAD_ID}-turn`;

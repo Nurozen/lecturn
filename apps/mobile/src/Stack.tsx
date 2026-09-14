@@ -30,6 +30,7 @@ import { GitBranchesSheet } from "./features/threads/git/GitBranchesSheet";
 import { GitCommitSheet } from "./features/threads/git/GitCommitSheet";
 import { GitConfirmSheet } from "./features/threads/git/GitConfirmSheet";
 import { GitOverviewSheet } from "./features/threads/git/GitOverviewSheet";
+import { PullRequestWatchRouteScreen } from "./features/pull-request-watch/PullRequestWatchRouteScreen";
 import { ThreadRouteScreen } from "./features/threads/ThreadRouteScreen";
 import { ConnectionsRouteScreen } from "./features/connection/ConnectionsRouteScreen";
 import { ConnectionsNewRouteScreen } from "./features/connection/ConnectionsNewRouteScreen";
@@ -469,6 +470,11 @@ export const RootStack = createNativeStackNavigator({
         headerBackVisible: false,
         ...getCompactBrandHeaderOptions(),
       },
+    }),
+    PullRequestWatch: createNativeStackScreen({
+      screen: PullRequestWatchRouteScreen,
+      linking: "pr-watches/:environmentId/:watchId",
+      options: { ...SOLID_HEADER_OPTIONS, title: "Pull request watch" },
     }),
     Thread: createNativeStackScreen({
       screen: ThreadRouteScreen,

@@ -10,6 +10,7 @@ import * as Electron from "electron";
 
 import { DEFAULT_CLIENT_SETTINGS } from "@lecturn/contracts";
 
+import { installDesktopActivity } from "../activity/DesktopActivity.ts";
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import { makeComponentLogger } from "../app/DesktopObservability.ts";
@@ -761,6 +762,12 @@ export const make = Effect.gen(function* () {
       void runPromise(Effect.andThen(electronWindow.reveal(window), dismissConnectingSplash));
     });
 
+    const disposeActivity = installDesktopActivity(window, {
+      platform: environment.platform,
+      preloadPath: environment.preloadPath.replace(/preload\.cjs$/, "activity-preload.cjs"),
+      applicationUrl,
+    });
+    window.once("closed", disposeActivity);
     loadApplication();
     if (environment.isDevelopment) {
       window.webContents.openDevTools({ mode: "detach" });

@@ -867,6 +867,10 @@ export type PullRequestDiffFileContentsResult = typeof PullRequestDiffFileConten
 
 export const PullRequestActionInput = Schema.Struct({
   ...PullRequestRef.fields,
+  /** Atomic head precondition for revision-scoped merge authorization. */
+  expectedHeadRevision: Schema.optional(
+    TrimmedNonEmptyString.check(Schema.isPattern(/^[a-f0-9]{40,64}$/)),
+  ),
   action: PullRequestAction,
   /**
    * Which strategy the merge uses, read for `merge` and for `enable-auto-merge` alike — a merge

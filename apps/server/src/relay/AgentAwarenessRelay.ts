@@ -1,3 +1,5 @@
+import { ThreadId as ThreadIdSchema, type PullRequestWatch } from "@lecturn/contracts";
+import { PullRequestWatchService } from "../pullRequest/PullRequestWatchService.ts";
 import { TeamPolicy, TeamPolicyLive } from "../cloud/TeamPolicy.ts";
 import type {
   EnvironmentId,
@@ -297,12 +299,68 @@ export function resolveAgentAwarenessRelayActiveThreadIds(input: {
     .map((thread) => thread.id);
 }
 
+/** PR watches have their own activity identity and outlive managing conversations. */
+export function projectPullRequestActivity(
+  environmentId: EnvironmentId,
+  watch: PullRequestWatch,
+  projectTitle: string,
+  nowMs: number,
+): RelayAgentActivityState | null {
+  const observation = watch.observation;
+  if (!observation || (!watch.watching && observation.state === "open")) return null;
+  const terminal = observation.state === "merged" || observation.state === "closed";
+  if (terminal && !watch.completedAt) return null;
+  const age = nowMs - Date.parse(terminal ? watch.completedAt! : observation.observedAt);
+  if (terminal && age > 15 * 60_000) return null;
+  const stale = !terminal && (watch.error !== null || age > 120_000);
+  const attention =
+    stale ||
+    observation.checksState === "failing" ||
+    watch.authorization?.status === "needs-authorization" ||
+    watch.authorization?.status === "blocked";
+  return {
+    environmentId,
+    threadId: ThreadIdSchema.make(`pr-watch:${watch.id}`),
+    projectTitle,
+    threadTitle: `#${watch.reference.number} ${observation.title}`,
+    modelTitle: `Manager: ${watch.managerStatus}`,
+    phase: terminal ? "completed" : attention ? "waiting_for_input" : "running",
+    headline: terminal
+      ? `Pull request ${observation.state}`
+      : stale
+        ? "PR status unavailable"
+        : `CI ${observation.checksState}`,
+    updatedAt: terminal ? watch.completedAt! : DateTime.formatIso(DateTime.makeUnsafe(nowMs)),
+    deepLink: `/pr-watches/${encodeURIComponent(environmentId)}/${encodeURIComponent(watch.id)}`,
+    pullRequest: {
+      watchId: watch.id,
+      projectId: watch.reference.projectId,
+      number: watch.reference.number,
+      repository: watch.reference.repository,
+      state: observation.state,
+      checks: observation.checksState,
+      requiredChecks: observation.requiredChecks,
+      watching: watch.watching,
+      manager: watch.managerStatus,
+      authorization: watch.authorization?.status ?? "none",
+      stale,
+    },
+  };
+}
+
+export function pullRequestActivityPublishKey(state: RelayAgentActivityState | null): string {
+  const heartbeat =
+    state && state.phase !== "completed" ? Math.floor(Date.parse(state.updatedAt) / 300_000) : 0;
+  return `${agentAwarenessPublishIdentity(state)}:${heartbeat}`;
+}
+
 export const make = Effect.gen(function* () {
   const teamPolicy = yield* TeamPolicy;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
   const snapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
+  const watches = yield* Effect.serviceOption(PullRequestWatchService);
   const crypto = yield* Crypto.Crypto;
   const cloudLinkKeyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(secrets);
   const activeSnapshotPublishedRef = yield* Ref.make(false);
@@ -418,6 +476,36 @@ export const make = Effect.gen(function* () {
         });
       });
 
+    const watchId = threadId.startsWith("pr-watch:") ? threadId.slice("pr-watch:".length) : null;
+    if (watchId !== null && Option.isSome(watches)) {
+      const watch = (yield* watches.value.list({})).watches.find((entry) => entry.id === watchId);
+      const project = watch
+        ? yield* snapshotQuery.getProjectShellById(watch.reference.projectId)
+        : Option.none();
+      const state =
+        watch && Option.isSome(project)
+          ? projectPullRequestActivity(
+              environmentId,
+              watch,
+              project.value.title,
+              (yield* DateTime.now).epochMilliseconds,
+            )
+          : null;
+      const published = yield* Ref.get(publishedStateByThreadRef);
+      // Refresh before APNs' ten-minute stale deadline, even with unchanged facts.
+      const previous = published.get(threadId);
+      const key = pullRequestActivityPublishKey(state);
+      if (previous === key) return;
+      yield* publishState({
+        projectId: watch?.reference.projectId ?? null,
+        state,
+        reason: "pull-request-watch",
+      });
+      yield* Ref.update(publishedStateByThreadRef, (entries) =>
+        new Map(entries).set(threadId, key),
+      );
+      return;
+    }
     const thread = yield* snapshotQuery.getThreadShellById(threadId);
     const project = Option.isSome(thread)
       ? yield* snapshotQuery.getProjectShellById(thread.value.projectId)
@@ -621,6 +709,21 @@ export const make = Effect.gen(function* () {
           Effect.andThen(publishActiveThreadsOnceWhenConfigured(startupState !== "enabled")),
         ),
       );
+      if (Option.isSome(watches)) {
+        yield* forkParked(
+          Effect.gen(function* () {
+            for (const watch of (yield* watches.value.list({})).watches) {
+              yield* worker.enqueue(ThreadIdSchema.make(`pr-watch:${watch.id}`));
+            }
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("PR activity publication failed", { cause: Cause.pretty(cause) }),
+            ),
+            Effect.andThen(Effect.sleep("30 seconds")),
+            Effect.forever,
+          ),
+        );
+      }
       yield* forkParked(
         Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
           const threadId = eventThreadId(event);

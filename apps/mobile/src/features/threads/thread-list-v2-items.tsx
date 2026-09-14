@@ -174,7 +174,7 @@ export const ThreadListV2SettledShelfHeader = memo(function ThreadListV2SettledS
       onPress={props.onToggle}
       style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
     >
-      <Text className="text-xs font-lecturn-medium text-foreground-tertiary">
+      <Text style={{ color: "#a2a6ab" }} className="text-xs font-lecturn-medium">
         {props.expanded ? "Settled" : `Settled (${props.count})`}
       </Text>
       <View className="h-px flex-1 bg-border" />
@@ -357,6 +357,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       compact Home list never sets it — phones navigate away on select. */
   readonly selected?: boolean;
   /** Override for narrow panes (iPad sidebar); defaults to window width. */
+  readonly nested?: boolean;
   readonly fullSwipeWidth?: number;
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
   readonly onDeleteThread: (thread: EnvironmentThreadShell) => void;
@@ -730,7 +731,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const cardContent = (
     <>
       <View className="flex-row items-center gap-1.5">
-        {props.project ? (
+        {props.project && !props.nested ? (
           <ProjectFavicon
             environmentId={thread.environmentId}
             faviconPath={props.project.faviconPath}
@@ -746,7 +747,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           )}
           numberOfLines={1}
         >
-          {props.projectTitle ?? props.project?.title ?? ""}
+          {props.nested ? thread.title : (props.projectTitle ?? props.project?.title ?? "")}
         </Text>
         {pinnedRow ? (
           <SymbolView
@@ -767,15 +768,17 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           {statusLabel?.label ?? timeLabel}
         </Text>
       </View>
-      <Text
-        className={cn(
-          "mt-1 text-base font-lecturn-medium",
-          selected ? "text-user-bubble-foreground" : "text-foreground",
-        )}
-        numberOfLines={2}
-      >
-        {thread.title}
-      </Text>
+      {!props.nested ? (
+        <Text
+          className={cn(
+            "mt-1 text-base font-lecturn-medium",
+            selected ? "text-user-bubble-foreground" : "text-foreground",
+          )}
+          numberOfLines={2}
+        >
+          {thread.title}
+        </Text>
+      ) : null}
       {props.searchMatch ? (
         <View className="mt-1">
           <ThreadSearchMatchExcerpt
@@ -874,7 +877,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     variant === "card" ? (
       <Pressable
         accessibilityHint={swipeAccessibilityHint}
-        accessibilityLabel={thread.title}
+        accessibilityLabel={
+          thread.settledOverride === "settled" ? `${thread.title}, settled` : thread.title
+        }
         accessibilityRole="button"
         accessibilityState={{ selected }}
         onPress={() => {
@@ -914,7 +919,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     ) : (
       <Pressable
         accessibilityHint={swipeAccessibilityHint}
-        accessibilityLabel={thread.title}
+        accessibilityLabel={
+          thread.settledOverride === "settled" ? `${thread.title}, settled` : thread.title
+        }
         accessibilityRole="button"
         accessibilityState={{ selected }}
         className={sidebarPane ? undefined : "bg-screen"}
@@ -942,17 +949,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             sidebarPane ? "px-3" : "px-5",
           )}
         >
-          {props.project ? (
-            <View className="opacity-40">
-              <ProjectFavicon
-                environmentId={thread.environmentId}
-                faviconPath={props.project.faviconPath}
-                size={15}
-                projectTitle={props.projectTitle ?? props.project.title}
-                workspaceRoot={props.project.workspaceRoot}
-              />
-            </View>
-          ) : null}
+          <SymbolView
+            name={snoozedRow ? "moon.zzz" : "checkmark.circle"}
+            size={16}
+            tintColor={snoozedRow ? "#d2b678" : "#ff866f"}
+          />
           <View className="min-w-0 flex-1">
             <Text
               className={cn(
@@ -960,9 +961,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                 selected ? "text-user-bubble-foreground" : "text-foreground-muted",
               )}
               numberOfLines={1}
+              style={!snoozedRow ? { color: "#a2a6ab" } : undefined}
             >
               {thread.title}
             </Text>
+            {!snoozedRow ? <Text style={{ color: "#a2a6ab", fontSize: 11 }}>Settled</Text> : null}
             {props.searchMatch ? (
               <ThreadSearchMatchExcerpt
                 match={props.searchMatch}

@@ -124,6 +124,7 @@ Capture one scene or device:
 
     pnpm screenshots:mobile --device iphone-6.9 --scene thread
     pnpm screenshots:mobile --platform android --scene review
+    pnpm screenshots:mobile --device iphone-6.9 --scene pr-watch
 
 Override the configured appearance or capture both variants:
 
@@ -185,6 +186,11 @@ before the screenshot is taken.
 The Environments capture presents the three local fixture transports as a Tailscale HTTPS hostname,
 a Helsinki VPS hostname, and a Tailnet IPv4 address. This display-only substitution keeps the cards
 remote-first while the harness retains reliable loopback connections to its ephemeral servers.
+
+The optional `pr-watch` scene opens the production pull request watch route with a paused,
+synthetic Moonbase PR and its last CI observation. It has no merge authorization and makes no
+GitHub requests. The default five-scene store matrix is unchanged. Treat these check results as
+sample data, not evidence of CI execution or PR delivery.
 
 ## Local prerequisites
 

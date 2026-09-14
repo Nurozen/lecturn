@@ -333,9 +333,10 @@ available on desktop and web.
 
 The **+** beside a saga or space opens a new conversation there. Send the first message to
 start the thread; clicking **+** again while its empty draft is open focuses the composer.
-The folder label beneath a conversation identifies its workspace: **Stave saga** means the
-saga coordinator directory, while **Stave space** identifies a member or standalone space.
-This label is conversation metadata, not another folder or project in the hierarchy.
+The staff icon beside the parent identifies a Stave saga or space. Conversations beneath it
+inherit that workspace without repeating its label on every card. Hover a conversation for
+its workspace path and repository details. Settled conversations appear in an expandable
+**Settled** group beneath their project or space.
 
 The workbench presents the same spaces in Board, List, and Dependencies views. Dependency waves
 show prerequisite ordering, not a promise that agents will run concurrently. Selection follows

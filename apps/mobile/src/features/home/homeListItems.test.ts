@@ -97,6 +97,27 @@ function displayStates(
 }
 
 describe("buildHomeListLayout", () => {
+  it("keeps settled history under its owner in the legacy grouped list", () => {
+    const original = makeGroup("project", 2);
+    const threads = original.threads.map((thread, index) =>
+      index === 1 ? { ...thread, settledOverride: "settled" as const } : thread,
+    );
+    const group = { ...original, threads, recentThreads: threads };
+    const collapsed = buildHomeListLayout({ groups: [group], displayStates: new Map() }).items;
+    expect(itemTypes(collapsed)).toEqual(["header", "thread", "v2-settled-shelf"]);
+    expect(collapsed.at(-1)).toMatchObject({ count: 1, expanded: false, depth: 1 });
+    const expanded = buildHomeListLayout({
+      groups: [group],
+      displayStates: new Map([["settled:project", { collapsed: false, visibleCount: 6 }]]),
+    }).items;
+    expect(expanded.at(-1)).toMatchObject({
+      type: "thread",
+      depth: 2,
+      settledBranch: true,
+      thread: { id: "project-thread-1" },
+    });
+  });
+
   it("renders a header plus all threads for a small group without a show-more row", () => {
     const layout = buildHomeListLayout({
       groups: [makeGroup("alpha", 3)],
@@ -450,13 +471,39 @@ describe("saga list layout", () => {
       rows.flatMap((row) =>
         row.type === "v2-thread" && row.item.thread.projectId === "a" ? [row.item.thread.id] : [],
       ),
-    ).toEqual(["pinned", "a-thread-0", "snoozed", "settled"]);
+    ).toEqual(["pinned", "a-thread-0", "snoozed"]);
     expect(
       rows
         .filter((row) => row.type === "v2-snoozed-shelf" || row.type === "v2-settled-shelf")
         .map((row) => row.type),
     ).toEqual(["v2-snoozed-shelf", "v2-settled-shelf"]);
     expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
+    const shelf = rows.find((row) => row.type === "v2-settled-shelf");
+    expect(shelf).toMatchObject({ count: 1, expanded: false, depth: 2, settledBranch: true });
+    expect(rows.filter((row) => row.type === "header").map((row) => row.group.key)).toEqual([
+      "saga",
+      "a",
+    ]);
+    const expanded = buildHomeHierarchyV2Items({
+      groups,
+      items,
+      sagaIndex: index,
+      displayStates: new Map([["settled:a", { collapsed: false, visibleCount: 6 }]]),
+    });
+    expect(
+      expanded.find((row) => row.type === "v2-thread" && row.item.thread.id === "settled"),
+    ).toMatchObject({ depth: 3, settledBranch: true });
+    const selectedSettled = buildHomeHierarchyV2Items({
+      groups,
+      items,
+      sagaIndex: index,
+      displayStates: new Map(),
+      selectedThreadKey: `${environmentId}:settled`,
+    });
+    expect(
+      selectedSettled.some((row) => row.type === "v2-thread" && row.item.thread.id === "settled"),
+    ).toBe(true);
+
     const displayStates = new Map([
       ["saga", { collapsed: true, visibleCount: 6 }],
       ["a", { collapsed: true, visibleCount: 6 }],

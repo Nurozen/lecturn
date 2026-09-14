@@ -82,5 +82,17 @@ export default defineConfig({
       outExtensions: () => ({ js: ".cjs" }),
       entry: ["src/preview-pip-preload.ts"],
     },
+    {
+      format: "cjs",
+      outDir: "dist-electron",
+      sourcemap: true,
+      outExtensions: () => ({ js: ".cjs" }),
+      entry: ["src/activity-preload.ts"],
+      deps: {
+        // The sandbox can require Electron, but workspace helpers must be inlined.
+        alwaysBundle: (id) => id.startsWith("@lecturn/"),
+        neverBundle: ["electron"],
+      },
+    },
   ],
 });

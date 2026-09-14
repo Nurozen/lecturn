@@ -5,7 +5,10 @@ import {
   type SagaProjectTreeNode,
 } from "@lecturn/client-runtime/state/project-grouping";
 import { buildPhysicalSagaProjectGroups } from "@lecturn/client-runtime/state/sagaWorkbench";
-import type { ThreadListV2ListItem } from "../threads/threadListV2";
+import type {
+  ThreadListV2ListItem,
+  ThreadListV2SettledShelfListItem,
+} from "../threads/threadListV2";
 import type { StaveSagaMemberStatus } from "@lecturn/contracts";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
 
@@ -40,6 +43,7 @@ export interface HomeHeaderListItem {
 
 export interface HomeThreadListItem {
   readonly depth?: number;
+  readonly settledBranch?: boolean;
   readonly type: "thread";
   readonly key: string;
   readonly thread: EnvironmentThreadShell;
@@ -69,7 +73,11 @@ export type HomeListItem =
   | HomeHeaderListItem
   | HomePendingTaskListItem
   | HomeThreadListItem
-  | HomeShowMoreListItem;
+  | HomeShowMoreListItem
+  | (ThreadListV2SettledShelfListItem & {
+      readonly depth?: number;
+      readonly settledBranch?: boolean;
+    });
 
 export interface HomeListLayout {
   readonly items: ReadonlyArray<HomeListItem>;
@@ -102,6 +110,13 @@ export function nextGroupDisplayState(
 export function homeListItemsAreEqual(previous: HomeListItem, item: HomeListItem): boolean {
   if (previous.depth !== item.depth) return false;
   switch (item.type) {
+    case "v2-settled-shelf":
+      return (
+        previous.type === "v2-settled-shelf" &&
+        previous.count === item.count &&
+        previous.expanded === item.expanded &&
+        previous.groupKey === item.groupKey
+      );
     case "header":
       return (
         previous.type === "header" &&
@@ -262,14 +277,16 @@ export function buildHomeListLayout(input: {
       continue;
     }
 
-    const totalCount = group.threads.length;
+    const activeThreads = group.threads.filter((thread) => thread.settledOverride !== "settled");
+    const settledThreads = group.threads.filter((thread) => thread.settledOverride === "settled");
+    const totalCount = activeThreads.length;
     // Default to the group's recent-activity window (last few days, or a small
     // fallback for stale projects), capped at the initial page size. Until the
     // user taps "Show more", older threads stay hidden to save vertical space;
     // "Show less" resets visibleCount to the initial constant, which lands back
     // here at the recency baseline.
     const baselineCount = Math.min(
-      group.recentThreads.length,
+      group.recentThreads.filter((thread) => thread.settledOverride !== "settled").length,
       HOME_INITIAL_VISIBLE_THREADS,
       totalCount,
     );
@@ -281,7 +298,7 @@ export function buildHomeListLayout(input: {
             : baselineCount,
           totalCount,
         );
-    const visibleThreads = group.threads.slice(0, visibleCount);
+    const visibleThreads = activeThreads.slice(0, visibleCount);
     const hiddenCount = totalCount - visibleCount;
     const hasShowMoreRow = !input.showAllThreads && totalCount > baselineCount;
 
@@ -322,6 +339,30 @@ export function buildHomeListLayout(input: {
         canShowLess: visibleCount > baselineCount,
       });
     }
+    if (settledThreads.length > 0) {
+      const groupKey = `settled:${group.key}`;
+      const expanded =
+        input.showAllThreads === true || input.displayStates.get(groupKey)?.collapsed === false;
+      items.push({
+        type: "v2-settled-shelf",
+        key: groupKey,
+        groupKey,
+        count: settledThreads.length,
+        expanded,
+        depth: depth + 1,
+        settledBranch: true,
+      });
+      if (expanded)
+        for (const [index, thread] of settledThreads.entries())
+          items.push({
+            type: "thread",
+            key: `thread:${thread.environmentId}:${thread.id}`,
+            thread,
+            depth: depth + 2,
+            settledBranch: true,
+            isLast: index === settledThreads.length - 1,
+          });
+    }
   }
 
   return { items, stickyHeaderIndices };
@@ -329,9 +370,10 @@ export function buildHomeListLayout(input: {
 
 export type HomeHierarchyV2Item = (ThreadListV2ListItem | HomeHeaderListItem) & {
   readonly depth?: number;
+  readonly settledBranch?: boolean;
 };
 
-/** Preserve V2 partitioning and row objects while giving each shelf the same Projects hierarchy. */
+/** Keep each project and saga in one tree; settled history belongs to its owning project. */
 export function buildHomeHierarchyV2Items(input: {
   readonly groups: ReadonlyArray<HomeThreadGroup>;
   readonly items: ReadonlyArray<ThreadListV2ListItem>;
@@ -352,69 +394,91 @@ export function buildHomeHierarchyV2Items(input: {
       ).map((ref) => [JSON.stringify([ref.environmentId, ref.projectId]), group.key] as const),
     ),
   );
-  const result: HomeHierarchyV2Item[] = [];
-  let section = "active";
-  let rows: ThreadListV2ListItem[] = [];
-  const flush = () => {
-    const rowsByGroup = new Map<string, ThreadListV2ListItem[]>();
-    const ungrouped: ThreadListV2ListItem[] = [];
-    for (const row of rows) {
-      const ref =
-        row.type === "v2-thread"
-          ? [row.item.thread.environmentId, row.item.thread.projectId]
-          : row.type === "v2-pending"
-            ? [row.pendingTask.message.environmentId, row.pendingTask.creation.projectId]
-            : null;
-      const key = ref === null ? undefined : groupByProject.get(JSON.stringify(ref));
-      if (key === undefined) {
-        ungrouped.push(row);
-        continue;
-      }
-      const owned = rowsByGroup.get(key) ?? [];
-      owned.push(row);
-      rowsByGroup.set(key, owned);
+  const result: HomeHierarchyV2Item[] = input.items.filter(
+    (row) => row.type === "v2-snoozed-shelf",
+  );
+  const rows = input.items.filter(
+    (row) => row.type !== "v2-settled-shelf" && row.type !== "v2-snoozed-shelf",
+  );
+  const rowsByGroup = new Map<string, ThreadListV2ListItem[]>();
+  const ungrouped: ThreadListV2ListItem[] = [];
+  for (const row of rows) {
+    const ref =
+      row.type === "v2-thread"
+        ? [row.item.thread.environmentId, row.item.thread.projectId]
+        : row.type === "v2-pending"
+          ? [row.pendingTask.message.environmentId, row.pendingTask.creation.projectId]
+          : null;
+    const key = ref === null ? undefined : groupByProject.get(JSON.stringify(ref));
+    if (key === undefined) {
+      ungrouped.push(row);
+      continue;
     }
-    const visible = (node: SagaProjectTreeNode): boolean =>
-      rowsByGroup.has(node.group.key) ||
-      (section === "active" && !input.searching && !!node.group.representative.stave) ||
-      node.children.some(visible);
-    const containsSelection = (node: SagaProjectTreeNode): boolean =>
-      (rowsByGroup.get(node.group.key) ?? []).some(
-        (row) =>
-          row.type === "v2-thread" &&
-          `${row.item.thread.environmentId}:${row.item.thread.id}` === input.selectedThreadKey,
-      ) || node.children.some(containsSelection);
-    const visit = (node: SagaProjectTreeNode, depth: number) => {
-      if (!visible(node)) return;
-      const group = groupsByKey.get(node.group.key)!;
-      const collapsed =
-        !!input.displayStates.get(group.key)?.collapsed &&
-        !input.searching &&
-        !containsSelection(node);
-      result.push({
-        type: "header",
-        key: `v2-${section}-header:${group.key}`,
-        group,
-        collapsed,
-        isFirst: result.length === 0,
-        depth,
-        memberStatus: node.memberStatus,
-      });
-      if (collapsed) return;
-      for (const row of rowsByGroup.get(group.key) ?? []) result.push({ ...row, depth: depth + 1 });
-      for (const child of node.children) visit(child, depth + 1);
-    };
-    for (const node of tree) visit(node, 0);
-    result.push(...ungrouped);
-    rows = [];
-  };
-  for (const item of input.items) {
-    if (item.type === "v2-snoozed-shelf" || item.type === "v2-settled-shelf") {
-      flush();
-      result.push(item);
-      section = item.type;
-    } else rows.push(item);
+    const owned = rowsByGroup.get(key) ?? [];
+    owned.push(row);
+    rowsByGroup.set(key, owned);
   }
-  flush();
+  const visible = (node: SagaProjectTreeNode): boolean =>
+    rowsByGroup.has(node.group.key) ||
+    (!input.searching && !!node.group.representative.stave) ||
+    node.children.some(visible);
+  const containsSelection = (node: SagaProjectTreeNode): boolean =>
+    (rowsByGroup.get(node.group.key) ?? []).some(
+      (row) =>
+        row.type === "v2-thread" &&
+        `${row.item.thread.environmentId}:${row.item.thread.id}` === input.selectedThreadKey,
+    ) || node.children.some(containsSelection);
+  const visit = (node: SagaProjectTreeNode, depth: number) => {
+    if (!visible(node)) return;
+    const group = groupsByKey.get(node.group.key)!;
+    const collapsed =
+      !!input.displayStates.get(group.key)?.collapsed &&
+      !input.searching &&
+      !containsSelection(node);
+    result.push({
+      type: "header",
+      key: `v2-active-header:${group.key}`,
+      group,
+      collapsed,
+      isFirst: result.length === 0,
+      depth,
+      memberStatus: node.memberStatus,
+    });
+    if (collapsed) return;
+    const owned = rowsByGroup.get(group.key) ?? [];
+    const settled = owned.filter(
+      (row) => row.type === "v2-thread" && row.item.thread.settledOverride === "settled",
+    );
+    for (const row of owned) {
+      if (row.type !== "v2-thread" || row.item.thread.settledOverride !== "settled")
+        result.push({ ...row, depth: depth + 1 });
+    }
+    if (settled.length > 0) {
+      const groupKey = `settled:${group.key}`;
+      const expanded =
+        input.searching === true ||
+        input.displayStates.get(groupKey)?.collapsed === false ||
+        settled.some(
+          (row) =>
+            row.type === "v2-thread" &&
+            `${row.item.thread.environmentId}:${row.item.thread.id}` === input.selectedThreadKey,
+        );
+      result.push({
+        type: "v2-settled-shelf",
+        key: groupKey,
+        groupKey,
+        count: settled.length,
+        expanded,
+        depth: depth + 1,
+        settledBranch: true,
+      });
+      if (expanded)
+        for (const row of settled) result.push({ ...row, depth: depth + 2, settledBranch: true });
+    }
+    for (const child of node.children) visit(child, depth + 1);
+  };
+  for (const node of tree) visit(node, 0);
+  result.push(...ungrouped);
+
   return result;
 }

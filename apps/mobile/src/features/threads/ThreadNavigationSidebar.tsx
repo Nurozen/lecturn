@@ -1,3 +1,4 @@
+import { buildSidebarHierarchy } from "./sidebar-hierarchy";
 import { useMobileSagaIndex, useSidebarNestSagas } from "../../state/stave";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import type {
@@ -70,6 +71,7 @@ import {
   PendingTaskListRow,
   ThreadListGroupHeader,
   ThreadListRow,
+  THREAD_ACTIVITY_VIEWABILITY_CONFIG,
   ThreadListShowMoreRow,
 } from "./thread-list-items";
 import {
@@ -340,7 +342,13 @@ function ThreadNavigationSidebarPane(
       const next = new Map(previous);
       next.set(
         key,
-        nextGroupDisplayState(previous.get(key) ?? DEFAULT_GROUP_DISPLAY_STATE, action),
+        nextGroupDisplayState(
+          previous.get(key) ?? {
+            ...DEFAULT_GROUP_DISPLAY_STATE,
+            collapsed: key.startsWith("settled:"),
+          },
+          action,
+        ),
       );
       return next;
     });
@@ -507,10 +515,10 @@ function ThreadNavigationSidebarPane(
       matchedThreadKeys,
       settlementEnvironmentIds,
       snoozeEnvironmentIds,
-      settledLimit: settledVisibleCount,
+      settledLimit: Number.POSITIVE_INFINITY,
       now: new Date().toISOString(),
       snoozedShelfExpanded,
-      settledShelfExpanded,
+      settledShelfExpanded: true,
       selectedThreadKey: props.selectedThreadKey ?? null,
     });
   }, [
@@ -569,7 +577,7 @@ function ThreadNavigationSidebarPane(
       snoozedShelfExpanded,
       snoozedShelfHeaderIndex: threadListV2Layout.snoozedShelfHeaderIndex,
       settledCount: threadListV2Layout.settledCount,
-      settledShelfExpanded,
+      settledShelfExpanded: true,
       settledShelfHeaderIndex: threadListV2Layout.settledShelfHeaderIndex,
       snoozeLabelNow: `${nowMinute}:00.000Z`,
     });
@@ -606,6 +614,7 @@ function ThreadNavigationSidebarPane(
     threadListV2Enabled,
     threadListV2Layout,
   ]);
+  const hierarchyGuides = useMemo(() => buildSidebarHierarchy(listItems), [listItems]);
   const listMenuActions = useMemo<MenuAction[]>(
     () => [
       {
@@ -778,6 +787,7 @@ function ThreadNavigationSidebarPane(
   // favicon and fallback title it was first rendered with.
   const listExtraData = useMemo(
     () => ({
+      hierarchyGuides,
       selectedThreadKey: props.selectedThreadKey ?? "",
       projectByKey,
       projectCwdByKey,
@@ -788,6 +798,7 @@ function ThreadNavigationSidebarPane(
       threadSearchMatchByKey,
     }),
     [
+      hierarchyGuides,
       props.selectedThreadKey,
       projectByKey,
       projectCwdByKey,
@@ -902,6 +913,7 @@ function ThreadNavigationSidebarPane(
             );
           return (
             <ThreadListV2Row
+              nested
               thread={thread}
               variant={item.item.variant}
               snoozed={item.item.snoozed}
@@ -980,7 +992,11 @@ function ThreadNavigationSidebarPane(
               count={item.count}
               disabled={!shelfPreferencesLoaded}
               expanded={item.expanded}
-              onToggle={toggleSettledShelf}
+              onToggle={
+                item.groupKey
+                  ? () => updateGroupDisplay(item.groupKey!, "toggle-collapsed")
+                  : toggleSettledShelf
+              }
               pane="sidebar"
             />
           );
@@ -1004,7 +1020,7 @@ function ThreadNavigationSidebarPane(
               variant="sidebar"
               collapsed={item.collapsed}
               isFirst={item.isFirst}
-              depth={item.depth}
+              depth={0}
               memberStatus={item.memberStatus}
               groupKey={item.group.key}
               onGroupAction={updateGroupDisplay}
@@ -1189,30 +1205,75 @@ function ThreadNavigationSidebarPane(
   // even while collapsed.
   const renderListItem = useCallback(
     (props: { readonly item: SidebarListItem }) => (
-      <View
-        style={{ paddingLeft: props.item.type === "header" ? 0 : (props.item.depth ?? 0) * 18 }}
-      >
-        {props.item.type !== "header"
-          ? Array.from({ length: props.item.depth ?? 0 }, (_, level) => (
-              <View
-                key={level}
-                pointerEvents="none"
-                accessible={false}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  bottom: 0,
-                  left: level * 18 + 8,
-                  width: 1,
-                  backgroundColor: "#b9893f",
-                }}
-              />
-            ))
-          : null}
+      <View style={{ paddingLeft: (props.item.depth ?? 0) * 18 }}>
+        {hierarchyGuides.get(props.item.key)?.map(({ level, continues }) => (
+          <View
+            key={level}
+            pointerEvents="none"
+            accessible={false}
+            style={{
+              position: "absolute",
+              top: 0,
+              bottom: continues ? 0 : "50%",
+              left: level * 18 + 16,
+              width:
+                (props.item.type === "thread" || props.item.type === "v2-thread") &&
+                "settledBranch" in props.item &&
+                props.item.settledBranch &&
+                level === (props.item.depth ?? 0) - 1
+                  ? 2
+                  : 1,
+              backgroundColor:
+                (props.item.type === "thread" || props.item.type === "v2-thread") &&
+                "settledBranch" in props.item &&
+                props.item.settledBranch &&
+                level === (props.item.depth ?? 0) - 1
+                  ? "#ff866f"
+                  : "#ffe1a0",
+              boxShadow:
+                (props.item.type === "thread" || props.item.type === "v2-thread") &&
+                "settledBranch" in props.item &&
+                props.item.settledBranch &&
+                level === (props.item.depth ?? 0) - 1
+                  ? "0 0 6px 1px #e64d3d88"
+                  : "0 0 5px 1px #dca64e55",
+            }}
+          />
+        ))}
+        {(props.item.depth ?? 0) > 0 ? (
+          <View
+            pointerEvents="none"
+            accessible={false}
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: ((props.item.depth ?? 0) - 1) * 18 + 16,
+              width: 12,
+              height:
+                (props.item.type === "thread" || props.item.type === "v2-thread") &&
+                "settledBranch" in props.item &&
+                props.item.settledBranch
+                  ? 2
+                  : 1,
+              backgroundColor:
+                (props.item.type === "thread" || props.item.type === "v2-thread") &&
+                "settledBranch" in props.item &&
+                props.item.settledBranch
+                  ? "#ff866f"
+                  : "#ffe1a0",
+              boxShadow:
+                (props.item.type === "thread" || props.item.type === "v2-thread") &&
+                "settledBranch" in props.item &&
+                props.item.settledBranch
+                  ? "0 0 6px 1px #e64d3d88"
+                  : "0 0 5px 1px #dca64e55",
+            }}
+          />
+        ) : null}
         {renderListRow(props)}
       </View>
     ),
-    [renderListRow],
+    [hierarchyGuides, renderListRow],
   );
 
   const listEmpty = (
@@ -1269,6 +1330,7 @@ function ThreadNavigationSidebarPane(
           <SwipeableScrollGateProvider enabled={swipeEnabled}>
             <GestureDetector gesture={sidebarScrollGesture}>
               <LegendList
+                viewabilityConfig={THREAD_ACTIVITY_VIEWABILITY_CONFIG}
                 data={listItems}
                 drawDistance={500}
                 estimatedItemSize={64}
@@ -1315,6 +1377,7 @@ function ThreadNavigationSidebarPane(
         <SwipeableScrollGateProvider enabled={swipeEnabled}>
           <GestureDetector gesture={sidebarScrollGesture}>
             <LegendList
+              viewabilityConfig={THREAD_ACTIVITY_VIEWABILITY_CONFIG}
               data={listItems}
               drawDistance={500}
               estimatedItemSize={64}

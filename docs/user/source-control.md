@@ -186,3 +186,13 @@ Control settings**.
 - [GitHub CLI](https://cli.github.com/)
 - [GitLab CLI](https://gitlab.com/gitlab-org/cli)
 - [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/)
+
+## Repository hierarchy and watches
+
+A Stave space can contain several repositories without being a repository itself. The Git overview lists its editable repositories separately; selecting a saga includes repositories from its member spaces. Project-folder views combine their children. Repository identity includes the hosting environment and checkout, so repositories with the same name on different machines remain distinct. Reference repositories are available for inspection, with mutations restricted to editable checkouts.
+
+Watch individual PRs in **Pull Requests** to keep CI, merge readiness, and agent status visible across the app, Mac activity panel, and configured mobile Live Activities. Linked PRs are discovered automatically. Lecturn also checks recently active conversations for viewer-authored PRs matching a verified non-default branch, including secondary editable repositories in Stave spaces. Ambiguous or missing branch information requires adding the watch explicitly.
+
+A PR's associated conversations and its managing conversation are separate. Choose a manager to direct responsibility; creating or forking a conversation does not transfer it. If only one eligible conversation is associated, the merge instruction can be sent directly to it. See [Pull request activity](./notifications-and-live-activities.md#pull-request-activity) for agent merge instructions and quick-steer behavior.
+
+PR lists default to the editable checkout’s working remote, usually `origin`, so fork projects show their own PRs rather than an upstream repository’s backlog. Thread PR discovery checks verified remotes across the editable repositories in a Stave space. Explicit upstream PR links remain accessible. Project grouping is unchanged.

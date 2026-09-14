@@ -59,6 +59,7 @@ export function resolveProjectGitTargets(input: {
   const { project, includeReferences = false } = input;
   if (!project) return [];
   if (!project.stave) {
+    if (!project.repositoryIdentity) return [];
     const cwd = project.workspaceRoot;
     return [
       {
@@ -82,17 +83,17 @@ export function resolveProjectGitTargets(input: {
     const existing = targets.get(key);
     // Conflicting aliases must never turn a reference checkout into a writable target.
     if (existing && (existing.mode === "reference" || repo.mode === "edit")) continue;
+    const isPrimary =
+      normalizeProjectPathForComparison(project.stave.primaryRepoPath ?? "") === key;
     targets.set(key, {
       key,
       cwd,
       repoName: repo.name,
       mode: repo.mode,
-      branch: repo.branch ?? null,
+      branch: repo.branch ?? (isPrimary ? (project.stave.primaryBranch ?? null) : null),
       repositoryIdentity:
         repo.repositoryIdentity ??
-        (normalizeProjectPathForComparison(project.stave.primaryRepoPath ?? "") === key
-          ? (project.stave.primaryRepositoryIdentity ?? null)
-          : null),
+        (isPrimary ? (project.stave.primaryRepositoryIdentity ?? null) : null),
     });
   }
   return [...targets.values()].filter((target) => includeReferences || target.mode === "edit");
@@ -127,11 +128,28 @@ export function staveThreadStartMessage(project: ProjectLike | null | undefined)
     : null;
 }
 
+/** Old servers can report a primary checkout before sending manifest rows. */
+function resolveSingleStaveGitTarget(project: ProjectLike): ProjectGitTarget | null {
+  const stave = project.stave;
+  if (!stave) return null;
+  const targets = resolveProjectGitTargets({ project });
+  if (targets.length > 0) return targets.length === 1 ? targets[0]! : null;
+  if (stave.repos.length > 0 || !stave.primaryRepoPath) return null;
+  return {
+    key: normalizeProjectPathForComparison(stave.primaryRepoPath),
+    cwd: stave.primaryRepoPath,
+    repoName: stave.spaceId,
+    mode: "edit",
+    branch: stave.primaryBranch ?? null,
+    repositoryIdentity: stave.primaryRepositoryIdentity ?? null,
+  };
+}
+
 /**
  * Directory git commands should run in for a thread on this project.
- * Stave spaces always target the primary repo (threads never get their own
- * worktree there); otherwise the thread's worktree wins over the project
- * root, matching the pre-Stave behaviour exactly.
+ * Stave spaces require an unambiguous editable checkout; callers that need
+ * several repositories use resolveProjectGitTargets or resolveRepositoryScope.
+ * Ordinary projects preserve the legacy worktree-over-root behavior.
  */
 export function resolveProjectGitCwd(input: {
   readonly project: ProjectLike | null | undefined;
@@ -139,21 +157,24 @@ export function resolveProjectGitCwd(input: {
 }): string | null {
   const { project, thread } = input;
   if (!project) return null;
-  if (project.stave) return project.stave.primaryRepoPath ?? null;
+  if (project.stave) return resolveSingleStaveGitTarget(project)?.cwd ?? null;
   return thread?.worktreePath ?? project.workspaceRoot;
 }
 
 /**
  * Branch that status/PR lookups should assume for a thread. New local
  * threads carry `branch: null`, which suppresses PR lookup today; a Stave
- * space fills that gap with the manifest branch of its primary repo.
+ * space fills that gap with the manifest branch of its sole editable repo.
  */
 export function resolveProjectGitBranch(input: {
   readonly project: ProjectLike | null | undefined;
   readonly thread?: ThreadLike | null | undefined;
 }): string | null {
-  if (input.project?.stave && !input.project.stave.primaryRepoPath) return null;
-  return input.thread?.branch ?? input.project?.stave?.primaryBranch ?? null;
+  if (input.project?.stave) {
+    const target = resolveSingleStaveGitTarget(input.project);
+    return target ? (input.thread?.branch ?? target.branch) : null;
+  }
+  return input.thread?.branch ?? null;
 }
 
 /**
@@ -168,10 +189,10 @@ export function staveForcedEnvMode(
   return isStaveProject(project) ? "local" : undefined;
 }
 
-/** PR identity follows the same primary checkout as Git status. */
+/** PR identity follows the same unambiguous checkout as Git status. */
 export function resolveProjectGitRepositoryIdentity(project: ProjectLike | null | undefined) {
   return project?.stave
-    ? (project.stave.primaryRepositoryIdentity ?? null)
+    ? (resolveSingleStaveGitTarget(project)?.repositoryIdentity ?? null)
     : (project?.repositoryIdentity ?? null);
 }
 

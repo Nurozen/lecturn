@@ -365,3 +365,52 @@ describe("resolveRepositoryPullRequestSelector", () => {
     expect(resolveRepositoryPullRequestSelector(null)).toBeNull();
   });
 });
+
+describe("unambiguous scalar Git targets", () => {
+  it("requires an explicit selection when several editable checkouts exist", () => {
+    const project = {
+      ...staveProject,
+      stave: {
+        ...staveProject.stave,
+        repos: [
+          { name: "app", path: "app", mode: "edit" as const },
+          { name: "api", path: "api", mode: "edit" as const },
+        ],
+      },
+    };
+    expect(resolveProjectGitCwd({ project })).toBeNull();
+    expect(resolveProjectGitBranch({ project, thread: { branch: "legacy" } })).toBeNull();
+    expect(resolveProjectGitRepositoryIdentity(project)).toBeNull();
+  });
+
+  it("uses the sole editable manifest checkout even if primary metadata is absent", () => {
+    const project = {
+      ...staveProjectWithoutPrimary,
+      stave: {
+        ...staveProjectWithoutPrimary.stave,
+        repos: [{ name: "app", path: "app", mode: "edit" as const, branch: "feature" }],
+      },
+    };
+    expect(resolveProjectGitCwd({ project })).toBe("/work/space/app");
+    expect(resolveProjectGitBranch({ project })).toBe("feature");
+  });
+
+  it("does not offer an ordinary directory as a writable repository without identity", () => {
+    expect(resolveProjectGitTargets({ project: plainProject })).toEqual([]);
+    expect(
+      resolveProjectGitTargets({ project: { ...plainProject, repositoryIdentity: null } }),
+    ).toEqual([]);
+  });
+
+  it("does not fall back to primary metadata for a reference-only manifest", () => {
+    const project = {
+      ...staveProject,
+      stave: {
+        ...staveProject.stave,
+        repos: [{ name: "app", path: "app", mode: "reference" as const }],
+      },
+    };
+    expect(resolveProjectGitCwd({ project })).toBeNull();
+    expect(resolveProjectGitBranch({ project })).toBeNull();
+  });
+});

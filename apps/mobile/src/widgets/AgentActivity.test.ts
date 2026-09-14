@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 vi.mock("@expo/ui/swift-ui", () => ({
   HStack: "HStack",
   Image: "Image",
+  Link: "Link",
   Rectangle: "Rectangle",
   Spacer: "Spacer",
   Text: "Text",
@@ -21,6 +22,7 @@ vi.mock("@expo/ui/swift-ui/modifiers", () => ({
   layoutPriority: (value: unknown) => value,
   lineLimit: (value: unknown) => value,
   padding: (value: unknown) => value,
+  opacity: (value: unknown) => value,
   resizable: (value: unknown) => value,
   widgetURL: (value: unknown) => ({ widgetURL: value }),
 }));
@@ -82,8 +84,8 @@ describe("AgentActivity widget layout", () => {
       environment as never,
     );
     const banner = JSON.stringify(layout.banner);
-    expect(banner).toContain("#d9a34e"); // Lecturn gold: running
-    expect(banner).toContain("#fcd34d"); // amber-300: waiting_for_approval
+    expect(banner).toContain("#e6bc63"); // Lecturn gold: running
+    expect(banner).toContain("#f0b34d"); // shared attention amber: waiting_for_approval
   });
 
   it("keeps readable status colors on its navy surface in a light host", () => {
@@ -100,8 +102,8 @@ describe("AgentActivity widget layout", () => {
       lightEnvironment as never,
     );
     const banner = JSON.stringify(layout.banner);
-    expect(banner).toContain("#fcd34d"); // amber-300 remains legible on navy
-    expect(banner).not.toContain("#d97706");
+    expect(banner).toContain("#f0b34d"); // shared attention amber remains legible on navy
+    expect(banner).not.toContain("#9a6700");
     expect(banner).toContain("#061522");
   });
 
@@ -156,9 +158,9 @@ describe("AgentActivity widget layout", () => {
       },
       environment as never,
     );
-    expect(JSON.stringify(layout.compactLeading)).toContain("#d9a34e"); // brand mark
+    expect(JSON.stringify(layout.compactLeading)).toContain("#e6bc63"); // brand mark
     expect(JSON.stringify(layout.compactTrailing)).toContain("Input");
-    expect(JSON.stringify(layout.minimal)).toContain("#a5b4fc");
+    expect(JSON.stringify(layout.minimal)).toContain("#f0b34d");
   });
 
   it("deep links the banner to the row that needs attention", () => {
@@ -215,7 +217,7 @@ describe("AgentActivity widget layout", () => {
     const banner = JSON.stringify(layout.banner);
     expect(banner).toContain("Agent work completed");
     expect(banner).not.toContain("0 active");
-    expect(banner).toContain("#6ee7b7"); // emerald-300 header tint
+    expect(banner).toContain("#56c5a1"); // shared completed green header tint
     expect(JSON.stringify(layout.compactTrailing)).toContain("Done");
     expect(JSON.stringify(layout.compactTrailing)).not.toContain("0 active");
     expect(JSON.stringify(layout.expandedLeading)).toContain("Done");
@@ -235,7 +237,7 @@ describe("AgentActivity widget layout", () => {
     );
     const banner = JSON.stringify(layout.banner);
     expect(banner).toContain("Agent work failed");
-    expect(banner).toContain("#fca5a5"); // red-300 header tint
+    expect(banner).toContain("#f07868"); // shared failed red header tint
     expect(JSON.stringify(layout.compactTrailing)).toContain("Failed");
     expect(JSON.stringify(layout.expandedLeading)).toContain("Failed");
     expect(JSON.stringify(layout.minimal)).toContain("xmark.octagon.fill");
@@ -260,7 +262,7 @@ describe("AgentActivity widget layout", () => {
     const banner = JSON.stringify(layout.banner);
     expect(banner).toContain("Agent work failed");
     expect(banner).not.toContain("Agent work completed");
-    expect(banner).toContain("#fca5a5"); // red-300 header tint
+    expect(banner).toContain("#f07868"); // shared failed red header tint
     expect(JSON.stringify(layout.compactTrailing)).toContain("Failed");
     expect(JSON.stringify(layout.expandedLeading)).toContain("Failed");
     expect(JSON.stringify(layout.minimal)).toContain("xmark.octagon.fill");
@@ -282,5 +284,55 @@ describe("AgentActivity widget layout", () => {
       expect(banner).toContain(`Thread ${visible}`);
     }
     expect(banner).not.toContain("Thread 6");
+  });
+});
+
+describe("pull request activity", () => {
+  const pr = {
+    watchId: "watch-1",
+    projectId: "project-1",
+    number: 42,
+    repository: "owner/repo",
+    state: "open",
+    checks: "pending",
+    requiredChecks: "unknown",
+    watching: true,
+    manager: "offline",
+    authorization: "waiting",
+    stale: true,
+  } as const;
+  it("keeps observation freshness, CI, watch intent and manager liveness distinct", () => {
+    const layout = AgentActivity(
+      {
+        ...props,
+        activities: [makeRow({ pullRequest: pr, deepLink: "/pr-watches/env-1/watch-1" })],
+      },
+      environment as never,
+    );
+    const banner = JSON.stringify(layout.banner);
+    expect(banner).toContain("CI pending");
+    expect(banner).toContain("Required unknown");
+    expect(banner).toContain("Stale · Watching · offline · Merge waiting");
+    expect(banner).toContain("1 active activity");
+    expect(banner).not.toContain("active agent");
+    expect(banner).toContain('"destination":"lecturn://pr-watches/env-1/watch-1"');
+  });
+  it("caps the expanded PR layout at two rows and never links mutation parameters", () => {
+    const layout = AgentActivity(
+      {
+        ...props,
+        activities: [1, 2, 3, 4].map((number) =>
+          makeRow({
+            pullRequest: { ...pr, number, repository: `unique-${number}` },
+            deepLink: "/pr-watches/env-1/watch-1?action=authorize",
+          }),
+        ),
+      },
+      environment as never,
+    );
+    expect(JSON.stringify(layout.expandedBottom)).toContain("unique-2");
+    expect(JSON.stringify(layout.expandedBottom)).not.toContain("unique-3");
+    expect(JSON.stringify(layout.banner)).not.toContain("unique-4");
+    expect(JSON.stringify(layout.expandedBottom)).not.toContain('"destination"');
   });
 });

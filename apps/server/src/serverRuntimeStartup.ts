@@ -1,3 +1,5 @@
+import { PullRequestWatchDiscovery } from "./pullRequest/PullRequestWatchDiscovery.ts";
+import { PullRequestWatchService } from "./pullRequest/PullRequestWatchService.ts";
 import {
   CommandId,
   DEFAULT_MODEL,
@@ -766,6 +768,11 @@ export const make = (options?: StartupOptions) =>
         Effect.gen(function* () {
           yield* orchestrationReactor.start().pipe(Scope.provide(reactorScope));
           yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope));
+          const watches = yield* Effect.serviceOption(PullRequestWatchService);
+          if (Option.isSome(watches)) yield* watches.value.start.pipe(Scope.provide(reactorScope));
+          const discovery = yield* Effect.serviceOption(PullRequestWatchDiscovery);
+          if (Option.isSome(discovery))
+            yield* discovery.value.start.pipe(Scope.provide(reactorScope));
         }),
       );
 

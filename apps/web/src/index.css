@@ -2240,40 +2240,46 @@ body,
   position: relative;
 }
 
-/* Static gold trunks connect each expanded node to its conversations and children. */
-.lecturn-hierarchy-conversations,
-.lecturn-hierarchy-branch {
+/* Every expanded project, space, and saga uses the same static gold tree.
+   Connectors belong to the list items so a final child's descendants cannot
+   extend its parent's trunk beyond the header elbow. */
+.lecturn-hierarchy-branch,
+.lecturn-hierarchy-conversations > ul > li {
   position: relative;
+  padding-inline-start: 28px;
 }
-.lecturn-hierarchy-children > .lecturn-hierarchy-conversations {
-  padding-inline-start: 20px;
-}
-.lecturn-hierarchy-children > .lecturn-hierarchy-conversations::before,
 .lecturn-hierarchy-branch::before,
-.lecturn-hierarchy-branch::after {
+.lecturn-hierarchy-branch::after,
+.lecturn-hierarchy-conversations > ul > li::before,
+.lecturn-hierarchy-conversations > ul > li::after {
   content: "";
   position: absolute;
   pointer-events: none;
+  inset-inline-start: 11px;
   box-shadow: 0 0 5px 1px #dca64e55;
 }
-.lecturn-hierarchy-children > .lecturn-hierarchy-conversations::before,
-.lecturn-hierarchy-branch::before {
+.lecturn-hierarchy-branch::before,
+.lecturn-hierarchy-conversations > ul > li::before {
   inset-block: 0;
-  inset-inline-start: 10px;
   width: 1px;
   background: linear-gradient(180deg, #dca64e99, #ffe1a0 45%, #ffe1a0 55%, #dca64e99);
 }
-.lecturn-hierarchy-branch:last-child::before,
-.lecturn-hierarchy-branch-last::before {
+.lecturn-hierarchy-branch:last-child::before {
   bottom: auto;
   height: 22px;
 }
-.lecturn-hierarchy-branch::after {
+.lecturn-hierarchy-conversations:last-child > ul > li:last-child::before {
+  bottom: 50%;
+}
+.lecturn-hierarchy-branch::after,
+.lecturn-hierarchy-conversations > ul > li::after {
   top: 22px;
-  inset-inline-start: 10px;
-  width: 16px;
+  width: 15px;
   height: 1px;
   background: linear-gradient(90deg, #dca64e99, #ffe1a0 50%, #dca64e99);
+}
+.lecturn-hierarchy-conversations > ul > li::after {
+  top: 50%;
 }
 .lecturn-saga-sheen {
   color: #ffe1a0;
@@ -2283,7 +2289,8 @@ body,
   text-shadow: 0 0 5px #dca64e55;
 }
 @media (forced-colors: active) {
-  .lecturn-hierarchy-children > .lecturn-hierarchy-conversations::before,
+  .lecturn-hierarchy-conversations > ul > li::before,
+  .lecturn-hierarchy-conversations > ul > li::after,
   .lecturn-hierarchy-branch::before,
   .lecturn-hierarchy-branch::after {
     background: CanvasText;
@@ -2370,5 +2377,127 @@ body,
   .lecturn-running-edge {
     animation: none;
     display: none;
+  }
+}
+
+@property --lecturn-active-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+/* Active work owns a full perimeter; the sidebar's visibility lease stops
+   motion offscreen or in a hidden window. Keep approval/error labels visible. */
+.lecturn-thread-active {
+  position: relative;
+}
+.lecturn-thread-active::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  z-index: 1;
+  background: conic-gradient(
+    from var(--lecturn-active-angle),
+    #dca64e55 0deg 260deg,
+    #dca64e 315deg,
+    #ffeac1 348deg,
+    #dca64e55 360deg
+  );
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+.lecturn-thread-active-visible::before {
+  animation: lecturn-active-perimeter 4s steps(48) infinite;
+}
+@keyframes lecturn-active-perimeter {
+  to {
+    --lecturn-active-angle: 360deg;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lecturn-thread-active-visible::before {
+    animation: none;
+  }
+}
+
+/* Settled work keeps its place in the tree with a warm copper/red-gold sheen. */
+.lecturn-settled-label {
+  color: light-dark(#646b73, #a6adb6);
+}
+.lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::before,
+.lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::after {
+  box-shadow: 0 0 7px 1px #f0524577;
+}
+.lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::before {
+  width: 2px;
+  background: linear-gradient(180deg, #e64d3dcc, #ff7258 42%, #ffd097 52%, #ff7258 62%, #e64d3dcc);
+}
+.lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::after {
+  height: 2px;
+  background: linear-gradient(90deg, #e64d3dcc, #ff7258 35%, #ffd097 52%, #e64d3dcc);
+}
+.settled-thread-action {
+  position: relative;
+  isolation: isolate;
+  color: var(--foreground);
+  border-color: #ed624f;
+  background-color: color-mix(in srgb, light-dark(#fff0ea, #321e25) 50%, var(--background));
+  box-shadow:
+    0 0 14px #f0524550,
+    inset 0 0 16px #e64d3d0b;
+}
+.settled-thread-action::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--lecturn-active-angle),
+    #e64d3dcc 0deg 230deg,
+    #ff7258 290deg,
+    #ffd097 340deg,
+    #e64d3dcc 360deg
+  );
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+.settled-thread-action:is(:hover, :focus-visible)::before {
+  animation: lecturn-active-perimeter 4s steps(48) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .settled-thread-action::before {
+    animation: none !important;
+  }
+}
+@media (forced-colors: active) {
+  .lecturn-settled-label,
+  .lecturn-hierarchy-settled [data-testid="sidebar-row-slim"],
+  .settled-thread-action {
+    color: CanvasText;
+  }
+  .lecturn-hierarchy-settled::before,
+  .lecturn-hierarchy-settled::after,
+  .lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::before,
+  .lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::after {
+    background: CanvasText;
+    box-shadow: none;
+  }
+  .settled-thread-action::before {
+    background: CanvasText;
+  }
+}
+@media (hover: hover) and (pointer: fine) {
+  /* The full red-gold perimeter supplies this action's hover affordance. */
+  .settled-thread-action::after {
+    display: none !important;
   }
 }

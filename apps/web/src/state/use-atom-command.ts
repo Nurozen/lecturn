@@ -1,3 +1,4 @@
+import { localThreadActivityIntents } from "./localThreadActivityIntent";
 import { RegistryContext } from "@effect/atom-react";
 import {
   type AtomCommand,
@@ -17,7 +18,21 @@ export function useAtomCommand<A, E, W>(
   const reportDefect = typeof options === "string" ? true : (options?.reportDefect ?? true);
 
   return useCallback(
-    (value: W) => runAtomCommand(registry, command, value, { label, reportFailure, reportDefect }),
+    async (value: W) => {
+      const intent = localThreadActivityIntents.begin(command.label, value);
+      try {
+        const result = await runAtomCommand(registry, command, value, {
+          label,
+          reportFailure,
+          reportDefect,
+        });
+        if (result._tag === "Failure") localThreadActivityIntents.cancel(intent);
+        return result;
+      } catch (error) {
+        localThreadActivityIntents.cancel(intent);
+        throw error;
+      }
+    },
     [command, label, registry, reportDefect, reportFailure],
   );
 }

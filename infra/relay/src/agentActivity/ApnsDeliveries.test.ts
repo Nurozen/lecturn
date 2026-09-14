@@ -1,3 +1,4 @@
+import { stableStringify } from "@lecturn/shared/relaySigning";
 import type {
   RelayAgentActivityAggregateState,
   RelayAgentActivityState,
@@ -431,7 +432,11 @@ describe("ApnsDeliveries", () => {
       const payloadAggregate = queuedJobs[0]?.payload.aggregate;
       expect(payloadAggregate?.title.length).toBeLessThanOrEqual(120);
       expect(payloadAggregate?.subtitle.length).toBeLessThanOrEqual(120);
-      expect(payloadAggregate?.activities).toHaveLength(5);
+      expect(payloadAggregate?.activities.length).toBeLessThanOrEqual(5);
+      expect(payloadAggregate?.activities.length).toBeGreaterThan(0);
+      expect(
+        new TextEncoder().encode(stableStringify(payloadAggregate)).byteLength,
+      ).toBeLessThanOrEqual(3200);
       expect(payloadAggregate?.activities[0]?.projectTitle.length).toBeLessThanOrEqual(120);
       expect(payloadAggregate?.activities[0]?.status.length).toBeLessThanOrEqual(40);
       expect(payloadAggregate?.activities[0]?.deepLink).toBe("/");

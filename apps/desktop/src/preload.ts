@@ -8,6 +8,7 @@ import { exposeClerkBridge } from "@clerk/electron/preload";
 import { contextBridge, ipcRenderer } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
+import * as ActivityChannels from "./activity/channels.ts";
 
 exposeClerkBridge({ passkeys: true });
 
@@ -30,7 +31,27 @@ function unwrapEnsureSshEnvironmentResult(result: unknown) {
   return result as Awaited<ReturnType<DesktopBridge["ensureSshEnvironment"]>>;
 }
 
+const activityBridge: NonNullable<DesktopBridge["activity"]> = {
+  publish: (snapshot) => ipcRenderer.invoke(ActivityChannels.ACTIVITY_PUBLISH, snapshot),
+  getEnabled: () => ipcRenderer.invoke(ActivityChannels.ACTIVITY_ENABLED),
+  onEnabledChange: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, enabled: boolean) => listener(enabled);
+    ipcRenderer.on(ActivityChannels.ACTIVITY_ENABLED_CHANGED, wrapped);
+    return () => ipcRenderer.removeListener(ActivityChannels.ACTIVITY_ENABLED_CHANGED, wrapped);
+  },
+  setEnabled: (enabled) => ipcRenderer.invoke(ActivityChannels.ACTIVITY_SET_ENABLED, enabled),
+  onAction: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, action: Parameters<typeof listener>[0]) =>
+      listener(action);
+    ipcRenderer.on(ActivityChannels.ACTIVITY_ACTION, wrapped);
+    return () => {
+      ipcRenderer.removeListener(ActivityChannels.ACTIVITY_ACTION, wrapped);
+    };
+  },
+};
+
 contextBridge.exposeInMainWorld("desktopBridge", {
+  ...(clientPlatform === "darwin" ? { activity: activityBridge } : {}),
   getAppBranding: () => {
     const result = ipcRenderer.sendSync(IpcChannels.GET_APP_BRANDING_CHANNEL);
     if (typeof result !== "object" || result === null) {
