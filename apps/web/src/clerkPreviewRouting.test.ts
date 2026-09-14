@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - Verify the deployment compiler's concrete filesystem target.
-import * as NodeFs from "node:fs";
+import * as NodeFS from "node:fs";
 import * as NodeModule from "node:module";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -32,7 +32,7 @@ describe("preview authentication deployment routing", () => {
       );
       // A catch-all API file is not a concrete filesystem target: check:true
       // skips it and the following SPA fallback returns HTML instead of JSON.
-      expect(NodeFs.existsSync(new URL(`..${destination.pathname}.ts`, import.meta.url))).toBe(
+      expect(NodeFS.existsSync(new URL(`..${destination.pathname}.ts`, import.meta.url))).toBe(
         true,
       );
     }
