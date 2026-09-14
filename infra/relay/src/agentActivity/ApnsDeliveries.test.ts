@@ -1837,7 +1837,7 @@ describe("paid recipient delivery", () => {
         expect(unpaid).toBeNull();
         expect(paid).not.toBeNull();
         expect(queuedJobs).toHaveLength(1);
-        expect(calls).toEqual([target.user_id, "paid-user"]);
+        expect([...new Set(calls)]).toEqual([target.user_id, "paid-user"]);
       }).pipe(
         Effect.provide(
           makeLayer({
@@ -2315,6 +2315,76 @@ describe("queued delivery entitlement windows", () => {
           execute: (request) =>
             Effect.sync(() => {
               sends++;
+              return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+            }),
+        }),
+      ),
+    );
+  });
+});
+
+describe("company notification authorization", () => {
+  it.effect("supports team-only recipients without a personal subscription", () => {
+    const queuedJobs: SignedApnsDeliveryJob[] = [];
+    return Effect.gen(function* () {
+      const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+      expect(yield* deliveries.sendForTarget({ target, aggregate, nowMs: 0 })).not.toBeNull();
+      expect(queuedJobs).toHaveLength(1);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          attempts: [],
+          queuedJobs,
+          managedAccess: {
+            check: (_user, _feature, _origin, environmentId) =>
+              environmentId === state.environmentId
+                ? Effect.void
+                : Effect.fail(new ManagedAccessRequired({ message: "No personal subscription" })),
+          },
+        }),
+      ),
+    );
+  });
+  it.effect("filters removed company rows from replay while preserving personal rows", () => {
+    const queuedJobs: SignedApnsDeliveryJob[] = [];
+    const mixed = {
+      ...aggregate,
+      activeCount: 2,
+      activities: [
+        ...aggregate.activities,
+        {
+          ...aggregate.activities[0]!,
+          environmentId: "company" as typeof state.environmentId,
+          threadId: "private-team-thread" as typeof state.threadId,
+          threadTitle: "Company secret",
+        },
+      ],
+    };
+    let companyAccess = true;
+    let body = "";
+    return Effect.gen(function* () {
+      const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+      yield* deliveries.sendForTarget({ target, aggregate: mixed, nowMs: 0 });
+      companyAccess = false;
+      yield* deliveries.processSignedJob(queuedJobs[0]!);
+      expect(body).not.toContain("Company secret");
+      expect(body).toContain(state.threadTitle);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          attempts: [],
+          queuedJobs,
+          config: signingConfig,
+          managedAccess: {
+            check: (_user, _feature, _origin, environmentId) =>
+              environmentId === "company" && !companyAccess
+                ? Effect.fail(new ManagedAccessRequired({ message: "Seat revoked" }))
+                : Effect.void,
+          },
+          execute: (request) =>
+            Effect.sync(() => {
+              if (request.body._tag === "Uint8Array")
+                body = new TextDecoder().decode(request.body.body);
               return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
             }),
         }),

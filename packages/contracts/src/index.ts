@@ -46,3 +46,4 @@ export * from "./sagaWorkbench.ts";
 export * from "./pullRequestWatch.ts";
 
 export { RelayPullRequestActivity } from "./relay.ts";
+export * from "./relayTeams.ts";

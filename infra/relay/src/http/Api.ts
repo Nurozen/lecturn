@@ -1,3 +1,5 @@
+import { TeamRuntime } from "../teams/TeamRuntime.ts";
+import { isBillingAppOrigin } from "../billing/BillingConfig.ts";
 import { createClerkClient, verifyToken } from "@clerk/backend";
 import { sql as drizzleSql } from "drizzle-orm";
 import * as Crypto from "effect/Crypto";
@@ -126,7 +128,10 @@ const appendRelayTraceContextResponseHeader = Effect.gen(function* () {
   );
 }).pipe(Effect.ignore);
 
-export const makeRelayCors = (billingOrigin = "https://lecturn.cloudgatherer.net") =>
+export const makeRelayCors = (
+  billingOrigin = "https://lecturn.cloudgatherer.net",
+  additionalAppOrigins: readonly string[] = [],
+) =>
   HttpRouter.middleware(
     Effect.fnUntraced(function* <E, R>(
       httpEffect: Effect.Effect<
@@ -144,11 +149,11 @@ export const makeRelayCors = (billingOrigin = "https://lecturn.cloudgatherer.net
           (request.method === "GET" ||
             (request.method === "OPTIONS" &&
               request.headers["access-control-request-method"] === "GET"));
-        const allowed = request.headers.origin === billingOrigin || desktopStatus;
+        const allowed =
+          isBillingAppOrigin(request.headers.origin, billingOrigin, additionalAppOrigins) ||
+          desktopStatus;
         const headers = {
-          ...(allowed
-            ? { "access-control-allow-origin": desktopStatus ? "lecturn://app" : billingOrigin }
-            : {}),
+          ...(allowed ? { "access-control-allow-origin": request.headers.origin! } : {}),
           "access-control-expose-headers": relayCorsExposedHeaders.join(","),
           vary: "Origin",
         };
@@ -509,6 +514,11 @@ export const unlinkEnvironmentRecord = Effect.fn("relay.api.client.unlinkEnviron
       environmentId: input.environmentId,
       target: deprovisionTarget,
     });
+    const teams = yield* Effect.serviceOption(TeamRuntime);
+    if (Option.isSome(teams))
+      yield* teams.value
+        .unlinked(input.userId, input.environmentId)
+        .pipe(Effect.catch(() => relayInternalErrorResponse("persistence_failed")));
     return unlinked;
   },
 );
@@ -613,6 +623,7 @@ export const clientApi = HttpApiBuilder.group(
               endpointRuntime: result.endpointRuntime,
               relayIssuer: config.relayIssuer,
               environmentCredential: result.environmentCredential,
+              ...(payload.organizationId ? { organizationId: payload.organizationId } : {}),
               cloudMintPublicKey: config.cloudMintPublicKey,
             };
           },

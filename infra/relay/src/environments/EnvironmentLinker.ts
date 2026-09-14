@@ -9,6 +9,8 @@ import {
   RELAY_LINK_PROOF_TYP,
   verifyRelayJwt,
 } from "@lecturn/shared/relayJwt";
+import { TeamRuntime } from "../teams/TeamRuntime.ts";
+import * as Option from "effect/Option";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -140,6 +142,7 @@ function isLoopbackManagedTunnelOrigin(
 
 const make = Effect.gen(function* () {
   const managedAccess = yield* ManagedAccess.ManagedAccess;
+  const teams = yield* Effect.serviceOption(TeamRuntime);
   const links = yield* EnvironmentLinks.EnvironmentLinks;
   const credentials = yield* EnvironmentCredentials.EnvironmentCredentials;
   const managedEndpointProvider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
@@ -291,13 +294,45 @@ const make = Effect.gen(function* () {
           stage: "validate_origin",
         });
       }
+      if (input.request.organizationId && verified.teamPolicyVersion !== 1)
+        return yield* new ManagedAccess.ManagedAccessRequired({
+          message: "Update this Lecturn host before publishing it with a company seat.",
+        });
+      if (Option.isSome(teams)) {
+        yield* teams.value
+          .prepareLink(input.userId, verified.environmentId, input.request)
+          .pipe(
+            Effect.mapError(
+              (error) => new ManagedAccess.ManagedAccessRequired({ message: error.message }),
+            ),
+          );
+      } else if (input.request.organizationId) {
+        return yield* new ManagedAccess.ManagedAccessRequired({
+          message: "Teams are not enabled on this relay.",
+        });
+      }
       // Disabled in normal deployments; sandbox gates only requested hosted features.
       if (input.request.managedTunnelsEnabled)
-        yield* managedAccess.check(input.userId, "managedConnect");
+        yield* managedAccess.check(
+          input.userId,
+          "managedConnect",
+          undefined,
+          verified.environmentId,
+        );
       if (input.request.notificationsEnabled)
-        yield* managedAccess.check(input.userId, "pushNotifications");
+        yield* managedAccess.check(
+          input.userId,
+          "pushNotifications",
+          undefined,
+          verified.environmentId,
+        );
       if (input.request.liveActivitiesEnabled)
-        yield* managedAccess.check(input.userId, "liveActivities");
+        yield* managedAccess.check(
+          input.userId,
+          "liveActivities",
+          undefined,
+          verified.environmentId,
+        );
       // Downgrading a managed link to publish-only must release the tunnel and
       // DNS that were provisioned for it — nothing else cleans them up until a
       // full unlink. Best effort: a cleanup failure must not block the link

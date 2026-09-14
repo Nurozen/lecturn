@@ -150,3 +150,69 @@ it.effect(
       yield* explicitlyGranted.check("existing-owner", "managedConnect");
     }),
 );
+
+it.effect("uses explicit team funding without falling back to a personal subscription", () =>
+  Effect.gen(function* () {
+    const time = Math.floor((yield* Clock.currentTimeMillis) / 1000);
+    let allowed = true;
+    const service = make(
+      () => Effect.succeed(account(time)),
+      undefined,
+      true,
+      (_user, env) =>
+        Effect.succeed(
+          env === "company"
+            ? {
+                allowed,
+                validUntil: time + 100,
+                windowStart: time,
+                policy: { publishAgentActivity: false },
+              }
+            : undefined,
+        ),
+    );
+    yield* service.check("owner", "managedConnect", undefined, "company");
+    expect(
+      (yield* service.check("owner", "pushNotifications", undefined, "company").pipe(Effect.flip))
+        ._tag,
+    ).toBe("ManagedAccessRequired");
+    allowed = false;
+    expect(
+      (yield* service.check("owner", "managedConnect", undefined, "company").pipe(Effect.flip))
+        ._tag,
+    ).toBe("ManagedAccessRequired");
+    yield* service.check("owner", "managedConnect", undefined, "personal");
+  }),
+);
+
+it.effect("personal rollout exemptions never bypass company revocation or publishing policy", () =>
+  Effect.gen(function* () {
+    const time = Math.floor((yield* Clock.currentTimeMillis) / 1000);
+    for (const enforce of [true, false]) {
+      for (const allowed of [true, false]) {
+        const service = make(
+          () => Effect.succeed(account(time)),
+          [],
+          enforce,
+          () =>
+            Effect.succeed({
+              allowed,
+              validUntil: time + 100,
+              windowStart: time - 10,
+              policy: { publishAgentActivity: false },
+            }),
+        );
+        expect(
+          (yield* Effect.flip(service.check("owner", "pushNotifications", time - 1, "company-env")))
+            ._tag,
+        ).toBe("ManagedAccessRequired");
+        if (!allowed)
+          expect(
+            (yield* Effect.flip(service.check("owner", "managedConnect", undefined, "company-env")))
+              ._tag,
+          ).toBe("ManagedAccessRequired");
+        else yield* service.check("owner", "managedConnect", undefined, "company-env");
+      }
+    }
+  }),
+);

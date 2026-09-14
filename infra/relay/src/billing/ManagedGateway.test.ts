@@ -43,6 +43,35 @@ const request = (hostname = environment.publicHostname) =>
   new Request(`https://${hostname}/api/health?check=1`);
 
 describe("managed gateway access boundary", () => {
+  it("keeps company and personal deadlines isolated and rearms the next expiry", async () => {
+    const company = { ...environment, accessUntilMs: 15_000 };
+    const personal = {
+      environmentId: "env_personal",
+      publicHostname: "personal.connect.example.com",
+      originHostname: "personal.origin.example.com",
+      accessUntilMs: 30_000,
+    };
+    const upstream = vi.fn<typeof fetch>(async () => new Response("ok"));
+    const { gateway, commits, setClock } = fixture(null, upstream);
+    await gateway.update(snapshot({ accessUntilMs: null, environments: [company, personal] }));
+    expect(commits.at(-1)?.alarmMs).toBe(15_000);
+    expect((await gateway.fetch(request())).status).toBe(200);
+    setClock(15_000);
+    await gateway.alarm();
+    expect((await gateway.fetch(request())).status).toBe(402);
+    expect((await gateway.fetch(request(personal.publicHostname))).status).toBe(200);
+    expect(commits.at(-1)?.alarmMs).toBe(30_000);
+    await gateway.update(
+      snapshot({
+        generation: 2,
+        accessUntilMs: 50_000,
+        environments: [{ ...company, accessUntilMs: null }, personal],
+      }),
+    );
+    expect((await gateway.fetch(request())).status).toBe(402);
+    expect((await gateway.fetch(request(personal.publicHostname))).status).toBe(200);
+  });
+
   it("forwards routed environment traffic through the fixed Worker custom domain", async () => {
     const upstream = vi.fn<typeof fetch>(async () => new Response("forwarded"));
     const gateway = createManagedGateway({

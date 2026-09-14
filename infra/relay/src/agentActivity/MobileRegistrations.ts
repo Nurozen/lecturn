@@ -1,3 +1,5 @@
+import { ManagedAccess } from "../billing/ManagedAccess.ts";
+import { filterPermittedActivity } from "../teams/TeamNotifications.ts";
 import type {
   RelayAgentActivitySnapshotResponse,
   RelayDeviceRegistrationRequest,
@@ -42,6 +44,7 @@ export class MobileRegistrations extends Context.Service<
 
 export const make = Effect.gen(function* () {
   const rows = yield* AgentActivityRows.AgentActivityRows;
+  const managedAccess = yield* ManagedAccess;
   const devices = yield* Devices.Devices;
   const liveActivities = yield* LiveActivities.LiveActivities;
   const publisher = yield* AgentActivityPublisher.AgentActivityPublisher;
@@ -95,11 +98,23 @@ export const make = Effect.gen(function* () {
         const activeStates = yield* rows.listForUser({ userId: input.userId });
         const now = yield* DateTime.now;
         return {
-          aggregate: AgentActivityPublisher.makeAggregateState({
-            activeStates,
-            terminalState: null,
-            nowMs: now.epochMilliseconds,
-          }),
+          aggregate: yield* filterPermittedActivity(
+            managedAccess,
+            input.userId,
+            AgentActivityPublisher.makeAggregateState({
+              activeStates,
+              terminalState: null,
+              nowMs: now.epochMilliseconds,
+            }),
+          ).pipe(
+            Effect.mapError(
+              (cause) =>
+                new AgentActivityRows.AgentActivityRowListPersistenceError({
+                  userId: input.userId,
+                  cause,
+                }),
+            ),
+          ),
         };
       },
     ),

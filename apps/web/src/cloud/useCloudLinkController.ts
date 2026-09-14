@@ -6,7 +6,11 @@ import {
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
 import { useEffect, useRef, useState } from "react";
-import { createBillingClient } from "@lecturn/client-runtime/relay";
+import {
+  createBillingClient,
+  createTeamsClient,
+  selectedTeam,
+} from "@lecturn/client-runtime/relay";
 import { isConnectSubscriptionRequired } from "./connectSubscriptionGate";
 
 import { toastManager } from "../components/ui/toast";
@@ -51,6 +55,7 @@ export function useCloudLinkController() {
   );
   const primaryCloudLinkState = usePrimaryCloudLinkState();
   const accountRef = useRef(userId);
+  const companyPublishingAllowed = useRef(true);
   useEffect(() => {
     accountRef.current = userId;
     return () => {
@@ -106,7 +111,33 @@ export function useCloudLinkController() {
 
   const checkSubscription = async (clerkToken?: string): Promise<boolean> => {
     const account = userId;
+    const organizationId = linked
+      ? (primaryCloudLinkState.data?.organizationId ?? null)
+      : selectedTeam(userId);
     try {
+      companyPublishingAllowed.current = true;
+      if (organizationId) {
+        const result = await createTeamsClient({
+          relayUrl: resolveCloudPublicConfig().relayUrl ?? "",
+          getToken: () =>
+            clerkToken ? Promise.resolve(clerkToken) : getToken(resolveRelayClerkTokenOptions()),
+        }).list();
+        if (accountRef.current !== account || (!linked && selectedTeam(account) !== organizationId))
+          return false;
+        const organization = result.organizations.find(
+          (item) => item.organizationId === organizationId,
+        );
+        if (!organization?.hasAccess) {
+          setOperationError(
+            "Your company Connect access is not active. Ask your administrator to assign a seat and check company billing.",
+          );
+          return false;
+        }
+        companyPublishingAllowed.current = organization.policy?.publishAgentActivity !== false;
+        setSubscriptionRequiredFor(null);
+        setOperationError(null);
+        return true;
+      }
       const status = await createBillingClient({
         relayUrl: resolveCloudPublicConfig().relayUrl ?? "",
         getToken: () =>
@@ -128,6 +159,9 @@ export function useCloudLinkController() {
 
   const reconcileCloudState = async (desired: CloudLinkDesiredState): Promise<boolean> => {
     setOperationError(null);
+    const organizationId = linked
+      ? (primaryCloudLinkState.data?.organizationId ?? null)
+      : selectedTeam(userId);
     const target = primaryCloudLinkState.target;
     if (!target) {
       reportUpdateFailure(new Error("Local environment is not ready yet."));
@@ -168,12 +202,18 @@ export function useCloudLinkController() {
         reportUpdateFailure(new Error("Sign in to Lecturn Connect before enabling this."));
         return false;
       }
-      if (!(await checkSubscription(clerkToken))) return false;
+      if (
+        !(await checkSubscription(clerkToken)) ||
+        (!linked && selectedTeam(userId) !== organizationId)
+      )
+        return false;
       if (!linked || managedTunnelActive !== desired.managedTunnel) {
         const linkResult = await linkPrimaryEnvironment({
           target,
           clerkToken,
           mode: desired.managedTunnel ? "managed" : "publish_only",
+          publishAgentActivity: desired.publish && companyPublishingAllowed.current,
+          ...(organizationId ? { organizationId } : {}),
         });
         if (linkResult._tag === "Failure") {
           if (!isAtomCommandInterrupted(linkResult)) {
@@ -185,7 +225,7 @@ export function useCloudLinkController() {
       }
       const prefResult = await updatePrimaryEnvironmentPreferences({
         target,
-        publishAgentActivity: desired.publish,
+        publishAgentActivity: desired.publish && companyPublishingAllowed.current,
       });
       if (prefResult._tag === "Failure") {
         if (!isAtomCommandInterrupted(prefResult)) {

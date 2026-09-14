@@ -22,6 +22,8 @@ import * as AgentActivityRows from "./AgentActivityRows.ts";
 import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
 import * as LiveActivities from "./LiveActivities.ts";
 import * as ApnsDeliveries from "./ApnsDeliveries.ts";
+import { TeamRuntime } from "../teams/TeamRuntime.ts";
+import { ManagedAccessUnavailable } from "../billing/ManagedAccess.ts";
 
 export type AgentActivityPublishError =
   | AgentActivityRows.AgentActivityRowUpsertPersistenceError
@@ -29,7 +31,8 @@ export type AgentActivityPublishError =
   | AgentActivityRows.AgentActivityRowListPersistenceError
   | EnvironmentLinks.EnvironmentLinkUserListPersistenceError
   | LiveActivities.LiveActivityTargetListPersistenceError
-  | ApnsDeliveries.ApnsDeliveryError;
+  | ApnsDeliveries.ApnsDeliveryError
+  | ManagedAccessUnavailable;
 
 export class AgentActivityPublisher extends Context.Service<
   AgentActivityPublisher,
@@ -52,6 +55,7 @@ export const make = Effect.gen(function* () {
   const links = yield* EnvironmentLinks.EnvironmentLinks;
   const liveActivities = yield* LiveActivities.LiveActivities;
   const apnsDeliveries = yield* ApnsDeliveries.ApnsDeliveries;
+  const teams = yield* Effect.serviceOption(TeamRuntime);
 
   const publishForDeliveryUser = Effect.fnUntraced(function* (input: {
     readonly deliveryUser: EnvironmentLinks.AgentAwarenessDeliveryUserRecord;
@@ -138,6 +142,30 @@ export const make = Effect.gen(function* () {
         "relay.thread_id": input.threadId,
         "relay.agent_activity.phase": input.state?.phase ?? "deleted",
       });
+      // Resolve recipients using the authenticated environment key before retaining any titles.
+      const deliveryUsers = yield* links.listDeliveryUsersForEnvironment({
+        environmentId: input.environmentId,
+        environmentPublicKey: input.environmentPublicKey,
+      });
+      if (input.state && Option.isSome(teams)) {
+        const owners = yield* links.listUsersForEnvironment({
+          environmentId: input.environmentId,
+          environmentPublicKey: input.environmentPublicKey,
+          includeAllLinkedUsers: true,
+        });
+        for (const owner of owners) {
+          const policy = yield* teams.value.policy(owner, input.environmentId).pipe(
+            Effect.mapError(
+              () =>
+                new ManagedAccessUnavailable({
+                  message: "Company activity publishing policy is temporarily unavailable.",
+                }),
+            ),
+          );
+          if (policy && (!policy.hasAccess || !policy.publishAgentActivity))
+            return { ok: true, deliveries: [] };
+        }
+      }
       if (input.state) {
         // Terminal states are persisted too (pruned by the cron after they
         // age out) so a thread that finishes while other agents are active
@@ -155,10 +183,6 @@ export const make = Effect.gen(function* () {
         });
       }
 
-      const deliveryUsers = yield* links.listDeliveryUsersForEnvironment({
-        environmentId: input.environmentId,
-        environmentPublicKey: input.environmentPublicKey,
-      });
       const now = yield* DateTime.now;
       const deliveriesByUser = yield* Effect.forEach(
         deliveryUsers,

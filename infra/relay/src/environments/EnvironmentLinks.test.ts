@@ -109,6 +109,19 @@ describe("EnvironmentLinks", () => {
       expect(query.sql).toContain('"relay_environment_links"."live_activities_enabled" = $3');
       expect(query.sql).toContain(" or ");
       expect(query.params).toEqual(["env-1", true, true]);
+
+      // Policy ownership includes linked environments even when both delivery options are off.
+      yield* links.listUsersForEnvironment({
+        environmentId: "env-1",
+        environmentPublicKey: "verified-key",
+        includeAllLinkedUsers: true,
+      });
+      const owners = new PgDialect().sqlToQuery(whereConditions[1] as never);
+      expect(owners.sql).toContain('"relay_environment_links"."revoked_at" is null');
+      expect(owners.sql).toContain('"relay_environment_links"."environment_public_key" = $2');
+      expect(owners.sql).not.toContain('"notifications_enabled"');
+      expect(owners.sql).not.toContain('"live_activities_enabled"');
+      expect(owners.params).toEqual(["env-1", "verified-key"]);
     }).pipe(
       Effect.provide(
         EnvironmentLinks.layer.pipe(Layer.provide(Layer.succeed(RelayDb.RelayDb, fakeDb))),

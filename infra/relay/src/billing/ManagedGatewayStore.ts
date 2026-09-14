@@ -1,3 +1,4 @@
+import { makeTeamStore } from "../teams/TeamStore.ts";
 import { Clock, DateTime, Effect } from "effect";
 import { RelayDb } from "../db.ts";
 import { BillingError, type BillingAccount } from "./BillingStore.ts";
@@ -24,6 +25,7 @@ export type ManagedGatewayAllocationCheckpoint = {
   | { step: "ready" }
 );
 export interface ManagedGatewayStoreConfig {
+  teamsEnabled?: boolean;
   enabled: boolean;
   guardVerified: boolean;
   enforcementUsers: readonly string[];
@@ -45,6 +47,7 @@ export const makeManagedGatewayStore = (config: ManagedGatewayStoreConfig) =>
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(config.stage) || !hostname.test(config.baseDomain))
       return yield* invalid("Gateway stage and base domain must be explicit lowercase DNS names");
     const { $client: sql } = yield* RelayDb;
+    const teams = config.teamsEnabled ? yield* makeTeamStore : undefined;
     const query = <A, E>(effect: Effect.Effect<A, E>) => effect.pipe(Effect.mapError(unavailable));
     const columns = sql`user_id AS "userId",environment_id AS "environmentId",public_hostname AS "publicHostname",origin_hostname AS "originHostname",origin_dns_record_id AS "originDnsRecordId",ready,deleting,generation::double precision AS generation`;
     const lock = Effect.fn("ManagedGatewayStore.lock")(function* (userId: string) {
@@ -299,13 +302,34 @@ export const makeManagedGatewayStore = (config: ManagedGatewayStoreConfig) =>
                 deadline! > time
                   ? deadline
                   : null,
-              environments: mappings
-                .filter(validateMapping)
-                .map(({ environmentId, publicHostname, originHostname }) => ({
+              environments: yield* Effect.forEach(
+                mappings.filter(validateMapping),
+                Effect.fn("ManagedGatewayStore.environmentAccess")(function* ({
                   environmentId,
                   publicHostname,
                   originHostname,
-                })),
+                }) {
+                  const team = teams
+                    ? yield* teams.access(userId, environmentId, Math.floor(time / 1000)).pipe(
+                        Effect.mapError(
+                          () =>
+                            new BillingError({
+                              code: "unavailable",
+                              message: "Team access unavailable",
+                            }),
+                        ),
+                      )
+                    : undefined;
+                  return {
+                    environmentId,
+                    publicHostname,
+                    originHostname,
+                    ...(team
+                      ? { accessUntilMs: team.allowed ? team.validUntil * 1000 : null }
+                      : {}),
+                  };
+                }),
+              ),
             } satisfies GatewaySnapshot;
           }),
         );

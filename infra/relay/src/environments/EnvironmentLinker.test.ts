@@ -12,6 +12,8 @@ import * as Redacted from "effect/Redacted";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
+import { TeamRuntime } from "../teams/TeamRuntime.ts";
+
 import * as DpopProofs from "../auth/DpopProofs.ts";
 import * as RelayTokens from "../auth/RelayTokens.ts";
 import * as EnvironmentCredentials from "./EnvironmentCredentials.ts";
@@ -113,6 +115,7 @@ const makeRequest = Effect.gen(function* () {
 
 function testLayer(input?: {
   readonly access?: ManagedAccess.ManagedAccess["Service"];
+  readonly teams?: TeamRuntime["Service"];
   readonly upsert?: EnvironmentLinks.EnvironmentLinks["Service"]["upsert"];
   readonly consume?: DpopProofs.DpopProofReplay["Service"]["consume"];
   readonly deprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["deprovision"];
@@ -121,6 +124,7 @@ function testLayer(input?: {
     Layer.provideMerge(RelayTokens.layer),
     Layer.provide(
       Layer.mergeAll(
+        input?.teams ? Layer.succeed(TeamRuntime, input.teams) : Layer.empty,
         Layer.succeed(ManagedAccess.ManagedAccess, input?.access ?? ManagedAccess.disabled),
         RelayConfiguration.layer(config),
         Layer.succeed(DpopProofs.DpopProofReplay, {
@@ -162,6 +166,55 @@ function testLayer(input?: {
 }
 
 describe("EnvironmentLinker", () => {
+  for (const supportsPolicy of [false, true]) {
+    it.effect(
+      `company links ${supportsPolicy ? "accept" : "reject"} a host ${supportsPolicy ? "with" : "without"} signed policy support`,
+      () => {
+        let prepared = 0;
+        let persisted = 0;
+        const teams: TeamRuntime["Service"] = {
+          prepareLink: () =>
+            Effect.sync(() => {
+              prepared++;
+              return undefined;
+            }),
+          access: () => Effect.succeed(undefined),
+          funding: () => Effect.succeed(undefined),
+          unlinked: () => Effect.void,
+          policy: () => Effect.succeed(null),
+        };
+        return Effect.gen(function* () {
+          const { request, payload } = yield* makeRequest;
+          const linker = yield* EnvironmentLinker.EnvironmentLinker;
+          const proof = signTestJwt(
+            { ...payload, ...(supportsPolicy ? { teamPolicyVersion: 1 } : {}) },
+            RELAY_LINK_PROOF_TYP,
+            environmentKeyPair.privateKey,
+          );
+          const result = yield* Effect.result(
+            linker.link({
+              userId: "user_123",
+              request: { ...request, proof, organizationId: "org_company" },
+            }),
+          );
+          expect(result._tag).toBe(supportsPolicy ? "Success" : "Failure");
+          expect(prepared).toBe(supportsPolicy ? 1 : 0);
+          expect(persisted).toBe(supportsPolicy ? 1 : 0);
+        }).pipe(
+          Effect.provide(
+            testLayer({
+              teams,
+              upsert: () =>
+                Effect.sync(() => {
+                  persisted++;
+                }),
+            }),
+          ),
+        );
+      },
+    );
+  }
+
   for (const feature of [
     "managedTunnelsEnabled",
     "notificationsEnabled",

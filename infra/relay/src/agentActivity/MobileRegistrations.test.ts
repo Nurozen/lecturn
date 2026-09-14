@@ -1,4 +1,8 @@
-import { layerDisabled as managedAccessDisabled } from "../billing/ManagedAccess.ts";
+import {
+  ManagedAccess,
+  ManagedAccessRequired,
+  layerDisabled as managedAccessDisabled,
+} from "../billing/ManagedAccess.ts";
 import type {
   RelayAgentActivityState,
   RelayDeviceRegistrationRequest,
@@ -160,6 +164,7 @@ function makeRegistrationReplayLayer(input: {
     Layer.provide(ApnsDeliveryQueue.layer.pipe(Layer.provide(NodeCryptoLayer.layer))),
     Layer.provide(
       Layer.mergeAll(
+        managedAccessDisabled,
         Layer.succeed(Devices.Devices, input.devices),
         Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
         Layer.succeed(EnvironmentLinks.EnvironmentLinks, makeEnvironmentLinks()),
@@ -206,6 +211,7 @@ describe("MobileRegistrations", () => {
           MobileRegistrations.layer.pipe(
             Layer.provide(
               Layer.mergeAll(
+                managedAccessDisabled,
                 Layer.succeed(
                   Devices.Devices,
                   makeDevices({
@@ -257,6 +263,7 @@ describe("MobileRegistrations", () => {
           MobileRegistrations.layer.pipe(
             Layer.provide(
               Layer.mergeAll(
+                managedAccessDisabled,
                 Layer.succeed(Devices.Devices, makeDevices()),
                 Layer.succeed(LiveActivities.LiveActivities, makeLiveActivities()),
                 Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
@@ -301,6 +308,7 @@ describe("MobileRegistrations", () => {
           MobileRegistrations.layer.pipe(
             Layer.provide(
               Layer.mergeAll(
+                managedAccessDisabled,
                 Layer.succeed(
                   Devices.Devices,
                   makeDevices({
@@ -355,6 +363,7 @@ describe("MobileRegistrations", () => {
           MobileRegistrations.layer.pipe(
             Layer.provide(
               Layer.mergeAll(
+                managedAccessDisabled,
                 Layer.succeed(Devices.Devices, makeDevices()),
                 Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
                 Layer.succeed(
@@ -408,6 +417,7 @@ describe("MobileRegistrations", () => {
         MobileRegistrations.layer.pipe(
           Layer.provide(
             Layer.mergeAll(
+              managedAccessDisabled,
               Layer.succeed(Devices.Devices, makeDevices()),
               Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
               Layer.succeed(LiveActivities.LiveActivities, makeLiveActivities()),
@@ -484,5 +494,41 @@ describe("MobileRegistrations", () => {
         expect(queuedJobs).toEqual([]);
       }).pipe(Effect.provide(makeRegistrationReplayLayer({ devices, liveActivities, queuedJobs })));
     },
+  );
+});
+
+it.effect("omits company activity from snapshots after the seat is revoked", () => {
+  let allowed = true;
+  return Effect.gen(function* () {
+    const registrations = yield* MobileRegistrations.MobileRegistrations;
+    expect(
+      (yield* registrations.getAgentActivitySnapshot({ userId: "employee" })).aggregate,
+    ).not.toBeNull();
+    allowed = false;
+    expect(
+      (yield* registrations.getAgentActivitySnapshot({ userId: "employee" })).aggregate,
+    ).toBeNull();
+  }).pipe(
+    Effect.provide(
+      MobileRegistrations.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.succeed(ManagedAccess, {
+              check: () =>
+                allowed
+                  ? Effect.void
+                  : Effect.fail(new ManagedAccessRequired({ message: "Company seat removed" })),
+            }),
+            Layer.succeed(Devices.Devices, makeDevices()),
+            Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
+            Layer.succeed(LiveActivities.LiveActivities, makeLiveActivities()),
+            Layer.succeed(
+              AgentActivityPublisher.AgentActivityPublisher,
+              makeAgentActivityPublisher(),
+            ),
+          ),
+        ),
+      ),
+    ),
   );
 });

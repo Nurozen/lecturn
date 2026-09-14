@@ -8,12 +8,13 @@ import * as Layer from "effect/Layer";
 import * as Planetscale from "alchemy/Planetscale";
 
 import * as RelayDb from "./src/db.ts";
+import { RELAY_STACK_NAME } from "./src/physicalIdentity.ts";
 import { RelayObservability } from "./src/observability.ts";
 import { ManagedEndpointZone, RelayApiZone } from "./src/zone.ts";
 import ApiLive, { Api } from "./src/worker.ts";
 
 export default Alchemy.Stack(
-  "LecturnRelay",
+  RELAY_STACK_NAME,
   {
     providers: Layer.mergeAll(
       Axiom.providers(),

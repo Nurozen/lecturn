@@ -11,7 +11,11 @@ import * as FileSystem from "effect/FileSystem";
 import { RelayBillingCheckoutRequest, RelayBillingReconcileRequest } from "@lecturn/contracts";
 import { BillingService } from "../billing/BillingService.ts";
 import { BillingError } from "../billing/BillingStore.ts";
-import { canStartBillingCheckout, type BillingConfig } from "../billing/BillingConfig.ts";
+import {
+  canStartBillingCheckout,
+  isBillingAppOrigin,
+  type BillingConfig,
+} from "../billing/BillingConfig.ts";
 import { RelayConfiguration } from "../Config.ts";
 import { verifyRelayClientBearerToken } from "./Api.ts";
 
@@ -30,8 +34,12 @@ const json = (value: unknown, status = 200) =>
     status,
     headers: { "cache-control": "no-store", pragma: "no-cache" },
   });
-export const requireBillingOrigin = (origin: string | undefined, expected: string) =>
-  origin !== undefined && origin !== expected
+export const requireBillingOrigin = (
+  origin: string | undefined,
+  expected: string,
+  additionalAppOrigins: readonly string[] = [],
+) =>
+  origin !== undefined && !isBillingAppOrigin(origin, expected, additionalAppOrigins)
     ? Effect.fail(
         new BillingError({
           code: "origin",
@@ -83,7 +91,11 @@ export function billingRoutes(config: BillingConfig, clerkWebhookSecret = "") {
       const userId = yield* billingPrincipal;
       const service = yield* BillingService;
       if (action === "status") return json(yield* service.status(userId));
-      yield* requireBillingOrigin(request.headers.origin, config.appOrigin);
+      yield* requireBillingOrigin(
+        request.headers.origin,
+        config.appOrigin,
+        config.additionalAppOrigins,
+      );
       if (!(request.headers["content-type"] ?? "").toLowerCase().startsWith("application/json"))
         return yield* badRequest();
       if (action === "checkout") {

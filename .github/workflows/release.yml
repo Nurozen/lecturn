@@ -403,6 +403,10 @@ jobs:
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
+        env:
+          # The CDN serves this script as octet-stream, which PowerShell reads as
+          # bytes. Use upstream's text/plain copy until the installer decodes it.
+          VP_LEGACY_INSTALLER_URL: ${{ matrix.platform == 'win' && 'https://raw.githubusercontent.com/voidzero-dev/vite-plus/9fd0d0ae6e775db361d3d5f9f3a18b47bc195420/packages/cli/install-legacy.ps1' || '' }}
         with:
           node-version-file: package.json
           cache: ${{ matrix.platform != 'win' }}

@@ -17,6 +17,7 @@ export interface BillingConfig {
   readonly annualPriceId: string;
   readonly portalConfigurationId: string;
   readonly appOrigin: string;
+  readonly additionalAppOrigins?: readonly string[];
   readonly renewalGraceSeconds: number;
 }
 
@@ -117,6 +118,26 @@ export function parseBillingConfig(
   const url = new URL(appOrigin);
   if (url.protocol !== "https:" || url.origin !== appOrigin || url.username || url.password)
     throw new Error("BILLING_APP_ORIGIN must be an HTTPS origin");
+  const additionalAppOrigins = [
+    ...new Set(
+      (env.BILLING_ADDITIONAL_APP_ORIGINS ?? "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ];
+  for (const origin of additionalAppOrigins) {
+    const additional = new URL(origin);
+    if (
+      additional.protocol !== "https:" ||
+      additional.origin !== origin ||
+      additional.username ||
+      additional.password ||
+      additional.hostname.includes("*")
+    ) {
+      throw new Error("BILLING_ADDITIONAL_APP_ORIGINS must contain exact HTTPS origins");
+    }
+  }
   const config: BillingConfig = {
     mode: mode as BillingConfig["mode"],
     checkoutEnabled,
@@ -135,6 +156,7 @@ export function parseBillingConfig(
     annualPriceId: env.STRIPE_ANNUAL_PRICE_ID ?? "",
     portalConfigurationId: env.STRIPE_PORTAL_CONFIGURATION_ID ?? "",
     appOrigin,
+    additionalAppOrigins,
     renewalGraceSeconds,
   };
   if (mode !== "disabled" && (!secretKey || !config.webhookSecret))
@@ -147,6 +169,15 @@ export function parseBillingConfig(
     throw new Error("Checkout requires configured monthly/annual prices and portal configuration");
   }
   return config;
+}
+
+/** Additional browser origins never change canonical Checkout/portal return URLs. */
+export function isBillingAppOrigin(
+  origin: string | undefined,
+  appOrigin: string,
+  additionalAppOrigins: readonly string[] = [],
+): boolean {
+  return origin !== undefined && (origin === appOrigin || additionalAppOrigins.includes(origin));
 }
 
 /** Purchases have their own cohort; service-enforcement enrollment never authorizes charges. */
