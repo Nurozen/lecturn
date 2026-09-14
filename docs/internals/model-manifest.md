@@ -17,8 +17,15 @@ change application code. Add or change a profile in the same JSON file only when
 a capability combination that does not already exist.
 
 `currentModels.claudeAgent` is retained as a frozen compatibility field for releases that predate
-catalog discovery. New Claude models do not need to be added there. Codex still discovers models
-from its app server and uses `currentModels.codex` only as a legacy-classification overlay.
+catalog discovery. New Claude models do not need to be added there. All `currentModels` lists are compatibility
+metadata for older clients; new clients do not interpret absence from a list as legacy.
+
+Runtime-discovered models remain visible by default. Only a matching entry in
+`providers.<driver>.models` with `status: "legacy"` moves a model into Legacy. A `current`
+entry or an unknown model clears stale legacy flags; custom models remain untouched.
+Codex and Antigravity discover availability from their runtimes, so new models do not need
+a manifest update to appear. Older clients retain their previous classification behavior
+until updated.
 
 Claude model entries support:
 
