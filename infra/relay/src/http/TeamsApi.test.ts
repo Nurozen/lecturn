@@ -2,9 +2,9 @@ import { EnvironmentCredentials } from "../environments/EnvironmentCredentials.t
 import { EnvironmentLinks } from "../environments/EnvironmentLinks.ts";
 import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
-import { createHmac } from "node:crypto";
+import * as NodeCrypto from "node:crypto";
 import { createClerkClient, verifyToken } from "@clerk/backend";
-import { Clock, Effect, Layer, Option, Redacted } from "effect";
+import { Effect, Layer, Option, Redacted } from "effect";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
@@ -228,11 +228,11 @@ function run(
     );
   });
 }
-const webhookTimestamp = Math.floor(Effect.runSync(Clock.currentTimeMillis) / 1000);
+const webhookTimestamp = Math.floor(vi.getRealSystemTime() / 1000);
 function clerkWebhook(payload: unknown, valid = true) {
   const body = JSON.stringify(payload);
   const id = "msg_test";
-  const signature = createHmac("sha256", Buffer.from(webhookKey, "base64"))
+  const signature = NodeCrypto.createHmac("sha256", Buffer.from(webhookKey, "base64"))
     .update(`${id}.${webhookTimestamp}.${body}`)
     .digest("base64");
   return new Request("https://relay.test/v1/teams/webhooks/clerk", {

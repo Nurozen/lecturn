@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vite-plus/test";
-import { createHmac } from "node:crypto";
-import { Clock, Effect } from "effect";
+import * as NodeCrypto from "node:crypto";
 import { createTeamStripeClient, InvalidTeamWebhookError } from "./TeamStripeClient.ts";
 import { STRIPE_API_VERSION } from "../billing/StripeClient.ts";
 const config = {
@@ -24,8 +23,8 @@ describe("Team Stripe adapter", () => {
       data: { object: { customer: "cus_team" } },
       ...overrides,
     });
-    const timestamp = Math.floor(Effect.runSync(Clock.currentTimeMillis) / 1000);
-    const digest = createHmac("sha256", config.webhookSecret)
+    const timestamp = Math.floor(vi.getRealSystemTime() / 1000);
+    const digest = NodeCrypto.createHmac("sha256", config.webhookSecret)
       .update(`${timestamp}.${payload}`)
       .digest("hex");
     return { raw: new TextEncoder().encode(payload), signature: `t=${timestamp},v1=${digest}` };
