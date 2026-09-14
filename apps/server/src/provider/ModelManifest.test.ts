@@ -39,16 +39,24 @@ const model = (overrides: Partial<ServerProviderModel>): ServerProviderModel => 
 });
 
 describe("classifyModels", () => {
-  it("flags non-current models, clears stale flags, and skips custom models", () => {
+  it("only flags explicitly legacy models, clears stale flags, and skips custom models", () => {
     const manifest: ModelManifestData = {
       version: 1,
       currentModels: { codex: ["current-a", "current-b"] },
+      providers: {
+        codex: {
+          profiles: {},
+          models: [{ slug: "old-model", name: "Old model", status: "legacy" }],
+        },
+      },
     };
     const models = [
       model({ slug: "current-a" }),
       // Stale flag from a previous classification pass must be cleared.
       model({ slug: "current-b", isLegacy: true }),
       model({ slug: "old-model" }),
+      model({ slug: "newly-discovered" }),
+      model({ slug: "stale-unknown", isLegacy: true }),
       // Custom models are user-defined and never reclassified.
       model({ slug: "my-own-model", isCustom: true }),
     ];
@@ -58,10 +66,28 @@ describe("classifyModels", () => {
         ["current-a", false],
         ["current-b", false],
         ["old-model", true],
+        ["newly-discovered", false],
+        ["stale-unknown", false],
         ["my-own-model", false],
       ],
     );
   });
+});
+
+describe("discovered model classification across providers", () => {
+  for (const driver of ["codex", "claudeAgent", "cursor", "grok", "opencode", "antigravity"]) {
+    it(`keeps ${driver} discoveries visible with an older manifest`, () => {
+      const manifest: ModelManifestData = {
+        version: 1,
+        currentModels: { [driver]: ["previous-current"] },
+      };
+      const discovered = model({ slug: "new-release", isLegacy: true });
+      assert.deepStrictEqual(
+        classifyModels([discovered], manifest, ProviderDriverKind.make(driver)),
+        [model({ slug: "new-release" })],
+      );
+    });
+  }
 });
 
 describe("applyManifestDefault", () => {
