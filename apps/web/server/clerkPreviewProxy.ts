@@ -30,8 +30,16 @@ export async function clerkPreviewProxy(
   ) {
     return fail(403, "Open the exact preview deployment URL to sign in.");
   }
-  const path = url.pathname.replace(/^\/(?:__clerk|api\/clerk-proxy)(?=\/|$)/, "");
+  const routingPaths = url.searchParams.getAll("__lecturn_clerk_path");
+  if (url.pathname === "/api/clerk-proxy" && routingPaths.length !== 1) {
+    return fail(400, "Invalid authentication route.");
+  }
+  const path =
+    url.pathname === "/api/clerk-proxy"
+      ? `/${url.searchParams.get("__lecturn_clerk_path") ?? ""}`
+      : url.pathname.replace(/^\/__clerk(?=\/|$)/, "");
   if (path === url.pathname || !path.startsWith("/")) return fail(404, "Not found.");
+  url.searchParams.delete("__lecturn_clerk_path");
   const secret = env.CLERK_SECRET_KEY?.trim();
   if (!secret) return fail(503, "Preview authentication is not configured.");
   // Vercel overwrites this header at its edge. Never trust a user-supplied

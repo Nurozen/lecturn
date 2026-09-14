@@ -1,4 +1,4 @@
-import { clerkPreviewProxy } from "../../server/clerkPreviewProxy";
+import { clerkPreviewProxy } from "../server/clerkPreviewProxy";
 
 export default {
   fetch(request: Request) {

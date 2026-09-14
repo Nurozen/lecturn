@@ -114,9 +114,51 @@ describe("Clerk preview proxy", () => {
 
   it("keeps encoded and double-slash paths on the fixed Clerk upstream", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response("ok"));
-    await clerkPreviewProxy(request("/api/clerk-proxy//evil.test/v1/client"), env, fetcher);
+    await clerkPreviewProxy(
+      request("/api/clerk-proxy?__lecturn_clerk_path=%2Fevil.test%2Fv1%2Fclient"),
+      env,
+      fetcher,
+    );
     expect((fetcher.mock.calls[0]![0] as Request).url).toBe(
       "https://frontend-api.clerk.dev//evil.test/v1/client",
+    );
+  });
+
+  it("forwards the rewritten function path without leaking the routing parameter", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response("ok"));
+    await clerkPreviewProxy(
+      request(
+        "/api/clerk-proxy?__lecturn_clerk_path=v1%2Fenvironment&__clerk_api_version=2026-01-01",
+      ),
+      env,
+      fetcher,
+    );
+    expect((fetcher.mock.calls[0]![0] as Request).url).toBe(
+      "https://frontend-api.clerk.dev/v1/environment?__clerk_api_version=2026-01-01",
+    );
+  });
+
+  it("rejects ambiguous rewritten paths and uses the public pathname over query input", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response("ok"));
+    expect(
+      (
+        await clerkPreviewProxy(
+          request(
+            "/api/clerk-proxy?__lecturn_clerk_path=v1/environment&__lecturn_clerk_path=v1/client",
+          ),
+          env,
+          fetcher,
+        )
+      ).status,
+    ).toBe(400);
+    expect(fetcher).not.toHaveBeenCalled();
+    await clerkPreviewProxy(
+      request("/__clerk/v1/environment?__lecturn_clerk_path=v1/client"),
+      env,
+      fetcher,
+    );
+    expect((fetcher.mock.calls[0]![0] as Request).url).toBe(
+      "https://frontend-api.clerk.dev/v1/environment",
     );
   });
 
