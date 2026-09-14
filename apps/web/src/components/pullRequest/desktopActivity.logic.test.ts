@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
+import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/models";
 import {
   EnvironmentId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
   type PullRequestWatchSnapshot,
 } from "@lecturn/contracts";
 import {
@@ -209,6 +211,7 @@ it("shows actual active conversations and approval state while excluding idle, a
     modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
     session: null,
     archivedAt: null,
+    settledOverride: null,
     backgroundLiveness: null,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
@@ -281,6 +284,7 @@ it("always retains the three latest interacted threads, including idle and offli
     modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
     session: null,
     archivedAt: null,
+    settledOverride: null,
     backgroundLiveness: null,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
@@ -332,5 +336,120 @@ describe("native watch activity state", () => {
     expect(activityRowVisualState({ ...row, status: "Offline · last observed" }, manager)).toBe(
       "offline",
     );
+  });
+});
+
+describe("settled conversation visibility", () => {
+  const local = EnvironmentId.make("local");
+  const connected = new Set([local]);
+  const makeThread = (
+    id: string,
+    overrides: Partial<EnvironmentThreadShell> = {},
+  ): EnvironmentThreadShell => ({
+    id: ThreadId.make(id),
+    environmentId: local,
+    projectId: ProjectId.make("project"),
+    title: id,
+    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+    latestTurn: null,
+    createdAt: "2026-09-14T00:00:00Z",
+    updatedAt: "2026-09-14T00:00:00Z",
+    latestUserMessageAt: null,
+    hasActionableProposedPlan: false,
+    session: null,
+    archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
+    backgroundLiveness: null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    ...overrides,
+  });
+
+  it("fills all three recent slots from unsettled threads, including offline conversations", () => {
+    const threads = [
+      makeThread("older", { latestUserMessageAt: "2026-09-14T01:00:00Z" }),
+      makeThread("second", { latestUserMessageAt: "2026-09-14T02:00:00Z" }),
+      makeThread("offline", {
+        environmentId: EnvironmentId.make("remote"),
+        latestUserMessageAt: "2026-09-14T03:00:00Z",
+      }),
+      makeThread("settled", {
+        settledOverride: "settled",
+        latestUserMessageAt: "2026-09-14T04:00:00Z",
+      }),
+    ];
+    const rows = threadActivityRows(threads, connected, {
+      "local:settled": "2026-09-14T05:00:00Z",
+    });
+    expect(rows.map((row) => row.threadId)).toEqual(["offline", "second", "older"]);
+    expect(rows.every((row) => row.recent)).toBe(true);
+    expect(boundedActivitySnapshot(rows).summary).toBe("3 activity items");
+  });
+
+  it.each([
+    ...(["running", "starting", "error", "stopped", "ready"] as const).map((status) => ({
+      session: {
+        threadId: ThreadId.make("settled"),
+        status,
+        providerName: "Codex",
+        runtimeMode: "full-access" as const,
+        activeTurnId: TurnId.make("turn"),
+        lastError: null,
+        updatedAt: "2026-09-14T04:00:00Z",
+      },
+    })),
+    { backgroundLiveness: "working" as const },
+    { backgroundLiveness: "monitoring" as const },
+    { hasPendingApprovals: true },
+    { hasPendingUserInput: true },
+  ])("ignores stale activity on settled threads: %j", (activity) => {
+    expect(
+      threadActivityRows(
+        [makeThread("settled", { ...activity, settledOverride: "settled" })],
+        connected,
+      ),
+    ).toEqual([]);
+  });
+
+  it("removes settled rows and stale actions, retains PR watches, and restores explicitly unsettled rows", () => {
+    const thread = makeThread("recent", { latestUserMessageAt: "2026-09-14T04:00:00Z" });
+    const before = threadActivityRows([thread], connected);
+    const row = before[0]!;
+    const settledThread = { ...thread, settledOverride: "settled" as const };
+    const settled = threadActivityRows([settledThread], connected);
+    const watched = {
+      ...snapshot,
+      watches: snapshot.watches.map((watch) => ({
+        ...watch,
+        managerThreadId: thread.id,
+        threadIds: [thread.id],
+      })),
+    };
+    const watches = watchActivityRows([[local, watched]], [settledThread]);
+    const after = [...settled, ...watches];
+    expect(boundedActivitySnapshot(after).summary).toBe("1 activity item");
+    expect(after).toEqual(watches);
+    expect(
+      resolveActivityAction(
+        {
+          kind: "steer",
+          rowId: row.id,
+          environmentId: row.environmentId,
+          projectId: row.projectId,
+          threadId: row.threadId!,
+          text: "continue",
+        },
+        after,
+      ),
+    ).toBeNull();
+    expect(threadActivityRows([{ ...thread, settledOverride: "active" }], connected)).toEqual(
+      before,
+    );
+    expect(boundedActivitySnapshot(settled)).toEqual({ summary: "0 activity items", rows: [] });
   });
 });

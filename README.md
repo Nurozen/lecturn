@@ -38,7 +38,7 @@ _Synthetic PR snapshots, paused for the demonstration._
 
 ## A glance at the notch
 
-The Mac activity panel keeps your three recent conversations and watched PRs close. Hover for a compact peek, expand a card for its current task and CI jobs, or steer the agent without returning to the main window. Gold marks work in progress, amber asks for attention, and completed work turns green.
+The Mac activity panel keeps your three recent unsettled conversations and watched PRs close. Hover for a compact peek, expand a card for its current task and CI jobs, or steer the agent without returning to the main window. Gold marks work in progress, amber asks for attention, and completed work turns green.
 
 <p align="center">
   <img src="./docs/images/lecturn-notch.webp" alt="Expanded Mac activity panel with a constellation-search PR, CI progress, and a quick steer to its agent." width="48%" />
