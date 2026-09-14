@@ -363,3 +363,13 @@ it("encodes Android pairing URLs without shell-sensitive JSON quotes", () => {
   assert.deepStrictEqual(JSON.parse(decodeURIComponent(encoded.slice("json-uri:".length))), urls);
   assert.equal(encoded.includes('"'), false);
 });
+
+it("captures the optional PR watch route without expanding the default store matrix", () => {
+  const selected = planShowcaseCaptures(
+    config,
+    parseShowcaseCliArgs(["--device", "phone", "--scene", "pr-watch"]),
+  );
+  assert.deepStrictEqual(selected[0]?.scenes, ["pr-watch"]);
+  const defaults = planShowcaseCaptures(config, parseShowcaseCliArgs(["--device", "phone"]));
+  assert.deepStrictEqual(defaults[0]?.scenes, ["thread", "review"]);
+});
