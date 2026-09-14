@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { createTeamsClient, selectTeam, selectedTeam } from "./teams";
+import { createTeamsClient, selectTeam, selectedTeam } from "./teams.ts";
 
 function fixture(body: unknown, status = 200) {
   const fetch = vi.fn(
