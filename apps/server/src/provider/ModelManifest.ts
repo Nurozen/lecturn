@@ -215,10 +215,9 @@ export function isLegacyModel(
   const catalogModel = manifest.providers?.[driverKind]?.models.find(
     (model) => model.slug === slug,
   );
-  if (catalogModel) return catalogModel.status === "legacy";
-  const currentModels = manifest.currentModels[driverKind];
-  if (!currentModels) return false;
-  return !currentModels.includes(slug);
+  // Discovery can lead the manifest. Absence from an older current-model list
+  // is not evidence that a newly available model is legacy.
+  return catalogModel?.status === "legacy";
 }
 
 /**
