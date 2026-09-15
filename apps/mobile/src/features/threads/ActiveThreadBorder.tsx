@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Animated, AppState, StyleSheet, View } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
 import { useReducedMotion } from "react-native-reanimated";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 
 /** A compositor-driven thread of light; recycled/offscreen rows keep a static edge. */
 export function ActiveThreadBorder({
@@ -11,6 +12,8 @@ export function ActiveThreadBorder({
   readonly visible: boolean;
   readonly settled?: boolean;
 }) {
+  const { themeAppearance } = useAppearancePreferences();
+  const light = themeAppearance === "light";
   const focused = useIsFocused();
   const reducedMotion = useReducedMotion();
   const [foreground, setForeground] = useState(AppState.currentState === "active");
@@ -56,7 +59,7 @@ export function ActiveThreadBorder({
         StyleSheet.absoluteFill,
         {
           borderWidth: settled ? 2 : 1,
-          borderColor: settled ? "#e64d3d" : "#b68a43",
+          borderColor: settled ? (light ? "#b33f32" : "#e64d3d") : light ? "#986718" : "#b68a43",
           borderRadius: 12,
         },
       ]}
@@ -68,9 +71,15 @@ export function ActiveThreadBorder({
             width: 4,
             height: 4,
             borderRadius: 2,
-            backgroundColor: settled ? "#ffd097" : "#fff0c6",
+            backgroundColor: settled
+              ? light
+                ? "#8e2c22"
+                : "#ffd097"
+              : light
+                ? "#613908"
+                : "#fff0c6",
             shadowColor: settled ? "#ff7258" : "#efc873",
-            shadowOpacity: 0.9,
+            shadowOpacity: light ? 0.25 : 0.9,
             shadowRadius: 5,
             transform: [
               {

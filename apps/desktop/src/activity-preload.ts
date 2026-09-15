@@ -19,6 +19,7 @@ import {
 import * as Channels from "./activity/channels.ts";
 import { ActivitySnapshotChangeTracker } from "./activity/changes.ts";
 import { ActivityHoverIntent } from "./activity/hover.ts";
+import { activityStateColorVariable } from "./activity/theme.ts";
 
 window.addEventListener("DOMContentLoaded", () => {
   const pill = document.getElementById("pill")!;
@@ -47,7 +48,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const changes = new ActivitySnapshotChangeTracker();
   let microRowId: string | null = null;
   let microLabel = "";
-  let microColor = "#e6bc63";
+  let microColor = "var(--activity-accent)";
   let microInteracted = false;
   let microTimer: ReturnType<typeof setTimeout> | undefined;
   let flashTimer: ReturnType<typeof setTimeout> | undefined;
@@ -146,7 +147,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const stateGlyph = (row: DesktopActivityRow) => {
     const presentation = activityVisualPresentation[stateFor(row)];
     const icon = element("span", presentation.glyph, "state-glyph");
-    icon.style.color = presentation.color;
+    icon.style.color = activityStateColorVariable(stateFor(row));
     icon.title = row.status || presentation.label;
     icon.setAttribute("aria-label", row.status || presentation.label);
     return icon;
@@ -302,7 +303,7 @@ window.addEventListener("DOMContentLoaded", () => {
         const checks = activityCheckSummary(row);
         if (checks.total) {
           const tally = element("span", activityCheckTally(row), "peek-ci");
-          tally.style.color = activityVisualPresentation[stateFor(row)].color;
+          tally.style.color = activityStateColorVariable(stateFor(row));
           tally.title = checks.label;
           tally.setAttribute("aria-label", checks.label);
           item.append(tally, checkMeter(row));
@@ -555,7 +556,7 @@ window.addEventListener("DOMContentLoaded", () => {
       const count = document.getElementById("summary")!;
       clearTimeout(flashTimer);
       count.classList.remove("state-change");
-      count.style.setProperty("--change-color", activityVisualPresentation[change.state].color);
+      count.style.setProperty("--change-color", activityStateColorVariable(change.state));
       void count.offsetWidth;
       count.classList.add("state-change");
       count.title = change.label;
@@ -567,7 +568,7 @@ window.addEventListener("DOMContentLoaded", () => {
           changed && change.label.startsWith(`${changed.title} · `)
             ? change.label.slice(changed.title.length + 3)
             : change.label;
-        microColor = activityVisualPresentation[change.state].color;
+        microColor = activityStateColorVariable(change.state);
         microInteracted = false;
         clearTimeout(microTimer);
         interact("micro-open");

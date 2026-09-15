@@ -88,6 +88,25 @@ export const activityVisualPresentation = {
   offline: { label: "Offline", color: "#a6adb6", glyph: "⊘" },
 } as const satisfies Record<ActivityVisualState, { label: string; color: string; glyph: string }>;
 
+const lightActivityColors = {
+  active: "#8a5b16",
+  attention: "#925410",
+  failed: "#b33f32",
+  complete: "#24745b",
+  idle: "#626873",
+  offline: "#626873",
+} as const satisfies Record<ActivityVisualState, string>;
+
+/** Preserve state hues while keeping small indicators legible on light surfaces. */
+export function activityVisualColor(
+  state: ActivityVisualState,
+  appearance: "light" | "dark",
+): string {
+  return appearance === "light"
+    ? lightActivityColors[state]
+    : activityVisualPresentation[state].color;
+}
+
 /** Short evidence-based copy: never infer that silence means a blocked agent. */
 export function threadActivityExcerpt(
   thread: ActivityThreadContext,

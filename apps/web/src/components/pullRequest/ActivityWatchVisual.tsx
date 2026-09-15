@@ -1,11 +1,15 @@
 import {
   activityVisualPresentation,
+  activityVisualColor,
   type ActivityVisualState,
 } from "@lecturn/client-runtime/state/activityContext";
 import type { PullRequestCheckStatus } from "@lecturn/contracts";
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import "./activityWatchVisual.css";
+
+const stateColor = (state: ActivityVisualState) =>
+  `light-dark(${activityVisualColor(state, "light")}, ${activityVisualColor(state, "dark")})`;
 
 export function ActivityWatchFrame(props: { state: ActivityVisualState; children: ReactNode }) {
   const [element, setElement] = useState<HTMLElement | null>(null);
@@ -37,9 +41,7 @@ export function ActivityWatchFrame(props: { state: ActivityVisualState; children
       className="lecturn-watch-activity space-y-3 rounded-xl border p-3 text-sm"
       data-activity-state={props.state}
       data-moving={moving && ["active", "attention"].includes(props.state)}
-      style={
-        { "--watch-state-color": activityVisualPresentation[props.state].color } as CSSProperties
-      }
+      style={{ "--watch-state-color": stateColor(props.state) } as CSSProperties}
     >
       {props.children}
     </article>
@@ -62,7 +64,7 @@ export function ActivityWatchState({
             tabIndex={0}
             aria-label={`${presentation.label}: ${detail}`}
             className="lecturn-watch-state inline-flex size-6 shrink-0 items-center justify-center rounded-full text-base font-semibold"
-            style={{ color: presentation.color }}
+            style={{ color: stateColor(state) }}
           />
         }
       >
@@ -76,18 +78,18 @@ export function ActivityWatchState({
 }
 
 const CHECK_STATES = [
-  { key: "failure", label: "Failed", color: activityVisualPresentation.failed.color },
+  { key: "failure", label: "Failed", color: stateColor("failed") },
   {
     key: "action-required",
     label: "Needs attention",
-    color: activityVisualPresentation.attention.color,
+    color: stateColor("attention"),
   },
-  { key: "pending", label: "Running or queued", color: activityVisualPresentation.active.color },
-  { key: "success", label: "Passed", color: activityVisualPresentation.complete.color },
+  { key: "pending", label: "Running or queued", color: stateColor("active") },
+  { key: "success", label: "Passed", color: stateColor("complete") },
   {
     key: "other",
     label: "Skipped, neutral or cancelled",
-    color: activityVisualPresentation.idle.color,
+    color: stateColor("idle"),
   },
 ] as const;
 

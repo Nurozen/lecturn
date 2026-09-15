@@ -1,4 +1,5 @@
 import { buildSidebarHierarchy } from "./sidebar-hierarchy";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { useMobileSagaIndex, useSidebarNestSagas } from "../../state/stave";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import type {
@@ -148,6 +149,8 @@ function NativeSidebarContainer(props: ThreadNavigationSidebarProps) {
 function ThreadNavigationSidebarPane(
   props: ThreadNavigationSidebarProps & { readonly nativeChrome: boolean },
 ) {
+  const { themeAppearance } = useAppearancePreferences();
+  const light = themeAppearance === "light";
   const insets = useSafeAreaInsets();
   const projects = useProjects();
   const threads = useThreadShells();
@@ -1228,13 +1231,18 @@ function ThreadNavigationSidebarPane(
                 "settledBranch" in props.item &&
                 props.item.settledBranch &&
                 level === (props.item.depth ?? 0) - 1
-                  ? "#ff866f"
-                  : "#ffe1a0",
-              boxShadow:
-                (props.item.type === "thread" || props.item.type === "v2-thread") &&
-                "settledBranch" in props.item &&
-                props.item.settledBranch &&
-                level === (props.item.depth ?? 0) - 1
+                  ? light
+                    ? "#b33f32"
+                    : "#ff866f"
+                  : light
+                    ? "#986718"
+                    : "#ffe1a0",
+              boxShadow: light
+                ? undefined
+                : (props.item.type === "thread" || props.item.type === "v2-thread") &&
+                    "settledBranch" in props.item &&
+                    props.item.settledBranch &&
+                    level === (props.item.depth ?? 0) - 1
                   ? "0 0 6px 1px #e64d3d88"
                   : "0 0 5px 1px #dca64e55",
             }}
@@ -1259,12 +1267,17 @@ function ThreadNavigationSidebarPane(
                 (props.item.type === "thread" || props.item.type === "v2-thread") &&
                 "settledBranch" in props.item &&
                 props.item.settledBranch
-                  ? "#ff866f"
-                  : "#ffe1a0",
-              boxShadow:
-                (props.item.type === "thread" || props.item.type === "v2-thread") &&
-                "settledBranch" in props.item &&
-                props.item.settledBranch
+                  ? light
+                    ? "#b33f32"
+                    : "#ff866f"
+                  : light
+                    ? "#986718"
+                    : "#ffe1a0",
+              boxShadow: light
+                ? undefined
+                : (props.item.type === "thread" || props.item.type === "v2-thread") &&
+                    "settledBranch" in props.item &&
+                    props.item.settledBranch
                   ? "0 0 6px 1px #e64d3d88"
                   : "0 0 5px 1px #dca64e55",
             }}
@@ -1273,7 +1286,7 @@ function ThreadNavigationSidebarPane(
         {renderListRow(props)}
       </View>
     ),
-    [hierarchyGuides, renderListRow],
+    [hierarchyGuides, light, renderListRow],
   );
 
   const listEmpty = (
