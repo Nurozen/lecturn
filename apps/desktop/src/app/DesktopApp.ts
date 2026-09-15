@@ -239,7 +239,16 @@ const startup = Effect.gen(function* () {
   const updates = yield* DesktopUpdates.DesktopUpdates;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
 
-  yield* shellEnvironment.installIntoProcess;
+  // Waiting here would hide the macOS window during a slow .zprofile/.zshrc.
+  // Parent-owned SSH/editor actions still need their own hydrated environment;
+  // the backend independently shares its discovery across all providers.
+  // Linux still needs shell-derived desktop/session settings before Electron ready.
+  if (environment.platform !== "darwin") {
+    yield* shellEnvironment.installIntoProcess;
+  } else {
+    DesktopShellEnvironment.installMacOSFallbackLocale(process.env);
+    yield* Effect.forkScoped(shellEnvironment.installIntoProcess);
+  }
   const hasCommandLinePasswordStore =
     preReadyElectronOptions.linuxPasswordStoreCommandLine !== null;
   const linuxElectronOptions =

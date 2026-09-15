@@ -10,6 +10,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as NodeOS from "node:os";
+import { startShellEnvironment } from "./shellEnvironment.ts";
 
 function logPathHydrationWarning(message: string, error?: unknown): void {
   process.stderr.write(
@@ -89,6 +90,20 @@ export const fixPath = Effect.fn("fixPath")(function* (): Effect.fn.Return<
       }),
     ),
   );
+});
+
+/** Start discovery while HTTP, settings, and provider status remain available. */
+export const startPathDiscovery = Effect.fn("startPathDiscovery")(function* () {
+  const platform = yield* HostProcessPlatform;
+  const env = yield* HostProcessEnvironment;
+  if (platform !== "darwin" && platform !== "linux") {
+    yield* fixPath();
+    return;
+  }
+  yield* Effect.sync(() => {
+    hydratePosixHome(env);
+    startShellEnvironment(env, platform);
+  });
 });
 
 export const expandHomePath = Effect.fn(function* (input: string) {

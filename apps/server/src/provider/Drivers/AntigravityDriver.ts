@@ -277,6 +277,11 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
       }).pipe(Effect.scoped);
 
       const provider = yield* makeAntigravityProvider(settings, {
+        discovery: {
+          waitForShell: !/[\\/]/.test(settings.binaryPath?.trim() ?? ""),
+          refreshEnvironment: () =>
+            Object.assign(processEnvironment, mergeProviderInstanceEnvironment(environment)),
+        },
         stampIdentity: classifyModels,
         probe,
         auth: { type: auth.authMethod, label: antigravityAuthLabel(auth.authMethod) },

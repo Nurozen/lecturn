@@ -31,7 +31,7 @@ import {
   httpCompressionLayer,
 } from "./http.ts";
 import { guardHttpResponseWriteErrors } from "./httpResponseErrorGuard.ts";
-import { fixPath } from "./os-jank.ts";
+import { startPathDiscovery } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { pullRequestHttpApiLayer } from "./pullRequest/http.ts";
@@ -722,7 +722,7 @@ export const makeServerLayer = Layer.unwrap(
     const routesReady = yield* Deferred.make<void>();
     const launcherLayer = ServiceLauncherClient.layer;
 
-    yield* fixPath();
+    yield* startPathDiscovery();
 
     const httpListeningLayer = Layer.effectDiscard(
       Effect.gen(function* () {

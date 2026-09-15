@@ -100,6 +100,14 @@ function runShellEnvironment(input: {
 }
 
 describe("DesktopShellEnvironment", () => {
+  it("preserves UTF-8 for GUI launches without waiting for a login shell", () => {
+    const env: NodeJS.ProcessEnv = { PATH: "/usr/bin" };
+    DesktopShellEnvironment.installMacOSFallbackLocale(env);
+    assert.equal(env.LC_CTYPE, "en_US.UTF-8");
+    const explicit: NodeJS.ProcessEnv = { LANG: "fr_FR.UTF-8" };
+    DesktopShellEnvironment.installMacOSFallbackLocale(explicit);
+    assert.equal(explicit.LC_CTYPE, undefined);
+  });
   it.effect("hydrates PATH and missing SSH_AUTH_SOCK from the login shell on macOS", () =>
     Effect.gen(function* () {
       const env: NodeJS.ProcessEnv = {

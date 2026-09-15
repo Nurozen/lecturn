@@ -132,6 +132,11 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<CursorSettings>>({
         maintenanceCapabilities,
+        discovery: {
+          waitForShell: !/[\\/]/.test(effectiveConfig.binaryPath?.trim() ?? ""),
+          refreshEnvironment: () =>
+            Object.assign(processEnv, mergeProviderInstanceEnvironment(environment)),
+        },
         getSettings: snapshotSettings.getSettings,
         streamSettings: snapshotSettings.streamSettings,
         haveSettingsChanged: haveProviderSnapshotSettingsChanged,
