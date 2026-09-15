@@ -1,5 +1,9 @@
 // @effect-diagnostics globalDate:off -- The native UI compares client intent timestamps; tests inject its clock.
-import type { DesktopActivityRow, ActivityVisualState } from "@lecturn/contracts";
+import type {
+  DesktopActivityRow,
+  DesktopActivitySnapshot,
+  ActivityVisualState,
+} from "@lecturn/contracts";
 import {
   activityVisualPresentation,
   activityVisualState,
@@ -27,7 +31,7 @@ const identity = (row: DesktopActivityRow) =>
     row.id,
     row.environmentId,
     row.projectId,
-    row.threadId ?? null,
+    row.watchId ? null : (row.threadId ?? null),
     row.watchId ?? null,
   ]);
 const compact = (value: string) => value.replace(/\s+/g, " ").trim().slice(0, 120);
@@ -271,5 +275,32 @@ export class ActivityChangeTracker {
     for (const row of rows) if (!transient(row)) this.stableStates.set(identity(row), stateOf(row));
     this.previous = rows;
     return result;
+  }
+}
+
+/** Restored/cached activity is visible immediately, but only subsequent live changes alert. */
+export class ActivitySnapshotChangeTracker {
+  private readonly environments = new Map<string, ActivityChangeTracker>();
+
+  update(snapshot: DesktopActivitySnapshot): ActivityChange | undefined {
+    const ready = new Set(
+      snapshot.readyEnvironmentIds ?? snapshot.rows.map((row) => row.environmentId),
+    );
+    for (const id of this.environments.keys()) {
+      if (!ready.has(id)) this.environments.delete(id);
+    }
+    const changes: ActivityChange[] = [];
+    for (const id of ready) {
+      let tracker = this.environments.get(id);
+      if (!tracker) {
+        tracker = new ActivityChangeTracker();
+        this.environments.set(id, tracker);
+      }
+      const change = tracker.update(snapshot.rows.filter((row) => row.environmentId === id));
+      if (change) changes.push(change);
+    }
+    return changes.toSorted(
+      (a, b) => priority[a.state] - priority[b.state] || a.rowId.localeCompare(b.rowId),
+    )[0];
   }
 }

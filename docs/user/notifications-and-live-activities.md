@@ -62,6 +62,8 @@ The desktop app has its own compact activity panel, independent of iPhone mirror
 
 Use **Show activity notch** or **Hide activity notch** in Pull Requests or the **Lecturn activity** menu-bar menu to enable or hide it. On an internal display with a recognizable notch area, the panel joins the top edge around the camera housing, with compact controls beside the camera and expanded content extending downward. On other displays, or when that area cannot be identified, use **Show activity** from the menu bar. The celestial background and illuminated-book logo match Lecturn. A moving gold border marks active work; it stops when hidden or when reduced motion is enabled. Approval, input and error states keep explicit labels.
 
+The notch starts collapsed. Restoring conversations and PR checks during startup does not open a preview; subsequent live changes can still alert.
+
 Hover over the compact notch to peek at up to three items, ranked with requests for attention and failing checks before ongoing work and quiet recent threads. Each row shows its project icon, conversation or PR, a short task update, and compact CI progress when available. Rows stay in place while hovered or focused as their facts refresh. Click a row to expand its details and CI jobs. Manual expansion stays open as you move through the panel; click outside, press Escape, or click its chevron to close it. Leaving a hover peek dismisses only the peek.
 
 This local desktop panel does not require a Connect subscription. Managed iPhone notifications, Live Activities, and their supported Apple mirroring surfaces retain the Connect access requirements above.

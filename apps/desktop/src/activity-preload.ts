@@ -16,7 +16,8 @@ import {
   type ActivityInteraction,
 } from "./activity/interaction.ts";
 import * as Channels from "./activity/channels.ts";
-import { ActivityChangeTracker } from "./activity/changes.ts";
+import { ActivitySnapshotChangeTracker } from "./activity/changes.ts";
+import { ActivityHoverIntent } from "./activity/hover.ts";
 
 window.addEventListener("DOMContentLoaded", () => {
   const pill = document.getElementById("pill")!;
@@ -42,8 +43,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const sentDrafts = new Map<string, string>();
   const expandedChecks = new Set<string>();
   const expandedContext = new Set<string>();
-  const changes = new ActivityChangeTracker();
-  let hasActivityBaseline = false;
+  const changes = new ActivitySnapshotChangeTracker();
   let microRowId: string | null = null;
   let microLabel = "";
   let microColor = "#e6bc63";
@@ -93,25 +93,27 @@ window.addEventListener("DOMContentLoaded", () => {
   };
   pill.addEventListener("click", () => interact("toggle"));
   const shell = document.getElementById("shell")!;
+  const hoverIntent = new ActivityHoverIntent();
   document.getElementById("open-app")!.addEventListener("click", () => {
     void ipcRenderer.invoke(Channels.ACTIVITY_OPEN_APP).catch((error: unknown) => {
       feedback.textContent = error instanceof Error ? error.message : "Unable to open Lecturn.";
     });
   });
   shell.addEventListener("mouseover", (event) => {
-    if (event.target instanceof Element && event.target.closest("#open-app")) return;
-    if (
-      event.relatedTarget instanceof Node &&
-      shell.contains(event.relatedTarget) &&
-      !(event.relatedTarget instanceof Element && event.relatedTarget.closest("#open-app"))
-    )
-      return;
+    if (event.relatedTarget instanceof Node && shell.contains(event.relatedTarget)) return;
+    hoverIntent.enter(event);
     clearTimeout(hoverLeaveTimeout);
-    hovered = true;
+  });
+  shell.addEventListener("mousemove", (event) => {
+    if (!hoverIntent.move(event)) return;
+    if (event.target instanceof Element && event.target.closest("#open-app")) return;
+    clearTimeout(hoverLeaveTimeout);
     if (mode === "micro") engageMicro();
-    else interact("hover-enter");
+    else if (!hovered) interact("hover-enter");
+    hovered = true;
   });
   shell.addEventListener("mouseleave", () => {
+    hoverIntent.leave();
     clearTimeout(hoverLeaveTimeout);
     hoverLeaveTimeout = setTimeout(() => {
       hovered = false;
@@ -494,8 +496,7 @@ window.addEventListener("DOMContentLoaded", () => {
     restoreFocus();
   };
   const receiveSnapshot = (next: DesktopActivitySnapshot) => {
-    const change = hasActivityBaseline || next.rows.length ? changes.update(next.rows) : undefined;
-    if (next.rows.length) hasActivityBaseline = true;
+    const change = changes.update(next);
     clearTimeout(pendingTimeout);
     snapshot = next;
     for (const [id, text] of sentDrafts) {
@@ -534,9 +535,11 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     render();
   };
-  ipcRenderer.on(Channels.ACTIVITY_SNAPSHOT, (_event, next: DesktopActivitySnapshot) =>
-    receiveSnapshot(next),
-  );
+  let receivedPublication = false;
+  ipcRenderer.on(Channels.ACTIVITY_SNAPSHOT, (_event, next: DesktopActivitySnapshot) => {
+    receivedPublication = true;
+    receiveSnapshot(next);
+  });
   ipcRenderer.on(Channels.ACTIVITY_CAMERA_HEIGHT, (_event, height: unknown) => {
     if (typeof height !== "number" || !Number.isFinite(height) || height < 0 || height > 80) return;
     document.documentElement.style.setProperty("--camera-height", `${height}px`);
@@ -549,6 +552,6 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   ipcRenderer.on(Channels.ACTIVITY_MODE, (_event, next: ActivityMode) => setMode(next));
   void ipcRenderer.invoke(Channels.ACTIVITY_READ).then((next: DesktopActivitySnapshot) => {
-    receiveSnapshot(next);
+    if (!receivedPublication) receiveSnapshot(next);
   });
 });

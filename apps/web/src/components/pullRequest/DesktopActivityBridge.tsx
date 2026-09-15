@@ -12,6 +12,7 @@ import { describeThreadActivity } from "@lecturn/client-runtime/state/activityCo
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/unstable/reactivity";
 import { environmentThreadDetails } from "../../state/threads";
+import { environmentShell } from "../../state/shell";
 import { useThreadShells, useProjects } from "../../state/entities";
 import { DESKTOP_ACTIVITY_ENABLED_EVENT } from "./DesktopActivityToggle";
 import { randomUUID } from "../../lib/utils";
@@ -57,6 +58,28 @@ function EnabledActivityBridge() {
     [environments],
   );
   const { values, failedEnvironmentIds } = usePullRequestWatches(ids);
+  const environmentKey = JSON.stringify(environments.map((item) => item.environmentId));
+  const liveShellsAtom = useMemo(
+    () =>
+      Atom.make((get) =>
+        (JSON.parse(environmentKey) as EnvironmentId[]).filter(
+          (id) => get(environmentShell.stateValueAtom(id)).status === "live",
+        ),
+      ),
+    [environmentKey],
+  );
+  const liveShellIds = useAtomValue(liveShellsAtom);
+  const readyEnvironmentIds = useMemo(
+    () =>
+      liveShellIds.filter(
+        (id) =>
+          connectedIds.has(id) &&
+          (!ids.includes(id) ||
+            values.some(([valueId]) => valueId === id) ||
+            failedEnvironmentIds.includes(id)),
+      ),
+    [liveShellIds, connectedIds, ids, values, failedEnvironmentIds],
+  );
   const threads = useThreadShells();
   const projects = useProjects();
   const sagaIndex = useSagaRepositoryIndex(projects);
@@ -345,18 +368,22 @@ function EnabledActivityBridge() {
     });
   });
   useEffect(() => {
-    pendingPublication.current = boundedActivitySnapshot(publishedRows);
+    pendingPublication.current = { ...boundedActivitySnapshot(publishedRows), readyEnvironmentIds };
     // Coalesce streamed assistant text without starving updates during a long response.
     if (publicationTimer.current !== null) return;
     publicationTimer.current = setTimeout(() => {
       publicationTimer.current = null;
       publishLatest();
     }, 300);
-  }, [publishedRows]);
+  }, [publishedRows, readyEnvironmentIds]);
   useEffect(
     () => () => {
       if (publicationTimer.current !== null) clearTimeout(publicationTimer.current);
-      void window.desktopBridge?.activity?.publish({ summary: "Disconnected", rows: [] });
+      void window.desktopBridge?.activity?.publish({
+        summary: "Disconnected",
+        rows: [],
+        readyEnvironmentIds: [],
+      });
     },
     [],
   );

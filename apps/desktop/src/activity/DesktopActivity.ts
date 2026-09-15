@@ -68,7 +68,11 @@ export function installDesktopActivity(
   let disposed = false;
   let manuallyShown = false;
   let preserveNextPanelBlur = false;
-  let snapshot: DesktopActivitySnapshot = { summary: "Lecturn activity", rows: [] };
+  let snapshot: DesktopActivitySnapshot = {
+    summary: "Lecturn activity",
+    rows: [],
+    readyEnvironmentIds: [],
+  };
   const panelUrl = `data:text/html;charset=utf-8,${encodeURIComponent(activityDocument)}`;
   const trayImage = nativeImage.createFromBuffer(Buffer.from(activityTrayMark, "base64"), {
     scaleFactor: 2,
@@ -332,7 +336,7 @@ export function installDesktopActivity(
   for (const [channel, handler] of handlers) ipcMain.handle(channel, handler);
   const clear = () => {
     if (disposed) return;
-    snapshot = { summary: "Lecturn is reconnecting…", rows: [] };
+    snapshot = { summary: "Lecturn is reconnecting…", rows: [], readyEnvironmentIds: [] };
     sendSnapshot();
   };
   mainContents.on("did-start-loading", clear);
