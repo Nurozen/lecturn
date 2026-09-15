@@ -1,5 +1,5 @@
 import {
-  activityVisualPresentation,
+  activityVisualColor,
   type ActivityVisualState,
 } from "@lecturn/client-runtime/state/activityContext";
 import { useIsFocused } from "@react-navigation/native";
@@ -10,6 +10,7 @@ import { AppText as Text } from "../../components/AppText";
 import { SymbolView, type AppSymbolName } from "../../components/AppSymbol";
 import { ActiveThreadBorder } from "../threads/ActiveThreadBorder";
 import { checkSegments } from "./watch-visuals";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 
 export function WatchActivityFrame(props: {
   state: ActivityVisualState;
@@ -17,6 +18,7 @@ export function WatchActivityFrame(props: {
   children: ReactNode;
   onLayout?: (event: LayoutChangeEvent) => void;
 }) {
+  const { themeAppearance } = useAppearancePreferences();
   const focused = useIsFocused();
   const reducedMotion = useReducedMotion();
   const [foreground, setForeground] = useState(AppState.currentState === "active");
@@ -37,7 +39,7 @@ export function WatchActivityFrame(props: {
     const animation = Animated.loop(
       Animated.sequence([
         Animated.timing(opacity, {
-          toValue: 0.3,
+          toValue: themeAppearance === "light" ? 0.65 : 0.3,
           duration: 1200,
           useNativeDriver: true,
           isInteraction: false,
@@ -52,8 +54,8 @@ export function WatchActivityFrame(props: {
     );
     animation.start();
     return () => animation.stop();
-  }, [opacity, pulse]);
-  const appearance = activityVisualPresentation[props.state];
+  }, [opacity, pulse, themeAppearance]);
+  const color = activityVisualColor(props.state, themeAppearance);
   return (
     <View onLayout={props.onLayout} className="gap-3 rounded-xl bg-subtle p-4">
       {props.state === "active" ? (
@@ -64,7 +66,7 @@ export function WatchActivityFrame(props: {
           accessible={false}
           style={[
             StyleSheet.absoluteFill,
-            { borderRadius: 12, borderWidth: 1, borderColor: appearance.color, opacity },
+            { borderRadius: 12, borderWidth: 1, borderColor: color, opacity },
           ]}
         />
       )}
@@ -75,20 +77,23 @@ export function WatchActivityFrame(props: {
 
 const segmentStyles: Record<
   keyof ReturnType<typeof checkSegments>,
-  { icon: AppSymbolName; color: string; label: string }
+  { icon: AppSymbolName; state: ActivityVisualState; label: string }
 > = {
-  passed: { icon: "checkmark.circle", color: "#56c5a1", label: "passed" },
-  running: { icon: "clock", color: "#e6bc63", label: "running" },
-  attention: { icon: "exclamationmark.triangle", color: "#f0b34d", label: "need attention" },
-  failed: { icon: "xmark.circle.fill", color: "#f07868", label: "failed" },
+  passed: { icon: "checkmark.circle", state: "complete", label: "passed" },
+  running: { icon: "clock", state: "active", label: "running" },
+  attention: { icon: "exclamationmark.triangle", state: "attention", label: "need attention" },
+  failed: { icon: "xmark.circle.fill", state: "failed", label: "failed" },
   other: {
     icon: "ellipsis.circle",
-    color: "#a6adb6",
+    state: "idle",
     label: "skipped, cancelled, neutral or unknown",
   },
 };
 
 export function WatchCheckSegments({ checks }: { checks: readonly { status: string }[] }) {
+  const { themeAppearance } = useAppearancePreferences();
+  const segmentColor = (key: keyof typeof segmentStyles) =>
+    activityVisualColor(segmentStyles[key].state, themeAppearance);
   const entries = Object.entries(checkSegments(checks)) as [keyof typeof segmentStyles, number][];
   return (
     <View className="gap-2">
@@ -108,10 +113,15 @@ export function WatchCheckSegments({ checks }: { checks: readonly { status: stri
           entries
             .filter(([, count]) => count > 0)
             .map(([key, count]) => (
-              <View key={key} style={{ flex: count, backgroundColor: segmentStyles[key].color }} />
+              <View key={key} style={{ flex: count, backgroundColor: segmentColor(key) }} />
             ))
         ) : (
-          <View style={{ flex: 1, backgroundColor: "#a6adb655" }} />
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: `${activityVisualColor("idle", themeAppearance)}55`,
+            }}
+          />
         )}
       </View>
       <View className="flex-row flex-wrap gap-3">
@@ -124,12 +134,8 @@ export function WatchCheckSegments({ checks }: { checks: readonly { status: stri
               accessibilityLabel={`${count} ${segmentStyles[key].label}`}
               className="flex-row items-center gap-1"
             >
-              <SymbolView
-                name={segmentStyles[key].icon}
-                size={14}
-                tintColor={segmentStyles[key].color}
-              />
-              <Text style={{ color: segmentStyles[key].color, fontSize: 12 }}>{count}</Text>
+              <SymbolView name={segmentStyles[key].icon} size={14} tintColor={segmentColor(key)} />
+              <Text style={{ color: segmentColor(key), fontSize: 12 }}>{count}</Text>
             </View>
           ))}
         {!checks.length ? (

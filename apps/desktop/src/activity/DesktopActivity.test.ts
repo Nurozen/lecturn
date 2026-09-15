@@ -11,11 +11,13 @@ const state = vi.hoisted(() => ({
     visible: boolean;
     focused: boolean;
     focusable: boolean;
+    animated: boolean;
     bounds: { x: number; y: number; width: number; height: number };
     webContents: { mainFrame: { url: string }; send: ReturnType<typeof vi.fn> };
   }>,
   cursor: { x: 600, y: 10 },
   enabled: true,
+  reducedMotion: false,
   trayDestroyed: false,
 }));
 vi.mock("electron-store", () => ({
@@ -35,6 +37,7 @@ vi.mock("electron", async () => {
     visible = false;
     focused = false;
     focusable = false;
+    animated = false;
     bounds = { x: 0, y: 0, width: 900, height: 600 };
     private contents = Object.assign(new EventEmitter(), {
       id: state.windows.length + 1,
@@ -59,8 +62,9 @@ vi.mock("electron", async () => {
       if (this.destroyed) throw new Error("Object has been destroyed");
       return this.bounds;
     }
-    setBounds(bounds: typeof this.bounds) {
+    setBounds(bounds: typeof this.bounds, animated = false) {
       this.bounds = bounds;
+      this.animated = animated;
     }
     isFocused() {
       return this.focused;
@@ -116,6 +120,9 @@ vi.mock("electron", async () => {
         state.handlers.set(channel, handler),
       removeHandler: (channel: string) => state.handlers.delete(channel),
     },
+    systemPreferences: {
+      getAnimationSettings: () => ({ prefersReducedMotion: state.reducedMotion }),
+    },
     nativeImage: { createFromBuffer: () => ({ setTemplateImage() {} }) },
     screen: Object.assign(new EventEmitter(), {
       getCursorScreenPoint: () => state.cursor,
@@ -139,9 +146,32 @@ beforeEach(() => {
   state.handlers.clear();
   state.cursor = { x: 600, y: 10 };
   state.enabled = true;
+  state.reducedMotion = false;
   state.trayDestroyed = false;
 });
 describe("Mac activity lifecycle", () => {
+  it("animates visible mode changes while respecting reduced motion and immediate startup", () => {
+    const main = new BrowserWindow();
+    const dispose = installDesktopActivity(main, options);
+    const panel = state.windows[1]!;
+    panel.emit("ready-to-show");
+    expect(panel.animated).toBe(false);
+    const event = {
+      sender: panel.webContents,
+      senderFrame: panel.webContents.mainFrame,
+    } as unknown as IpcMainInvokeEvent;
+    invoke(Channels.ACTIVITY_MODE, event, "hover-enter");
+    expect(panel.bounds.height).toBeGreaterThan(38);
+    expect(panel.animated).toBe(true);
+    invoke(Channels.ACTIVITY_MODE, event, "expand");
+    expect(panel.bounds.height).toBe(588);
+    expect(panel.animated).toBe(true);
+    state.reducedMotion = true;
+    invoke(Channels.ACTIVITY_MODE, event, "dismiss");
+    expect(panel.bounds.height).toBe(38);
+    expect(panel.animated).toBe(false);
+    dispose();
+  });
   it("shows automatic micro activity without stealing focus and focuses only after interaction", () => {
     const main = new BrowserWindow();
     const dispose = installDesktopActivity(main, options);
@@ -376,6 +406,39 @@ describe("Mac activity lifecycle", () => {
 });
 
 describe("foreground chat previews", () => {
+  it("opens peek at the filtered height and animates subsequent count changes", () => {
+    const main = new BrowserWindow();
+    const dispose = installDesktopActivity(main, options);
+    const panel = state.windows[1]!;
+    panel.emit("ready-to-show");
+    main.show();
+    main.focus();
+    invoke(Channels.ACTIVITY_PUBLISH, eventFor(main), {
+      summary: "Activity",
+      viewedThread: { environmentId: "env", threadId: "current" },
+      rows: ["current", "other"].map((id) => ({
+        id,
+        threadId: id,
+        environmentId: "env",
+        projectId: "project",
+        title: id,
+        subtitle: "",
+        status: "Working",
+        actions: [],
+      })),
+    });
+    const event = {
+      sender: panel.webContents,
+      senderFrame: panel.webContents.mainFrame,
+    } as unknown as IpcMainInvokeEvent;
+    invoke(Channels.ACTIVITY_MODE, event, "hover-enter");
+    expect(panel.bounds.height).toBe(163);
+    expect(panel.animated).toBe(true);
+    invoke(Channels.ACTIVITY_PEEK_COUNT, event, 2);
+    expect(panel.bounds.height).toBe(241);
+    expect(panel.animated).toBe(true);
+    dispose();
+  });
   it("keeps a current-chat-only notch collapsed on hover but allows manual expansion", () => {
     const main = new BrowserWindow();
     const dispose = installDesktopActivity(main, options);

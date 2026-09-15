@@ -22,10 +22,10 @@
   opacity: 1;
   background: conic-gradient(
     from var(--lecturn-active-angle),
-    #e6bc6322 0deg 245deg,
-    #e6bc63 312deg,
-    #ffedc4 345deg,
-    #e6bc6322 360deg
+    var(--lecturn-thread-trail) 0deg 245deg,
+    var(--lecturn-thread-gold) 312deg,
+    var(--lecturn-thread-tip) 345deg,
+    var(--lecturn-thread-trail) 360deg
   );
 }
 .lecturn-watch-activity[data-activity-state="active"][data-moving="true"]::before {

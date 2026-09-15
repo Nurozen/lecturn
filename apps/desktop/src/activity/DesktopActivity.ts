@@ -5,6 +5,7 @@ import {
   ipcMain,
   nativeImage,
   screen,
+  systemPreferences,
   type IpcMainInvokeEvent,
 } from "electron";
 import Store from "electron-store";
@@ -104,7 +105,7 @@ export function installDesktopActivity(
     if (!disposed && ready && panel && !panel.isDestroyed())
       panel.webContents.send(Channels.ACTIVITY_SNAPSHOT, snapshotForPanel());
   };
-  const place = () => {
+  const place = (animate: unknown = false) => {
     if (disposed || main.isDestroyed()) return;
     if (panel?.isDestroyed()) {
       panel = undefined;
@@ -188,7 +189,15 @@ export function installDesktopActivity(
       });
       void panel.loadURL(panelUrl);
     }
-    panel.setBounds(activityBounds(display, mode, peekCount));
+    // Use AppKit's bounded resize animation, anchored at the display's top edge.
+    // Display changes and initial placement stay immediate.
+    panel.setBounds(
+      activityBounds(display, mode, peekCount),
+      animate === true &&
+        ready &&
+        panel.isVisible() &&
+        !systemPreferences.getAnimationSettings().prefersReducedMotion,
+    );
     if (ready)
       panel.webContents.send(Channels.ACTIVITY_CAMERA_HEIGHT, activityCameraHeight(display));
     if (ready && (hasNotchSpace(display) || manuallyShown)) {
@@ -198,12 +207,18 @@ export function installDesktopActivity(
   const changeMode = (next: ActivityMode) => {
     if (mode === next) return;
     mode = next;
-    if (mode === "peek") peekCount = Math.min(snapshot.rows.length, 3);
+    if (mode === "peek") {
+      const current = snapshotForPanel();
+      peekCount = Math.min(
+        current.rows.filter((row) => !isViewedActivityThread(row, current.viewedThread)).length,
+        3,
+      );
+    }
     if (mode === "collapsed") manuallyShown = false;
-    place();
+    if (panel && !panel.isDestroyed()) panel.webContents.send(Channels.ACTIVITY_MODE, mode);
+    place(true);
     if (!panel || panel.isDestroyed()) return;
     panel.setFocusable(mode === "expanded");
-    panel.webContents.send(Channels.ACTIVITY_MODE, mode);
     if (mode === "expanded") {
       panel.show();
       panel.focus();
@@ -306,7 +321,7 @@ export function installDesktopActivity(
           throw new Error("Invalid peek size.");
         if (peekCount === value) return;
         peekCount = value;
-        if (mode === "peek") place();
+        if (mode === "peek") place(true);
       },
     ],
     [

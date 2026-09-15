@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   activityVisualState,
+  activityVisualColor,
+  activityVisualPresentation,
   threadActivityExcerpt,
   describeThreadActivity,
   type ActivityThreadContext,
@@ -91,4 +93,33 @@ describe("compact activity cues", () => {
     );
     expect(threadActivityExcerpt(thread, [messages[0]!])).toBe("No task update yet");
   });
+});
+
+describe("activity indicator contrast", () => {
+  function luminance(hex: string) {
+    const [r, g, b] = hex
+      .slice(1)
+      .match(/../g)!
+      .map((part) => {
+        const channel = Number.parseInt(part, 16) / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  }
+  for (const appearance of ["light", "dark"] as const) {
+    it(`keeps ${appearance} status icons at least 3:1 against activity surfaces`, () => {
+      const surfaces = appearance === "light" ? ["#ffffff", "#f4eedf"] : ["#061622", "#102a39"];
+      for (const state of Object.keys(
+        activityVisualPresentation,
+      ) as (keyof typeof activityVisualPresentation)[]) {
+        const foreground = luminance(activityVisualColor(state, appearance));
+        for (const surface of surfaces) {
+          const background = luminance(surface);
+          const contrast =
+            (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+          expect(contrast, `${state} on ${surface}`).toBeGreaterThanOrEqual(3);
+        }
+      }
+    });
+  }
 });

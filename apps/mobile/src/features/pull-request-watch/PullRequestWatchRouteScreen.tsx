@@ -1,4 +1,5 @@
 import { WatchActivityFrame, WatchCheckSegments } from "./WatchActivityVisuals";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { cardIsVisible } from "./watch-visuals";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
@@ -9,6 +10,7 @@ import {
 } from "@lecturn/client-runtime/state/pullRequestHandoff";
 import { useThreadDetail } from "../../state/queries";
 import {
+  activityVisualColor,
   activityVisualState,
   activityVisualPresentation,
   describeThreadActivity,
@@ -108,6 +110,7 @@ function StatusCue(props: {
   value: string;
   tone?: "good" | "bad" | "pending" | "neutral";
 }) {
+  const { themeAppearance } = useAppearancePreferences();
   return (
     <View
       accessible
@@ -119,12 +122,12 @@ function StatusCue(props: {
         size={16}
         tintColor={
           props.tone === "good"
-            ? "#56c5a1"
+            ? activityVisualColor("complete", themeAppearance)
             : props.tone === "bad"
-              ? "#f07868"
+              ? activityVisualColor("failed", themeAppearance)
               : props.tone === "pending"
-                ? "#e6bc63"
-                : "#a6adb6"
+                ? activityVisualColor("active", themeAppearance)
+                : activityVisualColor("idle", themeAppearance)
         }
       />
       <Text className="text-xs text-foreground-muted">{props.value}</Text>
@@ -184,6 +187,7 @@ function PullRequestWatchControls({
   readonly environmentId: EnvironmentId;
   readonly watchId: string;
 }) {
+  const { themeAppearance } = useAppearancePreferences();
   const navigation = useNavigation();
   const focused = useIsFocused();
   const projects = useProjects();
@@ -481,7 +485,7 @@ function PullRequestWatchControls({
                 <Text
                   accessibilityLabel={activityVisualPresentation[managerVisualState].label}
                   style={{
-                    color: activityVisualPresentation[managerVisualState].color,
+                    color: activityVisualColor(managerVisualState, themeAppearance),
                     fontSize: 18,
                   }}
                 >
@@ -567,14 +571,14 @@ function PullRequestWatchControls({
                     size={18}
                     tintColor={
                       check.status === "success"
-                        ? "#56c5a1"
+                        ? activityVisualColor("complete", themeAppearance)
                         : check.status === "failure"
-                          ? "#f07868"
+                          ? activityVisualColor("failed", themeAppearance)
                           : check.status === "action-required"
-                            ? "#f0b34d"
+                            ? activityVisualColor("attention", themeAppearance)
                             : check.status === "pending"
-                              ? "#e6bc63"
-                              : "#a6adb6"
+                              ? activityVisualColor("active", themeAppearance)
+                              : activityVisualColor("idle", themeAppearance)
                     }
                   />
                   <View className="flex-1">

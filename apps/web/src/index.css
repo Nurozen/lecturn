@@ -2151,6 +2151,23 @@ body,
     900px 300px;
 }
 
+/* Dark metal edges keep contrast on vellum; warm specular highlights supply the sheen. */
+:root {
+  --lecturn-thread-gold: light-dark(#c99438, #dca64e);
+  --lecturn-thread-highlight: light-dark(#edbe65, #ffe1a0);
+  --lecturn-thread-tip: light-dark(#ffe5a3, #ffeac1);
+  --lecturn-thread-trail: light-dark(#986718cc, #dca64e55);
+  --lecturn-thread-line: light-dark(#92631f, #dca64e99);
+  --lecturn-thread-glow: light-dark(#d49b3d66, #dca64e55);
+  --lecturn-thread-name: light-dark(#795016, #e8bd75);
+  --lecturn-thread-name-highlight: light-dark(#986718, #ffe1a0);
+  --lecturn-thread-edge: light-dark(#80521877, transparent);
+  --lecturn-copper-edge: light-dark(#90372a66, transparent);
+  --lecturn-copper-line: light-dark(#ad3c2f, #e64d3dcc);
+  --lecturn-copper-bright: light-dark(#e67c47, #ff7258);
+  --lecturn-copper-tip: light-dark(#ffd097, #ffd097);
+}
+
 /* One brief thread of light per interaction; no idle or looping animation.
    Fine pointers only: buttons reserve ::after for their larger touch target. */
 @media (hover: hover) and (pointer: fine) {
@@ -2170,12 +2187,12 @@ body,
     background: linear-gradient(
       90deg,
       transparent,
-      #dca64e 30%,
-      #ffe1a0 50%,
-      #dca64e 70%,
+      var(--lecturn-thread-gold) 30%,
+      var(--lecturn-thread-highlight) 50%,
+      var(--lecturn-thread-gold) 70%,
       transparent
     );
-    box-shadow: 0 0 5px 1px #dca64e55;
+    box-shadow: 0 0 5px 1px var(--lecturn-thread-glow);
     opacity: 0;
     transform-origin: left center;
   }
@@ -2256,13 +2273,22 @@ body,
   position: absolute;
   pointer-events: none;
   inset-inline-start: 11px;
-  box-shadow: 0 0 5px 1px #dca64e55;
+  box-shadow:
+    0 0 0 0.35px var(--lecturn-thread-edge),
+    0 0 5px 1px var(--lecturn-thread-glow);
 }
 .lecturn-hierarchy-branch::before,
 .lecturn-hierarchy-conversations > ul > li::before {
   inset-block: 0;
   width: 1px;
-  background: linear-gradient(180deg, #dca64e99, #ffe1a0 45%, #ffe1a0 55%, #dca64e99);
+  background: linear-gradient(
+    180deg,
+    var(--lecturn-thread-line),
+    var(--lecturn-thread-gold) 38%,
+    var(--lecturn-thread-tip) 50%,
+    var(--lecturn-thread-gold) 62%,
+    var(--lecturn-thread-line)
+  );
 }
 .lecturn-hierarchy-branch:last-child::before {
   bottom: auto;
@@ -2276,17 +2302,28 @@ body,
   top: 22px;
   width: 15px;
   height: 1px;
-  background: linear-gradient(90deg, #dca64e99, #ffe1a0 50%, #dca64e99);
+  background: linear-gradient(
+    90deg,
+    var(--lecturn-thread-line),
+    var(--lecturn-thread-highlight) 50%,
+    var(--lecturn-thread-line)
+  );
 }
 .lecturn-hierarchy-conversations > ul > li::after {
   top: 50%;
 }
 .lecturn-saga-sheen {
-  color: #ffe1a0;
-  background: linear-gradient(110deg, #e8bd75, #ffe1a0 25%, #ffe1a0 75%, #e8bd75);
+  color: var(--lecturn-thread-name-highlight);
+  background: linear-gradient(
+    110deg,
+    var(--lecturn-thread-name),
+    var(--lecturn-thread-name-highlight) 25%,
+    var(--lecturn-thread-name-highlight) 75%,
+    var(--lecturn-thread-name)
+  );
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  text-shadow: 0 0 5px #dca64e55;
+  text-shadow: 0 0 5px var(--lecturn-thread-glow);
 }
 @media (forced-colors: active) {
   .lecturn-hierarchy-conversations > ul > li::before,
@@ -2308,10 +2345,10 @@ body,
   position: absolute;
   inset: 0;
   overflow: hidden;
-  border: 1px solid #dca64e;
+  border: 1px solid var(--lecturn-thread-gold);
   border-radius: inherit;
   pointer-events: none;
-  box-shadow: 0 0 5px #dca64e44;
+  box-shadow: 0 0 5px var(--lecturn-thread-glow);
 }
 .lecturn-running-edge {
   position: absolute;
@@ -2323,7 +2360,7 @@ body,
   position: absolute;
   width: 16px;
   height: 2px;
-  background: linear-gradient(90deg, transparent, #ffe1a0);
+  background: linear-gradient(90deg, transparent, var(--lecturn-thread-highlight));
   border-radius: 50%;
 }
 .lecturn-running-top {
@@ -2358,7 +2395,7 @@ body,
 .lecturn-running-left::before {
   width: 2px;
   height: 16px;
-  background: linear-gradient(transparent, #ffe1a0);
+  background: linear-gradient(transparent, var(--lecturn-thread-highlight));
 }
 .lecturn-running-border[data-moving="true"] .lecturn-running-edge {
   animation-play-state: running;
@@ -2401,10 +2438,10 @@ body,
   z-index: 1;
   background: conic-gradient(
     from var(--lecturn-active-angle),
-    #dca64e55 0deg 260deg,
-    #dca64e 315deg,
-    #ffeac1 348deg,
-    #dca64e55 360deg
+    var(--lecturn-thread-trail) 0deg 260deg,
+    var(--lecturn-thread-gold) 315deg,
+    var(--lecturn-thread-tip) 348deg,
+    var(--lecturn-thread-trail) 360deg
   );
   mask:
     linear-gradient(#000 0 0) content-box,
@@ -2431,15 +2468,30 @@ body,
 }
 .lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::before,
 .lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::after {
-  box-shadow: 0 0 7px 1px #f0524577;
+  box-shadow:
+    0 0 0 0.35px var(--lecturn-copper-edge),
+    0 0 7px 1px #f0524577;
 }
 .lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::before {
   width: 2px;
-  background: linear-gradient(180deg, #e64d3dcc, #ff7258 42%, #ffd097 52%, #ff7258 62%, #e64d3dcc);
+  background: linear-gradient(
+    180deg,
+    var(--lecturn-copper-line),
+    var(--lecturn-copper-bright) 42%,
+    var(--lecturn-copper-tip) 52%,
+    var(--lecturn-copper-bright) 62%,
+    var(--lecturn-copper-line)
+  );
 }
 .lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::after {
   height: 2px;
-  background: linear-gradient(90deg, #e64d3dcc, #ff7258 35%, #ffd097 52%, #e64d3dcc);
+  background: linear-gradient(
+    90deg,
+    var(--lecturn-copper-line),
+    var(--lecturn-copper-bright) 35%,
+    var(--lecturn-copper-tip) 52%,
+    var(--lecturn-copper-line)
+  );
 }
 .settled-thread-action {
   position: relative;
@@ -2460,10 +2512,10 @@ body,
   padding: 2px;
   background: conic-gradient(
     from var(--lecturn-active-angle),
-    #e64d3dcc 0deg 230deg,
-    #ff7258 290deg,
-    #ffd097 340deg,
-    #e64d3dcc 360deg
+    var(--lecturn-copper-line) 0deg 230deg,
+    var(--lecturn-copper-bright) 290deg,
+    var(--lecturn-copper-tip) 340deg,
+    var(--lecturn-copper-line) 360deg
   );
   mask:
     linear-gradient(#000 0 0) content-box,
