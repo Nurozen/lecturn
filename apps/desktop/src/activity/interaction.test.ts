@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { DesktopActivityRow } from "@lecturn/contracts";
-import { activityPeekRows, nextActivityMode, reconcilePeekRows } from "./interaction.ts";
+import {
+  activityPeekRows,
+  nextActivityMode,
+  reconcilePeekRows,
+  isViewedActivityThread,
+} from "./interaction.ts";
 const row = (
   id: string,
   status: string,
@@ -67,4 +72,20 @@ describe("notch peek", () => {
       activityPeekRows([row("new", "Idle"), row("older", "Idle")]).map((item) => item.id),
     ).toEqual(["new", "older"]);
   });
+});
+
+it("omits the foreground conversation before ranking peek rows without hiding another environment or PR", () => {
+  const viewedThread = { environmentId: "env", threadId: "current" };
+  const rows = [
+    { ...row("current", "Needs approval"), threadId: "current" },
+    { ...row("remote", "Working"), environmentId: "other", threadId: "current" },
+    { ...row("pr", "Watching"), threadId: "current", watchId: "watch" },
+    row("other", "Idle"),
+  ];
+  const eligible = rows.filter((item) => !isViewedActivityThread(item, viewedThread));
+  expect(activityPeekRows(eligible).map((item) => item.id)).toEqual(["remote", "pr", "other"]);
+  expect(reconcilePeekRows(eligible, ["current", "remote"], true).map((item) => item.id)).toEqual([
+    "remote",
+  ]);
+  expect(rows.filter((item) => !isViewedActivityThread(item, undefined))).toEqual(rows);
 });

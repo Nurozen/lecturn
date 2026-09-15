@@ -1143,6 +1143,10 @@ export const DesktopActivityRowSchema = Schema.Struct({
 });
 export type DesktopActivityRow = typeof DesktopActivityRowSchema.Type;
 export const DesktopActivitySnapshotSchema = Schema.Struct({
+  /** Current chat route; the native host clears this while the main app is not foreground. */
+  viewedThread: Schema.optionalKey(
+    Schema.Struct({ environmentId: Schema.String, threadId: Schema.String }),
+  ),
   /** Environments with authoritative initial activity loaded; others are display-only. */
   readyEnvironmentIds: Schema.optionalKey(Schema.Array(Schema.String)),
   summary: Schema.String,

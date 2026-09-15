@@ -1,3 +1,4 @@
+import { isViewedActivityThread } from "./interaction.ts";
 // @effect-diagnostics globalDate:off -- The native UI compares client intent timestamps; tests inject its clock.
 import type {
   DesktopActivityRow,
@@ -141,7 +142,11 @@ export class ActivityChangeTracker {
     NonNullable<DesktopActivityRow["userAction"]>
   >();
 
-  update(rows: readonly DesktopActivityRow[], now = Date.now()): ActivityChange | undefined {
+  update(
+    rows: readonly DesktopActivityRow[],
+    now = Date.now(),
+    suppressedRows: ReadonlySet<string> = new Set(),
+  ): ActivityChange | undefined {
     const presentOrigins = new Set(rows.map(promptOrigin).filter((origin) => origin !== null));
     const intentOrigins = new Set(rows.filter((row) => row.userAction).map(promptOrigin));
     // The producer removes a failed command's intent; do not let that failed
@@ -190,7 +195,7 @@ export class ActivityChangeTracker {
       this.awaitingStart.delete(oldest);
     }
     const previousByIdentity = new Map(this.previous?.map((row) => [identity(row), row]));
-    const suppress = new Set<string>();
+    const suppress = new Set(suppressedRows);
     const consumed = new Set<string>();
     const consumedIntents = new Set<string>();
     const intentMatches = (
@@ -296,7 +301,13 @@ export class ActivitySnapshotChangeTracker {
         tracker = new ActivityChangeTracker();
         this.environments.set(id, tracker);
       }
-      const change = tracker.update(snapshot.rows.filter((row) => row.environmentId === id));
+      const rows = snapshot.rows.filter((row) => row.environmentId === id);
+      const suppressed = new Set(
+        rows
+          .filter((row) => isViewedActivityThread(row, snapshot.viewedThread))
+          .map((row) => row.id),
+      );
+      const change = tracker.update(rows, Date.now(), suppressed);
       if (change) changes.push(change);
     }
     return changes.toSorted(

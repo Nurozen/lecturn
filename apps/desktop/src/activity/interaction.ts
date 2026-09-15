@@ -1,5 +1,5 @@
 import { activityVisualState } from "@lecturn/client-runtime/state/activityContext";
-import type { DesktopActivityRow } from "@lecturn/contracts";
+import type { DesktopActivityRow, DesktopActivitySnapshot } from "@lecturn/contracts";
 
 export type ActivityMode = "collapsed" | "peek" | "micro" | "expanded";
 export type ActivityInteraction =
@@ -57,4 +57,17 @@ export function reconcilePeekRows(
     const row = byId.get(id);
     return row ? [row] : [];
   });
+}
+
+/** PR checks remain useful even while their managing conversation is on screen. */
+export function isViewedActivityThread(
+  row: DesktopActivityRow,
+  viewedThread: DesktopActivitySnapshot["viewedThread"],
+): boolean {
+  return Boolean(
+    !row.watchId &&
+    viewedThread &&
+    row.environmentId === viewedThread.environmentId &&
+    row.threadId === viewedThread.threadId,
+  );
 }

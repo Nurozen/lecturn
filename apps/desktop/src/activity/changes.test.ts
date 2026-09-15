@@ -22,8 +22,8 @@ const pr = (checks: DesktopActivityRow["checks"], patch: Partial<DesktopActivity
 
 describe("semantic activity changes", () => {
   it("does not announce an unchanged PR when its managing thread is discovered or reassigned", () => {
-    const checks = [{ name: "Tests", status: "pending" }];
-    const restored = pr(checks, { threadId: undefined });
+    const checks = [{ name: "Tests", status: "pending" }] as const;
+    const { threadId: _threadId, ...restored } = pr(checks);
     const associated = pr(checks, { threadId: "manager" });
     expect(activityChanges([restored], [associated])).toBeUndefined();
     expect(
@@ -381,5 +381,51 @@ describe("activity startup and reconnection", () => {
         readyEnvironmentIds: ["local"],
       }),
     ).toMatchObject({ state: "active" });
+  });
+});
+
+describe("foreground chat activity", () => {
+  it("silently consumes viewed-thread changes without replaying them when the app loses focus", () => {
+    const tracker = new ActivitySnapshotChangeTracker();
+    const viewedThread = { environmentId: "local", threadId: "thread" };
+    tracker.update({ summary: "Activity", rows: [row()], viewedThread });
+    expect(
+      tracker.update({ summary: "Activity", rows: [row({ status: "Working" })], viewedThread }),
+    ).toBeUndefined();
+    expect(
+      tracker.update({ summary: "Activity", rows: [row({ status: "Working" })] }),
+    ).toBeUndefined();
+    expect(tracker.update({ summary: "Activity", rows: [row({ status: "Done" })] })).toMatchObject({
+      state: "complete",
+    });
+  });
+  it("still announces another conversation when the viewed one changes in the same publication", () => {
+    const tracker = new ActivitySnapshotChangeTracker();
+    const viewedThread = { environmentId: "local", threadId: "thread" };
+    const other = row({ id: "other", threadId: "other" });
+    tracker.update({ summary: "Activity", rows: [row(), other], viewedThread });
+    expect(
+      tracker.update({
+        summary: "Activity",
+        rows: [row({ status: "Needs approval" }), { ...other, status: "Working" }],
+        viewedThread,
+      }),
+    ).toMatchObject({ rowId: "other", state: "active" });
+  });
+  it("retains PR check notifications while their managing conversation is visible", () => {
+    const tracker = new ActivitySnapshotChangeTracker();
+    const viewedThread = { environmentId: "local", threadId: "thread" };
+    tracker.update({
+      summary: "Activity",
+      rows: [pr([{ name: "Tests", status: "pending" }])],
+      viewedThread,
+    });
+    expect(
+      tracker.update({
+        summary: "Activity",
+        rows: [pr([{ name: "Tests", status: "failure" }])],
+        viewedThread,
+      }),
+    ).toMatchObject({ rowId: "pr-1", state: "failed" });
   });
 });

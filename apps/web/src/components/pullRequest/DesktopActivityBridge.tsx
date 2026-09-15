@@ -40,6 +40,7 @@ import { toastManager } from "../ui/toast";
 import { formatEnvironmentQueryError } from "../../state/query";
 
 function EnabledActivityBridge() {
+  const viewedThread = useParams({ strict: false, select: resolveThreadRouteRef });
   const { environments } = useEnvironments();
   const ids = useMemo(
     () =>
@@ -368,14 +369,18 @@ function EnabledActivityBridge() {
     });
   });
   useEffect(() => {
-    pendingPublication.current = { ...boundedActivitySnapshot(publishedRows), readyEnvironmentIds };
+    pendingPublication.current = {
+      ...boundedActivitySnapshot(publishedRows),
+      readyEnvironmentIds,
+      ...(viewedThread ? { viewedThread } : {}),
+    };
     // Coalesce streamed assistant text without starving updates during a long response.
     if (publicationTimer.current !== null) return;
     publicationTimer.current = setTimeout(() => {
       publicationTimer.current = null;
       publishLatest();
     }, 300);
-  }, [publishedRows, readyEnvironmentIds]);
+  }, [publishedRows, readyEnvironmentIds, viewedThread]);
   useEffect(
     () => () => {
       if (publicationTimer.current !== null) clearTimeout(publicationTimer.current);
