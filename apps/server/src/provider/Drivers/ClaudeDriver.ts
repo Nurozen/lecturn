@@ -190,6 +190,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<ClaudeSettings>>({
         maintenanceCapabilities,
+        discovery: {
+          waitForShell: !/[\\/]/.test(effectiveConfig.binaryPath?.trim() ?? ""),
+          refreshEnvironment: () =>
+            Object.assign(processEnv, mergeProviderInstanceEnvironment(environment)),
+        },
         getSettings: snapshotSettings.getSettings,
         streamSettings: snapshotSettings.streamSettings,
         haveSettingsChanged: haveProviderSnapshotSettingsChanged,

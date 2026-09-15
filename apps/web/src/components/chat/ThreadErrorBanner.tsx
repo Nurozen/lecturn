@@ -1,3 +1,6 @@
+import type { EnvironmentId, ServerProvider } from "@lecturn/contracts";
+import { ProviderDetectionRecovery } from "../ProviderDetectionProgress";
+import { isProviderExecutableError } from "../providerDetection";
 import { memo } from "react";
 import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
@@ -36,11 +39,31 @@ export function isThreadErrorBannerDismissedForSession(bannerKey: string | null)
 export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   error,
   onDismiss,
+  environmentId,
+  provider,
 }: {
   error: string | null;
+  environmentId?: EnvironmentId;
+  provider?: ServerProvider | null;
   onDismiss?: () => void;
 }) {
   if (!error) return null;
+  if (environmentId && provider && isProviderExecutableError(error)) {
+    return (
+      <div className="pointer-events-auto mx-auto mt-3 w-fit max-w-[min(48rem,calc(100%-2rem))] rounded-xl border border-warning/30 bg-popover p-3">
+        <ProviderDetectionRecovery
+          environmentId={environmentId}
+          provider={provider}
+          details={error}
+        />
+        {onDismiss ? (
+          <Button variant="ghost" size="xs" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
   return (
     <div className="pointer-events-auto mx-auto w-fit max-w-[min(48rem,calc(100%-2rem))] pt-3">
       <Alert

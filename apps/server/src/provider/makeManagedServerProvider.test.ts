@@ -150,6 +150,78 @@ const enrichedSnapshotSecond: ServerProvider = {
 };
 
 describe("makeManagedServerProvider", () => {
+  it.effect("keeps an already detected provider usable during a later health refresh", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const refreshStarted = yield* Deferred.make<void>();
+        const finishRefresh = yield* Deferred.make<void>();
+        const checks = yield* Ref.make(0);
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: () => false,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          discovery: { waitForShell: false, refreshEnvironment: () => {} },
+          checkProvider: Effect.gen(function* () {
+            if ((yield* Ref.updateAndGet(checks, (count) => count + 1)) > 1) {
+              yield* Deferred.succeed(refreshStarted, undefined);
+              yield* Deferred.await(finishRefresh);
+            }
+            return refreshedSnapshot;
+          }),
+          refreshOnInterval: false,
+        });
+        yield* Effect.yieldNow;
+        assert.equal((yield* provider.getSnapshot).discovery?.status, "ready");
+        const refresh = yield* provider.refresh.pipe(Effect.forkChild);
+        yield* Deferred.await(refreshStarted);
+        assert.equal((yield* provider.getSnapshot).discovery?.status, "ready");
+        yield* Deferred.succeed(finishRefresh, undefined);
+        yield* Fiber.join(refresh);
+      }),
+    ).pipe(Effect.provide(AlwaysRunTestLayer)),
+  );
+
+  it.effect("reports a timed out background discovery and recovers on retry", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        const shouldHang = yield* Ref.make(true);
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: () => false,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          discovery: { waitForShell: false, refreshEnvironment: () => {} },
+          checkProvider: Effect.gen(function* () {
+            yield* Deferred.succeed(started, undefined);
+            if (yield* Ref.get(shouldHang)) return yield* Effect.never;
+            return refreshedSnapshot;
+          }),
+          refreshOnInterval: false,
+        });
+        assert.equal((yield* provider.getSnapshot).discovery?.status, "detecting");
+        const timedOut = yield* provider.streamChanges.pipe(
+          Stream.filter((snapshot) => snapshot.discovery?.status === "timed-out"),
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* Deferred.await(started);
+        yield* TestClock.adjust("15 seconds");
+        const [failure] = yield* Fiber.join(timedOut);
+        assert.equal(failure?.status, "warning");
+        assert.match(failure?.message ?? "", /Retry.*Settings/);
+        yield* Ref.set(shouldHang, false);
+        const recovered = yield* provider.refresh;
+        assert.equal(recovered.discovery?.status, "ready");
+        assert.equal(recovered.installed, true);
+      }),
+    ).pipe(Effect.provide(AlwaysRunTestLayer)),
+  );
+
   it.effect(
     "runs the initial provider check in the background and streams the refreshed snapshot",
     () =>

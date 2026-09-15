@@ -303,6 +303,30 @@ export type ShellEnvironmentReader = (
   execFile?: ExecFileSyncLike,
 ) => Partial<Record<string, string>>;
 
+/** Read a login shell without blocking the server event loop. */
+export function readEnvironmentFromLoginShellAsync(
+  shell: string,
+  names: ReadonlyArray<string>,
+  signal: AbortSignal,
+): Promise<Partial<Record<string, string>>> {
+  return new Promise((resolve, reject) => {
+    NodeChildProcess.execFile(
+      shell,
+      ["-ilc", buildEnvironmentCaptureCommand(names)],
+      { encoding: "utf8", signal, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 },
+      (error, output) => {
+        if (error) return reject(error);
+        const environment: Partial<Record<string, string>> = {};
+        for (const name of names) {
+          const value = extractEnvironmentValue(output, name);
+          if (value !== undefined) environment[name] = value;
+        }
+        resolve(environment);
+      },
+    );
+  });
+}
+
 export const readEnvironmentFromLoginShell: ShellEnvironmentReader = (
   shell,
   names,

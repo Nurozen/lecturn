@@ -181,6 +181,11 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<CodexSettings>>({
         maintenanceCapabilities,
+        discovery: {
+          waitForShell: !/[\\/]/.test(effectiveConfig.binaryPath?.trim() ?? ""),
+          refreshEnvironment: () =>
+            Object.assign(processEnv, mergeProviderInstanceEnvironment(environment)),
+        },
         getSettings: snapshotSettings.getSettings,
         streamSettings: snapshotSettings.streamSettings,
         haveSettingsChanged: haveProviderSnapshotSettingsChanged,

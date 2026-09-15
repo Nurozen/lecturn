@@ -124,6 +124,7 @@ interface AntigravityProviderState {
 }
 
 interface AntigravityProviderOptions {
+  readonly discovery?: { readonly waitForShell: boolean; readonly refreshEnvironment: () => void };
   readonly stampIdentity: (snapshot: ServerProviderDraft) => Effect.Effect<ServerProvider>;
   readonly probe: Effect.Effect<
     EffectAcpSchema.InitializeResponse,
@@ -240,6 +241,7 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
   });
 
   const managed = yield* makeManagedServerProvider({
+    ...(options.discovery ? { discovery: options.discovery } : {}),
     maintenanceCapabilities:
       options.maintenanceCapabilities ??
       makeManualOnlyProviderMaintenanceCapabilities({

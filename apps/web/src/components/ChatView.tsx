@@ -8006,6 +8006,8 @@ function ChatViewContent(props: ChatViewProps) {
                 onOpenProviderSetup={openProviderSetup}
               />
               <ThreadErrorBanner
+                environmentId={environmentId}
+                provider={conversationProviderStatus}
                 error={visibleThreadError}
                 onDismiss={() => {
                   setThreadError(activeThread.id, null);
