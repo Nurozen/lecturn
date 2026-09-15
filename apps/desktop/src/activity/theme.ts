@@ -8,6 +8,7 @@ import {
 // window, including this isolated panel before the activity bridge connects.
 const dark = {
   text: "#f3ede0",
+  bar: "#000",
   muted: "#a9acb3",
   detail: "#b8bbc0",
   accent: "#e6bc63",
@@ -35,6 +36,7 @@ const dark = {
 
 const light: typeof dark = {
   text: "#342f26",
+  bar: "#f3eddf",
   muted: "#686455",
   detail: "#625a4d",
   accent: "#e2b968",
@@ -73,6 +75,4 @@ function themeDeclarations(appearance: "light" | "dark"): string {
   ].join(";");
 }
 
-// The hardware camera housing always remains black, so its notification colors
-// use the dark appearance even when the content below it uses the light palette.
-export const activityThemeStyles = `:root{${themeDeclarations("dark")}}\n@media(prefers-color-scheme:light){:root{${themeDeclarations("light")}}}\nbody.attached #bar{${themeDeclarations("dark")}}`;
+export const activityThemeStyles = `:root{${themeDeclarations("dark")}}\n@media(prefers-color-scheme:light){:root{${themeDeclarations("light")}}}`;

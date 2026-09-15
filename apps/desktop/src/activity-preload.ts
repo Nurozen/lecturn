@@ -74,7 +74,9 @@ window.addEventListener("DOMContentLoaded", () => {
   const interact = (event: ActivityInteraction) => {
     void ipcRenderer.invoke(Channels.ACTIVITY_MODE, event);
   };
+  let contentReveal: Animation | undefined;
   const setMode = (next: ActivityMode) => {
+    const changed = mode !== next;
     mode = next;
     if (mode !== "peek") peekIds = null;
     if (mode !== "micro") {
@@ -92,6 +94,18 @@ window.addEventListener("DOMContentLoaded", () => {
     );
     document.getElementById("chevron")!.textContent = mode === "expanded" ? "⌃" : "⌄";
     render();
+    if (changed) {
+      contentReveal?.cancel();
+      if (next !== "collapsed" && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        contentReveal = document.getElementById("content")!.animate(
+          [
+            { opacity: 0, transform: "translateY(-6px)" },
+            { opacity: 1, transform: "translateY(0)" },
+          ],
+          { duration: 220, easing: "cubic-bezier(.2,.8,.2,1)" },
+        );
+      }
+    }
   };
   pill.addEventListener("click", () => interact("toggle"));
   const shell = document.getElementById("shell")!;
