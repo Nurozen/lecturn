@@ -2151,18 +2151,21 @@ body,
     900px 300px;
 }
 
-/* Light surfaces need an ink-like gold, not the pale glow used on navy. */
+/* Dark metal edges keep contrast on vellum; warm specular highlights supply the sheen. */
 :root {
-  --lecturn-thread-gold: light-dark(#986718, #dca64e);
-  --lecturn-thread-highlight: light-dark(#68400b, #ffe1a0);
-  --lecturn-thread-tip: light-dark(#68400b, #ffeac1);
+  --lecturn-thread-gold: light-dark(#c99438, #dca64e);
+  --lecturn-thread-highlight: light-dark(#edbe65, #ffe1a0);
+  --lecturn-thread-tip: light-dark(#ffe5a3, #ffeac1);
   --lecturn-thread-trail: light-dark(#986718cc, #dca64e55);
-  --lecturn-thread-line: light-dark(#986718, #dca64e99);
-  --lecturn-thread-glow: light-dark(#98671822, #dca64e55);
+  --lecturn-thread-line: light-dark(#92631f, #dca64e99);
+  --lecturn-thread-glow: light-dark(#d49b3d66, #dca64e55);
   --lecturn-thread-name: light-dark(#795016, #e8bd75);
+  --lecturn-thread-name-highlight: light-dark(#986718, #ffe1a0);
+  --lecturn-thread-edge: light-dark(#80521877, transparent);
+  --lecturn-copper-edge: light-dark(#90372a66, transparent);
   --lecturn-copper-line: light-dark(#ad3c2f, #e64d3dcc);
-  --lecturn-copper-bright: light-dark(#c44831, #ff7258);
-  --lecturn-copper-tip: light-dark(#833122, #ffd097);
+  --lecturn-copper-bright: light-dark(#e67c47, #ff7258);
+  --lecturn-copper-tip: light-dark(#ffd097, #ffd097);
 }
 
 /* One brief thread of light per interaction; no idle or looping animation.
@@ -2270,7 +2273,9 @@ body,
   position: absolute;
   pointer-events: none;
   inset-inline-start: 11px;
-  box-shadow: 0 0 5px 1px var(--lecturn-thread-glow);
+  box-shadow:
+    0 0 0 0.35px var(--lecturn-thread-edge),
+    0 0 5px 1px var(--lecturn-thread-glow);
 }
 .lecturn-hierarchy-branch::before,
 .lecturn-hierarchy-conversations > ul > li::before {
@@ -2279,8 +2284,9 @@ body,
   background: linear-gradient(
     180deg,
     var(--lecturn-thread-line),
-    var(--lecturn-thread-highlight) 45%,
-    var(--lecturn-thread-highlight) 55%,
+    var(--lecturn-thread-gold) 38%,
+    var(--lecturn-thread-tip) 50%,
+    var(--lecturn-thread-gold) 62%,
     var(--lecturn-thread-line)
   );
 }
@@ -2307,12 +2313,12 @@ body,
   top: 50%;
 }
 .lecturn-saga-sheen {
-  color: var(--lecturn-thread-highlight);
+  color: var(--lecturn-thread-name-highlight);
   background: linear-gradient(
     110deg,
     var(--lecturn-thread-name),
-    var(--lecturn-thread-highlight) 25%,
-    var(--lecturn-thread-highlight) 75%,
+    var(--lecturn-thread-name-highlight) 25%,
+    var(--lecturn-thread-name-highlight) 75%,
     var(--lecturn-thread-name)
   );
   background-clip: text;
@@ -2462,7 +2468,9 @@ body,
 }
 .lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::before,
 .lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::after {
-  box-shadow: 0 0 7px 1px #f0524577;
+  box-shadow:
+    0 0 0 0.35px var(--lecturn-copper-edge),
+    0 0 7px 1px #f0524577;
 }
 .lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::before {
   width: 2px;

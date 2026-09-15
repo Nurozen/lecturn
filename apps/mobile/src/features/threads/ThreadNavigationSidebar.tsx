@@ -15,7 +15,8 @@ import type { MenuAction } from "@react-native-menu/menu";
 import { useAtomValue } from "@effect/atom-react";
 import { type EnvironmentId, resolveEnvironmentMachineKind } from "@lecturn/contracts";
 import { sortPinnedThreadsByOrderKey } from "@lecturn/client-runtime/state/thread-sort";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import type { LayoutChangeEvent } from "react-native";
 import { Platform, Pressable, StyleSheet, TextInput, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -89,6 +90,40 @@ import {
   THREAD_LIST_V2_SETTLED_PAGE_COUNT,
   type ThreadListV2ListItem,
 } from "./threadListV2";
+
+/** A static metallic glint leaves the darker rail readable on cream surfaces. */
+function LightHierarchySheen({
+  copper,
+  horizontal = false,
+}: {
+  readonly copper: boolean;
+  readonly horizontal?: boolean;
+}) {
+  const gradientId = `hierarchy-sheen-${useId().replaceAll(":", "")}`;
+  const base = copper ? "#ad3c2f" : "#92631f";
+  const metal = copper ? "#e67c47" : "#c99438";
+  const glint = copper ? "#ffd097" : "#ffe5a3";
+  return (
+    <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
+      <Defs>
+        <LinearGradient
+          id={gradientId}
+          x1="0%"
+          y1="0%"
+          x2={horizontal ? "100%" : "0%"}
+          y2={horizontal ? "0%" : "100%"}
+        >
+          <Stop offset="0%" stopColor={base} />
+          <Stop offset="35%" stopColor={metal} />
+          <Stop offset="48%" stopColor={glint} />
+          <Stop offset="56%" stopColor={metal} />
+          <Stop offset="100%" stopColor={base} />
+        </LinearGradient>
+      </Defs>
+      <Rect width="100%" height="100%" fill={`url(#${gradientId})`} />
+    </Svg>
+  );
+}
 
 /** The sidebar list serves both lists: v1 grouped items or, when the Thread
     List v2 beta is on, flat v2 rows with queued tasks spliced in, and a settled
@@ -1232,13 +1267,13 @@ function ThreadNavigationSidebarPane(
                 props.item.settledBranch &&
                 level === (props.item.depth ?? 0) - 1
                   ? light
-                    ? "#b33f32"
+                    ? "#ad3c2f"
                     : "#ff866f"
                   : light
-                    ? "#986718"
+                    ? "#92631f"
                     : "#ffe1a0",
               boxShadow: light
-                ? undefined
+                ? "0 0 3px #c9943833"
                 : (props.item.type === "thread" || props.item.type === "v2-thread") &&
                     "settledBranch" in props.item &&
                     props.item.settledBranch &&
@@ -1246,7 +1281,18 @@ function ThreadNavigationSidebarPane(
                   ? "0 0 6px 1px #e64d3d88"
                   : "0 0 5px 1px #dca64e55",
             }}
-          />
+          >
+            {light ? (
+              <LightHierarchySheen
+                copper={Boolean(
+                  (props.item.type === "thread" || props.item.type === "v2-thread") &&
+                  "settledBranch" in props.item &&
+                  props.item.settledBranch &&
+                  level === (props.item.depth ?? 0) - 1,
+                )}
+              />
+            ) : null}
+          </View>
         ))}
         {(props.item.depth ?? 0) > 0 ? (
           <View
@@ -1268,20 +1314,31 @@ function ThreadNavigationSidebarPane(
                 "settledBranch" in props.item &&
                 props.item.settledBranch
                   ? light
-                    ? "#b33f32"
+                    ? "#ad3c2f"
                     : "#ff866f"
                   : light
-                    ? "#986718"
+                    ? "#92631f"
                     : "#ffe1a0",
               boxShadow: light
-                ? undefined
+                ? "0 0 3px #c9943833"
                 : (props.item.type === "thread" || props.item.type === "v2-thread") &&
                     "settledBranch" in props.item &&
                     props.item.settledBranch
                   ? "0 0 6px 1px #e64d3d88"
                   : "0 0 5px 1px #dca64e55",
             }}
-          />
+          >
+            {light ? (
+              <LightHierarchySheen
+                horizontal
+                copper={Boolean(
+                  (props.item.type === "thread" || props.item.type === "v2-thread") &&
+                  "settledBranch" in props.item &&
+                  props.item.settledBranch,
+                )}
+              />
+            ) : null}
+          </View>
         ) : null}
         {renderListRow(props)}
       </View>

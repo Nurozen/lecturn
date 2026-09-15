@@ -59,11 +59,25 @@ export function ActiveThreadBorder({
         StyleSheet.absoluteFill,
         {
           borderWidth: settled ? 2 : 1,
-          borderColor: settled ? (light ? "#b33f32" : "#e64d3d") : light ? "#986718" : "#b68a43",
+          borderColor: settled ? (light ? "#ad3c2f" : "#e64d3d") : light ? "#92631f" : "#b68a43",
           borderRadius: 12,
         },
       ]}
     >
+      {light ? (
+        <View
+          style={[
+            StyleSheet.absoluteFill,
+            {
+              margin: 1,
+              borderWidth: 1,
+              borderRadius: 10,
+              borderColor: settled ? "#e67c4766" : "#c9943866",
+              borderTopColor: settled ? "#ffd097bb" : "#ffe5a3bb",
+            },
+          ]}
+        />
+      ) : null}
       {animate && size.width > 0 ? (
         <Animated.View
           style={{
@@ -71,16 +85,12 @@ export function ActiveThreadBorder({
             width: 4,
             height: 4,
             borderRadius: 2,
-            backgroundColor: settled
-              ? light
-                ? "#8e2c22"
-                : "#ffd097"
-              : light
-                ? "#613908"
-                : "#fff0c6",
+            backgroundColor: settled ? "#ffd097" : light ? "#ffe5a3" : "#fff0c6",
+            borderWidth: light ? 0.75 : 0,
+            borderColor: settled ? "#ad3c2f" : "#92631f",
             shadowColor: settled ? "#ff7258" : "#efc873",
-            shadowOpacity: light ? 0.25 : 0.9,
-            shadowRadius: 5,
+            shadowOpacity: light ? 0.45 : 0.9,
+            shadowRadius: light ? 3 : 5,
             transform: [
               {
                 translateX: progress.interpolate({
