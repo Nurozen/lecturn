@@ -12,11 +12,13 @@ import { ipcRenderer } from "electron";
 import { activityCheckSummary, activityCheckTally, checkPresentation } from "./activity/checks.ts";
 import {
   reconcilePeekRows,
+  isViewedActivityThread,
   type ActivityMode,
   type ActivityInteraction,
 } from "./activity/interaction.ts";
 import * as Channels from "./activity/channels.ts";
-import { ActivityChangeTracker } from "./activity/changes.ts";
+import { ActivitySnapshotChangeTracker } from "./activity/changes.ts";
+import { ActivityHoverIntent } from "./activity/hover.ts";
 
 window.addEventListener("DOMContentLoaded", () => {
   const pill = document.getElementById("pill")!;
@@ -42,8 +44,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const sentDrafts = new Map<string, string>();
   const expandedChecks = new Set<string>();
   const expandedContext = new Set<string>();
-  const changes = new ActivityChangeTracker();
-  let hasActivityBaseline = false;
+  const changes = new ActivitySnapshotChangeTracker();
   let microRowId: string | null = null;
   let microLabel = "";
   let microColor = "#e6bc63";
@@ -93,25 +94,27 @@ window.addEventListener("DOMContentLoaded", () => {
   };
   pill.addEventListener("click", () => interact("toggle"));
   const shell = document.getElementById("shell")!;
+  const hoverIntent = new ActivityHoverIntent();
   document.getElementById("open-app")!.addEventListener("click", () => {
     void ipcRenderer.invoke(Channels.ACTIVITY_OPEN_APP).catch((error: unknown) => {
       feedback.textContent = error instanceof Error ? error.message : "Unable to open Lecturn.";
     });
   });
   shell.addEventListener("mouseover", (event) => {
-    if (event.target instanceof Element && event.target.closest("#open-app")) return;
-    if (
-      event.relatedTarget instanceof Node &&
-      shell.contains(event.relatedTarget) &&
-      !(event.relatedTarget instanceof Element && event.relatedTarget.closest("#open-app"))
-    )
-      return;
+    if (event.relatedTarget instanceof Node && shell.contains(event.relatedTarget)) return;
+    hoverIntent.enter(event);
     clearTimeout(hoverLeaveTimeout);
-    hovered = true;
+  });
+  shell.addEventListener("mousemove", (event) => {
+    if (!hoverIntent.move(event)) return;
+    if (event.target instanceof Element && event.target.closest("#open-app")) return;
+    clearTimeout(hoverLeaveTimeout);
     if (mode === "micro") engageMicro();
-    else interact("hover-enter");
+    else if (!hovered) interact("hover-enter");
+    hovered = true;
   });
   shell.addEventListener("mouseleave", () => {
+    hoverIntent.leave();
     clearTimeout(hoverLeaveTimeout);
     hoverLeaveTimeout = setTimeout(() => {
       hovered = false;
@@ -268,12 +271,19 @@ window.addEventListener("DOMContentLoaded", () => {
           "empty",
         ),
       );
+    const previewRows = snapshot.rows.filter(
+      (row) => !isViewedActivityThread(row, snapshot.viewedThread),
+    );
     if (mode === "peek") {
       const rows = reconcilePeekRows(
-        snapshot.rows,
+        previewRows,
         peekIds ?? [],
         peekIds !== null && (hovered || Boolean(focusedKey)),
       );
+      if (!rows.length && snapshot.rows.length) {
+        interact("dismiss");
+        return;
+      }
       peekIds = rows.map((row) => row.id);
       void ipcRenderer.invoke(Channels.ACTIVITY_PEEK_COUNT, rows.length);
       for (const row of rows) {
@@ -316,7 +326,7 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     const groups =
       mode === "micro"
-        ? [{ title: "", rows: snapshot.rows.filter((row) => row.id === microRowId) }]
+        ? [{ title: "", rows: previewRows.filter((row) => row.id === microRowId) }]
         : [
             { title: "Pull requests", rows: snapshot.rows.filter((row) => row.watchId) },
             {
@@ -346,7 +356,31 @@ window.addEventListener("DOMContentLoaded", () => {
         const attention =
           visualState === "attention" || visualState === "failed" || visualState === "offline";
         const glyph = stateGlyph(row);
-        heading.append(glyph, element("h2", row.title));
+        const openAction = row.actions.find((action) => action.id === "open");
+        const headingTitle = element("h2", "");
+        if (openAction && row.threadId && !row.watchId) {
+          const titleButton = document.createElement("button");
+          titleButton.className = "card-title";
+          titleButton.textContent = row.title;
+          titleButton.title = openAction.label;
+          titleButton.dataset.focusKey = `${row.id}:title`;
+          titleButton.disabled = pending || openAction.disabled === true;
+          titleButton.addEventListener("click", () => void dispatch(row, "open"));
+          headingTitle.append(titleButton);
+          card.classList.add("navigable");
+          card.addEventListener("click", (event) => {
+            if (pending || openAction.disabled || window.getSelection()?.toString()) return;
+            if (!(event.target instanceof Element)) return;
+            if (
+              event.target.closest(
+                "button,a,input,textarea,select,form,details,[contenteditable=true]",
+              )
+            )
+              return;
+            void dispatch(row, "open");
+          });
+        } else headingTitle.textContent = row.title;
+        heading.append(glyph, headingTitle);
         card.append(projectIdentity(row), heading);
         if (mode === "micro") {
           const notice = element("div", microLabel, "micro-change");
@@ -452,9 +486,12 @@ window.addEventListener("DOMContentLoaded", () => {
           button.className = action.id === "merge" ? "primary" : "secondary icon-button";
           button.disabled = pending || action.disabled === true;
           button.addEventListener("click", () => void dispatch(row, action.id));
-          actions.append(button);
+          if (action.id === "open") {
+            button.className = "card-open";
+            card.append(button);
+          } else actions.append(button);
         }
-        card.append(actions);
+        if (actions.childElementCount) card.append(actions);
         const steer = row.actions.find((action) => action.id === "steer");
         if (steer) {
           const form = document.createElement("form");
@@ -494,8 +531,7 @@ window.addEventListener("DOMContentLoaded", () => {
     restoreFocus();
   };
   const receiveSnapshot = (next: DesktopActivitySnapshot) => {
-    const change = hasActivityBaseline || next.rows.length ? changes.update(next.rows) : undefined;
-    if (next.rows.length) hasActivityBaseline = true;
+    const change = changes.update(next);
     clearTimeout(pendingTimeout);
     snapshot = next;
     for (const [id, text] of sentDrafts) {
@@ -508,7 +544,13 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     pending = false;
     feedback.textContent = "";
-    if (microRowId && !next.rows.some((row) => row.id === microRowId)) dismissMicro();
+    if (
+      microRowId &&
+      !next.rows.some(
+        (row) => row.id === microRowId && !isViewedActivityThread(row, next.viewedThread),
+      )
+    )
+      dismissMicro();
     if (change) {
       const count = document.getElementById("summary")!;
       clearTimeout(flashTimer);
@@ -534,9 +576,11 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     render();
   };
-  ipcRenderer.on(Channels.ACTIVITY_SNAPSHOT, (_event, next: DesktopActivitySnapshot) =>
-    receiveSnapshot(next),
-  );
+  let receivedPublication = false;
+  ipcRenderer.on(Channels.ACTIVITY_SNAPSHOT, (_event, next: DesktopActivitySnapshot) => {
+    receivedPublication = true;
+    receiveSnapshot(next);
+  });
   ipcRenderer.on(Channels.ACTIVITY_CAMERA_HEIGHT, (_event, height: unknown) => {
     if (typeof height !== "number" || !Number.isFinite(height) || height < 0 || height > 80) return;
     document.documentElement.style.setProperty("--camera-height", `${height}px`);
@@ -549,6 +593,6 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   ipcRenderer.on(Channels.ACTIVITY_MODE, (_event, next: ActivityMode) => setMode(next));
   void ipcRenderer.invoke(Channels.ACTIVITY_READ).then((next: DesktopActivitySnapshot) => {
-    receiveSnapshot(next);
+    if (!receivedPublication) receiveSnapshot(next);
   });
 });

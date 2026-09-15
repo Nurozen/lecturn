@@ -1,5 +1,10 @@
+import { isViewedActivityThread } from "./interaction.ts";
 // @effect-diagnostics globalDate:off -- The native UI compares client intent timestamps; tests inject its clock.
-import type { DesktopActivityRow, ActivityVisualState } from "@lecturn/contracts";
+import type {
+  DesktopActivityRow,
+  DesktopActivitySnapshot,
+  ActivityVisualState,
+} from "@lecturn/contracts";
 import {
   activityVisualPresentation,
   activityVisualState,
@@ -27,7 +32,7 @@ const identity = (row: DesktopActivityRow) =>
     row.id,
     row.environmentId,
     row.projectId,
-    row.threadId ?? null,
+    row.watchId ? null : (row.threadId ?? null),
     row.watchId ?? null,
   ]);
 const compact = (value: string) => value.replace(/\s+/g, " ").trim().slice(0, 120);
@@ -137,7 +142,11 @@ export class ActivityChangeTracker {
     NonNullable<DesktopActivityRow["userAction"]>
   >();
 
-  update(rows: readonly DesktopActivityRow[], now = Date.now()): ActivityChange | undefined {
+  update(
+    rows: readonly DesktopActivityRow[],
+    now = Date.now(),
+    suppressedRows: ReadonlySet<string> = new Set(),
+  ): ActivityChange | undefined {
     const presentOrigins = new Set(rows.map(promptOrigin).filter((origin) => origin !== null));
     const intentOrigins = new Set(rows.filter((row) => row.userAction).map(promptOrigin));
     // The producer removes a failed command's intent; do not let that failed
@@ -186,7 +195,7 @@ export class ActivityChangeTracker {
       this.awaitingStart.delete(oldest);
     }
     const previousByIdentity = new Map(this.previous?.map((row) => [identity(row), row]));
-    const suppress = new Set<string>();
+    const suppress = new Set(suppressedRows);
     const consumed = new Set<string>();
     const consumedIntents = new Set<string>();
     const intentMatches = (
@@ -271,5 +280,38 @@ export class ActivityChangeTracker {
     for (const row of rows) if (!transient(row)) this.stableStates.set(identity(row), stateOf(row));
     this.previous = rows;
     return result;
+  }
+}
+
+/** Restored/cached activity is visible immediately, but only subsequent live changes alert. */
+export class ActivitySnapshotChangeTracker {
+  private readonly environments = new Map<string, ActivityChangeTracker>();
+
+  update(snapshot: DesktopActivitySnapshot): ActivityChange | undefined {
+    const ready = new Set(
+      snapshot.readyEnvironmentIds ?? snapshot.rows.map((row) => row.environmentId),
+    );
+    for (const id of this.environments.keys()) {
+      if (!ready.has(id)) this.environments.delete(id);
+    }
+    const changes: ActivityChange[] = [];
+    for (const id of ready) {
+      let tracker = this.environments.get(id);
+      if (!tracker) {
+        tracker = new ActivityChangeTracker();
+        this.environments.set(id, tracker);
+      }
+      const rows = snapshot.rows.filter((row) => row.environmentId === id);
+      const suppressed = new Set(
+        rows
+          .filter((row) => isViewedActivityThread(row, snapshot.viewedThread))
+          .map((row) => row.id),
+      );
+      const change = tracker.update(rows, Date.now(), suppressed);
+      if (change) changes.push(change);
+    }
+    return changes.toSorted(
+      (a, b) => priority[a.state] - priority[b.state] || a.rowId.localeCompare(b.rowId),
+    )[0];
   }
 }

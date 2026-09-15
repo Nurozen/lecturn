@@ -62,6 +62,9 @@ vi.mock("electron", async () => {
     setBounds(bounds: typeof this.bounds) {
       this.bounds = bounds;
     }
+    isFocused() {
+      return this.focused;
+    }
     isVisible() {
       return this.visible;
     }
@@ -369,5 +372,80 @@ describe("Mac activity lifecycle", () => {
     expect(panel.visible).toBe(true);
     expect(state.windows).toHaveLength(2);
     dispose();
+  });
+});
+
+describe("foreground chat previews", () => {
+  it("keeps a current-chat-only notch collapsed on hover but allows manual expansion", () => {
+    const main = new BrowserWindow();
+    const dispose = installDesktopActivity(main, options);
+    const panel = state.windows[1]!;
+    panel.emit("ready-to-show");
+    main.show();
+    main.focus();
+    invoke(Channels.ACTIVITY_PUBLISH, eventFor(main), {
+      summary: "Activity",
+      viewedThread: { environmentId: "env", threadId: "thread" },
+      rows: [
+        {
+          id: "current",
+          environmentId: "env",
+          projectId: "project",
+          threadId: "thread",
+          title: "Current chat",
+          subtitle: "",
+          status: "Working",
+          actions: [],
+        },
+      ],
+    });
+    const panelEvent = {
+      sender: panel.webContents,
+      senderFrame: panel.webContents.mainFrame,
+    } as unknown as IpcMainInvokeEvent;
+    invoke(Channels.ACTIVITY_MODE, panelEvent, "hover-enter");
+    expect(panel.bounds.height).toBe(38);
+    invoke(Channels.ACTIVITY_MODE, panelEvent, "expand");
+    expect(panel.bounds.height).toBe(588);
+    dispose();
+  });
+  it("publishes the viewed chat only while the main application is visible and focused", () => {
+    const main = new BrowserWindow();
+    const dispose = installDesktopActivity(main, options);
+    const panel = state.windows[1]!;
+    panel.emit("ready-to-show");
+    const current = { environmentId: "env", threadId: "thread" };
+    invoke(Channels.ACTIVITY_PUBLISH, eventFor(main), {
+      summary: "Activity",
+      rows: [],
+      viewedThread: current,
+    });
+    expect(panel.webContents.send).toHaveBeenLastCalledWith(Channels.ACTIVITY_SNAPSHOT, {
+      summary: "Activity",
+      rows: [],
+    });
+    main.show();
+    main.focus();
+    main.emit("focus");
+    expect(panel.webContents.send).toHaveBeenLastCalledWith(
+      Channels.ACTIVITY_SNAPSHOT,
+      expect.objectContaining({ viewedThread: current }),
+    );
+    state.windows[0]!.focused = false;
+    main.emit("blur");
+    expect(panel.webContents.send).toHaveBeenLastCalledWith(Channels.ACTIVITY_SNAPSHOT, {
+      summary: "Activity",
+      rows: [],
+    });
+    main.focus();
+    main.hide();
+    main.emit("hide");
+    expect(panel.webContents.send).toHaveBeenLastCalledWith(Channels.ACTIVITY_SNAPSHOT, {
+      summary: "Activity",
+      rows: [],
+    });
+    dispose();
+    expect(main.listenerCount("focus")).toBe(0);
+    expect(main.listenerCount("blur")).toBe(0);
   });
 });

@@ -23,7 +23,7 @@ import {
   hasNotchSpace,
   selectActivityDisplay,
 } from "./geometry.ts";
-import { nextActivityMode, type ActivityMode } from "./interaction.ts";
+import { nextActivityMode, isViewedActivityThread, type ActivityMode } from "./interaction.ts";
 import { isPublishedActivityAction, isTrustedActivitySender } from "./policy.ts";
 
 const decodeSnapshot = Schema.decodeUnknownSync(DesktopActivitySnapshotSchema);
@@ -68,7 +68,11 @@ export function installDesktopActivity(
   let disposed = false;
   let manuallyShown = false;
   let preserveNextPanelBlur = false;
-  let snapshot: DesktopActivitySnapshot = { summary: "Lecturn activity", rows: [] };
+  let snapshot: DesktopActivitySnapshot = {
+    summary: "Lecturn activity",
+    rows: [],
+    readyEnvironmentIds: [],
+  };
   const panelUrl = `data:text/html;charset=utf-8,${encodeURIComponent(activityDocument)}`;
   const trayImage = nativeImage.createFromBuffer(Buffer.from(activityTrayMark, "base64"), {
     scaleFactor: 2,
@@ -91,9 +95,14 @@ export function installDesktopActivity(
     )
       throw new Error("Untrusted activity sender.");
   };
+  const snapshotForPanel = (): DesktopActivitySnapshot => {
+    if (!main.isDestroyed() && main.isVisible() && main.isFocused()) return snapshot;
+    const { viewedThread: _viewedThread, ...backgroundSnapshot } = snapshot;
+    return backgroundSnapshot;
+  };
   const sendSnapshot = () => {
     if (!disposed && ready && panel && !panel.isDestroyed())
-      panel.webContents.send(Channels.ACTIVITY_SNAPSHOT, snapshot);
+      panel.webContents.send(Channels.ACTIVITY_SNAPSHOT, snapshotForPanel());
   };
   const place = () => {
     if (disposed || main.isDestroyed()) return;
@@ -286,7 +295,7 @@ export function installDesktopActivity(
       Channels.ACTIVITY_READ,
       (event) => {
         trusted(event, panel, panelUrl);
-        return snapshot;
+        return snapshotForPanel();
       },
     ],
     [
@@ -305,6 +314,13 @@ export function installDesktopActivity(
       (event, value) => {
         trusted(event, panel, panelUrl);
         const interaction = decodeInteraction(value);
+        const current = snapshotForPanel();
+        if (
+          interaction === "hover-enter" &&
+          current.rows.length &&
+          current.rows.every((row) => isViewedActivityThread(row, current.viewedThread))
+        )
+          return;
         changeMode(nextActivityMode(mode, interaction));
         if (interaction === "micro-interact" && mode === "micro" && panel && !panel.isDestroyed()) {
           panel.setFocusable(true);
@@ -332,7 +348,7 @@ export function installDesktopActivity(
   for (const [channel, handler] of handlers) ipcMain.handle(channel, handler);
   const clear = () => {
     if (disposed) return;
-    snapshot = { summary: "Lecturn is reconnecting…", rows: [] };
+    snapshot = { summary: "Lecturn is reconnecting…", rows: [], readyEnvironmentIds: [] };
     sendSnapshot();
   };
   mainContents.on("did-start-loading", clear);
@@ -341,6 +357,9 @@ export function installDesktopActivity(
   screen.on("display-removed", place);
   screen.on("display-metrics-changed", place);
   main.on("move", place);
+  main.on("focus", sendSnapshot);
+  main.on("blur", sendSnapshot);
+  main.on("hide", sendSnapshot);
   updateMenu();
   place();
   return () => {
@@ -351,6 +370,9 @@ export function installDesktopActivity(
     screen.removeListener("display-removed", place);
     screen.removeListener("display-metrics-changed", place);
     main.removeListener("move", place);
+    main.removeListener("focus", sendSnapshot);
+    main.removeListener("blur", sendSnapshot);
+    main.removeListener("hide", sendSnapshot);
     mainContents.removeListener("did-start-loading", clear);
     mainContents.removeListener("render-process-gone", clear);
     const closingPanel = panel;

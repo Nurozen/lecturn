@@ -1,6 +1,10 @@
 import type { DesktopActivityRow } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
-import { activityChanges, ActivityChangeTracker } from "./changes.ts";
+import {
+  activityChanges,
+  ActivityChangeTracker,
+  ActivitySnapshotChangeTracker,
+} from "./changes.ts";
 
 const row = (patch: Partial<DesktopActivityRow> = {}): DesktopActivityRow => ({
   id: "thread-1",
@@ -17,6 +21,21 @@ const pr = (checks: DesktopActivityRow["checks"], patch: Partial<DesktopActivity
   row({ id: "pr-1", watchId: "watch-1", status: "Watching", checks: checks ?? [], ...patch });
 
 describe("semantic activity changes", () => {
+  it("does not announce an unchanged PR when its managing thread is discovered or reassigned", () => {
+    const checks = [{ name: "Tests", status: "pending" }] as const;
+    const { threadId: _threadId, ...restored } = pr(checks);
+    const associated = pr(checks, { threadId: "manager" });
+    expect(activityChanges([restored], [associated])).toBeUndefined();
+    expect(
+      activityChanges([associated], [pr(checks, { threadId: "new-manager" })]),
+    ).toBeUndefined();
+    expect(
+      activityChanges(
+        [restored],
+        [pr([{ name: "Tests", status: "failure" }], { threadId: "manager" })],
+      ),
+    ).toMatchObject({ state: "failed" });
+  });
   it("never alerts on initial baseline but alerts on new active work after an observed empty panel", () => {
     const running = row({ status: "Working" });
     expect(activityChanges(undefined, [running])).toBeUndefined();
@@ -299,4 +318,114 @@ it("clears a cancelled producer intent instead of muting unrelated later work", 
   tracker.update([row({ userAction: { id: "failed-submit", kind: "start", at: 1_000 } })], 1_000);
   tracker.update([row()], 1_100);
   expect(tracker.update([row({ status: "Working" })], 1_200)).toMatchObject({ state: "active" });
+});
+
+describe("activity startup and reconnection", () => {
+  it("silently restores cached threads and late PR data, then alerts on live work", () => {
+    const tracker = new ActivitySnapshotChangeTracker();
+    const publish = (rows: DesktopActivityRow[], readyEnvironmentIds: string[]) =>
+      tracker.update({ summary: "Activity", rows, readyEnvironmentIds });
+    expect(publish([], [])).toBeUndefined();
+    expect(publish([row({ status: "Offline" })], [])).toBeUndefined();
+    expect(publish([row({ status: "Working" })], [])).toBeUndefined();
+    const checks = pr([{ name: "Test", status: "pending" }]);
+    expect(publish([row({ status: "Working" }), checks], ["local"])).toBeUndefined();
+    expect(publish([row({ status: "Done" }), checks], ["local"])).toMatchObject({
+      state: "complete",
+    });
+    expect(
+      publish([row({ status: "Done" }), pr([{ name: "Test", status: "failure" }])], ["local"]),
+    ).toMatchObject({ state: "failed" });
+  });
+  it("rebaselines after reload and reconnect without muting other environments", () => {
+    const tracker = new ActivitySnapshotChangeTracker();
+    const remote = row({ id: "remote-thread", environmentId: "remote", status: "Working" });
+    tracker.update({
+      summary: "",
+      rows: [row(), remote],
+      readyEnvironmentIds: ["local", "remote"],
+    });
+    expect(
+      tracker.update({
+        summary: "",
+        rows: [row({ status: "Needs input" }), { ...remote, status: "Offline" }],
+        readyEnvironmentIds: ["local"],
+      }),
+    ).toMatchObject({ state: "attention" });
+    expect(
+      tracker.update({
+        summary: "",
+        rows: [row({ status: "Needs input" }), { ...remote, status: "Done" }],
+        readyEnvironmentIds: ["local", "remote"],
+      }),
+    ).toBeUndefined();
+    tracker.update({ summary: "Reconnecting", rows: [], readyEnvironmentIds: [] });
+    expect(
+      tracker.update({ summary: "", rows: [remote], readyEnvironmentIds: ["remote"] }),
+    ).toBeUndefined();
+    expect(
+      tracker.update({
+        summary: "",
+        rows: [{ ...remote, status: "Needs input" }],
+        readyEnvironmentIds: ["remote"],
+      }),
+    ).toMatchObject({ state: "attention" });
+  });
+  it("alerts on new work after an authoritative empty startup", () => {
+    const tracker = new ActivitySnapshotChangeTracker();
+    tracker.update({ summary: "", rows: [], readyEnvironmentIds: ["local"] });
+    expect(
+      tracker.update({
+        summary: "",
+        rows: [row({ status: "Working" })],
+        readyEnvironmentIds: ["local"],
+      }),
+    ).toMatchObject({ state: "active" });
+  });
+});
+
+describe("foreground chat activity", () => {
+  it("silently consumes viewed-thread changes without replaying them when the app loses focus", () => {
+    const tracker = new ActivitySnapshotChangeTracker();
+    const viewedThread = { environmentId: "local", threadId: "thread" };
+    tracker.update({ summary: "Activity", rows: [row()], viewedThread });
+    expect(
+      tracker.update({ summary: "Activity", rows: [row({ status: "Working" })], viewedThread }),
+    ).toBeUndefined();
+    expect(
+      tracker.update({ summary: "Activity", rows: [row({ status: "Working" })] }),
+    ).toBeUndefined();
+    expect(tracker.update({ summary: "Activity", rows: [row({ status: "Done" })] })).toMatchObject({
+      state: "complete",
+    });
+  });
+  it("still announces another conversation when the viewed one changes in the same publication", () => {
+    const tracker = new ActivitySnapshotChangeTracker();
+    const viewedThread = { environmentId: "local", threadId: "thread" };
+    const other = row({ id: "other", threadId: "other" });
+    tracker.update({ summary: "Activity", rows: [row(), other], viewedThread });
+    expect(
+      tracker.update({
+        summary: "Activity",
+        rows: [row({ status: "Needs approval" }), { ...other, status: "Working" }],
+        viewedThread,
+      }),
+    ).toMatchObject({ rowId: "other", state: "active" });
+  });
+  it("retains PR check notifications while their managing conversation is visible", () => {
+    const tracker = new ActivitySnapshotChangeTracker();
+    const viewedThread = { environmentId: "local", threadId: "thread" };
+    tracker.update({
+      summary: "Activity",
+      rows: [pr([{ name: "Tests", status: "pending" }])],
+      viewedThread,
+    });
+    expect(
+      tracker.update({
+        summary: "Activity",
+        rows: [pr([{ name: "Tests", status: "failure" }])],
+        viewedThread,
+      }),
+    ).toMatchObject({ rowId: "pr-1", state: "failed" });
+  });
 });
