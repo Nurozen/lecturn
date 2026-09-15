@@ -218,6 +218,13 @@ export const ServerProvider = Schema.Struct({
   status: ServerProviderState,
   auth: ServerProviderAuth,
   checkedAt: IsoDateTime,
+  discovery: Schema.optional(
+    Schema.Struct({
+      status: Schema.Literals(["detecting", "ready", "timed-out", "error"]),
+      phase: Schema.Literals(["shell", "provider"]),
+      message: Schema.optional(TrimmedNonEmptyString),
+    }),
+  ),
   message: Schema.optional(TrimmedNonEmptyString),
   // Optional for back-compat: every legacy producer omits this field and
   // an absent value is interpreted as `"available"` by consumers (see

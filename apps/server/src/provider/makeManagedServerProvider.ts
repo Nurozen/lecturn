@@ -16,6 +16,7 @@ import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
+import { awaitShellEnvironment, getShellEnvironmentStatus } from "../shellEnvironment.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { applyUsageLimitsUpdate, resolveUsageLimitsAfterProbe } from "./providerUsageLimits.ts";
 import type { ServerProviderShape } from "./Services/ServerProvider.ts";
@@ -45,6 +46,10 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   readonly haveSettingsChanged: (previous: Settings, next: Settings) => boolean;
   readonly initialSnapshot: (settings: Settings) => Effect.Effect<ServerProvider>;
   readonly checkProvider: Effect.Effect<ServerProvider, ServerSettingsError>;
+  readonly discovery?: {
+    readonly waitForShell: boolean;
+    readonly refreshEnvironment: () => void;
+  };
   readonly enrichSnapshot?: (input: {
     readonly settings: Settings;
     readonly snapshot: ServerProvider;
@@ -67,7 +72,20 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     PubSub.shutdown,
   );
   const initialSettings = yield* input.getSettings;
-  const initialSnapshot = yield* input.initialSnapshot(initialSettings);
+  const initial = yield* input.initialSnapshot(initialSettings);
+  const initialSnapshot: ServerProvider =
+    input.discovery && initial.enabled
+      ? {
+          ...initial,
+          discovery: {
+            status: "detecting",
+            phase:
+              input.discovery.waitForShell && getShellEnvironmentStatus() === "pending"
+                ? "shell"
+                : "provider",
+          },
+        }
+      : initial;
   const snapshotStateRef = yield* Ref.make<ProviderSnapshotState>({
     snapshot: initialSnapshot,
     enrichmentGeneration: 0,
@@ -86,7 +104,13 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       }
       // Enrichment derives from the snapshot it was handed; a runtime usage
       // update that landed since must not be reverted by it.
-      const merged = withUsageLimits(nextSnapshot, state.snapshot.usageLimits);
+      const discovery = state.snapshot.discovery;
+      if (discovery?.status === "timed-out" || discovery?.status === "error")
+        return [null, state] as const;
+      const merged = withUsageLimits(
+        discovery && !nextSnapshot.discovery ? { ...nextSnapshot, discovery } : nextSnapshot,
+        state.snapshot.usageLimits,
+      );
       if (Equal.equals(state.snapshot, merged)) {
         return [null, state] as const;
       }
@@ -150,7 +174,83 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       return state.snapshot;
     }
 
-    const probedSnapshot = yield* input.checkProvider;
+    const probe = Effect.gen(function* () {
+      if (!input.discovery) return yield* input.checkProvider;
+      const previous = (yield* Ref.get(snapshotStateRef)).snapshot;
+      if (!previous.enabled) return yield* input.checkProvider;
+      const publishDetection = Effect.fn("publishDetection")(function* (
+        discovery: NonNullable<ServerProvider["discovery"]>,
+      ) {
+        // Routine health checks must not interrupt an already usable provider.
+        if (previous.discovery?.status === "ready") return;
+        const snapshot = yield* Ref.modify(snapshotStateRef, (state) => {
+          const snapshot = { ...state.snapshot, discovery };
+          return [snapshot, { ...state, snapshot }] as const;
+        });
+        yield* PubSub.publish(changesPubSub, snapshot);
+      });
+      const failure = (
+        status: "timed-out" | "error",
+        phase: "shell" | "provider",
+        message: string,
+      ): ServerProvider => ({
+        ...previous,
+        status: "warning",
+        message,
+        discovery: { status, phase, message },
+      });
+      if (input.discovery.waitForShell) {
+        yield* publishDetection({ status: "detecting", phase: "shell" });
+        const shell = yield* Effect.promise(() =>
+          awaitShellEnvironment({
+            retry:
+              previous.discovery?.status === "error" || previous.discovery?.status === "timed-out",
+          }),
+        );
+        if (shell.status !== "ready")
+          return failure(
+            shell.status,
+            "shell",
+            shell.message ??
+              "Loading the shell environment failed. Retry or configure the provider executable path in Settings.",
+          );
+      }
+      input.discovery.refreshEnvironment();
+      yield* publishDetection({ status: "detecting", phase: "provider" });
+      return yield* input.checkProvider.pipe(
+        Effect.map((snapshot): ServerProvider => ({
+          ...snapshot,
+          discovery: {
+            status: snapshot.installed && snapshot.status !== "error" ? "ready" : "error",
+            phase: "provider",
+            ...(snapshot.message ? { message: snapshot.message } : {}),
+          },
+        })),
+        Effect.timeoutOrElse({
+          duration: "15 seconds",
+          orElse: () =>
+            Effect.succeed(
+              failure(
+                "timed-out",
+                "provider",
+                "Provider detection timed out. Retry or configure the executable path in Settings.",
+              ),
+            ),
+        }),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Provider detection failed", cause).pipe(
+            Effect.as(
+              failure(
+                "error",
+                "provider",
+                "Could not detect the provider. Retry or configure its executable path in Settings.",
+              ),
+            ),
+          ),
+        ),
+      );
+    });
+    const probedSnapshot = yield* probe;
     const { snapshot: nextSnapshot, generation: nextGeneration } = yield* Ref.modify(
       snapshotStateRef,
       (state) => {

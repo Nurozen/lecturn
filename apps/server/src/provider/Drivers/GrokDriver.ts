@@ -112,6 +112,11 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<GrokSettings>>({
         maintenanceCapabilities,
+        discovery: {
+          waitForShell: !/[\\/]/.test(effectiveConfig.binaryPath?.trim() ?? ""),
+          refreshEnvironment: () =>
+            Object.assign(processEnv, mergeProviderInstanceEnvironment(environment)),
+        },
         getSettings: snapshotSettings.getSettings,
         streamSettings: snapshotSettings.streamSettings,
         haveSettingsChanged: haveProviderSnapshotSettingsChanged,
