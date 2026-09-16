@@ -1,3 +1,5 @@
+import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
+import { GlassCard } from "../../components/GlassCard";
 import { WatchActivityFrame, WatchCheckSegments } from "./WatchActivityVisuals";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { cardIsVisible } from "./watch-visuals";
@@ -60,7 +62,7 @@ function Action(props: {
       accessibilityLabel={props.accessibilityLabel ?? props.label}
       disabled={props.disabled}
       onPress={props.onPress}
-      className="min-h-11 justify-center rounded-xl border border-border px-3 py-2 disabled:opacity-40"
+      className="min-h-11 justify-center rounded-full border border-border bg-glass-surface px-4 py-2 active:bg-subtle-strong disabled:opacity-40"
     >
       <View className="flex-row items-center gap-2">
         {props.icon ? (
@@ -80,13 +82,13 @@ function Disclosure(props: {
 }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <View className="rounded-2xl border border-border">
+    <GlassCard radius={22}>
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded }}
         accessibilityLabel={`${props.label}${props.summary ? `, ${props.summary}` : ""}`}
         onPress={() => setExpanded((value) => !value)}
-        className="min-h-12 flex-row items-center gap-2.5 px-3 py-3"
+        className="min-h-14 flex-row items-center gap-2.5 px-4 py-3"
       >
         <SymbolView name={props.icon} size={19} tintColorClassName="accent-primary" />
         <Text className="font-lecturn-medium text-foreground">{props.label}</Text>
@@ -99,8 +101,8 @@ function Disclosure(props: {
           tintColorClassName="accent-foreground-muted"
         />
       </Pressable>
-      {expanded ? <View className="gap-3 px-3 pb-3">{props.children}</View> : null}
-    </View>
+      {expanded ? <View className="gap-3 px-4 pb-4">{props.children}</View> : null}
+    </GlassCard>
   );
 }
 
@@ -115,7 +117,7 @@ function StatusCue(props: {
     <View
       accessible
       accessibilityLabel={`${props.label}: ${props.value}`}
-      className="flex-row items-center gap-1.5 rounded-lg border border-border px-2.5 py-2"
+      className="flex-row items-center gap-1.5 rounded-full border border-border-subtle bg-glass-surface px-3 py-2"
     >
       <SymbolView
         name={props.icon}
@@ -172,11 +174,14 @@ export function PullRequestWatchRouteScreen({
   route,
 }: StaticScreenProps<{ environmentId: string; watchId: string }>) {
   return (
-    <PullRequestWatchControls
-      key={`${route.params.environmentId}:${route.params.watchId}`}
-      environmentId={EnvironmentId.make(route.params.environmentId)}
-      watchId={route.params.watchId}
-    />
+    <View className="flex-1 bg-screen">
+      <ArcaneBackdrop />
+      <PullRequestWatchControls
+        key={`${route.params.environmentId}:${route.params.watchId}`}
+        environmentId={EnvironmentId.make(route.params.environmentId)}
+        watchId={route.params.watchId}
+      />
+    </View>
   );
 }
 
@@ -375,8 +380,8 @@ function PullRequestWatchControls({
   return (
     <ScrollView
       contentInsetAdjustmentBehavior="automatic"
-      className="flex-1 bg-screen"
-      contentContainerStyle={{ padding: 20, gap: 16 }}
+      className="flex-1 bg-transparent"
+      contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 32 }}
       keyboardShouldPersistTaps="handled"
       onLayout={({ nativeEvent }) =>
         setViewport((current) => ({ ...current, height: nativeEvent.layout.height }))
@@ -508,6 +513,60 @@ function PullRequestWatchControls({
               </Text>
             </WatchActivityFrame>
           ) : null}
+          {manager ? (
+            <GlassCard className="gap-3 p-4">
+              <View className="flex-row items-center gap-2">
+                <SymbolView
+                  name="square.and.pencil"
+                  size={18}
+                  tintColorClassName="accent-primary"
+                />
+                <Text accessibilityRole="header" className="font-lecturn-medium text-foreground">
+                  Steer
+                </Text>
+                <Text
+                  className="min-w-0 flex-1 text-right text-xs text-foreground-muted"
+                  numberOfLines={1}
+                >
+                  {manager.title}
+                </Text>
+              </View>
+              <Text className="text-foreground-muted">
+                {describeThreadActivity(manager, managerDetail.data?.messages)}
+              </Text>
+              <TextInput
+                accessibilityLabel="Instructions for managing thread"
+                placeholder="What should the agent do next?"
+                multiline
+                value={steer}
+                onChangeText={(value) => {
+                  setSteer(value);
+                  setQueued(false);
+                }}
+                editable={canOperate}
+                className="min-h-24 rounded-2xl border border-border bg-glass-surface p-3 text-foreground"
+              />
+              <Action
+                label="Send"
+                accessibilityLabel={`Queue instructions for ${manager.title}`}
+                icon="arrow.up"
+                disabled={!canOperate || busy || !steer.trim()}
+                onPress={() => {
+                  void sendSteer();
+                }}
+              />
+              {queued ? (
+                <View accessibilityLiveRegion="polite" className="flex-row items-center gap-2">
+                  <SymbolView
+                    name="checkmark.circle"
+                    size={16}
+                    tintColorClassName="accent-primary"
+                  />
+                  <Text className="text-sm text-foreground-muted">Instructions queued</Text>
+                </View>
+              ) : null}
+            </GlassCard>
+          ) : null}
           {watch.error || watch.authorization?.message ? (
             <Text className="text-destructive">{watch.error ?? watch.authorization?.message}</Text>
           ) : null}
@@ -564,7 +623,7 @@ function PullRequestWatchControls({
                   onPress={() => {
                     if (check.url) void tryOpenExternalUrl(check.url, "pull-request");
                   }}
-                  className="min-h-11 flex-row items-center gap-2 rounded-lg bg-subtle px-3 py-2"
+                  className="min-h-12 flex-row items-center gap-2 rounded-2xl border border-border-subtle bg-glass-surface px-3 py-2"
                 >
                   <SymbolView
                     name={checkIcon(check.status)}
@@ -699,39 +758,6 @@ function PullRequestWatchControls({
               Merge when ready sends instructions to the thread named above.
             </Text>
           </Disclosure>
-          {manager ? (
-            <Disclosure
-              label="Steer"
-              icon="square.and.pencil"
-              summary={queued ? "Queued" : manager.title}
-            >
-              <Text className="text-foreground-muted">
-                {describeThreadActivity(manager, managerDetail.data?.messages)}
-              </Text>
-              <TextInput
-                accessibilityLabel="Instructions for managing thread"
-                placeholder="What should the agent do next?"
-                multiline
-                value={steer}
-                onChangeText={(value) => {
-                  setSteer(value);
-                  setQueued(false);
-                }}
-                editable={canOperate}
-                className="min-h-24 rounded-xl border border-border p-3 text-foreground"
-              />
-              <Action
-                label="Send"
-                accessibilityLabel={`Queue instructions for ${manager.title}`}
-                icon="arrow.up"
-                disabled={!canOperate || busy || !steer.trim()}
-                onPress={() => {
-                  void sendSteer();
-                }}
-              />
-              {queued ? <Text className="text-foreground-muted">Instructions queued</Text> : null}
-            </Disclosure>
-          ) : null}
         </>
       ) : null}
     </ScrollView>

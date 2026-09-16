@@ -76,6 +76,7 @@ import Animated, {
   FadeIn,
   FadeInUp,
   LinearTransition,
+  ReduceMotion,
   type SharedValue,
 } from "react-native-reanimated";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
@@ -96,6 +97,7 @@ import {
 } from "../../native/SelectableMarkdownText";
 
 import { AppText as Text } from "../../components/AppText";
+import { GlassCard } from "../../components/GlassCard";
 import { VideoPreviewModal, type VideoPreviewSource } from "../../components/VideoPreviewModal";
 import { VideoAttachmentTile } from "../../components/VideoAttachmentTile";
 import { MediaVideoPlayer } from "../../components/MediaVideoPlayer";
@@ -1433,12 +1435,18 @@ function renderFeedEntry(
       return (
         <Animated.View
           className="mb-5 items-end"
-          {...(enterAnimated ? { entering: FadeInUp.duration(220) } : {})}
+          {...(enterAnimated
+            ? { entering: FadeInUp.duration(220).reduceMotion(ReduceMotion.System) }
+            : {})}
         >
-          <View
-            className="min-w-0 gap-2 rounded-[20px] px-3.5 py-2.5"
+          <GlassCard
+            tone="accent"
+            sheen="subtle"
+            radius={22}
+            className="min-w-0 gap-2 px-4 py-3"
             style={{
               backgroundColor: userBubbleColor,
+              borderBottomRightRadius: 7,
               maxWidth: props.userBubbleMaxWidth,
               ...(hasReviewCommentContext
                 ? { width: props.reviewCommentBubbleWidth }
@@ -1480,7 +1488,7 @@ function renderFeedEntry(
                 <MessageAttachmentUnknown key={attachment.id} name={attachment.name} />
               );
             })}
-          </View>
+          </GlassCard>
           <View className="mt-1 flex-row items-center justify-end gap-1 pr-0.5">
             <Text className="font-lecturn-medium text-xs tabular-nums text-adaptive-neutral-600-400">
               {timestampLabel}
@@ -1506,44 +1514,63 @@ function renderFeedEntry(
     }
 
     const enterAnimated = isFreshTimestamp(message.createdAt);
+    const needsFullWidth =
+      hasWideBlock ||
+      attachments.length > 0 ||
+      renderedText.includes("\n") ||
+      renderedText.includes("![");
     return (
       <Animated.View
-        className={cn(showAssistantMeta ? "mb-5 px-1" : "mb-1 px-1")}
-        {...(enterAnimated ? { entering: FadeIn.duration(220) } : {})}
+        className={cn("items-start", showAssistantMeta ? "mb-5" : "mb-2")}
+        {...(enterAnimated
+          ? { entering: FadeIn.duration(220).reduceMotion(ReduceMotion.System) }
+          : {})}
       >
-        {renderedText.trim().length > 0 ? (
-          <AssistantMarkdownContent
-            markdown={renderedText}
-            markdownStyles={styles}
-            linkHandlers={props.markdownLinkHandlers}
-            onUseArtifactTemplate={props.onUseArtifactTemplate}
-            renderImage={props.renderMarkdownImage}
-            skills={props.skills}
-          />
-        ) : null}
-        {attachments.map((attachment) => {
-          return isImageAttachment(attachment) ? (
-            <MessageAttachmentImage
-              key={attachment.id}
-              environmentId={props.environmentId}
-              attachmentId={attachment.id}
-              name={attachment.name}
-              mimeType={attachment.mimeType}
-              className="mt-1.5 aspect-[1.3] w-full rounded-[18px] bg-adaptive-neutral-200-800"
-              onPressPreview={props.onPressPreview}
+        <GlassCard
+          radius={22}
+          className="min-w-0 px-4 py-3"
+          style={{
+            // Wide code, tables, and attachments keep a definite full-width
+            // layout; short prose reads as a left-aligned conversation bubble.
+            width: needsFullWidth ? "100%" : undefined,
+            maxWidth: needsFullWidth ? "100%" : props.userBubbleMaxWidth,
+            borderBottomLeftRadius: 7,
+          }}
+        >
+          {renderedText.trim().length > 0 ? (
+            <AssistantMarkdownContent
+              markdown={renderedText}
+              markdownStyles={styles}
+              linkHandlers={props.markdownLinkHandlers}
+              onUseArtifactTemplate={props.onUseArtifactTemplate}
+              renderImage={props.renderMarkdownImage}
+              skills={props.skills}
             />
-          ) : isFileAttachment(attachment) ? (
-            <MessageAttachmentFile
-              key={attachment.id}
-              environmentId={props.environmentId}
-              attachment={attachment}
-              onPressPreview={props.onPressPreview}
-              onPressVideo={props.onPressVideo}
-            />
-          ) : (
-            <MessageAttachmentUnknown key={attachment.id} name={attachment.name} />
-          );
-        })}
+          ) : null}
+          {attachments.map((attachment) => {
+            return isImageAttachment(attachment) ? (
+              <MessageAttachmentImage
+                key={attachment.id}
+                environmentId={props.environmentId}
+                attachmentId={attachment.id}
+                name={attachment.name}
+                mimeType={attachment.mimeType}
+                className="mt-1.5 aspect-[1.3] w-full rounded-[18px] bg-adaptive-neutral-200-800"
+                onPressPreview={props.onPressPreview}
+              />
+            ) : isFileAttachment(attachment) ? (
+              <MessageAttachmentFile
+                key={attachment.id}
+                environmentId={props.environmentId}
+                attachment={attachment}
+                onPressPreview={props.onPressPreview}
+                onPressVideo={props.onPressVideo}
+              />
+            ) : (
+              <MessageAttachmentUnknown key={attachment.id} name={attachment.name} />
+            );
+          })}
+        </GlassCard>
         {showAssistantMeta ? (
           <View className="mt-1 flex-row items-center gap-1">
             <CopyTextButton

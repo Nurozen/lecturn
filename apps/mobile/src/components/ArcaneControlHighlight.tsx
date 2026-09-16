@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Animated, StyleSheet } from "react-native";
+import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 import { useReducedMotion } from "react-native-reanimated";
 
 /** One short fade per interaction; no idle animation or animated shadow. */
@@ -11,6 +12,7 @@ export function ArcaneControlHighlight({
   readonly radius?: number;
 }) {
   const reduceMotion = useReducedMotion();
+  const { themeAppearance } = useAppearancePreferences();
   const [opacity] = useState(() => new Animated.Value(0));
   useEffect(() => {
     const animation = Animated.timing(opacity, {
@@ -26,12 +28,22 @@ export function ArcaneControlHighlight({
     <Animated.View
       pointerEvents="none"
       accessible={false}
-      style={[StyleSheet.absoluteFill, styles.thread, { opacity, borderRadius: radius }]}
+      style={[
+        StyleSheet.absoluteFill,
+        styles.thread,
+        { opacity, borderRadius: radius },
+        themeAppearance === "light" ? styles.copper : undefined,
+      ]}
     />
   );
 }
 
 const styles = StyleSheet.create({
+  copper: {
+    borderColor: "#bc7642",
+    backgroundColor: "#bc764212",
+    shadowColor: "#bc7642",
+  },
   thread: {
     borderWidth: 1,
     borderColor: "rgba(229, 180, 88, 0.8)",

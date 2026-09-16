@@ -70,7 +70,7 @@ describe("mobile themes", () => {
     expect(readDefaultMobileThemeVariables("light")["--color-screen"]).toBe("#f4eddf");
     expect(readDefaultMobileThemeVariables("dark")["--color-screen"]).toBe("#061522");
     expect(readDefaultMobileThemeVariables("light")["--color-user-bubble-skill-foreground"]).toBe(
-      "#dfc7a4",
+      "#ffe1b1",
     );
   });
 

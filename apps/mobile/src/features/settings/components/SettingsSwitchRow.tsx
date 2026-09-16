@@ -19,24 +19,27 @@ export function SettingsSwitchRow(props: {
     <View
       className={
         props.disabled
-          ? "flex-row items-center gap-4 p-4 opacity-[0.45]"
-          : "flex-row items-center gap-4 p-4"
+          ? "min-h-14 flex-row items-center gap-3 px-4 py-3 opacity-[0.45]"
+          : "min-h-14 flex-row items-center gap-3 px-4 py-3"
       }
     >
-      <SymbolView
-        name={props.icon}
-        size={22}
-        tintColorClassName={"accent-icon"}
-        type="monochrome"
-        weight="regular"
-      />
+      <View className="h-8 w-8 items-center justify-center rounded-full border border-border-subtle bg-glass-surface">
+        <SymbolView
+          name={props.icon}
+          size={18}
+          tintColorClassName={"accent-primary"}
+          type="monochrome"
+          weight="regular"
+        />
+      </View>
       <View className="min-w-0 flex-1">
-        <Text className="text-lg text-foreground">{props.label}</Text>
+        <Text className="text-base text-foreground">{props.label}</Text>
         {props.subtitle ? (
           <Text className="text-sm text-foreground-muted">{props.subtitle}</Text>
         ) : null}
       </View>
       <ThemedSwitch
+        accessibilityLabel={props.label}
         disabled={props.disabled}
         onValueChange={props.onValueChange}
         value={props.value}

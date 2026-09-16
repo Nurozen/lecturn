@@ -1,3 +1,4 @@
+import { GlassCard } from "../../../components/GlassCard";
 import { SymbolView } from "../../../components/AppSymbol";
 import type { ComponentProps } from "react";
 import { Pressable, View } from "react-native";
@@ -23,13 +24,14 @@ export function SheetActionButton(props: {
 
   return (
     <Pressable
+      accessibilityRole="button"
       className={cn(
-        "min-h-[48px] flex-1 flex-row items-center justify-center gap-2 rounded-[18px] px-4 py-3 disabled:opacity-[0.45]",
+        "min-h-[48px] flex-1 flex-row items-center justify-center gap-2 rounded-full px-4 py-3 active:opacity-70 disabled:opacity-[0.45]",
         tone === "primary"
           ? "bg-primary"
           : tone === "danger"
             ? "border border-danger-border bg-danger"
-            : "border border-secondary-border bg-secondary",
+            : "border border-border bg-glass-surface",
       )}
       disabled={props.disabled}
       onPress={props.onPress}
@@ -42,7 +44,7 @@ export function SheetActionButton(props: {
       />
       <Text
         className={cn(
-          "text-xs font-lecturn-bold tracking-[0.9px] uppercase",
+          "text-sm font-lecturn-medium",
           tone === "primary"
             ? "text-primary-foreground"
             : tone === "danger"
@@ -58,14 +60,14 @@ export function SheetActionButton(props: {
 
 export function MetaCard(props: { readonly label: string; readonly value: string }) {
   return (
-    <View className="rounded-[18px] border border-border bg-card px-4 py-3">
+    <GlassCard className="gap-1 px-4 py-3">
       <Text className="text-foreground-muted text-2xs font-lecturn-bold tracking-[0.9px] uppercase">
         {props.label}
       </Text>
       <Text selectable className="text-foreground text-sm font-medium" numberOfLines={1}>
         {props.value}
       </Text>
-    </View>
+    </GlassCard>
   );
 }
 
@@ -78,11 +80,12 @@ export function SheetListRow(props: {
 }) {
   return (
     <Pressable
-      className="flex-row items-center gap-3 px-1 py-3 disabled:opacity-[0.45]"
+      accessibilityRole="button"
+      className="min-h-14 flex-row items-center gap-3 rounded-2xl px-1 py-3 active:opacity-70 disabled:opacity-[0.45]"
       disabled={props.disabled}
       onPress={props.onPress}
     >
-      <View className="bg-subtle h-9 w-9 items-center justify-center rounded-full">
+      <View className="h-10 w-10 items-center justify-center rounded-full border border-border-subtle bg-glass-surface">
         <SymbolView
           name={props.icon}
           size={16}

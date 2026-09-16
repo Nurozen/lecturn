@@ -1,3 +1,4 @@
+import { GlassCard } from "../../components/GlassCard";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -39,10 +40,10 @@ import {
 import { ThreadSearchMatchExcerpt } from "./thread-search-match";
 
 /**
- * Thread List v2 renders one flat native list: rich edge-to-edge rows for
+ * Thread List v2 renders one virtualized native list: frosted cards for
  * active work and a receded settled tail, all with native swipe and
  * long-press actions. State reads through status labels and an active
- * thread border rather than card fills.
+ * thread border, with compact settled and snoozed shelves.
  */
 
 const MONO_FONT = Platform.select({
@@ -91,7 +92,7 @@ const LEGACY_MENU_ACTIONS: MenuAction[] = [
 ];
 
 /** Rounded-row radius shared with the v1 sidebar rows. */
-const SIDEBAR_V2_ROW_RADIUS = 12;
+const SIDEBAR_V2_ROW_RADIUS = 22;
 
 /** Section label + rule: the only structure in an otherwise flat list. */
 export const ThreadListV2SectionDivider = memo(function ThreadListV2SectionDivider(props: {
@@ -130,25 +131,24 @@ export const ThreadListV2SnoozedShelfHeader = memo(function ThreadListV2SnoozedS
       accessibilityLabel={props.count === 1 ? "1 snoozed thread" : `${props.count} snoozed threads`}
       accessibilityRole="button"
       accessibilityState={{ disabled: props.disabled, expanded: props.expanded }}
-      className={cn(
-        "mb-1.5 mt-4 flex-row items-center gap-2.5",
-        props.pane === "sidebar" ? "px-3" : "px-5",
-      )}
+      className={cn("mb-2 mt-3", props.pane === "sidebar" ? "mx-0" : "mx-[14px]")}
       disabled={props.disabled}
       onPress={props.onToggle}
       style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
     >
-      <Text className="text-xs font-lecturn-medium text-adaptive-blue-600-400">
-        {props.expanded ? "Snoozed" : `Snoozed (${props.count})`}
-      </Text>
-      <View className="h-px flex-1 bg-adaptive-blue-500-a20-blue-400-a15" />
-      <SymbolView
-        name="chevron.down"
-        size={10}
-        tintColor={colorScheme === "dark" ? SNOOZE_ACCENT_DARK : SNOOZE_ACCENT_LIGHT}
-        type="monochrome"
-        style={{ transform: [{ rotate: props.expanded ? "180deg" : "0deg" }] }}
-      />
+      <GlassCard radius={22} className="min-h-[44px] flex-row items-center gap-2.5 px-4 py-2">
+        <Text className="text-xs font-lecturn-medium text-adaptive-blue-600-400">
+          {props.expanded ? "Snoozed" : `Snoozed (${props.count})`}
+        </Text>
+        <View className="h-px flex-1 bg-adaptive-blue-500-a20-blue-400-a15" />
+        <SymbolView
+          name="chevron.down"
+          size={10}
+          tintColor={colorScheme === "dark" ? SNOOZE_ACCENT_DARK : SNOOZE_ACCENT_LIGHT}
+          type="monochrome"
+          style={{ transform: [{ rotate: props.expanded ? "180deg" : "0deg" }] }}
+        />
+      </GlassCard>
     </Pressable>
   );
 });
@@ -168,25 +168,24 @@ export const ThreadListV2SettledShelfHeader = memo(function ThreadListV2SettledS
       accessibilityLabel={props.count === 1 ? "1 settled thread" : `${props.count} settled threads`}
       accessibilityRole="button"
       accessibilityState={{ disabled: props.disabled, expanded: props.expanded }}
-      className={cn(
-        "mb-1.5 mt-4 flex-row items-center gap-2.5",
-        props.pane === "sidebar" ? "px-3" : "px-5",
-      )}
+      className={cn("mb-2 mt-3", props.pane === "sidebar" ? "mx-0" : "mx-[14px]")}
       disabled={props.disabled}
       onPress={props.onToggle}
       style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
     >
-      <Text style={{ color: "#a2a6ab" }} className="text-xs font-lecturn-medium">
-        {props.expanded ? "Settled" : `Settled (${props.count})`}
-      </Text>
-      <View className="h-px flex-1 bg-border" />
-      <SymbolView
-        name="chevron.down"
-        size={10}
-        tintColorClassName={"accent-foreground-muted"}
-        type="monochrome"
-        style={{ transform: [{ rotate: props.expanded ? "180deg" : "0deg" }] }}
-      />
+      <GlassCard radius={22} className="min-h-[44px] flex-row items-center gap-2.5 px-4 py-2">
+        <Text className="text-xs font-lecturn-medium text-foreground-muted">
+          {props.expanded ? "Settled" : `Settled (${props.count})`}
+        </Text>
+        <View className="h-px flex-1 bg-border" />
+        <SymbolView
+          name="chevron.down"
+          size={10}
+          tintColorClassName={"accent-foreground-muted"}
+          type="monochrome"
+          style={{ transform: [{ rotate: props.expanded ? "180deg" : "0deg" }] }}
+        />
+      </GlassCard>
     </Pressable>
   );
 });
@@ -295,28 +294,19 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
           accessibilityHint="Opens the queued task for editing"
           accessibilityLabel={pendingTask.title}
           accessibilityRole="button"
-          className={sidebarPane ? "bg-drawer active:bg-subtle" : undefined}
           onPress={() => onSelectPendingTask(pendingTask)}
-          style={
-            sidebarPane
-              ? {
-                  borderRadius: SIDEBAR_V2_ROW_RADIUS,
-                  paddingHorizontal: 12,
-                  paddingVertical: 10,
-                }
-              : ({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })
-          }
+          style={({ pressed }) => ({
+            opacity: pressed ? 0.7 : 1,
+            marginHorizontal: sidebarPane ? 0 : 14,
+            marginBottom: 8,
+          })}
         >
-          {sidebarPane ? (
-            rowContent
-          ) : (
-            <View className="bg-screen">
-              <View className="px-5 py-2.5">{rowContent}</View>
-              {props.showTrailingDivider !== false ? (
-                <View className="ml-5 h-px bg-border-subtle" />
-              ) : null}
-            </View>
-          )}
+          <GlassCard
+            radius={SIDEBAR_V2_ROW_RADIUS}
+            style={{ paddingHorizontal: sidebarPane ? 12 : 16, paddingVertical: 14 }}
+          >
+            {rowContent}
+          </GlassCard>
         </Pressable>
       </ControlPillMenu>
     </>
@@ -347,11 +337,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   /** Drawn after the label so the machine reads at a glance; ignored while
       the label is null. */
   readonly environmentMachine?: EnvironmentMachineKind;
-  /** Hosting surface. "screen" (default) renders the compact Home idiom:
-      flat edge-to-edge rows on the screen background with inset hairlines.
-      "sidebar" renders the iPad split-view idiom: rounded rows blending
-      into the drawer surface, selection filled with the accent color —
-      matching the v1 sidebar rows. */
+  /** Hosting surface controls margins and selection; both use the same frosted cards. */
   readonly pane?: "screen" | "sidebar";
   /** Keeps row hairlines inside a section; section headers draw their own rule. */
   readonly showTrailingDivider?: boolean;
@@ -436,20 +422,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
 
   const theme = useUniwindTheme();
   const screenColor = theme["--color-screen"];
-  const drawerColor = theme["--color-drawer"];
-  const pressedBackgroundColor = theme["--color-subtle"];
-  const selectedBackgroundColor = theme["--color-user-bubble"];
+  const selectedBackgroundColor = theme["--color-card"];
   const sidebarPane = props.pane === "sidebar";
   const selected = props.selected === true;
-  // The provider badge's border blends into the row's own surface, which
-  // differs by pane and (for the sidebar pane) selection: the sidebar row
-  // background becomes the selected fill or the drawer surface, while the
-  // flat "screen" pane rows always sit on the screen background.
-  const providerIconSurfaceColor = sidebarPane
-    ? selected
-      ? selectedBackgroundColor
-      : drawerColor
-    : screenColor;
+  // Badges use the card material on both phone and sidebar surfaces.
+  const providerIconSurfaceColor = selectedBackgroundColor;
 
   const status = resolveThreadListV2Status(thread);
   const statusLabel = STATUS_LABEL_BY_STATUS[status];
@@ -746,10 +723,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           />
         ) : null}
         <Text
-          className={cn(
-            "flex-1 text-sm font-lecturn-medium",
-            selected ? "text-user-bubble-foreground-muted" : "text-foreground-muted",
-          )}
+          className="flex-1 text-sm font-lecturn-medium text-foreground-muted"
           numberOfLines={1}
         >
           {props.nested ? thread.title : (props.projectTitle ?? props.project?.title ?? "")}
@@ -766,7 +740,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           className={cn(
             "text-xs tabular-nums",
             selected
-              ? "text-user-bubble-foreground"
+              ? "text-foreground"
               : (visibleStatusLabel?.className ?? "text-foreground-tertiary"),
           )}
         >
@@ -774,23 +748,13 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         </Text>
       </View>
       {!props.nested ? (
-        <Text
-          className={cn(
-            "mt-1 text-base font-lecturn-medium",
-            selected ? "text-user-bubble-foreground" : "text-foreground",
-          )}
-          numberOfLines={2}
-        >
+        <Text className="mt-1 text-base font-lecturn-medium text-foreground" numberOfLines={2}>
           {thread.title}
         </Text>
       ) : null}
       {props.searchMatch ? (
         <View className="mt-1">
-          <ThreadSearchMatchExcerpt
-            match={props.searchMatch}
-            query={props.searchQuery ?? ""}
-            selected={selected}
-          />
+          <ThreadSearchMatchExcerpt match={props.searchMatch} query={props.searchQuery ?? ""} />
         </View>
       ) : null}
       <View className="mt-1 flex-row items-center gap-2">
@@ -798,7 +762,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           <Text
             className={cn(
               "flex-1 text-xs",
-              selected ? "text-user-bubble-foreground-muted" : "text-adaptive-red-600-a80-400-a80",
+              selected ? "text-foreground-muted" : "text-adaptive-red-600-a80-400-a80",
             )}
             numberOfLines={1}
           >
@@ -812,21 +776,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
              truncation), and the wrapper takes the slack so the trailers
              stay pinned right. */
           <View className="min-w-0 flex-1 flex-row items-center gap-1">
-            <Text
-              className={cn(
-                "shrink text-xs",
-                selected ? "text-user-bubble-foreground-muted" : "text-foreground-muted",
-              )}
-              numberOfLines={1}
-            >
+            <Text className="shrink text-xs text-foreground-muted" numberOfLines={1}>
               {thread.branch ? (
-                <Text
-                  className={cn(
-                    "text-xs",
-                    selected ? "text-user-bubble-foreground-muted" : "text-foreground-muted",
-                  )}
-                  style={{ fontFamily: MONO_FONT }}
-                >
+                <Text className="text-xs text-foreground-muted" style={{ fontFamily: MONO_FONT }}>
                   {thread.branch}
                 </Text>
               ) : null}
@@ -835,7 +787,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                 <Text
                   className={cn(
                     "text-xs",
-                    selected ? "text-user-bubble-foreground-muted" : "text-foreground-tertiary",
+                    selected ? "text-foreground-muted" : "text-foreground-tertiary",
                   )}
                 >
                   {props.environmentLabel}
@@ -847,7 +799,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                 kind={props.environmentMachine}
                 size={11}
                 tintColorClassName={
-                  selected ? "accent-user-bubble-foreground-muted" : "accent-foreground-tertiary"
+                  selected ? "accent-foreground-muted" : "accent-foreground-tertiary"
                 }
               />
             ) : null}
@@ -858,7 +810,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         {pr ? (
           <Text
             accessibilityLabel={pr.accessibilityLabel}
-            className={cn("text-xs", selected ? "text-user-bubble-foreground" : pr.textClassName)}
+            className={cn("text-xs", selected ? "text-foreground" : pr.textClassName)}
             style={{ fontFamily: MONO_FONT }}
           >
             #{pr.label}
@@ -895,37 +847,22 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           close();
           onSelectThread(thread);
         }}
-        style={
-          sidebarPane
-            ? ({ pressed }) => ({
-                backgroundColor: selected
-                  ? selectedBackgroundColor
-                  : pressed
-                    ? pressedBackgroundColor
-                    : drawerColor,
-                borderRadius: SIDEBAR_V2_ROW_RADIUS,
-                paddingHorizontal: 12,
-                paddingVertical: 10,
-              })
-            : ({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })
-        }
+        style={({ pressed }) => ({
+          backgroundColor: selected ? selectedBackgroundColor : screenColor,
+          borderRadius: SIDEBAR_V2_ROW_RADIUS,
+          opacity: pressed ? 0.7 : 1,
+        })}
       >
-        {sidebarPane ? (
-          cardContent
-        ) : (
-          /* The opaque screen background keeps swipe actions behind the
-             row. Draw the activity border last so this surface cannot
-             cover its highlight. */
-          <View className="bg-screen">
-            <View className="px-5 py-2.5">{cardContent}</View>
-            {props.showTrailingDivider !== false ? (
-              <View className="ml-5 h-px bg-border-subtle" />
-            ) : null}
-          </View>
-        )}
-        {status === "working" ? (
-          <ActiveThreadBorder visible={visible} radius={sidebarPane ? SIDEBAR_V2_ROW_RADIUS : 0} />
-        ) : null}
+        <GlassCard
+          tone={selected ? "accent" : "default"}
+          radius={SIDEBAR_V2_ROW_RADIUS}
+          style={{ paddingHorizontal: sidebarPane ? 12 : 16, paddingVertical: 14 }}
+        >
+          {cardContent}
+          {status === "working" ? (
+            <ActiveThreadBorder visible={visible} radius={SIDEBAR_V2_ROW_RADIUS} />
+          ) : null}
+        </GlassCard>
       </Pressable>
     ) : (
       <Pressable
@@ -935,83 +872,79 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         }
         accessibilityRole="button"
         accessibilityState={{ selected }}
-        className={sidebarPane ? undefined : "bg-screen"}
         onPress={() => {
           close();
           onSelectThread(thread);
         }}
-        style={
-          sidebarPane
-            ? ({ pressed }) => ({
-                backgroundColor: selected
-                  ? selectedBackgroundColor
-                  : pressed
-                    ? pressedBackgroundColor
-                    : drawerColor,
-                borderRadius: SIDEBAR_V2_ROW_RADIUS,
-              })
-            : ({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })
-        }
+        style={({ pressed }) => ({
+          backgroundColor: selected ? selectedBackgroundColor : screenColor,
+          borderRadius: SIDEBAR_V2_ROW_RADIUS,
+          opacity: pressed ? 0.7 : 1,
+        })}
       >
-        {/* Settled history recedes: dimmed favicon + muted title. */}
-        <View
-          className={cn(
-            "min-h-[44px] flex-row items-center gap-2.5 py-2",
-            sidebarPane ? "px-3" : "px-5",
-          )}
-        >
-          <SymbolView
-            name={snoozedRow ? "moon.zzz" : "checkmark.circle"}
-            size={16}
-            tintColor={snoozedRow ? "#d2b678" : "#ff866f"}
-          />
-          <View className="min-w-0 flex-1">
+        <GlassCard tone={selected ? "accent" : "default"} radius={SIDEBAR_V2_ROW_RADIUS}>
+          {/* Settled history recedes: dimmed favicon + muted title. */}
+          <View
+            className={cn(
+              "min-h-[44px] flex-row items-center gap-2.5 py-2",
+              sidebarPane ? "px-3" : "px-5",
+            )}
+          >
+            <SymbolView
+              name={snoozedRow ? "moon.zzz" : "checkmark.circle"}
+              size={16}
+              tintColor={snoozedRow ? "#d2b678" : "#ff866f"}
+            />
+            <View className="min-w-0 flex-1">
+              <Text
+                className={cn("text-base", selected ? "text-foreground" : "text-foreground-muted")}
+                numberOfLines={1}
+              >
+                {thread.title}
+              </Text>
+              {!snoozedRow ? (
+                <Text className="text-foreground-muted" style={{ fontSize: 11 }}>
+                  Settled
+                </Text>
+              ) : null}
+              {props.searchMatch ? (
+                <ThreadSearchMatchExcerpt
+                  match={props.searchMatch}
+                  query={props.searchQuery ?? ""}
+                />
+              ) : null}
+            </View>
             <Text
               className={cn(
-                "text-base",
-                selected ? "text-user-bubble-foreground" : "text-foreground-muted",
+                "text-sm tabular-nums",
+                selected
+                  ? "text-foreground-muted"
+                  : snoozedRow
+                    ? "text-adaptive-blue-600-400"
+                    : "text-foreground-tertiary",
               )}
-              numberOfLines={1}
-              style={!snoozedRow ? { color: "#a2a6ab" } : undefined}
+              style={{ fontFamily: MONO_FONT }}
             >
-              {thread.title}
+              {snoozedRow && props.snoozeWakeLabelText !== undefined
+                ? props.snoozeWakeLabelText
+                : timeLabel}
             </Text>
-            {!snoozedRow ? <Text style={{ color: "#a2a6ab", fontSize: 11 }}>Settled</Text> : null}
-            {props.searchMatch ? (
-              <ThreadSearchMatchExcerpt
-                match={props.searchMatch}
-                query={props.searchQuery ?? ""}
-                selected={selected}
-              />
-            ) : null}
           </View>
-          <Text
-            className={cn(
-              "text-sm tabular-nums",
-              selected
-                ? "text-user-bubble-foreground-muted"
-                : snoozedRow
-                  ? "text-adaptive-blue-600-400"
-                  : "text-foreground-tertiary",
-            )}
-            style={{ fontFamily: MONO_FONT }}
-          >
-            {snoozedRow && props.snoozeWakeLabelText !== undefined
-              ? props.snoozeWakeLabelText
-              : timeLabel}
-          </Text>
-        </View>
+        </GlassCard>
       </Pressable>
     );
 
   return (
     <>
       <ThreadSwipeable
-        backgroundColor={sidebarPane ? drawerColor : screenColor}
+        backgroundColor="transparent"
         compactActions={variant === "slim"}
-        containerStyle={
-          sidebarPane ? { borderRadius: SIDEBAR_V2_ROW_RADIUS, overflow: "hidden" } : undefined
-        }
+        containerStyle={{
+          borderRadius: SIDEBAR_V2_ROW_RADIUS,
+          overflow: "hidden",
+          marginHorizontal: sidebarPane ? 0 : 14,
+          marginBottom: 8,
+        }}
         enableTrackpadSwipe
         // Full swipe commits the advertised lifecycle action (Settle /
         // Un-settle), never the secondary snooze action.

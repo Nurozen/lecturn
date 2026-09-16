@@ -107,7 +107,7 @@ export function ControlPill(props: {
         : "bg-primary"
       : variant === "danger"
         ? "bg-danger"
-        : "bg-subtle",
+        : "border border-border bg-glass-surface",
     props.className,
   );
   const labelClassName = cn(

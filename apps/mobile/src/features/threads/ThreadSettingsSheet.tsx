@@ -35,6 +35,7 @@ import { Alert, Platform, Pressable, ScrollView, TextInput, View } from "react-n
 import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { GlassCard } from "../../components/GlassCard";
 import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text } from "../../components/AppText";
 import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
@@ -123,9 +124,9 @@ function ModelRow(props: {
       disabled={props.option.isUnavailable}
       onPress={props.onPress}
       className={cn(
-        "mx-4 min-h-11 flex-row items-center gap-2 bg-card px-4 py-2 active:bg-subtle",
-        props.isFirst && "rounded-t-2xl",
-        props.isLast ? "rounded-b-2xl" : "border-b border-border-subtle",
+        "mx-4 min-h-12 flex-row items-center gap-3 border-x border-border-subtle bg-glass-surface px-4 py-3 active:bg-subtle-strong",
+        props.isFirst && "rounded-t-[22px] border-t",
+        props.isLast ? "rounded-b-[22px] border-b" : "border-b border-border-subtle",
       )}
     >
       <View className="min-w-0 flex-1">
@@ -234,7 +235,7 @@ function DisclosureRow(props: {
       accessibilityRole="button"
       onPress={props.onPress}
       className={cn(
-        "min-h-11 flex-row items-center gap-2 bg-card px-4 py-2 active:bg-subtle",
+        "min-h-12 flex-row items-center gap-2 px-4 py-3 active:bg-subtle",
         !props.isLast && "border-b border-border-subtle",
       )}
     >
@@ -270,7 +271,7 @@ function ChoiceRow(props: {
       accessibilityState={{ checked: props.selected }}
       onPress={props.onPress}
       className={cn(
-        "min-h-14 flex-row items-center gap-3 bg-card px-4 py-3 active:bg-subtle",
+        "min-h-14 flex-row items-center gap-3 px-4 py-3 active:bg-subtle",
         !props.isLast && "border-b border-border-subtle",
       )}
     >
@@ -302,7 +303,7 @@ function SwitchRow(props: {
   return (
     <View
       className={cn(
-        "min-h-11 flex-row items-center justify-between bg-card px-4 py-1",
+        "min-h-12 flex-row items-center justify-between px-4 py-2",
         !props.isLast && "border-b border-border-subtle",
       )}
     >
@@ -725,12 +726,29 @@ function ThreadSettingsOptionsItem(props: {
       <Text className="px-5 pb-2 pt-2 text-sm font-lecturn-medium text-foreground-muted">
         Options
       </Text>
-      <Animated.View
-        className="mx-4 overflow-hidden rounded-2xl bg-card"
-        layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}
-      >
-        {session.displayedDescriptors.map((descriptor) => {
-          if (descriptor.type === "select") {
+      <Animated.View className="mx-4" layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}>
+        <GlassCard>
+          {session.displayedDescriptors.map((descriptor) => {
+            if (descriptor.type === "select") {
+              return (
+                <Animated.View
+                  key={descriptor.id}
+                  entering={
+                    props.animationsReady ? THREAD_SETTINGS_OPTION_ENTER_TRANSITION : undefined
+                  }
+                  exiting={
+                    props.animationsReady ? THREAD_SETTINGS_OPTION_EXIT_TRANSITION : undefined
+                  }
+                  layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}
+                >
+                  <DisclosureRow
+                    label={descriptor.label}
+                    value={getProviderOptionCurrentLabel(descriptor)}
+                    onPress={() => props.onOpenSubmenu({ kind: "descriptor", id: descriptor.id })}
+                  />
+                </Animated.View>
+              );
+            }
             return (
               <Animated.View
                 key={descriptor.id}
@@ -740,39 +758,25 @@ function ThreadSettingsOptionsItem(props: {
                 exiting={props.animationsReady ? THREAD_SETTINGS_OPTION_EXIT_TRANSITION : undefined}
                 layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}
               >
-                <DisclosureRow
+                <SwitchRow
                   label={descriptor.label}
-                  value={getProviderOptionCurrentLabel(descriptor)}
-                  onPress={() => props.onOpenSubmenu({ kind: "descriptor", id: descriptor.id })}
+                  value={descriptor.currentValue ?? false}
+                  onValueChange={(value) => session.applyOptionChange(descriptor.id, value)}
                 />
               </Animated.View>
             );
-          }
-          return (
-            <Animated.View
-              key={descriptor.id}
-              entering={props.animationsReady ? THREAD_SETTINGS_OPTION_ENTER_TRANSITION : undefined}
-              exiting={props.animationsReady ? THREAD_SETTINGS_OPTION_EXIT_TRANSITION : undefined}
-              layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}
-            >
-              <SwitchRow
-                label={descriptor.label}
-                value={descriptor.currentValue ?? false}
-                onValueChange={(value) => session.applyOptionChange(descriptor.id, value)}
-              />
-            </Animated.View>
-          );
-        })}
-        <Animated.View layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}>
-          <DisclosureRow
-            isLast
-            label="Runtime"
-            value={
-              RUNTIME_MODE_CHOICES.find((choice) => choice.mode === session.runtimeMode)?.label
-            }
-            onPress={() => props.onOpenSubmenu({ kind: "runtime" })}
-          />
-        </Animated.View>
+          })}
+          <Animated.View layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}>
+            <DisclosureRow
+              isLast
+              label="Runtime"
+              value={
+                RUNTIME_MODE_CHOICES.find((choice) => choice.mode === session.runtimeMode)?.label
+              }
+              onPress={() => props.onOpenSubmenu({ kind: "runtime" })}
+            />
+          </Animated.View>
+        </GlassCard>
       </Animated.View>
 
       {Platform.OS !== "ios" && session.hasLegacyModels ? (
@@ -780,14 +784,14 @@ function ThreadSettingsOptionsItem(props: {
           <Text className="px-5 pb-2 pt-7 text-sm font-lecturn-medium text-foreground-muted">
             Catalog
           </Text>
-          <View className="mx-4 overflow-hidden rounded-2xl bg-card">
+          <GlassCard className="mx-4">
             <SwitchRow
               isLast
               label="Legacy models"
               onValueChange={session.setShowLegacy}
               value={session.showLegacy}
             />
-          </View>
+          </GlassCard>
         </>
       ) : null}
     </View>
@@ -905,7 +909,7 @@ function ThreadSettingsMainContent(props: {
                 accessibilityLabel="Find a model"
                 autoCapitalize="none"
                 autoCorrect={false}
-                className="h-11 rounded-xl bg-card px-4 text-base text-foreground"
+                className="h-12 rounded-full border border-border-subtle bg-glass-surface px-4 text-base text-foreground"
                 onChangeText={session.setSearchQuery}
                 placeholder="Find a model"
                 placeholderTextColorClassName="accent-placeholder"
@@ -985,7 +989,7 @@ function ThreadSettingsChoiceContent(props: {
       contentInsetAdjustmentBehavior="automatic"
       showsVerticalScrollIndicator={false}
     >
-      <View className="overflow-hidden rounded-2xl bg-card">
+      <GlassCard>
         {submenuContent.rows.map((row, index) => (
           <ChoiceRow
             key={row.id}
@@ -996,7 +1000,7 @@ function ThreadSettingsChoiceContent(props: {
             onPress={row.onPress}
           />
         ))}
-      </View>
+      </GlassCard>
     </ScrollView>
   );
 }

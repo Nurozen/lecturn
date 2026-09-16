@@ -1,3 +1,4 @@
+import { GlassCard } from "../../../components/GlassCard";
 import { useMobileSagaIndex } from "../../../state/stave";
 import { resolveRepositoryScope } from "@lecturn/client-runtime/state/repositoryScope";
 import { useProjects } from "../../../state/entities";
@@ -76,7 +77,7 @@ function ProjectPullRequests(props: {
     groups.set(key, group);
   }
   return (
-    <View className="gap-2 rounded-2xl border border-border bg-card px-4 py-3">
+    <GlassCard className="gap-2 px-4 py-3">
       <Text className="font-lecturn-bold text-base">Pull requests</Text>
       {query.error ? <Text className="text-foreground-muted text-sm">{query.error}</Text> : null}
       {query.isPending && !query.data ? (
@@ -125,7 +126,7 @@ function ProjectPullRequests(props: {
       <Pressable accessibilityRole="button" onPress={query.refresh}>
         <Text className="text-primary text-sm">Refresh pull requests</Text>
       </Pressable>
-    </View>
+    </GlassCard>
   );
 }
 
@@ -380,7 +381,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
       }
     >
       {!worktreesSupported ? (
-        <View className="gap-1 rounded-2xl border border-border bg-card px-4 py-3">
+        <GlassCard className="gap-1 px-4 py-3">
           <Text className="text-base font-lecturn-bold">Space repositories</Text>
           <Text className="text-sm text-foreground-muted">
             Select a repository for Git actions. Threads keep working across the whole space.
@@ -398,7 +399,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
               onSelect={() => selectGitRepository(target.key)}
             />
           ))}
-        </View>
+        </GlassCard>
       ) : null}
       {!worktreesSupported && selectedThreadGitRepository ? (
         <MetaCard
@@ -406,13 +407,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
           value={selectedThreadGitRepository.cwd}
         />
       ) : null}
-      <View
-        className={
-          isInspector
-            ? "overflow-hidden rounded-2xl border border-border bg-card px-3 py-1"
-            : "overflow-hidden rounded-[22px] border border-border bg-card px-4 py-1"
-        }
-      >
+      <GlassCard className={isInspector ? "px-3 py-1" : "px-4 py-1"}>
         {sheetMenuItems.map(({ item, disabledReason }, index) => (
           <View key={`${item.id}-${item.label}`}>
             {index > 0 ? <View className="ml-12 h-px bg-border" /> : null}
@@ -474,7 +469,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
             })
           }
         />
-      </View>
+      </GlassCard>
 
       {selectedThreadProject ? (
         <ProjectPullRequests

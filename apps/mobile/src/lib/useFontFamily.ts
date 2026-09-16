@@ -1,3 +1,5 @@
+import { Platform } from "react-native";
+
 const FONT_FAMILIES = {
   regular: "DMSans-Regular",
   medium: "DMSans-Medium",
@@ -9,5 +11,5 @@ const FONT_FAMILIES = {
  * Prefer Uniwind font classes when the target component accepts `className`.
  */
 export function useFontFamily(weight: keyof typeof FONT_FAMILIES): string {
-  return FONT_FAMILIES[weight];
+  return Platform.OS === "ios" ? "System" : FONT_FAMILIES[weight];
 }

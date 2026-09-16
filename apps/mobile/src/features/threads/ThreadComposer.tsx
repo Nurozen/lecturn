@@ -49,12 +49,11 @@ import {
 } from "../../components/ComposerAttachmentStrip";
 import { VideoPreviewModal, type VideoPreviewSource } from "../../components/VideoPreviewModal";
 import { GlassSurface } from "../../components/GlassSurface";
+import { GlassCard } from "../../components/GlassCard";
+import { SymbolView } from "../../components/AppSymbol";
+import { RUNTIME_MODE_CHOICES } from "./thread-settings-options";
 import { ComposerEditor, type ComposerEditorHandle } from "../../components/ComposerEditor";
-import {
-  ComposerActionButton,
-  ComposerInlineControl,
-  ComposerToolbarRow,
-} from "../../components/ComposerToolbar";
+import { ComposerActionButton, ComposerToolbarRow } from "../../components/ComposerToolbar";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import type {
   DraftComposerAttachment,
@@ -67,7 +66,10 @@ import {
 } from "../../lib/modelOptions";
 import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
 import type { RemoteClientConnectionState } from "../../lib/connection";
-import { resolveProviderOptionDescriptors } from "../../lib/providerOptions";
+import {
+  providerOptionValueLabels,
+  resolveProviderOptionDescriptors,
+} from "../../lib/providerOptions";
 import { ComposerCommandPopover } from "./ComposerCommandPopover";
 import { useComposerCommandMenu } from "./use-composer-command-menu";
 import {
@@ -90,16 +92,16 @@ import {
 } from "./use-thread-settings-sheet-presentation";
 
 /**
- * Height of the collapsed composer (pill + vertical padding, excluding safe-area inset).
+ * Height of the collapsed composer (metadata + pill + padding, excluding safe-area inset).
  * Exported so the parent can compute feed overlap / content insets.
  */
-export const COMPOSER_COLLAPSED_CHROME = 60;
+export const COMPOSER_COLLAPSED_CHROME = 112;
 
 /**
- * Height of the expanded composer (card + toolbar + vertical padding, excluding safe-area inset).
+ * Height of the expanded composer (metadata + card + toolbar + padding, excluding safe-area inset).
  * Used by the parent to compute the larger feed bottom inset when the composer is focused.
  */
-export const COMPOSER_EXPANDED_CHROME = 156;
+export const COMPOSER_EXPANDED_CHROME = 208;
 
 export interface ThreadComposerProps {
   readonly draftMessage: string;
@@ -198,6 +200,7 @@ export function ComposerSurface(props: {
       <AnimatedGlassSurface
         chrome="none"
         fallbackClassName="border border-border bg-card-translucent"
+        className="border border-border"
         glassEffectStyle="regular"
         // The composer is a passive material containing interactive controls.
         // Keep native glass out of the interactive content's layout path.
@@ -557,7 +560,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
 
   return (
     <Animated.View
-      className="px-[12px]"
+      className="px-[14px]"
       style={{
         paddingTop: isExpanded ? 8 : 6,
         paddingBottom: (props.bottomInset ?? 0) + (isExpanded ? 8 : 6),
@@ -598,11 +601,49 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           </Pressable>
         ) : null}
 
+        <GlassCard radius={19} className="mb-2">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={[
+              "Model and reasoning settings",
+              currentModelOption?.label ?? currentModelSelection.model,
+              ...providerOptionValueLabels(providerOptionDescriptors),
+              RUNTIME_MODE_CHOICES.find((choice) => choice.mode === currentRuntimeMode)?.label ??
+                currentRuntimeMode,
+              props.selectedThread.interactionMode === "plan" ? "Plan mode" : "Chat mode",
+            ].join(", ")}
+            onPress={openSettings}
+            disabled={voiceInput.isBusy}
+            accessibilityState={{ disabled: voiceInput.isBusy }}
+            style={{ minHeight: 44, opacity: voiceInput.isBusy ? 0.6 : 1 }}
+            className="flex-row items-center gap-2 px-3 active:opacity-70"
+          >
+            <ProviderIcon provider={currentModelOption?.providerDriver} size={17} />
+            <Text
+              className="shrink text-xs font-lecturn-medium text-foreground"
+              numberOfLines={1}
+              style={{ maxWidth: "38%" }}
+            >
+              {currentModelOption?.label ?? currentModelSelection.model}
+            </Text>
+            <View className="h-3.5 w-px bg-border" />
+            <Text className="min-w-0 flex-1 text-xs text-foreground-muted" numberOfLines={1}>
+              {[
+                ...providerOptionValueLabels(providerOptionDescriptors),
+                RUNTIME_MODE_CHOICES.find((choice) => choice.mode === currentRuntimeMode)?.label ??
+                  currentRuntimeMode,
+                ...(props.selectedThread.interactionMode === "plan" ? ["Plan"] : []),
+              ].join(" · ")}
+            </Text>
+            <SymbolView name="chevron.right" size={11} tintColorClassName="accent-icon-muted" />
+          </Pressable>
+        </GlassCard>
+
         <ComposerSurface
           style={
             isExpanded
               ? {
-                  borderRadius: 26,
+                  borderRadius: 28,
                   minHeight: 140,
                   overflow: "hidden" as const,
                   paddingBottom: 6,
@@ -785,18 +826,6 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                       onPickMedia={props.onPickDraftMedia}
                       onPickFiles={props.onPickDraftFiles}
                     />
-                    <View className="min-w-0 shrink" style={{ maxWidth: 152 }}>
-                      <ComposerInlineControl
-                        accessibilityLabel="Model and reasoning settings"
-                        emphasized
-                        iconNode={
-                          <ProviderIcon provider={currentModelOption?.providerDriver} size={16} />
-                        }
-                        label={currentModelOption?.label ?? currentModelSelection.model}
-                        maxWidth={152}
-                        onPress={openSettings}
-                      />
-                    </View>
                   </View>
                 )}
                 <View className="shrink-0 flex-row items-center">

@@ -5,6 +5,12 @@
 /* ─── Theme tokens ──────────────────────────────────────────────────── */
 @layer theme {
   :root {
+    @variant ios {
+      --font-sans: "System";
+      --font-medium: "System";
+      --font-bold: "System";
+    }
+
     @variant android {
       --font-mono: "monospace";
     }
@@ -17,8 +23,8 @@
 
       /* Card / surface */
       --color-card: #fff9ee;
-      --color-card-alt: #ede3d2;
-      --color-card-translucent: rgba(255, 255, 255, 0.8);
+      --color-card-alt: #f0e7da;
+      --color-card-translucent: rgba(255, 249, 238, 0.88);
 
       /* Text */
       --color-foreground: #302a22;
@@ -27,7 +33,7 @@
       --color-foreground-tertiary: #83745e;
 
       /* Borders & separators */
-      --color-border: rgba(0, 0, 0, 0.08);
+      --color-border: rgba(130, 71, 44, 0.18);
       --color-border-subtle: rgba(0, 0, 0, 0.06);
       --color-separator: rgba(0, 0, 0, 0.04);
 
@@ -36,10 +42,10 @@
       --color-subtle-strong: rgba(0, 0, 0, 0.08);
       --color-inline-skill-background: rgba(217, 163, 78, 0.12);
       --color-inline-skill-border: rgba(217, 163, 78, 0.25);
-      --color-inline-skill-foreground: #805419;
+      --color-inline-skill-foreground: #984e29;
 
       /* Primary action */
-      --color-primary: #805419;
+      --color-primary: #984e29;
       --color-primary-foreground: #fff9ee;
       --color-primary-shadow: #302a22;
 
@@ -59,7 +65,7 @@
 
       /* Inputs */
       --color-input: #fff9ee;
-      --color-input-border: rgba(0, 0, 0, 0.1);
+      --color-input-border: rgba(130, 71, 44, 0.24);
       --color-sidebar-search: rgba(118, 118, 128, 0.12);
       --color-placeholder: #756650;
 
@@ -71,8 +77,8 @@
       /* Header / glass chrome */
       --color-header: rgba(255, 255, 255, 0.97);
       --color-header-border: rgba(0, 0, 0, 0.06);
-      --color-glass-surface: rgba(255, 255, 255, 0.72);
-      --color-glass-tint: rgba(255, 255, 255, 0.18);
+      --color-glass-surface: rgba(255, 249, 238, 0.76);
+      --color-glass-tint: rgba(255, 249, 238, 0.16);
 
       /* StatusBar */
       --color-status-bar: #f4eddf;
@@ -80,7 +86,7 @@
       /* Markdown */
       --color-md-body: #302a22;
       --color-md-strong: #302a22;
-      --color-md-link: #805419;
+      --color-md-link: #984e29;
       --color-md-blockquote-border: rgba(0, 0, 0, 0.08);
       --color-md-blockquote-bg: rgba(0, 0, 0, 0.02);
       --color-md-code-bg: rgba(0, 0, 0, 0.04);
@@ -92,10 +98,10 @@
       --color-md-hr: rgba(0, 0, 0, 0.08);
 
       /* iMessage-style user bubble */
-      --color-user-bubble: #805419;
+      --color-user-bubble: #984e29;
       --color-user-bubble-foreground: #fff9ee;
       --color-user-bubble-foreground-muted: rgba(255, 255, 255, 0.78);
-      --color-user-bubble-skill-foreground: #dfc7a4;
+      --color-user-bubble-skill-foreground: #ffe1b1;
 
       /* Drawer / modal backdrop */
       --color-backdrop: rgba(0, 0, 0, 0.22);
@@ -117,16 +123,16 @@
       /* Card / surface */
       --color-card: #0c1d2b;
       --color-card-alt: #142838;
-      --color-card-translucent: rgba(12, 29, 43, 0.8);
+      --color-card-translucent: rgba(12, 29, 43, 0.88);
 
       /* Text */
-      --color-foreground: #dfc7a4;
-      --color-foreground-secondary: #a5957f;
+      --color-foreground: #e8edf0;
+      --color-foreground-secondary: #b5c0c9;
       --color-foreground-muted: #9eacb7;
       --color-foreground-tertiary: #85929d;
 
       /* Borders & separators */
-      --color-border: rgba(255, 255, 255, 0.06);
+      --color-border: rgba(185, 211, 227, 0.2);
       --color-border-subtle: rgba(255, 255, 255, 0.04);
       --color-separator: rgba(255, 255, 255, 0.03);
 
@@ -144,7 +150,7 @@
 
       /* Secondary action */
       --color-secondary: rgba(255, 255, 255, 0.04);
-      --color-secondary-foreground: #dfc7a4;
+      --color-secondary-foreground: #e8edf0;
       --color-secondary-border: rgba(255, 255, 255, 0.06);
       --color-switch-active-track: #30d158;
       --color-switch-active-thumb: #ffffff;
@@ -158,13 +164,13 @@
 
       /* Inputs */
       --color-input: #142838;
-      --color-input-border: rgba(255, 255, 255, 0.08);
+      --color-input-border: rgba(185, 211, 227, 0.24);
       --color-sidebar-search: rgba(118, 118, 128, 0.24);
       --color-placeholder: #9eacb7;
 
       /* Icons */
-      --color-icon: #dfc7a4;
-      --color-icon-muted: #a5957f;
+      --color-icon: #e8edf0;
+      --color-icon-muted: #b5c0c9;
       --color-icon-subtle: #9eacb7;
 
       /* Header / glass chrome */
@@ -177,8 +183,8 @@
       --color-status-bar: #061522;
 
       /* Markdown */
-      --color-md-body: #dfc7a4;
-      --color-md-strong: #dfc7a4;
+      --color-md-body: #e8edf0;
+      --color-md-strong: #f4f1e9;
       --color-md-link: #d9a34e;
       --color-md-blockquote-border: rgba(255, 255, 255, 0.1);
       --color-md-blockquote-bg: rgba(255, 255, 255, 0.03);
@@ -240,10 +246,16 @@
 /* ─── Custom utilities ──────────────────────────────────────────────── */
 @utility font-lecturn-medium {
   font-family: var(--font-medium);
+  @variant ios {
+    font-weight: 500;
+  }
 }
 
 @utility font-lecturn-bold {
   font-family: var(--font-bold);
+  @variant ios {
+    font-weight: 700;
+  }
 }
 
 @utility font-lecturn-extrabold {
