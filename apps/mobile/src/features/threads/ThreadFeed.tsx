@@ -1446,7 +1446,6 @@ function renderFeedEntry(
             className="min-w-0 gap-2 px-4 py-3"
             style={{
               backgroundColor: userBubbleColor,
-              borderBottomRightRadius: 7,
               maxWidth: props.userBubbleMaxWidth,
               ...(hasReviewCommentContext
                 ? { width: props.reviewCommentBubbleWidth }
@@ -1514,11 +1513,6 @@ function renderFeedEntry(
     }
 
     const enterAnimated = isFreshTimestamp(message.createdAt);
-    const needsFullWidth =
-      hasWideBlock ||
-      attachments.length > 0 ||
-      renderedText.includes("\n") ||
-      renderedText.includes("![");
     return (
       <Animated.View
         className={cn("items-start", showAssistantMeta ? "mb-5" : "mb-2")}
@@ -1530,11 +1524,9 @@ function renderFeedEntry(
           radius={22}
           className="min-w-0 px-4 py-3"
           style={{
-            // Wide code, tables, and attachments keep a definite full-width
-            // layout; short prose reads as a left-aligned conversation bubble.
-            width: needsFullWidth ? "100%" : undefined,
-            maxWidth: needsFullWidth ? "100%" : props.userBubbleMaxWidth,
-            borderBottomLeftRadius: 7,
+            // Keep streaming paragraphs, code, and attachments on the same
+            // layout width from the first token through the completed reply.
+            width: "100%",
           }}
         >
           {renderedText.trim().length > 0 ? (

@@ -775,7 +775,7 @@ export function HomeScreen(props: HomeScreenProps) {
   );
 
   const renderV2Row = useCallback(
-    ({ item, index }: { readonly item: HomeHierarchyV2Item; readonly index: number }) => {
+    ({ item }: { readonly item: HomeHierarchyV2Item; readonly index: number }) => {
       if (item.type === "header")
         return (
           <ThreadListGroupHeader
@@ -795,10 +795,6 @@ export function HomeScreen(props: HomeScreenProps) {
             onSelectThread={props.onSelectThread}
           />
         );
-      const nextItem = threadListV2Items[index + 1];
-      const showTrailingDivider =
-        nextItem?.type === "v2-thread" ||
-        (nextItem?.type === "v2-pending" && !nextItem.showPendingDivider);
       if (item.type === "v2-pending") {
         const pendingScopeKey = scopedProjectKey(
           item.pendingTask.message.environmentId,
@@ -817,7 +813,6 @@ export function HomeScreen(props: HomeScreenProps) {
             }
             environmentMachine={machineByEnvironmentId.get(item.pendingTask.message.environmentId)}
             showPendingDivider={item.showPendingDivider}
-            showTrailingDivider={showTrailingDivider}
             onSelectPendingTask={props.onSelectPendingTask}
             onDeletePendingTask={props.onDeletePendingTask}
           />
@@ -864,7 +859,6 @@ export function HomeScreen(props: HomeScreenProps) {
           pinned={item.item.pinned}
           snoozePresetMinute={nowMinute}
           snoozeWakeLabelText={item.snoozeWakeLabelText}
-          showTrailingDivider={showTrailingDivider}
           project={
             projectByKey.get(scopedProjectKey(thread.environmentId, thread.projectId)) ?? null
           }
@@ -948,7 +942,6 @@ export function HomeScreen(props: HomeScreenProps) {
       shelfPreferencesLoaded,
       settlementEnvironmentIds,
       snoozeEnvironmentIds,
-      threadListV2Items,
       updateGroupDisplay,
       props.onNewThreadInProject,
       threadSearchMatchByKey,

@@ -1481,7 +1481,7 @@ function ThreadNavigationSidebarPane(
       </View>
 
       <View
-        className="absolute inset-x-0 top-0 z-[4] bg-drawer"
+        className="absolute inset-x-0 top-0 z-[4] border-border bg-drawer"
         collapsable={false}
         onLayout={handleStickyHeaderLayout}
         pointerEvents="auto"
@@ -1489,7 +1489,6 @@ function ThreadNavigationSidebarPane(
           paddingTop: insets.top,
           paddingBottom: 12,
           borderBottomWidth: StyleSheet.hairlineWidth,
-          borderBottomColor: light ? "#ffffffc0" : "#cce5f030",
         }}
       >
         <View className="h-[50px] flex-row items-end gap-0.5 pr-2 pl-5">

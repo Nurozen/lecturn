@@ -4,12 +4,7 @@ import { View } from "react-native";
 
 import { AppText as Text } from "../../../components/AppText";
 
-export function SettingsSection(props: {
-  readonly title?: string;
-  readonly children: ReactNode;
-  /** Legacy grouping hint; settings now share the same glass card on both platforms. */
-  readonly card?: boolean;
-}) {
+export function SettingsSection(props: { readonly title?: string; readonly children: ReactNode }) {
   return (
     <View className="gap-2">
       {props.title ? (

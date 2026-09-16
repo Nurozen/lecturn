@@ -12,7 +12,12 @@ trail; settled threads retain their red-gold outline and expandable hierarchy.
 On supported iOS versions, floating controls use the system glass material. Scrolling cards use a
 lightweight sheen so long conversations and lists stay responsive. Other devices use matching
 material colors and highlights. Reduce Transparency and increased-contrast settings use solid
-surfaces instead.
+surfaces instead, including smaller controls and input fields.
+
+On iOS, interface text and composer chips use Apple's system typeface with matching regular,
+medium, and bold weights. Android retains DM Sans. The default mobile palette deliberately uses
+neutral light text over midnight glass and stronger surface borders; the web and desktop palettes
+retain their existing typography and text colors. Other selected themes keep their own accent hues.
 
 Model, reasoning, and access details remain visible above the conversation composer; tap the strip
 to change settings. Pull requests with a managing agent keep their steering field visible. Files,

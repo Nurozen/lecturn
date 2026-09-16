@@ -1,11 +1,14 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import { StyleSheet, View, type ViewProps } from "react-native";
 
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 import { useGlassAccessibility } from "../lib/useGlassAccessibility";
 import { cn } from "../lib/cn";
+import { useUniwindTheme } from "../lib/useUniwindTheme";
+import { themeColorWithAlpha } from "../lib/mobileTheme";
 
 export interface GlassCardProps extends ViewProps {
+  readonly ref?: Ref<View>;
   readonly children: ReactNode;
   readonly tone?: "default" | "accent" | "settled";
   readonly radius?: number;
@@ -28,36 +31,25 @@ export function GlassCard({
 }: GlassCardProps) {
   const { themeAppearance } = useAppearancePreferences();
   const light = themeAppearance === "light";
+  const theme = useUniwindTheme();
   const accessibleOpaque = useGlassAccessibility();
   const opaque = forceOpaque || accessibleOpaque;
   return (
     <View
       {...props}
-      className={cn(
-        opaque ? "bg-card" : "bg-card-translucent",
-        tone === "accent" ? "border-primary/50 border-t-primary/70" : undefined,
-        className,
-      )}
+      className={cn(opaque ? "bg-card" : "bg-card-translucent", className)}
       style={[
         {
           borderRadius: radius,
           borderCurve: "continuous",
           overflow: "hidden",
-          borderWidth: StyleSheet.hairlineWidth,
-          ...(tone === "default"
-            ? {
-                borderColor: light ? "#ffffffd9" : "#b9d3e345",
-                borderTopColor: light ? "#ffffff" : "#cce5f067",
-              }
-            : tone === "settled"
-              ? {
-                  borderColor: light ? "#ad3c2f85" : "#ed624f85",
-                  borderTopColor: light ? "#ad3c2fb8" : "#ed624fb8",
-                }
-              : {}),
-          boxShadow: opaque
-            ? undefined
-            : [{ offsetX: 0, offsetY: 3, blurRadius: 9, color: light ? "#422c1810" : "#00000024" }],
+          borderWidth: tone === "accent" ? 1.5 : StyleSheet.hairlineWidth,
+          borderColor:
+            tone === "accent"
+              ? theme["--color-primary"]
+              : tone === "settled"
+                ? theme["--color-danger-foreground"]
+                : theme["--color-border"],
         },
         style,
       ]}
@@ -76,8 +68,8 @@ export function GlassCard({
                 sheen === "subtle"
                   ? "linear-gradient(150deg, #ffffff0a 0%, #ffffff00 42%, #00000008 100%)"
                   : light
-                    ? "linear-gradient(150deg, #ffffff9c 0%, #ffffff00 42%, #bc764210 100%)"
-                    : "linear-gradient(150deg, #d9edff18 0%, #ffffff00 42%, #00000018 100%)",
+                    ? `linear-gradient(150deg, #ffffff9c 0%, #ffffff00 42%, ${themeColorWithAlpha(theme["--color-primary"], 0.06)} 100%)`
+                    : `linear-gradient(150deg, ${themeColorWithAlpha(theme["--color-primary"], 0.09)} 0%, #ffffff00 42%, #00000018 100%)`,
             },
           ]}
         />

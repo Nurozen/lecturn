@@ -118,14 +118,17 @@ function useMarkdownPreviewStyles(renderImage?: MarkdownImageRenderer): Markdown
         heading: {
           color: strong,
           fontFamily: boldFontFamily,
+          fontWeight: "700",
         },
         strong: {
           color: strong,
           fontFamily: boldFontFamily,
+          fontWeight: "700",
         },
         link: {
           color: link,
           fontFamily: mediumFontFamily,
+          fontWeight: "500",
         },
         blockquote: {
           backgroundColor: blockquoteBackground,

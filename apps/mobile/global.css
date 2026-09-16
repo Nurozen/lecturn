@@ -91,7 +91,7 @@
       --color-md-blockquote-bg: rgba(0, 0, 0, 0.02);
       --color-md-code-bg: rgba(0, 0, 0, 0.04);
       --color-md-code-text: #302a22;
-      --color-md-user-code-bg: rgba(255, 255, 255, 0.22);
+      --color-md-user-code-bg: rgba(0, 0, 0, 0.12);
       --color-md-user-code-text: #fff9ee;
       --color-md-user-fence-bg: rgba(0, 0, 0, 0.16);
       --color-md-user-fence-text: #fff9ee;
@@ -100,7 +100,7 @@
       /* iMessage-style user bubble */
       --color-user-bubble: #984e29;
       --color-user-bubble-foreground: #fff9ee;
-      --color-user-bubble-foreground-muted: rgba(255, 255, 255, 0.78);
+      --color-user-bubble-foreground-muted: rgba(255, 255, 255, 0.86);
       --color-user-bubble-skill-foreground: #ffe1b1;
 
       /* Drawer / modal backdrop */
@@ -244,6 +244,21 @@
 }
 
 /* ─── Custom utilities ──────────────────────────────────────────────── */
+/* These font-family tokens shadow Tailwind's weight utilities. Set both roles. */
+@utility font-medium {
+  font-family: var(--font-medium);
+  @variant ios {
+    font-weight: 500;
+  }
+}
+
+@utility font-bold {
+  font-family: var(--font-bold);
+  @variant ios {
+    font-weight: 700;
+  }
+}
+
 @utility font-lecturn-medium {
   font-family: var(--font-medium);
   @variant ios {

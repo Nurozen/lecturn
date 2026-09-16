@@ -128,12 +128,8 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
   }, [newThreadTarget, onNewThread]);
   const showNewThreadButton = onNewThread !== undefined && newThreadTarget !== null;
 
-  // The new-thread button is a SIBLING of the collapse toggle, not a child:
-  // nested touchables are unreachable to VoiceOver/TalkBack (the parent
-  // swallows focus). Row padding lives on the container (explicit styles —
-  // dynamic padding classes on Pressable did not apply reliably) so both
-  // children share one centerline; hitSlop restores the padded tap area.
-  const verticalHitSlop = { top: 8, bottom: 8 };
+  // Separate 44pt controls keep collapse, open, and new-thread actions reachable
+  // to touch users and VoiceOver/TalkBack without overlapping hit areas.
   return (
     <GlassCard
       radius={22}
@@ -146,13 +142,11 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
       <View
         className="flex-row items-center"
         style={{
-          minHeight: compact ? 44 : 36,
-          paddingLeft: (compact ? 20 : 12) + (props.depth ?? 0) * 18,
-          // Compact right padding centers the 20pt plus glyph on the thread
-          // rows' trailing chevron column (18 + 13/2 ≈ 24.5 from the edge).
-          paddingRight: compact ? 14 : 12,
-          paddingBottom: 12,
-          paddingTop: 12,
+          minHeight: 52,
+          paddingLeft: 4 + (props.depth ?? 0) * 18,
+          paddingRight: 4,
+          paddingBottom: 4,
+          paddingTop: 4,
         }}
       >
         {Array.from({ length: props.depth ?? 0 }, (_, level) => (
@@ -175,8 +169,7 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
           accessibilityState={{ expanded: !props.collapsed }}
           accessibilityLabel={`${props.collapsed ? "Expand" : "Collapse"} ${props.title}`}
           accessibilityHint={props.collapsed ? "Expands the project" : "Collapses the project"}
-          className={"flex-row items-center pr-2"}
-          hitSlop={{ ...verticalHitSlop, left: compact ? 20 : 12 }}
+          style={{ minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }}
           onPress={handleToggle}
         >
           <Text className="text-foreground-muted">{props.collapsed ? "▸" : "▾"}</Text>
@@ -190,7 +183,7 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
               : "Expands or collapses the project"
           }
           className="min-w-0 flex-1 flex-row items-center gap-2"
-          hitSlop={verticalHitSlop}
+          style={{ minHeight: 44 }}
           onPress={() => {
             if (props.firstThread && props.onSelectThread) props.onSelectThread(props.firstThread);
             else handleToggle();
@@ -241,9 +234,14 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
             disabled={newThreadTarget?.stave?.state === "archived"}
             accessibilityState={{ disabled: newThreadTarget?.stave?.state === "archived" }}
             accessibilityRole="button"
-            hitSlop={{ ...verticalHitSlop, left: 10, right: 14 }}
             onPress={handleNewThread}
-            style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1, paddingLeft: 12 })}
+            style={({ pressed }) => ({
+              opacity: pressed ? 0.5 : 1,
+              minWidth: 44,
+              minHeight: 44,
+              alignItems: "center",
+              justifyContent: "center",
+            })}
           >
             <SymbolView
               name="plus"
@@ -748,6 +746,13 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
           <View className="px-4 py-3">
             <View className="gap-1">
               <View className="flex-row items-center justify-between gap-2">
+                {selected ? (
+                  <View
+                    accessible={false}
+                    pointerEvents="none"
+                    className="h-6 w-1 rounded-full bg-primary"
+                  />
+                ) : null}
                 <Text
                   className="flex-1 text-lg font-lecturn-bold text-foreground"
                   numberOfLines={1}
@@ -814,6 +819,13 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
           ) : null}
           <View className="gap-1 px-3 py-3">
             <View className="flex-row items-center justify-between gap-2">
+              {selected ? (
+                <View
+                  accessible={false}
+                  pointerEvents="none"
+                  className="h-6 w-1 rounded-full bg-primary"
+                />
+              ) : null}
               <Text
                 className="flex-1 text-base font-lecturn-medium text-foreground"
                 numberOfLines={1}

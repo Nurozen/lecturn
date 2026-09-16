@@ -6,7 +6,6 @@ import {
 } from "../../lib/providerOptions";
 import { RUNTIME_MODE_CHOICES } from "./thread-settings-options";
 import { ActiveThreadBorder } from "./ActiveThreadBorder";
-import { GlassCard } from "../../components/GlassCard";
 import { AppText as Text } from "../../components/AppText";
 import { SymbolView } from "../../components/AppSymbol";
 import { useThreadListActions } from "../home/useThreadListActions";
@@ -935,18 +934,15 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                       opacity: unsettling ? 0.6 : 1,
                     }}
                   >
-                    <GlassCard
-                      tone="settled"
-                      radius={24}
+                    <View
                       pointerEvents="none"
                       style={{
                         position: "absolute",
                         inset: 0,
+                        borderRadius: 24,
                         backgroundColor: isDarkMode ? "#1e1b20" : "#f5e8df",
                       }}
-                    >
-                      {null}
-                    </GlassCard>
+                    />
                     <ActiveThreadBorder visible settled radius={24} />
                     <View
                       style={{ flexDirection: "row", alignItems: "center", flexShrink: 1, gap: 8 }}

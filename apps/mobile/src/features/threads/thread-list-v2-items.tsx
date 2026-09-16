@@ -211,8 +211,6 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
   readonly pane?: "screen" | "sidebar";
   /** Draws the "Pending" divider above the first queued row. */
   readonly showPendingDivider: boolean;
-  /** Keeps row hairlines inside a section; section headers draw their own rule. */
-  readonly showTrailingDivider?: boolean;
   readonly onSelectPendingTask: (pendingTask: PendingNewTask) => void;
   readonly onDeletePendingTask: (pendingTask: PendingNewTask) => void;
 }) {
@@ -339,8 +337,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly environmentMachine?: EnvironmentMachineKind;
   /** Hosting surface controls margins and selection; both use the same frosted cards. */
   readonly pane?: "screen" | "sidebar";
-  /** Keeps row hairlines inside a section; section headers draw their own rule. */
-  readonly showTrailingDivider?: boolean;
   /** Highlights the thread open in the detail pane (iPad split view). The
       compact Home list never sets it — phones navigate away on select. */
   readonly selected?: boolean;
@@ -708,11 +704,18 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       ? `Opens the thread. Swipe left to ${primaryAction.label.toLowerCase()}.`
       : `Opens the thread. Swipe left for ${primaryAction.label.toLowerCase()} and snooze actions.`;
 
-  // The sidebar pane fills selected rows with the theme's message surface, so
-  // every piece of row text must use that surface's paired foreground.
+  // Selection has its own solid marker; status and PR colors retain their meaning.
   const cardContent = (
     <>
       <View className="flex-row items-center gap-1.5">
+        {selected ? (
+          <View
+            accessible={false}
+            pointerEvents="none"
+            className="h-6 w-1 rounded-full bg-primary"
+          />
+        ) : null}
+
         {props.project && !props.nested ? (
           <ProjectFavicon
             environmentId={thread.environmentId}
@@ -739,9 +742,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         <Text
           className={cn(
             "text-xs tabular-nums",
-            selected
-              ? "text-foreground"
-              : (visibleStatusLabel?.className ?? "text-foreground-tertiary"),
+            visibleStatusLabel?.className ?? "text-foreground-tertiary",
           )}
         >
           {visibleStatusLabel?.label ?? timeLabel}
@@ -759,13 +760,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       ) : null}
       <View className="mt-1 flex-row items-center gap-2">
         {status === "failed" && thread.session?.lastError ? (
-          <Text
-            className={cn(
-              "flex-1 text-xs",
-              selected ? "text-foreground-muted" : "text-adaptive-red-600-a80-400-a80",
-            )}
-            numberOfLines={1}
-          >
+          <Text className="flex-1 text-xs text-adaptive-red-600-a80-400-a80" numberOfLines={1}>
             {thread.session.lastError}
           </Text>
         ) : thread.branch || props.environmentLabel ? (
@@ -810,7 +805,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         {pr ? (
           <Text
             accessibilityLabel={pr.accessibilityLabel}
-            className={cn("text-xs", selected ? "text-foreground" : pr.textClassName)}
+            className={cn("text-xs", pr.textClassName)}
             style={{ fontFamily: MONO_FONT }}
           >
             #{pr.label}
@@ -890,6 +885,13 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               sidebarPane ? "px-3" : "px-5",
             )}
           >
+            {selected ? (
+              <View
+                accessible={false}
+                pointerEvents="none"
+                className="h-6 w-1 rounded-full bg-primary"
+              />
+            ) : null}
             <SymbolView
               name={snoozedRow ? "moon.zzz" : "checkmark.circle"}
               size={16}

@@ -246,7 +246,7 @@ function ScrollToEndButton(props: { readonly disabled?: boolean; readonly onPres
     <ControlPill
       accessibilityLabel="Scroll to end"
       activateOnPressIn
-      className="h-11 w-11 bg-transparent"
+      className="h-11 w-11 border-0 bg-transparent"
       disabled={props.disabled}
       icon={{ ios: "chevron.down", android: "keyboard_arrow_down" }}
       onPress={props.onPress}

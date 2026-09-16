@@ -12,6 +12,8 @@ import { withUniwind } from "uniwind";
 
 import { cn } from "../lib/cn";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
+import { useUniwindTheme } from "../lib/useUniwindTheme";
+import { themeColorWithAlpha } from "../lib/mobileTheme";
 import { useGlassAccessibility } from "../lib/useGlassAccessibility";
 
 // Explicit mappings keep the native glassEffectStyle enum out of style-array conversion.
@@ -49,6 +51,7 @@ export function GlassSurface({
   const { themeAppearance } = useAppearancePreferences();
   const isDarkMode = themeAppearance === "dark";
   const opaque = useGlassAccessibility();
+  const theme = useUniwindTheme();
   const supportsGlass = Platform.OS === "ios" && isGlassEffectAPIAvailable() && !opaque;
   const surfaceStyle: ViewStyle = {
     borderRadius: 28,
@@ -72,8 +75,7 @@ export function GlassSurface({
       ? {}
       : {
           borderWidth: 0.5,
-          borderColor: isDarkMode ? "#b9d3e34d" : "#ffffffdd",
-          borderTopColor: isDarkMode ? "#cce5f078" : "#ffffff",
+          borderColor: theme["--color-border"],
         }),
   };
 
@@ -121,8 +123,8 @@ export function GlassSurface({
           ? undefined
           : {
               experimental_backgroundImage: isDarkMode
-                ? "linear-gradient(150deg, #d9edff18 0%, #ffffff00 42%, #00000018 100%)"
-                : "linear-gradient(150deg, #ffffff9c 0%, #ffffff00 42%, #bc764210 100%)",
+                ? `linear-gradient(150deg, ${themeColorWithAlpha(theme["--color-primary"], 0.09)} 0%, #ffffff00 42%, #00000018 100%)`
+                : `linear-gradient(150deg, #ffffff9c 0%, #ffffff00 42%, ${themeColorWithAlpha(theme["--color-primary"], 0.06)} 100%)`,
             },
       ]}
     >

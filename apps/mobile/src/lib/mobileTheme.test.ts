@@ -83,11 +83,11 @@ describe("mobile themes", () => {
     expect(variables["--color-screen"]).toMatch(/^#/);
   });
 
-  it("uses the same preview roles and standard artwork as desktop", () => {
+  it("previews the actual mobile palette and retains shared custom palettes", () => {
     expect(getMobileThemePreviewColors(DEFAULT_MOBILE_THEME_ID, "light")).toEqual({
       canvas: "#f4eddf",
-      accent: "#e9deca",
-      messageAction: "#805419",
+      accent: "#fff9ee",
+      messageAction: "#984e29",
     });
     const desktopOcean = BUILT_IN_THEMES.find((theme) => theme.id === "ocean")!;
     expect(getMobileThemePreviewColors("ocean", "light")).toEqual({
@@ -170,6 +170,35 @@ describe("mobile themes", () => {
       expect(variables["--color-primary-shadow"]).toBe("#000000");
       expect(variables["--color-backdrop"]).toBe("rgba(0, 0, 0, 0.48)");
       expect(variables["--color-drawer-shadow"]).toBe("rgba(0, 0, 0, 0.32)");
+    }
+  });
+
+  it("keeps default and custom user-bubble text readable, including muted and inline code", () => {
+    for (const appearance of ["light", "dark"] as const) {
+      const palettes = [
+        readDefaultMobileThemeVariables(appearance),
+        ...BUILT_IN_THEME_IDS.map((id) => getMobileThemeVariables(id, appearance)),
+      ];
+      for (const variables of palettes) {
+        const surface = variables["--color-user-bubble"];
+        for (const role of [
+          "--color-user-bubble-foreground",
+          "--color-user-bubble-foreground-muted",
+          "--color-user-bubble-skill-foreground",
+        ] as const) {
+          const color = variables[role];
+          const foreground = color.startsWith("rgba") ? compositeOver(color, surface) : color;
+          expect(
+            contrastRatio(foreground, surface),
+            `${appearance}: ${role} on ${surface}`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+        const codeSurface = compositeOver(variables["--color-md-user-code-bg"], surface);
+        expect(
+          contrastRatio(variables["--color-md-user-code-text"], codeSurface),
+          `${appearance}: inline code on ${surface}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
     }
   });
 
