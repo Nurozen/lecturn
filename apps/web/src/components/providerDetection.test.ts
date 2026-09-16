@@ -4,6 +4,7 @@ import {
   isProviderExecutableError,
   providerDetectionLabel,
   providerDetectionSendBlock,
+  shouldShowProviderDetection,
 } from "./providerDetection";
 
 const provider: ServerProvider = {
@@ -65,5 +66,30 @@ describe("provider discovery recovery", () => {
     expect(
       isProviderExecutableError("Provider detection is still running. Retry once it finishes."),
     ).toBe(true);
+  });
+});
+
+describe("provider discovery visibility", () => {
+  it("does not replay cached discovery work while an environment reconnects", () => {
+    expect(shouldShowProviderDetection(provider, true)).toBe(true);
+    expect(shouldShowProviderDetection(provider, false)).toBe(false);
+    const ready = { ...provider, discovery: { status: "ready", phase: "provider" } } as const;
+    expect(shouldShowProviderDetection(ready, true)).toBe(false);
+    expect(providerDetectionLabel(ready)).toBe("Codex detection is ready");
+    expect(providerDetectionSendBlock(ready)).toBeNull();
+  });
+
+  it("only offers failed detection recovery for connected environments", () => {
+    const timedOut = { ...provider, discovery: { status: "timed-out", phase: "shell" } } as const;
+    expect(shouldShowProviderDetection(timedOut, true)).toBe(true);
+    expect(shouldShowProviderDetection(timedOut, false)).toBe(false);
+    const failed = {
+      ...provider,
+      installed: true,
+      discovery: { status: "error", phase: "provider" },
+    } as const;
+    expect(shouldShowProviderDetection(failed, true)).toBe(true);
+    expect(shouldShowProviderDetection(failed, false)).toBe(false);
+    expect(shouldShowProviderDetection({ ...failed, installed: false }, true)).toBe(false);
   });
 });

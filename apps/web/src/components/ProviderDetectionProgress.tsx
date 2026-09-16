@@ -1,11 +1,11 @@
 import type { EnvironmentId, ServerProvider } from "@lecturn/contracts";
 import { Link } from "@tanstack/react-router";
-import { RotateCwIcon } from "lucide-react";
+import { CheckCircle2Icon, RotateCwIcon } from "lucide-react";
 import { useRef, useState } from "react";
 import { useEnvironments } from "../state/environments";
 import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
-import { providerDetectionLabel } from "./providerDetection";
+import { providerDetectionLabel, shouldShowProviderDetection } from "./providerDetection";
 import { GoldThreadSpinner } from "./ui/gold-thread-spinner";
 import { Button } from "./ui/button";
 
@@ -22,7 +22,8 @@ export function ProviderDetectionRecovery({
   const pending = useRef(false);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState(false);
-  const detecting = provider.discovery?.status === "detecting" || retrying;
+  const ready = provider.discovery?.status === "ready";
+  const detecting = provider.discovery?.status === "detecting" || (retrying && !ready);
   const retry = async () => {
     if (pending.current) return;
     pending.current = true;
@@ -39,8 +40,10 @@ export function ProviderDetectionRecovery({
     }
   };
   return (
-    <div className="flex items-start gap-3" role={detecting ? "status" : "alert"}>
-      {detecting ? (
+    <div className="flex items-start gap-3" role={detecting || ready ? "status" : "alert"}>
+      {ready ? (
+        <CheckCircle2Icon className="size-10 shrink-0 text-muted-foreground" />
+      ) : detecting ? (
         <GoldThreadSpinner className="size-10" />
       ) : (
         <Button
@@ -56,9 +59,13 @@ export function ProviderDetectionRecovery({
       )}
       <div className="min-w-0 flex-1 space-y-1 text-sm">
         <p className="font-medium">
-          {retrying ? "Retrying provider detection…" : providerDetectionLabel(provider)}
+          {retrying && !ready ? "Retrying provider detection…" : providerDetectionLabel(provider)}
         </p>
-        {!detecting ? (
+        {ready ? (
+          <p className="text-muted-foreground">
+            The earlier attempt failed. Try sending your message again.
+          </p>
+        ) : !detecting ? (
           <>
             <p className="text-muted-foreground">
               Retry detection or configure the executable path in provider settings. Check that the
@@ -78,7 +85,7 @@ export function ProviderDetectionRecovery({
             </div>
           </>
         ) : null}
-        {retryError ? (
+        {retryError && !ready ? (
           <p className="text-warning">
             Detection could not be retried. Check the environment connection, then try again.
           </p>
@@ -101,11 +108,8 @@ export function ProviderDetectionProgress() {
   const { environments } = useEnvironments();
   const rows = environments.flatMap((environment) =>
     (environment.serverConfig?.providers ?? [])
-      .filter(
-        (provider) =>
-          provider.discovery?.status === "detecting" ||
-          provider.discovery?.status === "timed-out" ||
-          (provider.discovery?.status === "error" && provider.installed),
+      .filter((provider) =>
+        shouldShowProviderDetection(provider, environment.connection.phase === "connected"),
       )
       .map((provider) => ({ environment, provider })),
   );
