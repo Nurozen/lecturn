@@ -3093,7 +3093,8 @@ const makeWsRpcLayer = (
                   },
                 })),
               );
-              const providerStatuses = providerRegistry.streamChanges.pipe(
+              const providerChanges = yield* providerRegistry.subscribeChanges;
+              const providerStatuses = providerChanges.pipe(
                 Stream.map((providers) => ({
                   version: 1 as const,
                   type: "providerStatuses" as const,
@@ -3138,9 +3139,9 @@ const makeWsRpcLayer = (
                 })),
               );
 
-              yield* providerRegistry
-                .refresh()
-                .pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped);
+              // Startup and periodic probes belong to the managed providers.
+              // Reconnecting a client only resumes observation; it must not
+              // launch or cancel provider detection.
 
               const liveUpdates = Stream.merge(
                 keybindingsUpdates,
