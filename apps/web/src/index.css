@@ -2151,17 +2151,17 @@ body,
     900px 300px;
 }
 
-/* Dark metal edges keep contrast on vellum; warm specular highlights supply the sheen. */
+/* Copper on vellum, gold on midnight; dark edges and bright tips retain a metallic sheen. */
 :root {
-  --lecturn-thread-gold: light-dark(#c99438, #dca64e);
-  --lecturn-thread-highlight: light-dark(#edbe65, #ffe1a0);
-  --lecturn-thread-tip: light-dark(#ffe5a3, #ffeac1);
-  --lecturn-thread-trail: light-dark(#986718cc, #dca64e55);
-  --lecturn-thread-line: light-dark(#92631f, #dca64e99);
-  --lecturn-thread-glow: light-dark(#d49b3d66, #dca64e55);
-  --lecturn-thread-name: light-dark(#795016, #e8bd75);
-  --lecturn-thread-name-highlight: light-dark(#986718, #ffe1a0);
-  --lecturn-thread-edge: light-dark(#80521877, transparent);
+  --lecturn-thread-gold: light-dark(#bc7642, #dca64e);
+  --lecturn-thread-highlight: light-dark(#e5a06d, #ffe1a0);
+  --lecturn-thread-tip: light-dark(#ffe1b1, #ffeac1);
+  --lecturn-thread-trail: light-dark(#87482dcc, #dca64e55);
+  --lecturn-thread-line: light-dark(#82472c, #dca64e99);
+  --lecturn-thread-glow: light-dark(#bc764266, #dca64e55);
+  --lecturn-thread-name: light-dark(#784126, #e8bd75);
+  --lecturn-thread-name-highlight: light-dark(#94512e, #ffe1a0);
+  --lecturn-thread-edge: light-dark(#713d2677, transparent);
   --lecturn-copper-edge: light-dark(#90372a66, transparent);
   --lecturn-copper-line: light-dark(#ad3c2f, #e64d3dcc);
   --lecturn-copper-bright: light-dark(#e67c47, #ff7258);

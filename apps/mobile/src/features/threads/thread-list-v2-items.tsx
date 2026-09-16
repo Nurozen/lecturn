@@ -4,6 +4,7 @@ import type {
 } from "@lecturn/client-runtime/state/shell";
 import type { EnvironmentThreadSearchMatch } from "@lecturn/client-runtime/state/thread-search";
 import type { EnvironmentMachineKind } from "@lecturn/contracts";
+import { useRecyclingState, useViewabilityAmount } from "@legendapp/list/react-native";
 import { canSnooze, resolveSnoozePresets } from "@lecturn/client-runtime/state/thread-settled";
 import { resolveSettledThreadTimestamp } from "@lecturn/client-runtime/state/thread-sort";
 import type { MenuAction } from "@react-native-menu/menu";
@@ -25,6 +26,7 @@ import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import { useThreadPr } from "../../state/use-thread-pr";
 import { ThreadSwipeable } from "../home/thread-swipe-actions";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
+import { ActiveThreadBorder } from "./ActiveThreadBorder";
 import { buildThreadForkMenuItems } from "./thread-fork-menu";
 import { buildThreadTitleRegenerationMenuItems } from "./thread-title-regeneration-menu";
 import {
@@ -39,8 +41,8 @@ import { ThreadSearchMatchExcerpt } from "./thread-search-match";
 /**
  * Thread List v2 renders one flat native list: rich edge-to-edge rows for
  * active work and a receded settled tail, all with native swipe and
- * long-press actions. State reads through colored status labels and text
- * hierarchy rather than card fills.
+ * long-press actions. State reads through status labels and an active
+ * thread border rather than card fills.
  */
 
 const MONO_FONT = Platform.select({
@@ -418,6 +420,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   } = props;
   const snoozedRow = props.snoozed === true;
   const pinnedRow = props.pinned === true;
+  const [visible, setVisible] = useRecyclingState(false);
+  useViewabilityAmount(useCallback((token) => setVisible(token.sizeVisible > 0), [setVisible]));
 
   // Rows without a loaded project shell (pending tasks) still know the
   // project cwd, which is enough for ordinary repos; Stave redirection needs
@@ -449,6 +453,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
 
   const status = resolveThreadListV2Status(thread);
   const statusLabel = STATUS_LABEL_BY_STATUS[status];
+  const visibleStatusLabel = status === "working" ? undefined : statusLabel;
   // Settled rows label by the same stamp they sort by, so order and label
   // can't disagree. updatedAt is always present, so the resolver never
   // returns null here.
@@ -762,10 +767,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             "text-xs tabular-nums",
             selected
               ? "text-user-bubble-foreground"
-              : (statusLabel?.className ?? "text-foreground-tertiary"),
+              : (visibleStatusLabel?.className ?? "text-foreground-tertiary"),
           )}
         >
-          {statusLabel?.label ?? timeLabel}
+          {visibleStatusLabel?.label ?? timeLabel}
         </Text>
       </View>
       {!props.nested ? (
@@ -878,7 +883,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       <Pressable
         accessibilityHint={swipeAccessibilityHint}
         accessibilityLabel={
-          thread.settledOverride === "settled" ? `${thread.title}, settled` : thread.title
+          thread.settledOverride === "settled"
+            ? `${thread.title}, settled`
+            : statusLabel
+              ? `${thread.title}, ${statusLabel.label}`
+              : thread.title
         }
         accessibilityRole="button"
         accessibilityState={{ selected }}
@@ -904,10 +913,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         {sidebarPane ? (
           cardContent
         ) : (
-          /* Flat native list rows: no tonal containers — colored status
-             labels and text hierarchy carry state, an inset hairline
-             separates rows. The opaque screen background stays so swipe
-             actions reveal behind the row. */
+          /* The opaque screen background keeps swipe actions behind the
+             row. Draw the activity border last so this surface cannot
+             cover its highlight. */
           <View className="bg-screen">
             <View className="px-5 py-2.5">{cardContent}</View>
             {props.showTrailingDivider !== false ? (
@@ -915,6 +923,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             ) : null}
           </View>
         )}
+        {status === "working" ? (
+          <ActiveThreadBorder visible={visible} radius={sidebarPane ? SIDEBAR_V2_ROW_RADIUS : 0} />
+        ) : null}
       </Pressable>
     ) : (
       <Pressable

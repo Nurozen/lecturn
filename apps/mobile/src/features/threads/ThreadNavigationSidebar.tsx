@@ -100,9 +100,9 @@ function LightHierarchySheen({
   readonly horizontal?: boolean;
 }) {
   const gradientId = `hierarchy-sheen-${useId().replaceAll(":", "")}`;
-  const base = copper ? "#ad3c2f" : "#92631f";
-  const metal = copper ? "#e67c47" : "#c99438";
-  const glint = copper ? "#ffd097" : "#ffe5a3";
+  const base = copper ? "#ad3c2f" : "#82472c";
+  const metal = copper ? "#e67c47" : "#bc7642";
+  const glint = copper ? "#ffd097" : "#ffe1b1";
   return (
     <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
       <Defs>
@@ -1270,10 +1270,10 @@ function ThreadNavigationSidebarPane(
                     ? "#ad3c2f"
                     : "#ff866f"
                   : light
-                    ? "#92631f"
+                    ? "#82472c"
                     : "#ffe1a0",
               boxShadow: light
-                ? "0 0 3px #c9943833"
+                ? "0 0 3px #bc764233"
                 : (props.item.type === "thread" || props.item.type === "v2-thread") &&
                     "settledBranch" in props.item &&
                     props.item.settledBranch &&
@@ -1317,10 +1317,10 @@ function ThreadNavigationSidebarPane(
                     ? "#ad3c2f"
                     : "#ff866f"
                   : light
-                    ? "#92631f"
+                    ? "#82472c"
                     : "#ffe1a0",
               boxShadow: light
-                ? "0 0 3px #c9943833"
+                ? "0 0 3px #bc764233"
                 : (props.item.type === "thread" || props.item.type === "v2-thread") &&
                     "settledBranch" in props.item &&
                     props.item.settledBranch

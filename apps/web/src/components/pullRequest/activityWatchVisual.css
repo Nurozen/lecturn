@@ -22,14 +22,14 @@
   opacity: 1;
   background: conic-gradient(
     from var(--lecturn-active-angle),
-    var(--lecturn-thread-trail) 0deg 245deg,
-    var(--lecturn-thread-gold) 312deg,
-    var(--lecturn-thread-tip) 345deg,
+    var(--lecturn-thread-trail) 0deg 260deg,
+    var(--lecturn-thread-gold) 315deg,
+    var(--lecturn-thread-tip) 348deg,
     var(--lecturn-thread-trail) 360deg
   );
 }
 .lecturn-watch-activity[data-activity-state="active"][data-moving="true"]::before {
-  animation: lecturn-active-perimeter 4s steps(40) infinite;
+  animation: lecturn-active-perimeter 4s steps(48) infinite;
 }
 .lecturn-watch-activity[data-activity-state="attention"][data-moving="true"]::before {
   animation: lecturn-watch-attention 2.4s ease-in-out infinite;
