@@ -926,17 +926,21 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                       padding: 18,
                       alignItems: "center",
                       gap: 8,
-                      backgroundColor: "#1e1b20",
-                      boxShadow: "0 0 10px 1px #e64d3d44",
+                      backgroundColor: isDarkMode ? "#1e1b20" : "#f5e8df",
+                      boxShadow: isDarkMode ? "0 0 10px 1px #e64d3d44" : "0 0 10px 1px #ad3c2f22",
                       opacity: unsettling ? 0.6 : 1,
                     }}
                   >
                     <ActiveThreadBorder visible settled />
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                      <SymbolView name="checkmark.circle" size={18} tintColor="#ff866f" />
-                      <Text style={{ color: "#a2a6ab" }}>Settled</Text>
+                      <SymbolView
+                        name="checkmark.circle"
+                        size={18}
+                        tintColor={isDarkMode ? "#ff866f" : "#ad3c2f"}
+                      />
+                      <Text style={{ color: isDarkMode ? "#a2a6ab" : "#646b73" }}>Settled</Text>
                     </View>
-                    <Text style={{ color: "#ffd097", fontSize: 17 }}>
+                    <Text style={{ color: isDarkMode ? "#ffd097" : "#873e2e", fontSize: 17 }}>
                       {unsettling ? "Unsettling…" : "Unsettle"}
                     </Text>
                   </Pressable>

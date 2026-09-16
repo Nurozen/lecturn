@@ -51,15 +51,15 @@ const light: typeof dark = {
   card: "#fffaf0ed",
   "wallpaper-top": "#f3eddfeb",
   "wallpaper-bottom": "#f3eddfef",
-  sheen: "#d49b3d77",
-  "subtle-border": "#9b783d66",
-  hover: "#98671812",
+  sheen: "#bc764277",
+  "subtle-border": "#94512e66",
+  hover: "#87482d12",
   "failed-border": "#b33f32aa",
   "complete-border": "#24745b88",
   "offline-border": "#62687399",
-  "thread-trail": "#986718cc",
-  "thread-highlight": "#ffe5a3",
-  "thread-base": "#c99438",
+  "thread-trail": "#87482dcc",
+  "thread-highlight": "#ffe1b1",
+  "thread-base": "#bc7642",
 };
 
 export function activityStateColorVariable(state: ActivityVisualState): string {

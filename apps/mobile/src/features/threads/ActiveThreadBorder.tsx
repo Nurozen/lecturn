@@ -1,112 +1,153 @@
-import { useEffect, useState } from "react";
-import { Animated, AppState, StyleSheet, View } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { AccessibilityInfo, AppState, StyleSheet, View } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
-import { useReducedMotion } from "react-native-reanimated";
+import Animated, {
+  useAnimatedProps,
+  useFrameCallback,
+  useReducedMotion,
+  useSharedValue,
+  type SharedValue,
+} from "react-native-reanimated";
+import Svg, { Path } from "react-native-svg";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
+import { threadBorderGeometry, threadBorderPalette, threadBorderPhase } from "./thread-border";
 
-/** A compositor-driven thread of light; recycled/offscreen rows keep a static edge. */
+const AnimatedPath = Animated.createAnimatedComponent(Path);
+const SEGMENTS = [
+  "tail",
+  "tail-rise",
+  "body",
+  "body-rise",
+  "crest-rise",
+  "crest",
+  "tip-rise",
+  "tip",
+] as const;
+
+function SheenSegment({
+  path,
+  perimeter,
+  index,
+  color,
+  progress,
+  strokeWidth,
+}: {
+  path: string;
+  perimeter: number;
+  index: number;
+  color: string;
+  progress: SharedValue<number>;
+  strokeWidth: number;
+}) {
+  // Eight contiguous segments form a broad, tapered trail (24% of the outline),
+  // rather than a point moving inside a square bounding box.
+  const length = perimeter * 0.03;
+  const animatedProps = useAnimatedProps(() => ({
+    strokeDashoffset: -(progress.get() * perimeter + index * length),
+  }));
+  return (
+    <AnimatedPath
+      d={path}
+      fill="none"
+      stroke={color}
+      strokeWidth={strokeWidth}
+      strokeOpacity={(index + 1) / 8}
+      strokeDasharray={[length, perimeter - length]}
+      strokeDashoffset={-index * length}
+      animatedProps={animatedProps}
+    />
+  );
+}
+
+/** A rounded metallic perimeter; motion is UI-thread driven and capped at 12 updates/s. */
 export function ActiveThreadBorder({
   visible,
   settled = false,
+  radius = 12,
 }: {
   readonly visible: boolean;
   readonly settled?: boolean;
+  readonly radius?: number;
 }) {
   const { themeAppearance } = useAppearancePreferences();
   const light = themeAppearance === "light";
+  const palette = threadBorderPalette(light, settled);
   const focused = useIsFocused();
-  const reducedMotion = useReducedMotion();
+  const initialReducedMotion = useReducedMotion();
+  const [reducedMotion, setReducedMotion] = useState(initialReducedMotion);
   const [foreground, setForeground] = useState(AppState.currentState === "active");
   const [size, setSize] = useState({ width: 0, height: 0 });
-  const [progress] = useState(() => new Animated.Value(0));
+  const progress = useSharedValue(0);
   useEffect(() => {
-    const subscription = AppState.addEventListener("change", (state) =>
-      setForeground(state === "active"),
-    );
-    return () => subscription.remove();
+    const app = AppState.addEventListener("change", (state) => setForeground(state === "active"));
+    const motion = AccessibilityInfo.addEventListener("reduceMotionChanged", setReducedMotion);
+    return () => {
+      app.remove();
+      motion.remove();
+    };
   }, []);
-  const animate = visible && focused && foreground && !reducedMotion;
+  const strokeWidth = settled ? 2 : 1.5;
+  // Copper edging remains visible beside the bright crest on cream surfaces.
+  const edgeWidth = strokeWidth + (light ? 1 : 0);
+  const geometry = threadBorderGeometry(size.width, size.height, radius, edgeWidth);
+  const animate = visible && focused && foreground && !reducedMotion && geometry !== null;
+  const clock = useFrameCallback(
+    useCallback(
+      ({ timeSinceFirstFrame }: { timeSinceFirstFrame: number }) => {
+        "worklet";
+        const phase = threadBorderPhase(timeSinceFirstFrame);
+        if (progress.get() !== phase) progress.set(phase);
+      },
+      [progress],
+    ),
+    false,
+  );
   useEffect(() => {
-    if (!animate) return;
-    progress.setValue(0);
-    const animation = Animated.loop(
-      Animated.timing(progress, {
-        toValue: 1,
-        duration: 7000,
-        useNativeDriver: true,
-        isInteraction: false,
-      }),
-    );
-    animation.start();
-    return () => animation.stop();
-  }, [animate, progress]);
-  const width = Math.max(size.width - 4, 1);
-  const height = Math.max(size.height - 4, 1);
-  const perimeter = 2 * (width + height);
-  const inputRange = [
-    0,
-    width / perimeter,
-    (width + height) / perimeter,
-    (2 * width + height) / perimeter,
-    1,
+    clock.setActive(animate);
+    // Keep a real static sheen when motion is disabled or a recycled row leaves view.
+    if (!animate) progress.set(0);
+    return () => clock.setActive(false);
+  }, [animate, clock, progress]);
+  const colors = [
+    palette.trail,
+    palette.trail,
+    palette.trail,
+    palette.metal,
+    palette.metal,
+    palette.metal,
+    palette.tip,
+    palette.tip,
   ];
   return (
     <View
       pointerEvents="none"
       accessible={false}
-      onLayout={({ nativeEvent }) => setSize(nativeEvent.layout)}
-      style={[
-        StyleSheet.absoluteFill,
-        {
-          borderWidth: settled ? 2 : 1,
-          borderColor: settled ? (light ? "#ad3c2f" : "#e64d3d") : light ? "#92631f" : "#b68a43",
-          borderRadius: 12,
-        },
-      ]}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      onLayout={({ nativeEvent: { layout } }) =>
+        setSize((previous) =>
+          previous.width === layout.width && previous.height === layout.height
+            ? previous
+            : { width: layout.width, height: layout.height },
+        )
+      }
+      style={[StyleSheet.absoluteFill, { zIndex: 1 }]}
     >
-      {light ? (
-        <View
-          style={[
-            StyleSheet.absoluteFill,
-            {
-              margin: 1,
-              borderWidth: 1,
-              borderRadius: 10,
-              borderColor: settled ? "#e67c4766" : "#c9943866",
-              borderTopColor: settled ? "#ffd097bb" : "#ffe5a3bb",
-            },
-          ]}
-        />
-      ) : null}
-      {animate && size.width > 0 ? (
-        <Animated.View
-          style={{
-            position: "absolute",
-            width: 4,
-            height: 4,
-            borderRadius: 2,
-            backgroundColor: settled ? "#ffd097" : light ? "#ffe5a3" : "#fff0c6",
-            borderWidth: light ? 0.75 : 0,
-            borderColor: settled ? "#ad3c2f" : "#92631f",
-            shadowColor: settled ? "#ff7258" : "#efc873",
-            shadowOpacity: light ? 0.45 : 0.9,
-            shadowRadius: light ? 3 : 5,
-            transform: [
-              {
-                translateX: progress.interpolate({
-                  inputRange,
-                  outputRange: [0, width, width, 0, 0],
-                }),
-              },
-              {
-                translateY: progress.interpolate({
-                  inputRange,
-                  outputRange: [0, 0, height, height, 0],
-                }),
-              },
-            ],
-          }}
-        />
+      {geometry ? (
+        <Svg width={size.width} height={size.height}>
+          <Path d={geometry.path} fill="none" stroke={palette.base} strokeWidth={edgeWidth} />
+          {colors.map((color, index) => (
+            <SheenSegment
+              key={SEGMENTS[index]}
+              path={geometry.path}
+              perimeter={geometry.perimeter}
+              index={index}
+              color={color}
+              progress={progress}
+              strokeWidth={strokeWidth}
+            />
+          ))}
+        </Svg>
       ) : null}
     </View>
   );

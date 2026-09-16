@@ -723,7 +723,9 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
           onSelectThread(thread);
         }}
       >
-        {status?.kind === "working" ? <ActiveThreadBorder visible={visible} /> : null}
+        {status?.kind === "working" ? (
+          <ActiveThreadBorder visible={visible} radius={compact ? 0 : SIDEBAR_ROW_RADIUS} />
+        ) : null}
         <View className="pr-[18px] pt-[10px]" style={{ paddingLeft: THREAD_LIST_COMPACT_INSET }}>
           <View className={cn("gap-[3px] pb-[10px]", !props.isLast && "border-b border-separator")}>
             <View className="flex-row items-center justify-between gap-2">
@@ -782,7 +784,9 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
           paddingVertical: 10,
         })}
       >
-        {status?.kind === "working" ? <ActiveThreadBorder visible={visible} /> : null}
+        {status?.kind === "working" ? (
+          <ActiveThreadBorder visible={visible} radius={compact ? 0 : SIDEBAR_ROW_RADIUS} />
+        ) : null}
         <View className="gap-[3px]">
           <View className="flex-row items-center justify-between gap-2">
             <Text
