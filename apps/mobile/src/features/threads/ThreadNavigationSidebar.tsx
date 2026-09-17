@@ -52,6 +52,7 @@ import {
   buildHomeListLayout,
   buildHomeHierarchyV2Items,
   DEFAULT_GROUP_DISPLAY_STATE,
+  EMPTY_HOME_LIST_LAYOUT,
   homeListItemsAreEqual,
   nextGroupDisplayState,
   type HomeGroupDisplayAction,
@@ -395,13 +396,15 @@ function ThreadNavigationSidebarPane(
   const hasSearchQuery = props.searchQuery.trim().length > 0;
   const listLayout = useMemo(
     () =>
-      buildHomeListLayout({
-        groups,
-        displayStates: groupDisplayStates,
-        showAllThreads: hasSearchQuery,
-        sagaIndex,
-      }),
-    [groups, groupDisplayStates, hasSearchQuery, sagaIndex],
+      threadListV2Enabled
+        ? EMPTY_HOME_LIST_LAYOUT
+        : buildHomeListLayout({
+            groups,
+            displayStates: groupDisplayStates,
+            showAllThreads: hasSearchQuery,
+            sagaIndex,
+          }),
+    [threadListV2Enabled, groups, groupDisplayStates, hasSearchQuery, sagaIndex],
   );
   const projectCwdByKey = useMemo(() => {
     const map = new Map<string, string>();

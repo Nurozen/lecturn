@@ -98,7 +98,7 @@ for (const folder of ["apps/web/public", "apps/marketing/public"]) {
 }
 await write("assets/prod/logo.svg", source);
 await write(
-  "apps/marketing/public/icon.webp",
+  "apps/marketing/src/assets/icon.webp",
   await sharp(await render("#102A39", 1024))
     .webp({ quality: 95 })
     .toBuffer(),
