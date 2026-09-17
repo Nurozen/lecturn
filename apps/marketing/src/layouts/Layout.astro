@@ -1,4 +1,6 @@
 ---
+import { Image } from "astro:assets";
+import appIcon from "../assets/icon.webp";
 import {
 
   GITHUB_REPOSITORY_URL,
@@ -67,7 +69,17 @@ const {
       <footer class="footer">
         <div class="footer-inner">
           <div class="footer-brand">
-            <img src="/icon.webp" alt="" />
+            <Image
+              src={appIcon}
+              alt=""
+              width={20}
+              height={20}
+              densities={[1, 2, 3]}
+              format="webp"
+              quality={90}
+              loading="lazy"
+              decoding="async"
+            />
             <span>&copy; {new Date().getFullYear()} Cloud Gatherer Labs · Based on Lecturn, MIT licensed</span>
           </div>
           <div class="footer-links">
