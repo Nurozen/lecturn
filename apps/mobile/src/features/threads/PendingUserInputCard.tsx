@@ -16,6 +16,7 @@ import { USER_INPUT_TOGGLE_DURATION_MS } from "./pendingUserInputLayout";
 
 import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
+import { GlassCard } from "../../components/GlassCard";
 import { ControlPill } from "../../components/ControlPill";
 import { cn } from "../../lib/cn";
 import {
@@ -156,12 +157,15 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
   // card's top edge wipes past and reveals it — no opacity handoff, so no
   // crossfade frames.
   const bar = showBar ? (
-    <View
+    <GlassCard
+      radius={28}
+      tone="accent"
+      opaque
       onLayout={handleBarLayout}
       pointerEvents={props.collapsed ? "auto" : "none"}
       accessibilityElementsHidden={!props.collapsed}
       importantForAccessibility={props.collapsed ? "auto" : "no-hide-descendants"}
-      className="flex-row items-center gap-2 rounded-full border border-adaptive-neutral-200-white-a6 bg-adaptive-neutral-100-900 py-1.5 pl-4 pr-1.5"
+      className="flex-row items-center gap-2 py-1.5 pl-4 pr-1.5"
     >
       <Pressable
         accessibilityRole="button"
@@ -171,9 +175,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
         onPress={props.onToggleCollapsed}
         className="min-h-10 flex-1 flex-row items-center gap-2 active:opacity-70"
       >
-        <Text className="font-lecturn-bold text-2xs uppercase tracking-[1.1px] text-adaptive-sky-700-300">
-          User input needed
-        </Text>
+        <Text className="font-lecturn-medium text-xs text-primary">User input needed</Text>
         <Text className="font-sans text-xs text-adaptive-neutral-500-400">
           {questionCount} question{questionCount === 1 ? "" : "s"}
         </Text>
@@ -194,7 +196,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
           onPress={props.onStopThread}
         />
       ) : null}
-    </View>
+    </GlassCard>
   ) : null;
   const card = renderCard ? (
     // The surface is opaque on purpose: the card floats over the thread
@@ -216,13 +218,22 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
           : FadeOutDown.duration(USER_INPUT_TOGGLE_DURATION_MS).easing(Easing.out(Easing.cubic))
       }
       layout={CARD_LAYOUT_TRANSITION}
-      className="overflow-hidden gap-2.5 rounded-[20px] border border-adaptive-neutral-200-white-a6 bg-adaptive-neutral-100-900 p-4"
+      className="overflow-hidden gap-2.5 rounded-[24px] p-4"
       style={
         EXPANDED_CARD_IS_OVERLAY
           ? [{ maxHeight: props.maxHeight }, cardAnimatedStyle]
           : { maxHeight: props.maxHeight }
       }
     >
+      <GlassCard
+        tone="accent"
+        radius={24}
+        pointerEvents="none"
+        opaque
+        style={{ position: "absolute", inset: 0 }}
+      >
+        {null}
+      </GlassCard>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Collapse user input"
@@ -230,9 +241,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
         className="flex-row items-start gap-2"
       >
         <View className="flex-1 gap-2.5">
-          <Text className="font-lecturn-bold text-2xs uppercase tracking-[1.1px] text-adaptive-sky-700-300">
-            User input needed
-          </Text>
+          <Text className="font-lecturn-medium text-xs text-primary">User input needed</Text>
           <Text className="font-lecturn-bold text-lg text-adaptive-neutral-950-50">
             Fill in the pending answers
           </Text>
@@ -277,9 +286,11 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                       className={cn(
                         "min-h-12 w-full rounded-2xl border px-3.5 py-3",
                         selected
-                          ? "border-adaptive-blue-300-a50-blue-400-a28 bg-adaptive-blue-50-blue-400-a14"
+                          ? "border-primary/50 bg-primary/10"
                           : "border-adaptive-neutral-200-white-a6 bg-adaptive-white-neutral-950-a70",
                       )}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
                       onPress={() =>
                         props.onSelectOption(
                           props.pendingUserInput.requestId,
@@ -292,9 +303,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                         <Text
                           className={cn(
                             "font-lecturn-bold text-sm",
-                            selected
-                              ? "text-adaptive-sky-700-300"
-                              : "text-adaptive-neutral-600-300",
+                            selected ? "text-primary" : "text-adaptive-neutral-600-300",
                           )}
                         >
                           {option.label}
@@ -326,16 +335,29 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
         })}
       </ScrollView>
       <Pressable
+        accessibilityRole="button"
+        accessibilityState={{
+          disabled:
+            props.answers === null ||
+            props.respondingUserInputId === props.pendingUserInput.requestId,
+        }}
         className={cn(
           "items-center justify-center rounded-2xl px-4 py-3.5",
-          props.answers ? "bg-blue-500" : "bg-adaptive-neutral-200-700-a60",
+          props.answers ? "bg-primary" : "bg-subtle",
         )}
         disabled={
           props.answers === null || props.respondingUserInputId === props.pendingUserInput.requestId
         }
         onPress={() => void props.onSubmit()}
       >
-        <Text className="font-lecturn-extrabold text-sm text-white">Submit answers</Text>
+        <Text
+          className={cn(
+            "font-lecturn-bold text-sm",
+            props.answers ? "text-primary-foreground" : "text-foreground-muted",
+          )}
+        >
+          Submit answers
+        </Text>
       </Pressable>
     </Animated.View>
   ) : null;

@@ -6,6 +6,7 @@ import { useIsFocused } from "@react-navigation/native";
 import { useEffect, useState, type ReactNode } from "react";
 import { Animated, AppState, StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
+import { GlassCard } from "../../components/GlassCard";
 import { AppText as Text } from "../../components/AppText";
 import { SymbolView, type AppSymbolName } from "../../components/AppSymbol";
 import { ActiveThreadBorder } from "../threads/ActiveThreadBorder";
@@ -57,21 +58,21 @@ export function WatchActivityFrame(props: {
   }, [opacity, pulse, themeAppearance]);
   const color = activityVisualColor(props.state, themeAppearance);
   return (
-    <View onLayout={props.onLayout} className="gap-3 rounded-xl bg-subtle p-4">
+    <GlassCard onLayout={props.onLayout} className="gap-3 p-4" radius={24}>
       {props.state === "active" ? (
-        <ActiveThreadBorder visible={props.visible} />
+        <ActiveThreadBorder visible={props.visible} radius={24} />
       ) : (
         <Animated.View
           pointerEvents="none"
           accessible={false}
           style={[
             StyleSheet.absoluteFill,
-            { borderRadius: 12, borderWidth: 1, borderColor: color, opacity },
+            { borderRadius: 24, borderWidth: 1, borderColor: color, opacity },
           ]}
         />
       )}
       {props.children}
-    </View>
+    </GlassCard>
   );
 }
 

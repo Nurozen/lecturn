@@ -1,3 +1,4 @@
+import { GlassCard } from "../../components/GlassCard";
 import { buildSidebarHierarchy } from "./sidebar-hierarchy";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { useMobileSagaIndex, useSidebarNestSagas } from "../../state/stave";
@@ -134,7 +135,7 @@ type SidebarListItem = (
   | { readonly type: "v2-show-more"; readonly key: string; readonly hiddenCount: number }
 ) & { readonly depth?: number };
 
-const SIDEBAR_STICKY_HEADER_HEIGHT = 106;
+const SIDEBAR_STICKY_HEADER_HEIGHT = 114;
 
 interface ThreadNavigationSidebarProps {
   readonly width: number;
@@ -1044,7 +1045,7 @@ function ThreadNavigationSidebarPane(
               accessibilityRole="button"
               accessibilityLabel={`Show ${Math.min(item.hiddenCount, THREAD_LIST_V2_SETTLED_PAGE_COUNT)} more settled threads`}
               onPress={showMoreSettled}
-              className="mx-4 mt-2 items-center rounded-lg border border-dashed border-border py-2.5"
+              className="mx-4 mt-2 items-center rounded-full border border-border bg-card py-3"
               style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
             >
               <Text className="text-xs font-lecturn-medium text-foreground-muted">
@@ -1403,7 +1404,7 @@ function ThreadNavigationSidebarPane(
                 viewabilityConfig={THREAD_ACTIVITY_VIEWABILITY_CONFIG}
                 data={listItems}
                 drawDistance={500}
-                estimatedItemSize={64}
+                estimatedItemSize={80}
                 extraData={listExtraData}
                 getItemType={(item) => item.type}
                 itemsAreEqual={sidebarItemsAreEqual}
@@ -1450,7 +1451,7 @@ function ThreadNavigationSidebarPane(
               viewabilityConfig={THREAD_ACTIVITY_VIEWABILITY_CONFIG}
               data={listItems}
               drawDistance={500}
-              estimatedItemSize={64}
+              estimatedItemSize={80}
               extraData={listExtraData}
               getItemType={(item) => item.type}
               itemsAreEqual={sidebarItemsAreEqual}
@@ -1480,11 +1481,15 @@ function ThreadNavigationSidebarPane(
       </View>
 
       <View
-        className="absolute inset-x-0 top-0 z-[4] bg-drawer"
+        className="absolute inset-x-0 top-0 z-[4] border-border bg-drawer"
         collapsable={false}
         onLayout={handleStickyHeaderLayout}
         pointerEvents="auto"
-        style={{ paddingTop: insets.top }}
+        style={{
+          paddingTop: insets.top,
+          paddingBottom: 12,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+        }}
       >
         <View className="h-[50px] flex-row items-end gap-0.5 pr-2 pl-5">
           {/* Title slot doubles as the connection status surface: while an
@@ -1508,7 +1513,10 @@ function ThreadNavigationSidebarPane(
           </View>
         </View>
 
-        <View className="mx-4 mt-[9px] h-[38px] flex-row items-center gap-1.5 rounded-xl bg-sidebar-search pr-2.5 pl-[11px]">
+        <GlassCard
+          radius={22}
+          className="mx-4 mt-[9px] h-[42px] flex-row items-center gap-2 pr-3 pl-3"
+        >
           <SymbolView
             name="magnifyingglass"
             size={15}
@@ -1528,7 +1536,7 @@ function ThreadNavigationSidebarPane(
             className="h-[34px] flex-1 px-0 py-0 font-sans text-base text-foreground"
             value={props.searchQuery}
           />
-        </View>
+        </GlassCard>
       </View>
     </View>
   );

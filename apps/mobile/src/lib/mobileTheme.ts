@@ -8,10 +8,8 @@ import {
   type ThemeAppearance,
   type ThemeColors,
 } from "@lecturn/shared/themePalettes";
-import {
-  STANDARD_THEME_PREVIEW_COLORS,
-  type ThemePreviewColors,
-} from "@lecturn/shared/themePreview";
+import type { ThemePreviewColors } from "@lecturn/shared/themePreview";
+import defaultThemeVariables from "../../generated-uniwind-default-theme-variables.json" with { type: "json" };
 
 export const DEFAULT_MOBILE_THEME_ID = MOBILE_DEFAULT_THEME_ID;
 export const MOBILE_THEME_IDS = SHARED_MOBILE_THEME_IDS;
@@ -210,6 +208,12 @@ export function createMobileThemeVariables(
   appearance: MobileThemeAppearance,
 ): MobileThemeVariables {
   const c = nativeColors(colors);
+  const foregroundChannels = rgbChannels(c.messageForeground);
+  const surfaceChannels = rgbChannels(c.messageSurface);
+  const messageForegroundIsLight =
+    foregroundChannels && surfaceChannels
+      ? relativeLuminance(foregroundChannels) > relativeLuminance(surfaceChannels)
+      : appearance === "light";
   return {
     "--color-screen": c.canvas,
     "--color-sheet": withAlpha(c.chrome, 0.98),
@@ -261,7 +265,7 @@ export function createMobileThemeVariables(
     "--color-md-blockquote-bg": c.muted,
     "--color-md-code-bg": c.codeBackground,
     "--color-md-code-text": c.codeForeground,
-    "--color-md-user-code-bg": withAlpha(c.messageForeground, 0.18),
+    "--color-md-user-code-bg": withAlpha(messageForegroundIsLight ? "#000000" : "#ffffff", 0.12),
     "--color-md-user-code-text": c.messageForeground,
     "--color-md-user-fence-bg": withAlpha("#000000", appearance === "dark" ? 0.28 : 0.16),
     "--color-md-user-fence-text": c.messageForeground,
@@ -303,7 +307,14 @@ export function getMobileThemePreviewColors(
   themeId: MobileThemeId,
   appearance: MobileThemeAppearance,
 ): ThemePreviewColors {
-  if (themeId === DEFAULT_MOBILE_THEME_ID) return STANDARD_THEME_PREVIEW_COLORS[appearance];
+  if (themeId === DEFAULT_MOBILE_THEME_ID) {
+    const variables = defaultThemeVariables[appearance];
+    return {
+      canvas: variables["--color-screen"],
+      accent: variables["--color-secondary"],
+      messageAction: variables["--color-primary"],
+    };
+  }
   const theme = BUILT_IN_THEMES.find((candidate) => candidate.id === themeId) ?? BUILT_IN_THEMES[0];
   const colors = getThemeColorsForAppearance(theme, appearance) ?? theme.colors;
   return {

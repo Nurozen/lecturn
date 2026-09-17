@@ -1,3 +1,4 @@
+import { GlassSurface } from "../../components/GlassSurface";
 import type { EnvironmentId, ThreadId } from "@lecturn/contracts";
 import type { MenuAction } from "@react-native-menu/menu";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
@@ -124,30 +125,38 @@ function ReviewSelectionActionBar(props: {
         gap: 10,
       }}
     >
-      {props.onOpenComment ? (
-        <Pressable
-          className="h-12 flex-1 flex-row items-center justify-center gap-2 rounded-full bg-primary px-5"
-          onPress={props.onOpenComment}
-        >
-          {content}
-        </Pressable>
-      ) : (
-        <View className="h-12 flex-1 flex-row items-center justify-center gap-2 rounded-full bg-primary px-5">
-          {content}
-        </View>
-      )}
-
-      <Pressable
-        className="h-12 w-12 items-center justify-center rounded-full bg-primary"
-        onPress={props.onClear}
+      <GlassSurface
+        className="flex-1 flex-row items-center gap-2 p-1.5"
+        style={{ borderRadius: 32 }}
       >
-        <SymbolView
-          name="xmark"
-          size={16}
-          tintColorClassName={"accent-primary-foreground"}
-          type="monochrome"
-        />
-      </Pressable>
+        {props.onOpenComment ? (
+          <Pressable
+            accessibilityRole="button"
+            className="min-h-12 flex-1 flex-row items-center justify-center gap-2 rounded-full bg-primary px-5 py-2 active:opacity-70"
+            onPress={props.onOpenComment}
+          >
+            {content}
+          </Pressable>
+        ) : (
+          <View className="h-12 flex-1 flex-row items-center justify-center gap-2 rounded-full bg-primary px-5">
+            {content}
+          </View>
+        )}
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Clear review selection"
+          className="h-12 w-12 items-center justify-center rounded-full border border-border-subtle bg-glass-surface active:opacity-70"
+          onPress={props.onClear}
+        >
+          <SymbolView
+            name="xmark"
+            size={16}
+            tintColorClassName={"accent-foreground"}
+            type="monochrome"
+          />
+        </Pressable>
+      </GlassSurface>
     </View>
   );
 }

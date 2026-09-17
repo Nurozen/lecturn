@@ -31,6 +31,7 @@ import type { EnvironmentId, ToolActivityIcon } from "@lecturn/contracts";
 import { toolActivityFaviconUrl } from "@lecturn/shared/favicon";
 
 import { AppText as Text } from "../../components/AppText";
+import { GlassCard } from "../../components/GlassCard";
 import { LecturnWordmark } from "../../components/LecturnWordmark";
 import { cn } from "../../lib/cn";
 import { THREAD_WORK_ROW_MIN_HEIGHT, type deriveThreadWorkLogSizing } from "../../lib/layout";
@@ -445,6 +446,9 @@ export function ThreadWorkLog(props: ThreadWorkLogProps) {
 
   return (
     <View className="-mx-1 mb-1 px-1 py-0">
+      <GlassCard radius={14} pointerEvents="none" style={{ position: "absolute", inset: 0 }}>
+        {null}
+      </GlassCard>
       {props.activities[0]?.groupedToolDetail ? (
         <ThreadWorkGroupList
           activities={props.activities}
@@ -870,6 +874,9 @@ export function ThreadWorkGroupToggle(props: {
 
   return (
     <View className="-mx-1 px-1 py-0">
+      <GlassCard radius={14} pointerEvents="none" style={{ position: "absolute", inset: 0 }}>
+        {null}
+      </GlassCard>
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded: props.expanded }}

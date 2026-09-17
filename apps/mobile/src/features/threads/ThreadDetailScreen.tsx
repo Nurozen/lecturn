@@ -922,25 +922,47 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     disabled={unsettling || props.connectionStateLabel !== "connected"}
                     onPress={() => void handleUnsettle()}
                     style={{
-                      borderRadius: 12,
-                      padding: 18,
+                      borderRadius: 24,
+                      minHeight: 76,
+                      padding: 20,
+                      flexDirection: "row",
+                      flexWrap: "wrap",
+                      justifyContent: "space-between",
                       alignItems: "center",
-                      gap: 8,
-                      backgroundColor: isDarkMode ? "#1e1b20" : "#f5e8df",
+                      gap: 12,
                       boxShadow: isDarkMode ? "0 0 10px 1px #e64d3d44" : "0 0 10px 1px #ad3c2f22",
                       opacity: unsettling ? 0.6 : 1,
                     }}
                   >
-                    <ActiveThreadBorder visible settled />
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <View
+                      pointerEvents="none"
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        borderRadius: 24,
+                        backgroundColor: isDarkMode ? "#1e1b20" : "#f5e8df",
+                      }}
+                    />
+                    <ActiveThreadBorder visible settled radius={24} />
+                    <View
+                      style={{ flexDirection: "row", alignItems: "center", flexShrink: 1, gap: 8 }}
+                    >
                       <SymbolView
                         name="checkmark.circle"
                         size={18}
                         tintColor={isDarkMode ? "#ff866f" : "#ad3c2f"}
                       />
-                      <Text style={{ color: isDarkMode ? "#a2a6ab" : "#646b73" }}>Settled</Text>
+                      <Text style={{ color: isDarkMode ? "#a2a6ab" : "#646b73", flexShrink: 1 }}>
+                        Settled
+                      </Text>
                     </View>
-                    <Text style={{ color: isDarkMode ? "#ffd097" : "#873e2e", fontSize: 17 }}>
+                    <Text
+                      style={{
+                        color: isDarkMode ? "#ffd097" : "#873e2e",
+                        fontSize: 17,
+                        flexShrink: 1,
+                      }}
+                    >
                       {unsettling ? "Unsettling…" : "Unsettle"}
                     </Text>
                   </Pressable>

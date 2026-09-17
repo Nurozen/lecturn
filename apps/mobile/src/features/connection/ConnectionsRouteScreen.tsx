@@ -1,3 +1,4 @@
+import { GlassCard } from "../../components/GlassCard";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { NativeHeaderToolbar } from "../../native/StackHeader";
 import { useNavigation } from "@react-navigation/native";
@@ -63,7 +64,7 @@ export function ConnectionsRouteScreen() {
         }}
       >
         {hasEnvironments ? (
-          <View collapsable={false} className="overflow-hidden rounded-[24px] bg-card">
+          <GlassCard collapsable={false} radius={24} className="overflow-hidden">
             {connectedEnvironments.map((environment, index) => (
               <View
                 key={environment.environmentId}
@@ -86,9 +87,9 @@ export function ConnectionsRouteScreen() {
                 />
               </View>
             ))}
-          </View>
+          </GlassCard>
         ) : (
-          <View collapsable={false} className="items-center gap-3 rounded-[24px] bg-card px-6 py-8">
+          <GlassCard collapsable={false} radius={24} className="items-center gap-3 px-6 py-8">
             <View className="h-12 w-12 items-center justify-center rounded-[16px] bg-subtle">
               <SymbolView
                 name="point.3.connected.trianglepath.dotted"
@@ -101,7 +102,7 @@ export function ConnectionsRouteScreen() {
               No environments connected yet.{"\n"}Tap{" "}
               <Text className="font-lecturn-bold text-foreground">+</Text> to add one.
             </Text>
-          </View>
+          </GlassCard>
         )}
       </ScrollView>
     </View>

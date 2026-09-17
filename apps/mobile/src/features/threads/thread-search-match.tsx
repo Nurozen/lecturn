@@ -46,27 +46,19 @@ function splitHighlightParts(text: string, query: string) {
 export function ThreadSearchMatchExcerpt(props: {
   readonly match: EnvironmentThreadSearchMatch;
   readonly query: string;
-  readonly selected?: boolean;
   readonly compact?: boolean;
 }) {
   const isUser = props.match.source === "user";
   const parts = splitHighlightParts(props.match.snippet, props.query);
   return (
     <Text
-      className={cn(
-        props.compact ? "text-sm" : "text-xs",
-        props.selected ? "text-user-bubble-foreground-muted" : "text-foreground-muted",
-      )}
+      className={cn(props.compact ? "text-sm" : "text-xs", "text-foreground-muted")}
       numberOfLines={1}
     >
       <Text
         className={cn(
           props.compact ? "text-sm font-lecturn-medium" : "text-xs font-lecturn-medium",
-          props.selected
-            ? "text-user-bubble-foreground"
-            : isUser
-              ? "text-adaptive-blue-500-400"
-              : "text-adaptive-emerald-600-400",
+          isUser ? "text-adaptive-blue-500-400" : "text-adaptive-emerald-600-400",
         )}
       >
         {isUser ? "You:" : "Agent:"}{" "}
@@ -76,11 +68,7 @@ export function ThreadSearchMatchExcerpt(props: {
           className={cn(
             props.compact ? "text-sm" : "text-xs",
             part.highlighted && "font-lecturn-bold",
-            props.selected
-              ? "text-user-bubble-foreground"
-              : part.highlighted
-                ? "text-foreground"
-                : "text-foreground-muted",
+            part.highlighted ? "text-foreground" : "text-foreground-muted",
           )}
           key={part.start}
         >

@@ -2,7 +2,6 @@ import { GlassView, isGlassEffectAPIAvailable } from "expo-glass-effect";
 import type { ReactNode, Ref } from "react";
 import {
   Platform,
-  useColorScheme,
   View,
   type ColorValue,
   type StyleProp,
@@ -12,6 +11,10 @@ import {
 import { withUniwind } from "uniwind";
 
 import { cn } from "../lib/cn";
+import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
+import { useUniwindTheme } from "../lib/useUniwindTheme";
+import { themeColorWithAlpha } from "../lib/mobileTheme";
+import { useGlassAccessibility } from "../lib/useGlassAccessibility";
 
 // Explicit mappings keep the native glassEffectStyle enum out of style-array conversion.
 const ThemedGlassView = withUniwind(GlassView, {
@@ -45,14 +48,18 @@ export function GlassSurface({
   style,
   ...props
 }: GlassSurfaceProps) {
-  const isDarkMode = useColorScheme() === "dark";
-  const supportsGlass = Platform.OS === "ios" && isGlassEffectAPIAvailable();
+  const { themeAppearance } = useAppearancePreferences();
+  const isDarkMode = themeAppearance === "dark";
+  const opaque = useGlassAccessibility();
+  const theme = useUniwindTheme();
+  const supportsGlass = Platform.OS === "ios" && isGlassEffectAPIAvailable() && !opaque;
   const surfaceStyle: ViewStyle = {
-    borderRadius: 32,
+    borderRadius: 28,
+    borderCurve: "continuous",
     overflow: "hidden",
     shadowColor: chrome === "none" ? "transparent" : "#000000",
     shadowOpacity: chrome === "none" ? 0 : isDarkMode ? 0.22 : 0.08,
-    shadowRadius: chrome === "none" ? 0 : 28,
+    shadowRadius: chrome === "none" ? 0 : 16,
     shadowOffset:
       chrome === "none"
         ? {
@@ -61,9 +68,15 @@ export function GlassSurface({
           }
         : {
             width: 0,
-            height: 14,
+            height: 6,
           },
-    elevation: chrome === "none" ? 0 : 12,
+    elevation: chrome === "none" ? 0 : 6,
+    ...(chrome === "none"
+      ? {}
+      : {
+          borderWidth: 0.5,
+          borderColor: theme["--color-border"],
+        }),
   };
 
   if (supportsGlass) {
@@ -100,8 +113,20 @@ export function GlassSurface({
           : "border border-border bg-glass-surface",
         fallbackClassName,
         className,
+        opaque ? "bg-card" : undefined,
       )}
-      style={[surfaceStyle, fallbackStyle, style]}
+      style={[
+        surfaceStyle,
+        fallbackStyle,
+        style,
+        opaque || chrome === "none"
+          ? undefined
+          : {
+              experimental_backgroundImage: isDarkMode
+                ? `linear-gradient(150deg, ${themeColorWithAlpha(theme["--color-primary"], 0.09)} 0%, #ffffff00 42%, #00000018 100%)`
+                : `linear-gradient(150deg, #ffffff9c 0%, #ffffff00 42%, ${themeColorWithAlpha(theme["--color-primary"], 0.06)} 100%)`,
+            },
+      ]}
     >
       {children}
     </View>

@@ -1,14 +1,10 @@
+import { GlassCard } from "../../../components/GlassCard";
 import type { ReactNode } from "react";
 import { View } from "react-native";
 
 import { AppText as Text } from "../../../components/AppText";
 
-export function SettingsSection(props: {
-  readonly title?: string;
-  readonly children: ReactNode;
-  /** Force the grouped card background; Android otherwise lists options flat. */
-  readonly card?: boolean;
-}) {
+export function SettingsSection(props: { readonly title?: string; readonly children: ReactNode }) {
   return (
     <View className="gap-2">
       {props.title ? (
@@ -16,15 +12,9 @@ export function SettingsSection(props: {
           {props.title}
         </Text>
       ) : null}
-      <View
-        className={
-          props.card
-            ? "overflow-hidden rounded-[24px] border-continuous bg-card/55"
-            : "overflow-hidden rounded-[24px] border-continuous bg-card/55 android:bg-transparent"
-        }
-      >
+      <GlassCard radius={24} className="overflow-hidden">
         {props.children}
-      </View>
+      </GlassCard>
     </View>
   );
 }

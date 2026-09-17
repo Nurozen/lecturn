@@ -81,19 +81,23 @@ _Forking is available for Codex, Claude, and OpenCode. Cursor, Grok, and Antigra
 
 Lecturn Connect links your hosting computers to your account for remote access, managed notifications, and Live Activities. The hosting app must remain running. Local connections, direct pairing, SSH, and Tailscale remain free; managed Connect requires an active subscription, trial, or explicit complimentary access. Connect costs $10/month or $100/year for three managed environments, with a 14-day card-required trial.
 
+Your workspace, in glass. Rounded conversations, floating controls, and translucent project cards keep the celestial backgrounds in view. Choose pearl and copper in light mode or midnight and gold in dark mode. Model and access settings stay within reach, alongside files, terminal, Git, review, and approvals. Accessibility settings can replace transparent materials with solid surfaces. [Explore mobile appearance](./docs/user/mobile-appearance.md).
+
 <p align="center">
-  <img src="./docs/images/lecturn-mobile-thread.webp" alt="Lecturn on iPhone showing a synthetic coding conversation." width="32%" />
-  <img src="./docs/images/lecturn-mobile-review.webp" alt="Lecturn on iPhone reviewing changes in a synthetic project." width="32%" />
-  <img src="./docs/images/lecturn-mobile-pr.webp" alt="Lecturn on iPhone showing sample PR checks, its managing conversation, and steering controls." width="32%" />
+  <img src="./docs/images/lecturn-mobile-thread.webp" alt="Pearl glass conversation on iPhone with copper message bubbles and model and access controls above the composer." width="32%" />
+  <img src="./docs/images/lecturn-mobile-projects.webp" alt="Midnight glass project cards with an approval indicator and an expanded settled thread group." width="32%" />
+  <img src="./docs/images/lecturn-mobile-pr.webp" alt="Mobile pull request overview with CI progress, its managing agent, a steering field, and Merge when ready." width="32%" />
 </p>
 
-_Current iPhone app, captured in the iOS simulator with synthetic projects and conversations. Sample PR snapshots are paused; no GitHub actions were performed._
+Follow a pull request from your phone: inspect CI jobs, steer its managing agent, or send **Merge when ready** to that conversation. The agent receives instructions to wait for required checks and repository merge rules before merging.
+
+_Current iPhone app, captured in the iOS simulator with synthetic projects and conversations. The floating gear is a development-build control. Sample PR snapshots are paused; steering and merge handoff were verified with a recording test provider, without performing GitHub actions._
 
 <details>
-<summary>Projects and conversations on your phone</summary>
+<summary>Pearl glass and copper accents in light mode</summary>
 
 <p align="center">
-  <img src="./docs/images/lecturn-mobile-projects.webp" alt="The current iPhone project list with synthetic conversations grouped by project." width="360" />
+  <img src="./docs/images/lecturn-mobile-projects-light.webp" alt="Light-mode project list with pearl glass cards, copper hierarchy lines, an approval indicator, and a collapsed settled group." width="360" />
 </p>
 
 </details>

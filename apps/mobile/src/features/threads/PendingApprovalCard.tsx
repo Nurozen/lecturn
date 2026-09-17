@@ -5,6 +5,7 @@ import type {
 } from "@lecturn/contracts";
 import { Pressable, View } from "react-native";
 
+import { GlassCard } from "../../components/GlassCard";
 import { AppText as Text } from "../../components/AppText";
 import type { PendingApproval } from "../../lib/threadActivity";
 
@@ -30,10 +31,8 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
   // Opaque for the same reason as PendingUserInputCard: nothing blurs the feed
   // behind this card, so a translucent surface bleeds messages through it.
   return (
-    <View className="gap-2.5 rounded-[20px] border border-adaptive-neutral-200-white-a6 bg-adaptive-neutral-100-900 p-4">
-      <Text className="font-lecturn-bold text-2xs uppercase tracking-[1.1px] text-adaptive-sky-700-300">
-        Approval needed
-      </Text>
+    <GlassCard tone="accent" radius={24} className="gap-2.5 p-4" opaque>
+      <Text className="font-lecturn-medium text-xs text-primary">Approval needed</Text>
       <Text className="font-lecturn-bold text-lg text-adaptive-neutral-950-50">
         {props.approval.appName ?? props.approval.requestKind}
       </Text>
@@ -53,18 +52,22 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
             key={option.decision}
             className={`items-center justify-center rounded-[14px] px-3.5 py-3 ${
               option.decision === "accept"
-                ? "bg-blue-500"
+                ? "bg-primary"
                 : option.decision === "decline"
                   ? "bg-adaptive-rose-100-500-a18"
                   : "bg-adaptive-neutral-200-800"
             }`}
+            accessibilityRole="button"
+            accessibilityState={{
+              disabled: props.respondingApprovalId === props.approval.requestId,
+            }}
             disabled={props.respondingApprovalId === props.approval.requestId}
             onPress={() => void props.onRespond(props.approval.requestId, option.decision)}
           >
             <Text
               className={`text-sm ${
                 option.decision === "accept"
-                  ? "font-lecturn-extrabold text-white"
+                  ? "font-lecturn-bold text-primary-foreground"
                   : option.decision === "decline"
                     ? "font-lecturn-bold text-adaptive-rose-700-300"
                     : "font-lecturn-bold text-adaptive-neutral-950-50"
@@ -75,6 +78,6 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
           </Pressable>
         ))}
       </View>
-    </View>
+    </GlassCard>
   );
 }
