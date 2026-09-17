@@ -49,6 +49,35 @@ it("gives a direct repair command for a stale service", () => {
   );
 });
 
+it("explains an incomplete nightly installation and keeps repair on its installed version", () => {
+  const output = formatServiceStatus(
+    {
+      ...status,
+      current: false,
+      installedVersion: "0.0.32-nightly.1",
+      problems: ["linger-disabled", "service-stopped"],
+    },
+    "0.0.32-nightly.1",
+  );
+
+  expect(output).toContain("[linger-disabled]");
+  expect(output).toContain("last login session ends");
+  expect(output).toContain('sudo loginctl enable-linger "$(id -un)"');
+  expect(output).toContain("[service-stopped]");
+  expect(output).toContain("lecturn service update");
+  expect(output).not.toContain("lecturn@latest");
+  expect(output).not.toContain("npx");
+});
+
+it("keeps the plain repair command when the installed service needs an update", () => {
+  const output = formatServiceStatus(
+    { ...status, current: false, installedVersion: "0.0.28" },
+    "0.0.29",
+  );
+  expect(output).toContain("Next: Run `lecturn service update`.");
+  expect(output).not.toContain("0.0.28 service update");
+});
+
 it("explains where the service is supported", () => {
   assert.include(
     formatServiceStatus({ ...status, supported: false, installed: false }, "0.0.29"),
@@ -151,6 +180,15 @@ it.effect.each([
     name: "the same version",
     state: { ...status, current: false, installedVersion: packageJson.version },
   },
+  {
+    name: "an incomplete install of the same version",
+    state: {
+      ...status,
+      current: false,
+      installedVersion: packageJson.version,
+      problems: ["linger-disabled"] as const,
+    },
+  },
   { name: "an unknown version", state: { ...status, current: false } },
 ])("installs or repairs $name without an override", ({ state }) =>
   Effect.gen(function* () {
@@ -198,6 +236,15 @@ it.effect("keeps onboarding successful when a newer version appears before insta
       ),
     );
 
+    expect(ready).toBe(false);
+  }),
+);
+
+it.effect("keeps the manual-server fallback when background prerequisites fail", () =>
+  Effect.gen(function* () {
+    const ready = yield* recoverServiceOnboardingOffer(
+      Effect.fail(new BootService.BootServicePrerequisiteError({ problem: "linger-disabled" })),
+    );
     expect(ready).toBe(false);
   }),
 );
