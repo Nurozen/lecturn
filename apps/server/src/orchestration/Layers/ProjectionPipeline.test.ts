@@ -67,49 +67,51 @@ const BaseTestLayer = makeProjectionPipelinePrefixedTestLayer("lecturn-projectio
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("lecturn-projection-cursor-batch-")))(
   "OrchestrationProjectionPipeline cursor batches",
   (it) => {
-    it.effect("writes a project, its lifecycle cursor, and all projector cursors in four statements", () =>
-      Effect.gen(function* () {
-        const projectionPipeline = yield* OrchestrationProjectionPipeline;
-        const eventStore = yield* OrchestrationEventStore;
-        const projectionState = yield* ProjectionStateRepository;
-        const counter = makeSqlStatementCounter();
-        const createdAt = "2026-01-01T00:00:00.000Z";
-        const event = yield* eventStore.append({
-          type: "project.created",
-          eventId: EventId.make("evt-cursor-batch-project"),
-          aggregateKind: "project",
-          aggregateId: ProjectId.make("project-cursor-batch"),
-          occurredAt: createdAt,
-          commandId: CommandId.make("cmd-cursor-batch-project"),
-          causationEventId: null,
-          correlationId: null,
-          metadata: {},
-          payload: {
-            projectId: ProjectId.make("project-cursor-batch"),
-            title: "Cursor batch project",
-            workspaceRoot: "/tmp/project-cursor-batch",
-            defaultModelSelection: null,
-            scripts: [],
-            createdAt,
-            updatedAt: createdAt,
-          },
-        });
-
-        yield* projectionPipeline.projectEvent(event).pipe(Effect.withTracer(counter.tracer));
-        // One project insert plus one batched projector-cursor upsert; the Stave
-        // lifecycle projector adds its own cursor read and advance on every event.
-        assert.strictEqual(counter.count(), 4);
-        assert.deepEqual(
-          yield* projectionState.listAll(),
-          Object.values(ORCHESTRATION_PROJECTOR_NAMES)
-            .sort()
-            .map((projector) => ({
-              projector,
-              lastAppliedSequence: event.sequence,
+    it.effect(
+      "writes a project, its lifecycle cursor, and all projector cursors in four statements",
+      () =>
+        Effect.gen(function* () {
+          const projectionPipeline = yield* OrchestrationProjectionPipeline;
+          const eventStore = yield* OrchestrationEventStore;
+          const projectionState = yield* ProjectionStateRepository;
+          const counter = makeSqlStatementCounter();
+          const createdAt = "2026-01-01T00:00:00.000Z";
+          const event = yield* eventStore.append({
+            type: "project.created",
+            eventId: EventId.make("evt-cursor-batch-project"),
+            aggregateKind: "project",
+            aggregateId: ProjectId.make("project-cursor-batch"),
+            occurredAt: createdAt,
+            commandId: CommandId.make("cmd-cursor-batch-project"),
+            causationEventId: null,
+            correlationId: null,
+            metadata: {},
+            payload: {
+              projectId: ProjectId.make("project-cursor-batch"),
+              title: "Cursor batch project",
+              workspaceRoot: "/tmp/project-cursor-batch",
+              defaultModelSelection: null,
+              scripts: [],
+              createdAt,
               updatedAt: createdAt,
-            })),
-        );
-      }),
+            },
+          });
+
+          yield* projectionPipeline.projectEvent(event).pipe(Effect.withTracer(counter.tracer));
+          // One project insert plus one batched projector-cursor upsert; the Stave
+          // lifecycle projector adds its own cursor read and advance on every event.
+          assert.strictEqual(counter.count(), 4);
+          assert.deepEqual(
+            yield* projectionState.listAll(),
+            Object.values(ORCHESTRATION_PROJECTOR_NAMES)
+              .sort()
+              .map((projector) => ({
+                projector,
+                lastAppliedSequence: event.sequence,
+                updatedAt: createdAt,
+              })),
+          );
+        }),
     );
   },
 );

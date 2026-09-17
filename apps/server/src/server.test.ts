@@ -1817,7 +1817,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const staticDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-static-cache-" });
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "lecturn-static-cache-",
+      });
       const indexPath = path.join(staticDir, "index.html");
       yield* fileSystem.writeFileString(indexPath, "<html>first build</html>");
       yield* buildAppUnderTest({ config: { staticDir } });
@@ -1864,7 +1866,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const staticDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-static-hashes-" });
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "lecturn-static-hashes-",
+      });
       yield* fileSystem.makeDirectory(path.join(staticDir, "assets"));
       yield* fileSystem.makeDirectory(path.join(staticDir, ".vite"));
       yield* fileSystem.writeFileString(
@@ -1982,7 +1986,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const staticDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-static-replace-" });
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "lecturn-static-replace-",
+      });
       const beforeOpenPath = path.join(staticDir, "before-open.txt");
       const afterOpenPath = path.join(staticDir, "after-open.txt");
       const original = "original bytes";
@@ -2037,7 +2043,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const staticDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-static-close-" });
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "lecturn-static-close-",
+      });
       const filePath = path.join(staticDir, "index.html");
       const body = "<p>file content</p>".repeat(1024);
       yield* fileSystem.writeFileString(filePath, body);

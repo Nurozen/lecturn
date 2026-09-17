@@ -230,6 +230,7 @@ class GitSafetyTests(unittest.TestCase):
                 self.assertIn(json.dumps(schema), structure)
                 Path(kwargs['log']).write_text(json.dumps(argv) + '\n' + self.grok_env(
                     num_turns=1, structuredOutput={'verdict': 'changes', 'tree': 'abc123', 'findings': 'summary'}))
+            return SimpleNamespace(returncode=0)
 
         with patch.object(batches, 'command', side_effect=launch):
             result = runner.agent(self.repo, self.folder, 'outside', 'Review', schema, True, runtime='grok')
@@ -255,6 +256,7 @@ class GitSafetyTests(unittest.TestCase):
         def launch(argv, cwd, **kwargs):
             calls.append(argv)
             Path(kwargs['log']).write_text(json.dumps(argv) + '\n' + self.grok_env(num_turns=1, text='{"verdict": "blocked"}'))
+            return SimpleNamespace(returncode=0)
 
         with patch.object(batches, 'command', side_effect=launch):
             with self.assertRaisesRegex(batches.Blocked, 'without inspecting'):
@@ -262,6 +264,7 @@ class GitSafetyTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertTrue(all('--json-schema' not in argv for argv in calls))
         self.assertEqual(calls[1][calls[1].index('--prompt-file') + 1], str(self.folder / 'outside.retry.prompt.md'))
+        self.assertTrue((self.folder / 'outside.retry1.events.log').exists())
         self.assertTrue((self.folder / 'outside.retry.prompt.md').read_text().startswith('Review'))
         self.assertIn('answered without reading', (self.folder / 'outside.retry.prompt.md').read_text())
         self.assertFalse((self.folder / 'outside.json').exists())
@@ -283,6 +286,7 @@ class GitSafetyTests(unittest.TestCase):
                     Path(kwargs['log']).write_text(json.dumps(argv) + '\n' + self.grok_env(num_turns=1, text='not started'))
                 else:
                     Path(kwargs['log']).write_text(json.dumps(argv) + '\n' + self.grok_env(num_turns=7))
+                return SimpleNamespace(returncode=0)
             return calls, launch
 
         calls, launch = make({'verdict': 'changes', 'tree': 'abc123'})
@@ -297,6 +301,42 @@ class GitSafetyTests(unittest.TestCase):
             with self.subTest(message=message), patch.object(batches, 'command', side_effect=launch):
                 with self.assertRaisesRegex(batches.Blocked, message):
                     runner.agent(self.repo, self.folder, 'outside', 'Review', schema, True, runtime='grok')
+
+    def test_grok_transient_failures_are_retried_then_block(self):
+        runner = batches.Runner.__new__(batches.Runner)
+        runner.lock_fd = None
+        schema = {'required': ['verdict', 'tree']}
+
+        def make(failures):
+            calls = []
+
+            def launch(argv, cwd, **kwargs):
+                calls.append(argv)
+                if '--json-schema' in argv:
+                    Path(kwargs['log']).write_text(json.dumps(argv) + '\n' + self.grok_env(
+                        num_turns=1, structuredOutput={'verdict': 'changes', 'tree': 'abc123'}))
+                    return SimpleNamespace(returncode=0)
+                if len(calls) <= failures:
+                    self.assertTrue(kwargs['allow_failure'])
+                    Path(kwargs['log']).write_text(json.dumps(argv) + '\n{"type": "error", "message": "stream error"}\n')
+                    return SimpleNamespace(returncode=1)
+                Path(kwargs['log']).write_text(json.dumps(argv) + '\n' + self.grok_env(num_turns=7))
+                return SimpleNamespace(returncode=0)
+            return calls, launch
+
+        calls, launch = make(2)
+        with patch.object(batches, 'command', side_effect=launch):
+            result = runner.agent(self.repo, self.folder, 'outside', 'Review', schema, True, runtime='grok')
+        self.assertEqual(result, {'verdict': 'changes', 'tree': 'abc123'})
+        self.assertEqual(len(calls), 4)
+        # Transient retries reuse the original prompt, never the nudge.
+        self.assertTrue(all(argv[argv.index('--prompt-file') + 1] == str(self.folder / 'outside.prompt.md') for argv in calls[:3]))
+        self.assertTrue((self.folder / 'outside.retry2.events.log').exists())
+        calls, launch = make(3)
+        with patch.object(batches, 'command', side_effect=launch):
+            with self.assertRaisesRegex(batches.Blocked, 'kept failing'):
+                runner.agent(self.repo, self.folder, 'outside', 'Review', schema, True, runtime='grok')
+        self.assertEqual(len(calls), 3)
 
     def test_grok_envelope_rejects_cancelled_or_unstructured_runs(self):
         log = self.folder / 'g.events.log'
