@@ -30,7 +30,7 @@ backend data with `LECTURN_HOME` need to be updated before using this arrangemen
 
 ## iPhone and iPad
 
-Lecturn is available to invited testers through TestFlight. Install Apple's TestFlight app and accept the Lecturn invitation using the Apple account associated with your tester invitation, then install Lecturn. There is no public TestFlight link or App Store release yet.
+Lecturn is available as a public TestFlight beta. Install Apple's TestFlight app, open the public link at https://testflight.apple.com/join/AY9PU516 on your device, and install Lecturn. There is no App Store release yet.
 
 Sign in to Lecturn Connect in both the desktop and mobile apps. Keep the desktop app running and link the computer to your account, then select that computer in Lecturn on your phone. In desktop Settings → Connections, enable **Publish agent activity**. Allow notifications when iOS asks; enable the activity notification or Live Activity options you want in Lecturn Settings. Start an agent task on the connected computer to check activity updates and notification delivery on your device.
 
