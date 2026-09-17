@@ -2151,6 +2151,23 @@ body,
     900px 300px;
 }
 
+/* Copper on vellum, gold on midnight; dark edges and bright tips retain a metallic sheen. */
+:root {
+  --lecturn-thread-gold: light-dark(#bc7642, #dca64e);
+  --lecturn-thread-highlight: light-dark(#e5a06d, #ffe1a0);
+  --lecturn-thread-tip: light-dark(#ffe1b1, #ffeac1);
+  --lecturn-thread-trail: light-dark(#87482dcc, #dca64e55);
+  --lecturn-thread-line: light-dark(#82472c, #dca64e99);
+  --lecturn-thread-glow: light-dark(#bc764266, #dca64e55);
+  --lecturn-thread-name: light-dark(#784126, #e8bd75);
+  --lecturn-thread-name-highlight: light-dark(#94512e, #ffe1a0);
+  --lecturn-thread-edge: light-dark(#713d2677, transparent);
+  --lecturn-copper-edge: light-dark(#90372a66, transparent);
+  --lecturn-copper-line: light-dark(#ad3c2f, #e64d3dcc);
+  --lecturn-copper-bright: light-dark(#e67c47, #ff7258);
+  --lecturn-copper-tip: light-dark(#ffd097, #ffd097);
+}
+
 /* One brief thread of light per interaction; no idle or looping animation.
    Fine pointers only: buttons reserve ::after for their larger touch target. */
 @media (hover: hover) and (pointer: fine) {
@@ -2170,12 +2187,12 @@ body,
     background: linear-gradient(
       90deg,
       transparent,
-      #dca64e 30%,
-      #ffe1a0 50%,
-      #dca64e 70%,
+      var(--lecturn-thread-gold) 30%,
+      var(--lecturn-thread-highlight) 50%,
+      var(--lecturn-thread-gold) 70%,
       transparent
     );
-    box-shadow: 0 0 5px 1px #dca64e55;
+    box-shadow: 0 0 5px 1px var(--lecturn-thread-glow);
     opacity: 0;
     transform-origin: left center;
   }
@@ -2240,50 +2257,77 @@ body,
   position: relative;
 }
 
-/* Static gold trunks connect each expanded node to its conversations and children. */
-.lecturn-hierarchy-conversations,
-.lecturn-hierarchy-branch {
+/* Every expanded project, space, and saga uses the same static gold tree.
+   Connectors belong to the list items so a final child's descendants cannot
+   extend its parent's trunk beyond the header elbow. */
+.lecturn-hierarchy-branch,
+.lecturn-hierarchy-conversations > ul > li {
   position: relative;
+  padding-inline-start: 28px;
 }
-.lecturn-hierarchy-children > .lecturn-hierarchy-conversations {
-  padding-inline-start: 20px;
-}
-.lecturn-hierarchy-children > .lecturn-hierarchy-conversations::before,
 .lecturn-hierarchy-branch::before,
-.lecturn-hierarchy-branch::after {
+.lecturn-hierarchy-branch::after,
+.lecturn-hierarchy-conversations > ul > li::before,
+.lecturn-hierarchy-conversations > ul > li::after {
   content: "";
   position: absolute;
   pointer-events: none;
-  box-shadow: 0 0 5px 1px #dca64e55;
+  inset-inline-start: 11px;
+  box-shadow:
+    0 0 0 0.35px var(--lecturn-thread-edge),
+    0 0 5px 1px var(--lecturn-thread-glow);
 }
-.lecturn-hierarchy-children > .lecturn-hierarchy-conversations::before,
-.lecturn-hierarchy-branch::before {
+.lecturn-hierarchy-branch::before,
+.lecturn-hierarchy-conversations > ul > li::before {
   inset-block: 0;
-  inset-inline-start: 10px;
   width: 1px;
-  background: linear-gradient(180deg, #dca64e99, #ffe1a0 45%, #ffe1a0 55%, #dca64e99);
+  background: linear-gradient(
+    180deg,
+    var(--lecturn-thread-line),
+    var(--lecturn-thread-gold) 38%,
+    var(--lecturn-thread-tip) 50%,
+    var(--lecturn-thread-gold) 62%,
+    var(--lecturn-thread-line)
+  );
 }
-.lecturn-hierarchy-branch:last-child::before,
-.lecturn-hierarchy-branch-last::before {
+.lecturn-hierarchy-branch:last-child::before {
   bottom: auto;
   height: 22px;
 }
-.lecturn-hierarchy-branch::after {
+.lecturn-hierarchy-conversations:last-child > ul > li:last-child::before {
+  bottom: 50%;
+}
+.lecturn-hierarchy-branch::after,
+.lecturn-hierarchy-conversations > ul > li::after {
   top: 22px;
-  inset-inline-start: 10px;
-  width: 16px;
+  width: 15px;
   height: 1px;
-  background: linear-gradient(90deg, #dca64e99, #ffe1a0 50%, #dca64e99);
+  background: linear-gradient(
+    90deg,
+    var(--lecturn-thread-line),
+    var(--lecturn-thread-highlight) 50%,
+    var(--lecturn-thread-line)
+  );
+}
+.lecturn-hierarchy-conversations > ul > li::after {
+  top: 50%;
 }
 .lecturn-saga-sheen {
-  color: #ffe1a0;
-  background: linear-gradient(110deg, #e8bd75, #ffe1a0 25%, #ffe1a0 75%, #e8bd75);
+  color: var(--lecturn-thread-name-highlight);
+  background: linear-gradient(
+    110deg,
+    var(--lecturn-thread-name),
+    var(--lecturn-thread-name-highlight) 25%,
+    var(--lecturn-thread-name-highlight) 75%,
+    var(--lecturn-thread-name)
+  );
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  text-shadow: 0 0 5px #dca64e55;
+  text-shadow: 0 0 5px var(--lecturn-thread-glow);
 }
 @media (forced-colors: active) {
-  .lecturn-hierarchy-children > .lecturn-hierarchy-conversations::before,
+  .lecturn-hierarchy-conversations > ul > li::before,
+  .lecturn-hierarchy-conversations > ul > li::after,
   .lecturn-hierarchy-branch::before,
   .lecturn-hierarchy-branch::after {
     background: CanvasText;
@@ -2301,10 +2345,10 @@ body,
   position: absolute;
   inset: 0;
   overflow: hidden;
-  border: 1px solid #dca64e;
+  border: 1px solid var(--lecturn-thread-gold);
   border-radius: inherit;
   pointer-events: none;
-  box-shadow: 0 0 5px #dca64e44;
+  box-shadow: 0 0 5px var(--lecturn-thread-glow);
 }
 .lecturn-running-edge {
   position: absolute;
@@ -2316,7 +2360,7 @@ body,
   position: absolute;
   width: 16px;
   height: 2px;
-  background: linear-gradient(90deg, transparent, #ffe1a0);
+  background: linear-gradient(90deg, transparent, var(--lecturn-thread-highlight));
   border-radius: 50%;
 }
 .lecturn-running-top {
@@ -2351,7 +2395,7 @@ body,
 .lecturn-running-left::before {
   width: 2px;
   height: 16px;
-  background: linear-gradient(transparent, #ffe1a0);
+  background: linear-gradient(transparent, var(--lecturn-thread-highlight));
 }
 .lecturn-running-border[data-moving="true"] .lecturn-running-edge {
   animation-play-state: running;
@@ -2370,5 +2414,142 @@ body,
   .lecturn-running-edge {
     animation: none;
     display: none;
+  }
+}
+
+@property --lecturn-active-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+/* Active work owns a full perimeter; the sidebar's visibility lease stops
+   motion offscreen or in a hidden window. Keep approval/error labels visible. */
+.lecturn-thread-active {
+  position: relative;
+}
+.lecturn-thread-active::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  z-index: 1;
+  background: conic-gradient(
+    from var(--lecturn-active-angle),
+    var(--lecturn-thread-trail) 0deg 260deg,
+    var(--lecturn-thread-gold) 315deg,
+    var(--lecturn-thread-tip) 348deg,
+    var(--lecturn-thread-trail) 360deg
+  );
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+.lecturn-thread-active-visible::before {
+  animation: lecturn-active-perimeter 4s steps(48) infinite;
+}
+@keyframes lecturn-active-perimeter {
+  to {
+    --lecturn-active-angle: 360deg;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lecturn-thread-active-visible::before {
+    animation: none;
+  }
+}
+
+/* Settled work keeps its place in the tree with a warm copper/red-gold sheen. */
+.lecturn-settled-label {
+  color: light-dark(#646b73, #a6adb6);
+}
+.lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::before,
+.lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::after {
+  box-shadow:
+    0 0 0 0.35px var(--lecturn-copper-edge),
+    0 0 7px 1px #f0524577;
+}
+.lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::before {
+  width: 2px;
+  background: linear-gradient(
+    180deg,
+    var(--lecturn-copper-line),
+    var(--lecturn-copper-bright) 42%,
+    var(--lecturn-copper-tip) 52%,
+    var(--lecturn-copper-bright) 62%,
+    var(--lecturn-copper-line)
+  );
+}
+.lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::after {
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--lecturn-copper-line),
+    var(--lecturn-copper-bright) 35%,
+    var(--lecturn-copper-tip) 52%,
+    var(--lecturn-copper-line)
+  );
+}
+.settled-thread-action {
+  position: relative;
+  isolation: isolate;
+  color: var(--foreground);
+  border-color: #ed624f;
+  background-color: color-mix(in srgb, light-dark(#fff0ea, #321e25) 50%, var(--background));
+  box-shadow:
+    0 0 14px #f0524550,
+    inset 0 0 16px #e64d3d0b;
+}
+.settled-thread-action::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--lecturn-active-angle),
+    var(--lecturn-copper-line) 0deg 230deg,
+    var(--lecturn-copper-bright) 290deg,
+    var(--lecturn-copper-tip) 340deg,
+    var(--lecturn-copper-line) 360deg
+  );
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+.settled-thread-action:is(:hover, :focus-visible)::before {
+  animation: lecturn-active-perimeter 4s steps(48) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .settled-thread-action::before {
+    animation: none !important;
+  }
+}
+@media (forced-colors: active) {
+  .lecturn-settled-label,
+  .lecturn-hierarchy-settled [data-testid="sidebar-row-slim"],
+  .settled-thread-action {
+    color: CanvasText;
+  }
+  .lecturn-hierarchy-settled::before,
+  .lecturn-hierarchy-settled::after,
+  .lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::before,
+  .lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::after {
+    background: CanvasText;
+    box-shadow: none;
+  }
+  .settled-thread-action::before {
+    background: CanvasText;
+  }
+}
+@media (hover: hover) and (pointer: fine) {
+  /* The full red-gold perimeter supplies this action's hover affordance. */
+  .settled-thread-action::after {
+    display: none !important;
   }
 }

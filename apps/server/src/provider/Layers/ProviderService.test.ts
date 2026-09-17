@@ -1,3 +1,4 @@
+import { TeamPolicyError } from "../../cloud/TeamPolicy.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -345,6 +346,9 @@ function makeProviderServiceLayer(
   input: {
     readonly directory?: ProviderSessionDirectory.ProviderSessionDirectory["Service"];
     readonly supportsConversationRollback?: boolean;
+    readonly checkTeamProvider?: NonNullable<
+      Parameters<typeof makeProviderServiceLiveImpl>[0]
+    >["checkTeamProvider"];
     readonly registry?: ProviderAdapterRegistry.ProviderAdapterRegistry["Service"];
   } = {},
 ) {
@@ -373,7 +377,9 @@ function makeProviderServiceLayer(
 
   const layer = it.layer(
     Layer.mergeAll(
-      makeProviderServiceLive().pipe(
+      makeProviderServiceLive(
+        input.checkTeamProvider ? { checkTeamProvider: input.checkTeamProvider } : {},
+      ).pipe(
         Layer.provide(providerAdapterLayer),
         Layer.provide(directoryLayer),
         Layer.provide(defaultServerSettingsLayer),
@@ -3190,4 +3196,27 @@ describe("Stave provider runtime quiescence", () => {
         }).pipe(Effect.provide(NodeServices.layer)),
     );
   }
+});
+
+const companyRestricted = makeProviderServiceLayer({
+  checkTeamProvider: () =>
+    Effect.fail(new TeamPolicyError({ message: "Provider disabled by your organization." })),
+});
+companyRestricted.layer("ProviderService company provider restriction", (it) => {
+  it.effect("rejects before launching a provider process", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("team-restricted");
+      const result = yield* provider
+        .startSession(threadId, {
+          provider: CODEX_DRIVER,
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          threadId,
+          runtimeMode: "full-access",
+        })
+        .pipe(Effect.exit);
+      assert.isTrue(Exit.isFailure(result));
+      assert.equal(companyRestricted.codex.startSession.mock.calls.length, 0);
+    }),
+  );
 });

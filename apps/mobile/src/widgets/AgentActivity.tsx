@@ -1,13 +1,19 @@
-import { HStack, Image, Spacer, Text, VStack, ZStack } from "@expo/ui/swift-ui";
-import type { ComponentProps } from "react";
+import { HStack, Image, Link, Rectangle, Spacer, Text, VStack, ZStack } from "@expo/ui/swift-ui";
+import type { ComponentProps, ReactNode } from "react";
+import type { RelayPullRequestActivity } from "@lecturn/contracts";
 import {
+  activityBackgroundTint,
+  background,
+  clipShape,
   font,
   foregroundStyle,
   frame,
   layoutPriority,
   lineLimit,
   padding,
+  opacity,
   resizable,
+  strokeBorder,
   widgetURL,
 } from "@expo/ui/swift-ui/modifiers";
 import {
@@ -37,6 +43,7 @@ export interface AgentActivityRowProps {
   readonly status: string;
   readonly updatedAt: string;
   readonly deepLink: string;
+  readonly pullRequest?: RelayPullRequestActivity;
 }
 
 export interface AgentActivityProps {
@@ -56,39 +63,33 @@ export function AgentActivity(
 ): LiveActivityLayout {
   "widget";
 
-  // Use SwiftUI's semantic label colors rather than fixed hex keyed off the
-  // device color scheme. A Live Activity banner always renders over a dark
-  // system material regardless of the device's light/dark setting, so
-  // scheme-derived dark text read as unreadable dark-on-dark on the lock
-  // screen. Semantic colors adapt to whatever material the OS places them on:
-  // the dark LA banner and the (light or dark) home-screen widget alike.
-  const primaryForeground = "primary";
-  const secondaryForeground = "secondary";
+  // Keep these literals inside the serialized widget function. Match Lecturn's
+  // dark app chrome even when macOS mirrors the activity in a light appearance.
+  const navy = "#061522";
+  const primaryForeground = "#dfc7a4";
+  const secondaryForeground = "#a5957f";
+  const gold = "#e6bc63";
+  const subdued = environment.isLuminanceReduced === true;
+  // The compact/minimal host chrome remains system-owned (including on Mac).
+  const systemGold = environment.colorScheme === "light" ? "#996918" : gold;
 
-  // Status tints mirror the web sidebar's pills
-  // (apps/web/src/components/Sidebar.logic.ts resolveThreadStatusPill): amber
-  // for approval, indigo for input, sky for working, emerald for completed.
-  // On iPhone the LA sits on a dark material, but macOS (iPhone Mirroring /
-  // Mac notification center) renders it on a light one — so pick the web
-  // palette's light (-600) or dark (-300) variant off the color scheme.
-  const isLightScheme = environment.colorScheme === "light";
-  const phaseTint = (phase: AgentActivityPhase | undefined): string => {
-    if (environment.isLuminanceReduced) {
-      return secondaryForeground;
-    }
+  const phaseTint = (phase: AgentActivityPhase | undefined, systemSurface = false): string => {
+    if (subdued) return systemSurface ? "secondary" : secondaryForeground;
+    const isLightScheme = systemSurface && environment.colorScheme === "light";
     switch (phase) {
       case "waiting_for_approval":
-        return isLightScheme ? "#d97706" : "#fcd34d"; // amber-600 / amber-300
       case "waiting_for_input":
-        return isLightScheme ? "#4f46e5" : "#a5b4fc"; // indigo-600 / indigo-300
+        return isLightScheme ? "#9a6700" : "#f0b34d";
       case "failed":
-        return isLightScheme ? "#dc2626" : "#fca5a5"; // red-600 / red-300
+        return isLightScheme ? "#b42318" : "#f07868";
       case "completed":
-        return isLightScheme ? "#059669" : "#6ee7b7"; // emerald-600 / emerald-300
+        return isLightScheme ? "#087f5b" : "#56c5a1";
+      case "stale":
+        return isLightScheme ? "#626a73" : "#a6adb6";
       case "starting":
       case "running":
       default:
-        return isLightScheme ? "#0284c7" : "#7dd3fc"; // sky-600 / sky-300
+        return isLightScheme ? "#996918" : gold;
     }
   };
 
@@ -103,6 +104,7 @@ export function AgentActivity(
   const ordered = [...props.activities].sort(
     (a, b) => phasePriority(a.phase) - phasePriority(b.phase),
   );
+  const hasPullRequests = ordered.some((row) => row.pullRequest !== undefined);
   const row0 = ordered[0];
   const row1 = ordered[1];
   const row2 = ordered[2];
@@ -132,13 +134,23 @@ export function AgentActivity(
   // newer success.
   const allDone = props.activeCount === 0;
   const doneLabel = failedRow ? "Failed" : "Done";
-  const outcomeLabel = failedRow ? "Agent work failed" : "Agent work completed";
+  const outcomeLabel = hasPullRequests
+    ? failedRow
+      ? "Activity needs attention"
+      : "Activity completed"
+    : failedRow
+      ? "Agent work failed"
+      : "Agent work completed";
 
   // Header copy: "5 active agents" + (", 1 needs attention"). The banner renders
   // the two parts in-line so the attention half can carry the accent color;
   // `summary` is the short form for tight spots (expanded center, watch card).
   const agentWord = props.activeCount === 1 ? "agent" : "agents";
-  const agentsLabel = allDone ? outcomeLabel : `${props.activeCount} active ${agentWord}`;
+  const agentsLabel = allDone
+    ? outcomeLabel
+    : hasPullRequests
+      ? `${props.activeCount} active ${props.activeCount === 1 ? "activity" : "activities"}`
+      : `${props.activeCount} active ${agentWord}`;
   const attentionSuffix =
     attentionRows.length > 0
       ? `${attentionRows.length} need${attentionRows.length === 1 ? "s" : ""} attention`
@@ -190,8 +202,24 @@ export function AgentActivity(
   // out it's the title that truncates, never the (short) project name or the
   // status label. Single-line keeps rows inside the expanded island's hard
   // height budget (~160pt) and lets the banner fit more agents.
-  const renderCompactRow = (row: AgentActivityRowProps) => (
-    <HStack spacing={7} alignment="center">
+  const renderAgentRow = (row: AgentActivityRowProps) => (
+    <HStack
+      spacing={7}
+      alignment="center"
+      modifiers={
+        row.phase === "running"
+          ? [
+              padding({ horizontal: 4, vertical: 2 }),
+              strokeBorder({
+                color: subdued ? "#655032" : gold,
+                style: { lineWidth: 0.7 },
+                cornerRadius: 5,
+                shape: "roundedRectangle",
+              }),
+            ]
+          : []
+      }
+    >
       <Text
         modifiers={[
           font({ weight: "semibold", size: 13 }),
@@ -207,21 +235,59 @@ export function AgentActivity(
           truncate together. (A maxWidth frame is greedy and reserved its full
           width even for short names; layoutPriority let the project starve the
           title.) */}
-      <Text modifiers={[font({ size: 11 }), foregroundStyle(secondaryForeground), lineLimit(1)]}>
-        {row.projectTitle}
-      </Text>
+      {row.projectTitle !== row.threadTitle ? (
+        <Text modifiers={[font({ size: 11 }), foregroundStyle(secondaryForeground), lineLimit(1)]}>
+          {row.projectTitle}
+        </Text>
+      ) : null}
       <Spacer minLength={8} />
-      <Text
-        modifiers={[
-          font({ weight: "semibold", size: 11 }),
-          foregroundStyle(phaseTint(row.phase)),
-          layoutPriority(1),
-        ]}
-      >
-        {row.status}
-      </Text>
+      {row.phase !== "running" ? (
+        <Text
+          modifiers={[
+            font({ weight: "semibold", size: 11 }),
+            foregroundStyle(phaseTint(row.phase)),
+            layoutPriority(1),
+          ]}
+        >
+          {row.status}
+        </Text>
+      ) : null}
     </HStack>
   );
+
+  // PR rows use two bounded lines and a smaller row budget. The widget is a
+  // glanceable snapshot; taps open authenticated controls, never a mutation URL.
+  const renderCompactRow = (row: AgentActivityRowProps) => {
+    const pr = row.pullRequest;
+    if (!pr) return renderAgentRow(row);
+    const content = (
+      <VStack alignment="leading" spacing={2}>
+        <Text
+          modifiers={[
+            font({ weight: "semibold", size: 12 }),
+            foregroundStyle(primaryForeground),
+            lineLimit(1),
+          ]}
+        >
+          {`#${pr.number} ${pr.repository.slice(0, 64)} · CI ${pr.checks} · Required ${pr.requiredChecks}`}
+        </Text>
+        <Text
+          modifiers={[
+            font({ size: 10 }),
+            foregroundStyle(pr.stale ? secondaryForeground : phaseTint(row.phase)),
+            lineLimit(1),
+          ]}
+        >
+          {`${pr.stale ? "Stale · " : ""}${pr.watching ? "Watching" : "Paused"} · ${pr.manager} · Merge ${pr.authorization}`}
+        </Text>
+      </VStack>
+    );
+    const destination =
+      row.deepLink.startsWith("/pr-watches/") && !/[?#]/.test(row.deepLink)
+        ? `lecturn://${row.deepLink.slice(1)}`
+        : null;
+    return destination ? <Link destination={destination}>{content}</Link> : content;
+  };
 
   // The Lecturn mark. `assetName` resolves the template image set bundled in
   // the widget extension's asset catalog. Image views only honor `resizable`
@@ -235,41 +301,71 @@ export function AgentActivity(
     </HStack>
   );
 
+  // WidgetKit snapshots do not support an ongoing animation loop. A broad
+  // highlight gives the thread its sheen without timers or extra activity pushes.
+  const renderThread = () => (
+    <Rectangle
+      modifiers={[
+        frame({ height: 1 }),
+        foregroundStyle({
+          type: "linearGradient",
+          colors: subdued
+            ? ["#263746", "#6c583a", "#263746"]
+            : ["#263746", "#9c7133", "#f4deb0", "#d9a34e", "#263746"],
+          startPoint: { x: 0, y: 0 },
+          endPoint: { x: 1, y: 0 },
+        }),
+      ]}
+    />
+  );
+  // The image has lower layout priority so the content decides the widget's
+  // height. It is a bundled original-color asset, never a remote image fetch.
+  const brandedSurface = (content: ReactNode, radius = 20) => (
+    <ZStack modifiers={[background(navy), clipShape("roundedRectangle", radius)]}>
+      <HStack modifiers={[layoutPriority(-1), opacity(subdued ? 0.16 : 0.6)]}>
+        <Image assetName="LecturnNightSky" modifiers={[resizable()]} />
+      </HStack>
+      {content}
+    </ZStack>
+  );
+  const surface = [
+    clipShape("roundedRectangle", 20),
+    strokeBorder({
+      color: subdued ? "#263746" : "#655032",
+      style: { lineWidth: 0.5 },
+      cornerRadius: 20,
+      shape: "roundedRectangle",
+    }),
+    activityBackgroundTint(navy),
+  ];
+
   return {
-    banner: (
+    banner: brandedSurface(
       <VStack
         alignment="leading"
-        spacing={6}
-        modifiers={deepLink ? [padding({ all: 14 }), widgetURL(deepLink)] : [padding({ all: 14 })]}
+        spacing={5}
+        modifiers={[
+          padding({ horizontal: 14, vertical: 12 }),
+          ...surface,
+          ...(deepLink ? [widgetURL(deepLink)] : []),
+        ]}
       >
-        {/* Logo pinned to the leading edge; the status texts centered across the
-            full width (ZStack so the logo doesn't skew the centering). No footer —
-            overflow beyond the visible rows is inferable from the count. */}
-        <ZStack>
-          <HStack spacing={0} alignment="center">
-            {renderLogo(13, primaryForeground)}
-            <Spacer minLength={0} />
-          </HStack>
-          <HStack spacing={6} alignment="center">
-            <Spacer minLength={0} />
+        <HStack spacing={10} alignment="center">
+          {renderLogo(24, subdued ? secondaryForeground : gold)}
+          <VStack alignment="leading" spacing={2}>
             <Text
               modifiers={[
                 font({ weight: "semibold", size: 13 }),
-                // The all-done header carries the outcome tint (emerald /
-                // red) the way the Done/Failed status labels do.
-                foregroundStyle(allDone ? headerTint : primaryForeground),
+                foregroundStyle(subdued ? secondaryForeground : gold),
                 lineLimit(1),
               ]}
             >
               {agentsLabel}
             </Text>
             {attentionSuffix ? (
-              <Text modifiers={[font({ size: 13 }), foregroundStyle(secondaryForeground)]}>·</Text>
-            ) : null}
-            {attentionSuffix ? (
               <Text
                 modifiers={[
-                  font({ weight: "semibold", size: 13 }),
+                  font({ weight: "semibold", size: 11 }),
                   foregroundStyle(headerTint),
                   lineLimit(1),
                 ]}
@@ -277,22 +373,27 @@ export function AgentActivity(
                 {attentionSuffix}
               </Text>
             ) : null}
-            <Spacer minLength={0} />
-          </HStack>
-        </ZStack>
+          </VStack>
+          <Spacer minLength={0} />
+        </HStack>
+        {renderThread()}
         {row0 ? renderCompactRow(row0) : null}
         {row1 ? renderCompactRow(row1) : null}
         {row2 ? renderCompactRow(row2) : null}
-        {row3 ? renderCompactRow(row3) : null}
-        {row4 ? renderCompactRow(row4) : null}
-      </VStack>
+        {!hasPullRequests && row3 ? renderCompactRow(row3) : null}
+        {!hasPullRequests && row4 ? renderCompactRow(row4) : null}
+      </VStack>,
     ),
     // Compact card for the watchOS Smart Stack + CarPlay (the `.small` family):
     // brand + count, then the single most important agent with its status glyph.
-    bannerSmall: (
-      <VStack alignment="leading" spacing={5} modifiers={[padding({ all: 10 })]}>
+    bannerSmall: brandedSurface(
+      <VStack
+        alignment="leading"
+        spacing={5}
+        modifiers={[padding({ all: 10 }), ...surface, ...(deepLink ? [widgetURL(deepLink)] : [])]}
+      >
         <HStack spacing={7} alignment="center">
-          {renderLogo(14, primaryForeground)}
+          {renderLogo(18, subdued ? secondaryForeground : gold)}
           <Text
             modifiers={[
               font({ weight: "bold", size: 13 }),
@@ -304,6 +405,7 @@ export function AgentActivity(
           </Text>
           <Spacer minLength={6} />
         </HStack>
+        {renderThread()}
         {row0 ? (
           <HStack spacing={7} alignment="center">
             <Text
@@ -313,19 +415,26 @@ export function AgentActivity(
                 lineLimit(1),
               ]}
             >
-              {row0.threadTitle}
+              {row0.pullRequest
+                ? `#${row0.pullRequest.number} ${row0.pullRequest.repository.slice(0, 32)}`
+                : row0.threadTitle}
             </Text>
             <Spacer minLength={6} />
             <Text modifiers={[font({ size: 11 }), foregroundStyle(phaseTint(row0.phase))]}>
-              {row0.status}
+              {row0.pullRequest ? `CI ${row0.pullRequest.checks}` : row0.status}
             </Text>
           </HStack>
         ) : null}
-      </VStack>
+      </VStack>,
     ),
-    compactLeading: renderLogo(14, tint),
+    compactLeading: renderLogo(16, subdued ? "secondary" : systemGold),
     compactTrailing: (
-      <Text modifiers={[font({ weight: "semibold", size: 11 }), foregroundStyle(tint)]}>
+      <Text
+        modifiers={[
+          font({ weight: "semibold", size: 11 }),
+          foregroundStyle(phaseTint(heroRow?.phase, true)),
+        ]}
+      >
         {attentionRow
           ? attentionRow.phase === "waiting_for_approval"
             ? "Approval"
@@ -338,11 +447,19 @@ export function AgentActivity(
     // mark (all-done shows the hero row's checkmark/cross).
     minimal:
       (attentionRow || failedRow || allDone) && heroRow
-        ? renderGlyph(phaseSymbol(heroRow.phase), 13, phaseTint(heroRow.phase))
-        : renderLogo(11, tint),
+        ? renderGlyph(phaseSymbol(heroRow.phase), 15, phaseTint(heroRow.phase, true))
+        : renderLogo(14, subdued ? "secondary" : systemGold),
     expandedLeading: (
-      <HStack spacing={5} alignment="center" modifiers={[padding({ leading: 4, vertical: 4 })]}>
-        {renderLogo(15, tint)}
+      <HStack
+        spacing={5}
+        alignment="center"
+        modifiers={[
+          padding({ horizontal: 8, vertical: 4 }),
+          background(navy),
+          clipShape("roundedRectangle", 10),
+        ]}
+      >
+        {renderLogo(18, subdued ? secondaryForeground : gold)}
         <Text modifiers={[font({ weight: "bold", size: 13 }), foregroundStyle(tint)]}>
           {allDone ? doneLabel : `${props.activeCount}`}
         </Text>
@@ -356,7 +473,7 @@ export function AgentActivity(
     // useful in a view the user is actively holding open — and the trailing
     // region hugs the island's corner radius, which clipped it anyway.
     expandedTrailing: null,
-    expandedBottom: (
+    expandedBottom: brandedSurface(
       // Vertical padding only: the expanded region provides its own horizontal
       // content margins, so `all` padding double-indented the rows.
       // Horizontal padding keeps both edges clear of the island's corner
@@ -366,14 +483,20 @@ export function AgentActivity(
         spacing={5}
         modifiers={
           deepLink
-            ? [padding({ vertical: 2, horizontal: 8 }), widgetURL(deepLink)]
-            : [padding({ vertical: 2, horizontal: 8 })]
+            ? [
+                padding({ vertical: 4, horizontal: 8 }),
+                clipShape("roundedRectangle", 10),
+                widgetURL(deepLink),
+              ]
+            : [padding({ vertical: 4, horizontal: 8 }), clipShape("roundedRectangle", 10)]
         }
       >
+        {renderThread()}
         {row0 ? renderCompactRow(row0) : null}
         {row1 ? renderCompactRow(row1) : null}
-        {row2 ? renderCompactRow(row2) : null}
-      </VStack>
+        {!hasPullRequests && row2 ? renderCompactRow(row2) : null}
+      </VStack>,
+      10,
     ),
   };
 }

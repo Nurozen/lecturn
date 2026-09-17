@@ -235,7 +235,7 @@ export function ComposerActionButton(props: {
     >
       <View
         className={cn(
-          "size-[30px] items-center justify-center rounded-full",
+          "size-[34px] items-center justify-center rounded-full border border-white/20",
           props.variant === "danger"
             ? "bg-danger"
             : props.disabled

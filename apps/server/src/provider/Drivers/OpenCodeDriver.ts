@@ -199,6 +199,11 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<OpenCodeSettings>>(
         {
           maintenanceCapabilities,
+          discovery: {
+            waitForShell: !/[\\/]/.test(effectiveConfig.binaryPath?.trim() ?? ""),
+            refreshEnvironment: () =>
+              Object.assign(processEnv, mergeProviderInstanceEnvironment(environment)),
+          },
           getSettings: snapshotSettings.getSettings,
           streamSettings: snapshotSettings.streamSettings,
           haveSettingsChanged: haveProviderSnapshotSettingsChanged,

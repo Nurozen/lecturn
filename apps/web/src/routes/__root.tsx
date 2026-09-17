@@ -1,3 +1,4 @@
+import { ProviderDetectionProgress } from "../components/ProviderDetectionProgress";
 import { type ServerLifecycleWelcomePayload } from "@lecturn/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
@@ -164,6 +165,7 @@ function RootRouteView() {
         {primaryEnvironmentAuthenticated ? <PlanAgentSelectionHeal /> : null}
         {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
         {appShell}
+        {primaryEnvironmentAuthenticated ? <ProviderDetectionProgress /> : null}
         {/* Above the router: a theme draft is judged by walking the app, so the
             editor has to survive navigation away from settings. */}
         <ThemeEditorHost />

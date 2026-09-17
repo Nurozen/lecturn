@@ -67,7 +67,7 @@ export function ConnectionEnvironmentRow(props: {
   }, [label, url, props]);
 
   return (
-    <Animated.View layout={LinearTransition.duration(250)} className="bg-card">
+    <Animated.View className="bg-card" layout={LinearTransition.duration(250)}>
       <Pressable
         className="flex-row items-center gap-3 px-4 py-3.5 active:opacity-70"
         onPress={props.onToggle}

@@ -1,3 +1,14 @@
+import { ProviderIcon } from "../../components/ProviderIcon";
+import { buildModelOptions } from "../../lib/modelOptions";
+import {
+  providerOptionValueLabels,
+  resolveProviderOptionDescriptors,
+} from "../../lib/providerOptions";
+import { RUNTIME_MODE_CHOICES } from "./thread-settings-options";
+import { ActiveThreadBorder } from "./ActiveThreadBorder";
+import { AppText as Text } from "../../components/AppText";
+import { SymbolView } from "../../components/AppSymbol";
+import { useThreadListActions } from "../home/useThreadListActions";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { type EnvironmentConnectionPhase } from "@lecturn/client-runtime/connection";
 import {
@@ -35,6 +46,7 @@ import {
 } from "react";
 import {
   AppState,
+  Pressable,
   Keyboard,
   Platform,
   useWindowDimensions,
@@ -153,6 +165,60 @@ export interface ThreadDetailScreenProps {
   readonly showContent?: boolean;
 }
 
+/** Keep the thread configuration visible while its composer is parked. */
+function SettledThreadMetadata({
+  thread,
+  serverConfig,
+}: {
+  readonly thread: OrchestrationThreadShell;
+  readonly serverConfig: LecturnServerConfig | null;
+}) {
+  const model = useMemo(
+    () =>
+      buildModelOptions(serverConfig, thread.modelSelection).find(
+        (option) =>
+          option.selection.instanceId === thread.modelSelection.instanceId &&
+          option.selection.model === thread.modelSelection.model,
+      ),
+    [serverConfig, thread.modelSelection],
+  );
+  const optionLabels = providerOptionValueLabels(
+    resolveProviderOptionDescriptors({
+      capabilities: model?.capabilities,
+      selections: thread.modelSelection.options,
+    }),
+  );
+  const mode =
+    RUNTIME_MODE_CHOICES.find((choice) => choice.mode === thread.runtimeMode)?.label ??
+    thread.runtimeMode;
+  return (
+    <View
+      style={{ alignItems: "center", paddingTop: 12, gap: 6 }}
+      accessible
+      accessibilityLabel={[
+        model?.label ?? thread.modelSelection.model,
+        ...optionLabels,
+        mode,
+        thread.interactionMode === "plan" ? "Plan mode" : "Chat mode",
+      ].join(", ")}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <ProviderIcon provider={model?.providerDriver} size={16} />
+        <Text className="text-sm text-foreground-muted">
+          {model?.label ?? thread.modelSelection.model}
+        </Text>
+      </View>
+      <Text className="text-xs text-foreground-muted" style={{ textAlign: "center" }}>
+        {[
+          ...optionLabels,
+          mode,
+          thread.interactionMode === "plan" ? "Plan mode" : "Chat mode",
+        ].join(" · ")}
+      </Text>
+    </View>
+  );
+}
+
 function latestStreamingAssistantMessage(
   feed: ReadonlyArray<ThreadFeedEntry>,
 ): { readonly id: string; readonly textLength: number } | null {
@@ -230,6 +296,21 @@ const USER_INPUT_TOGGLE_TIMING = {
 
 export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: ThreadDetailScreenProps) {
   const insets = useSafeAreaInsets();
+  const settled = props.selectedThread.settledOverride === "settled";
+  const { unsettleThread } = useThreadListActions();
+  const [unsettling, setUnsettling] = useState(false);
+  useEffect(() => {
+    if (settled) Keyboard.dismiss();
+  }, [settled]);
+  const handleUnsettle = async () => {
+    if (unsettling) return;
+    setUnsettling(true);
+    try {
+      await unsettleThread({ ...props.selectedThread, environmentId: props.environmentId });
+    } finally {
+      setUnsettling(false);
+    }
+  };
   const isKeyboardVisible = useKeyboardState((state) => state.isVisible);
   const liveKeyboardHeight = useKeyboardState((state) => state.height);
   // Android can swallow the IME hide callbacks when the app is backgrounded
@@ -615,6 +696,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   ]);
 
   const handleSendMessage = useCallback(async () => {
+    if (settled) return null;
     const targetThreadKey = selectedThreadKey;
     const hasUserMessage = selectedThreadFeed.some(
       (entry) => entry.type === "message" && entry.message.role === "user",
@@ -639,6 +721,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   }, [
     anchorMessageId,
     props.onSendMessage,
+    settled,
     props.selectedThread.latestTurn,
     props.selectedThreadQueueCount,
     selectedThreadFeed,
@@ -824,7 +907,76 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
 
               {/* Hidden (not unmounted) while a user-input request owns the
                 composer slot, so composer drafts and editor state survive. */}
-              <View style={activeUserInputRequestId !== null ? { display: "none" } : undefined}>
+              {settled ? (
+                <View
+                  style={{
+                    paddingHorizontal: 16,
+                    paddingBottom: composerBottomInset,
+                    paddingTop: 12,
+                  }}
+                >
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Unsettle thread"
+                    accessibilityHint="Restores the composer and any saved draft."
+                    disabled={unsettling || props.connectionStateLabel !== "connected"}
+                    onPress={() => void handleUnsettle()}
+                    style={{
+                      borderRadius: 24,
+                      minHeight: 76,
+                      padding: 20,
+                      flexDirection: "row",
+                      flexWrap: "wrap",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 12,
+                      boxShadow: isDarkMode ? "0 0 10px 1px #e64d3d44" : "0 0 10px 1px #ad3c2f22",
+                      opacity: unsettling ? 0.6 : 1,
+                    }}
+                  >
+                    <View
+                      pointerEvents="none"
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        borderRadius: 24,
+                        backgroundColor: isDarkMode ? "#1e1b20" : "#f5e8df",
+                      }}
+                    />
+                    <ActiveThreadBorder visible settled radius={24} />
+                    <View
+                      style={{ flexDirection: "row", alignItems: "center", flexShrink: 1, gap: 8 }}
+                    >
+                      <SymbolView
+                        name="checkmark.circle"
+                        size={18}
+                        tintColor={isDarkMode ? "#ff866f" : "#ad3c2f"}
+                      />
+                      <Text style={{ color: isDarkMode ? "#a2a6ab" : "#646b73", flexShrink: 1 }}>
+                        Settled
+                      </Text>
+                    </View>
+                    <Text
+                      style={{
+                        color: isDarkMode ? "#ffd097" : "#873e2e",
+                        fontSize: 17,
+                        flexShrink: 1,
+                      }}
+                    >
+                      {unsettling ? "Unsettling…" : "Unsettle"}
+                    </Text>
+                  </Pressable>
+                  <SettledThreadMetadata
+                    thread={props.selectedThread}
+                    serverConfig={props.serverConfig}
+                  />
+                </View>
+              ) : null}
+              <View
+                style={
+                  settled || activeUserInputRequestId !== null ? { display: "none" } : undefined
+                }
+              >
                 <ThreadComposer
                   editorRef={composerEditorRef}
                   draftMessage={props.draftMessage}

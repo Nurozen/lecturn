@@ -255,7 +255,7 @@ export function UsageLimitsSection() {
   return (
     <>
       {sources.map((source) => (
-        <SettingsSection key={source.key} card>
+        <SettingsSection key={source.key}>
           {source.error ? (
             <Text className="p-4 text-sm text-foreground-muted">{source.error}</Text>
           ) : source.accounts.length === 0 ? (
@@ -280,7 +280,6 @@ export function UsageLimitsSection() {
         <SettingsSection
           key={group.environmentId}
           title={group.environmentLabel ? `Limits · ${group.environmentLabel}` : "Limits"}
-          card
         >
           {group.providers.map((provider, index) => (
             <ProviderLimits

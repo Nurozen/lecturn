@@ -424,7 +424,7 @@ const make = Effect.gen(function* () {
         link,
         allocation,
       });
-      yield* managedAccess.check(input.userId, "managedConnect");
+      yield* managedAccess.check(input.userId, "managedConnect", undefined, input.environmentId);
       const now = yield* DateTime.now;
       const expiresAt = DateTime.add(now, { minutes: 2 });
       const nonce = yield* crypto.randomUUIDv4.pipe(
@@ -580,7 +580,7 @@ const make = Effect.gen(function* () {
         link,
         allocation,
       });
-      yield* managedAccess.check(input.userId, "managedConnect");
+      yield* managedAccess.check(input.userId, "managedConnect", undefined, input.environmentId);
       const now = yield* DateTime.now;
       const expiresAt = DateTime.add(now, { minutes: 2 });
       const nonce = yield* crypto.randomUUIDv4.pipe(
@@ -672,7 +672,7 @@ const make = Effect.gen(function* () {
           operation: "connect",
         });
       }
-      yield* managedAccess.check(input.userId, "managedConnect");
+      yield* managedAccess.check(input.userId, "managedConnect", undefined, input.environmentId);
       return {
         environmentId: link.environmentId,
         endpoint,

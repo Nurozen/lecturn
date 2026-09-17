@@ -19,7 +19,7 @@ import { ProviderInstanceId } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import { ProviderUnsupportedError } from "../Errors.ts";
+import { ProviderAdapterValidationError, ProviderUnsupportedError } from "../Errors.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import {
   ProviderAdapterRegistry,
@@ -38,7 +38,34 @@ const makeProviderAdapterRegistry = Effect.fn("makeProviderAdapterRegistry")(fun
                 provider: instanceId,
               }),
             )
-          : Effect.succeed(instance.adapter),
+          : instance.snapshot.getSnapshot.pipe(
+              Effect.map((snapshot) =>
+                snapshot.discovery === undefined
+                  ? instance.adapter
+                  : {
+                      ...instance.adapter,
+                      startSession: (input) =>
+                        instance.snapshot.getSnapshot.pipe(
+                          Effect.flatMap((current) => {
+                            const discovery = current.discovery;
+                            if (discovery && discovery.status !== "ready") {
+                              return Effect.fail(
+                                new ProviderAdapterValidationError({
+                                  provider: String(instance.driverKind),
+                                  operation: "startSession",
+                                  issue:
+                                    discovery.status === "detecting"
+                                      ? "Provider detection is still running. Wait for detection to finish, or configure its executable path in Settings → Providers."
+                                      : "Provider detection did not finish successfully. Retry detection or configure its executable path in Settings → Providers.",
+                                }),
+                              );
+                            }
+                            return instance.adapter.startSession(input);
+                          }),
+                        ),
+                    },
+              ),
+            ),
       ),
     );
 

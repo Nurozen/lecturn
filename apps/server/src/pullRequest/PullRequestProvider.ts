@@ -412,6 +412,7 @@ export interface PullRequestProviderApi {
 
   readonly runAction: (
     input: ProviderRepositoryRef & {
+      readonly expectedHeadRevision?: string;
       readonly number: number;
       readonly action: PullRequestAction;
       /** Meaningful for `merge` and `enable-auto-merge`; absent takes the host's own default. */

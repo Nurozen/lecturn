@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
+import * as Ref from "effect/Ref";
 
 import type * as ClaudeAdapter from "../Services/ClaudeAdapter.ts";
 import type * as CodexAdapter from "../Services/CodexAdapter.ts";
@@ -198,3 +199,65 @@ it.layer(layer)("ProviderAdapterRegistryLive", (it) => {
       ]);
     }));
 });
+
+it.effect(
+  "blocks native session startup while detection is pending and permits retry after recovery",
+  () =>
+    Effect.gen(function* () {
+      const status =
+        yield* Ref.make<NonNullable<ServerProvider["discovery"]>["status"]>("detecting");
+      const calls = yield* Ref.make(0);
+      const native = {
+        ...fakeCodexAdapter,
+        startSession: () =>
+          Ref.update(calls, (count) => count + 1).pipe(
+            Effect.as({} as import("@lecturn/contracts").ProviderSession),
+          ),
+      };
+      const base = makeFakeInstance("codex", native);
+      const instance = {
+        ...base,
+        snapshot: {
+          ...base.snapshot,
+          getSnapshot: Ref.get(status).pipe(
+            Effect.map(
+              (state) =>
+                ({
+                  installed: true,
+                  discovery: { status: state, phase: "shell" },
+                }) as ServerProvider,
+            ),
+          ),
+        },
+      };
+      const registryLayer = Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
+        getInstance: () => Effect.succeed(instance),
+        listInstances: Effect.succeed([instance]),
+        listUnavailable: Effect.succeed([]),
+        streamChanges: Stream.empty,
+        subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), (pubsub) =>
+          PubSub.subscribe(pubsub),
+        ),
+      });
+      yield* Effect.gen(function* () {
+        const registry = yield* ProviderAdapterRegistry.ProviderAdapterRegistry;
+        const adapter = yield* registry.getByInstance(instance.instanceId);
+        const input = {} as Parameters<typeof adapter.startSession>[0];
+        const pending = yield* adapter.startSession(input).pipe(Effect.flip);
+        assert.match(pending.message, /detection is still running/);
+        yield* Ref.set(status, "timed-out");
+        const timeout = yield* adapter.startSession(input).pipe(Effect.flip);
+        assert.match(timeout.message, /Retry detection/);
+        assert.equal(yield* Ref.get(calls), 0);
+        yield* Ref.set(status, "ready");
+        yield* adapter.startSession(input);
+        assert.equal(yield* Ref.get(calls), 1);
+      }).pipe(
+        Effect.provide(
+          ProviderAdapterRegistryLayer.ProviderAdapterRegistryLive.pipe(
+            Layer.provide(registryLayer),
+          ),
+        ),
+      );
+    }),
+);

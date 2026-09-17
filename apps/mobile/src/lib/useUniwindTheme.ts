@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
+import { useGlassAccessibility } from "./useGlassAccessibility";
+import { glassAccessibilityVariables } from "./glassTheme";
 import type { MobileThemeVariables } from "./mobileTheme";
 import { getMobileThemeRuntimeVariables } from "./mobileThemeVariables";
 
@@ -14,8 +16,9 @@ import { getMobileThemeRuntimeVariables } from "./mobileThemeVariables";
  */
 export function useUniwindTheme(): MobileThemeVariables {
   const { themeAppearance, themeId } = useAppearancePreferences();
-  return useMemo(
-    () => getMobileThemeRuntimeVariables(themeId, themeAppearance),
-    [themeAppearance, themeId],
-  );
+  const opaqueGlass = useGlassAccessibility();
+  return useMemo(() => {
+    const variables = getMobileThemeRuntimeVariables(themeId, themeAppearance);
+    return { ...variables, ...glassAccessibilityVariables(variables, opaqueGlass) };
+  }, [themeAppearance, themeId, opaqueGlass]);
 }

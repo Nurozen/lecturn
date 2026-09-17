@@ -1,3 +1,7 @@
+import { GlassCard } from "../../../components/GlassCard";
+import { useMobileSagaIndex } from "../../../state/stave";
+import { resolveRepositoryScope } from "@lecturn/client-runtime/state/repositoryScope";
+import { useProjects } from "../../../state/entities";
 import {
   type GitActionRequestInput,
   buildMenuItems,
@@ -14,6 +18,7 @@ import {
 } from "@react-navigation/native";
 import { createEnvironmentRpcQueryAtomFamily } from "@lecturn/client-runtime/state/runtime";
 import { connectionAtomRuntime } from "../../../connection/runtime";
+import { WatchPullRequestButton } from "../../pull-request-watch/WatchPullRequestButton";
 import { SymbolView } from "../../../components/AppSymbol";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Platform, Pressable, RefreshControl, ScrollView, View } from "react-native";
@@ -36,19 +41,32 @@ import { resolveGitOverviewReviewNavigationAction } from "./git-overview-navigat
 import { MetaCard, SheetListRow, menuItemIconName, statusSummary } from "./gitSheetComponents";
 
 const spacePullRequests = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
-  label: "mobile:stave-space-pull-requests",
+  label: "mobile:project-pull-requests",
   tag: WS_METHODS.pullRequestsList,
   staleTimeMs: 30_000,
 });
 
-function SpacePullRequests(props: {
+function ProjectPullRequests(props: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
+  readonly threadId: ThreadId;
 }) {
+  const projects = useProjects();
+  const sagaIndex = useMobileSagaIndex(projects, true);
+  const projectIds = [
+    ...new Set([
+      props.projectId,
+      ...resolveRepositoryScope({
+        projects,
+        sagaIndex,
+        roots: [{ environmentId: props.environmentId, projectId: props.projectId }],
+      }).flatMap((target) => target.projectIds),
+    ]),
+  ];
   const query = useEnvironmentQuery(
     spacePullRequests({
       environmentId: props.environmentId,
-      input: { projectId: props.projectId, state: "open", limit: 50 },
+      input: { projectIds, state: "open", limit: 50 },
     }),
   );
   const groups = new Map<string, NonNullable<typeof query.data>["entries"][number][]>();
@@ -59,8 +77,8 @@ function SpacePullRequests(props: {
     groups.set(key, group);
   }
   return (
-    <View className="gap-2 rounded-2xl border border-border bg-card px-4 py-3">
-      <Text className="font-lecturn-bold text-base">Space pull requests</Text>
+    <GlassCard className="gap-2 px-4 py-3">
+      <Text className="font-lecturn-bold text-base">Pull requests</Text>
       {query.error ? <Text className="text-foreground-muted text-sm">{query.error}</Text> : null}
       {query.isPending && !query.data ? (
         <Text className="text-foreground-muted text-sm">Loading pull requests…</Text>
@@ -72,15 +90,26 @@ function SpacePullRequests(props: {
         <View key={repository} className="gap-1">
           <Text className="text-foreground-muted text-xs">{repository}</Text>
           {prs.map((pr) => (
-            <SheetListRow
-              key={pr.number}
-              icon="arrow.triangle.pull"
-              title={`#${pr.number} ${pr.title}`}
-              subtitle={`${pr.headBranch} → ${pr.baseBranch}${pr.isDraft ? " · Draft" : ""}`}
-              onPress={() => {
-                void tryOpenExternalUrl(pr.url, "pull-request");
-              }}
-            />
+            <View key={pr.number}>
+              <SheetListRow
+                icon="arrow.triangle.pull"
+                title={`#${pr.number} ${pr.title}`}
+                subtitle={`${pr.headBranch} → ${pr.baseBranch}${pr.isDraft ? " · Draft" : ""}`}
+                onPress={() => {
+                  void tryOpenExternalUrl(pr.url, "pull-request");
+                }}
+              />
+              <WatchPullRequestButton
+                environmentId={props.environmentId}
+                threadId={props.threadId}
+                reference={{
+                  projectId: pr.projectId,
+                  host: pr.host,
+                  repository: pr.repository,
+                  number: pr.number,
+                }}
+              />
+            </View>
           ))}
         </View>
       ))}
@@ -97,7 +126,7 @@ function SpacePullRequests(props: {
       <Pressable accessibilityRole="button" onPress={query.refresh}>
         <Text className="text-primary text-sm">Refresh pull requests</Text>
       </Pressable>
-    </View>
+    </GlassCard>
   );
 }
 
@@ -352,7 +381,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
       }
     >
       {!worktreesSupported ? (
-        <View className="gap-1 rounded-2xl border border-border bg-card px-4 py-3">
+        <GlassCard className="gap-1 px-4 py-3">
           <Text className="text-base font-lecturn-bold">Space repositories</Text>
           <Text className="text-sm text-foreground-muted">
             Select a repository for Git actions. Threads keep working across the whole space.
@@ -370,7 +399,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
               onSelect={() => selectGitRepository(target.key)}
             />
           ))}
-        </View>
+        </GlassCard>
       ) : null}
       {!worktreesSupported && selectedThreadGitRepository ? (
         <MetaCard
@@ -378,13 +407,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
           value={selectedThreadGitRepository.cwd}
         />
       ) : null}
-      <View
-        className={
-          isInspector
-            ? "overflow-hidden rounded-2xl border border-border bg-card px-3 py-1"
-            : "overflow-hidden rounded-[22px] border border-border bg-card px-4 py-1"
-        }
-      >
+      <GlassCard className={isInspector ? "px-3 py-1" : "px-4 py-1"}>
         {sheetMenuItems.map(({ item, disabledReason }, index) => (
           <View key={`${item.id}-${item.label}`}>
             {index > 0 ? <View className="ml-12 h-px bg-border" /> : null}
@@ -446,10 +469,14 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
             })
           }
         />
-      </View>
+      </GlassCard>
 
-      {!worktreesSupported && selectedThreadProject ? (
-        <SpacePullRequests environmentId={environmentId} projectId={selectedThreadProject.id} />
+      {selectedThreadProject ? (
+        <ProjectPullRequests
+          environmentId={environmentId}
+          projectId={selectedThreadProject.id}
+          threadId={threadId}
+        />
       ) : null}
       {currentWorktreePath ? <MetaCard label="Worktree" value={currentWorktreePath} /> : null}
     </ScrollView>

@@ -1,3 +1,4 @@
+import { GlassCard } from "../../../components/GlassCard";
 import { isStaveProject } from "@lecturn/client-runtime/state/projectGit";
 import { sanitizeFeatureBranchName } from "@lecturn/shared/git";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
@@ -85,7 +86,7 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
             {selectedThreadGitRepository?.repoName ?? "Repository unavailable"}
           </Text>
         ) : null}
-        <View className="gap-2 rounded-[18px] border border-border bg-card px-4 py-4">
+        <GlassCard className="gap-2 px-4 py-4">
           <Text className="text-foreground-secondary text-2xs font-lecturn-bold tracking-[1px] uppercase">
             New branch
           </Text>
@@ -109,10 +110,10 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
               });
             }}
           />
-        </View>
+        </GlassCard>
 
         {worktreesSupported ? (
-          <View className="gap-2 rounded-[18px] border border-border bg-card px-4 py-4">
+          <GlassCard className="gap-2 px-4 py-4">
             <Text className="text-foreground-secondary text-2xs font-lecturn-bold tracking-[1px] uppercase">
               New worktree
             </Text>
@@ -149,7 +150,7 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
                   });
               }}
             />
-          </View>
+          </GlassCard>
         ) : null}
 
         <View className="gap-2">
@@ -190,7 +191,7 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
                   });
                 }}
               >
-                <View className="absolute inset-0 rounded-[18px] bg-card" />
+                <View className="absolute inset-0 rounded-[18px] bg-glass-surface" />
                 <Text className="text-foreground text-base font-lecturn-bold">{branch.name}</Text>
                 <Text className="text-foreground-secondary text-xs font-medium">{subtitle}</Text>
               </Pressable>

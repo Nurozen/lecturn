@@ -49,6 +49,7 @@ export function useThreadSettingsSheetPresentation(input: {
   readonly isEditorFocused: boolean;
 }) {
   const [phase, setPhase] = useState<PresentationPhase>("closed");
+  const [keepsComposerExpanded, setKeepsComposerExpanded] = useState(false);
   const isActiveRef = useRef(false);
   const isMountedRef = useRef(true);
   const isEditorFocusedRef = useRef(input.isEditorFocused);
@@ -91,7 +92,10 @@ export function useThreadSettingsSheetPresentation(input: {
     focusRestoreIdRef.current += 1;
     clearDismissRestoreTimer();
     restorePendingRef.current = false;
-    restoreFocusAfterDismissRef.current = input.isEditorFocused || KeyboardController.isVisible();
+    // The compact metadata strip can open settings without owning the
+    // keyboard. Preserve that layout and never steal focus on dismissal.
+    restoreFocusAfterDismissRef.current = input.isEditorFocused;
+    setKeepsComposerExpanded(input.isEditorFocused);
     setPhase("opening");
 
     const openingId = openingIdRef.current + 1;
@@ -187,6 +191,7 @@ export function useThreadSettingsSheetPresentation(input: {
   return {
     isActive: phase !== "closed",
     isVisible: phase === "visible",
+    keepsComposerExpanded: phase !== "closed" && keepsComposerExpanded,
     open,
     onDismissed,
     onStackTransitionsFinished,

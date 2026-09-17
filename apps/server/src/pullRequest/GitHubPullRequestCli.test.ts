@@ -1132,6 +1132,88 @@ layer("GitHubPullRequestCli.layer", (it) => {
     }),
   );
 
+  it.effect(
+    "uses the immediate merge API with a pinned head without enrolling provider automation",
+    () =>
+      Effect.gen(function* () {
+        mockedExecute.mockReturnValue(Effect.succeed(output('{"merged":true}')));
+        const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+        const revision = "a".repeat(40);
+        yield* cli.runPullRequestAction({
+          cwd: "/w",
+          repository: "acme/web",
+          host: "github.example.com",
+          number: 7,
+          action: "merge",
+          mergeMethod: "squash",
+          expectedHeadRevision: revision,
+        });
+        expect(callAt(0).args).toEqual([
+          "api",
+          "--method",
+          "PUT",
+          "--hostname",
+          "github.example.com",
+          "repos/acme/web/pulls/7/merge",
+          "-f",
+          `sha=${revision}`,
+          "-f",
+          "merge_method=squash",
+        ]);
+        yield* cli.runPullRequestAction({
+          cwd: "/w",
+          repository: "acme/web",
+          host: "github.com",
+          number: 7,
+          action: "enable-auto-merge",
+          expectedHeadRevision: revision,
+        });
+        expect(callAt(1).args).toEqual([
+          "pr",
+          "merge",
+          "7",
+          "--repo",
+          "github.com/acme/web",
+          "--auto",
+          "--merge",
+        ]);
+      }),
+  );
+
+  it.effect(
+    "refuses an unconfirmed immediate merge without falling back to queue or auto-merge",
+    () =>
+      Effect.gen(function* () {
+        const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+        const responses = [
+          {
+            result: output('{"merged":false,"message":"Merge queue required"}'),
+            tag: "GitHubPullRequestMergeRefusedError",
+          },
+          { result: output('{"message":"Accepted"}'), tag: "GitHubPullRequestReadError" },
+          { result: output('{"merged":true}', true), tag: "GitHubPullRequestReadError" },
+          { result: output('{"merged":true}', false, true), tag: "GitHubPullRequestReadError" },
+        ];
+        for (const [index, response] of responses.entries()) {
+          mockedExecute.mockReturnValue(Effect.succeed(response.result));
+          const failure = yield* Effect.flip(
+            cli.runPullRequestAction({
+              cwd: "/w",
+              repository: "acme/web",
+              host: "github.com",
+              number: 7,
+              action: "merge",
+              expectedHeadRevision: "a".repeat(40),
+            }),
+          );
+          expect(failure._tag).toBe(response.tag);
+          expect(mockedExecute).toHaveBeenCalledTimes(index + 1);
+          expect(callAt(index).args).toContain("merge_method=merge");
+          expect(callAt(index).args[0]).toBe("api");
+        }
+      }),
+  );
+
   it.effect("arms auto-merge with the same strategy a merge would have used", () =>
     Effect.gen(function* () {
       mockedExecute.mockReturnValue(Effect.succeed(output("")));

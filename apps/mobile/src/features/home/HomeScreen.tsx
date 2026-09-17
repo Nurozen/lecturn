@@ -43,6 +43,7 @@ import {
   PendingTaskListRow,
   ThreadListGroupHeader,
   ThreadListRow,
+  THREAD_ACTIVITY_VIEWABILITY_CONFIG,
   ThreadListShowMoreRow,
 } from "../threads/thread-list-items";
 import {
@@ -131,7 +132,7 @@ interface HomeScreenProps {
 
 /* ─── Layout constants ───────────────────────────────────────────────── */
 
-const ESTIMATED_THREAD_ROW_HEIGHT = 72;
+const ESTIMATED_THREAD_ROW_HEIGHT = 86;
 const PRE_LIQUID_GLASS_BOTTOM_TOOLBAR_HEIGHT = 44;
 /**
  * Top spacing between the list and the Android custom header. The Android
@@ -273,7 +274,16 @@ export function HomeScreen(props: HomeScreenProps) {
   const updateGroupDisplay = useCallback(
     (key: string, action: HomeGroupDisplayAction) => {
       const next = new Map(effectiveGroupDisplayStatesRef.current);
-      next.set(key, nextGroupDisplayState(next.get(key) ?? DEFAULT_GROUP_DISPLAY_STATE, action));
+      next.set(
+        key,
+        nextGroupDisplayState(
+          next.get(key) ?? {
+            ...DEFAULT_GROUP_DISPLAY_STATE,
+            collapsed: key.startsWith("settled:"),
+          },
+          action,
+        ),
+      );
       effectiveGroupDisplayStatesRef.current = next;
       setGroupDisplayStates(next);
       if (action === "toggle-collapsed") {
@@ -681,10 +691,10 @@ export function HomeScreen(props: HomeScreenProps) {
       matchedThreadKeys,
       settlementEnvironmentIds,
       snoozeEnvironmentIds,
-      settledLimit: settledVisibleCount,
+      settledLimit: Number.POSITIVE_INFINITY,
       now: new Date().toISOString(),
       snoozedShelfExpanded,
-      settledShelfExpanded,
+      settledShelfExpanded: true,
       selectedThreadKey: null,
     });
   }, [
@@ -745,7 +755,7 @@ export function HomeScreen(props: HomeScreenProps) {
         snoozedShelfExpanded,
         snoozedShelfHeaderIndex: threadListV2Layout.snoozedShelfHeaderIndex,
         settledCount: threadListV2Layout.settledCount,
-        settledShelfExpanded,
+        settledShelfExpanded: true,
         settledShelfHeaderIndex: threadListV2Layout.settledShelfHeaderIndex,
         snoozeLabelNow: `${nowMinute}:00.000Z`,
       }),
@@ -765,7 +775,7 @@ export function HomeScreen(props: HomeScreenProps) {
   );
 
   const renderV2Row = useCallback(
-    ({ item, index }: { readonly item: HomeHierarchyV2Item; readonly index: number }) => {
+    ({ item }: { readonly item: HomeHierarchyV2Item; readonly index: number }) => {
       if (item.type === "header")
         return (
           <ThreadListGroupHeader
@@ -785,10 +795,6 @@ export function HomeScreen(props: HomeScreenProps) {
             onSelectThread={props.onSelectThread}
           />
         );
-      const nextItem = threadListV2Items[index + 1];
-      const showTrailingDivider =
-        nextItem?.type === "v2-thread" ||
-        (nextItem?.type === "v2-pending" && !nextItem.showPendingDivider);
       if (item.type === "v2-pending") {
         const pendingScopeKey = scopedProjectKey(
           item.pendingTask.message.environmentId,
@@ -807,7 +813,6 @@ export function HomeScreen(props: HomeScreenProps) {
             }
             environmentMachine={machineByEnvironmentId.get(item.pendingTask.message.environmentId)}
             showPendingDivider={item.showPendingDivider}
-            showTrailingDivider={showTrailingDivider}
             onSelectPendingTask={props.onSelectPendingTask}
             onDeletePendingTask={props.onDeletePendingTask}
           />
@@ -829,7 +834,11 @@ export function HomeScreen(props: HomeScreenProps) {
             count={item.count}
             disabled={!shelfPreferencesLoaded}
             expanded={item.expanded}
-            onToggle={toggleSettledShelf}
+            onToggle={
+              item.groupKey
+                ? () => updateGroupDisplay(item.groupKey!, "toggle-collapsed")
+                : toggleSettledShelf
+            }
           />
         );
       }
@@ -843,13 +852,13 @@ export function HomeScreen(props: HomeScreenProps) {
         );
       return (
         <ThreadListV2Row
+          nested
           thread={thread}
           variant={item.item.variant}
           snoozed={item.item.snoozed}
           pinned={item.item.pinned}
           snoozePresetMinute={nowMinute}
           snoozeWakeLabelText={item.snoozeWakeLabelText}
-          showTrailingDivider={showTrailingDivider}
           project={
             projectByKey.get(scopedProjectKey(thread.environmentId, thread.projectId)) ?? null
           }
@@ -933,7 +942,6 @@ export function HomeScreen(props: HomeScreenProps) {
       shelfPreferencesLoaded,
       settlementEnvironmentIds,
       snoozeEnvironmentIds,
-      threadListV2Items,
       updateGroupDisplay,
       props.onNewThreadInProject,
       threadSearchMatchByKey,
@@ -961,8 +969,20 @@ export function HomeScreen(props: HomeScreenProps) {
                   top: 0,
                   bottom: 0,
                   left: level * 18 + 8,
-                  width: 1,
-                  backgroundColor: "#b9893f",
+                  width:
+                    "settledBranch" in props.item &&
+                    props.item.type !== "v2-settled-shelf" &&
+                    props.item.settledBranch &&
+                    level === (props.item.depth ?? 0) - 1
+                      ? 2
+                      : 1,
+                  backgroundColor:
+                    "settledBranch" in props.item &&
+                    props.item.type !== "v2-settled-shelf" &&
+                    props.item.settledBranch &&
+                    level === (props.item.depth ?? 0) - 1
+                      ? "#ff866f"
+                      : "#b9893f",
                 }}
               />
             ))
@@ -1020,6 +1040,15 @@ export function HomeScreen(props: HomeScreenProps) {
   const renderRow = useCallback(
     ({ item }: LegendListRenderItemProps<HomeListItem>) => {
       switch (item.type) {
+        case "v2-settled-shelf":
+          return (
+            <ThreadListV2SettledShelfHeader
+              count={item.count}
+              expanded={item.expanded}
+              onToggle={() => updateGroupDisplay(item.groupKey!, "toggle-collapsed")}
+            />
+          );
+
         case "header":
           return (
             <ThreadListGroupHeader
@@ -1155,8 +1184,20 @@ export function HomeScreen(props: HomeScreenProps) {
                   top: 0,
                   bottom: 0,
                   left: level * 18 + 8,
-                  width: 1,
-                  backgroundColor: "#b9893f",
+                  width:
+                    "settledBranch" in props.item &&
+                    props.item.type !== "v2-settled-shelf" &&
+                    props.item.settledBranch &&
+                    level === (props.item.depth ?? 0) - 1
+                      ? 2
+                      : 1,
+                  backgroundColor:
+                    "settledBranch" in props.item &&
+                    props.item.type !== "v2-settled-shelf" &&
+                    props.item.settledBranch &&
+                    level === (props.item.depth ?? 0) - 1
+                      ? "#ff866f"
+                      : "#b9893f",
                 }}
               />
             ))
@@ -1276,7 +1317,7 @@ export function HomeScreen(props: HomeScreenProps) {
                   accessibilityRole="button"
                   accessibilityLabel={`Show ${Math.min(threadListV2Layout.hiddenSettledCount, THREAD_LIST_V2_SETTLED_PAGE_COUNT)} more settled threads`}
                   onPress={showMoreSettled}
-                  className="mx-4 mt-2 items-center rounded-lg border border-dashed border-border py-2.5"
+                  className="mx-4 mt-2 items-center rounded-full border border-border bg-card py-3"
                   style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
                 >
                   <Text className="text-xs font-lecturn-medium text-foreground-muted">
@@ -1317,6 +1358,7 @@ export function HomeScreen(props: HomeScreenProps) {
           `stickyHeaderIndices` if this gets revisited. */}
       <SwipeableScrollGateProvider enabled={swipeEnabled}>
         <LegendList
+          viewabilityConfig={THREAD_ACTIVITY_VIEWABILITY_CONFIG}
           ref={listRef}
           data={listLayout.items}
           renderItem={renderItem}

@@ -88,6 +88,10 @@ const LOGIN_SHELL_ENV_NAMES = [
 ] as const;
 const WINDOWS_PROFILE_ENV_NAMES = ["PATH", "FNM_DIR", "FNM_MULTISHELL_PATH"] as const;
 const LOCALE_ENV_NAMES = ["LANG", "LC_ALL", "LC_CTYPE"] as const;
+
+export function installMacOSFallbackLocale(env: NodeJS.ProcessEnv): void {
+  if (LOCALE_ENV_NAMES.every((name) => !env[name]?.trim())) env.LC_CTYPE = "en_US.UTF-8";
+}
 const FALLBACK_LC_CTYPE = "en_US.UTF-8";
 const WINDOWS_SHELL_CANDIDATES = ["pwsh.exe", "powershell.exe"] as const;
 const LOGIN_SHELL_TIMEOUT = Duration.seconds(5);
@@ -334,6 +338,7 @@ const runCommandOutput = Effect.fn("desktop.shellEnvironment.runCommandOutput")(
 const readLoginShellEnvironment = (
   shell: string,
   names: ReadonlyArray<string>,
+  timeout = LOGIN_SHELL_TIMEOUT,
 ): Effect.Effect<EnvironmentPatch, never, ChildProcessSpawner.ChildProcessSpawner> =>
   names.length === 0
     ? Effect.succeed({})
@@ -341,7 +346,7 @@ const readLoginShellEnvironment = (
         probe: "login-shell",
         command: shell,
         args: ["-ilc", capturePosixEnvironmentCommand(names)],
-        timeout: LOGIN_SHELL_TIMEOUT,
+        timeout,
       }).pipe(Effect.map((output) => extractEnvironment(output, names)));
 
 const readLaunchctlPath = runCommandOutput({
@@ -432,7 +437,11 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
     for (const shell of listLoginShellCandidates(config)) {
       Object.assign(
         shellEnvironment,
-        yield* readLoginShellEnvironment(shell, LOGIN_SHELL_ENV_NAMES),
+        yield* readLoginShellEnvironment(
+          shell,
+          LOGIN_SHELL_ENV_NAMES,
+          config.platform === "darwin" ? Duration.seconds(15) : LOGIN_SHELL_TIMEOUT,
+        ),
       );
       if (shellEnvironment.PATH) break;
     }

@@ -1,3 +1,4 @@
+import { PullRequestWatchService } from "./pullRequest/PullRequestWatchService.ts";
 import { SagaWorkbenchService } from "./stave/SagaWorkbenchService.ts";
 // @effect-diagnostics nodeBuiltinImport:off - assembleThreadFork mints ids through a synchronous callback, which the Effect Crypto service cannot satisfy
 import * as NodeCrypto from "node:crypto";
@@ -642,6 +643,7 @@ const makeWsRpcLayer = (
       const sourceControlRepositories =
         yield* SourceControlRepositoryService.SourceControlRepositoryService;
       const pullRequests = yield* PullRequestService.PullRequestService;
+      const pullRequestWatches = yield* PullRequestWatchService;
       const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
       const sessions = yield* SessionStore.SessionStore;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
@@ -1671,6 +1673,23 @@ const makeWsRpcLayer = (
 
       return WsRpcGroup.of({
         ...staveRpcHandlers,
+        [WS_METHODS.pullRequestWatchList]: (input) =>
+          observeRpcEffect(WS_METHODS.pullRequestWatchList, pullRequestWatches.list(input)),
+        [WS_METHODS.pullRequestWatchTrack]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestWatchTrack,
+            pullRequestWatches.track(input, currentSession.subject),
+          ),
+        [WS_METHODS.pullRequestWatchCommand]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestWatchCommand,
+            pullRequestWatches.command(input, currentSession.subject),
+          ),
+        [WS_METHODS.pullRequestWatchConfigure]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestWatchConfigure,
+            pullRequestWatches.configure(input),
+          ),
         [WS_METHODS.sagaWorkbenchGetSnapshot]: (input) =>
           observeRpcEffect(WS_METHODS.sagaWorkbenchGetSnapshot, sagaWorkbench.getSnapshot(input)),
         [WS_METHODS.sagaWorkbenchGetEvidence]: (input) =>
@@ -3074,7 +3093,8 @@ const makeWsRpcLayer = (
                   },
                 })),
               );
-              const providerStatuses = providerRegistry.streamChanges.pipe(
+              const providerChanges = yield* providerRegistry.subscribeChanges;
+              const providerStatuses = providerChanges.pipe(
                 Stream.map((providers) => ({
                   version: 1 as const,
                   type: "providerStatuses" as const,
@@ -3119,9 +3139,9 @@ const makeWsRpcLayer = (
                 })),
               );
 
-              yield* providerRegistry
-                .refresh()
-                .pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped);
+              // Startup and periodic probes belong to the managed providers.
+              // Reconnecting a client only resumes observation; it must not
+              // launch or cancel provider detection.
 
               const liveUpdates = Stream.merge(
                 keybindingsUpdates,
@@ -3246,6 +3266,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         ),
     });
     const pullRequests = yield* PullRequestService.PullRequestService;
+    const pullRequestWatches = yield* PullRequestWatchService;
     const staveOperations = yield* StaveOperations.StaveOperations;
     const sagaWorkbench = yield* SagaWorkbenchService;
     return HttpRouter.add(
@@ -3287,6 +3308,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               // One server-lifetime service means clients share the same PR caches, and a WS
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
+              Layer.provide(Layer.succeed(PullRequestWatchService, pullRequestWatches)),
               // Stave operations outlive the socket that started them, so every
               // connection attaches to the one server-lifetime registry.
               Layer.provide(Layer.succeed(StaveOperations.StaveOperations, staveOperations)),

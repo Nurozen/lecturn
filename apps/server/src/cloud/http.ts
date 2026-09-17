@@ -69,6 +69,7 @@ import {
 import {
   CLOUD_ENDPOINT_RUNTIME_CONFIG,
   CLOUD_LINKED_USER_ID,
+  CLOUD_LINKED_ORGANIZATION_ID,
   CLOUD_MINT_PUBLIC_KEY,
   encodeEndpointRuntimeConfigJson,
   PUBLISH_AGENT_ACTIVITY_SECRET,
@@ -409,6 +410,7 @@ const makeCloudLinkProof = Effect.fn("environment.cloud.makeLinkProof")(function
     endpoint: request.endpoint,
     origin: request.origin,
     scopes: linkProofScopes(request),
+    teamPolicyVersion: 1,
   } satisfies RelayEnvironmentLinkProofPayload;
   return yield* signRelayJwt({
     privateKey: keyPair.privateKey,
@@ -479,6 +481,12 @@ const applyCloudRelayConfig = Effect.fn("environment.cloud.applyRelayConfig")(fu
     stringToBytes(payload.relayIssuer ?? payload.relayUrl),
   );
   yield* dependencies.secrets.set(CLOUD_LINKED_USER_ID, stringToBytes(payload.cloudUserId));
+  if (payload.organizationId)
+    yield* dependencies.secrets.set(
+      CLOUD_LINKED_ORGANIZATION_ID,
+      stringToBytes(payload.organizationId),
+    );
+  else yield* dependencies.secrets.remove(CLOUD_LINKED_ORGANIZATION_ID);
   yield* dependencies.secrets.set(
     RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
     stringToBytes(payload.environmentCredential),
@@ -745,19 +753,27 @@ export const releaseManagedTunnelOnShutdown = Effect.fn(
 const readCloudLinkState = Effect.fn("environment.cloud.readLinkState")(function* (
   dependencies: CloudHttpDependencies,
 ) {
-  const [cloudUserId, relayUrl, relayIssuer, endpointRuntimeConfig, publishAgentActivity] =
-    yield* Effect.all(
-      [
-        dependencies.secrets.get(CLOUD_LINKED_USER_ID),
-        dependencies.secrets.get(RELAY_URL_SECRET),
-        dependencies.secrets.get(RELAY_ISSUER_SECRET),
-        dependencies.secrets.get(CLOUD_ENDPOINT_RUNTIME_CONFIG),
-        dependencies.secrets.get(PUBLISH_AGENT_ACTIVITY_SECRET),
-      ],
-      { concurrency: 5 },
-    );
+  const [
+    cloudUserId,
+    relayUrl,
+    relayIssuer,
+    endpointRuntimeConfig,
+    publishAgentActivity,
+    organizationId,
+  ] = yield* Effect.all(
+    [
+      dependencies.secrets.get(CLOUD_LINKED_USER_ID),
+      dependencies.secrets.get(RELAY_URL_SECRET),
+      dependencies.secrets.get(RELAY_ISSUER_SECRET),
+      dependencies.secrets.get(CLOUD_ENDPOINT_RUNTIME_CONFIG),
+      dependencies.secrets.get(PUBLISH_AGENT_ACTIVITY_SECRET),
+      dependencies.secrets.get(CLOUD_LINKED_ORGANIZATION_ID),
+    ],
+    { concurrency: 5 },
+  );
   return {
     linked: Option.isSome(cloudUserId),
+    organizationId: Option.isSome(organizationId) ? bytesToString(organizationId.value) : null,
     cloudUserId: Option.isSome(cloudUserId) ? bytesToString(cloudUserId.value) : null,
     relayUrl: Option.isSome(relayUrl) ? bytesToString(relayUrl.value) : null,
     relayIssuer: Option.isSome(relayIssuer) ? bytesToString(relayIssuer.value) : null,
@@ -788,6 +804,7 @@ const cloudUnlinkHandler = Effect.fn("environment.cloud.unlink")(
     yield* Effect.all(
       [
         dependencies.secrets.remove(CLOUD_LINKED_USER_ID),
+        dependencies.secrets.remove(CLOUD_LINKED_ORGANIZATION_ID),
         dependencies.secrets.remove(RELAY_URL_SECRET),
         dependencies.secrets.remove(RELAY_ISSUER_SECRET),
         dependencies.secrets.remove(RELAY_ENVIRONMENT_CREDENTIAL_SECRET),

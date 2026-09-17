@@ -1,3 +1,4 @@
+import { decodeRelayJwt, verifyRelayJwt, RELAY_LINK_PROOF_TYP } from "@lecturn/shared/relayJwt";
 import * as Context from "effect/Context";
 import { OrchestrationEngineLive } from "./orchestration/Layers/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./orchestration/Layers/ProjectionPipeline.ts";
@@ -906,6 +907,9 @@ const buildAppUnderTest = (options?: {
               ),
             setProviderMaintenanceActionState: () => Effect.succeed([]),
             streamChanges: Stream.empty,
+            subscribeChanges: Effect.succeed(
+              options?.layers?.providerRegistry?.streamChanges ?? Stream.empty,
+            ),
             ...options?.layers?.providerRegistry,
           }),
           Layer.mock(ProviderService.ProviderService)({
@@ -2395,6 +2399,44 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(bootstrap.body.reason, "invalid_credential");
       assert.equal(bootstrap.body.dpopFailureReason, "request_mismatch");
       assert.equal(typeof bootstrap.body.traceId, "string");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("signs team policy capability into environment link proofs", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+      const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
+      const origin = new URL(linkProofUrl);
+      const response = yield* fetchEffect(linkProofUrl, {
+        method: "POST",
+        headers: { cookie: ownerCookie, "content-type": "application/json" },
+        body: jsonRequestBody({
+          challenge: "team-capability-challenge",
+          relayIssuer: "https://relay.example.test",
+          endpoint: {
+            httpBaseUrl: origin.origin,
+            wsBaseUrl: origin.origin.replace(/^http/, "ws") + "/ws",
+            providerKind: "cloudflare_tunnel",
+          },
+          origin: { localHttpHost: origin.hostname, localHttpPort: Number(origin.port) },
+        }),
+      });
+      assert.equal(response.status, 200);
+      const token = yield* responseJsonEffect<string>(response);
+      const decoded = decodeRelayJwt(token);
+      assert.equal(typeof decoded.environmentPublicKey, "string");
+      const now = yield* DateTime.now;
+      const verified = yield* verifyRelayJwt({
+        token,
+        publicKey: String(decoded.environmentPublicKey),
+        issuer: String(decoded.iss),
+        audience: "https://relay.example.test",
+        typ: RELAY_LINK_PROOF_TYP,
+        nowEpochSeconds: Math.floor(now.epochMilliseconds / 1000),
+      });
+      assert.equal(verified.teamPolicyVersion, 1);
+      assert.equal(verified.challenge, "team-capability-challenge");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -7202,48 +7244,25 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("refreshes providers for each subscribeServerConfig connection", () =>
+  it.effect("reconnects to server config without restarting provider detection", () =>
     Effect.gen(function* () {
       const refreshCalls = yield* Ref.make(0);
-      const firstRefreshDone = yield* Deferred.make<void>();
-      const secondRefreshDone = yield* Deferred.make<void>();
-
       yield* buildAppUnderTest({
         layers: {
           providerRegistry: {
-            refresh: () =>
-              Ref.updateAndGet(refreshCalls, (count) => count + 1).pipe(
-                Effect.tap((count) =>
-                  Deferred.succeed(
-                    count === 1 ? firstRefreshDone : secondRefreshDone,
-                    undefined,
-                  ).pipe(Effect.ignore),
-                ),
-                Effect.as([]),
-              ),
+            refresh: () => Ref.update(refreshCalls, (count) => count + 1).pipe(Effect.as([])),
           },
         },
       });
-
       const wsUrl = yield* getWsServerUrl("/ws");
-      yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          Effect.gen(function* () {
-            yield* client[WS_METHODS.subscribeServerConfig]({}).pipe(Stream.runHead);
-            yield* Deferred.await(firstRefreshDone);
-          }),
-        ),
-      );
-      yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          Effect.gen(function* () {
-            yield* client[WS_METHODS.subscribeServerConfig]({}).pipe(Stream.runHead);
-            yield* Deferred.await(secondRefreshDone);
-          }),
-        ),
-      );
-
-      assert.equal(yield* Ref.get(refreshCalls), 2);
+      for (let connection = 0; connection < 2; connection++) {
+        yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.subscribeServerConfig]({}).pipe(Stream.runHead),
+          ),
+        );
+      }
+      assert.equal(yield* Ref.get(refreshCalls), 0);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -7340,6 +7359,62 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(first?.type, "snapshot");
       if (first?.type === "snapshot") assert.equal(first.config.environmentThemes, undefined);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("keeps detection completion that arrives while loading the config snapshot", () =>
+    Effect.gen(function* () {
+      const readyProvider = {
+        instanceId: ProviderInstanceId.make("codex"),
+        driver: ProviderDriverKind.make("codex"),
+        enabled: true,
+        installed: true,
+        version: "1.0.0",
+        status: "ready" as const,
+        auth: { status: "authenticated" as const },
+        checkedAt: "2026-04-11T00:00:00.000Z",
+        models: [],
+        slashCommands: [],
+        skills: [],
+        discovery: { status: "ready" as const, phase: "provider" as const },
+      };
+      const readyProviders = [readyProvider];
+      const changes = yield* PubSub.unbounded<typeof readyProviders>();
+      yield* buildAppUnderTest({
+        layers: {
+          providerRegistry: {
+            subscribeChanges: PubSub.subscribe(changes).pipe(
+              Effect.map((subscription) => Stream.fromSubscription(subscription)),
+            ),
+            // The probe finishes after the snapshot was captured but before
+            // the RPC starts consuming live events.
+            getProviders: PubSub.publish(changes, readyProviders).pipe(
+              Effect.as([
+                {
+                  ...readyProvider,
+                  discovery: { status: "detecting" as const, phase: "provider" as const },
+                },
+              ]),
+            ),
+          },
+        },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const events = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.subscribeServerConfig]({}).pipe(Stream.take(2), Stream.runCollect),
+        ),
+      );
+      const [snapshot, update] = Array.from(events);
+      assert.equal(snapshot?.type, "snapshot");
+      if (snapshot?.type === "snapshot") {
+        assert.equal(snapshot.config.providers[0]?.discovery?.status, "detecting");
+      }
+      assert.deepEqual(update, {
+        version: 1,
+        type: "providerStatuses",
+        payload: { providers: readyProviders },
+      });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );
 
   it.effect("routes websocket rpc subscribeServerConfig emits provider status updates", () =>

@@ -47,6 +47,7 @@ function sceneFromPathname(pathname: string): ShowcaseScene | null {
   if (routePath === "/settings" || routePath.endsWith("/settings/environments")) {
     return "environments";
   }
+  if (routePath.startsWith("/pr-watches/")) return "pr-watch";
   if (routePath.endsWith("/terminal")) return "terminal";
   if (routePath.endsWith("/review")) return "review";
   if (routePath.startsWith("/threads/")) return "thread";
@@ -229,7 +230,12 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
       return;
     }
     const routes: ShowcaseResetRoute[] = [{ name: "Home" }];
-    if (requestedScene === "environments") {
+    if (requestedScene === "pr-watch") {
+      routes.push({
+        name: "PullRequestWatch",
+        params: { environmentId: params.environmentId, watchId: "showcase-remote-handoff" },
+      });
+    } else if (requestedScene === "environments") {
       routes.push({
         name: "SettingsSheet",
         state: {

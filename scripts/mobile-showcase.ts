@@ -28,6 +28,7 @@ import {
   SHOWCASE_PROJECTS,
   SHOWCASE_TERMINAL_ID,
   SHOWCASE_THREAD_ID,
+  SHOWCASE_WATCH_ID,
   seedShowcaseEnvironment,
 } from "./mobile-showcase-environment.ts";
 
@@ -392,7 +393,9 @@ export function planShowcaseCaptures(
           scenes:
             options.scenes.size === 0
               ? device.scenes
-              : device.scenes.filter((scene) => options.scenes.has(scene)),
+              : [...options.scenes].filter(
+                  (scene) => scene === "pr-watch" || device.scenes.includes(scene),
+                ),
         })),
       );
     })
@@ -668,6 +671,8 @@ function buildShowcasePairingUrl(host: string, port: number, credential: string)
 }
 
 export function showcaseSceneUrl(scene: ShowcaseScene, environmentId: string): string {
+  if (scene === "pr-watch")
+    return `${APP_SCHEME}://pr-watches/${encodeURIComponent(environmentId)}/${SHOWCASE_WATCH_ID}`;
   if (scene === "threads") return `${APP_SCHEME}://`;
   if (scene === "environments") return `${APP_SCHEME}://settings/environments`;
   const threadPath = `threads/${encodeURIComponent(environmentId)}/${SHOWCASE_THREAD_ID}`;

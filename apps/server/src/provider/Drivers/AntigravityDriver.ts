@@ -108,9 +108,8 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
       });
-      // Google returns every model the account can use, including older
-      // Gemini generations. The manifest names the current ones so the picker
-      // folds the rest under its legacy section, as it does for Codex.
+      // Google owns model availability. Only explicit legacy catalog entries
+      // are folded; models newly returned by Google remain visible.
       const classifyModels = (draft: ServerProviderDraft) =>
         modelManifest.current.pipe(
           Effect.map((manifest) =>
@@ -278,6 +277,11 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
       }).pipe(Effect.scoped);
 
       const provider = yield* makeAntigravityProvider(settings, {
+        discovery: {
+          waitForShell: !/[\\/]/.test(settings.binaryPath?.trim() ?? ""),
+          refreshEnvironment: () =>
+            Object.assign(processEnvironment, mergeProviderInstanceEnvironment(environment)),
+        },
         stampIdentity: classifyModels,
         probe,
         auth: { type: auth.authMethod, label: antigravityAuthLabel(auth.authMethod) },

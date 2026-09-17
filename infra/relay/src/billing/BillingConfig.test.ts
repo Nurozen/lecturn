@@ -1,5 +1,25 @@
 import { expect, it } from "vite-plus/test";
 import { canStartBillingCheckout, parseBillingConfig } from "./BillingConfig.ts";
+it("defaults to no additional browser origins and accepts only exact HTTPS origins", () => {
+  expect(parseBillingConfig({}).additionalAppOrigins).toEqual([]);
+  expect(
+    parseBillingConfig({
+      BILLING_ADDITIONAL_APP_ORIGINS: " https://preview.example.com,https://preview.example.com ",
+    }).additionalAppOrigins,
+  ).toEqual(["https://preview.example.com"]);
+  for (const origin of [
+    "*",
+    "https://*.example.com",
+    "http://example.com",
+    "https://example.com/path",
+    "https://example.com/",
+    "https://example.com?query=1",
+    "https://person:secret@example.com",
+    "https://example.com#fragment",
+  ]) {
+    expect(() => parseBillingConfig({ BILLING_ADDITIONAL_APP_ORIGINS: origin })).toThrow();
+  }
+});
 it("defaults to no checkout, no enforcement, no grace", () => {
   expect(parseBillingConfig({})).toMatchObject({
     mode: "disabled",

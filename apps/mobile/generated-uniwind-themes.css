@@ -172,7 +172,7 @@
       --color-md-blockquote-bg: #eaa7cb;
       --color-md-code-bg: #f5ecf9;
       --color-md-code-text: #673c8b;
-      --color-md-user-code-bg: rgba(73, 44, 97, 0.18);
+      --color-md-user-code-bg: rgba(255, 255, 255, 0.12);
       --color-md-user-code-text: #492c61;
       --color-md-user-fence-bg: rgba(0, 0, 0, 0.16);
       --color-md-user-fence-text: #492c61;
@@ -297,7 +297,7 @@
       --color-md-blockquote-bg: #423a45;
       --color-md-code-bg: #1f1a24;
       --color-md-code-text: #d8c3ef;
-      --color-md-user-code-bg: rgba(242, 235, 250, 0.18);
+      --color-md-user-code-bg: rgba(0, 0, 0, 0.12);
       --color-md-user-code-text: #f2ebfa;
       --color-md-user-fence-bg: rgba(0, 0, 0, 0.28);
       --color-md-user-fence-text: #f2ebfa;
@@ -422,7 +422,7 @@
       --color-md-blockquote-bg: #e6f0ea;
       --color-md-code-bg: #eef1ef;
       --color-md-code-text: #241523;
-      --color-md-user-code-bg: rgba(36, 21, 35, 0.18);
+      --color-md-user-code-bg: rgba(255, 255, 255, 0.12);
       --color-md-user-code-text: #241523;
       --color-md-user-fence-bg: rgba(0, 0, 0, 0.16);
       --color-md-user-fence-text: #241523;
@@ -547,7 +547,7 @@
       --color-md-blockquote-bg: #253e31;
       --color-md-code-bg: #28342e;
       --color-md-code-text: #fffaff;
-      --color-md-user-code-bg: rgba(255, 250, 255, 0.18);
+      --color-md-user-code-bg: rgba(0, 0, 0, 0.12);
       --color-md-user-code-text: #fffaff;
       --color-md-user-fence-bg: rgba(0, 0, 0, 0.28);
       --color-md-user-fence-text: #fffaff;
@@ -672,7 +672,7 @@
       --color-md-blockquote-bg: #e8eff4;
       --color-md-code-bg: #f0f1f3;
       --color-md-code-text: #241523;
-      --color-md-user-code-bg: rgba(36, 21, 35, 0.18);
+      --color-md-user-code-bg: rgba(255, 255, 255, 0.12);
       --color-md-user-code-text: #241523;
       --color-md-user-fence-bg: rgba(0, 0, 0, 0.16);
       --color-md-user-fence-text: #241523;
@@ -797,7 +797,7 @@
       --color-md-blockquote-bg: #233544;
       --color-md-code-bg: #252e38;
       --color-md-code-text: #fffaff;
-      --color-md-user-code-bg: rgba(255, 250, 255, 0.18);
+      --color-md-user-code-bg: rgba(0, 0, 0, 0.12);
       --color-md-user-code-text: #fffaff;
       --color-md-user-fence-bg: rgba(0, 0, 0, 0.28);
       --color-md-user-fence-text: #fffaff;
@@ -922,7 +922,7 @@
       --color-md-blockquote-bg: #f4ede9;
       --color-md-code-bg: #f3f1f0;
       --color-md-code-text: #241523;
-      --color-md-user-code-bg: rgba(36, 21, 35, 0.18);
+      --color-md-user-code-bg: rgba(255, 255, 255, 0.12);
       --color-md-user-code-text: #241523;
       --color-md-user-fence-bg: rgba(0, 0, 0, 0.16);
       --color-md-user-fence-text: #241523;
@@ -1047,7 +1047,7 @@
       --color-md-blockquote-bg: #432e23;
       --color-md-code-bg: #362b27;
       --color-md-code-text: #fffaff;
-      --color-md-user-code-bg: rgba(255, 250, 255, 0.18);
+      --color-md-user-code-bg: rgba(0, 0, 0, 0.12);
       --color-md-user-code-text: #fffaff;
       --color-md-user-fence-bg: rgba(0, 0, 0, 0.28);
       --color-md-user-fence-text: #fffaff;
@@ -1172,7 +1172,7 @@
       --color-md-blockquote-bg: #f0edf6;
       --color-md-code-bg: #f2f1f4;
       --color-md-code-text: #241523;
-      --color-md-user-code-bg: rgba(36, 21, 35, 0.18);
+      --color-md-user-code-bg: rgba(255, 255, 255, 0.12);
       --color-md-user-code-text: #241523;
       --color-md-user-fence-bg: rgba(0, 0, 0, 0.16);
       --color-md-user-fence-text: #241523;
@@ -1297,7 +1297,7 @@
       --color-md-blockquote-bg: #2d2643;
       --color-md-code-bg: #2a2736;
       --color-md-code-text: #fffaff;
-      --color-md-user-code-bg: rgba(255, 250, 255, 0.18);
+      --color-md-user-code-bg: rgba(0, 0, 0, 0.12);
       --color-md-user-code-text: #fffaff;
       --color-md-user-fence-bg: rgba(0, 0, 0, 0.28);
       --color-md-user-fence-text: #fffaff;

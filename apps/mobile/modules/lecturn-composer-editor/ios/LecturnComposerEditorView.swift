@@ -688,8 +688,7 @@ public final class LecturnComposerEditorView: ExpoView, UITextViewDelegate, UITe
     iconImage: UIImage?,
     style: ComposerChipStyle
   ) -> UIImage {
-    let font = UIFont(name: "DMSans-Medium", size: max(12, fontSize - 2))
-      ?? UIFont.systemFont(ofSize: max(12, fontSize - 2), weight: .medium)
+    let font = UIFont.systemFont(ofSize: max(12, fontSize - 2), weight: .medium)
     let fallbackIcon = UIImage(
       systemName: iconName,
       withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .medium)

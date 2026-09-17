@@ -1,3 +1,12 @@
+import {
+  selectThreadPullRequestWatches,
+  threadPullRequestLinks,
+} from "@lecturn/client-runtime/state/threadPullRequests";
+import { GitPullRequestIcon } from "lucide-react";
+import { usePullRequestWatches } from "../state/pullRequestWatch";
+import type { PullRequestWatch } from "@lecturn/contracts";
+import { StaveIcon } from "./StaveIcon";
+import { projectSettledPage } from "./sidebarSettledGroups";
 import { StaveLifecycleBadge } from "./stave/StaveLifecycleBadge";
 import { describeStaveWorkspace } from "./stave/staveWorkspaceContext.logic";
 import { autoAnimate } from "@formkit/auto-animate";
@@ -141,7 +150,6 @@ import {
   animatePinnedLayoutChanges,
   buildBulkTitleRegenerationContextMenuItem,
   filterSidebarProjectScopeItems,
-  formatWorkingDurationLabel,
   firstValidTimestampMs,
   hasUnseenCompletion,
   isSidebarNestedLinkClick,
@@ -153,7 +161,6 @@ import {
   resolveSidebarThreadStatus,
   searchSidebarThreadsByTitle,
   shouldCreateNewThreadInCurrentProject,
-  resolveWorkingStartedAt,
   sortLogicalProjectsForSidebar,
   sortPinnedThreadsForSidebar,
   sortSettledThreadsForSidebar,
@@ -170,10 +177,10 @@ import {
   resolveDisplayedThreadPr,
   resolveDisplayedThreadPrProvider,
   setThreadChangeRequestSnapshot,
-  settledPrHoverColorClass,
   terminalStatusFromRunningIds,
   threadChangeRequestSnapshotsAtom,
   type ThreadChangeRequestSnapshot,
+  type ThreadPr,
   type TerminalStatusIndicator,
   useLinkedThreadPullRequest,
 } from "./ThreadStatusIndicators";
@@ -263,23 +270,6 @@ function JumpHintBadge(props: { label: string }) {
   );
 }
 
-// Self-ticking so only this span re-renders each second, not the whole row.
-function WorkingDuration(props: { startedAt: string | null }) {
-  const startedMs = props.startedAt !== null ? Date.parse(props.startedAt) : Number.NaN;
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (Number.isNaN(startedMs)) return;
-    const id = window.setInterval(() => setTick((tick) => tick + 1), 1_000);
-    return () => window.clearInterval(id);
-  }, [startedMs]);
-  if (Number.isNaN(startedMs)) return null;
-  return (
-    <span className="font-mono tabular-nums">
-      {formatWorkingDurationLabel(Date.now() - startedMs)}
-    </span>
-  );
-}
-
 const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, ProviderInstanceEntry> = new Map();
 
 function terminalProcessLabel(count: number): string {
@@ -303,6 +293,8 @@ function SidebarThreadTooltip({
   branchMismatch,
   terminalStatus,
   terminalProcessCount,
+  pullRequest,
+  pullRequestWatches = [],
 }: {
   thread: SidebarThreadSummary;
   projectTitle: string | null;
@@ -323,7 +315,18 @@ function SidebarThreadTooltip({
   } | null;
   terminalStatus: TerminalStatusIndicator | null;
   terminalProcessCount: number;
+  pullRequest?: ThreadPr;
+  pullRequestWatches?: readonly PullRequestWatch[];
 }) {
+  const requests = threadPullRequestLinks(
+    pullRequestWatches,
+    pullRequest
+      ? {
+          ...pullRequest,
+          repository: thread.linkedPullRequest?.repository,
+        }
+      : null,
+  );
   const driverKind = providerEntry?.driverKind ?? null;
   return (
     <TooltipPopup
@@ -337,6 +340,11 @@ function SidebarThreadTooltip({
         <div className="min-w-0 truncate text-xs leading-none font-medium text-foreground">
           {thread.title}
         </div>
+        {thread.settledOverride === "settled" ? (
+          <div className="lecturn-settled-label flex items-center gap-1.5 text-xs font-medium">
+            <CircleCheckIcon aria-hidden className="size-3.5" /> Settled
+          </div>
+        ) : null}
         <div className="grid gap-1.5 pl-0.5 text-xs text-muted-foreground">
           {projectDisplayName ? (
             <div className="flex min-w-0 items-center gap-2">
@@ -362,7 +370,7 @@ function SidebarThreadTooltip({
           ) : null}
           {staveWorkspace ? (
             <div className="flex min-w-0 items-start gap-2">
-              <FolderIcon className="mt-0.5 size-3 shrink-0 stroke-muted-foreground" />
+              <StaveIcon className="mt-0.5 size-3 shrink-0 text-primary" />
               <div className="min-w-0 text-foreground/75">
                 <div>{staveWorkspace.label}</div>
                 <div className="mt-1 text-muted-foreground whitespace-pre-line wrap-break-word">
@@ -376,6 +384,32 @@ function SidebarThreadTooltip({
               <div className="min-w-0 truncate text-foreground/75">{thread.branch}</div>
             </div>
           ) : null}
+          {requests.map((request) => (
+            <div key={request.key} className="flex min-w-0 items-start gap-2">
+              <GitPullRequestIcon aria-hidden className="mt-0.5 size-3 shrink-0" />
+              <div className="min-w-0 text-foreground/75">
+                <div>
+                  {request.repository} #{request.number} · {request.state}
+                </div>
+                <div className="mt-1 wrap-break-word">{request.title}</div>
+                {request.watch ? (
+                  <div className="mt-1 text-muted-foreground">
+                    {request.watch.watching ? "Watching" : "Not watching"} · Manager{" "}
+                    {request.watch.managerStatus}
+                    {request.watch.observation
+                      ? ` · CI ${request.watch.observation.checksState} · Required ${request.watch.observation.requiredChecks}`
+                      : ""}
+                    {request.watch.observation ? (
+                      <div>
+                        Observed {new Date(request.watch.observation.observedAt).toLocaleString()}
+                      </div>
+                    ) : null}
+                    {request.watch.error ? <div>{request.watch.error}</div> : null}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ))}
           {branchMismatch ? (
             <div className="flex min-w-0 items-start gap-2 text-warning">
               <CircleAlertIcon aria-hidden className="mt-0.5 size-3 shrink-0 stroke-current" />
@@ -758,6 +792,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
 const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   thread: SidebarThreadSummary;
   variant: "card" | "slim";
+  nested?: boolean;
   // Slim rows are either settled (action: un-settle) or merely quiet
   // (seen Ready threads — action: settle).
   variantAction: "settle" | "unsettle" | "unsnooze";
@@ -845,6 +880,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   );
   const threadKey = scopedThreadKey(threadRef);
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(props.isActive);
+  const [borderRow, setBorderRow] = useState<HTMLElement | null>(null);
+  const [borderVisible, setBorderVisible] = useState(false);
+  const attachRow = useCallback(
+    (node: HTMLElement | null) => {
+      rowRef(node);
+      setBorderRow(node);
+    },
+    [rowRef],
+  );
   const isRegeneratingTitle = thread.titleRegeneration != null;
   const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
@@ -889,6 +933,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     leaseLiveStatus ? thread.environmentId : null,
     leaseLiveStatus ? thread.linkedPullRequest : null,
   );
+  const watches = usePullRequestWatches(leaseLiveStatus ? [thread.environmentId] : []);
   const gitStatus = useEnvironmentQuery(
     leaseLiveStatus && gitTarget.statusEnabled && gitCwd !== null
       ? vcsEnvironment.status({
@@ -912,10 +957,51 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     linkedPullRequestStatus,
   });
 
+  const watchProjects = useProjects();
+  const pullRequestWatches = selectThreadPullRequestWatches({
+    projects: watchProjects,
+    environmentId: thread.environmentId,
+    thread,
+    watches: watches.values
+      .filter(([environmentId]) => environmentId === thread.environmentId)
+      .flatMap(([, snapshot]) => snapshot.watches),
+  });
+  const pullRequestLinks = threadPullRequestLinks(
+    pullRequestWatches,
+    pr
+      ? {
+          ...pr,
+          repository: thread.linkedPullRequest?.repository,
+        }
+      : null,
+  );
+
   // Same semantics as the legacy sidebar (never-visited counts as read):
   // switching sidebars must not light up every historical thread as unread.
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
   const status = resolveSidebarThreadStatus(thread);
+  useEffect(() => {
+    if (!borderRow || status !== "working") return;
+    let visible = false;
+    const sync = () => setBorderVisible(visible && !document.hidden);
+    const observer =
+      typeof IntersectionObserver === "undefined"
+        ? null
+        : new IntersectionObserver(
+            ([entry]) => {
+              visible = entry?.isIntersecting === true;
+              sync();
+            },
+            { root: borderRow.closest<HTMLElement>('[data-slot="scroll-area-viewport"]') },
+          );
+    observer?.observe(borderRow);
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      observer?.disconnect();
+      document.removeEventListener("visibilitychange", sync);
+      setBorderVisible(false);
+    };
+  }, [borderRow, status]);
   // A woken thread reappears at its original position (the sort is
   // deliberately static), so the pill has to carry the weight. Snoozing is
   // an explicit act, so the pill clears only when the user re-engages:
@@ -1010,8 +1096,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     linkedPullRequest: thread.linkedPullRequest,
     linkedPullRequestStatus,
   });
-  const prStatus = prStatusIndicator(pr, prProvider);
-  const settledPrHoverClass = pr ? settledPrHoverColorClass(pr.state, pr.isDraft) : undefined;
   useEffect(() => {
     const nextSnapshot = nextThreadChangeRequestSnapshot({
       threadBranch,
@@ -1071,6 +1155,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       branchMismatch={branchMismatch}
       terminalStatus={terminalStatus}
       terminalProcessCount={terminalProcessCount}
+      pullRequest={pr}
+      pullRequestWatches={pullRequestWatches}
     />
   );
 
@@ -1212,18 +1298,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     if (!showSnoozeButton) setSnoozeMenuOpen(false);
   }, [showSnoozeButton]);
   const handlePrClick = useCallback(
-    (event: ReactMouseEvent<HTMLAnchorElement>) => {
-      if (!pr?.url) return;
+    (event: ReactMouseEvent<HTMLAnchorElement>, url: string) => {
       const openedInRightPanel = openPrLink(
         event,
-        pr.url,
+        url,
         openPullRequestsInRightPanel ? threadRef : undefined,
       );
       if (openedInRightPanel && openPullRequestsInRightPanel && !props.isActive) {
         onThreadActivate(threadRef);
       }
     },
-    [onThreadActivate, openPrLink, openPullRequestsInRightPanel, pr, props.isActive, threadRef],
+    [onThreadActivate, openPrLink, openPullRequestsInRightPanel, props.isActive, threadRef],
   );
 
   // All sidebar rows share one surface model. Live threads used to look
@@ -1232,6 +1317,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // content; surface is reserved for interaction (hover, multi-select, route).
   const rowSurfaceClassName = cn(
     "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left outline-none select-none",
+    status === "working" && "lecturn-thread-active",
+    status === "working" && borderVisible && "lecturn-thread-active-visible",
     props.isActive
       ? "bg-sidebar-row-active text-sidebar-foreground"
       : isSelected
@@ -1284,6 +1371,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   ? "text-muted-foreground"
                   : "text-secondary-label/70",
             ),
+        variantAction === "unsettle" && "lecturn-settled-label",
         isRegeneratingTitle && "opacity-[0.55]",
       )}
     >
@@ -1293,28 +1381,45 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
 
   // A real link so cmd/ctrl+click and middle-click open the host in the
   // browser. A plain click still opens Lecturn's pull request view.
+  const multiplePrRepositories =
+    new Set(pullRequestLinks.map((request) => request.repository)).size > 1;
   const prBadge =
-    prStatus && pr ? (
-      <a
-        href={pr.url}
-        target="_blank"
-        rel="noopener noreferrer"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={handlePrClick}
-        className={cn(
-          // Sidebar chrome follows the interface font; tabular digits keep the
-          // number from reflowing as PR states stream in.
-          "shrink-0 text-xs tabular-nums hover:underline",
-          variant === "slim" && variantAction === "unsettle"
-            ? props.isActive
-              ? "text-secondary-label"
-              : cn("text-secondary-label transition-colors", settledPrHoverClass)
-            : prStatus.colorClass,
-        )}
-        aria-label={prStatus.tooltip}
-      >
-        #{pr.number}
-      </a>
+    pullRequestLinks.length > 0 ? (
+      <span className="inline-flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
+        {pullRequestLinks.map((request) => {
+          const presentation =
+            request.state === "unknown"
+              ? null
+              : prStatusIndicator(
+                  {
+                    ...request,
+                    state: request.state,
+                    baseRef: request.watch?.observation?.baseBranch ?? "",
+                    headRef: "",
+                  },
+                  prProvider,
+                );
+          const context = request.repository || request.url;
+          return (
+            <a
+              key={request.key}
+              href={request.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => handlePrClick(event, request.url)}
+              className={cn(
+                "shrink-0 text-xs tabular-nums hover:underline",
+                presentation?.colorClass ?? "text-muted-foreground",
+              )}
+              aria-label={`${context} #${request.number} · ${request.state}: ${request.title}`}
+            >
+              {multiplePrRepositories && request.repository ? `${request.repository} ` : ""}#
+              {request.number}
+            </a>
+          );
+        })}
+      </span>
     ) : null;
   const terminalStatusIcon = terminalStatus ? (
     <span
@@ -1381,7 +1486,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           <TooltipTrigger
             render={
               <div
-                ref={rowRef}
+                ref={attachRow}
                 role="button"
                 tabIndex={0}
                 data-lecturn-thread-surface
@@ -1395,25 +1500,24 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               />
             }
           >
-            {/* Settled history recedes: dimmed favicon at rest, restored on
-              hover so the tail stays scannable when you're hunting. */}
-            <span
-              className={cn(
-                "shrink-0 transition-opacity",
-                !props.isActive &&
-                  "opacity-40 grayscale group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0",
-              )}
-            >
+            {!props.nested ? (
               <ProjectFavicon
                 environmentId={thread.environmentId}
                 cwd={props.projectCwd ?? ""}
                 projectName={props.projectTitle ?? ""}
                 faviconPath={props.projectFaviconPath}
                 projectIcon={props.projectIcon}
-                className="size-4"
+                className="size-4 shrink-0"
               />
-            </span>
+            ) : null}
             {draftIndicator}
+            {variantAction === "unsettle" ? (
+              <CircleCheckIcon
+                role="img"
+                aria-label="Settled"
+                className="lecturn-settled-label size-3.5 shrink-0"
+              />
+            ) : null}
             {title}
             {pinIndicator}
             {terminalStatusIcon}
@@ -1546,12 +1650,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         <TooltipTrigger
           render={
             <div
-              ref={rowRef}
+              ref={attachRow}
               role="button"
               tabIndex={0}
               data-lecturn-thread-surface
               data-testid="sidebar-row-card"
-              aria-busy={isRegeneratingTitle || undefined}
+              aria-busy={isRegeneratingTitle || status === "working" || undefined}
+              aria-label={status === "working" ? `${thread.title} · Working` : undefined}
               className={rowSurfaceClassName}
               onClick={handleClick}
               onDoubleClick={handleDoubleClick}
@@ -1560,18 +1665,27 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
-          <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
+          <div
+            className={cn(
+              "relative z-10 px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]",
+              props.nested ? "min-h-[3.25rem]" : "h-[4.875rem]",
+            )}
+          >
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               {draftIndicator}
-              <ProjectFavicon
-                environmentId={thread.environmentId}
-                cwd={props.projectCwd ?? ""}
-                projectName={props.projectTitle ?? ""}
-                faviconPath={props.projectFaviconPath}
-                projectIcon={props.projectIcon}
-                className="size-4 shrink-0"
-              />
-              {props.projectDisplayName ? (
+              {!props.nested ? (
+                <ProjectFavicon
+                  environmentId={thread.environmentId}
+                  cwd={props.projectCwd ?? ""}
+                  projectName={props.projectTitle ?? ""}
+                  faviconPath={props.projectFaviconPath}
+                  projectIcon={props.projectIcon}
+                  className="size-4 shrink-0"
+                />
+              ) : null}
+              {props.nested ? (
+                title
+              ) : props.projectDisplayName ? (
                 <span
                   className={cn(
                     "min-w-0 flex-1 truncate text-secondary-label text-xs",
@@ -1601,7 +1715,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     snoozeMenuOpen && "pointer-events-none absolute right-0 opacity-0",
                   )}
                 >
-                  {topStatus ? (
+                  {topStatus && status !== "working" ? (
                     isWokeStatus ? (
                       <Tooltip>
                         <TooltipTrigger
@@ -1638,11 +1752,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                             wrapper around the ticking duration would make
                             screen readers announce every second. */}
                         <span role="status">{topStatus.label}</span>
-                        {status === "working" ? (
-                          <span aria-hidden>
-                            <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
-                          </span>
-                        ) : null}
                       </span>
                     )
                   ) : (
@@ -1708,14 +1817,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 ) : null}
               </span>
             </div>
-            <div className="mt-1 flex min-w-0">
-              {title}
-              {isRegeneratingTitle ? (
-                <span role="status" className="sr-only">
-                  Regenerating title
-                </span>
-              ) : null}
-            </div>
+            {!props.nested ? (
+              <div className="mt-1 flex min-w-0">
+                {title}
+                {isRegeneratingTitle ? (
+                  <span role="status" className="sr-only">
+                    Regenerating title
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
               {props.canFork ? (
                 <span className="flex shrink-0 items-center gap-1">
@@ -1746,9 +1857,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ) : null}
               {/* Stave threads span the space; their primary Git branch is only
                   one repo inside that workspace. */}
-              {staveWorkspace ? (
+              {staveWorkspace && props.nested ? (
+                <span className="flex-1" />
+              ) : staveWorkspace ? (
                 <>
-                  <FolderIcon aria-hidden className="size-3 shrink-0" />
+                  <StaveIcon aria-hidden className="size-3 shrink-0 text-primary" />
                   <span className="min-w-0 flex-1 truncate whitespace-nowrap">
                     {staveWorkspace.label}
                   </span>
@@ -2550,12 +2663,42 @@ export default function Sidebar() {
       return matches(node) || children.length ? [{ ...node, children }] : [];
     });
   }, [sagaTree, scopedProjectKeys]);
+  const [projectSettledShelves, setProjectSettledShelves] = useState<
+    Readonly<Record<string, { expanded: boolean; limit: number }>>
+  >({});
+  const settledByProject = useMemo(() => {
+    const entries = new Map<
+      string,
+      ReturnType<typeof projectSettledPage<EnvironmentThreadShell>>
+    >();
+    for (const node of scopedSagaTree.flatMap((root) => [root, ...root.children])) {
+      const rows = settledThreads.filter((thread) =>
+        node.group.memberProjectRefs.some(
+          (ref) => ref.environmentId === thread.environmentId && ref.projectId === thread.projectId,
+        ),
+      );
+      entries.set(
+        node.group.key,
+        projectSettledPage(
+          rows,
+          projectSettledShelves[node.group.key],
+          routeThreadKey,
+          SETTLED_TAIL_INITIAL_COUNT,
+        ),
+      );
+    }
+    return entries;
+  }, [scopedSagaTree, settledThreads, projectSettledShelves, routeThreadKey]);
+  const nestedSettledThreads = useMemo(
+    () => [...settledByProject.values()].flatMap((page) => page.visible),
+    [settledByProject],
+  );
   const orderedThreads = useMemo(() => {
     const rows = [
       ...pinnedThreads,
       ...activeThreads,
       ...visibleSnoozedThreads,
-      ...renderedSettledThreads,
+      ...(nestSagaProjects ? nestedSettledThreads : renderedSettledThreads),
     ];
     if (!nestSagaProjects) return rows;
     return sagaSidebarThreadOrder(scopedSagaTree, collapsedProjectKeys, rows);
@@ -2564,6 +2707,7 @@ export default function Sidebar() {
     activeThreads,
     visibleSnoozedThreads,
     renderedSettledThreads,
+    nestedSettledThreads,
     nestSagaProjects,
     scopedSagaTree,
     collapsedProjectKeys,
@@ -4107,6 +4251,7 @@ export default function Sidebar() {
                         key={`${threadKey}:${rowVariant}`}
                         thread={thread}
                         variant={rowVariant}
+                        nested={nestSagaProjects}
                         // Snoozed rows wake, settled rows un-settle, and cards settle.
                         variantAction={
                           section === "snoozed"
@@ -4224,15 +4369,17 @@ export default function Sidebar() {
                             ref.environmentId === thread.environmentId &&
                             ref.projectId === thread.projectId,
                         );
-                      const rows = orderedThreads.filter(matches);
+                      const rows = orderedThreads.filter(
+                        (thread) => matches(thread) && !settledThreads.includes(thread),
+                      );
+                      const settledPage = settledByProject.get(node.group.key);
+                      const settledExpanded = settledPage?.expanded ?? false;
                       return (
                         <li
                           key={node.group.key}
-                          className={
-                            nested ? "lecturn-hierarchy-branch list-none pl-7" : "list-none"
-                          }
+                          className={nested ? "lecturn-hierarchy-branch list-none" : "list-none"}
                         >
-                          <div data-thread-selection-safe className="mt-2 flex items-center gap-1">
+                          <div data-thread-selection-safe className="flex items-center gap-1 pt-2">
                             <button
                               type="button"
                               data-lecturn-hover
@@ -4250,7 +4397,7 @@ export default function Sidebar() {
                                     type="button"
                                     data-lecturn-hover
                                     className={cn(
-                                      "min-w-0 flex-1 truncate py-1.5 text-left text-xs font-medium",
+                                      "flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left text-xs font-medium",
                                       project.stave?.isSaga
                                         ? "text-primary"
                                         : "text-sidebar-foreground",
@@ -4269,24 +4416,50 @@ export default function Sidebar() {
                                       } else toggleProject(node.group.key);
                                     }}
                                   >
-                                    <span
-                                      className={
-                                        project.stave?.isSaga ? "lecturn-saga-sheen" : undefined
-                                      }
-                                    >
-                                      {project.displayName}
-                                    </span>
                                     {project.stave ? (
-                                      <span className="ml-1 text-[10px] font-normal text-muted-foreground">
-                                        ·{" "}
-                                        {environmentLabelById.get(project.environmentId) ??
-                                          project.environmentId}
-                                      </span>
+                                      <StaveIcon
+                                        role="img"
+                                        aria-label={
+                                          project.stave.isSaga ? "Stave saga" : "Stave space"
+                                        }
+                                        className="size-4 shrink-0 text-primary"
+                                      />
                                     ) : null}
+                                    {!project.stave ||
+                                    project.projectIcon ||
+                                    project.faviconPath ? (
+                                      <ProjectFavicon
+                                        environmentId={project.environmentId}
+                                        cwd={project.workspaceRoot}
+                                        projectName={project.displayName}
+                                        faviconPath={project.faviconPath}
+                                        projectIcon={project.projectIcon}
+                                        className="size-4 shrink-0"
+                                      />
+                                    ) : null}
+                                    <span className="min-w-0 truncate">
+                                      <span
+                                        className={
+                                          project.stave?.isSaga ? "lecturn-saga-sheen" : undefined
+                                        }
+                                      >
+                                        {project.displayName}
+                                      </span>
+                                      {project.stave ? (
+                                        <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                                          ·{" "}
+                                          {environmentLabelById.get(project.environmentId) ??
+                                            project.environmentId}
+                                        </span>
+                                      ) : null}
+                                    </span>
                                   </button>
                                 }
                               />
                               <TooltipPopup side="right">
+                                {project.stave ? (
+                                  <p>{project.stave.isSaga ? "Stave saga" : "Stave space"}</p>
+                                ) : null}
                                 <p>
                                   {environmentLabelById.get(project.environmentId) ??
                                     project.environmentId}
@@ -4346,15 +4519,10 @@ export default function Sidebar() {
                             </Tooltip>
                           </div>
                           {!closed ? (
-                            <ul
-                              className={cn(
-                                "flex flex-col",
-                                (project.stave?.isSaga || nested) && "lecturn-hierarchy-children",
-                              )}
-                            >
+                            <ul className="lecturn-hierarchy-children flex flex-col">
                               {rows.length > 0 ? (
                                 <li className="lecturn-hierarchy-conversations list-none">
-                                  <ul className="flex flex-col gap-px">
+                                  <ul className="flex flex-col">
                                     {rows.map((thread) => {
                                       const key = scopedThreadKey(
                                         scopeThreadRef(thread.environmentId, thread.id),
@@ -4369,6 +4537,70 @@ export default function Sidebar() {
                                       );
                                     })}
                                   </ul>
+                                </li>
+                              ) : null}
+                              {settledPage && settledPage.total > 0 ? (
+                                <li className="lecturn-hierarchy-branch lecturn-hierarchy-settled list-none">
+                                  <button
+                                    type="button"
+                                    data-thread-selection-safe
+                                    data-lecturn-hover
+                                    className="lecturn-settled-label flex w-full items-center gap-1.5 rounded px-1 py-2 text-left text-xs font-medium"
+                                    aria-expanded={settledExpanded}
+                                    aria-label={`Settled threads in ${project.displayName} (${settledPage.total})`}
+                                    onClick={() =>
+                                      setProjectSettledShelves((old) => ({
+                                        ...old,
+                                        [node.group.key]: {
+                                          expanded: !settledExpanded,
+                                          limit: settledPage.limit,
+                                        },
+                                      }))
+                                    }
+                                  >
+                                    <ChevronDownIcon
+                                      aria-hidden
+                                      className={cn("size-3.5", !settledExpanded && "-rotate-90")}
+                                    />
+                                    <CircleCheckIcon aria-hidden className="size-3.5" />
+                                    Settled{" "}
+                                    <span className="tabular-nums">({settledPage.total})</span>
+                                  </button>
+                                  {settledExpanded ? (
+                                    <ul className="lecturn-hierarchy-children flex flex-col">
+                                      <li className="lecturn-hierarchy-conversations list-none">
+                                        <ul className="flex flex-col">
+                                          {settledPage.visible.map((thread) =>
+                                            renderThreadRow(thread, "settled"),
+                                          )}
+                                        </ul>
+                                      </li>
+                                      {settledPage.hidden > 0 ? (
+                                        <li className="list-none pl-7">
+                                          <button
+                                            type="button"
+                                            data-thread-selection-safe
+                                            data-lecturn-hover
+                                            className="lecturn-settled-label rounded px-2 py-1 text-xs"
+                                            onClick={() =>
+                                              setProjectSettledShelves((old) => ({
+                                                ...old,
+                                                [node.group.key]: {
+                                                  expanded: true,
+                                                  limit:
+                                                    settledPage.limit + SETTLED_TAIL_PAGE_COUNT,
+                                                },
+                                              }))
+                                            }
+                                          >
+                                            Show{" "}
+                                            {Math.min(settledPage.hidden, SETTLED_TAIL_PAGE_COUNT)}{" "}
+                                            more
+                                          </button>
+                                        </li>
+                                      ) : null}
+                                    </ul>
+                                  ) : null}
                                 </li>
                               ) : null}
                               {node.children.map((child) => renderNode(child, true))}
@@ -4402,16 +4634,6 @@ export default function Sidebar() {
                               onClick={toggleSnoozedShelf}
                             >
                               Snoozed ({snoozedThreads.length})
-                            </button>
-                          ) : null}
-                          {settledThreads.length ? (
-                            <button
-                              type="button"
-                              data-lecturn-hover
-                              aria-expanded={settledShelfExpanded}
-                              onClick={toggleSettledShelf}
-                            >
-                              Settled ({settledThreads.length})
                             </button>
                           ) : null}
                         </li>
@@ -4584,7 +4806,7 @@ export default function Sidebar() {
                   }
                   return items;
                 })()}
-                {settledShelfExpanded && hiddenSettledCount > 0 ? (
+                {!nestSagaProjects && settledShelfExpanded && hiddenSettledCount > 0 ? (
                   <li className="list-none">
                     <button
                       type="button"

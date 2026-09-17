@@ -124,6 +124,7 @@ Capture one scene or device:
 
     pnpm screenshots:mobile --device iphone-6.9 --scene thread
     pnpm screenshots:mobile --platform android --scene review
+    pnpm screenshots:mobile --device iphone-6.9 --scene pr-watch
 
 Override the configured appearance or capture both variants:
 
@@ -186,6 +187,11 @@ The Environments capture presents the three local fixture transports as a Tailsc
 a Helsinki VPS hostname, and a Tailnet IPv4 address. This display-only substitution keeps the cards
 remote-first while the harness retains reliable loopback connections to its ephemeral servers.
 
+The optional `pr-watch` scene opens the production pull request watch route with a paused,
+synthetic Moonbase PR and its last CI observation. It has no merge authorization and makes no
+GitHub requests. The default five-scene store matrix is unchanged. Treat these check results as
+sample data, not evidence of CI execution or PR delivery.
+
 ## Local prerequisites
 
 - iOS: Xcode command-line tools, the configured simulator runtimes, and installed CocoaPods.
@@ -197,3 +203,17 @@ The harness is the source of truth for upload dimensions; do not resize its outp
 change, update the target's `storeAsset` specification. Capture fails when a PNG is the wrong size,
 has alpha, is not 8-bit RGB, exceeds the configured file-size limit, violates Google Play's 9:16
 shape/bounds, or leaves a full output set below its store minimum.
+
+## Present notifications and Live Activities in store listings
+
+Use this benefit copy for a release that includes the branded Live Activity layouts:
+
+> Step away without losing track. See which agents are working, need your attention, or have finished from your iPhone Lock Screen and supported Dynamic Island. Open Lecturn to review the conversation and respond.
+>
+> Managed notifications and Live Activities require Lecturn Connect access, an online hosting computer, and enabled device settings.
+
+A suitable screenshot caption is **Stay connected to your agents**. Show the actual installed release candidate with synthetic project and task names. Capture an attention state and a completed state, and verify that tapping opens the expected conversation. Check compact and expanded layouts, long titles, and the five-row banner on the target device before publication.
+
+The README's native layout preview is a promotional illustration, not an App Store screenshot. It omits system surroundings and cannot verify Lock Screen placement, Dynamic Island constraints, or Mac mirroring. Do not upload it as evidence of an installed app. The in-app screenshot harness above does not by itself capture these system Live Activity surfaces.
+
+Keep store screenshots and claims aligned with the submitted binary. Prepare refreshed screenshots for the next matching release; do not withdraw an active production review merely to add this visual polish. Do not describe the styling update as a new notification delivery capability or imply that users can approve a task directly in the activity.

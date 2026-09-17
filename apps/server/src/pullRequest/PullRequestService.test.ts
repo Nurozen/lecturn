@@ -5,6 +5,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import { VcsDriverRegistry } from "../vcs/VcsDriverRegistry.ts";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import type {
@@ -177,12 +178,14 @@ function fakeProvider(
 
 function makeService(input: {
   readonly projects: ReadonlyArray<OrchestrationProjectShell>;
+  readonly vcs?: VcsDriverRegistry["Service"];
   readonly providers: ReadonlyArray<PullRequestProviderApi>;
   readonly resolveHandle?: SourceControlProviderRegistry.SourceControlProviderRegistry["Service"]["resolveHandle"];
 }) {
   return PullRequestService.make.pipe(
     Effect.provide(
       Layer.mergeAll(
+        input.vcs ? Layer.succeed(VcsDriverRegistry, input.vcs) : Layer.empty,
         Layer.succeed(PullRequestProviderRegistry, fromProviders(input.providers)),
         Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
           resolveHandle:
@@ -4047,6 +4050,83 @@ function multiRepoSpace(
   };
 }
 
+it.effect(
+  "rejects a stale watch binding before reading permissions or mutating its resolved repository",
+  () =>
+    Effect.gen(function* () {
+      const space = multiRepoSpace([
+        { path: "web", repository: "acme/web" },
+        { path: "services/api", repository: "acme/api" },
+      ]);
+      const permissions: string[] = [];
+      const writes: unknown[] = [];
+      const service = yield* makeService({
+        projects: [space],
+        providers: [
+          fakeProvider("github", {
+            getViewerPermissions: ({ cwd }) =>
+              Effect.sync(() => {
+                permissions.push(cwd);
+                return hostedChangeRequest("").viewerPermissions;
+              }),
+            runAction: (input) =>
+              Effect.sync(() => {
+                writes.push(input);
+              }),
+          }),
+        ],
+      });
+      const input = {
+        projectId: space.id,
+        host: "github.com",
+        repository: "acme/api",
+        number: 42,
+        action: "merge" as const,
+        expectedHeadRevision: "authorized-head",
+      };
+      for (const expectedBinding of [
+        PullRequestService.pullRequestRepositoryBinding(
+          space,
+          "/spaces/task/old-api",
+          "github.com/acme/api",
+        ),
+        PullRequestService.pullRequestRepositoryBinding(
+          space,
+          "/spaces/task/services/api",
+          "github.com/acme/old-api",
+        ),
+        PullRequestService.pullRequestRepositoryBinding(
+          { ...space, stave: { ...space.stave!, createdAt: "2026-01-01T00:00:00Z" } },
+          "/spaces/task/services/api",
+          "github.com/acme/api",
+        ),
+      ]) {
+        const failure = yield* Effect.flip(service.runAction(input, { expectedBinding }));
+        assert.strictEqual(failure._tag, "PullRequestOperationError");
+      }
+      assert.deepStrictEqual(permissions, []);
+      assert.deepStrictEqual(writes, []);
+      yield* service.runAction(input, {
+        expectedBinding: PullRequestService.pullRequestRepositoryBinding(
+          space,
+          "/spaces/task/services/api",
+          "github.com/acme/api",
+        ),
+      });
+      assert.deepStrictEqual(permissions, ["/spaces/task/services/api"]);
+      assert.deepStrictEqual(writes, [
+        {
+          cwd: "/spaces/task/services/api",
+          host: "github.com",
+          repository: "acme/api",
+          number: 42,
+          action: "merge",
+          expectedHeadRevision: "authorized-head",
+        },
+      ]);
+    }),
+);
+
 it.effect("lists every editable nested repository under its space, excluding references", () =>
   Effect.gen(function* () {
     const asked: string[] = [];
@@ -4576,5 +4656,89 @@ it.effect(
       yield* service.summary(canonical);
       yield* service.summary(legacy);
       assert.strictEqual(reads, 4);
+    }),
+);
+
+it.effect(
+  "fork checkout lists origin, resolves explicit upstream and fences retargeted watch writes",
+  () =>
+    Effect.gen(function* () {
+      const grouped = project({
+        id: "fork",
+        title: "Fork",
+        workspaceRoot: "/fork",
+        repository: "upstream/app",
+      });
+      let remoteNames = ["origin", "upstream"];
+      const reads: string[] = [];
+      const writes: string[] = [];
+      const vcs = {
+        resolve: () =>
+          Effect.succeed({
+            driver: {
+              listRemotes: () =>
+                Effect.succeed({
+                  remotes: remoteNames.map((name) => ({
+                    name,
+                    url: `https://github.com/${name === "origin" ? "mine" : "upstream"}/app.git`,
+                  })),
+                }),
+            },
+          }),
+      } as unknown as VcsDriverRegistry["Service"];
+      const service = yield* makeService({
+        projects: [grouped],
+        vcs,
+        providers: [
+          fakeProvider("github", {
+            listChangeRequests: ({ repository }) =>
+              Effect.sync(() => {
+                reads.push(repository);
+                return {
+                  items: [changeRequest(31, "2026-07-02T00:00:00Z")],
+                  truncated: false,
+                  continues: false,
+                };
+              }),
+            getChangeRequest: () => Effect.succeed(hostedChangeRequest("Fork PR")),
+            runAction: ({ repository }) =>
+              Effect.sync(() => {
+                writes.push(repository);
+              }),
+          }),
+        ],
+      });
+      const listed = yield* service.list({ state: "open" });
+      assert.deepEqual(
+        listed.entries.map((entry) => entry.repository),
+        ["mine/app"],
+      );
+      assert.deepEqual(reads, ["mine/app"]);
+      const all = yield* service.list({ state: "open" }, { allRemotes: true });
+      assert.deepEqual(all.entries.map((entry) => entry.repository).sort(), [
+        "mine/app",
+        "upstream/app",
+      ]);
+      const ref = { projectId: grouped.id, repository: "mine/app", host: "github.com", number: 31 };
+      const binding = PullRequestService.pullRequestRepositoryBinding(
+        grouped,
+        "/fork",
+        "github.com/mine/app",
+      );
+      yield* service.runAction(
+        { ...ref, action: "merge", expectedHeadRevision: "abc123" },
+        { expectedBinding: binding },
+      );
+      assert.deepEqual(writes, ["mine/app"]);
+      remoteNames = ["upstream"];
+      const removed = yield* service
+        .runAction(
+          { ...ref, action: "merge", expectedHeadRevision: "abc123" },
+          { expectedBinding: binding },
+        )
+        .pipe(Effect.result);
+      assert.equal(removed._tag, "Failure");
+      assert.deepEqual(writes, ["mine/app"]);
+      yield* service.detail({ ...ref, repository: "upstream/app" });
     }),
 );

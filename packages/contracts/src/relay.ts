@@ -97,6 +97,29 @@ export const RelayDeviceUnregistrationParams = Schema.Struct({
 });
 export type RelayDeviceUnregistrationParams = typeof RelayDeviceUnregistrationParams.Type;
 
+/** Bounded PR facts shared by live activities and authenticated app controls. */
+export const RelayPullRequestActivity = Schema.Struct({
+  watchId: TrimmedNonEmptyString,
+  projectId: TrimmedNonEmptyString,
+  number: Schema.Int.check(Schema.isGreaterThan(0)),
+  repository: TrimmedNonEmptyString,
+  state: Schema.Literals(["open", "closed", "merged"]),
+  checks: Schema.Literals(["passing", "failing", "pending", "none", "unknown"]),
+  requiredChecks: Schema.Literals(["passing", "failing", "pending", "none", "unknown"]),
+  watching: Schema.Boolean,
+  manager: Schema.Literals(["working", "monitoring", "idle", "offline", "unassigned"]),
+  authorization: Schema.Literals([
+    "none",
+    "waiting",
+    "armed",
+    "merged",
+    "needs-authorization",
+    "blocked",
+  ]),
+  stale: Schema.Boolean,
+});
+export type RelayPullRequestActivity = typeof RelayPullRequestActivity.Type;
+
 export const RelayAgentActivityState = Schema.Struct({
   environmentId: EnvironmentId,
   threadId: ThreadId,
@@ -108,6 +131,7 @@ export const RelayAgentActivityState = Schema.Struct({
   modelTitle: TrimmedNonEmptyString,
   updatedAt: TrimmedNonEmptyString,
   deepLink: TrimmedNonEmptyString,
+  pullRequest: Schema.optional(RelayPullRequestActivity),
 });
 export type RelayAgentActivityState = typeof RelayAgentActivityState.Type;
 
@@ -121,6 +145,7 @@ export const RelayAgentActivityAggregateRow = Schema.Struct({
   status: TrimmedNonEmptyString,
   updatedAt: TrimmedNonEmptyString,
   deepLink: TrimmedNonEmptyString,
+  pullRequest: Schema.optional(RelayPullRequestActivity),
 });
 export type RelayAgentActivityAggregateRow = typeof RelayAgentActivityAggregateRow.Type;
 
@@ -173,6 +198,7 @@ export const RelayLinkProofRequest = Schema.Struct({
 export type RelayLinkProofRequest = typeof RelayLinkProofRequest.Type;
 
 export const RelayEnvironmentConfigRequest = Schema.Struct({
+  organizationId: Schema.optionalKey(TrimmedNonEmptyString),
   relayUrl: Schema.String,
   relayIssuer: Schema.optional(Schema.String),
   cloudUserId: Schema.String,
@@ -218,6 +244,7 @@ export const RelayEnvironmentLinkScope = Schema.Literals([
 export type RelayEnvironmentLinkScope = typeof RelayEnvironmentLinkScope.Type;
 
 export const RelayEnvironmentLinkProofPayload = Schema.Struct({
+  teamPolicyVersion: Schema.optionalKey(Schema.Literal(1)),
   ...RelaySignedJwtRegisteredClaims,
   challenge: TrimmedNonEmptyString,
   descriptor: ExecutionEnvironmentDescriptor,
@@ -253,6 +280,7 @@ export type RelayEnvironmentLinkChallengeResponse =
   typeof RelayEnvironmentLinkChallengeResponse.Type;
 
 export const RelayEnvironmentLinkRequest = Schema.Struct({
+  organizationId: Schema.optionalKey(TrimmedNonEmptyString),
   deviceId: Schema.optional(
     TrimmedNonEmptyString.annotate({
       description: "Optional client device identifier associated with this link.",
@@ -268,6 +296,7 @@ export const RelayEnvironmentLinkRequest = Schema.Struct({
 export type RelayEnvironmentLinkRequest = typeof RelayEnvironmentLinkRequest.Type;
 
 export const RelayEnvironmentLinkResponse = Schema.Struct({
+  organizationId: Schema.optionalKey(TrimmedNonEmptyString),
   ok: Schema.Boolean,
   cloudUserId: TrimmedNonEmptyString,
   environmentId: EnvironmentId,

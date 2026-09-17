@@ -1,3 +1,5 @@
+import { ProjectIconOverride } from "./orchestration.ts";
+import { PullRequestCheckStatus } from "./pullRequest.ts";
 import type {
   VcsCreateRefInput,
   VcsCreateRefResult,
@@ -1052,7 +1054,115 @@ export const DesktopPreviewAutomationWaitForInputSchema = Schema.Struct({
   input: PreviewAutomationWaitForInput,
 });
 
+/** Display-only activity data. Credentials and repository commands stay in the main client. */
+export const DesktopActivityActionKindSchema = Schema.Literals([
+  "open",
+  "watch",
+  "stop-watch",
+  "merge",
+  "revoke-merge",
+  "steer",
+]);
+export const DesktopActivityIdentitySchema = Schema.Struct({
+  watchRevision: Schema.optionalKey(Schema.Int),
+  rowId: Schema.String,
+  environmentId: Schema.String,
+  projectId: Schema.String,
+  threadId: Schema.optionalKey(Schema.String),
+  watchId: Schema.optionalKey(Schema.String),
+});
+export const DesktopActivityActionSchema = Schema.Struct({
+  ...DesktopActivityIdentitySchema.fields,
+  kind: DesktopActivityActionKindSchema,
+  text: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(8000))),
+  mergeMode: Schema.optionalKey(Schema.Literals(["follow-pr", "revision-only"])),
+});
+export type DesktopActivityAction = typeof DesktopActivityActionSchema.Type;
+export const ActivityVisualState = Schema.Literals([
+  "active",
+  "attention",
+  "failed",
+  "complete",
+  "idle",
+  "offline",
+]);
+export type ActivityVisualState = typeof ActivityVisualState.Type;
+export const DesktopActivityRowSchema = Schema.Struct({
+  userPromptAt: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(100))),
+  userSettled: Schema.optionalKey(Schema.Boolean),
+  userStopped: Schema.optionalKey(Schema.Boolean),
+  userAction: Schema.optionalKey(
+    Schema.Struct({
+      id: Schema.String.check(Schema.isMaxLength(100)),
+      kind: Schema.Literals(["start", "stop", "settle", "unsettle"]),
+      at: Schema.Number,
+    }),
+  ),
+  visualState: Schema.optionalKey(ActivityVisualState),
+  projectLabel: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(300))),
+  projectIcon: Schema.optionalKey(ProjectIconOverride),
+  projectIconDataUrl: Schema.optionalKey(
+    Schema.String.check(
+      Schema.isMaxLength(16384),
+      Schema.isPattern(/^data:image\/svg\+xml;base64,[A-Za-z0-9+/=]+$/),
+    ),
+  ),
+  projectKind: Schema.optionalKey(Schema.Literals(["project", "space", "saga"])),
+  excerpt: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(180))),
+  recent: Schema.optionalKey(Schema.Boolean),
+  mergeRecipient: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(300))),
+  mergeStatus: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(1000))),
+  checkTotal: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  checks: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        name: Schema.String.check(Schema.isMaxLength(300)),
+        status: PullRequestCheckStatus,
+        description: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(500))),
+      }),
+    ).check(Schema.isMaxLength(50)),
+  ),
+  watchRevision: Schema.optionalKey(Schema.Int),
+  defaultMergeMode: Schema.optionalKey(Schema.Literals(["follow-pr", "revision-only"])),
+  id: Schema.String,
+  environmentId: Schema.String,
+  projectId: Schema.String,
+  threadId: Schema.optionalKey(Schema.String),
+  watchId: Schema.optionalKey(Schema.String),
+  title: Schema.String,
+  subtitle: Schema.String,
+  status: Schema.String,
+  detail: Schema.optionalKey(Schema.String),
+  actions: Schema.Array(
+    Schema.Struct({
+      id: DesktopActivityActionKindSchema,
+      label: Schema.String,
+      disabled: Schema.optionalKey(Schema.Boolean),
+    }),
+  ),
+});
+export type DesktopActivityRow = typeof DesktopActivityRowSchema.Type;
+export const DesktopActivitySnapshotSchema = Schema.Struct({
+  /** Current chat route; the native host clears this while the main app is not foreground. */
+  viewedThread: Schema.optionalKey(
+    Schema.Struct({ environmentId: Schema.String, threadId: Schema.String }),
+  ),
+  /** Environments with authoritative initial activity loaded; others are display-only. */
+  readyEnvironmentIds: Schema.optionalKey(Schema.Array(Schema.String)),
+  summary: Schema.String,
+  rows: Schema.Array(DesktopActivityRowSchema),
+});
+export type DesktopActivitySnapshot = typeof DesktopActivitySnapshotSchema.Type;
+
 export interface DesktopBridge {
+  /** macOS activity surface; commands execute through the authenticated main client. */
+  activity?: {
+    publish: (snapshot: DesktopActivitySnapshot) => Promise<void>;
+    onAction: (listener: (action: DesktopActivityAction) => void) => () => void;
+    setEnabled: (enabled: boolean) => Promise<void>;
+    getEnabled: () => Promise<boolean>;
+    onEnabledChange: (listener: (enabled: boolean) => void) => () => void;
+  };
   getAppBranding: () => DesktopAppBranding | null;
   /** The desktop client's OS platform, read from Electron's preload process. */
   getClientPlatform?: () => string;

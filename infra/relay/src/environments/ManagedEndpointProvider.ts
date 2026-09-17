@@ -873,7 +873,7 @@ export const make = Effect.gen(function* () {
           port: input.origin.localHttpPort,
         });
       }
-      yield* managedAccess.check(input.userId, "managedConnect");
+      yield* managedAccess.check(input.userId, "managedConnect", undefined, input.environmentId);
       const cf = yield* requireCloudflareSettings(config, input);
       const useGateway = gateway ? yield* gateway.enabledFor(input.userId) : false;
       const namespace = useGateway ? `g-${cf.namespace}` : cf.namespace;
@@ -1251,7 +1251,7 @@ export const make = Effect.gen(function* () {
         ),
       );
 
-      yield* managedAccess.check(input.userId, "managedConnect");
+      yield* managedAccess.check(input.userId, "managedConnect", undefined, input.environmentId);
       const completed = yield* reservations.complete(reservation).pipe(
         Effect.mapError(
           () =>

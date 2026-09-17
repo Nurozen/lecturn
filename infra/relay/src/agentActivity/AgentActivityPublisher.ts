@@ -22,6 +22,8 @@ import * as AgentActivityRows from "./AgentActivityRows.ts";
 import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
 import * as LiveActivities from "./LiveActivities.ts";
 import * as ApnsDeliveries from "./ApnsDeliveries.ts";
+import { TeamRuntime } from "../teams/TeamRuntime.ts";
+import { ManagedAccessUnavailable } from "../billing/ManagedAccess.ts";
 
 export type AgentActivityPublishError =
   | AgentActivityRows.AgentActivityRowUpsertPersistenceError
@@ -29,7 +31,8 @@ export type AgentActivityPublishError =
   | AgentActivityRows.AgentActivityRowListPersistenceError
   | EnvironmentLinks.EnvironmentLinkUserListPersistenceError
   | LiveActivities.LiveActivityTargetListPersistenceError
-  | ApnsDeliveries.ApnsDeliveryError;
+  | ApnsDeliveries.ApnsDeliveryError
+  | ManagedAccessUnavailable;
 
 export class AgentActivityPublisher extends Context.Service<
   AgentActivityPublisher,
@@ -52,6 +55,7 @@ export const make = Effect.gen(function* () {
   const links = yield* EnvironmentLinks.EnvironmentLinks;
   const liveActivities = yield* LiveActivities.LiveActivities;
   const apnsDeliveries = yield* ApnsDeliveries.ApnsDeliveries;
+  const teams = yield* Effect.serviceOption(TeamRuntime);
 
   const publishForDeliveryUser = Effect.fnUntraced(function* (input: {
     readonly deliveryUser: EnvironmentLinks.AgentAwarenessDeliveryUserRecord;
@@ -138,6 +142,30 @@ export const make = Effect.gen(function* () {
         "relay.thread_id": input.threadId,
         "relay.agent_activity.phase": input.state?.phase ?? "deleted",
       });
+      // Resolve recipients using the authenticated environment key before retaining any titles.
+      const deliveryUsers = yield* links.listDeliveryUsersForEnvironment({
+        environmentId: input.environmentId,
+        environmentPublicKey: input.environmentPublicKey,
+      });
+      if (input.state && Option.isSome(teams)) {
+        const owners = yield* links.listUsersForEnvironment({
+          environmentId: input.environmentId,
+          environmentPublicKey: input.environmentPublicKey,
+          includeAllLinkedUsers: true,
+        });
+        for (const owner of owners) {
+          const policy = yield* teams.value.policy(owner, input.environmentId).pipe(
+            Effect.mapError(
+              () =>
+                new ManagedAccessUnavailable({
+                  message: "Company activity publishing policy is temporarily unavailable.",
+                }),
+            ),
+          );
+          if (policy && (!policy.hasAccess || !policy.publishAgentActivity))
+            return { ok: true, deliveries: [] };
+        }
+      }
       if (input.state) {
         // Terminal states are persisted too (pruned by the cron after they
         // age out) so a thread that finishes while other agents are active
@@ -155,10 +183,6 @@ export const make = Effect.gen(function* () {
         });
       }
 
-      const deliveryUsers = yield* links.listDeliveryUsersForEnvironment({
-        environmentId: input.environmentId,
-        environmentPublicKey: input.environmentPublicKey,
-      });
       const now = yield* DateTime.now;
       const deliveriesByUser = yield* Effect.forEach(
         deliveryUsers,
@@ -210,16 +234,27 @@ function aggregateRowForState(state: RelayAgentActivityState) {
     threadTitle: state.threadTitle,
     modelTitle: state.modelTitle,
     phase: state.phase,
-    status: statusForPhase(state.phase),
+    status: state.pullRequest
+      ? state.pullRequest.stale
+        ? "Stale"
+        : state.pullRequest.state !== "open"
+          ? state.pullRequest.state
+          : `CI ${state.pullRequest.checks}`
+      : statusForPhase(state.phase),
     updatedAt: state.updatedAt,
     deepLink: state.deepLink,
+    ...(state.pullRequest ? { pullRequest: state.pullRequest } : {}),
   };
 }
 
 function terminalAggregateState(state: RelayAgentActivityState): RelayAgentActivityAggregateState {
   return sanitizeAgentActivityAggregateState({
     title: "Lecturn",
-    subtitle: state.phase === "failed" ? "Agent work failed" : "Agent work completed",
+    subtitle: state.pullRequest
+      ? `Pull request ${state.pullRequest.state}`
+      : state.phase === "failed"
+        ? "Agent work failed"
+        : "Agent work completed",
     activeCount: 0,
     updatedAt: state.updatedAt,
     activities: [aggregateRowForState(state)],
@@ -271,7 +306,11 @@ export function makeAggregateState(input: {
     }
     return sanitizeAgentActivityAggregateState({
       title: "Lecturn",
-      subtitle: newest.phase === "failed" ? "Agent work failed" : "Agent work completed",
+      subtitle: newest.pullRequest
+        ? `Pull request ${newest.pullRequest.state}`
+        : newest.phase === "failed"
+          ? "Agent work failed"
+          : "Agent work completed",
       activeCount: 0,
       updatedAt: newest.updatedAt,
       activities: recentTerminal.slice(0, MAX_ACTIVITY_ROWS).map(aggregateRowForState),
@@ -292,7 +331,9 @@ export function makeAggregateState(input: {
   ).updatedAt;
   return sanitizeAgentActivityAggregateState({
     title: "Lecturn",
-    subtitle: "Agent work in progress",
+    subtitle: activeStates.some((state) => state.pullRequest)
+      ? "Agents and pull requests"
+      : "Agent work in progress",
     activeCount: activeStates.length,
     updatedAt,
     activities: displayedStates.map(aggregateRowForState),

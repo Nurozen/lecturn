@@ -1,3 +1,4 @@
+import { TeamPolicy } from "../cloud/TeamPolicy.ts";
 import * as NodeCrypto from "node:crypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 
@@ -303,7 +304,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
     });
   });
 
-  it("selects only active shell snapshot threads for startup catch-up", () => {
+  it("excludes settled conversations from startup catch-up and projects their activity tombstone", () => {
     const now = "2026-05-25T00:00:00.000Z";
     const environmentId = "env-1" as EnvironmentId;
     const projectId = "project-1" as ProjectId;
@@ -331,6 +332,39 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
       hasActionableProposedPlan: false,
     } satisfies Omit<OrchestrationThreadShell, "id">;
 
+    const settledThread = {
+      ...baseThread,
+      id: "thread-settled" as ThreadId,
+      settledOverride: "settled",
+      settledAt: now,
+      latestTurn: {
+        turnId: "turn-settled" as TurnId,
+        state: "completed",
+        requestedAt: now,
+        startedAt: now,
+        completedAt: now,
+        assistantMessageId: null,
+      },
+    } satisfies OrchestrationThreadShell;
+
+    expect(
+      AgentAwarenessRelay.resolveAgentAwarenessRelayPublishSnapshot({
+        environmentId,
+        threadId: settledThread.id,
+        thread: Option.some(settledThread),
+        project: Option.some({
+          id: projectId,
+          title: "Lecturn",
+          workspaceRoot: "/workspace",
+          repositoryIdentity: null,
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        }),
+      }),
+    ).toEqual({ projectId, state: null, reason: "snapshot" });
+
     expect(
       AgentAwarenessRelay.resolveAgentAwarenessRelayActiveThreadIds({
         environmentId,
@@ -341,6 +375,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
           },
         ],
         threads: [
+          settledThread,
           {
             ...baseThread,
             id: activeThreadId,
@@ -730,3 +765,44 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
     ),
   );
 });
+
+it.effect(
+  "does not read or transmit thread activity when organization publishing is disabled",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const secrets = makeMemorySecretStore();
+        yield* secrets.setString(RELAY_URL_SECRET, "https://relay.example.test");
+        yield* secrets.setString(RELAY_ENVIRONMENT_CREDENTIAL_SECRET, "environment-test-token");
+        yield* secrets.setString(PUBLISH_AGENT_ACTIVITY_SECRET, "true");
+        let threadReads = 0;
+        const publisher = yield* AgentAwarenessRelay.make.pipe(
+          Effect.provideService(TeamPolicy, {
+            checkProvider: () => Effect.void,
+            canPublishActivity: Effect.succeed(false),
+          }),
+          Effect.provideService(ServerSecretStore.ServerSecretStore, secrets.store),
+          Effect.provideService(ServerEnvironment.ServerEnvironment, {
+            getEnvironmentId: Effect.succeed("env-policy" as EnvironmentId),
+            getDescriptor: Effect.die("Should not read descriptor"),
+          }),
+          Effect.provideService(ProjectionSnapshotQuery, {
+            getThreadShellById: () =>
+              Effect.sync(() => {
+                threadReads += 1;
+                return Option.none();
+              }),
+          } as unknown as ProjectionSnapshotQueryShape),
+          Effect.provideService(OrchestrationEngineService, {
+            readEvents: () => Stream.empty,
+            dispatch: () => Effect.succeed({ sequence: 1 }),
+            streamDomainEvents: Stream.empty,
+            subscribeDomainEvents: Effect.succeed(Stream.empty),
+            latestSequence: Effect.succeed(0),
+          }),
+        );
+        yield* publisher.publishThread("thread-policy" as ThreadId);
+        expect(threadReads).toBe(0);
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+);

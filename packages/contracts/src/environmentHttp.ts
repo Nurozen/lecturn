@@ -375,6 +375,7 @@ export const EnvironmentCloudRelayConfigResult = Schema.Struct({
 export type EnvironmentCloudRelayConfigResult = typeof EnvironmentCloudRelayConfigResult.Type;
 
 export const EnvironmentCloudLinkStateResult = Schema.Struct({
+  organizationId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   linked: Schema.Boolean,
   cloudUserId: Schema.NullOr(Schema.String),
   relayUrl: Schema.NullOr(Schema.String),

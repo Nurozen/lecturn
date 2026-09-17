@@ -85,6 +85,10 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.staveRunOperation]: AuthOrchestrationOperateScope,
   // Watching an operation somebody else started is a read of its progress.
   [WS_METHODS.staveObserveOperation]: AuthOrchestrationReadScope,
+  [WS_METHODS.pullRequestWatchList]: AuthOrchestrationReadScope,
+  [WS_METHODS.pullRequestWatchTrack]: AuthOrchestrationOperateScope,
+  [WS_METHODS.pullRequestWatchCommand]: AuthOrchestrationOperateScope,
+  [WS_METHODS.pullRequestWatchConfigure]: AuthOrchestrationOperateScope,
   [WS_METHODS.pullRequestsList]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsListStats]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsSummary]: AuthOrchestrationReadScope,

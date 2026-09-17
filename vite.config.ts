@@ -133,6 +133,9 @@ export default defineConfig({
       {
         // Reviewed native and third-party interop boundaries that cannot consume a className.
         files: [
+          // React Native gradient strings require resolved palette colors.
+          "apps/mobile/src/components/GlassCard.tsx",
+          "apps/mobile/src/components/GlassSurface.tsx",
           "apps/mobile/src/features/archive/ArchivedThreadsScreen.tsx",
           "apps/mobile/src/features/connection/ConnectionsNewRouteScreen.tsx",
           "apps/mobile/src/features/files/FileMarkdownPreview.tsx",

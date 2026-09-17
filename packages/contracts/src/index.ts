@@ -42,3 +42,8 @@ export * from "./rpc.ts";
 export * from "./relayBilling.ts";
 
 export * from "./sagaWorkbench.ts";
+
+export * from "./pullRequestWatch.ts";
+
+export { RelayPullRequestActivity } from "./relay.ts";
+export * from "./relayTeams.ts";

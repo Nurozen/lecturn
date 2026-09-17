@@ -3,6 +3,18 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./state/activityContext": {
+      "types": "./src/state/activityContext.ts",
+      "default": "./src/state/activityContext.ts"
+    },
+    "./state/repositoryScope": {
+      "types": "./src/state/repositoryScope.ts",
+      "default": "./src/state/repositoryScope.ts"
+    },
+    "./state/pullRequestWatch": {
+      "types": "./src/state/pullRequestWatch.ts",
+      "default": "./src/state/pullRequestWatch.ts"
+    },
     "./connection": {
       "types": "./src/connection/index.ts",
       "default": "./src/connection/index.ts"
@@ -230,6 +242,14 @@
     "./state/sagaWorkbench": {
       "types": "./src/state/sagaWorkbench.ts",
       "default": "./src/state/sagaWorkbench.ts"
+    },
+    "./state/threadPullRequests": {
+      "types": "./src/state/threadPullRequests.ts",
+      "default": "./src/state/threadPullRequests.ts"
+    },
+    "./state/pullRequestHandoff": {
+      "types": "./src/state/pullRequestHandoff.ts",
+      "default": "./src/state/pullRequestHandoff.ts"
     }
   },
   "scripts": {

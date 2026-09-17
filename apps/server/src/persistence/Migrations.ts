@@ -63,6 +63,7 @@ import Migration0048 from "./Migrations/048_ProjectionThreadForkLineage.ts";
 import Migration0049 from "./Migrations/049_StaveProjectLifecycle.ts";
 import Migration0050 from "./Migrations/050_StaveLifecycleRecovery.ts";
 import Migration0051 from "./Migrations/051_SagaWorkbench.ts";
+import Migration0052 from "./Migrations/052_PullRequestWatches.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -126,6 +127,7 @@ export const migrationEntries = [
   [49, "StaveProjectLifecycle", Migration0049],
   [50, "StaveLifecycleRecovery", Migration0050],
   [51, "SagaWorkbench", Migration0051],
+  [52, "PullRequestWatches", Migration0052],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

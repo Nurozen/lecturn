@@ -1,3 +1,4 @@
+import { GlassCard } from "../../../components/GlassCard";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useCallback, useState } from "react";
 import { Platform, Pressable, ScrollView, View } from "react-native";
@@ -88,7 +89,7 @@ export function GitCommitSheet(props: GitCommitSheetProps) {
             {selectedThreadGitRepository?.repoName ?? "Repository unavailable"}
           </Text>
         ) : null}
-        <View className="gap-3 rounded-[22px] border border-border bg-card px-4 py-4">
+        <GlassCard className="gap-3 px-4 py-4">
           <View className="flex-row items-center justify-between gap-3">
             <Text className="text-foreground-muted text-sm font-medium">Branch</Text>
             <Text className="text-foreground text-base font-lecturn-bold">
@@ -100,9 +101,9 @@ export function GitCommitSheet(props: GitCommitSheetProps) {
               Warning: this is the default branch.
             </Text>
           ) : null}
-        </View>
+        </GlassCard>
 
-        <View className="gap-3 rounded-[22px] border border-border bg-card px-4 py-4">
+        <GlassCard className="gap-3 px-4 py-4">
           <View className="flex-row items-center justify-between gap-3">
             <View className="gap-1">
               <Text className="text-foreground text-base font-lecturn-bold">Files</Text>
@@ -179,7 +180,7 @@ export function GitCommitSheet(props: GitCommitSheetProps) {
                     }}
                   >
                     <View
-                      className={`absolute inset-0 rounded-[18px] ${included ? "bg-card" : "bg-subtle"}`}
+                      className={`absolute inset-0 rounded-[18px] ${included ? "bg-glass-surface" : "bg-subtle"}`}
                     />
                     <View className="flex-row items-start justify-between gap-3">
                       <View className="flex-1 gap-1">
@@ -209,7 +210,7 @@ export function GitCommitSheet(props: GitCommitSheetProps) {
               })}
             </View>
           )}
-        </View>
+        </GlassCard>
 
         <View className="gap-2">
           <Text className="text-foreground text-sm font-lecturn-bold">Commit message</Text>

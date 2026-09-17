@@ -15,6 +15,7 @@ import type {
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
+import type * as Scope from "effect/Scope";
 import type { ProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 
 export type ProviderMaintenanceActionKind = "update";
@@ -79,6 +80,13 @@ export interface ProviderRegistryShape {
    * change. The array contains the full current state.
    */
   readonly streamChanges: Stream.Stream<ReadonlyArray<ServerProvider>>;
+
+  /** Subscribe before reading a snapshot so detection completion cannot be lost. */
+  readonly subscribeChanges: Effect.Effect<
+    Stream.Stream<ReadonlyArray<ServerProvider>>,
+    never,
+    Scope.Scope
+  >;
 }
 
 export class ProviderRegistry extends Context.Service<ProviderRegistry, ProviderRegistryShape>()(

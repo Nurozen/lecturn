@@ -67,6 +67,18 @@ provider's CLI, or use Lecturn's managed setup for Antigravity.
 Codex and Claude are on by default. Cursor, Grok Build, OpenCode, and Antigravity are off by
 default. Turn them on in **Settings** > **Providers** when you want to use them.
 
+On macOS, Lecturn opens while it loads your shell environment and detects providers in the
+background. Progress appears in the bottom-right corner; settings and navigation remain usable.
+Shell loading and provider detection each allow up to 15 seconds. If detection times out, the
+indicator turns grey with a retry button and a link to that provider's settings. You can retry
+without restarting, or configure an explicit executable path to bypass shell discovery. New
+turns wait for their provider to be ready; existing running turns continue. Brief connection
+interruptions do not restart provider detection. The progress indicator is hidden while an
+environment is disconnected and resumes from its current status after reconnecting.
+
+If a provider cannot start, use the recovery panel to retry or open settings. **Show details**
+keeps the technical error available for troubleshooting.
+
 For Antigravity, select the environment in provider settings, then install and sign in there.
 The runtime and credentials stay on that environment, even when you use a phone or remote
 browser. See [Antigravity setup](./providers-antigravity.md) for Google sign-in, remote callback

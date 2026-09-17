@@ -26,6 +26,7 @@ export function ArcaneControlHighlight({
     <Animated.View
       pointerEvents="none"
       accessible={false}
+      className="border-primary bg-primary/7 shadow-primary"
       style={[StyleSheet.absoluteFill, styles.thread, { opacity, borderRadius: radius }]}
     />
   );
@@ -34,9 +35,6 @@ export function ArcaneControlHighlight({
 const styles = StyleSheet.create({
   thread: {
     borderWidth: 1,
-    borderColor: "rgba(229, 180, 88, 0.8)",
-    backgroundColor: "rgba(229, 180, 88, 0.055)",
-    shadowColor: "#dfab52",
     shadowOpacity: 0.3,
     shadowRadius: 5,
     shadowOffset: { width: 0, height: 0 },

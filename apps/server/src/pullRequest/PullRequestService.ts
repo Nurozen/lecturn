@@ -1,3 +1,4 @@
+import { stableStringify } from "@lecturn/shared/relaySigning";
 import * as Cache from "effect/Cache";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -8,6 +9,12 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Path from "effect/Path";
+import * as Option from "effect/Option";
+import { VcsDriverRegistry } from "../vcs/VcsDriverRegistry.ts";
+import {
+  normalizeGitRemoteUrl,
+  detectSourceControlProviderFromGitRemoteUrl,
+} from "@lecturn/shared/git";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -138,6 +145,7 @@ export class PullRequestService extends Context.Service<
   {
     readonly list: (
       input: PullRequestListInput,
+      options?: { readonly allRemotes?: boolean },
     ) => Effect.Effect<PullRequestListResult, PullRequestError>;
     readonly listStats: (
       input: PullRequestListStatsInput,
@@ -166,7 +174,10 @@ export class PullRequestService extends Context.Service<
     readonly diffFileContents: (
       input: PullRequestDiffFileContentsInput,
     ) => Effect.Effect<PullRequestDiffFileContentsResult, PullRequestError>;
-    readonly runAction: (input: PullRequestActionInput) => Effect.Effect<void, PullRequestError>;
+    readonly runAction: (
+      input: PullRequestActionInput,
+      options?: { readonly expectedBinding: string },
+    ) => Effect.Effect<void, PullRequestError>;
     readonly update: (input: PullRequestUpdateInput) => Effect.Effect<void, PullRequestError>;
     readonly comment: (input: PullRequestCommentInput) => Effect.Effect<void, PullRequestError>;
     readonly updateComment: (
@@ -243,6 +254,7 @@ const LABEL_CHANGE_REFUSAL = "You need triage access on this repository to chang
 
 /** A project this page can read: its remote is on a host with an implementation. */
 interface SupportedProject {
+  readonly canonicalKey: string;
   readonly project: OrchestrationProjectShell;
   readonly api: PullRequestProviderApi;
   readonly cwd: string;
@@ -408,7 +420,7 @@ function toPullRequestError(
       : new PullRequestOperationError({ operation, detail: error.detail, cause: error });
 }
 
-function withRateLimitBackoff(
+export function withRateLimitBackoff(
   api: PullRequestProviderApi,
   host: string,
   limits: SourceControlRateLimit.SourceControlRateLimit["Service"],
@@ -474,6 +486,12 @@ function withRateLimitBackoff(
       : {
           listChangeRequestStats: wrap("listChangeRequestStats", api.listChangeRequestStats),
         }),
+    ...(api.readAcceptanceEvidence
+      ? { readAcceptanceEvidence: wrap("readAcceptanceEvidence", api.readAcceptanceEvidence) }
+      : {}),
+    ...(api.listAcceptanceCandidates
+      ? { listAcceptanceCandidates: wrap("listAcceptanceCandidates", api.listAcceptanceCandidates) }
+      : {}),
     getChangeRequest: wrap("getChangeRequest", api.getChangeRequest),
     ...(api.getChangeRequestSummary === undefined
       ? {}
@@ -532,7 +550,7 @@ export const pullRequestCwd = (project: OrchestrationProjectShell): string =>
 
 type RepositoryIdentity = NonNullable<OrchestrationProjectShell["repositoryIdentity"]>;
 
-function repositorySelector(identity: RepositoryIdentity | null | undefined): string | null {
+export function repositorySelector(identity: RepositoryIdentity | null | undefined): string | null {
   if (!identity) return null;
   if (identity.displayName) return identity.displayName;
   return identity.owner && identity.name ? `${identity.owner}/${identity.name}` : null;
@@ -542,6 +560,21 @@ export function repositoryIdentityOf(project: OrchestrationProjectShell): string
   return repositorySelector(project.stave?.primaryRepositoryIdentity ?? project.repositoryIdentity);
 }
 
+/** Incarnation and physical checkout are part of a watch's authority. */
+export const pullRequestRepositoryBinding = (
+  project: OrchestrationProjectShell,
+  cwd: string,
+  canonicalKey: string,
+) =>
+  stableStringify([
+    project.id,
+    project.workspaceRoot,
+    project.stave?.spaceId ?? null,
+    project.stave?.createdAt ?? null,
+    cwd,
+    canonicalKey,
+  ]);
+
 interface ProjectRepository {
   readonly project: OrchestrationProjectShell;
   readonly cwd: string;
@@ -549,7 +582,7 @@ interface ProjectRepository {
 }
 
 /** Expand the manifest, retaining the space as the owning project for every checkout. */
-function projectRepositories(
+export function projectRepositories(
   project: OrchestrationProjectShell,
   path: Path.Path,
 ): ProjectRepository[] {
@@ -592,9 +625,62 @@ function projectRepositories(
   });
 }
 
+/** Grouping identities may name upstream; PR operations belong to actual checkout remotes. */
+export const resolveProjectRepositories = Effect.fn("PullRequest.resolveProjectRepositories")(
+  function* (
+    project: OrchestrationProjectShell,
+    path: Path.Path,
+    vcs: Option.Option<VcsDriverRegistry["Service"]>,
+    allRemotes = false,
+  ) {
+    const checkouts = projectRepositories(project, path);
+    // Isolated consumers without a VCS runtime retain projected identities.
+    if (Option.isNone(vcs)) return checkouts;
+    return (yield* Effect.forEach(
+      checkouts,
+      (checkout) =>
+        Effect.gen(function* () {
+          const handle = yield* vcs.value.resolve({ cwd: checkout.cwd });
+          const { remotes } = yield* handle.driver.listRemotes(checkout.cwd);
+          const ordered = [...remotes].sort((left, right) =>
+            left.name === "origin"
+              ? -1
+              : right.name === "origin"
+                ? 1
+                : left.name.localeCompare(right.name),
+          );
+          const selected = allRemotes ? ordered : ordered.slice(0, 1);
+          const seen = new Set<string>();
+          return selected.flatMap((remote): ProjectRepository[] => {
+            const canonicalKey = normalizeGitRemoteUrl(remote.url);
+            const provider = detectSourceControlProviderFromGitRemoteUrl(remote.url);
+            if (!provider || seen.has(canonicalKey)) return [];
+            seen.add(canonicalKey);
+            const displayName = canonicalKey.split("/").slice(1).join("/");
+            if (!displayName) return [];
+            return [
+              {
+                ...checkout,
+                identity: {
+                  canonicalKey,
+                  displayName,
+                  provider: provider.kind,
+                  rootPath: checkout.cwd,
+                  locator: { source: "git-remote", remoteName: remote.name, remoteUrl: remote.url },
+                },
+              },
+            ];
+          });
+        }).pipe(Effect.orElseSucceed(() => [])),
+      { concurrency: REPOSITORY_CONCURRENCY },
+    )).flat();
+  },
+);
+
 export const make = Effect.gen(function* () {
   const mergedPullRequests = yield* PubSub.sliding<PullRequestMergeEvent>(64);
   const path = yield* Path.Path;
+  const vcs = yield* Effect.serviceOption(VcsDriverRegistry);
   const pullRequestRefreshes = yield* SubscriptionRef.make(0);
   const registry = yield* PullRequestProviderRegistry;
   const projections = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
@@ -602,7 +688,7 @@ export const make = Effect.gen(function* () {
   const rateLimits = yield* SourceControlRateLimit.SourceControlRateLimit;
 
   const refineUnknownProjectKinds = (
-    projects: ReadonlyArray<OrchestrationProjectShell>,
+    targets: ReadonlyArray<ProjectRepository>,
     filter: Pick<PullRequestListInput, "projectId" | "projectIds" | "host">,
   ) => {
     type RefinementCandidate = {
@@ -612,9 +698,7 @@ export const make = Effect.gen(function* () {
       readonly remoteUrl: string;
     };
     const refinements = new Map<string, RefinementCandidate[]>();
-    for (const { project, identity, cwd } of projects.flatMap((project) =>
-      projectRepositories(project, path),
-    )) {
+    for (const { project, identity, cwd } of targets) {
       if (filter.projectId !== undefined && project.id !== filter.projectId) continue;
       if (filter.projectIds !== undefined && !filter.projectIds.includes(project.id)) continue;
       if (identity.provider !== "unknown" || repositorySelector(identity) === null) continue;
@@ -664,6 +748,7 @@ export const make = Effect.gen(function* () {
   const listWorkspaceProjects = (
     filter: Pick<PullRequestListInput, "projectId" | "projectIds" | "host">,
     deduplicate = true,
+    allRemotes = false,
   ): Effect.Effect<WorkspaceProjects, PullRequestError> =>
     projections.getShellSnapshot().pipe(
       Effect.mapError(
@@ -675,11 +760,22 @@ export const make = Effect.gen(function* () {
           }),
       ),
       Effect.flatMap((snapshot) =>
-        refineUnknownProjectKinds(snapshot.projects, filter).pipe(
-          Effect.map((refinedKinds) => ({ refinedKinds, snapshot })),
-        ),
+        Effect.gen(function* () {
+          const projects = snapshot.projects.filter(
+            (project) =>
+              (filter.projectId === undefined || project.id === filter.projectId) &&
+              (filter.projectIds === undefined || filter.projectIds.includes(project.id)),
+          );
+          const targets = (yield* Effect.forEach(
+            projects,
+            (project) => resolveProjectRepositories(project, path, vcs, allRemotes),
+            { concurrency: REPOSITORY_CONCURRENCY },
+          )).flat();
+          const refinedKinds = yield* refineUnknownProjectKinds(targets, filter);
+          return { refinedKinds, targets };
+        }),
       ),
-      Effect.map(({ refinedKinds, snapshot }) => {
+      Effect.map(({ refinedKinds, targets }) => {
         const supported: SupportedProject[] = [];
         const identities: Array<
           Pick<PullRequestListEntry, "projectId" | "repository" | "host" | "provider">
@@ -690,9 +786,7 @@ export const make = Effect.gen(function* () {
         >();
         const viewerRoots = new Map<string, string[]>();
         const seen = new Set<string>();
-        for (const { project, identity, cwd } of snapshot.projects.flatMap((project) =>
-          projectRepositories(project, path),
-        )) {
+        for (const { project, identity, cwd } of targets) {
           if (filter.projectId !== undefined && project.id !== filter.projectId) continue;
           if (filter.projectIds !== undefined && !filter.projectIds.includes(project.id)) continue;
           let kind = identity?.provider as SourceControlProviderKind | undefined;
@@ -726,6 +820,7 @@ export const make = Effect.gen(function* () {
             continue;
           }
           supported.push({
+            canonicalKey: identity.canonicalKey,
             project,
             cwd,
             api: withRateLimitBackoff(api, host, rateLimits),
@@ -738,7 +833,7 @@ export const make = Effect.gen(function* () {
     );
 
   const requireProject = (ref: PullRequestRef): Effect.Effect<SupportedProject, PullRequestError> =>
-    listWorkspaceProjects({ projectId: ref.projectId }).pipe(
+    listWorkspaceProjects({ projectId: ref.projectId }, true, true).pipe(
       Effect.flatMap(
         ({ supported, identities }): Effect.Effect<SupportedProject, PullRequestError> => {
           if (supported.length === 0) {
@@ -988,7 +1083,7 @@ export const make = Effect.gen(function* () {
   const searchVisibilityKey = (host: string, repository: string) =>
     `${host}\n${repository.trim().toLowerCase()}`;
 
-  const listUncached: PullRequestService["Service"]["list"] = (input) =>
+  const listUncached: PullRequestService["Service"]["list"] = (input, options) =>
     Effect.gen(function* () {
       const involvement = input.involvement ?? "all";
       // Refused whole rather than per repository: a cursor is only ever a value this service
@@ -999,7 +1094,7 @@ export const make = Effect.gen(function* () {
         supported: projects,
         unimplemented,
         viewerRoots,
-      } = yield* listWorkspaceProjects(input);
+      } = yield* listWorkspaceProjects(input, true, options?.allRemotes);
       const projectCounts = new Map<string, number>();
       for (const { host } of projects) {
         projectCounts.set(host, (projectCounts.get(host) ?? 0) + 1);
@@ -1525,10 +1620,36 @@ export const make = Effect.gen(function* () {
 
   const runAction = (
     input: PullRequestActionInput,
+    options?: { readonly expectedBinding: string },
   ): Effect.Effect<{ repository: string; host: string }, PullRequestError> =>
     requireProject(input).pipe(
       Effect.flatMap(
         (project): Effect.Effect<{ repository: string; host: string }, PullRequestError> => {
+          if (options?.expectedBinding !== undefined) {
+            const binding = pullRequestRepositoryBinding(
+              project.project,
+              project.cwd,
+              project.canonicalKey,
+            );
+            if (binding !== options.expectedBinding)
+              return Effect.fail(
+                new PullRequestOperationError({
+                  operation: "runAction",
+                  detail: "Repository binding changed before the action could run.",
+                }),
+              );
+          }
+          if (
+            input.expectedHeadRevision !== undefined &&
+            (project.api.kind !== "github" || input.action !== "merge")
+          ) {
+            return Effect.fail(
+              new PullRequestOperationError({
+                operation: "runAction",
+                detail: "This host/action cannot enforce a revision-bound merge.",
+              }),
+            );
+          }
           // The surface hides what a host cannot do, and this refuses it as well: a request that
           // reached here anyway must not be handed to a provider that never claimed the action.
           if (!project.api.capabilities.actions.includes(input.action)) {
@@ -1593,6 +1714,9 @@ export const make = Effect.gen(function* () {
                 }
                 return project.api
                   .runAction({
+                    ...(input.expectedHeadRevision === undefined
+                      ? {}
+                      : { expectedHeadRevision: input.expectedHeadRevision }),
                     cwd: project.cwd,
                     repository: project.repository,
                     host: project.host,
@@ -2056,7 +2180,7 @@ export const make = Effect.gen(function* () {
   const listStatsUncached: PullRequestService["Service"]["listStats"] = (input) =>
     Effect.gen(function* () {
       if (input.refs.length === 0) return { stats: [] };
-      const { supported, identities } = yield* listWorkspaceProjects({}, false);
+      const { supported, identities } = yield* listWorkspaceProjects({}, false, true);
       const wanted = new Map<
         string,
         { readonly project: SupportedProject; readonly number: number }
@@ -2364,7 +2488,8 @@ export const make = Effect.gen(function* () {
       timeToLive: (exit) => (Exit.isSuccess(exit) ? LIST_CACHE_TTL : Duration.zero),
     },
   );
-  const list: PullRequestService["Service"]["list"] = (input) => {
+  const list: PullRequestService["Service"]["list"] = (input, options) => {
+    if (options?.allRemotes) return listUncached(input, options);
     const key = JSON.stringify([
       listingsEpoch,
       input.state,
@@ -2591,8 +2716,8 @@ export const make = Effect.gen(function* () {
       );
   const runActionAndInvalidate: PullRequestService["Service"]["runAction"] = Effect.fn(
     "PullRequestService.runActionAndInvalidate",
-  )(function* (input) {
-    const { repository, host } = yield* runAction(input);
+  )(function* (input, options) {
+    const { repository, host } = yield* runAction(input, options);
     bumpRefEpoch({ ...input, repository, host });
     listingsEpoch = ++epochCounter;
     if (input.action === "merge") {

@@ -37,6 +37,8 @@ import {
   getMobileUniwindThemeName,
   type MobileThemeRuntimeState,
 } from "../../../lib/mobileThemeRuntime";
+import { useGlassAccessibility } from "../../../lib/useGlassAccessibility";
+import { glassAccessibilityThemeUpdates } from "../../../lib/glassTheme";
 import { cacheTerminalFontSize } from "../../terminal/terminalUiState";
 
 interface AppearancePreferencesContextValue {
@@ -64,6 +66,12 @@ interface AppearancePreferencesContextValue {
 const AppearancePreferencesContext = createContext<AppearancePreferencesContextValue | null>(null);
 
 export function AppearancePreferencesProvider(props: { readonly children: ReactNode }) {
+  const opaqueGlass = useGlassAccessibility();
+  useLayoutEffect(() => {
+    for (const update of glassAccessibilityThemeUpdates(opaqueGlass)) {
+      Uniwind.updateCSSVariables(update.themeName, update.variables);
+    }
+  }, [opaqueGlass]);
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const systemColorScheme = useColorScheme() === "dark" ? "dark" : "light";

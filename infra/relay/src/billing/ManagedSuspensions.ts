@@ -1,4 +1,5 @@
 import { Clock, Effect, Schema } from "effect";
+import { makeTeamStore } from "../teams/TeamStore.ts";
 import { RelayDb } from "../db.ts";
 import { effectiveAccountAccess } from "./BillingGrants.ts";
 import { BillingError, type BillingAccount } from "./BillingStore.ts";
@@ -108,9 +109,11 @@ export const makeManagedSuspensions = (config: {
   readonly enabled: () => Effect.Effect<boolean, BillingError>;
   readonly provider: SuspensionProvider;
   readonly enforcementUsers?: ReadonlyArray<string> | undefined;
+  readonly teamsEnabled?: boolean;
 }) =>
   Effect.gen(function* () {
     const { $client: sql } = yield* RelayDb;
+    const teams = config.teamsEnabled ? yield* makeTeamStore : undefined;
     const query = <A, E>(effect: Effect.Effect<A, E>) => effect.pipe(Effect.mapError(unavailable));
     const drain = Effect.fn("ManagedSuspensions.drain")(function* () {
       if (!(yield* config.enabled())) return;
@@ -138,7 +141,7 @@ export const makeManagedSuspensions = (config: {
       SELECT allocation.tunnel_id,allocation.user_id,allocation.environment_id,account.generation,reservation.generation,${now}
       FROM relay_managed_endpoint_allocations allocation JOIN relay_billing_accounts account ON account.user_id=allocation.user_id
       LEFT JOIN relay_managed_reservations reservation ON reservation.user_id=allocation.user_id AND reservation.environment_id=allocation.environment_id
-      WHERE allocation.tunnel_id IS NOT NULL AND (account.deleted_at IS NOT NULL OR
+      WHERE allocation.tunnel_id IS NOT NULL ${teams ? sql`AND NOT EXISTS (SELECT 1 FROM relay_team_environment_funding funding WHERE funding.user_id=allocation.user_id AND funding.environment_id=allocation.environment_id)` : sql``} AND (account.deleted_at IS NOT NULL OR
       ((${config.enforcementUsers === undefined || config.enforcementUsers.includes("*")} OR ${encodeJson(config.enforcementUsers ?? [])}::jsonb ? account.user_id) AND
       (COALESCE((account.state->>'suspended')::boolean,false) OR
       (account.updated_at>${now - 900} AND account.updated_at<=${now} AND COALESCE((account.state->>'accessUntil')::numeric,0)<=${now}
@@ -146,6 +149,16 @@ export const makeManagedSuspensions = (config: {
       AND COALESCE((account.state->'grant'->>'end')::numeric,0)>${now}
       AND COALESCE((account.state->'grant'->>'limit')::numeric,0)>=3)))))
       ON CONFLICT(tunnel_id) DO NOTHING`);
+      if (teams)
+        yield* query(sql`INSERT INTO relay_managed_suspensions(tunnel_id,user_id,environment_id,account_generation,reservation_generation,created_at)
+        SELECT allocation.tunnel_id,allocation.user_id,allocation.environment_id,account.generation,reservation.generation,${now}
+        FROM relay_managed_endpoint_allocations allocation
+        JOIN relay_team_environment_funding funding ON funding.user_id=allocation.user_id AND funding.environment_id=allocation.environment_id
+        JOIN relay_team_accounts account ON account.organization_id=funding.organization_id
+        LEFT JOIN relay_team_seats seat ON seat.organization_id=account.organization_id AND seat.user_id=allocation.user_id
+        LEFT JOIN relay_managed_reservations reservation ON reservation.user_id=allocation.user_id AND reservation.environment_id=allocation.environment_id
+        WHERE allocation.tunnel_id IS NOT NULL AND (seat.user_id IS NULL OR account.suspended OR account.purchased_seats<=0 OR COALESCE(account.access_until,0)<=${now})
+        ON CONFLICT(tunnel_id) DO NOTHING`);
       const jobs = yield* query(
         sql<SuspensionJob>`SELECT * FROM relay_managed_suspensions WHERE completed_at IS NULL AND retry_at<=${now} ORDER BY created_at LIMIT 10`,
       );
@@ -158,23 +171,35 @@ export const makeManagedSuspensions = (config: {
                 (yield* sql<BillingAccount>`SELECT * FROM relay_billing_accounts WHERE user_id=${candidate.user_id} FOR UPDATE`)[0];
               const current =
                 (yield* sql<SuspensionJob>`SELECT * FROM relay_managed_suspensions WHERE tunnel_id=${candidate.tunnel_id} AND completed_at IS NULL AND retry_at<=${now} FOR UPDATE`)[0];
-              if (!current || !account) return null;
+              if (!current) return null;
+              if (teams)
+                yield* sql`SELECT account.organization_id FROM relay_team_accounts account JOIN relay_team_environment_funding funding ON funding.organization_id=account.organization_id WHERE funding.user_id=${candidate.user_id} AND funding.environment_id=${candidate.environment_id} FOR UPDATE OF account,funding`;
+              const team = teams
+                ? yield* teams.access(candidate.user_id, candidate.environment_id, now)
+                : undefined;
+              if (!account && !team) return null;
               if (
-                account.deleted_at === null &&
+                !team &&
+                account?.deleted_at === null &&
                 config.enforcementUsers &&
                 !config.enforcementUsers.includes("*") &&
                 !config.enforcementUsers.includes(current.user_id)
               )
                 return null;
               if (current.stage === "pending") {
-                const access = effectiveAccountAccess(account, now);
+                const access = team
+                  ? { allowed: team.allowed, available: true }
+                  : effectiveAccountAccess(account, now);
                 if (access.allowed || !access.available) {
                   // A restored subscription or operator grant cancels only work that has not started.
                   if (access.allowed)
                     yield* sql`DELETE FROM relay_managed_suspensions WHERE tunnel_id=${current.tunnel_id}`;
                   return null;
                 }
-                yield* sql`UPDATE relay_billing_accounts SET generation=generation+1 WHERE user_id=${current.user_id}`;
+                if (team)
+                  yield* sql`UPDATE relay_team_accounts SET generation=generation+1 WHERE organization_id=${team.organizationId}`;
+                else
+                  yield* sql`UPDATE relay_billing_accounts SET generation=generation+1 WHERE user_id=${current.user_id}`;
                 // Even observe-mode recovery cannot reuse this tunnel while retirement is paused.
                 // Provision uses the stored name; old jobs retain only the old resource ID.
                 yield* sql`UPDATE relay_managed_endpoint_allocations SET tunnel_name='lecturn-recovery-' || md5(tunnel_id),updated_at=clock_timestamp()::text WHERE user_id=${current.user_id} AND environment_id=${current.environment_id} AND tunnel_id=${current.tunnel_id}`;

@@ -1,4 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import type { SagaProjectIndexEntry } from "@lecturn/client-runtime/state/project-grouping";
+import type { RepositoryScopeProject } from "@lecturn/client-runtime/state/repositoryScope";
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import {
   createEnvironmentRpcCommand,
@@ -17,6 +19,7 @@ import { connectionAtomRuntime } from "../connection/runtime";
 import { type EnvironmentQueryView, useEnvironmentQuery } from "./query";
 import { serverEnvironment } from "./server";
 import { subscribeStaveMutation } from "../staveMutation";
+import { appAtomRegistry } from "../rpc/atomRegistry";
 
 /**
  * Web Stave reads. Mobile has its own query binding to the shared RPC contracts.
@@ -42,6 +45,61 @@ export const staveSagaStatus = createEnvironmentRpcQueryAtomFamily(connectionAto
   tag: WS_METHODS.staveSagaStatus,
   staleTimeMs: 15_000,
 });
+
+const sagaRepositoryIndex = Atom.family((key: string) =>
+  Atom.make((get) => {
+    const targets = JSON.parse(key) as Array<{ environmentId: EnvironmentId; sagaRoot: string }>;
+    const entries: SagaProjectIndexEntry[] = [];
+    for (const target of targets) {
+      const config = get(serverEnvironment.configValueAtom(target.environmentId));
+      if (!environmentSupportsStave(config) || !config?.settings.stave.enabled) continue;
+      const result = get(
+        staveSagaStatus({
+          environmentId: target.environmentId,
+          input: { sagaRoot: target.sagaRoot },
+        }),
+      );
+      if (AsyncResult.isSuccess(result)) entries.push({ ...target, status: result.value });
+    }
+    return entries;
+  }),
+);
+
+/** Repository ownership uses verified rosters independently of sidebar nesting preferences. */
+export function useSagaRepositoryIndex(projects: readonly RepositoryScopeProject[]) {
+  const key = useMemo(
+    () =>
+      JSON.stringify(
+        projects
+          .filter((project) => project.stave?.isSaga && project.stave.state !== "archived")
+          .map((project) => ({
+            environmentId: project.environmentId,
+            sagaRoot: project.workspaceRoot,
+          })),
+      ),
+    [projects],
+  );
+  const entries = useAtomValue(sagaRepositoryIndex(key));
+  useEffect(
+    () =>
+      subscribeStaveMutation((environmentId) => {
+        const targets = JSON.parse(key) as Array<{
+          environmentId: EnvironmentId;
+          sagaRoot: string;
+        }>;
+        const config = appAtomRegistry.get(serverEnvironment.configValueAtom(environmentId));
+        if (!environmentSupportsStave(config) || !config?.settings.stave.enabled) return;
+        for (const target of targets) {
+          if (target.environmentId === environmentId)
+            appAtomRegistry.refresh(
+              staveSagaStatus({ environmentId, input: { sagaRoot: target.sagaRoot } }),
+            );
+        }
+      }),
+    [key],
+  );
+  return entries;
+}
 
 export function useStaveSagaStatus(
   environmentId: EnvironmentId,

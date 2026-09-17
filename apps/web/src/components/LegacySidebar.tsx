@@ -206,6 +206,7 @@ import {
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   resolveProjectStatusIndicator,
+  resolveSidebarThreadStatus,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   orderItemsByPreferredIds,
@@ -405,6 +406,38 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(isActive);
+  const [borderRow, setBorderRow] = useState<HTMLElement | null>(null);
+  const [borderVisible, setBorderVisible] = useState(false);
+  const attachRow = useCallback(
+    (node: HTMLElement | null) => {
+      rowRef(node);
+      setBorderRow(node);
+    },
+    [rowRef],
+  );
+  const isWorking = resolveSidebarThreadStatus(thread) === "working";
+  useEffect(() => {
+    if (!borderRow || !isWorking) return;
+    let visible = false;
+    const sync = () => setBorderVisible(visible && !document.hidden);
+    const observer =
+      typeof IntersectionObserver === "undefined"
+        ? null
+        : new IntersectionObserver(
+            ([entry]) => {
+              visible = entry?.isIntersecting === true;
+              sync();
+            },
+            { root: borderRow.closest<HTMLElement>('[data-slot="scroll-area-viewport"]') },
+          );
+    observer?.observe(borderRow);
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      observer?.disconnect();
+      document.removeEventListener("visibilitychange", sync);
+      setBorderVisible(false);
+    };
+  }, [borderRow, isWorking]);
   const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const runningTerminalIds = useThreadRunningTerminalIds({
@@ -731,7 +764,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
 
   return (
     <SidebarMenuSubItem
-      ref={rowRef}
+      ref={attachRow}
       className="w-full"
       data-thread-item
       onMouseLeave={handleMouseLeave}
@@ -745,7 +778,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         className={`${resolveThreadRowClassName({
           isActive,
           isSelected,
-        })} relative isolate`}
+        })} relative isolate ${isWorking ? "lecturn-thread-active" : ""} ${isWorking && borderVisible ? "lecturn-thread-active-visible" : ""}`}
         onClick={handleRowClick}
         onDoubleClick={handleRowDoubleClick}
         onKeyDown={handleRowKeyDown}
@@ -778,7 +811,12 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               </TooltipPopup>
             </Tooltip>
           )}
-          {threadStatus && <ThreadStatusLabel status={threadStatus} />}
+          {threadStatus &&
+            (isWorking ? (
+              <span className="sr-only">{threadStatus.label}</span>
+            ) : (
+              <ThreadStatusLabel status={threadStatus} />
+            ))}
           {renamingThreadKey === threadKey ? (
             <input
               ref={handleRenameInputRef}

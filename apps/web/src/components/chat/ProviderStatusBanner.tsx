@@ -7,7 +7,14 @@ import { formatProviderDriverKindLabel } from "../../providerModels";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export function getProviderStatusBannerKey(status: ServerProvider | null): string | null {
-  if (!status || status.status === "ready" || status.status === "disabled") return null;
+  if (
+    !status ||
+    status.discovery?.status === "detecting" ||
+    status.status === "ready" ||
+    status.status === "disabled"
+  ) {
+    return null;
+  }
   // Antigravity checks saved credentials when a session starts. Its local
   // health check leaves auth unknown after a restart, which is not a failure.
   if (

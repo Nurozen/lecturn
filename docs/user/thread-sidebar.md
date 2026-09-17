@@ -18,7 +18,7 @@ live background work keep the thread active. Lecturn settles from a closed or me
 only when its timestamp is not older than the user's latest activity. If that timestamp is not
 available, the inactivity rule still applies. A manual un-settle also keeps the thread active.
 
-**Settled** lists threads by when their work finished, newest first. A thread you settle yourself
+**Settled** is an expandable group beneath each project, Stave space, or saga in the project hierarchy. Its red-gold connectors and check marks distinguish finished conversations. The flat sidebar keeps its shared Settled section. Threads are listed by when their work finished, newest first. A thread you settle yourself
 sorts by the moment you settled it. A thread that settled on its own sorts by its last message or
 turn, not by when the server noticed it was inactive.
 
@@ -33,7 +33,9 @@ style.
 A settings change affects future settlement and does not reopen a settled thread. Settings saved
 by older clients on one device no longer control this behavior.
 
-When you un-settle a thread, it returns to the top of the active list so you can find it right
+Opening a settled thread keeps its conversation visible. The composer becomes an **Unsettle** control with a red-gold border; unsettle before writing another message. Existing drafts are preserved. The thread tooltip also labels its settled state.
+
+When you unsettle a thread, it returns to the top of the active list so you can find it right
 away. Its timestamps do not change. Other threads keep their positions.
 
 A thread whose composer holds unsent text or attachments shows an amber tint and a pen icon in the
@@ -92,3 +94,7 @@ be selected again. The option is hidden when the connected environment needs a s
 Stave projects show archive reminders or cleanup refusals beside their project information.
 Open project settings for Archive now or Keep; deleted projects with unfinished cleanup appear
 in Settings → Stave. See [Stave spaces](./stave.md#automatic-cleanup) for policy and recovery.
+
+Settled conversations retain a read-only model, reasoning/options, and access-mode strip beneath Unsettle. Context usage remains visible when available.
+
+Stave spaces and sagas carry a staff icon in their parent heading. Nested conversation rows avoid repeating the workspace type; repository details remain available in the workspace controls and tooltips.

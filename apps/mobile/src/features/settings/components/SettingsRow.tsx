@@ -27,18 +27,20 @@ export function SettingsRow(props: {
     <View
       className={
         props.disabled
-          ? "flex-row items-center gap-4 p-4 opacity-[0.45]"
-          : "flex-row items-center gap-4 p-4"
+          ? "min-h-14 flex-row items-center gap-3 px-4 py-3 opacity-[0.45]"
+          : "min-h-14 flex-row items-center gap-3 px-4 py-3"
       }
     >
-      <SymbolView
-        name={props.icon}
-        size={22}
-        tintColorClassName={"accent-icon"}
-        type="monochrome"
-        weight="regular"
-      />
-      <Text className="shrink-0 text-lg text-foreground" numberOfLines={1}>
+      <View className="h-8 w-8 items-center justify-center rounded-full border border-border-subtle bg-glass-surface">
+        <SymbolView
+          name={props.icon}
+          size={18}
+          tintColorClassName={"accent-primary"}
+          type="monochrome"
+          weight="regular"
+        />
+      </View>
+      <Text className="shrink text-base text-foreground" numberOfLines={1}>
         {props.label}
       </Text>
       <View className="min-w-0 flex-1 items-end">

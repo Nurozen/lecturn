@@ -350,6 +350,8 @@ export function linkPrimaryEnvironmentToCloud(input: {
   readonly target: CloudLinkTarget;
   readonly clerkToken: string;
   readonly mode?: CloudLinkMode;
+  readonly organizationId?: string;
+  readonly publishAgentActivity?: boolean;
 }): Effect.Effect<
   void,
   CloudEnvironmentLinkError,
@@ -376,8 +378,8 @@ export function linkPrimaryEnvironmentToCloud(input: {
       .createEnvironmentLinkChallenge({
         clerkToken: input.clerkToken,
         payload: {
-          notificationsEnabled: true,
-          liveActivitiesEnabled: true,
+          notificationsEnabled: input.publishAgentActivity !== false,
+          liveActivitiesEnabled: input.publishAgentActivity !== false,
           managedTunnelsEnabled,
         },
       })
@@ -408,8 +410,9 @@ export function linkPrimaryEnvironmentToCloud(input: {
         clerkToken: input.clerkToken,
         payload: {
           proof,
-          notificationsEnabled: true,
-          liveActivitiesEnabled: true,
+          ...(input.organizationId ? { organizationId: input.organizationId } : {}),
+          notificationsEnabled: input.publishAgentActivity !== false,
+          liveActivitiesEnabled: input.publishAgentActivity !== false,
           managedTunnelsEnabled,
         },
       })
@@ -431,6 +434,7 @@ export function linkPrimaryEnvironmentToCloud(input: {
           relayUrl: configuredRelayUrl,
           relayIssuer: link.relayIssuer,
           cloudUserId: link.cloudUserId,
+          ...(link.organizationId ? { organizationId: link.organizationId } : {}),
           environmentCredential: link.environmentCredential,
           cloudMintPublicKey: link.cloudMintPublicKey,
           endpointRuntime: link.endpointRuntime,

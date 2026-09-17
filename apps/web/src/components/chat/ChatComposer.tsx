@@ -1,3 +1,4 @@
+import { providerDetectionSendBlock } from "../providerDetection";
 import type {
   ApprovalRequestId,
   AssistantCitation,
@@ -1619,10 +1620,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     projectModelSelection: activeProjectDefaultModelSelection,
     settings,
   });
-  const providerSendBlockReason = getAntigravitySendBlockReason(
-    selectedProviderEntry?.snapshot,
-    selectedModel,
-  );
+  const providerSendBlockReason =
+    providerDetectionSendBlock(selectedProviderEntry?.snapshot) ??
+    getAntigravitySendBlockReason(selectedProviderEntry?.snapshot, selectedModel);
   const sendDisabledReason =
     externalSendDisabledReason ??
     (activePendingProgress ? null : (attachmentBlockReason ?? providerSendBlockReason));

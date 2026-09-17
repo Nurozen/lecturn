@@ -1,3 +1,5 @@
+import { selectedTeam, createTeamsClient } from "@lecturn/client-runtime/relay";
+import { decodeRelayJwt } from "@lecturn/shared/relayJwt";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -266,12 +268,28 @@ export function linkEnvironmentToCloudWithPreference(
     const deviceId = yield* storage.loadOrCreateAgentAwarenessDeviceId.pipe(
       Effect.mapError(cloudEnvironmentLinkError("Could not load the mobile device id.")),
     );
-    const liveActivitiesEnabled = input.liveActivitiesEnabled;
+    const funding = teamLinkFunding(input.clerkToken);
+    let notificationsEnabled = true;
+    if (funding.organizationId) {
+      const teams = yield* Effect.tryPromise({
+        try: () => createTeamsClient({ relayUrl, getToken: async () => input.clerkToken }).list(),
+        catch: cloudEnvironmentLinkError("Could not check company publishing policy."),
+      });
+      const company = teams.organizations.find(
+        (org) => org.organizationId === funding.organizationId,
+      );
+      if (!company?.hasAccess)
+        return yield* new CloudEnvironmentLinkError({
+          message: "Company Connect access is not active.",
+        });
+      notificationsEnabled = company.policy.publishAgentActivity;
+    }
+    const liveActivitiesEnabled = input.liveActivitiesEnabled && notificationsEnabled;
     const challenge = yield* relayClient
       .createEnvironmentLinkChallenge({
         clerkToken: input.clerkToken,
         payload: {
-          notificationsEnabled: true,
+          notificationsEnabled,
           liveActivitiesEnabled,
           managedTunnelsEnabled: true,
         },
@@ -302,8 +320,9 @@ export function linkEnvironmentToCloudWithPreference(
         clerkToken: input.clerkToken,
         payload: {
           deviceId,
+          ...funding,
           proof,
-          notificationsEnabled: true,
+          notificationsEnabled,
           liveActivitiesEnabled,
           managedTunnelsEnabled: true,
         },
@@ -324,6 +343,7 @@ export function linkEnvironmentToCloudWithPreference(
           relayUrl,
           relayIssuer: link.relayIssuer,
           cloudUserId: link.cloudUserId,
+          ...(link.organizationId ? { organizationId: link.organizationId } : {}),
           environmentCredential: link.environmentCredential,
           cloudMintPublicKey: link.cloudMintPublicKey,
           endpointRuntime: link.endpointRuntime,
@@ -590,4 +610,14 @@ export function refreshCloudEnvironmentConnection(input: {
     clerkToken: input.clerkToken,
     environmentId: input.connection.environmentId,
   });
+}
+
+function teamLinkFunding(token: string): { organizationId?: string } {
+  try {
+    const userId = decodeRelayJwt(token).sub;
+    const organizationId = typeof userId === "string" ? selectedTeam(userId) : null;
+    return organizationId ? { organizationId } : {};
+  } catch {
+    return {};
+  }
 }

@@ -51,6 +51,24 @@ function withAssetFiles(config) {
       fs.writeFileSync(path.join(catalogDir, "Contents.json"), CATALOG_CONTENTS);
       fs.writeFileSync(path.join(imageSetDir, "Contents.json"), IMAGE_SET_CONTENTS);
       fs.copyFileSync(source, path.join(imageSetDir, SVG_NAME));
+      const backgroundSetDir = path.join(catalogDir, "LecturnNightSky.imageset");
+      fs.mkdirSync(backgroundSetDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(backgroundSetDir, "Contents.json"),
+        JSON.stringify(
+          {
+            images: [{ idiom: "universal", filename: "LecturnNightSky.png" }],
+            info: { author: "expo", version: 1 },
+            properties: { "template-rendering-intent": "original" },
+          },
+          null,
+          2,
+        ) + "\n",
+      );
+      fs.copyFileSync(
+        path.resolve(cfg.modRequest.projectRoot, "assets/lecturn-widget-sky.png"),
+        path.join(backgroundSetDir, "LecturnNightSky.png"),
+      );
       return cfg;
     },
   ]);

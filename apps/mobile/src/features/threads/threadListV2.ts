@@ -228,7 +228,8 @@ export interface ThreadListV2SnoozedShelfListItem {
 
 export interface ThreadListV2SettledShelfListItem {
   readonly type: "v2-settled-shelf";
-  readonly key: "v2-settled-shelf";
+  readonly key: string;
+  readonly groupKey?: string;
   readonly count: number;
   readonly expanded: boolean;
 }

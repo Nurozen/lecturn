@@ -1,3 +1,6 @@
+import * as PullRequestWatchDiscovery from "./pullRequest/PullRequestWatchDiscovery.ts";
+import * as PullRequestWatchService from "./pullRequest/PullRequestWatchService.ts";
+import * as PullRequestWatchProvider from "./pullRequest/PullRequestWatchProvider.ts";
 import * as SagaInferenceReactor from "./stave/SagaInferenceReactor.ts";
 import * as SagaWorkbenchService from "./stave/SagaWorkbenchService.ts";
 import * as SagaWorkbenchEvidence from "./stave/SagaWorkbenchEvidence.ts";
@@ -29,7 +32,7 @@ import {
   httpCompressionLayer,
 } from "./http.ts";
 import { guardHttpResponseWriteErrors } from "./httpResponseErrorGuard.ts";
-import { fixPath } from "./os-jank.ts";
+import { startPathDiscovery } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { pullRequestHttpApiLayer } from "./pullRequest/http.ts";
@@ -357,6 +360,7 @@ const SourceControlProviderRegistryLayerLive = SourceControlProviderRegistry.lay
 );
 
 const PullRequestServiceLive = PullRequestService.layer.pipe(
+  Layer.provide(VcsDriverRegistryLayerLive),
   Layer.provide(PullRequestProviderRegistry.layer),
   Layer.provide(SourceControlProviderRegistryLayerLive),
   Layer.provide(SourceControlRateLimit.layer),
@@ -448,11 +452,44 @@ const ServerEnvironmentLayerLive = ServerEnvironment.layer.pipe(
 const StaveWorkspaceReaderLayerLive = StaveWorkspaceReader.layer.pipe(
   Layer.provide(RepositoryIdentityResolver.layer),
 );
-const StaveLifecycleLayerLive = StaveLifecycleRepositoryLive.pipe(
-  Layer.provide(PersistenceLayerLive),
-);
 const StaveExecutionLayerLive = StaveExecution.layer.pipe(
   Layer.provide(Layer.mergeAll(StaveBinaryLayerLive, ServerSettingsLayerLive)),
+);
+const StaveRpcRuntimeLayerLive = StaveRpcHandlers.runtimeLayer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      StaveCliLayerLive,
+      StaveWorkspaceReaderLayerLive,
+      StaveReadCache.layer,
+      StaveExecutionLayerLive,
+      ServerSettingsLayerLive,
+    ),
+  ),
+);
+const PullRequestWatchLayerLive = PullRequestWatchService.layer.pipe(
+  Layer.provide(StaveRpcRuntimeLayerLive),
+  Layer.provide(PersistenceLayerLive),
+  Layer.provide(
+    PullRequestWatchProvider.layer.pipe(
+      Layer.provide(VcsDriverRegistryLayerLive),
+      Layer.provide(PullRequestProviderRegistry.layer),
+      Layer.provide(StaveWorkspaceReaderLayerLive),
+      Layer.provide(SourceControlProviderRegistryLayerLive),
+      Layer.provide(SourceControlRateLimit.layer),
+      Layer.provide(PullRequestServiceLive),
+    ),
+  ),
+);
+
+const PullRequestWatchDiscoveryLayerLive = PullRequestWatchDiscovery.layer.pipe(
+  Layer.provide(VcsDriverRegistryLayerLive),
+  Layer.provide(StaveRpcRuntimeLayerLive),
+  Layer.provide(PullRequestWatchLayerLive),
+  Layer.provide(PullRequestServiceLive),
+  Layer.provide(GitVcsDriverLayerLive),
+);
+const StaveLifecycleLayerLive = StaveLifecycleRepositoryLive.pipe(
+  Layer.provide(PersistenceLayerLive),
 );
 const StaveLayerLive = Layer.mergeAll(
   StaveExecutionLayerLive,
@@ -484,17 +521,7 @@ const StaveLayerLive = Layer.mergeAll(
   StaveCliLayerLive,
   StaveConfigReaderLayerLive,
   StaveRootsLayerLive,
-  StaveRpcHandlers.runtimeLayer.pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        StaveCliLayerLive,
-        StaveWorkspaceReaderLayerLive,
-        StaveReadCache.layer,
-        StaveExecutionLayerLive,
-        ServerSettingsLayerLive,
-      ),
-    ),
-  ),
+  StaveRpcRuntimeLayerLive,
 );
 
 // One fence instance protects providers, terminals and Stave operations. The
@@ -567,6 +594,8 @@ const AntigravityInstallationRefreshLive = Layer.effectDiscard(
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(AntigravityInstallationRefreshLive),
   Layer.provideMerge(SagaWorkbenchLayerLive),
+  Layer.provideMerge(PullRequestWatchDiscoveryLayerLive),
+  Layer.provideMerge(PullRequestWatchLayerLive),
   Layer.provideMerge(ProviderAuthServiceLive),
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),
@@ -671,6 +700,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   // Reusing the exact layer object shares the runtime instance by memoization;
   // isolated route harnesses can also supply its dependencies directly.
   Layer.provide(SagaWorkbenchLayerLive),
+  Layer.provide(PullRequestWatchLayerLive),
   Layer.provide(PullRequestServiceLive),
   // One registry per server: a Stave operation started over one socket keeps
   // running after that socket closes and can be re-attached from any other.
@@ -694,7 +724,7 @@ export const makeServerLayer = Layer.unwrap(
     const routesReady = yield* Deferred.make<void>();
     const launcherLayer = ServiceLauncherClient.layer;
 
-    yield* fixPath();
+    yield* startPathDiscovery();
 
     const httpListeningLayer = Layer.effectDiscard(
       Effect.gen(function* () {

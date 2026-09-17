@@ -1,3 +1,6 @@
+import { GlassCard } from "../../components/GlassCard";
+import { buildSidebarHierarchy } from "./sidebar-hierarchy";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { useMobileSagaIndex, useSidebarNestSagas } from "../../state/stave";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import type {
@@ -13,7 +16,8 @@ import type { MenuAction } from "@react-native-menu/menu";
 import { useAtomValue } from "@effect/atom-react";
 import { type EnvironmentId, resolveEnvironmentMachineKind } from "@lecturn/contracts";
 import { sortPinnedThreadsByOrderKey } from "@lecturn/client-runtime/state/thread-sort";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import type { LayoutChangeEvent } from "react-native";
 import { Platform, Pressable, StyleSheet, TextInput, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -70,6 +74,7 @@ import {
   PendingTaskListRow,
   ThreadListGroupHeader,
   ThreadListRow,
+  THREAD_ACTIVITY_VIEWABILITY_CONFIG,
   ThreadListShowMoreRow,
 } from "./thread-list-items";
 import {
@@ -87,6 +92,40 @@ import {
   type ThreadListV2ListItem,
 } from "./threadListV2";
 
+/** A static metallic glint leaves the darker rail readable on cream surfaces. */
+function LightHierarchySheen({
+  copper,
+  horizontal = false,
+}: {
+  readonly copper: boolean;
+  readonly horizontal?: boolean;
+}) {
+  const gradientId = `hierarchy-sheen-${useId().replaceAll(":", "")}`;
+  const base = copper ? "#ad3c2f" : "#82472c";
+  const metal = copper ? "#e67c47" : "#bc7642";
+  const glint = copper ? "#ffd097" : "#ffe1b1";
+  return (
+    <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
+      <Defs>
+        <LinearGradient
+          id={gradientId}
+          x1="0%"
+          y1="0%"
+          x2={horizontal ? "100%" : "0%"}
+          y2={horizontal ? "0%" : "100%"}
+        >
+          <Stop offset="0%" stopColor={base} />
+          <Stop offset="35%" stopColor={metal} />
+          <Stop offset="48%" stopColor={glint} />
+          <Stop offset="56%" stopColor={metal} />
+          <Stop offset="100%" stopColor={base} />
+        </LinearGradient>
+      </Defs>
+      <Rect width="100%" height="100%" fill={`url(#${gradientId})`} />
+    </Svg>
+  );
+}
+
 /** The sidebar list serves both lists: v1 grouped items or, when the Thread
     List v2 beta is on, flat v2 rows with queued tasks spliced in, and a settled
     "Show more" pager. */
@@ -96,7 +135,7 @@ type SidebarListItem = (
   | { readonly type: "v2-show-more"; readonly key: string; readonly hiddenCount: number }
 ) & { readonly depth?: number };
 
-const SIDEBAR_STICKY_HEADER_HEIGHT = 106;
+const SIDEBAR_STICKY_HEADER_HEIGHT = 114;
 
 interface ThreadNavigationSidebarProps {
   readonly width: number;
@@ -146,6 +185,8 @@ function NativeSidebarContainer(props: ThreadNavigationSidebarProps) {
 function ThreadNavigationSidebarPane(
   props: ThreadNavigationSidebarProps & { readonly nativeChrome: boolean },
 ) {
+  const { themeAppearance } = useAppearancePreferences();
+  const light = themeAppearance === "light";
   const insets = useSafeAreaInsets();
   const projects = useProjects();
   const threads = useThreadShells();
@@ -340,7 +381,13 @@ function ThreadNavigationSidebarPane(
       const next = new Map(previous);
       next.set(
         key,
-        nextGroupDisplayState(previous.get(key) ?? DEFAULT_GROUP_DISPLAY_STATE, action),
+        nextGroupDisplayState(
+          previous.get(key) ?? {
+            ...DEFAULT_GROUP_DISPLAY_STATE,
+            collapsed: key.startsWith("settled:"),
+          },
+          action,
+        ),
       );
       return next;
     });
@@ -507,10 +554,10 @@ function ThreadNavigationSidebarPane(
       matchedThreadKeys,
       settlementEnvironmentIds,
       snoozeEnvironmentIds,
-      settledLimit: settledVisibleCount,
+      settledLimit: Number.POSITIVE_INFINITY,
       now: new Date().toISOString(),
       snoozedShelfExpanded,
-      settledShelfExpanded,
+      settledShelfExpanded: true,
       selectedThreadKey: props.selectedThreadKey ?? null,
     });
   }, [
@@ -569,7 +616,7 @@ function ThreadNavigationSidebarPane(
       snoozedShelfExpanded,
       snoozedShelfHeaderIndex: threadListV2Layout.snoozedShelfHeaderIndex,
       settledCount: threadListV2Layout.settledCount,
-      settledShelfExpanded,
+      settledShelfExpanded: true,
       settledShelfHeaderIndex: threadListV2Layout.settledShelfHeaderIndex,
       snoozeLabelNow: `${nowMinute}:00.000Z`,
     });
@@ -606,6 +653,7 @@ function ThreadNavigationSidebarPane(
     threadListV2Enabled,
     threadListV2Layout,
   ]);
+  const hierarchyGuides = useMemo(() => buildSidebarHierarchy(listItems), [listItems]);
   const listMenuActions = useMemo<MenuAction[]>(
     () => [
       {
@@ -778,6 +826,7 @@ function ThreadNavigationSidebarPane(
   // favicon and fallback title it was first rendered with.
   const listExtraData = useMemo(
     () => ({
+      hierarchyGuides,
       selectedThreadKey: props.selectedThreadKey ?? "",
       projectByKey,
       projectCwdByKey,
@@ -788,6 +837,7 @@ function ThreadNavigationSidebarPane(
       threadSearchMatchByKey,
     }),
     [
+      hierarchyGuides,
       props.selectedThreadKey,
       projectByKey,
       projectCwdByKey,
@@ -902,6 +952,7 @@ function ThreadNavigationSidebarPane(
             );
           return (
             <ThreadListV2Row
+              nested
               thread={thread}
               variant={item.item.variant}
               snoozed={item.item.snoozed}
@@ -980,7 +1031,11 @@ function ThreadNavigationSidebarPane(
               count={item.count}
               disabled={!shelfPreferencesLoaded}
               expanded={item.expanded}
-              onToggle={toggleSettledShelf}
+              onToggle={
+                item.groupKey
+                  ? () => updateGroupDisplay(item.groupKey!, "toggle-collapsed")
+                  : toggleSettledShelf
+              }
               pane="sidebar"
             />
           );
@@ -990,7 +1045,7 @@ function ThreadNavigationSidebarPane(
               accessibilityRole="button"
               accessibilityLabel={`Show ${Math.min(item.hiddenCount, THREAD_LIST_V2_SETTLED_PAGE_COUNT)} more settled threads`}
               onPress={showMoreSettled}
-              className="mx-4 mt-2 items-center rounded-lg border border-dashed border-border py-2.5"
+              className="mx-4 mt-2 items-center rounded-full border border-border bg-card py-3"
               style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
             >
               <Text className="text-xs font-lecturn-medium text-foreground-muted">
@@ -1004,7 +1059,7 @@ function ThreadNavigationSidebarPane(
               variant="sidebar"
               collapsed={item.collapsed}
               isFirst={item.isFirst}
-              depth={item.depth}
+              depth={0}
               memberStatus={item.memberStatus}
               groupKey={item.group.key}
               onGroupAction={updateGroupDisplay}
@@ -1189,30 +1244,107 @@ function ThreadNavigationSidebarPane(
   // even while collapsed.
   const renderListItem = useCallback(
     (props: { readonly item: SidebarListItem }) => (
-      <View
-        style={{ paddingLeft: props.item.type === "header" ? 0 : (props.item.depth ?? 0) * 18 }}
-      >
-        {props.item.type !== "header"
-          ? Array.from({ length: props.item.depth ?? 0 }, (_, level) => (
-              <View
-                key={level}
-                pointerEvents="none"
-                accessible={false}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  bottom: 0,
-                  left: level * 18 + 8,
-                  width: 1,
-                  backgroundColor: "#b9893f",
-                }}
+      <View style={{ paddingLeft: (props.item.depth ?? 0) * 18 }}>
+        {hierarchyGuides.get(props.item.key)?.map(({ level, continues }) => (
+          <View
+            key={level}
+            pointerEvents="none"
+            accessible={false}
+            style={{
+              position: "absolute",
+              top: 0,
+              bottom: continues ? 0 : "50%",
+              left: level * 18 + 16,
+              width:
+                (props.item.type === "thread" || props.item.type === "v2-thread") &&
+                "settledBranch" in props.item &&
+                props.item.settledBranch &&
+                level === (props.item.depth ?? 0) - 1
+                  ? 2
+                  : 1,
+              backgroundColor:
+                (props.item.type === "thread" || props.item.type === "v2-thread") &&
+                "settledBranch" in props.item &&
+                props.item.settledBranch &&
+                level === (props.item.depth ?? 0) - 1
+                  ? light
+                    ? "#ad3c2f"
+                    : "#ff866f"
+                  : light
+                    ? "#82472c"
+                    : "#ffe1a0",
+              boxShadow: light
+                ? "0 0 3px #bc764233"
+                : (props.item.type === "thread" || props.item.type === "v2-thread") &&
+                    "settledBranch" in props.item &&
+                    props.item.settledBranch &&
+                    level === (props.item.depth ?? 0) - 1
+                  ? "0 0 6px 1px #e64d3d88"
+                  : "0 0 5px 1px #dca64e55",
+            }}
+          >
+            {light ? (
+              <LightHierarchySheen
+                copper={Boolean(
+                  (props.item.type === "thread" || props.item.type === "v2-thread") &&
+                  "settledBranch" in props.item &&
+                  props.item.settledBranch &&
+                  level === (props.item.depth ?? 0) - 1,
+                )}
               />
-            ))
-          : null}
+            ) : null}
+          </View>
+        ))}
+        {(props.item.depth ?? 0) > 0 ? (
+          <View
+            pointerEvents="none"
+            accessible={false}
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: ((props.item.depth ?? 0) - 1) * 18 + 16,
+              width: 12,
+              height:
+                (props.item.type === "thread" || props.item.type === "v2-thread") &&
+                "settledBranch" in props.item &&
+                props.item.settledBranch
+                  ? 2
+                  : 1,
+              backgroundColor:
+                (props.item.type === "thread" || props.item.type === "v2-thread") &&
+                "settledBranch" in props.item &&
+                props.item.settledBranch
+                  ? light
+                    ? "#ad3c2f"
+                    : "#ff866f"
+                  : light
+                    ? "#82472c"
+                    : "#ffe1a0",
+              boxShadow: light
+                ? "0 0 3px #bc764233"
+                : (props.item.type === "thread" || props.item.type === "v2-thread") &&
+                    "settledBranch" in props.item &&
+                    props.item.settledBranch
+                  ? "0 0 6px 1px #e64d3d88"
+                  : "0 0 5px 1px #dca64e55",
+            }}
+          >
+            {light ? (
+              <LightHierarchySheen
+                horizontal
+                copper={Boolean(
+                  (props.item.type === "thread" || props.item.type === "v2-thread") &&
+                  "settledBranch" in props.item &&
+                  props.item.settledBranch,
+                )}
+              />
+            ) : null}
+          </View>
+        ) : null}
         {renderListRow(props)}
       </View>
     ),
-    [renderListRow],
+    [hierarchyGuides, light, renderListRow],
   );
 
   const listEmpty = (
@@ -1269,9 +1401,10 @@ function ThreadNavigationSidebarPane(
           <SwipeableScrollGateProvider enabled={swipeEnabled}>
             <GestureDetector gesture={sidebarScrollGesture}>
               <LegendList
+                viewabilityConfig={THREAD_ACTIVITY_VIEWABILITY_CONFIG}
                 data={listItems}
                 drawDistance={500}
-                estimatedItemSize={64}
+                estimatedItemSize={80}
                 extraData={listExtraData}
                 getItemType={(item) => item.type}
                 itemsAreEqual={sidebarItemsAreEqual}
@@ -1315,9 +1448,10 @@ function ThreadNavigationSidebarPane(
         <SwipeableScrollGateProvider enabled={swipeEnabled}>
           <GestureDetector gesture={sidebarScrollGesture}>
             <LegendList
+              viewabilityConfig={THREAD_ACTIVITY_VIEWABILITY_CONFIG}
               data={listItems}
               drawDistance={500}
-              estimatedItemSize={64}
+              estimatedItemSize={80}
               extraData={listExtraData}
               getItemType={(item) => item.type}
               itemsAreEqual={sidebarItemsAreEqual}
@@ -1347,11 +1481,15 @@ function ThreadNavigationSidebarPane(
       </View>
 
       <View
-        className="absolute inset-x-0 top-0 z-[4] bg-drawer"
+        className="absolute inset-x-0 top-0 z-[4] border-border bg-drawer"
         collapsable={false}
         onLayout={handleStickyHeaderLayout}
         pointerEvents="auto"
-        style={{ paddingTop: insets.top }}
+        style={{
+          paddingTop: insets.top,
+          paddingBottom: 12,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+        }}
       >
         <View className="h-[50px] flex-row items-end gap-0.5 pr-2 pl-5">
           {/* Title slot doubles as the connection status surface: while an
@@ -1375,7 +1513,10 @@ function ThreadNavigationSidebarPane(
           </View>
         </View>
 
-        <View className="mx-4 mt-[9px] h-[38px] flex-row items-center gap-1.5 rounded-xl bg-sidebar-search pr-2.5 pl-[11px]">
+        <GlassCard
+          radius={22}
+          className="mx-4 mt-[9px] h-[42px] flex-row items-center gap-2 pr-3 pl-3"
+        >
           <SymbolView
             name="magnifyingglass"
             size={15}
@@ -1395,7 +1536,7 @@ function ThreadNavigationSidebarPane(
             className="h-[34px] flex-1 px-0 py-0 font-sans text-base text-foreground"
             value={props.searchQuery}
           />
-        </View>
+        </GlassCard>
       </View>
     </View>
   );

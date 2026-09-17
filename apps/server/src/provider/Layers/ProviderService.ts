@@ -42,6 +42,8 @@ import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import * as Stream from "effect/Stream";
 
+import { TeamPolicy, TeamPolicyLive } from "../../cloud/TeamPolicy.ts";
+import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import { StaveRuntimeFence } from "../../stave/StaveRuntimeFence.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
@@ -85,6 +87,7 @@ interface PendingCompaction {
  * reads the logger off the tag.
  */
 export interface ProviderServiceLiveOptions {
+  readonly checkTeamProvider?: TeamPolicy["Service"]["checkProvider"];
   readonly runtimeFence?: StaveRuntimeFence["Service"];
   readonly canonicalEventLogger?: EventNdjsonLogger;
   /**
@@ -234,6 +237,16 @@ const correlateRuntimeEventWithInstance = (
 const makeProviderService = Effect.fn("makeProviderService")(function* (
   options?: ProviderServiceLiveOptions,
 ) {
+  const checkTeamProvider = (provider: string) =>
+    (options?.checkTeamProvider?.(provider) ?? Effect.void).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ProviderValidationError({
+            operation: "ProviderService.teamPolicy",
+            issue: cause.message,
+          }),
+      ),
+    );
   const runtimeFence = options?.runtimeFence ?? (yield* StaveRuntimeFence);
   const analytics = yield* Effect.service(AnalyticsService.AnalyticsService);
   const serverConfig = yield* ServerConfig.ServerConfig;
@@ -548,6 +561,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         readPersistedCwd(input.binding.runtimePayload) ?? serverConfig.cwd,
         Effect.gen(function* () {
           const adapter = yield* registry.getByInstance(bindingInstanceId);
+          yield* checkTeamProvider(adapter.provider);
           const hasResumeCursor =
             input.binding.resumeCursor !== null && input.binding.resumeCursor !== undefined;
           const hasActiveSession = yield* adapter.hasSession(input.binding.threadId);
@@ -738,6 +752,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       return yield* Effect.gen(function* () {
         const instanceInfo = yield* registry.getInstanceInfo(resolvedInstanceId);
         const resolvedProvider = instanceInfo.driverKind;
+        yield* checkTeamProvider(resolvedProvider);
         metricProvider = resolvedProvider;
         if (parsed.provider !== undefined && parsed.provider !== resolvedProvider) {
           return yield* toValidationError(
@@ -958,6 +973,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         operation: "ProviderService.sendTurn",
         allowRecovery: false,
       });
+      yield* checkTeamProvider(routed.adapter.provider);
       if (
         input.continuation === true &&
         !input.input &&
@@ -1037,6 +1053,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         operation: "ProviderService.compactThread",
         allowRecovery: true,
       });
+      yield* checkTeamProvider(routed.adapter.provider);
       yield* Effect.annotateCurrentSpan({
         "provider.operation": "compact-thread",
         "provider.kind": routed.adapter.provider,
@@ -1203,6 +1220,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           operation: "ProviderService.respondToRequest",
           allowRecovery: true,
         });
+        yield* checkTeamProvider(routed.adapter.provider);
         metricProvider = routed.adapter.provider;
         yield* Effect.annotateCurrentSpan({
           "provider.operation": "respond-to-request",
@@ -1242,6 +1260,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         operation: "ProviderService.respondToUserInput",
         allowRecovery: true,
       });
+      yield* checkTeamProvider(routed.adapter.provider);
       metricProvider = routed.adapter.provider;
       yield* Effect.annotateCurrentSpan({
         "provider.operation": "respond-to-user-input",
@@ -1602,8 +1621,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
 export const ProviderServiceLive = Layer.effect(
   ProviderService.ProviderService,
-  makeProviderService(),
-);
+  Effect.gen(function* () {
+    const policy = yield* TeamPolicy;
+    return yield* makeProviderService({ checkTeamProvider: policy.checkProvider });
+  }),
+).pipe(Layer.provide(TeamPolicyLive.pipe(Layer.provide(ServerSecretStore.layer))));
 
 export function makeProviderServiceLive(options?: ProviderServiceLiveOptions) {
   return Layer.effect(ProviderService.ProviderService, makeProviderService(options));

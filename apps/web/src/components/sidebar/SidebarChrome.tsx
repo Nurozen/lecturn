@@ -86,7 +86,7 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
     <Link
       aria-label="Go to threads"
       className={cn(
-        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center gap-1 overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex",
+        "relative z-10 ml-[var(--workspace-titlebar-content-left)] mr-3 hidden h-7 w-fit min-w-0 shrink items-center gap-1 overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex",
         onBackdrop ? "text-white" : "text-foreground",
       )}
       to="/"
@@ -94,7 +94,7 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
       <LecturnWordmark aria-hidden className="size-6 shrink-0" />
       <span
         className={cn(
-          "truncate font-display text-lg tracking-tight",
+          "min-w-0 truncate font-display text-lg tracking-tight",
           onBackdrop ? "text-white/70" : "text-muted-foreground",
         )}
       >
