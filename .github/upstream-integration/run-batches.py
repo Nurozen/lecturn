@@ -75,6 +75,7 @@ REVIEW_GH_COMMANDS = ('gh api', 'gh run view', 'gh run list', 'gh pr view', 'gh 
 # the grok CLI) with read-only built-in tools only. It cannot run git, gh or shell commands, so the
 # controller writes the complete reviewed diff next to the manifest for it.
 GROK_TOOLS = 'read_file,list_dir,grep'
+GROK_ATTEMPTS = 3
 OUTSIDE_REVIEW_NOTE = '''
 
 Outside perspective from a different model family. You have only read_file, list_dir and grep on the worktree
@@ -406,24 +407,36 @@ class Runner:
         base = ['grok', '--cwd', str(repo), '--permission-mode', 'bypassPermissions', '--tools', GROK_TOOLS,
                 '--no-subagents', '--disable-web-search', '--output-format', 'json']
         analysis = None
-        for stale in ('retry.prompt.md', 'retry.events.log', 'analysis.md', 'structure.prompt.md', 'structure.events.log'):
+        for stale in folder.glob(f'{name}.retry*'):
+            stale.unlink()
+        for stale in ('analysis.md', 'structure.prompt.md', 'structure.events.log'):
             (folder / f'{name}.{stale}').unlink(missing_ok=True)
-        for attempt, (prompt_file, log_path) in enumerate((
-                (prompt_path, folder / f'{name}.events.log'),
-                (folder / f'{name}.retry.prompt.md', folder / f'{name}.retry.events.log'))):
-            if attempt:
-                prompt_file.write_text(prompt + GROK_NUDGE)
-            command([*base, '--max-turns', '300', '--prompt-file', str(prompt_file)], repo, log=log_path, lock_fd=self.lock_fd)
+        # Transient CLI/API failures (non-zero exit, e.g. an API stream error mid-review) are retried
+        # up to GROK_ATTEMPTS times; a turn-one answer gets exactly one nudged retry.
+        nudged, prompt_file = False, prompt_path
+        for attempt in range(GROK_ATTEMPTS):
+            log_path = folder / (f'{name}.events.log' if attempt == 0 else f'{name}.retry{attempt}.events.log')
+            result = command([*base, '--max-turns', '300', '--prompt-file', str(prompt_file)], repo,
+                             log=log_path, lock_fd=self.lock_fd, allow_failure=True)
+            if result.returncode:
+                continue
             analysis = grok_analysis(log_path)
             if analysis is not None:
                 break
-        require(analysis is not None, 'Grok answered without inspecting anything')
+            require(not nudged, 'Grok answered without inspecting anything')
+            nudged, prompt_file = True, folder / f'{name}.retry.prompt.md'
+            prompt_file.write_text(prompt + GROK_NUDGE)
+        require(analysis is not None, 'Grok answered without inspecting anything' if nudged else 'Grok run kept failing')
         (folder / f'{name}.analysis.md').write_text(analysis)
         structure_path = folder / f'{name}.structure.prompt.md'
         structure_path.write_text(GROK_STRUCTURE_PROMPT.format(schema=json.dumps(output_schema), analysis=analysis))
         structure_log = folder / f'{name}.structure.events.log'
-        command([*base, '--disallowed-tools', GROK_TOOLS, '--max-turns', '5', '--prompt-file', str(structure_path),
-                 '--json-schema', json.dumps(output_schema)], repo, log=structure_log, lock_fd=self.lock_fd)
+        for attempt in range(GROK_ATTEMPTS):
+            result = command([*base, '--disallowed-tools', GROK_TOOLS, '--max-turns', '5', '--prompt-file', str(structure_path),
+                              '--json-schema', json.dumps(output_schema)], repo, log=structure_log, lock_fd=self.lock_fd,
+                             allow_failure=(attempt < GROK_ATTEMPTS - 1))
+            if not result.returncode:
+                break
         value = grok_result(structure_log)
         # The formatting call must not re-judge: verdict and tree have to appear in the analysis's own
         # Verdict section, and findings is the analysis text itself.
