@@ -44,3 +44,6 @@ node_modules/
 
 # Transient summary written by upstream-integrate.yml, read into the PR body
 .upstream-integration-summary.md
+
+# Python bytecode from the upstream-integration controller tests
+__pycache__/
