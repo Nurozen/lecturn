@@ -578,6 +578,8 @@ Stage source deliberately. Return ready only if complete, exact git write-tree, 
 When ready, summary is the final PR description: lead with the concrete problem and result for a reviewer without this conversation.
 Omit round numbers, preserved-staging notes and handoff history. When blocked, summary must explain the actual blocking reason.
 Checks will be rerun by controller and independent reviewer judges their adequacy. Return at least one meaningful check.
+Always include one check running node_modules/.bin/vp fmt --check over every changed source file (the commit bypasses
+repo hooks, so an unformatted tree would only fail in hosted CI).
 Set ci_retry true only when CI failed for a verified transient infrastructure reason and the correct repair is no source changes.
 Explain the actual failed job/log evidence; do not use ci_retry to dismiss a source defect or cancelled run without investigation.
 '''
@@ -688,7 +690,9 @@ transient infrastructure failure that should be rerun. Otherwise return ci_retry
                 self.save(folder, m)
                 return
             require(staged_tree(repo, head, m['merge_parent']) == m['tree'], 'Tree changed after review')
-            git(repo, 'commit', '-m', f"fix: integrate upstream checkpoint {m['target'][:12]}")
+            # --no-verify: the reviewed tree is the artifact. Repo pre-commit hooks (formatters) would
+            # rewrite files after review; formatting is enforced by the builder's checks and CI instead.
+            git(repo, 'commit', '--no-verify', '-m', f"fix: integrate upstream checkpoint {m['target'][:12]}")
             head = git(repo, 'rev-parse', 'HEAD')
         # Recover a successful commit whose manifest write was interrupted.
         require(git(repo, 'show', '-s', '--format=%P', head).split() == parents, 'Unexpected commit parents')
