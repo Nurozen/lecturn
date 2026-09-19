@@ -82,6 +82,7 @@ import {
   OrchestrationSearchThreadsError,
   OrchestrationSearchThreadsInput,
   OrchestrationGetTurnDiffError,
+  OrchestrationPreviewCheckpointRevertError,
   OrchestrationGetTurnDiffInput,
   OrchestrationRpcSchemas,
   OrchestrationGetWorkflowScriptError,
@@ -1243,6 +1244,15 @@ export const WsOrchestrationGetTurnDiffRpc = Rpc.make(ORCHESTRATION_WS_METHODS.g
   error: Schema.Union([OrchestrationGetTurnDiffError, EnvironmentAuthorizationError]),
 });
 
+export const WsOrchestrationPreviewCheckpointRevertRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.previewCheckpointRevert,
+  {
+    payload: OrchestrationRpcSchemas.previewCheckpointRevert.input,
+    success: OrchestrationRpcSchemas.previewCheckpointRevert.output,
+    error: Schema.Union([OrchestrationPreviewCheckpointRevertError, EnvironmentAuthorizationError]),
+  },
+);
+
 export const WsOrchestrationGetFullThreadDiffRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.getFullThreadDiff,
   {
@@ -1528,6 +1538,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetWorkflowScriptRpc,
   WsOrchestrationGetTurnDiffRpc,
+  WsOrchestrationPreviewCheckpointRevertRpc,
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationSearchThreadsRpc,
   WsOrchestrationGetArchivedShellSnapshotRpc,

@@ -639,6 +639,9 @@ function formatOutgoingPrompt(params: {
   const promptEffort = resolvePromptInjectedEffort(caps, params.effort);
   return applyClaudePromptEffortPrefix(params.text, promptEffort);
 }
+/** Names enough at-risk files to be convincing without turning the dialog into a file listing. */
+const REVERT_DELETION_PREVIEW_LIMIT = 10;
+
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
 
@@ -1421,6 +1424,9 @@ function ChatViewContent(props: ChatViewProps) {
     reportFailure: false,
   });
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
+    reportFailure: false,
+  });
+  const previewCheckpointRevert = useAtomCommand(threadEnvironment.previewCheckpointRevert, {
     reportFailure: false,
   });
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
@@ -6142,10 +6148,35 @@ function ChatViewContent(props: ChatViewProps) {
         setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
         return;
       }
+      // Reverting runs `git clean`, which deletes untracked files the target
+      // checkpoint cannot restore. Those have no git object behind them, so
+      // the loss is permanent and has to be named before the user agrees to it.
+      const preview = await previewCheckpointRevert({
+        environmentId,
+        input: { threadId: activeThread.id, turnCount },
+      });
+      const removedPaths = preview._tag === "Success" ? (preview.value.removedPaths ?? []) : [];
+      const removedTruncated = preview._tag === "Success" && preview.value.truncated;
+      const deletionWarning =
+        removedPaths.length === 0
+          ? []
+          : [
+              "",
+              removedPaths.length === 1
+                ? "This will also permanently delete 1 untracked file:"
+                : `This will also permanently delete ${removedPaths.length} untracked files:`,
+              ...removedPaths.slice(0, REVERT_DELETION_PREVIEW_LIMIT).map((path) => `  ${path}`),
+              ...(removedPaths.length > REVERT_DELETION_PREVIEW_LIMIT || removedTruncated
+                ? ["  …and more"]
+                : []),
+            ];
+
       const confirmed = await localApi.dialogs.confirm(
         [
           `Revert this thread to checkpoint ${turnCount}?`,
           "This will discard newer messages and turn diffs in this thread.",
+          ...deletionWarning,
+          "",
           "This action cannot be undone.",
         ].join("\n"),
         { variant: "destructive" },
@@ -6177,6 +6208,7 @@ function ChatViewContent(props: ChatViewProps) {
       activeEnvironmentUnavailable,
       activeEnvironmentUnavailableLabel,
       environmentId,
+      previewCheckpointRevert,
       isConnecting,
       isRevertingCheckpoint,
       isSendBusy,

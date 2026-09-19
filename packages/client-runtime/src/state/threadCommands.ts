@@ -1,6 +1,6 @@
 import * as Crypto from "effect/Crypto";
 import { Atom } from "effect/unstable/reactivity";
-import { WS_METHODS } from "@lecturn/contracts";
+import { ORCHESTRATION_WS_METHODS, WS_METHODS } from "@lecturn/contracts";
 
 import {
   createAtomCommandScheduler,
@@ -218,6 +218,14 @@ export function createThreadEnvironmentAtoms<R, E>(
     uploadFeedback: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:commands:thread:upload-feedback",
       tag: WS_METHODS.providerUploadFeedback,
+      scheduler,
+      concurrency,
+    }),
+    // Read-only, and asked once per confirmation dialog rather than rendered,
+    // so it is an imperative command instead of a query atom.
+    previewCheckpointRevert: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:commands:thread:preview-checkpoint-revert",
+      tag: ORCHESTRATION_WS_METHODS.previewCheckpointRevert,
       scheduler,
       concurrency,
     }),

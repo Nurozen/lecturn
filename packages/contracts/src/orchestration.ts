@@ -29,6 +29,7 @@ export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
   getWorkflowScript: "orchestration.getWorkflowScript",
   getTurnDiff: "orchestration.getTurnDiff",
+  previewCheckpointRevert: "orchestration.previewCheckpointRevert",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreads: "orchestration.searchThreads",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
@@ -1928,6 +1929,34 @@ export type OrchestrationGetTurnDiffInput = typeof OrchestrationGetTurnDiffInput
 export const OrchestrationGetTurnDiffResult = ThreadTurnDiff;
 export type OrchestrationGetTurnDiffResult = typeof OrchestrationGetTurnDiffResult.Type;
 
+/**
+ * Upper bound on paths returned by a revert preview. The list only exists to
+ * warn a user, so a workspace with thousands of untracked files reports
+ * `truncated` instead of pushing an unbounded array over the socket.
+ */
+export const ORCHESTRATION_REVERT_PREVIEW_MAX_PATHS = 200;
+
+export const OrchestrationPreviewCheckpointRevertInput = Schema.Struct({
+  threadId: ThreadId,
+  turnCount: NonNegativeInt,
+});
+export type OrchestrationPreviewCheckpointRevertInput =
+  typeof OrchestrationPreviewCheckpointRevertInput.Type;
+
+/**
+ * Files a revert would delete without recreating them.
+ *
+ * These are untracked and not ignored, so Git holds no object for them and the
+ * deletion cannot be undone. `truncated` means the real set is larger than the
+ * returned list.
+ */
+export const OrchestrationPreviewCheckpointRevertResult = Schema.Struct({
+  removedPaths: Schema.Array(TrimmedNonEmptyString),
+  truncated: Schema.Boolean,
+});
+export type OrchestrationPreviewCheckpointRevertResult =
+  typeof OrchestrationPreviewCheckpointRevertResult.Type;
+
 export const OrchestrationGetFullThreadDiffInput = Schema.Struct({
   threadId: ThreadId,
   toTurnCount: NonNegativeInt,
@@ -2024,6 +2053,10 @@ export const OrchestrationRpcSchemas = {
     input: OrchestrationGetTurnDiffInput,
     output: OrchestrationGetTurnDiffResult,
   },
+  previewCheckpointRevert: {
+    input: OrchestrationPreviewCheckpointRevertInput,
+    output: OrchestrationPreviewCheckpointRevertResult,
+  },
   getFullThreadDiff: {
     input: OrchestrationGetFullThreadDiffInput,
     output: OrchestrationGetFullThreadDiffResult,
@@ -2065,6 +2098,14 @@ export class OrchestrationDispatchCommandError extends Schema.TaggedErrorClass<O
 
 export class OrchestrationGetTurnDiffError extends Schema.TaggedErrorClass<OrchestrationGetTurnDiffError>()(
   "OrchestrationGetTurnDiffError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
+export class OrchestrationPreviewCheckpointRevertError extends Schema.TaggedErrorClass<OrchestrationPreviewCheckpointRevertError>()(
+  "OrchestrationPreviewCheckpointRevertError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),
