@@ -2,11 +2,13 @@ import {
   CommandId,
   ProjectId,
   ProviderInstanceId,
+  MessageId,
   ThreadId,
   TurnId,
   type OrchestrationLatestTurn,
   type OrchestrationReadModel,
   type OrchestrationSession,
+  type OrchestrationThread,
 } from "@lecturn/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
@@ -15,6 +17,7 @@ import * as Effect from "effect/Effect";
 import { decideOrchestrationCommand } from "./decider.ts";
 
 const NOW = "2026-01-01T00:00:00.000Z";
+const EARLIER = "2025-12-31T23:00:00.000Z";
 const THREAD_ID = ThreadId.make("thread-1");
 
 function makeSession(status: OrchestrationSession["status"]): OrchestrationSession {
@@ -29,20 +32,36 @@ function makeSession(status: OrchestrationSession["status"]): OrchestrationSessi
   };
 }
 
-function makeLatestTurn(state: OrchestrationLatestTurn["state"]): OrchestrationLatestTurn {
+function makeLatestTurn(
+  state: OrchestrationLatestTurn["state"],
+  at: string = NOW,
+): OrchestrationLatestTurn {
   return {
     turnId: TurnId.make("turn-1"),
     state,
-    requestedAt: NOW,
-    startedAt: NOW,
-    completedAt: state === "completed" ? NOW : null,
+    requestedAt: at,
+    startedAt: at,
+    completedAt: state === "completed" ? at : null,
     assistantMessageId: null,
+  };
+}
+
+function makeUserMessage(createdAt: string): OrchestrationThread["messages"][number] {
+  return {
+    id: MessageId.make("message-queued"),
+    role: "user",
+    text: "Continue",
+    turnId: null,
+    streaming: false,
+    createdAt,
+    updatedAt: createdAt,
   };
 }
 
 function makeReadModel(input: {
   readonly session?: OrchestrationSession | null;
   readonly latestTurn?: OrchestrationLatestTurn | null;
+  readonly messages?: OrchestrationThread["messages"];
 }): OrchestrationReadModel {
   return {
     snapshotSequence: 0,
@@ -67,7 +86,7 @@ function makeReadModel(input: {
         snoozedAt: null,
         pinnedAt: null,
         deletedAt: null,
-        messages: [],
+        messages: input.messages ?? [],
         proposedPlans: [],
         activities: [],
         checkpoints: [],
@@ -140,6 +159,28 @@ it.layer(NodeServices.layer)("checkpoint revert decider", (it) => {
       const result = yield* decideOrchestrationCommand({
         command: revertCommand("cmd-revert-no-session"),
         readModel: makeReadModel({ session: null }),
+      });
+      const events = Array.isArray(result) ? result : [result];
+      expect(events[0]?.type).toBe("thread.checkpoint-revert-requested");
+    }),
+  );
+
+  it.effect("allows a revert when a user message is queued but no turn has started", () =>
+    Effect.gen(function* () {
+      // `threadHasQueuedTurnStart` would call this thread busy: the newest user
+      // message is recent and newer than every timestamp on the latest turn.
+      // That heuristic exists for settlement, where a false positive is free.
+      // As a revert gate it would reject a legitimate action on a guess, and
+      // nothing is writing to the worktree until a turn actually starts.
+      const result = yield* decideOrchestrationCommand({
+        command: revertCommand("cmd-revert-queued-message"),
+        readModel: makeReadModel({
+          session: makeSession("ready"),
+          // Turn finished an hour before the newest user message, which is the
+          // exact shape the queued-turn heuristic reads as "busy".
+          latestTurn: makeLatestTurn("completed", EARLIER),
+          messages: [makeUserMessage(NOW)],
+        }),
       });
       const events = Array.isArray(result) ? result : [result];
       expect(events[0]?.type).toBe("thread.checkpoint-revert-requested");
