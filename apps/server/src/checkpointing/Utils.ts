@@ -53,3 +53,28 @@ export function resolveThreadWorkspaceCwd(input: {
 
   return input.projects.find((project) => project.id === input.thread.projectId)?.workspaceRoot;
 }
+
+/**
+ * Resolve the checkpoint ref a revert to `turnCount` must restore.
+ *
+ * Turn 0 means "back to the thread's baseline", which predates every recorded
+ * turn checkpoint and so resolves through the baseline helper rather than a
+ * lookup. Returns undefined when the read model holds no ref for the turn.
+ *
+ * Shared so the revert reactor and the pre-revert preview always target the
+ * same commit; a preview of a different ref would warn about the wrong files.
+ */
+export function revertTargetCheckpointRef(input: {
+  readonly threadId: ThreadId;
+  readonly turnCount: number;
+  readonly checkpoints: ReadonlyArray<{
+    readonly checkpointTurnCount: number;
+    readonly checkpointRef: CheckpointRef;
+  }>;
+}): CheckpointRef | undefined {
+  if (input.turnCount === 0) {
+    return checkpointBaselineRefForThread(input.threadId, input.checkpoints);
+  }
+  return input.checkpoints.find((checkpoint) => checkpoint.checkpointTurnCount === input.turnCount)
+    ?.checkpointRef;
+}

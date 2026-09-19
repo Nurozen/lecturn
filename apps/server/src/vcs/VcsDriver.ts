@@ -46,6 +46,15 @@ export interface VcsAliasCheckpointRefsInput {
   }>;
 }
 
+/**
+ * Paths a checkpoint restore would delete, with `truncated` set when the
+ * underlying listing hit its output budget and the set is therefore partial.
+ */
+export interface VcsCheckpointRestoreDeletions {
+  readonly paths: ReadonlyArray<string>;
+  readonly truncated: boolean;
+}
+
 export interface VcsCheckpointOps {
   readonly captureCheckpoint: (input: VcsCaptureCheckpointInput) => Effect.Effect<void, VcsError>;
   readonly hasCheckpointRef: (
@@ -54,6 +63,14 @@ export interface VcsCheckpointOps {
   readonly restoreCheckpoint: (
     input: VcsRestoreCheckpointInput,
   ) => Effect.Effect<boolean, VcsError>;
+  /**
+   * Dry run of the destructive half of `restoreCheckpoint`. Lists working-tree
+   * files the restore would delete without recreating them, so a caller can
+   * warn before the data is gone.
+   */
+  readonly listRestoreDeletions: (
+    input: VcsRestoreCheckpointInput,
+  ) => Effect.Effect<VcsCheckpointRestoreDeletions, VcsError>;
   readonly diffCheckpoints: (input: VcsDiffCheckpointsInput) => Effect.Effect<string, VcsError>;
   readonly deleteCheckpointRefs: (
     input: VcsDeleteCheckpointRefsInput,

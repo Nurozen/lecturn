@@ -343,6 +343,9 @@ export class GitVcsDriver extends Context.Service<
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const GIT_CHECK_IGNORE_MAX_STDIN_BYTES = 256 * 1024;
 const CHECKPOINT_DIFF_MAX_OUTPUT_BYTES = 10_000_000;
+// Path listings only, so this is far below the diff budget. A repository large
+// enough to exceed it reports `truncated` rather than a silently short list.
+const CHECKPOINT_DELETION_PREVIEW_MAX_OUTPUT_BYTES = 2_000_000;
 const WORKSPACE_GIT_HARDENED_CONFIG_ARGS = [
   "-c",
   "core.fsmonitor=false",
@@ -795,6 +798,53 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       resolveCheckpointCommit(input.cwd, input.checkpointRef).pipe(
         Effect.map((commit) => commit !== null),
       ),
+
+    listRestoreDeletions: Effect.fn("GitVcsDriver.checkpoints.listRestoreDeletions")(
+      function* (input) {
+        const operation = "GitVcsDriver.checkpoints.listRestoreDeletions";
+
+        let commitOid = yield* resolveCheckpointCommit(input.cwd, input.checkpointRef);
+        if (!commitOid && input.fallbackToHead === true) {
+          commitOid = yield* resolveHeadCommit(input.cwd);
+        }
+        if (!commitOid) {
+          return { paths: [], truncated: false };
+        }
+
+        // `restoreCheckpoint` runs `git clean -fd` after restoring the target
+        // tree, so the files at risk are the untracked, non-ignored ones that the
+        // target commit does not bring back. `ls-files --others` enumerates them
+        // individually; `git status` would collapse a new directory into one
+        // entry and under-report the loss.
+        const untrackedResult = yield* execute({
+          operation,
+          cwd: input.cwd,
+          args: ["ls-files", "--others", "--exclude-standard", "-z"],
+          maxOutputBytes: CHECKPOINT_DELETION_PREVIEW_MAX_OUTPUT_BYTES,
+          appendTruncationMarker: false,
+        });
+        const untrackedPaths = splitNullSeparatedGitStdoutPaths(untrackedResult);
+        if (untrackedPaths.length === 0) {
+          return { paths: [], truncated: untrackedResult.stdoutTruncated };
+        }
+
+        const restoredResult = yield* execute({
+          operation,
+          cwd: input.cwd,
+          args: ["ls-tree", "-r", "--name-only", "-z", commitOid],
+          maxOutputBytes: CHECKPOINT_DELETION_PREVIEW_MAX_OUTPUT_BYTES,
+          appendTruncationMarker: false,
+        });
+        const restoredPaths = new Set(splitNullSeparatedGitStdoutPaths(restoredResult));
+
+        return {
+          paths: untrackedPaths.filter((path) => !restoredPaths.has(path)),
+          // A truncated restore listing can only make us claim a file survives
+          // when it would actually be deleted, so both listings feed the flag.
+          truncated: untrackedResult.stdoutTruncated || restoredResult.stdoutTruncated,
+        };
+      },
+    ),
 
     restoreCheckpoint: Effect.fn("GitVcsDriver.checkpoints.restoreCheckpoint")(function* (input) {
       const operation = "GitVcsDriver.checkpoints.restoreCheckpoint";

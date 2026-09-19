@@ -24,8 +24,8 @@ import { isTemporaryWorktreeBranch } from "@lecturn/shared/git";
 import { parseTurnDiffFilesFromUnifiedDiff } from "../../checkpointing/Diffs.ts";
 import {
   checkpointRefForThreadTurn,
-  checkpointBaselineRefForThread,
   resolveThreadWorkspaceCwd,
+  revertTargetCheckpointRef,
 } from "../../checkpointing/Utils.ts";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -800,12 +800,11 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const targetCheckpointRef =
-      event.payload.turnCount === 0
-        ? checkpointBaselineRefForThread(event.payload.threadId, thread.checkpoints)
-        : thread.checkpoints.find(
-            (checkpoint) => checkpoint.checkpointTurnCount === event.payload.turnCount,
-          )?.checkpointRef;
+    const targetCheckpointRef = revertTargetCheckpointRef({
+      threadId: event.payload.threadId,
+      turnCount: event.payload.turnCount,
+      checkpoints: thread.checkpoints,
+    });
 
     if (!targetCheckpointRef) {
       yield* appendRevertFailureActivity({

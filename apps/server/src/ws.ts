@@ -49,6 +49,8 @@ import {
   OrchestrationGetSnapshotError,
   OrchestrationSearchThreadsError,
   OrchestrationGetTurnDiffError,
+  OrchestrationPreviewCheckpointRevertError,
+  ORCHESTRATION_REVERT_PREVIEW_MAX_PATHS,
   ORCHESTRATION_WS_METHODS,
   type ProjectId,
   type ProjectEntriesFailure,
@@ -86,7 +88,7 @@ import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { copyClaimedAttachment } from "./attachmentStore.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
-import { resolveThreadWorkspaceCwd } from "./checkpointing/Utils.ts";
+import { resolveThreadWorkspaceCwd, revertTargetCheckpointRef } from "./checkpointing/Utils.ts";
 import * as ServerConfig from "./config.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
@@ -1833,6 +1835,77 @@ const makeWsRpcLayer = (
                   }),
               ),
             ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.previewCheckpointRevert]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.previewCheckpointRevert,
+            Effect.gen(function* () {
+              const previewError = (message: string, cause?: unknown) =>
+                new OrchestrationPreviewCheckpointRevertError({
+                  message,
+                  ...(cause !== undefined ? { cause } : {}),
+                });
+
+              const thread = Option.getOrUndefined(
+                yield* projectionSnapshotQuery
+                  .getThreadDetailById(input.threadId)
+                  .pipe(
+                    Effect.mapError((cause) => previewError("Failed to load the thread.", cause)),
+                  ),
+              );
+              if (thread === undefined) {
+                return yield* previewError("The thread no longer exists.");
+              }
+
+              const project = yield* projectionSnapshotQuery
+                .getProjectShellById(thread.projectId)
+                .pipe(
+                  Effect.mapError((cause) => previewError("Failed to load the project.", cause)),
+                );
+
+              const workspaceCwd = resolveThreadWorkspaceCwd({
+                thread,
+                projects: Option.match(project, {
+                  onNone: (): { readonly id: ProjectId; readonly workspaceRoot: string }[] => [],
+                  onSome: (shell) => [shell],
+                }),
+              });
+              const checkpointRef = revertTargetCheckpointRef({
+                threadId: input.threadId,
+                turnCount: input.turnCount,
+                checkpoints: thread.checkpoints,
+              });
+              // The preview is advisory. When the workspace or the target ref
+              // cannot be resolved the revert itself fails with a precise
+              // reason, so report nothing at risk rather than surfacing a
+              // second, less useful error in the confirmation dialog.
+              if (workspaceCwd === undefined || checkpointRef === undefined) {
+                return { removedPaths: [], truncated: false };
+              }
+
+              const deletions = yield* checkpointStore
+                .listRestoreDeletions({
+                  cwd: workspaceCwd,
+                  checkpointRef,
+                  fallbackToHead: input.turnCount === 0,
+                })
+                .pipe(
+                  Effect.mapError((cause) =>
+                    previewError(
+                      "Failed to inspect the workspace for files a revert would delete.",
+                      cause,
+                    ),
+                  ),
+                );
+
+              return {
+                removedPaths: deletions.paths.slice(0, ORCHESTRATION_REVERT_PREVIEW_MAX_PATHS),
+                truncated:
+                  deletions.truncated ||
+                  deletions.paths.length > ORCHESTRATION_REVERT_PREVIEW_MAX_PATHS,
+              };
+            }),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.getFullThreadDiff]: (input) =>

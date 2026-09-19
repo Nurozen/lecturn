@@ -19,7 +19,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import type { CheckpointStoreError } from "./Errors.ts";
-import type { VcsCheckpointOps } from "../vcs/VcsDriver.ts";
+import type { VcsCheckpointOps, VcsCheckpointRestoreDeletions } from "../vcs/VcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
 export interface CaptureCheckpointInput {
@@ -74,6 +74,16 @@ export class CheckpointStore extends Context.Service<
     readonly hasCheckpointRef: (
       input: Omit<RestoreCheckpointInput, "fallbackToHead">,
     ) => Effect.Effect<boolean, CheckpointStoreError>;
+
+    /**
+     * List working-tree files a restore would delete without recreating them.
+     *
+     * Read-only. Lets a caller warn about unrecoverable loss before running
+     * the restore, since these files have no object in the repository.
+     */
+    readonly listRestoreDeletions: (
+      input: RestoreCheckpointInput,
+    ) => Effect.Effect<VcsCheckpointRestoreDeletions, CheckpointStoreError>;
 
     /**
      * Restore workspace and staging state to a checkpoint.
@@ -151,6 +161,16 @@ export const make = Effect.gen(function* () {
     return yield* checkpoints.hasCheckpointRef(input);
   });
 
+  const listRestoreDeletions: CheckpointStore["Service"]["listRestoreDeletions"] = Effect.fn(
+    "listRestoreDeletions",
+  )(function* (input) {
+    const checkpoints = yield* resolveCheckpoints(
+      "CheckpointStore.listRestoreDeletions",
+      input.cwd,
+    );
+    return yield* checkpoints.listRestoreDeletions(input);
+  });
+
   const restoreCheckpoint: CheckpointStore["Service"]["restoreCheckpoint"] = Effect.fn(
     "restoreCheckpoint",
   )(function* (input) {
@@ -186,6 +206,7 @@ export const make = Effect.gen(function* () {
     isGitRepository,
     captureCheckpoint,
     hasCheckpointRef,
+    listRestoreDeletions,
     restoreCheckpoint,
     diffCheckpoints,
     deleteCheckpointRefs,

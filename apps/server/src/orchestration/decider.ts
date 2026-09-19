@@ -1204,11 +1204,28 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.checkpoint.revert": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      // The client disables the revert control while a turn is in flight, but a
+      // click can still race the reactor and a command can be dispatched
+      // directly. Restoring the worktree underneath an agent that is still
+      // writing to it corrupts the tree, so the invariant has to hold here too.
+      //
+      // Only unambiguous state counts. A queued-but-unstarted turn deliberately
+      // does not block: nothing is writing yet, and `threadHasQueuedTurnStart`
+      // is a time-windowed settlement heuristic, so using it as a safety gate
+      // would reject legitimate reverts on a guess.
+      const sessionComingAlive =
+        thread.session?.status === "starting" || thread.session?.status === "running";
+      if (sessionComingAlive || thread.latestTurn?.state === "running") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `thread ${command.threadId} has a turn in flight; interrupt it before reverting checkpoints`,
+        });
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
