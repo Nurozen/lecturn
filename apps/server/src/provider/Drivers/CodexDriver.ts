@@ -28,6 +28,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
@@ -53,6 +54,7 @@ import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import * as ModelManifest from "../ModelManifest.ts";
 import type { ProviderDriver, ProviderInstance } from "../ProviderDriver.ts";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
+import { makeCodexExternalSessionsLister } from "./CodexExternalSessions.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
@@ -244,6 +246,28 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
               ),
             );
 
+      // Every list spawns an app-server, and clients issue lists concurrently
+      // (several clients, or one per search term), so run one at a time.
+      const externalSessionsSemaphore = yield* Semaphore.make(1);
+      const listCodexExternalSessions = makeCodexExternalSessionsLister({
+        instanceId,
+        openClient: Effect.suspend(() =>
+          withCodexAppServerClient({
+            binaryPath: effectiveConfig.binaryPath,
+            homePath: effectiveConfig.homePath,
+            launchArgs: resolveCodexLaunchArgs(effectiveConfig.launchArgs, processEnv),
+            // Home-level request; any directory serves, same as the status probe.
+            cwd: process.cwd(),
+            environment: processEnv,
+          }),
+        ).pipe(
+          Effect.map(({ client }) => client),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        ),
+      });
+      const listExternalSessions: NonNullable<ProviderInstance["listExternalSessions"]> = (input) =>
+        externalSessionsSemaphore.withPermits(1)(listCodexExternalSessions(input));
+
       // Redemption spends something on the user's account. It serialises on
       // the account (instances sharing a Codex home share the credit), keeps
       // one idempotency key until Codex reports an outcome, and is bounded so
@@ -316,6 +340,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         snapshot,
         snapshotForCwd,
         consumeResetCredit,
+        listExternalSessions,
         adapter,
         textGeneration,
       } satisfies ProviderInstance;

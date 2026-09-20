@@ -111,6 +111,10 @@
       "types": "./src/state/entities.ts",
       "default": "./src/state/entities.ts"
     },
+    "./state/externalSessions": {
+      "types": "./src/state/externalSessions.ts",
+      "default": "./src/state/externalSessions.ts"
+    },
     "./state/filesystem": {
       "types": "./src/state/filesystem.ts",
       "default": "./src/state/filesystem.ts"

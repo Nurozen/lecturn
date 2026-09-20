@@ -22,6 +22,8 @@
  * @module provider/ProviderDriver
  */
 import type {
+  ExternalSessionsListError,
+  ExternalSessionSummary,
   ProviderConsumeResetCreditOutcome,
   ProviderDriverKind,
   ProviderInstanceEnvironment,
@@ -56,6 +58,36 @@ export interface ProviderDriverMetadata {
 }
 
 /**
+ * One session a provider's own tooling created outside Lecturn. The service
+ * layer stamps `providerInstanceId` / `driverKind` and caps the text fields,
+ * so listers only report what they read.
+ */
+export type ExternalSessionListing = Omit<
+  ExternalSessionSummary,
+  "providerInstanceId" | "driverKind"
+>;
+
+export interface ListExternalSessionsInput {
+  readonly cwd?: string | undefined;
+  readonly searchTerm?: string | undefined;
+  readonly limit: number;
+  /**
+   * Every resume cursor Lecturn has persisted, across all instances and
+   * providers, since instances can share a home. Opaque to the caller: the
+   * lister keeps the ones its own cursor schema parses, skips the rest, and
+   * hides the sessions they name.
+   */
+  readonly knownResumeCursors: ReadonlyArray<unknown>;
+}
+
+export interface ListExternalSessionsResult {
+  /** Newest first, at most `limit` entries. */
+  readonly sessions: ReadonlyArray<ExternalSessionListing>;
+  /** True when more matching sessions exist than were returned. */
+  readonly truncated: boolean;
+}
+
+/**
  * One materialized provider instance. Held by the registry, looked up by
  * `instanceId`, torn down by closing the scope it was created in.
  *
@@ -83,6 +115,16 @@ export interface ProviderInstance {
     ProviderConsumeResetCreditOutcome,
     ProviderDriverError
   >;
+  /**
+   * List sessions created outside Lecturn (provider CLI / desktop app) so they
+   * can be imported. Reads the instance's own session store, which is why it
+   * lives here rather than on the adapter. Absent means unsupported; a driver
+   * that sets it must also report `externalSessions: "supported"` in its
+   * presentation.
+   */
+  readonly listExternalSessions?: (
+    input: ListExternalSessionsInput,
+  ) => Effect.Effect<ListExternalSessionsResult, ExternalSessionsListError>;
   readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
   readonly textGeneration: TextGeneration.TextGeneration["Service"];
   readonly auth?: ProviderAuthController;
