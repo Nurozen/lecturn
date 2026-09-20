@@ -17,7 +17,11 @@ import { and, eq, sql } from "drizzle-orm";
 
 import { claimPushToken, displacedTokenRows } from "./PushTokenClaims.ts";
 import * as RelayDb from "../db.ts";
-import { relayLiveActivities, relayMobileDevices } from "../persistence/schema.ts";
+import {
+  type NotifiedPushEvent,
+  relayLiveActivities,
+  relayMobileDevices,
+} from "../persistence/schema.ts";
 
 export class LiveActivityRegistrationPersistenceError extends Schema.TaggedErrorClass<LiveActivityRegistrationPersistenceError>()(
   "LiveActivityRegistrationPersistenceError",
@@ -52,6 +56,7 @@ export class LiveActivityDeliveryMarkPersistenceError extends Schema.TaggedError
       "mark-start-queued",
       "clear-start-queued",
       "invalidate-delivery-token",
+      "mark-push-notified",
     ]),
     userId: Schema.String,
     deviceId: Schema.String,
@@ -77,6 +82,7 @@ export interface DeviceRow {
   readonly push_token: string | null;
   readonly push_to_start_token: string | null;
   readonly preferences_json: string;
+  readonly notified_push_events_json: string | null;
 }
 
 export interface LiveActivityRow {
@@ -106,6 +112,12 @@ export class LiveActivities extends Context.Service<
       readonly kind: RelayDeliveryKind;
       readonly aggregate: RelayAgentActivityAggregateState | null;
       readonly deliveredAt: string;
+    }) => Effect.Effect<void, LiveActivityDeliveryMarkPersistenceError>;
+    // Replaces the device's record of already-rung push-notification events.
+    readonly markPushNotified: (input: {
+      readonly userId: string;
+      readonly deviceId: string;
+      readonly events: ReadonlyArray<NotifiedPushEvent>;
     }) => Effect.Effect<void, LiveActivityDeliveryMarkPersistenceError>;
     readonly markStartQueued: (input: {
       readonly userId: string;
@@ -229,6 +241,7 @@ export const make = Effect.gen(function* () {
           push_token: relayMobileDevices.pushToken,
           push_to_start_token: relayMobileDevices.pushToStartToken,
           preferences_json: relayMobileDevices.preferencesJson,
+          notified_push_events_json: relayMobileDevices.notifiedPushEventsJson,
           activity_push_token: relayLiveActivities.activityPushToken,
           remote_start_queued_at: relayLiveActivities.remoteStartQueuedAt,
           remote_started_at: relayLiveActivities.remoteStartedAt,
@@ -252,6 +265,10 @@ export const make = Effect.gen(function* () {
               (row) =>
                 Effect.all({
                   preferences_json: encodeJsonValue(row.preferences_json),
+                  notified_push_events_json:
+                    row.notified_push_events_json === null
+                      ? Effect.succeed(null)
+                      : encodeJsonValue(row.notified_push_events_json),
                   last_aggregate_json:
                     row.last_aggregate_json === null
                       ? Effect.succeed(null)
@@ -350,6 +367,33 @@ export const make = Effect.gen(function* () {
             }),
         ),
       );
+    }),
+
+    markPushNotified: Effect.fn("relay.live_activities.mark_push_notified")(function* (input) {
+      yield* Effect.annotateCurrentSpan({
+        "relay.mobile.device_id": input.deviceId,
+      });
+      yield* db
+        .update(relayMobileDevices)
+        .set({ notifiedPushEventsJson: input.events })
+        .where(
+          and(
+            eq(relayMobileDevices.userId, input.userId),
+            eq(relayMobileDevices.deviceId, input.deviceId),
+          ),
+        )
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new LiveActivityDeliveryMarkPersistenceError({
+                operation: "mark-push-notified",
+                userId: input.userId,
+                deviceId: input.deviceId,
+                kind: "push_notification",
+                cause,
+              }),
+          ),
+        );
     }),
 
     markStartQueued: Effect.fn("relay.live_activities.mark_start_queued")(function* (input) {

@@ -19,6 +19,15 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 
+// Identity of one push-notification event: a thread in a given phase + status.
+// Deliberately timestamp-free so heartbeat republishes map to the same event.
+export interface NotifiedPushEvent {
+  readonly environmentId: string;
+  readonly threadId: string;
+  readonly phase: string;
+  readonly status: string;
+}
+
 export const relayMobileDevices = pgTable(
   "relay_mobile_devices",
   {
@@ -35,6 +44,11 @@ export const relayMobileDevices = pgTable(
     pushToken: text("push_token"),
     pushToStartToken: text("push_to_start_token"),
     preferencesJson: jsonb("preferences_json").notNull().$type<RelayAgentAwarenessPreferences>(),
+    // Push-notification events already rung on this device, so republishes of
+    // an unchanged state stay silent. Null until the first push is queued.
+    notifiedPushEventsJson: jsonb("notified_push_events_json").$type<
+      ReadonlyArray<NotifiedPushEvent>
+    >(),
     createdAt: varchar("created_at", { length: 64 }).notNull(),
     updatedAt: varchar("updated_at", { length: 64 }).notNull(),
   },
