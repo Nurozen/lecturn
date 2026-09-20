@@ -27,6 +27,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -61,6 +62,7 @@ import {
 } from "../../provider/Services/ProviderService.ts";
 import { checkpointRefForThreadTurn } from "../../checkpointing/Utils.ts";
 import { ProviderValidationError } from "../../provider/Errors.ts";
+import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
 import { ServerConfig } from "../../config.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
 import * as WorkspacePaths from "../../workspace/WorkspacePaths.ts";
@@ -90,8 +92,8 @@ function createProviderServiceHarness(
 ) {
   const now = "2026-01-01T00:00:00.000Z";
   const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
-  const rollbackConversation = vi.fn(
-    (_input: { readonly threadId: ThreadId; readonly numTurns: number }) => Effect.void,
+  const rollbackConversation = vi.fn<ProviderServiceShape["rollbackConversation"]>(
+    () => Effect.void,
   );
   const assertConversationRollbackSupported = vi.fn<
     ProviderServiceShape["assertConversationRollbackSupported"]
@@ -302,6 +304,7 @@ describe("CheckpointReactor", () => {
     readonly secondThreadArchived?: boolean;
     readonly localStatusRefName?: string | null;
     readonly providerSessionCwd?: string;
+    readonly persistedSessionCwd?: boolean;
     readonly providerName?: ProviderDriverKind;
     readonly gitStatusRefreshCalls?: Array<string>;
     readonly pullRequestRefreshCalls?: Array<string>;
@@ -368,6 +371,21 @@ describe("CheckpointReactor", () => {
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(RuntimeReceiptBusLive),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
+      Layer.provideMerge(
+        Layer.mock(ProviderSessionDirectory)({
+          getBinding: (threadId) =>
+            Effect.succeed(
+              options?.persistedSessionCwd
+                ? Option.some({
+                    threadId,
+                    provider: options?.providerName ?? ProviderDriverKind.make("codex"),
+                    providerInstanceId: ProviderInstanceId.make("codex"),
+                    runtimePayload: { cwd },
+                  })
+                : Option.none(),
+            ),
+        }),
+      ),
       Layer.provideMerge(Layer.mock(PullRequestService)({ refreshAfterTurn })),
       Layer.provideMerge(vcsStatusBroadcasterLayer),
       Layer.provideMerge(CheckpointStore.layer.pipe(Layer.provide(VcsDriverRegistry.layer))),
@@ -424,7 +442,8 @@ describe("CheckpointReactor", () => {
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           runtimeMode: "approval-required",
           branch: options?.threadBranch ?? null,
-          worktreePath: options?.threadWorktreePath ?? cwd,
+          worktreePath:
+            options?.threadWorktreePath !== undefined ? options.threadWorktreePath : cwd,
           createdAt,
         })
         .pipe(
@@ -444,7 +463,8 @@ describe("CheckpointReactor", () => {
                     interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
                     runtimeMode: "approval-required",
                     branch: null,
-                    worktreePath: options?.threadWorktreePath ?? cwd,
+                    worktreePath:
+                      options?.threadWorktreePath !== undefined ? options.threadWorktreePath : cwd,
                     createdAt,
                   })
                   .pipe(
@@ -1244,6 +1264,181 @@ describe("CheckpointReactor", () => {
       expect(harness.provider.rollbackConversation).not.toHaveBeenCalled();
       expect(NodeFS.readFileSync(NodePath.join(harness.cwd, "README.md"), "utf8")).toBe("v3\n");
       expect(gitRefExists(harness.cwd, checkpointRefForThreadTurn(threadId, 2))).toBe(true);
+    }),
+  );
+
+  effectIt.effect.each(["provider rejection", "missing checkpoint", "baseline fallback"] as const)(
+    "preserves revert ordering for %s",
+    (scenario) =>
+      Effect.gen(function* () {
+        const harness = yield* Effect.promise(() => createHarness());
+        const threadId = ThreadId.make("thread-1");
+        const createdAt = "2026-01-01T00:00:00.000Z";
+        const checked = yield* Deferred.make<void>();
+        harness.provider.assertConversationRollbackSupported.mockImplementation(() =>
+          Deferred.succeed(checked, undefined).pipe(Effect.asVoid),
+        );
+        if (scenario === "provider rejection") {
+          harness.provider.rollbackConversation.mockImplementation(() =>
+            Effect.fail(
+              new ProviderValidationError({
+                operation: "ProviderService.rollbackConversation",
+                issue: "Provider rejected rollback.",
+              }),
+            ),
+          );
+        }
+        for (const turnCount of [1, 2]) {
+          yield* harness.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.make(`cmd-ordering-message-${turnCount}`),
+            threadId,
+            message: {
+              messageId: MessageId.make(`message-ordering-${turnCount}`),
+              role: "user",
+              text: `Keep message ${turnCount}`,
+              attachments: [],
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "approval-required",
+            createdAt,
+          });
+          yield* harness.engine.dispatch({
+            type: "thread.turn.diff.complete",
+            commandId: CommandId.make(`cmd-ordering-diff-${turnCount}`),
+            threadId,
+            turnId: asTurnId(`turn-ordering-${turnCount}`),
+            completedAt: createdAt,
+            checkpointRef: checkpointRefForThreadTurn(threadId, turnCount),
+            status: "ready",
+            files: [],
+            checkpointTurnCount: turnCount,
+            createdAt,
+          });
+        }
+        yield* Effect.promise(() => harness.drain());
+        const before = (yield* Effect.promise(() => harness.readModel())).threads.find(
+          (thread) => thread.id === threadId,
+        );
+        const turnCount = scenario === "baseline fallback" ? 0 : 1;
+        if (scenario !== "provider rejection") {
+          runGit(harness.cwd, [
+            "update-ref",
+            "-d",
+            checkpointRefForThreadTurn(threadId, turnCount),
+          ]);
+        }
+        yield* harness.engine.dispatch({
+          type: "thread.checkpoint.revert",
+          commandId: CommandId.make("cmd-ordering-revert"),
+          threadId,
+          turnCount,
+          createdAt,
+        });
+        yield* Deferred.await(checked);
+        yield* Effect.promise(() => harness.drain());
+        const after = (yield* Effect.promise(() => harness.readModel())).threads.find(
+          (thread) => thread.id === threadId,
+        );
+
+        if (scenario === "baseline fallback") {
+          expect(harness.provider.rollbackConversation).toHaveBeenCalledWith({
+            threadId,
+            numTurns: 2,
+          });
+          expect(after?.checkpoints).toHaveLength(0);
+          expect(after?.messages).toHaveLength(0);
+          expect(NodeFS.readFileSync(NodePath.join(harness.cwd, "README.md"), "utf8")).toBe("v1\n");
+          return;
+        }
+        expect(after?.checkpoints).toEqual(before?.checkpoints);
+        expect(after?.messages).toEqual(before?.messages);
+        expect(after?.latestTurn).toEqual(before?.latestTurn);
+        expect(after?.activities).toContainEqual(
+          expect.objectContaining({
+            kind: "checkpoint.revert.failed",
+            payload: expect.objectContaining({
+              detail: expect.stringContaining(
+                scenario === "provider rejection"
+                  ? "Provider rejected rollback"
+                  : "Filesystem checkpoint is unavailable",
+              ),
+            }),
+          }),
+        );
+        expect(harness.provider.rollbackConversation).toHaveBeenCalledTimes(
+          scenario === "provider rejection" ? 1 : 0,
+        );
+        expect(NodeFS.readFileSync(NodePath.join(harness.cwd, "README.md"), "utf8")).toBe("v3\n");
+        expect(gitRefExists(harness.cwd, checkpointRefForThreadTurn(threadId, 2))).toBe(true);
+      }),
+  );
+
+  effectIt.effect.each([
+    "persisted workspace",
+    "worktree",
+    "project",
+    "empty session cwd",
+  ] as const)("reverts without a live workspace using the %s", (scenario) =>
+    Effect.gen(function* () {
+      const otherCwd = createGitRepository();
+      tempDirs.push(otherCwd);
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          hasSession: scenario === "empty session cwd",
+          ...(scenario === "empty session cwd" ? { providerSessionCwd: "" } : {}),
+          persistedSessionCwd:
+            scenario === "persisted workspace" || scenario === "empty session cwd",
+          ...(scenario === "project"
+            ? { threadWorktreePath: null }
+            : { projectWorkspaceRoot: otherCwd }),
+          ...(scenario === "persisted workspace" || scenario === "empty session cwd"
+            ? { threadWorktreePath: otherCwd }
+            : {}),
+        }),
+      );
+      const threadId = ThreadId.make("thread-1");
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      for (const count of [1, 2]) {
+        yield* harness.engine.dispatch({
+          type: "thread.turn.diff.complete",
+          commandId: CommandId.make(`cmd-inactive-diff-${count}`),
+          threadId,
+          turnId: asTurnId(`turn-${count}`),
+          completedAt: createdAt,
+          checkpointRef: checkpointRefForThreadTurn(threadId, count),
+          status: "ready",
+          files: [],
+          checkpointTurnCount: count,
+          createdAt,
+        });
+      }
+      // Repeated reverts must work even while listSessions remains empty.
+      for (const turnCount of [1, 0]) {
+        yield* harness.engine.dispatch({
+          type: "thread.checkpoint.revert",
+          commandId: CommandId.make(`cmd-inactive-revert-${turnCount}`),
+          threadId,
+          turnCount,
+          createdAt,
+        });
+        yield* Effect.promise(() => harness.drain());
+        const thread = (yield* Effect.promise(() => harness.readModel())).threads.find(
+          (entry) => entry.id === threadId,
+        );
+        expect(thread?.checkpoints).toHaveLength(turnCount);
+        expect(
+          thread?.activities.some((activity) => activity.kind === "checkpoint.revert.failed"),
+        ).toBe(false);
+        expect(NodeFS.readFileSync(NodePath.join(harness.cwd, "README.md"), "utf8")).toBe(
+          turnCount === 1 ? "v2\n" : "v1\n",
+        );
+      }
+      expect(harness.provider.rollbackConversation.mock.calls.map(([input]) => input)).toEqual([
+        { threadId, numTurns: 1 },
+        { threadId, numTurns: 1 },
+      ]);
+      expect(NodeFS.readFileSync(NodePath.join(otherCwd, "README.md"), "utf8")).toBe("v1\n");
     }),
   );
 

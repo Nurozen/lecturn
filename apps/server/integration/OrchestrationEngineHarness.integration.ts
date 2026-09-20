@@ -356,6 +356,7 @@ export const makeOrchestrationIntegrationHarness = (
     );
     const checkpointReactorLayer = CheckpointReactorLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),
+      Layer.provideMerge(providerSessionDirectoryLayer),
       Layer.provideMerge(
         Layer.mock(PullRequestService.PullRequestService)({
           refreshAfterTurn: Effect.void,

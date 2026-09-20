@@ -1691,6 +1691,41 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
+  it.effect("persists a replacement conversation cursor before rollback returns", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+      const threadId = asThreadId("thread-revert-replacement");
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+      const resumeCursor = { threadId: "replacement-codex-thread" };
+      routing.codex.rollbackThread.mockImplementationOnce((id) =>
+        Effect.sync(() => {
+          routing.codex.updateSession(id, (session) => ({ ...session, resumeCursor }));
+          return { threadId: id, turns: [] as const };
+        }),
+      );
+
+      yield* provider.rollbackConversation({ threadId, numTurns: 1 });
+
+      const binding = yield* directory.getBinding(threadId);
+      assert.isTrue(Option.isSome(binding));
+      if (Option.isSome(binding)) {
+        assert.deepEqual(binding.value.resumeCursor, resumeCursor);
+        assert.equal(binding.value.providerInstanceId, codexInstanceId);
+      }
+      yield* routing.codex.stopSession(threadId);
+      routing.codex.startSession.mockClear();
+      yield* provider.sendTurn({ threadId, input: "Continue after reverting" });
+      assert.deepEqual(routing.codex.startSession.mock.calls[0]?.[0].resumeCursor, resumeCursor);
+    }),
+  );
+
   it.effect("preserves the persisted binding when stopping a session", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;
