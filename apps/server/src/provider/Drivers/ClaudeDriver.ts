@@ -58,6 +58,7 @@ import {
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
 } from "../providerUpdateSettings.ts";
+import { makeClaudeExternalSessionImporter } from "./ClaudeExternalSessionImport.ts";
 import {
   claudeExternalSessionsConfigDir,
   makeClaudeExternalSessionsLister,
@@ -270,6 +271,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
           ? {}
           : {
               listExternalSessions: makeClaudeExternalSessionsLister({
+                instanceId,
+                configDir: externalSessionsConfigDir,
+              }),
+              importExternalSession: makeClaudeExternalSessionImporter({
                 instanceId,
                 configDir: externalSessionsConfigDir,
               }),

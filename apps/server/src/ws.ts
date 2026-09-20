@@ -36,6 +36,7 @@ import {
   type DiscoveredLocalServerList,
   EventId,
   type EditorId,
+  type ExternalSessionImportFailure,
   type FileManagerRevealKind,
   type OrchestrationClientOrigin,
   type OrchestrationCommand,
@@ -108,6 +109,10 @@ import {
   resolveForkSessionSource,
   type ThreadForkAssemblyFailure,
 } from "./orchestration/threadFork.ts";
+import {
+  buildImportedThreadHistory,
+  type MaterializedThreadImportCommand,
+} from "./orchestration/threadImport.ts";
 import { OrchestrationCommandReceiptRepository } from "./persistence/Services/OrchestrationCommandReceipts.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -120,7 +125,7 @@ import {
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import * as ProviderService from "./provider/Services/ProviderService.ts";
 import * as ProviderSessionDirectory from "./provider/Services/ProviderSessionDirectory.ts";
-import { listExternalSessions } from "./provider/externalSessions.ts";
+import { importExternalSession, listExternalSessions } from "./provider/externalSessions.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
 import { ProviderInstanceRegistry } from "./provider/Services/ProviderInstanceRegistry.ts";
@@ -178,6 +183,24 @@ const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchComma
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
+
+/** Client-facing message for each way an import request can fail to materialize. */
+function describeThreadImportFailure(reason: ExternalSessionImportFailure): string {
+  switch (reason) {
+    case "forking-disabled":
+      return "Thread forking is disabled on this server, and importing a session forks it.";
+    case "provider-unsupported":
+      return "This provider cannot import sessions created outside Lecturn.";
+    case "provider-unavailable":
+      return "The provider to import from is unavailable on this server.";
+    case "session-not-found":
+      return "The session to import no longer exists.";
+    case "unreadable":
+      return "The session to import could not be read.";
+    case "empty-session":
+      return "The session holds no messages to import.";
+  }
+}
 
 /** Client-facing message for each way a fork request can fail to assemble. */
 function describeThreadForkAssemblyFailure(failure: ThreadForkAssemblyFailure): string {
@@ -1236,6 +1259,42 @@ const makeWsRpcLayer = (
           );
         });
 
+      // Fork and import materializers run side effects before dispatch, so a
+      // client retry has to stop at the engine's command receipt, the recorded
+      // outcome of the first attempt: Some(sequence) when it was accepted, a
+      // failure when it was rejected, None when the command is new.
+      const recordedThreadCommandOutcome = Effect.fnUntraced(function* (command: {
+        readonly type: "thread.fork" | "thread.import";
+        readonly commandId: CommandId;
+        readonly threadId: ThreadId;
+      }) {
+        const receipt = Option.getOrUndefined(
+          yield* commandReceipts
+            .getByCommandId({ commandId: command.commandId })
+            .pipe(
+              Effect.mapError((cause) =>
+                toDispatchCommandError(
+                  cause,
+                  `Failed to read the ${command.type} command's receipt.`,
+                ),
+              ),
+            ),
+        );
+        if (
+          receipt === undefined ||
+          receipt.aggregateKind !== "thread" ||
+          receipt.aggregateId !== command.threadId
+        ) {
+          return Option.none<{ readonly sequence: number }>();
+        }
+        if (receipt.status === "accepted") {
+          return Option.some({ sequence: receipt.resultSequence });
+        }
+        return yield* new OrchestrationDispatchCommandError({
+          message: receipt.error ?? "Previously rejected.",
+        });
+      });
+
       // Server-side materialization of a client fork request: read the source
       // thread, assemble the inherited history (pure, in threadFork.ts), run
       // the compensable side effects (checkpoint ref aliases, attachment file
@@ -1269,29 +1328,10 @@ const makeWsRpcLayer = (
             toDispatchCommandError(cause, "Failed to read the source thread for the fork.");
 
           // A client retry of an already-handled fork must not replay side
-          // effects (ref aliasing, attachment copies) or re-record analytics:
-          // the engine's command receipt is the recorded outcome, so return
-          // it verbatim before touching anything.
-          const priorReceipt = Option.getOrUndefined(
-            yield* commandReceipts
-              .getByCommandId({ commandId: command.commandId })
-              .pipe(
-                Effect.mapError((cause) =>
-                  toDispatchCommandError(cause, "Failed to read the fork command's receipt."),
-                ),
-              ),
-          );
-          if (
-            priorReceipt !== undefined &&
-            priorReceipt.aggregateKind === "thread" &&
-            priorReceipt.aggregateId === command.threadId
-          ) {
-            if (priorReceipt.status === "accepted") {
-              return { sequence: priorReceipt.resultSequence };
-            }
-            return yield* new OrchestrationDispatchCommandError({
-              message: priorReceipt.error ?? "Previously rejected.",
-            });
+          // effects (ref aliasing, attachment copies) or re-record analytics.
+          const recorded = yield* recordedThreadCommandOutcome(command);
+          if (Option.isSome(recorded)) {
+            return recorded.value;
           }
 
           // The side effects below write into the child's checkpoint-ref
@@ -1570,6 +1610,166 @@ const makeWsRpcLayer = (
           );
       };
 
+      // Server-side materialization of a client import request: natively fork
+      // the external session, turn its transcript into thread history (pure,
+      // in threadImport.ts) and dispatch the materialized command. The fork is
+      // the only side effect and cannot be undone here, so every check that
+      // can reject the command runs before it.
+      const dispatchThreadImport = (
+        importCommand: Extract<ClientOrchestrationCommand, { type: "thread.import" }>,
+      ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> => {
+        const importFailure = (reason: ExternalSessionImportFailure, cause?: unknown) =>
+          new OrchestrationDispatchCommandError({
+            message: describeThreadImportFailure(reason),
+            threadImportFailure: reason,
+            ...(cause !== undefined ? { cause } : {}),
+          });
+        const importProgram = Effect.gen(function* () {
+          const importStartedAtMs = yield* Clock.currentTimeMillis;
+          // An import runs on a native fork, so the fork kill-switch covers it.
+          if (!config.threadForkingEnabled) {
+            return yield* importFailure("forking-disabled");
+          }
+          // Server time, as the normalizer stamps on the normal dispatch path.
+          const command = { ...importCommand, createdAt: yield* nowIso };
+
+          const readError = (cause: unknown) =>
+            toDispatchCommandError(cause, "Failed to read the project for the import.");
+
+          // A client retry of an already-handled import must not fork the
+          // external session a second time.
+          const recorded = yield* recordedThreadCommandOutcome(command);
+          if (Option.isSome(recorded)) {
+            return recorded.value;
+          }
+
+          const project = Option.getOrUndefined(
+            yield* projectionSnapshotQuery
+              .getProjectShellById(command.projectId)
+              .pipe(Effect.mapError(readError)),
+          );
+          if (project === undefined) {
+            return yield* new OrchestrationDispatchCommandError({
+              message: "The project to import the session into no longer exists.",
+            });
+          }
+          const existingThread = yield* projectionSnapshotQuery
+            .getThreadShellById(command.threadId)
+            .pipe(Effect.mapError(readError));
+          if (Option.isSome(existingThread)) {
+            return yield* new OrchestrationDispatchCommandError({
+              message: "A thread with the import's id already exists.",
+            });
+          }
+          // The fork's cursor only resumes on the instance that cut it.
+          if (command.modelSelection.instanceId !== command.providerInstanceId) {
+            return yield* new OrchestrationDispatchCommandError({
+              message: "An imported session must run on the provider it was imported from.",
+            });
+          }
+          // Imports skip the normalizer, so the thread-creation worktree rule
+          // is enforced here.
+          yield* staveAdmission
+            .check({
+              projectRoot: project.workspaceRoot,
+              projectId: project.id,
+              intent: "thread.create",
+              worktreePath: command.worktreePath,
+            })
+            .pipe(
+              Effect.mapError(
+                (error) =>
+                  new OrchestrationDispatchCommandError({ message: error.message, cause: error }),
+              ),
+            );
+
+          const imported = yield* importExternalSession({
+            providerInstanceId: command.providerInstanceId,
+            sessionId: command.sessionId,
+            cwd: command.worktreePath ?? project.workspaceRoot,
+            title: command.title,
+          }).pipe(
+            Effect.provideService(ProviderInstanceRegistry, providerInstances),
+            Effect.mapError((error) => importFailure(error.reason, error)),
+          );
+          if (!imported.transcript.some((entry) => entry.kind === "message")) {
+            return yield* importFailure("empty-session");
+          }
+
+          const { history, historyTruncated } = buildImportedThreadHistory({
+            transcript: imported.transcript,
+            createdAt: command.createdAt,
+            mintUuid: () => NodeCrypto.randomUUID(),
+          });
+          const materialized: MaterializedThreadImportCommand = {
+            type: "thread.import",
+            threadId: command.threadId,
+            createdAt: command.createdAt,
+            thread: {
+              projectId: command.projectId,
+              title: imported.threadTitle,
+              modelSelection: command.modelSelection,
+              runtimeMode: command.runtimeMode,
+              interactionMode: command.interactionMode,
+              branch: command.branch,
+              worktreePath: command.worktreePath,
+            },
+            importedFrom: {
+              providerInstanceId: command.providerInstanceId,
+              driverKind: imported.driverKind,
+              sessionId: command.sessionId,
+              cwd: imported.cwd,
+              title: imported.title,
+              importedAt: command.createdAt,
+              historyTruncated,
+            },
+            importSource: {
+              providerInstanceId: command.providerInstanceId,
+              resumeCursor: imported.resumeCursor,
+            },
+            history,
+          };
+
+          // The client's commandId identifies the import, so a retried
+          // request deduplicates through the engine's command receipts.
+          const dispatched = yield* dispatchFromClient({
+            ...materialized,
+            commandId: command.commandId,
+          }).pipe(
+            Effect.mapError((cause) =>
+              toDispatchCommandError(cause, "Failed to dispatch orchestration command"),
+            ),
+          );
+          // Same deletion-cleanup fence as thread.create: the thread may reuse
+          // a previously deleted thread id.
+          yield* threadDeletionReactor.drainThrough(dispatched.sequence);
+
+          yield* analytics.record("client.thread.imported", {
+            ...clientAnalyticsProps,
+            provider: command.providerInstanceId,
+            historyTruncated,
+          });
+          const durationMs = (yield* Clock.currentTimeMillis) - importStartedAtMs;
+          yield* Effect.logInfo("thread import dispatched", {
+            threadId: command.threadId,
+            providerInstanceId: command.providerInstanceId,
+            durationMs,
+            messageCount: history.messages.length,
+            activityCount: history.activities.length,
+            historyTruncated,
+          });
+          return dispatched;
+        });
+
+        return startup
+          .enqueueCommand(importProgram)
+          .pipe(
+            Effect.mapError((cause) =>
+              toDispatchCommandError(cause, "Failed to dispatch orchestration command"),
+            ),
+          );
+      };
+
       const dispatchNormalizedCommand = (
         normalizedCommand: OrchestrationCommand,
       ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> => {
@@ -1734,11 +1934,14 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,
             Effect.gen(function* () {
-              // Fork requests are materialized server-side from the source
-              // thread's projections, so they branch off before normalization
-              // (the normalizer rejects raw thread.fork on every transport).
+              // Fork and import requests are materialized server-side, so they
+              // branch off before normalization (the normalizer rejects the
+              // raw client shapes on every transport).
               if (command.type === "thread.fork") {
                 return yield* dispatchThreadFork(command);
+              }
+              if (command.type === "thread.import") {
+                return yield* dispatchThreadImport(command);
               }
               const normalizedCommand = yield* normalizeDispatchCommand(command);
               // Archive removes the thread from the client, so this transport
@@ -2793,6 +2996,10 @@ const makeWsRpcLayer = (
               Effect.provideService(
                 ProviderSessionDirectory.ProviderSessionDirectory,
                 providerSessionDirectory,
+              ),
+              Effect.provideService(
+                ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+                projectionSnapshotQuery,
               ),
             ),
             { "rpc.aggregate": "provider" },

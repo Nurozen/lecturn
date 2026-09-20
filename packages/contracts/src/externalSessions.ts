@@ -79,3 +79,33 @@ export class ExternalSessionsListError extends Schema.TaggedErrorClass<ExternalS
     return `Failed to list external sessions for provider '${this.providerInstanceId}'${cwd} (${this.reason}).`;
   }
 }
+
+export const ExternalSessionImportFailure = Schema.Literals([
+  // Thread forking is switched off on this server; imports run on a fork.
+  "forking-disabled",
+  // The provider cannot import sessions created outside Lecturn.
+  "provider-unsupported",
+  // The instance is unknown to this server, or disabled.
+  "provider-unavailable",
+  // The provider's session store no longer holds the session.
+  "session-not-found",
+  // The session exists but could not be read or forked.
+  "unreadable",
+  // The session holds no messages to import.
+  "empty-session",
+]);
+export type ExternalSessionImportFailure = typeof ExternalSessionImportFailure.Type;
+
+export class ExternalSessionImportError extends Schema.TaggedErrorClass<ExternalSessionImportError>()(
+  "ExternalSessionImportError",
+  {
+    providerInstanceId: ProviderInstanceId,
+    sessionId: TrimmedNonEmptyString,
+    reason: ExternalSessionImportFailure,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return `Failed to import external session '${this.sessionId}' from provider '${this.providerInstanceId}' (${this.reason}).`;
+  }
+}

@@ -25,6 +25,7 @@ import type {
   ProjectId,
   ThreadForkOrigin,
   ThreadForkProviderSource,
+  ThreadImportSource,
   ThreadId,
 } from "@lecturn/contracts";
 import * as Context from "effect/Context";
@@ -290,6 +291,26 @@ export interface ProjectionSnapshotQueryShape {
   readonly getThreadForkContextById: (
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<ProjectionThreadForkContext>, ProjectionRepositoryError>;
+
+  /**
+   * Read the provider session an imported, non-deleted thread runs on: the
+   * native fork cut at import time, whose cursor the thread's first send
+   * resumes. None for threads that were not imported. Server-only: the cursor
+   * never reaches shells or details.
+   */
+  readonly getThreadImportSourceById: (
+    threadId: ThreadId,
+  ) => Effect.Effect<Option.Option<ThreadImportSource>, ProjectionRepositoryError>;
+
+  /**
+   * Read the import source of every non-deleted imported thread, so the
+   * external session list can hide import forks that were never sent to and
+   * therefore have no provider binding yet.
+   */
+  readonly listThreadImportSources: () => Effect.Effect<
+    ReadonlyArray<ThreadImportSource>,
+    ProjectionRepositoryError
+  >;
 
   /**
    * Read the ids of all non-deleted threads (archived included) whose

@@ -12,7 +12,7 @@ import type {
   ThreadId,
   TurnId,
 } from "@lecturn/contracts";
-import { EventId, MessageId } from "@lecturn/contracts";
+import { EventId, isImportedHistoryRow, MessageId } from "@lecturn/contracts";
 import { UUID_NAMESPACE_DNS, uuidV5 } from "@lecturn/shared/uuid";
 
 import { deriveCopiedAttachmentId } from "../attachmentStore.ts";
@@ -436,6 +436,14 @@ export function assembleThreadFork(input: AssembleThreadForkInput): AssembleThre
     null,
   );
 
+  // The child's copy of imported rows stays imported history only while the
+  // child carries the origin whose importedAt bounds them.
+  const importedFrom =
+    source.importedFrom != null &&
+    [...messages, ...activities].some((row) => isImportedHistoryRow(source, row))
+      ? source.importedFrom
+      : null;
+
   const command: MaterializedThreadForkCommand = {
     type: "thread.fork",
     threadId: input.childThreadId,
@@ -458,6 +466,7 @@ export function assembleThreadFork(input: AssembleThreadForkInput): AssembleThre
       messageId: input.sourceMessageId,
     },
     forkSource,
+    ...(importedFrom === null ? {} : { importedFrom }),
     history: { messages, activities, proposedPlans, turns },
   };
 
