@@ -129,6 +129,7 @@ import {
   pendingServiceUpdateExists,
   reconcileDesiredCloudLink,
   releaseManagedTunnelOnShutdown,
+  syncManagedEndpointOrigin,
 } from "./cloud/http.ts";
 import { serverRelayBrokerTracingLayer } from "./cloud/relayTracing.ts";
 import { shouldRetryCloudLink } from "./cloud/relayResponse.ts";
@@ -852,10 +853,41 @@ export const makeServerLayer = Layer.unwrap(
             if (!cleanupBeforeActivation) {
               yield* Effect.addFinalizer(() => releaseManagedTunnel);
             }
-            if (!(yield* CloudCliState.readCliDesiredCloudLink)) return;
             const server = yield* HttpServer.HttpServer;
             const address = server.address;
             if (typeof address === "string" || !("port" in address)) return;
+            const retryTransientFailures = {
+              while: shouldRetryCloudLink,
+              schedule: Schedule.exponential("1 second").pipe(
+                Schedule.modifyDelay(({ duration }) =>
+                  Effect.succeed(Duration.min(duration, Duration.seconds(30))),
+                ),
+                Schedule.upTo({ duration: "10 minutes" }),
+              ),
+            };
+            if (!(yield* CloudCliState.readCliDesiredCloudLink)) {
+              // A link installed from a web/mobile client is never re-provisioned
+              // at boot, so its tunnel still targets the port recorded at link
+              // time. Repoint it at the port this launch actually bound. The
+              // CLI reconcile below already links with the current origin.
+              yield* syncManagedEndpointOrigin(`http://127.0.0.1:${address.port}`).pipe(
+                Effect.retry(retryTransientFailures),
+                Effect.tap((updated) =>
+                  updated
+                    ? Effect.logInfo("Lecturn Connect managed tunnel origin synced on startup", {
+                        port: address.port,
+                      })
+                    : Effect.void,
+                ),
+                Effect.catch((cause) =>
+                  Effect.logWarning(
+                    "Failed to sync the Lecturn Connect managed tunnel origin on startup",
+                    { message: cause.message },
+                  ),
+                ),
+              );
+              return;
+            }
             // No settling delay before the first attempt: routes are already
             // serving by the time activation opens this gate (the startup
             // sequence awaits routesReady), and the retry schedule below
@@ -863,15 +895,7 @@ export const makeServerLayer = Layer.unwrap(
             // millisecond here is dead time on the path to remote
             // reachability after a restart.
             yield* reconcileDesiredCloudLink(`http://127.0.0.1:${address.port}`).pipe(
-              Effect.retry({
-                while: shouldRetryCloudLink,
-                schedule: Schedule.exponential("1 second").pipe(
-                  Schedule.modifyDelay(({ duration }) =>
-                    Effect.succeed(Duration.min(duration, Duration.seconds(30))),
-                  ),
-                  Schedule.upTo({ duration: "10 minutes" }),
-                ),
-              }),
+              Effect.retry(retryTransientFailures),
               Effect.tap(() =>
                 Effect.logInfo("Lecturn Connect desired link reconciled on startup"),
               ),

@@ -607,6 +607,8 @@ const RelayAgentActivityPublishErrors = [
   RelayInternalError,
 ] as const;
 
+const RelayManagedEndpointOriginSyncErrors = [RelayAuthInvalidError, RelayInternalError] as const;
+
 export class RelayClientPrincipal extends Context.Service<
   RelayClientPrincipal,
   {
@@ -911,6 +913,21 @@ export const RelayPublishResponse = Schema.Struct({
 });
 export type RelayPublishResponse = typeof RelayPublishResponse.Type;
 
+export const RelayManagedEndpointOriginSyncRequest = Schema.Struct({
+  origin: RelayManagedEndpointOrigin,
+});
+export type RelayManagedEndpointOriginSyncRequest =
+  typeof RelayManagedEndpointOriginSyncRequest.Type;
+
+// `updatedTunnels` is 0 when the environment has no provisioned managed tunnel
+// (publish-only links, or a tunnel released on shutdown).
+export const RelayManagedEndpointOriginSyncResponse = Schema.Struct({
+  ok: Schema.Boolean,
+  updatedTunnels: Schema.Int,
+});
+export type RelayManagedEndpointOriginSyncResponse =
+  typeof RelayManagedEndpointOriginSyncResponse.Type;
+
 export const RelayHealthResponse = Schema.Struct({
   ok: Schema.Boolean,
   service: Schema.Literal("relay"),
@@ -1118,8 +1135,24 @@ export const RelayServerGroup = HttpApiGroup.make("server")
         error: RelayAgentActivityPublishErrors,
       },
     ).annotate(OpenApi.Summary, "Publish agent activity"),
+    // A managed tunnel forwards to the loopback origin captured at link time.
+    // Environments call this at boot so a changed local port does not strand
+    // the tunnel on a dead origin until someone relinks.
+    HttpApiEndpoint.put(
+      "syncManagedEndpointOrigin",
+      "/v1/environments/:environmentId/managed-endpoint-origin",
+      {
+        params: Schema.Struct({ environmentId: EnvironmentId }),
+        payload: RelayManagedEndpointOriginSyncRequest,
+        success: RelayManagedEndpointOriginSyncResponse,
+        error: RelayManagedEndpointOriginSyncErrors,
+      },
+    ).annotate(OpenApi.Summary, "Sync the managed endpoint's local origin"),
   )
-  .annotate(OpenApi.Description, "Environment-authenticated activity publication.")
+  .annotate(
+    OpenApi.Description,
+    "Environment-authenticated activity publication and endpoint upkeep.",
+  )
   .middleware(RelayEnvironmentAuth);
 
 export const RelayApi = HttpApi.make("RelayApi")
