@@ -150,6 +150,7 @@ function testLayer(input?: {
           prepareDeprovision: () => Effect.succeed(null),
           deprovision: input?.deprovision ?? (() => Effect.void),
           release: () => Effect.succeed(true),
+          syncOrigin: () => Effect.succeed(false),
           provision: () =>
             Effect.succeed({
               endpoint: {

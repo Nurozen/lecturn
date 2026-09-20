@@ -28,6 +28,8 @@ import {
   RelayEnvironmentLinkProofPayload,
   RelayLinkProofRequest,
   RelayManagedEndpointOrigin,
+  type RelayManagedEndpointOriginSyncRequest,
+  RelayManagedEndpointOriginSyncResponse,
   RelayOkResponse,
 } from "@lecturn/contracts/relay";
 import { withRelayClientTracing } from "@lecturn/shared/relayTracing";
@@ -749,6 +751,58 @@ export const releaseManagedTunnelOnShutdown = Effect.fn(
   }
   return true;
 });
+
+// A managed tunnel forwards to the loopback origin the relay recorded at link
+// time, but the local port can change between launches (the desktop app scans
+// for a free one). Call this once the server is listening so the tunnel follows
+// the port. Authenticated by the stored environment credential, so it also
+// covers links installed from a web/mobile client, which have no CLI token.
+// Resolves to whether the relay repointed a tunnel.
+export const syncManagedEndpointOrigin = Effect.fn("environment.cloud.syncManagedEndpointOrigin")(
+  function* (localOrigin: string) {
+    const dependencies = yield* cloudHttpDependencies;
+    // The link belongs to the relay it was installed against, so target the
+    // persisted URL rather than the currently configured one.
+    const [runtimeConfig, relayUrl, environmentCredential] = yield* Effect.all([
+      dependencies.secrets.get(CLOUD_ENDPOINT_RUNTIME_CONFIG),
+      dependencies.secrets.get(RELAY_URL_SECRET),
+      dependencies.secrets.get(RELAY_ENVIRONMENT_CREDENTIAL_SECRET),
+    ]);
+    if (
+      Option.isNone(runtimeConfig) ||
+      Option.isNone(relayUrl) ||
+      Option.isNone(environmentCredential)
+    ) {
+      return false;
+    }
+    const localUrl = new URL(localOrigin);
+    const environmentId = yield* dependencies.environment.getEnvironmentId;
+    const response = yield* HttpClientRequest.put(
+      `${bytesToString(relayUrl.value)}/v1/environments/${encodeURIComponent(environmentId)}/managed-endpoint-origin`,
+    ).pipe(
+      HttpClientRequest.bearerToken(bytesToString(environmentCredential.value)),
+      HttpClientRequest.bodyJson({
+        origin: {
+          localHttpHost: localUrl.hostname,
+          localHttpPort: endpointRequestPort(localUrl),
+        },
+      } satisfies RelayManagedEndpointOriginSyncRequest),
+      Effect.flatMap(dependencies.httpClient.execute),
+      withRelayClientTracing,
+    );
+    // A relay that predates this endpoint answers 404. Retrying cannot help,
+    // and the link keeps working as long as the port did not move.
+    if (response.status === 404) {
+      yield* Effect.logDebug("Lecturn Connect relay does not support managed endpoint origin sync");
+      return false;
+    }
+    const result = yield* filterRelayResponse(response).pipe(
+      Effect.flatMap(HttpClientResponse.schemaBodyJson(RelayManagedEndpointOriginSyncResponse)),
+    );
+    return result.updatedTunnels > 0;
+  },
+  Effect.mapError(relayRequestError),
+);
 
 const readCloudLinkState = Effect.fn("environment.cloud.readLinkState")(function* (
   dependencies: CloudHttpDependencies,

@@ -26,6 +26,7 @@ import {
   relayNotFoundRoute,
   relayDpopFailureReason,
   revokeEnvironmentLinkRecord,
+  syncManagedEndpointOriginRecord,
   traceRelayHttpRequestWith,
   unlinkEnvironmentRecord,
   verifyRelayClientBearerToken,
@@ -191,6 +192,8 @@ function relayUnlinkTestLayer(input?: {
   readonly revokeCredential?: EnvironmentCredentials.EnvironmentCredentials["Service"]["revokeForEnvironmentPublicKey"];
   readonly prepareDeprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["prepareDeprovision"];
   readonly deprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["deprovision"];
+  readonly listUsersForEnvironment?: EnvironmentLinks.EnvironmentLinks["Service"]["listUsersForEnvironment"];
+  readonly syncOrigin?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["syncOrigin"];
 }) {
   return Layer.mergeAll(
     Layer.succeed(
@@ -203,7 +206,8 @@ function relayUnlinkTestLayer(input?: {
       EnvironmentLinks.EnvironmentLinks,
       EnvironmentLinks.EnvironmentLinks.of({
         upsert: () => Effect.die("unused upsert"),
-        listUsersForEnvironment: () => Effect.die("unused listUsersForEnvironment"),
+        listUsersForEnvironment:
+          input?.listUsersForEnvironment ?? (() => Effect.die("unused listUsersForEnvironment")),
         listDeliveryUsersForEnvironment: () => Effect.die("unused listDeliveryUsersForEnvironment"),
         listPublicKeysForEnvironment: () => Effect.die("unused listPublicKeysForEnvironment"),
         listForUser: () => Effect.die("unused listForUser"),
@@ -226,6 +230,7 @@ function relayUnlinkTestLayer(input?: {
         prepareDeprovision: input?.prepareDeprovision ?? (() => Effect.succeed(null)),
         deprovision: input?.deprovision ?? (() => Effect.void),
         release: () => Effect.die("unused release"),
+        syncOrigin: input?.syncOrigin ?? (() => Effect.die("unused syncOrigin")),
       }),
     ),
   );
@@ -414,6 +419,56 @@ describe("relay environment unlink", () => {
           deprovision: () =>
             Effect.sync(() => {
               calls.push("deprovision");
+            }),
+        }),
+      ),
+    );
+  });
+});
+
+describe("relay managed endpoint origin sync", () => {
+  it.effect("syncs every owner linked with the environment key, including silenced ones", () => {
+    const lookups: Array<unknown> = [];
+    const synced: Array<unknown> = [];
+    return Effect.gen(function* () {
+      expect(
+        yield* syncManagedEndpointOriginRecord({
+          environmentId: "environment-1",
+          environmentPublicKey: "public-key",
+          origin: { localHttpHost: "127.0.0.1", localHttpPort: 3774 },
+        }),
+      ).toEqual({ ok: true, updatedTunnels: 1 });
+      expect(lookups).toEqual([
+        {
+          environmentId: "environment-1",
+          environmentPublicKey: "public-key",
+          includeAllLinkedUsers: true,
+        },
+      ]);
+      expect(synced).toEqual([
+        {
+          userId: "user-with-tunnel",
+          environmentId: "environment-1",
+          origin: { localHttpHost: "127.0.0.1", localHttpPort: 3774 },
+        },
+        {
+          userId: "user-publish-only",
+          environmentId: "environment-1",
+          origin: { localHttpHost: "127.0.0.1", localHttpPort: 3774 },
+        },
+      ]);
+    }).pipe(
+      Effect.provide(
+        relayUnlinkTestLayer({
+          listUsersForEnvironment: (input) =>
+            Effect.sync(() => {
+              lookups.push(input);
+              return ["user-with-tunnel", "user-publish-only"];
+            }),
+          syncOrigin: (input) =>
+            Effect.sync(() => {
+              synced.push(input);
+              return input.userId === "user-with-tunnel";
             }),
         }),
       ),

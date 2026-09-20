@@ -6,6 +6,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
+import * as Schema from "effect/Schema";
 import * as Tracer from "effect/Tracer";
 import {
   HttpClient,
@@ -29,8 +30,15 @@ import {
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import { CLOUD_CLI_DESIRED_LINK_SECRET } from "./CliState.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
-import type { RelayLinkProofRequest } from "@lecturn/contracts/relay";
-import { CLOUD_ENDPOINT_RUNTIME_CONFIG, RELAY_URL_SECRET } from "./config.ts";
+import {
+  RelayManagedEndpointOriginSyncRequest,
+  type RelayLinkProofRequest,
+} from "@lecturn/contracts/relay";
+import {
+  CLOUD_ENDPOINT_RUNTIME_CONFIG,
+  RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
+  RELAY_URL_SECRET,
+} from "./config.ts";
 import {
   consumeCloudReplayGuards,
   isSupportedLinkProviderKind,
@@ -38,8 +46,10 @@ import {
   pendingServiceUpdateExists,
   reconcileDesiredCloudLink,
   releaseManagedTunnelOnShutdown,
+  syncManagedEndpointOrigin,
 } from "./http.ts";
 import * as ManagedEndpointRuntime from "./ManagedEndpointRuntime.ts";
+import { shouldRetryCloudLink } from "./relayResponse.ts";
 import { traceAuthenticatedRelayRequest, traceRelayRequest } from "./traceRelayRequest.ts";
 
 const storeFailure = (tag: "AlreadyExists" | "PermissionDenied") =>
@@ -234,40 +244,100 @@ describe("reconcileDesiredCloudLink", () => {
   );
 });
 
-describe("releaseManagedTunnelOnShutdown", () => {
-  const cliToken: CliTokenManager.PersistedToken = {
-    accessToken: "cli-access-token",
-    refreshToken: "cli-refresh-token",
-    expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+const cliToken: CliTokenManager.PersistedToken = {
+  accessToken: "cli-access-token",
+  refreshToken: "cli-refresh-token",
+  expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+};
+
+function makeMemorySecretStore(initial: Iterable<readonly [string, string]> = []) {
+  const values = new Map<string, Uint8Array>(
+    Array.from(initial, ([name, value]) => [name, new TextEncoder().encode(value)] as const),
+  );
+  const store: ServerSecretStore.ServerSecretStore["Service"] = {
+    get: (name) => Effect.sync(() => Option.fromNullishOr(values.get(name))),
+    set: (name, value) =>
+      Effect.sync(() => {
+        values.set(name, value);
+      }),
+    create: unusedSecretStoreOperation,
+    getOrCreateRandom: unusedSecretStoreOperation,
+    remove: (name) =>
+      Effect.sync(() => {
+        values.delete(name);
+      }),
   };
+  return { store, values };
+}
 
-  function makeMemorySecretStore(initial: Iterable<readonly [string, string]> = []) {
-    const values = new Map<string, Uint8Array>(
-      Array.from(initial, ([name, value]) => [name, new TextEncoder().encode(value)] as const),
+interface ReleaseHarness {
+  readonly store: ServerSecretStore.ServerSecretStore["Service"];
+  readonly applyConfigCalls: Array<unknown>;
+  readonly requests: Array<HttpClientRequest.HttpClientRequest>;
+  readonly respond?: () => Response;
+}
+
+const provideReleaseHarness =
+  (harness: ReleaseHarness) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(
+      Effect.provideService(ServerSecretStore.ServerSecretStore, harness.store),
+      Effect.provideService(
+        ServerEnvironment.ServerEnvironment,
+        ServerEnvironment.ServerEnvironment.of({
+          getEnvironmentId: Effect.succeed(EnvironmentId.make("env_123")),
+          getDescriptor: Effect.die("unused"),
+        }),
+      ),
+      Effect.provideService(
+        ManagedEndpointRuntime.CloudManagedEndpointRuntime,
+        ManagedEndpointRuntime.CloudManagedEndpointRuntime.of({
+          applyConfig: (config) =>
+            Effect.sync(() => {
+              harness.applyConfigCalls.push(config);
+              return {
+                status: "disabled",
+              } satisfies ManagedEndpointRuntime.CloudManagedEndpointRuntimeStatus;
+            }),
+        }),
+      ),
+      Effect.provideService(
+        EnvironmentAuth.EnvironmentAuth,
+        EnvironmentAuth.EnvironmentAuth.of({} as EnvironmentAuth.EnvironmentAuth["Service"]),
+      ),
+      Effect.provideService(
+        CliTokenManager.CloudCliTokenManager,
+        CliTokenManager.CloudCliTokenManager.of({
+          get: unusedSecretStoreOperation(),
+          getExisting: Effect.succeed(Option.some(cliToken)),
+          hasCredential: unusedSecretStoreOperation(),
+          store: () => unusedSecretStoreOperation(),
+          clear: unusedSecretStoreOperation(),
+        }),
+      ),
+      Effect.provideService(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Effect.sync(() => {
+            harness.requests.push(request);
+            return HttpClientResponse.fromWeb(
+              request,
+              (harness.respond ?? (() => Response.json({ ok: true })))(),
+            );
+          }),
+        ),
+      ),
+      // The release consults the launcher state file under the configured
+      // baseDir, so every harness run gets a scoped temp baseDir.
+      Effect.provide(
+        ServerConfigModule.layerTest("/", { prefix: "lecturn-http-release-test-" }).pipe(
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
+      Effect.scoped,
     );
-    const store: ServerSecretStore.ServerSecretStore["Service"] = {
-      get: (name) => Effect.sync(() => Option.fromNullishOr(values.get(name))),
-      set: (name, value) =>
-        Effect.sync(() => {
-          values.set(name, value);
-        }),
-      create: unusedSecretStoreOperation,
-      getOrCreateRandom: unusedSecretStoreOperation,
-      remove: (name) =>
-        Effect.sync(() => {
-          values.delete(name);
-        }),
-    };
-    return { store, values };
-  }
 
-  interface ReleaseHarness {
-    readonly store: ServerSecretStore.ServerSecretStore["Service"];
-    readonly applyConfigCalls: Array<unknown>;
-    readonly requests: Array<HttpClientRequest.HttpClientRequest>;
-    readonly respond?: () => Response;
-  }
-
+describe("releaseManagedTunnelOnShutdown", () => {
   // Writes the launcher's durable state file into this test's baseDir with
   // the launcher's own writer; the release reads it to detect an in-flight
   // update handoff.
@@ -284,66 +354,6 @@ describe("releaseManagedTunnelOnShutdown", () => {
         }),
       );
     });
-
-  const provideReleaseHarness =
-    (harness: ReleaseHarness) =>
-    <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-      effect.pipe(
-        Effect.provideService(ServerSecretStore.ServerSecretStore, harness.store),
-        Effect.provideService(
-          ServerEnvironment.ServerEnvironment,
-          ServerEnvironment.ServerEnvironment.of({
-            getEnvironmentId: Effect.succeed(EnvironmentId.make("env_123")),
-            getDescriptor: Effect.die("unused"),
-          }),
-        ),
-        Effect.provideService(
-          ManagedEndpointRuntime.CloudManagedEndpointRuntime,
-          ManagedEndpointRuntime.CloudManagedEndpointRuntime.of({
-            applyConfig: (config) =>
-              Effect.sync(() => {
-                harness.applyConfigCalls.push(config);
-                return {
-                  status: "disabled",
-                } satisfies ManagedEndpointRuntime.CloudManagedEndpointRuntimeStatus;
-              }),
-          }),
-        ),
-        Effect.provideService(
-          EnvironmentAuth.EnvironmentAuth,
-          EnvironmentAuth.EnvironmentAuth.of({} as EnvironmentAuth.EnvironmentAuth["Service"]),
-        ),
-        Effect.provideService(
-          CliTokenManager.CloudCliTokenManager,
-          CliTokenManager.CloudCliTokenManager.of({
-            get: unusedSecretStoreOperation(),
-            getExisting: Effect.succeed(Option.some(cliToken)),
-            hasCredential: unusedSecretStoreOperation(),
-            store: () => unusedSecretStoreOperation(),
-            clear: unusedSecretStoreOperation(),
-          }),
-        ),
-        Effect.provideService(
-          HttpClient.HttpClient,
-          HttpClient.make((request) =>
-            Effect.sync(() => {
-              harness.requests.push(request);
-              return HttpClientResponse.fromWeb(
-                request,
-                (harness.respond ?? (() => Response.json({ ok: true })))(),
-              );
-            }),
-          ),
-        ),
-        // The release consults the launcher state file under the configured
-        // baseDir, so every harness run gets a scoped temp baseDir.
-        Effect.provide(
-          ServerConfigModule.layerTest("/", { prefix: "lecturn-http-release-test-" }).pipe(
-            Layer.provideMerge(NodeServices.layer),
-          ),
-        ),
-        Effect.scoped,
-      );
 
   // The persisted state of a CLI-managed link whose tunnel is releasable.
   const managedLinkSecrets = [
@@ -576,6 +586,127 @@ describe("releaseManagedTunnelOnShutdown", () => {
         applyConfigCalls,
         requests,
         respond: () => Response.json({ ok: false }, { status: 503 }),
+      }),
+    );
+  });
+});
+
+const decodeOriginSyncRequestJson = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(RelayManagedEndpointOriginSyncRequest),
+);
+
+describe("syncManagedEndpointOrigin", () => {
+  // A managed link installed from a web/mobile client: no CLI-desired flag.
+  const clientInstalledLinkSecrets = [
+    [CLOUD_ENDPOINT_RUNTIME_CONFIG, "runtime-config"],
+    [RELAY_URL_SECRET, "https://relay.example.test"],
+    [RELAY_ENVIRONMENT_CREDENTIAL_SECRET, "environment-credential"],
+  ] as const;
+
+  it.effect("repoints the tunnel at the current port using the environment credential", () => {
+    const { store } = makeMemorySecretStore(clientInstalledLinkSecrets);
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+
+    return Effect.gen(function* () {
+      const updated = yield* syncManagedEndpointOrigin("http://127.0.0.1:3774");
+
+      expect(updated).toBe(true);
+      expect(requests).toHaveLength(1);
+      const request = requests[0]!;
+      expect(request.method).toBe("PUT");
+      expect(request.url).toBe(
+        "https://relay.example.test/v1/environments/env_123/managed-endpoint-origin",
+      );
+      expect(request.headers.authorization).toBe("Bearer environment-credential");
+      expect(request.body._tag).toBe("Uint8Array");
+      if (request.body._tag !== "Uint8Array") return;
+      const payload = yield* decodeOriginSyncRequestJson(
+        new TextDecoder().decode(request.body.body),
+      );
+      expect(payload).toEqual({
+        origin: { localHttpHost: "127.0.0.1", localHttpPort: 3774 },
+      });
+    }).pipe(
+      provideReleaseHarness({
+        store,
+        applyConfigCalls: [],
+        requests,
+        respond: () => Response.json({ ok: true, updatedTunnels: 1 }),
+      }),
+    );
+  });
+
+  it.effect("reports no update when the relay has no tunnel to repoint", () => {
+    const { store } = makeMemorySecretStore(clientInstalledLinkSecrets);
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+
+    return Effect.gen(function* () {
+      expect(yield* syncManagedEndpointOrigin("http://127.0.0.1:3774")).toBe(false);
+      expect(requests).toHaveLength(1);
+    }).pipe(
+      provideReleaseHarness({
+        store,
+        applyConfigCalls: [],
+        requests,
+        respond: () => Response.json({ ok: true, updatedTunnels: 0 }),
+      }),
+    );
+  });
+
+  it.effect("makes no request without a stored managed link and credential", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+    const incompleteLinks = [
+      clientInstalledLinkSecrets.filter(([name]) => name !== CLOUD_ENDPOINT_RUNTIME_CONFIG),
+      clientInstalledLinkSecrets.filter(([name]) => name !== RELAY_URL_SECRET),
+      clientInstalledLinkSecrets.filter(([name]) => name !== RELAY_ENVIRONMENT_CREDENTIAL_SECRET),
+    ];
+
+    return Effect.forEach(incompleteLinks, (secrets) =>
+      syncManagedEndpointOrigin("http://127.0.0.1:3774").pipe(
+        provideReleaseHarness({
+          store: makeMemorySecretStore(secrets).store,
+          applyConfigCalls: [],
+          requests,
+        }),
+      ),
+    ).pipe(
+      Effect.map((results) => {
+        expect(results).toEqual([false, false, false]);
+        expect(requests).toEqual([]);
+      }),
+    );
+  });
+
+  it.effect("resolves without error against an older relay that lacks the endpoint", () => {
+    const { store } = makeMemorySecretStore(clientInstalledLinkSecrets);
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+
+    return Effect.gen(function* () {
+      expect(yield* syncManagedEndpointOrigin("http://127.0.0.1:3774")).toBe(false);
+      expect(requests).toHaveLength(1);
+    }).pipe(
+      provideReleaseHarness({
+        store,
+        applyConfigCalls: [],
+        requests,
+        respond: () => new Response("Not Found", { status: 404 }),
+      }),
+    );
+  });
+
+  it.effect("fails with a non-retryable error when the relay rejects the credential", () => {
+    const { store } = makeMemorySecretStore(clientInstalledLinkSecrets);
+
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(syncManagedEndpointOrigin("http://127.0.0.1:3774"));
+
+      expect(shouldRetryCloudLink(error)).toBe(false);
+    }).pipe(
+      provideReleaseHarness({
+        store,
+        applyConfigCalls: [],
+        requests: [],
+        respond: () => new Response("Unauthorized", { status: 401 }),
       }),
     );
   });

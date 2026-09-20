@@ -125,6 +125,20 @@ connector, and attempts to revoke the relay-side environment record. It retains 
 authorization so `lecturn connect link` can re-enable exposure without another browser flow. `lecturn connect
 logout` performs the same cleanup and removes the stored CLI authorization.
 
+### Boot-time origin sync
+
+A managed tunnel forwards to the loopback origin (`http://127.0.0.1:<port>`) the relay recorded when
+the link was made, but the local port is not stable: the desktop app scans upward for a free port on
+every launch. The CLI startup reconcile re-links with the current origin, but it only runs for links
+made by `lecturn connect link`. Links installed from the desktop, web, or mobile UI have no CLI token
+and no boot-time re-provision, so after activation the server instead calls the relay's
+environment-authenticated `PUT /v1/environments/:environmentId/managed-endpoint-origin` with the port
+it actually bound, using the stored environment credential and the persisted relay URL. Without this,
+a port change left `cloudflared` dialing a dead port and every relayed request failed with
+`endpoint_request_failed` until the user unlinked and relinked. The sync retries transient failures
+on the same bounded schedule as the reconcile, never blocks startup, and treats a 404 from an older
+relay as "not supported" rather than an error.
+
 The background service has an independent lifecycle. Connect setup may offer to install it, but
 logout leaves it running; manage it with `lecturn service status`, `install`, `update`, and `uninstall`.
 
