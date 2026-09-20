@@ -109,7 +109,32 @@ rl.on("line", (line) => {
     write({ id, result: fixture.responses.threadStart });
     return;
   }
+  if (method === "thread/read" && script.rollback) {
+    write({
+      id,
+      result: { thread: { ...fixture.responses.threadStart.thread, historyMode: "paginated" } },
+    });
+    return;
+  }
+  if (method === "thread/turns/list" && script.rollback) {
+    write({ id, result: { data: script.rollback.turns } });
+    return;
+  }
+  if (method === "thread/fork" && script.rollback) {
+    write(
+      script.rollback.error
+        ? { id, error: { code: -32000, message: script.rollback.error } }
+        : { id, result: { thread: { id: script.rollback.replacementThreadId } } },
+    );
+    return;
+  }
   if (method === "turn/start") {
+    if (script.rollback) {
+      NodeFS.appendFileSync(
+        `${process.env.LECTURNX_COLLAB_SCRIPT}.requests`,
+        `${JSON.stringify({ method, params: message.params })}\n`,
+      );
+    }
     const turnId = script.turnIds?.[turnStartCount];
     const turn = turnId
       ? { ...fixture.responses.turnStart.turn, id: turnId }
@@ -117,7 +142,7 @@ rl.on("line", (line) => {
     activeTurn = turn;
     turnStartCount += 1;
     write({ id, result: { ...fixture.responses.turnStart, turn } });
-    const rootThreadId = script.rootThreadId;
+    const rootThreadId = script.rollback ? message.params.threadId : script.rootThreadId;
     if (script.onlyFirstTurnStarts !== true || turnStartCount === 1) {
       write({
         jsonrpc: "2.0",
@@ -125,7 +150,8 @@ rl.on("line", (line) => {
         params: { threadId: rootThreadId, turn },
       });
     }
-    for (const notification of script.notifications) {
+    for (const notification of script.notificationsByTurn?.[turnStartCount - 1] ??
+      script.notifications) {
       write({ jsonrpc: "2.0", method: notification.method, params: notification.params });
     }
     for (const request of script.serverRequests ?? []) {

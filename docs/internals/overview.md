@@ -149,6 +149,14 @@ baseline capture, completed-turn capture, diff projection, and reverting both th
 provider conversation. The storage contract is `VcsCheckpointOps` in
 [`VcsDriver.ts`](../../apps/server/src/vcs/VcsDriver.ts), implemented for Git in the same directory.
 
+Revert checks that the target checkpoint exists before changing provider history, then rolls back
+the provider before restoring files. A provider rejection leaves files and the visible conversation
+unchanged. These operations are not atomic across the provider and filesystem: a filesystem error
+after successful provider rollback is still reported as a failed revert.
+Revert does not require a live provider session. Workspace lookup prefers the live session cwd,
+then its persisted binding cwd, then the thread worktree or project root. Provider rollback recovers
+a stopped session from its persisted resume state.
+
 ## Startup
 
 [`serverRuntimeStartup.ts`][startup] runs a fixed lifecycle: start keybindings, settings, and

@@ -43,6 +43,17 @@ Your answers are sent as a new message. They reach the current turn while Codex 
 start a new turn if it has finished. Unanswered questions stay available after you reconnect.
 This works in the web, desktop, and mobile apps. Codex must support async questions.
 
+## Revert a conversation
+
+Reverting removes later messages from the Lecturn thread and restores its workspace checkpoint.
+You can continue in the same Lecturn thread afterward. For Codex conversations with paginated
+history, Lecturn continues from a replacement Codex conversation containing the retained turns.
+Reverting all turns starts an empty Codex conversation.
+Revert also works after the provider session stops or the server restarts, provided its saved
+conversation and workspace are still available.
+
+If Codex rejects the revert, Lecturn leaves the messages and workspace files unchanged.
+
 ## Sub-agent models
 
 The web and desktop Agents panel shows each sub-agent's model and reasoning effort when Codex

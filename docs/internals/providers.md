@@ -77,6 +77,17 @@ assistant text. Persisted messages keep their serialized links.
 Adding a driver means writing the driver plus adapter and adding it to `BUILT_IN_DRIVERS`. No
 orchestration, contract, or client change is required for the common case.
 
+### Codex conversation rollback
+
+Legacy Codex history uses `thread/rollback`. Paginated history is read with `thread/turns/list`
+and reverted by forking through the last retained turn; removing every turn starts a fresh native
+thread. The Lecturn thread ID stays unchanged. The runtime adopts the replacement resume cursor
+only after the request succeeds and ignores later notifications from the retired native thread.
+`ProviderService` persists the updated session binding before reporting rollback success, so
+reconnects and later forks use the retained history.
+Stored-thread resume and fork requests use `excludeTurns: true`; the runtime reads history
+separately instead of asking Codex to hydrate paginated turns in the open response.
+
 ### Grok health check
 
 `checkGrokProviderStatus` never opens an ACP session. It runs `grok --version`, then `grok models`
