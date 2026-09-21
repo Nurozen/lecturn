@@ -112,6 +112,12 @@ vi.mock("./publicConfig", () => ({
   resolveRelayClerkTokenOptions: () => ({ template: "relay" }),
 }));
 
+// Authentication lifecycle tests have no local publishing host.
+vi.mock("./primaryCloudLinkState", async () => {
+  const { Atom } = await import("effect/unstable/reactivity");
+  return { primaryCloudPublisherAtom: Atom.make(null) };
+});
+
 vi.mock("../connection/catalog", async () => {
   const { Atom } = await import("effect/unstable/reactivity");
   return {
