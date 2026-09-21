@@ -142,6 +142,14 @@ relay as "not supported" rather than an error.
 The background service has an independent lifecycle. Connect setup may offer to install it, but
 logout leaves it running; manage it with `lecturn service status`, `install`, `update`, and `uninstall`.
 
+### Device relay reservation
+
+Updated hosts reserve loopback TCP port `47391` while publishing, including activity-only links. This kernel-owned lease is shared across OS users, release channels, and Lecturn homes on the same host. A competing installation remains usable locally and reports the owning environment in **Settings → Relay**. Unlink or stop the owner, then use **Retry relay** in the blocked installation. Health reads do not acquire the reservation.
+
+The lease releases on orderly shutdown or process exit without PID-file cleanup. Tests use ephemeral ports and owned child processes. Older builds do not participate, and isolated VM/container network namespaces have their own reservations. An abruptly killed host can leave an orphan connector process, but its backend is gone; the reservation does not terminate unrelated processes.
+
+Account ownership changes are serialized across validation, connector changes, and credential persistence. Sidebar ownership combines relay catalog account tags with the primary host's verified publisher, revalidated after reconnect and foregrounding. Direct/SSH connections are not assigned to the active account merely because that account is selected.
+
 ### Headless and SSH authorization
 
 The loopback OAuth callback listener binds to port `34338`. That path only works when a browser on

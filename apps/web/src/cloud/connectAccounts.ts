@@ -10,6 +10,8 @@ import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
 
 import { environmentCatalog } from "../connection/catalog";
 import { getLocalStorageItem, setLocalStorageItem } from "../hooks/useLocalStorage";
+import { primaryCloudPublisherAtom } from "./primaryCloudLinkState";
+import { withPrimaryPublisher } from "./environmentAccountOwnership";
 import { knownConnectAccountsAtom } from "./knownAccounts";
 
 export const ACCOUNT_PROFILES_STORAGE_KEY = "lecturn:account-profiles:v1";
@@ -132,10 +134,13 @@ export function keepUnchangedAccountOwners<Owners extends ReadonlyMap<string, st
     : next;
 }
 
-/** Owning Connect account per relay environment, from the catalog's `accountId` tags. */
+/** Relay catalog ownership plus the primary host's actual publishing account. */
 export const accountByEnvironmentIdAtom = Atom.make((get) => {
-  const owners = relayAccountByEnvironmentId(
-    [...get(environmentCatalog.catalogValueAtom).entries.values()].map((entry) => entry.target),
+  const owners = withPrimaryPublisher(
+    relayAccountByEnvironmentId(
+      [...get(environmentCatalog.catalogValueAtom).entries.values()].map((entry) => entry.target),
+    ),
+    get(primaryCloudPublisherAtom),
   );
   return keepUnchangedAccountOwners(Option.getOrUndefined(get.self<typeof owners>()), owners);
 }).pipe(Atom.withLabel("connect:account-by-environment"));

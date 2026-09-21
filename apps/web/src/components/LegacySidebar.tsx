@@ -790,6 +790,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         onKeyDown={handleRowKeyDown}
         onContextMenu={handleRowContextMenu}
       >
+        <AccountMark environmentId={thread.environmentId} variant="rail" />
         <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
           {prStatus && pr && (
             <Tooltip>
@@ -873,7 +874,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               </TooltipPopup>
             </Tooltip>
           )}
-          <AccountMark environmentId={thread.environmentId} />
           <ThreadWorktreeIndicator thread={thread} />
           {terminalStatus && (
             <Tooltip>

@@ -1,3 +1,4 @@
+import { deviceRelayPublicationBlocked } from "../cloud/DeviceRelayReservation.ts";
 import { ThreadId as ThreadIdSchema, type PullRequestWatch } from "@lecturn/contracts";
 import { PullRequestWatchService } from "../pullRequest/PullRequestWatchService.ts";
 import { TeamPolicy, TeamPolicyLive } from "../cloud/TeamPolicy.ts";
@@ -376,6 +377,7 @@ export const make = Effect.gen(function* () {
       );
 
   const readRelayConfig = Effect.gen(function* () {
+    if (deviceRelayPublicationBlocked(secrets)) return null;
     const [url, issuer, environmentCredential] = yield* Effect.all([
       readSecretString(RELAY_URL_SECRET),
       readSecretString(RELAY_ISSUER_SECRET),

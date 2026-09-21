@@ -233,7 +233,11 @@ export function useCloudLinkController(
         (!linked && selectedTeam(userId) !== organizationId)
       )
         return false;
-      if (!linked || managedTunnelActive !== desired.managedTunnel) {
+      if (
+        !linked ||
+        managedTunnelActive !== desired.managedTunnel ||
+        primaryCloudLinkState.data?.deviceRelayConflict
+      ) {
         const linkResult = await linkPrimaryEnvironment({
           target,
           clerkToken,

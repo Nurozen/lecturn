@@ -1526,7 +1526,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               />
             ) : null}
             {title}
-            <AccountMark environmentId={thread.environmentId} />
+            <AccountMark environmentId={thread.environmentId} variant="rail" />
             {pinIndicator}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
@@ -1673,6 +1673,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
+          <AccountMark environmentId={thread.environmentId} variant="rail" />
           <div
             className={cn(
               "relative z-10 px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]",
@@ -1705,7 +1706,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ) : (
                 <span className="flex-1" />
               )}
-              <AccountMark environmentId={thread.environmentId} />
               {pinIndicator}
               {/* The visible state owns this slot's width: status at rest,
                   actions on hover/keyboard focus or while the popover is open. Keeping

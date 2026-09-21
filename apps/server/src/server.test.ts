@@ -3793,7 +3793,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         endpointRuntimeStatus?: { status?: string; reason?: string };
       }>(relayConfigResponse);
       assert.equal(relayConfigBody._tag, "EnvironmentCloudEndpointUnavailableError");
-      assert.equal(relayConfigBody.message, "Managed endpoint runtime could not be started.");
+      assert.equal(relayConfigBody.message, "cloudflared missing");
       assert.equal(relayConfigBody.endpointRuntimeStatus?.status, "failed");
       assert.equal(relayConfigBody.endpointRuntimeStatus?.reason, "cloudflared missing");
 

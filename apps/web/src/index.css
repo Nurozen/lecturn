@@ -2621,3 +2621,55 @@ body,
   --terminal-cursor: var(--app-theme-terminal-cursor);
   --terminal-selection-background: var(--app-theme-terminal-selection-background);
 }
+
+/* Account identity belongs to the card edge, leaving its title unobstructed. */
+.lecturn-account-rail {
+  position: absolute;
+  z-index: 11;
+  inset-block: 3px;
+  inset-inline-start: 0;
+  width: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--account-tint) 65%, transparent),
+    color-mix(in srgb, var(--account-tint) 18%, transparent)
+  );
+  box-shadow:
+    inset 1px 0 0 color-mix(in srgb, white 45%, transparent),
+    1px 0 5px color-mix(in srgb, var(--account-tint) 20%, transparent);
+}
+
+/* Only the moving fold gets a glass rim; nothing repaints after the transition. */
+.lecturn-account-collapse {
+  position: relative;
+}
+
+.lecturn-account-collapse::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  z-index: 12;
+  inset-inline: 2px;
+  bottom: 0;
+  height: 9px;
+  border-radius: 0 0 8px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--account-tint) 55%, transparent);
+  background: linear-gradient(
+    transparent,
+    color-mix(in srgb, var(--account-tint) 18%, transparent)
+  );
+  box-shadow: inset 0 -1px 1px color-mix(in srgb, white 35%, transparent);
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+
+.lecturn-account-collapse:is([data-starting-style], [data-ending-style])::after {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lecturn-account-collapse::after {
+    display: none;
+  }
+}

@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   setActive: vi.fn(async () => undefined),
   getToken: vi.fn(async (_accountId?: string): Promise<string | null> => "token"),
   state: {
+    deviceRelayConflict: null as string | null,
     linked: true,
     organizationId: null as string | null,
     cloudUserId: "account-a",
@@ -80,13 +81,62 @@ describe("Connect account ownership during reconciliation", () => {
     vi.clearAllMocks();
     mocks.selectedTeam = null;
     mocks.state.organizationId = null;
+    mocks.state.deviceRelayConflict = null;
     mocks.billingStatus.mockResolvedValue({ state: "active", hasAccess: true });
     mocks.userId = "account-b";
     mocks.isSignedIn = true;
     mocks.getToken.mockResolvedValue("token");
     mocks.state.linked = true;
+    mocks.state.managedTunnelActive = true;
+    mocks.state.publishAgentActivity = true;
     mocks.known = { accountIds: [], needsSignIn: [], synced: true };
     vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("reacquires a conflicted managed relay without changing its mode or publishing preference", async () => {
+    mocks.userId = "account-a";
+    mocks.state.deviceRelayConflict = "Relay in use by another installation";
+    expect(
+      await useCloudLinkController().reconcileCloudState({ managedTunnel: true, publish: true }),
+    ).toBe(true);
+    expect(mocks.link).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ mode: "managed", publishAgentActivity: true }),
+    );
+    expect(mocks.preferences).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ publishAgentActivity: true }),
+    );
+  });
+
+  it("reacquires activity-only publishing without enabling a managed tunnel", async () => {
+    mocks.userId = "account-a";
+    mocks.state.managedTunnelActive = false;
+    mocks.state.deviceRelayConflict = "Relay in use by another installation";
+    expect(
+      await useCloudLinkController().reconcileCloudState({ managedTunnel: false, publish: true }),
+    ).toBe(true);
+    expect(mocks.link).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ mode: "publish_only", publishAgentActivity: true }),
+    );
+  });
+
+  it("does not restart a healthy relay for a preference-only update", async () => {
+    mocks.userId = "account-a";
+    expect(
+      await useCloudLinkController().reconcileCloudState({ managedTunnel: true, publish: false }),
+    ).toBe(true);
+    expect(mocks.link).not.toHaveBeenCalled();
+    expect(mocks.preferences).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ publishAgentActivity: false }),
+    );
+  });
+
+  it("cannot use retry to take another account's conflicted relay", async () => {
+    mocks.state.deviceRelayConflict = "Relay in use by another installation";
+    expect(
+      await useCloudLinkController().reconcileCloudState({ managedTunnel: true, publish: true }),
+    ).toBe(false);
+    expect(mocks.link).not.toHaveBeenCalled();
+    expect(mocks.preferences).not.toHaveBeenCalled();
   });
 
   it("does not claim publishing succeeded or mutate the old owner's settings after account switching", async () => {
@@ -230,6 +280,7 @@ describe("Connect subscription preflight", () => {
     vi.clearAllMocks();
     mocks.selectedTeam = null;
     mocks.state.organizationId = null;
+    mocks.state.deviceRelayConflict = null;
     mocks.userId = "account-a";
     mocks.state.linked = false;
     mocks.isSignedIn = true;
@@ -303,6 +354,7 @@ describe("company funding", () => {
     mocks.teamList.mockImplementationOnce(async () => {
       mocks.selectedTeam = null;
       mocks.state.organizationId = null;
+      mocks.state.deviceRelayConflict = null;
       return {
         organizations: [
           { organizationId: "org_test", hasAccess: true, policy: { publishAgentActivity: true } },
