@@ -31,12 +31,10 @@ it("accepts native capability responses and clears the abort timer", async () =>
   vi.stubGlobal("AbortSignal", {});
   vi.stubGlobal(
     "fetch",
-    vi
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({ capabilities: { multiAccountPush: true } }),
-      }),
+    vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ capabilities: { multiAccountPush: true } }),
+    }),
   );
   const { refreshMultiAccountPushCapability, getMultiAccountPushSupported } =
     await import("./multiAccountCapability");
