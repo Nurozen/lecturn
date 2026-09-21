@@ -13,10 +13,12 @@ export async function refreshMultiAccountPushCapability(): Promise<void> {
   if (!relay) return;
   pending = (async () => {
     let next = false;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
     try {
       const response = await fetch(
         `${relay.replace(/\/$/, "")}/.well-known/oauth-protected-resource`,
-        { signal: AbortSignal.timeout(10_000) },
+        { signal: controller.signal },
       );
       if (response.ok) {
         const document: unknown = await response.json();
@@ -31,6 +33,8 @@ export async function refreshMultiAccountPushCapability(): Promise<void> {
       }
     } catch {
       /* Unknown relays fail closed for adding accounts on iOS. */
+    } finally {
+      clearTimeout(timeout);
     }
     if (next !== supported) {
       supported = next;
