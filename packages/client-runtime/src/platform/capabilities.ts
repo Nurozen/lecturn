@@ -24,7 +24,9 @@ export interface ProvisionedSshEnvironment extends PreparedSshEnvironment {
 export class CloudSession extends Context.Service<
   CloudSession,
   {
-    readonly clerkToken: Effect.Effect<string, ConnectionAttemptError>;
+    /** Signed-in Connect accounts, primary account first. */
+    readonly accountIds: Effect.Effect<ReadonlyArray<string>>;
+    readonly clerkToken: (accountId: string) => Effect.Effect<string, ConnectionAttemptError>;
   }
 >()("@lecturn/client-runtime/platform/capabilities/CloudSession") {}
 

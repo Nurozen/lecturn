@@ -23,7 +23,11 @@ import {
 } from "@lecturn/client-runtime/connection";
 import { bootstrapRemoteBearerSession } from "@lecturn/client-runtime/authorization";
 import { fetchRemoteEnvironmentDescriptor } from "@lecturn/client-runtime/environment";
-import { managedRelayAccountChanges, managedRelaySessionAtom } from "@lecturn/client-runtime/relay";
+import {
+  managedRelayAccountChanges,
+  managedRelayAccountIds,
+  managedRelaySessionsAtom,
+} from "@lecturn/client-runtime/relay";
 import { EnvironmentRpcRequestObserver } from "@lecturn/client-runtime/rpc";
 import {
   AuthStandardClientScopes,
@@ -109,9 +113,7 @@ const wakeupsLayer = Wakeups.layer({
           }),
       ).pipe(Effect.asVoid),
     ),
-    managedRelayAccountChanges(appAtomRegistry).pipe(
-      Stream.map(() => "credentials-changed" as const),
-    ),
+    managedRelayAccountChanges(appAtomRegistry).pipe(Stream.map(Wakeups.accountCredentialsChanged)),
   ),
 });
 
@@ -182,9 +184,10 @@ const capabilitiesLayer = Layer.effectContext(
       scopes: AuthStandardClientScopes,
     });
     const cloudSession = CloudSession.of({
-      clerkToken: Effect.gen(function* () {
-        const session = appAtomRegistry.get(managedRelaySessionAtom);
-        if (session === null) {
+      accountIds: Effect.sync(() => managedRelayAccountIds(appAtomRegistry)),
+      clerkToken: Effect.fnUntraced(function* (accountId: string) {
+        const session = appAtomRegistry.get(managedRelaySessionsAtom).get(accountId);
+        if (session === undefined) {
           return yield* new ConnectionBlockedError({
             reason: "authentication",
             detail: "Sign in to Lecturn Connect to connect this environment.",

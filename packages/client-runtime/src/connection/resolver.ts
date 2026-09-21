@@ -147,6 +147,19 @@ const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")
   });
 });
 
+// No single Connect account can be named as the owner of a relay target.
+// Blocked, not transient: the supervisor parks a blocked target until a wakeup
+// or retarget instead of retrying a question that time alone cannot answer.
+function relayAccountUnresolvedError(signedInAccounts: number): ConnectionBlockedError {
+  return new ConnectionBlockedError({
+    reason: "authentication",
+    detail:
+      signedInAccounts === 0
+        ? "Sign in to Lecturn Connect to connect this environment."
+        : "Could not tell which Lecturn Connect account owns this environment.",
+  });
+}
+
 const makeRelayBroker = Effect.fn("clientRuntime.connection.broker.makeRelay")(function* () {
   const relay = yield* ManagedRelay.ManagedRelayClient;
   const session = yield* ClientCapabilities.CloudSession;
@@ -155,12 +168,26 @@ const makeRelayBroker = Effect.fn("clientRuntime.connection.broker.makeRelay")(f
 
   return Effect.fnUntraced(
     function* (target: RelayConnectionTarget) {
+      // The owner is the tagged account, else the only signed-in account.
+      // Never try each account: the relay would see every account ask for it.
+      const accountIds = yield* session.accountIds;
+      const accountId = target.accountId ?? (accountIds.length === 1 ? accountIds[0] : undefined);
+      if (accountId === undefined && accountIds.length > 0) {
+        return yield* relayAccountUnresolvedError(accountIds.length);
+      }
       const authorized = yield* remote.authorizeDpop({
         expectedEnvironmentId: target.environmentId,
+        ...(accountId === undefined ? {} : { accountId }),
+        // No other account could own an unstamped token. That holds with no
+        // account too: a cold start before sign-in loads still connects from cache.
+        acceptUnstampedToken: accountIds.every((id) => id === accountId),
         obtainBootstrap: Effect.gen(function* () {
-          const clerkToken = yield* session.clerkToken.pipe(
-            Effect.withSpan("relay.connection.cloudSessionToken.resolve"),
-          );
+          if (accountId === undefined) {
+            return yield* relayAccountUnresolvedError(accountIds.length);
+          }
+          const clerkToken = yield* session
+            .clerkToken(accountId)
+            .pipe(Effect.withSpan("relay.connection.cloudSessionToken.resolve"));
           const deviceId = yield* identity.deviceId.pipe(
             Effect.withSpan("relay.connection.deviceIdentity.resolve"),
           );

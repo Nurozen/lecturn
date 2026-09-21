@@ -101,9 +101,10 @@ export function createEnvironmentCatalogAtoms<R, E>(
     label: "environment-catalog:remove-relay-environments",
     scheduler: commandScheduler,
     concurrency: serial,
-    execute: (_input: void) =>
+    // No input removes every relay environment; an account removes only its own.
+    execute: (scope: { readonly accountId: string } | void) =>
       EnvironmentRegistry.EnvironmentRegistry.pipe(
-        Effect.flatMap((registry) => registry.removeRelayEnvironments()),
+        Effect.flatMap((registry) => registry.removeRelayEnvironments(scope ?? undefined)),
       ),
   });
   const retryNow = createRuntimeCommand(runtime, {

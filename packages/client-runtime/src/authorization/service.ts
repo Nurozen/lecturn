@@ -61,6 +61,10 @@ export class RemoteEnvironmentAuthorization extends Context.Service<
     }) => Effect.Effect<AuthorizedRemoteEnvironment, ConnectionAttemptError>;
     readonly authorizeDpop: (input: {
       readonly expectedEnvironmentId: EnvironmentId;
+      /** The Connect account that owns the environment, when it is known. */
+      readonly accountId?: string;
+      /** Whether a cached token without an owner may serve `accountId`: not once another account is signed in. */
+      readonly acceptUnstampedToken?: boolean;
       readonly obtainBootstrap: Effect.Effect<
         RelayEnvironmentAuthorization,
         ConnectionAttemptError
@@ -196,6 +200,8 @@ export const make = Effect.gen(function* () {
       readonly expectedEnvironmentId: Parameters<
         RemoteEnvironmentAuthorization["Service"]["authorizeDpop"]
       >[0]["expectedEnvironmentId"];
+      readonly accountId?: string;
+      readonly acceptUnstampedToken?: boolean;
       readonly obtainBootstrap: Parameters<
         RemoteEnvironmentAuthorization["Service"]["authorizeDpop"]
       >[0]["obtainBootstrap"];
@@ -218,6 +224,11 @@ export const make = Effect.gen(function* () {
         Option.isSome(cached) &&
         cached.value.environmentId === input.expectedEnvironmentId &&
         cached.value.dpopThumbprint === thumbprint &&
+        // A relinked environment must not keep using its previous owner's token.
+        (input.accountId === undefined ||
+          (cached.value.accountId === undefined
+            ? input.acceptUnstampedToken === true
+            : cached.value.accountId === input.accountId)) &&
         cached.value.expiresAtEpochMs > now + DPOP_ACCESS_TOKEN_REFRESH_SKEW_MS
       ) {
         yield* Effect.annotateCurrentSpan({
@@ -295,6 +306,7 @@ export const make = Effect.gen(function* () {
         accessToken: access.access_token,
         expiresAtEpochMs: issuedAt + access.expires_in * 1_000,
         dpopThumbprint: thumbprint,
+        ...(input.accountId === undefined ? {} : { accountId: input.accountId }),
       });
       const socketUrl = yield* createDpopSocketUrl(token).pipe(Effect.mapError(mapDpopSocketError));
       yield* tokenStore

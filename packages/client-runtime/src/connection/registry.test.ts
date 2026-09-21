@@ -140,8 +140,14 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
     readonly beforeRegistrationRemove?: (
       target: ConnectionTarget,
     ) => Effect.Effect<void, Persistence.ConnectionPersistenceError>;
+    readonly accountIds?: ReadonlyArray<string>;
   },
 ) {
+  const accountIds = yield* Ref.make(options?.accountIds ?? []);
+  const wakeups = yield* SubscriptionRef.make<{
+    readonly sequence: number;
+    readonly reason: ConnectionWakeups.ConnectionWakeup;
+  }>({ sequence: 0, reason: "application-active" });
   const storedTargets = yield* Ref.make(
     new Map(initialTargets.map((target) => [target.environmentId, target])),
   );
@@ -381,10 +387,22 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
         Layer.succeed(ConnectionCredentialStore.ConnectionCredentialStore, credentialStore),
         Layer.succeed(TokenStore.RemoteDpopAccessTokenStore, tokenStore),
         Layer.succeed(ClientCapabilities.SshEnvironmentGateway, sshGateway),
+        Layer.succeed(
+          ClientCapabilities.CloudSession,
+          ClientCapabilities.CloudSession.of({
+            accountIds: Ref.get(accountIds),
+            clerkToken: () => Effect.die(new Error("Clerk tokens are not used by registry tests.")),
+          }),
+        ),
         Layer.succeed(Connectivity.Connectivity, connectivity),
         Layer.succeed(
           ConnectionWakeups.ConnectionWakeups,
-          ConnectionWakeups.ConnectionWakeups.of({ changes: Stream.never }),
+          ConnectionWakeups.ConnectionWakeups.of({
+            changes: SubscriptionRef.changes(wakeups).pipe(
+              Stream.drop(1),
+              Stream.map((event) => event.reason),
+            ),
+          }),
         ),
         Layer.succeed(ConnectionDriver.ConnectionDriver, driver),
         cacheLayer,
@@ -395,6 +413,9 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
 
   return {
     layer,
+    accountIds,
+    wake: (reason: ConnectionWakeups.ConnectionWakeup) =>
+      SubscriptionRef.update(wakeups, (current) => ({ sequence: current.sequence + 1, reason })),
     storedTargets,
     shellCache,
     cacheClears,
@@ -748,6 +769,286 @@ describe("EnvironmentRegistry", () => {
       }).pipe(Effect.provide(harness.layer), Effect.scoped);
     }),
   );
+
+  describe("relay accounts", () => {
+    const tagged = (target: RelayConnectionTarget, accountId: string) =>
+      new RelayConnectionTarget({
+        environmentId: target.environmentId,
+        label: target.label,
+        accountId,
+      });
+    const currentSupervisor = (
+      registry: EnvironmentRegistry.EnvironmentRegistry["Service"],
+      environmentId: EnvironmentId,
+    ) =>
+      registry.run(
+        environmentId,
+        Effect.map(EnvironmentSupervisor.EnvironmentSupervisor, (supervisor) => supervisor),
+      );
+
+    const unlisted = (registry: EnvironmentRegistry.EnvironmentRegistry["Service"]) =>
+      SubscriptionRef.get(registry.unlistedRelayEnvironmentIds).pipe(Effect.map((ids) => [...ids]));
+    const expectNothingRemoved = Effect.fn(function* (
+      harness: Effect.Success<ReturnType<typeof makeHarness>>,
+      entryCount: number,
+    ) {
+      expect((yield* Ref.get(harness.storedTargets)).size).toBe(entryCount);
+      expect(yield* Ref.get(harness.cacheClears)).toEqual([]);
+      expect(yield* Ref.get(harness.ownedDataClears)).toEqual([]);
+    });
+
+    it.effect("adopts a listed entry of an upgraded catalog and keeps the data it owns", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness([RELAY_TARGET], [], [], {
+          accountIds: ["account-a"],
+        });
+        yield* Ref.update(harness.shellCache, (current) =>
+          new Map(current).set(RELAY_TARGET.environmentId, CACHED_SNAPSHOT),
+        );
+
+        yield* Effect.gen(function* () {
+          const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+          yield* registry.start;
+          yield* awaitConnectionState(
+            registry,
+            RELAY_TARGET.environmentId,
+            (state) => state.phase === "connected",
+          );
+          const supervisor = yield* currentSupervisor(registry, RELAY_TARGET.environmentId);
+
+          yield* registry.reconcileRelayEnvironments("account-a", [RELAY_TARGET.environmentId]);
+
+          const adopted = tagged(RELAY_TARGET, "account-a");
+          expect((yield* Ref.get(harness.storedTargets)).get(RELAY_TARGET.environmentId)).toEqual(
+            adopted,
+          );
+          expect(
+            (yield* SubscriptionRef.get(registry.entries)).get(RELAY_TARGET.environmentId)?.target,
+          ).toEqual(adopted);
+          // Drafts and caches are keyed by environment, so adoption leaves them be.
+          expect(yield* Ref.get(harness.ownedDataClears)).toEqual([]);
+          expect((yield* Ref.get(harness.shellCache)).has(RELAY_TARGET.environmentId)).toBe(true);
+          // The supervisor is retargeted, not replaced, and its session stays up.
+          expect(yield* currentSupervisor(registry, RELAY_TARGET.environmentId)).toBe(supervisor);
+          expect(supervisor.target).toEqual(adopted);
+          expect(yield* Ref.get(harness.sessions)).toHaveLength(1);
+          expect(yield* Ref.get(harness.releasedSessions)).toBe(0);
+        }).pipe(Effect.provide(harness.layer), Effect.scoped);
+      }),
+    );
+
+    it.effect("marks entries no signed-in account lists as unlisted and removes nothing", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness([RELAY_TARGET, SECOND_RELAY_TARGET], [], [], {
+          accountIds: ["account-a", "account-b"],
+        });
+
+        yield* Effect.gen(function* () {
+          const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+          yield* registry.start;
+
+          yield* registry.reconcileRelayEnvironments("account-a", [RELAY_TARGET.environmentId]);
+          const held = yield* SubscriptionRef.get(registry.entries);
+          expect(held.get(RELAY_TARGET.environmentId)?.target).toEqual(
+            tagged(RELAY_TARGET, "account-a"),
+          );
+          expect(held.get(SECOND_RELAY_TARGET.environmentId)?.target).toEqual(SECOND_RELAY_TARGET);
+          // B has yet to list, so the second entry may still be B's.
+          expect(yield* unlisted(registry)).toEqual([]);
+
+          yield* registry.reconcileRelayEnvironments("account-b", []);
+          expect(yield* unlisted(registry)).toEqual([SECOND_RELAY_TARGET.environmentId]);
+          yield* expectNothingRemoved(harness, 2);
+
+          yield* registry.reconcileRelayEnvironments("account-b", [
+            SECOND_RELAY_TARGET.environmentId,
+          ]);
+          expect(yield* unlisted(registry)).toEqual([]);
+          expect(
+            (yield* Ref.get(harness.storedTargets)).get(SECOND_RELAY_TARGET.environmentId),
+          ).toEqual(tagged(SECOND_RELAY_TARGET, "account-b"));
+          yield* expectNothingRemoved(harness, 2);
+        }).pipe(Effect.provide(harness.layer), Effect.scoped);
+      }),
+    );
+
+    it.effect("gives account B nothing of A's catalog while A's listing is delayed", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness([RELAY_TARGET], [], [], {
+          accountIds: ["account-b", "account-a"],
+        });
+
+        yield* Effect.gen(function* () {
+          const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+          yield* registry.reconcileRelayEnvironments("account-b", []);
+          expect(
+            (yield* SubscriptionRef.get(registry.entries)).get(RELAY_TARGET.environmentId)?.target,
+          ).toEqual(RELAY_TARGET);
+          expect(yield* Ref.get(harness.ownedDataClears)).toEqual([]);
+
+          yield* registry.reconcileRelayEnvironments("account-a", [RELAY_TARGET.environmentId]);
+          expect((yield* Ref.get(harness.storedTargets)).get(RELAY_TARGET.environmentId)).toEqual(
+            tagged(RELAY_TARGET, "account-a"),
+          );
+          expect(yield* Ref.get(harness.ownedDataClears)).toEqual([]);
+        }).pipe(Effect.provide(harness.layer), Effect.scoped);
+      }),
+    );
+
+    it.effect("moves a relinked entry to the listing account on the same supervisor", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness([tagged(RELAY_TARGET, "account-a")], [], [], {
+          accountIds: ["account-a", "account-b"],
+        });
+
+        yield* Effect.gen(function* () {
+          const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+          const supervisor = yield* currentSupervisor(registry, RELAY_TARGET.environmentId);
+
+          // A has listed and dropped it, so B's listing may take it.
+          yield* registry.reconcileRelayEnvironments("account-a", []);
+          yield* registry.reconcileRelayEnvironments("account-b", [RELAY_TARGET.environmentId]);
+
+          const relinked = tagged(RELAY_TARGET, "account-b");
+          expect((yield* Ref.get(harness.storedTargets)).get(RELAY_TARGET.environmentId)).toEqual(
+            relinked,
+          );
+          expect(yield* currentSupervisor(registry, RELAY_TARGET.environmentId)).toBe(supervisor);
+          expect(supervisor.target).toEqual(relinked);
+          expect(yield* Ref.get(harness.cacheClears)).toEqual([]);
+          expect(yield* Ref.get(harness.ownedDataClears)).toEqual([]);
+        }).pipe(Effect.provide(harness.layer), Effect.scoped);
+      }),
+    );
+
+    it.effect("keeps a single account's entries through an empty listing", () =>
+      Effect.gen(function* () {
+        const expired = tagged(SECOND_RELAY_TARGET, "account-expired");
+        const harness = yield* makeHarness([tagged(RELAY_TARGET, "account-a"), expired], [], [], {
+          accountIds: ["account-a"],
+        });
+
+        yield* Effect.gen(function* () {
+          const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+          // A listing for an account that is not signed in decides nothing.
+          yield* registry.reconcileRelayEnvironments("account-expired", []);
+          expect(yield* unlisted(registry)).toEqual([]);
+
+          yield* registry.reconcileRelayEnvironments("account-a", []);
+          // The signed-out account's entry is not A's to call unlisted.
+          expect(yield* unlisted(registry)).toEqual([RELAY_TARGET.environmentId]);
+          yield* expectNothingRemoved(harness, 2);
+        }).pipe(Effect.provide(harness.layer), Effect.scoped);
+      }),
+    );
+
+    it.effect("leaves an entry with an owner who still lists it", () =>
+      Effect.gen(function* () {
+        const owned = tagged(RELAY_TARGET, "account-a");
+        const registrationWrites = yield* Ref.make(0);
+        const harness = yield* makeHarness([owned], [], [], {
+          accountIds: ["account-a", "account-b"],
+          beforeRegistrationRegister: () => Ref.update(registrationWrites, (count) => count + 1),
+        });
+
+        yield* Effect.gen(function* () {
+          const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+          yield* registry.reconcileRelayEnvironments("account-a", [RELAY_TARGET.environmentId]);
+          yield* registry.reconcileRelayEnvironments("account-b", [RELAY_TARGET.environmentId]);
+          yield* registry.reconcileRelayEnvironments("account-a", [RELAY_TARGET.environmentId]);
+
+          expect((yield* Ref.get(harness.storedTargets)).get(RELAY_TARGET.environmentId)).toEqual(
+            owned,
+          );
+          expect(yield* Ref.get(registrationWrites)).toBe(0);
+        }).pipe(Effect.provide(harness.layer), Effect.scoped);
+      }),
+    );
+
+    it.effect("leaves an entry with an owner who has not listed or is not signed in", () =>
+      Effect.gen(function* () {
+        const owned = tagged(RELAY_TARGET, "account-a");
+        const expired = tagged(SECOND_RELAY_TARGET, "account-expired");
+        const harness = yield* makeHarness([owned, expired], [], [], {
+          accountIds: ["account-a", "account-b"],
+        });
+
+        yield* Effect.gen(function* () {
+          const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+          yield* registry.reconcileRelayEnvironments("account-b", [
+            RELAY_TARGET.environmentId,
+            SECOND_RELAY_TARGET.environmentId,
+          ]);
+
+          expect([...(yield* Ref.get(harness.storedTargets)).values()]).toEqual([owned, expired]);
+        }).pipe(Effect.provide(harness.layer), Effect.scoped);
+      }),
+    );
+
+    it.effect("drops an account's listing when its credentials change", () =>
+      Effect.gen(function* () {
+        const owned = tagged(RELAY_TARGET, "account-a");
+        const harness = yield* makeHarness([owned], [], [], {
+          accountIds: ["account-a", "account-b"],
+        });
+
+        yield* Effect.gen(function* () {
+          const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+          yield* registry.reconcileRelayEnvironments("account-a", []);
+          yield* registry.reconcileRelayEnvironments("account-b", []);
+          expect(yield* unlisted(registry)).toEqual([RELAY_TARGET.environmentId]);
+
+          // A signs out and back in between two listings.
+          yield* Effect.yieldNow;
+          yield* harness.wake(
+            ConnectionWakeups.accountCredentialsChanged({
+              added: new Set(["account-a"]),
+              removed: new Set(),
+            }),
+          );
+          yield* SubscriptionRef.changes(registry.unlistedRelayEnvironmentIds).pipe(
+            Stream.filter((ids) => ids.size === 0),
+            Stream.runHead,
+          );
+
+          // A's earlier listing no longer speaks for it, so B cannot take the entry.
+          yield* registry.reconcileRelayEnvironments("account-b", [RELAY_TARGET.environmentId]);
+          expect((yield* Ref.get(harness.storedTargets)).get(RELAY_TARGET.environmentId)).toEqual(
+            owned,
+          );
+
+          yield* registry.reconcileRelayEnvironments("account-a", []);
+          yield* registry.reconcileRelayEnvironments("account-b", [RELAY_TARGET.environmentId]);
+          expect((yield* Ref.get(harness.storedTargets)).get(RELAY_TARGET.environmentId)).toEqual(
+            tagged(RELAY_TARGET, "account-b"),
+          );
+          yield* expectNothingRemoved(harness, 1);
+        }).pipe(Effect.provide(harness.layer), Effect.scoped);
+      }),
+    );
+
+    it.effect("removes one account's environments and reports which", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness([
+          tagged(RELAY_TARGET, "account-a"),
+          tagged(SECOND_RELAY_TARGET, "account-b"),
+        ]);
+
+        yield* Effect.gen(function* () {
+          const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+          const removed = yield* registry.removeRelayEnvironments({ accountId: "account-b" });
+
+          expect(removed).toEqual([SECOND_RELAY_TARGET.environmentId]);
+          expect([...(yield* Ref.get(harness.storedTargets)).keys()]).toEqual([
+            RELAY_TARGET.environmentId,
+          ]);
+          expect(yield* Ref.get(harness.ownedDataClears)).toEqual([
+            SECOND_RELAY_TARGET.environmentId,
+          ]);
+        }).pipe(Effect.provide(harness.layer), Effect.scoped);
+      }),
+    );
+  });
 
   it.effect("keeps the runtime registered when durable removal fails", () =>
     Effect.gen(function* () {

@@ -18,17 +18,19 @@ import {
   type ConnectionRegistration,
   type PlatformConnectionRegistration,
   type PrimaryConnectionRegistration,
+  RelayConnectionRegistration,
   SshConnectionProfile,
   connectionRegistrationCatalogEntry,
 } from "./catalog.ts";
 import * as ConnectionCredentialStore from "./credentialStore.ts";
 import * as ConnectionProfileStore from "./profileStore.ts";
 import * as Connectivity from "./connectivity.ts";
-import type {
-  ConnectionAttemptError,
-  ConnectionTarget,
-  NetworkStatus,
-  SupervisorConnectionState,
+import {
+  type ConnectionAttemptError,
+  type ConnectionTarget,
+  type NetworkStatus,
+  RelayConnectionTarget,
+  type SupervisorConnectionState,
 } from "./model.ts";
 import * as Persistence from "../platform/persistence.ts";
 import * as EnvironmentSupervisor from "./supervisor.ts";
@@ -83,11 +85,36 @@ export class EnvironmentRegistry extends Context.Service<
       | EnvironmentNotRegisteredError
       | PlatformEnvironmentRemovalError
     >;
-    readonly removeRelayEnvironments: () => Effect.Effect<
-      void,
+    /**
+     * Removes relay environments and the data they own, returning the removed
+     * IDs. Without a scope that is every relay environment; with one, only
+     * those tagged to that account.
+     */
+    readonly removeRelayEnvironments: (scope?: {
+      readonly accountId: string;
+    }) => Effect.Effect<
+      ReadonlyArray<EnvironmentId>,
       | Persistence.ConnectionPersistenceError
       | ConnectionAttemptError
       | PlatformEnvironmentRemovalError
+    >;
+    /**
+     * Applies one account's successful relay listing to the catalog. A listed
+     * relay entry becomes this account's, keeping its caches and supervisor,
+     * when it is untagged or when its signed-in owner has listed since sign-in
+     * and no longer lists it. Nothing is ever removed here.
+     */
+    readonly reconcileRelayEnvironments: (
+      accountId: string,
+      listedEnvironmentIds: ReadonlyArray<EnvironmentId>,
+    ) => Effect.Effect<void, Persistence.ConnectionPersistenceError>;
+    /**
+     * Relay environments that no signed-in account lists, known once every
+     * signed-in account has listed. In memory only; entries owned by accounts
+     * that are not signed in are never included.
+     */
+    readonly unlistedRelayEnvironmentIds: SubscriptionRef.SubscriptionRef<
+      ReadonlySet<EnvironmentId>
     >;
     readonly retryNow: (environmentId: EnvironmentId) => Effect.Effect<void>;
     readonly state: (
@@ -121,7 +148,7 @@ export class EnvironmentRegistry extends Context.Service<
 
 interface EnvironmentServiceScope {
   readonly entry: ConnectionCatalogEntry;
-  readonly supervisor: EnvironmentSupervisor.EnvironmentSupervisor["Service"];
+  readonly supervisor: EnvironmentSupervisor.EnvironmentSupervisorHandle;
   readonly scope: Scope.Closeable;
 }
 
@@ -137,6 +164,7 @@ export const make = Effect.gen(function* () {
   const driver = yield* ConnectionDriver.ConnectionDriver;
   const wakeups = yield* ConnectionWakeups.ConnectionWakeups;
   const ssh = yield* ClientCapabilities.SshEnvironmentGateway;
+  const cloudSession = yield* ClientCapabilities.CloudSession;
   const persistedTargets = yield* storage.list;
   const initialEntries = new Map(
     yield* Effect.forEach(
@@ -169,6 +197,12 @@ export const make = Effect.gen(function* () {
     readonly users: number;
   }
 
+  // Each signed-in account's latest successful relay listing since it signed in.
+  const relayListings = yield* Ref.make<ReadonlyMap<string, ReadonlySet<EnvironmentId>>>(new Map());
+  const relayListingsGuard = yield* Semaphore.make(1);
+  const unlistedRelayEnvironmentIds = yield* SubscriptionRef.make<ReadonlySet<EnvironmentId>>(
+    new Set(),
+  );
   const leaseLocks = yield* Ref.make<ReadonlyMap<EnvironmentId, LeaseLock>>(new Map());
   const leaseLocksGuard = yield* Semaphore.make(1);
   const started = yield* Ref.make(false);
@@ -603,11 +637,19 @@ export const make = Effect.gen(function* () {
     );
   });
 
+  const relayTargets = SubscriptionRef.get(entries).pipe(
+    Effect.map((current) =>
+      [...current.values()].flatMap((entry) =>
+        entry.target._tag === "RelayConnectionTarget" ? [entry.target] : [],
+      ),
+    ),
+  );
+
   const removeRelayEnvironments = Effect.fn("EnvironmentRegistry.removeRelayEnvironments")(
-    function* () {
-      const relayEnvironmentIds = [...(yield* SubscriptionRef.get(entries)).values()]
-        .filter((entry) => entry.target._tag === "RelayConnectionTarget")
-        .map((entry) => entry.target.environmentId);
+    function* (scope?: { readonly accountId: string }) {
+      const relayEnvironmentIds = (yield* relayTargets)
+        .filter((target) => scope === undefined || target.accountId === scope.accountId)
+        .map((target) => target.environmentId);
 
       yield* Effect.forEach(
         relayEnvironmentIds,
@@ -620,6 +662,105 @@ export const make = Effect.gen(function* () {
           discard: true,
         },
       );
+      return relayEnvironmentIds;
+    },
+  );
+
+  // Hands a relay entry to its owning account in place: the catalog, the
+  // stored scope entry, and the running supervisor all move to the new target,
+  // so nothing is torn down and cached data stays.
+  const retagRelayEnvironment = Effect.fn("EnvironmentRegistry.retagRelayEnvironment")(function* (
+    environmentId: EnvironmentId,
+    accountId: string,
+  ) {
+    yield* withLeaseLock(
+      environmentId,
+      Effect.gen(function* () {
+        const current = (yield* SubscriptionRef.get(entries)).get(environmentId);
+        if (
+          current === undefined ||
+          current.target._tag !== "RelayConnectionTarget" ||
+          current.target.accountId === accountId ||
+          (yield* Ref.get(platformEnvironmentIds)).has(environmentId)
+        ) {
+          return;
+        }
+        const target = new RelayConnectionTarget({ ...current.target, accountId });
+        const entry: ConnectionCatalogEntry = { ...current, target };
+        yield* registrations.register(new RelayConnectionRegistration({ target }));
+        yield* Ref.update(persistedTargetsByEnvironment, (targets) =>
+          new Map(targets).set(environmentId, target),
+        );
+        const serviceScope = (yield* SubscriptionRef.get(serviceScopes)).get(environmentId);
+        if (serviceScope !== undefined) {
+          yield* SubscriptionRef.update(serviceScopes, (scopes) =>
+            new Map(scopes).set(environmentId, { ...serviceScope, entry }),
+          );
+          yield* serviceScope.supervisor.retarget(entry);
+        }
+        yield* SubscriptionRef.update(entries, (catalog) =>
+          new Map(catalog).set(environmentId, entry),
+        );
+      }),
+    );
+  });
+
+  const refreshUnlistedRelayEnvironments = Effect.gen(function* () {
+    const accountIds = yield* cloudSession.accountIds;
+    const listings = yield* Ref.get(relayListings);
+    // An entry another account has yet to list may be that account's, or on
+    // its way there through a relink.
+    const complete = accountIds.length > 0 && accountIds.every((id) => listings.has(id));
+    const next = new Set(
+      complete
+        ? (yield* relayTargets)
+            .filter(
+              (target) =>
+                (target.accountId === undefined || accountIds.includes(target.accountId)) &&
+                !accountIds.some((id) => listings.get(id)?.has(target.environmentId)),
+            )
+            .map((target) => target.environmentId)
+        : [],
+    );
+    const current = yield* SubscriptionRef.get(unlistedRelayEnvironmentIds);
+    if (next.size !== current.size || [...next].some((id) => !current.has(id))) {
+      yield* SubscriptionRef.set(unlistedRelayEnvironmentIds, next);
+    }
+  });
+
+  const applyRelayListing = Effect.fn("EnvironmentRegistry.applyRelayListing")(function* (
+    accountId: string,
+    listedEnvironmentIds: ReadonlyArray<EnvironmentId>,
+  ) {
+    const accountIds = yield* cloudSession.accountIds;
+    if (!accountIds.includes(accountId)) {
+      return;
+    }
+    const listed = new Set(listedEnvironmentIds);
+    const listings = yield* Ref.updateAndGet(relayListings, (current) =>
+      new Map([...current].filter(([id]) => accountIds.includes(id))).set(accountId, listed),
+    );
+
+    // The relay can hold links to one environment for two accounts, so an
+    // entry is never taken from an owner who still lists it or who has yet
+    // to list.
+    const claimable = (target: RelayConnectionTarget) =>
+      target.accountId === undefined ||
+      listings.get(target.accountId)?.has(target.environmentId) === false;
+    yield* Effect.forEach(
+      (yield* relayTargets).filter(
+        (target) =>
+          listed.has(target.environmentId) && target.accountId !== accountId && claimable(target),
+      ),
+      (target) => retagRelayEnvironment(target.environmentId, accountId),
+      { discard: true },
+    );
+    yield* refreshUnlistedRelayEnvironments;
+  });
+
+  const reconcileRelayEnvironments = Effect.fn("EnvironmentRegistry.reconcileRelayEnvironments")(
+    function* (accountId: string, listedEnvironmentIds: ReadonlyArray<EnvironmentId>) {
+      yield* relayListingsGuard.withPermits(1)(applyRelayListing(accountId, listedEnvironmentIds));
     },
   );
 
@@ -657,6 +798,21 @@ export const make = Effect.gen(function* () {
     Stream.runForEach((status) => SubscriptionRef.set(networkStatus, status)),
     Effect.forkScoped,
   );
+  // A listing speaks for one sign-in: an account that signs out, or back in,
+  // has to list again before it counts.
+  yield* wakeups.changes.pipe(
+    Stream.filter((reason) => ConnectionWakeups.isCredentialsChangeFor(reason, undefined)),
+    Stream.runForEach((reason) =>
+      relayListingsGuard.withPermits(1)(
+        Ref.update(relayListings, (current) =>
+          typeof reason === "string"
+            ? new Map()
+            : new Map([...current].filter(([id]) => !reason.accountIds.has(id))),
+        ).pipe(Effect.andThen(refreshUnlistedRelayEnvironments)),
+      ),
+    ),
+    Effect.forkScoped,
+  );
 
   return EnvironmentRegistry.of({
     entries,
@@ -667,6 +823,8 @@ export const make = Effect.gen(function* () {
     reconcilePlatform,
     remove,
     removeRelayEnvironments,
+    reconcileRelayEnvironments,
+    unlistedRelayEnvironmentIds,
     retryNow,
     state,
     stateChanges,

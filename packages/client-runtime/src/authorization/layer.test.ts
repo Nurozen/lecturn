@@ -271,6 +271,111 @@ describe("RemoteEnvironmentAuthorization", () => {
     }),
   );
 
+  it.effect("refuses a cached token after the environment is relinked to another account", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        initialToken: new TokenStore.RemoteDpopAccessToken({
+          environmentId: ENVIRONMENT_ID,
+          label: DESCRIPTOR.label,
+          endpoint: ENDPOINT,
+          accessToken: "account-a-access-token",
+          expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+          dpopThumbprint: "thumbprint-1",
+          accountId: "account-a",
+        }),
+        responses: [
+          Response.json(DESCRIPTOR),
+          accessToken("account-b-access-token"),
+          websocketTicket("account-b-ticket"),
+        ],
+      });
+
+      const authorized = yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        return yield* remote.authorizeDpop({
+          expectedEnvironmentId: ENVIRONMENT_ID,
+          accountId: "account-b",
+          obtainBootstrap: harness.obtainBootstrap,
+        });
+      }).pipe(Effect.provide(harness.layer));
+
+      expect(authorized.socketUrl).toContain("wsTicket=account-b-ticket");
+      expect(yield* Ref.get(harness.bootstrapCalls)).toBe(1);
+      expect((yield* Ref.get(harness.tokens)).get(ENVIRONMENT_ID)).toEqual(
+        expect.objectContaining({
+          accessToken: "account-b-access-token",
+          accountId: "account-b",
+        }),
+      );
+    }),
+  );
+
+  it.effect("accepts a cached token without an owner only for the sole account", () =>
+    Effect.gen(function* () {
+      const unstamped = new TokenStore.RemoteDpopAccessToken({
+        environmentId: ENVIRONMENT_ID,
+        label: DESCRIPTOR.label,
+        endpoint: ENDPOINT,
+        accessToken: "cached-access-token",
+        expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+        dpopThumbprint: "thumbprint-1",
+      });
+      const authorizeAs = Effect.fn("test.authorizeAs")(function* (acceptUnstampedToken: boolean) {
+        const harness = yield* makeHarness({
+          initialToken: unstamped,
+          responses: acceptUnstampedToken
+            ? [websocketTicket("cached-ticket")]
+            : [
+                Response.json(DESCRIPTOR),
+                accessToken("fresh-access-token"),
+                websocketTicket("fresh-ticket"),
+              ],
+        });
+        yield* Effect.gen(function* () {
+          const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+          return yield* remote.authorizeDpop({
+            expectedEnvironmentId: ENVIRONMENT_ID,
+            accountId: "account-a",
+            acceptUnstampedToken,
+            obtainBootstrap: harness.obtainBootstrap,
+          });
+        }).pipe(Effect.provide(harness.layer));
+        return yield* Ref.get(harness.bootstrapCalls);
+      });
+
+      expect(yield* authorizeAs(true)).toBe(0);
+      expect(yield* authorizeAs(false)).toBe(1);
+    }),
+  );
+
+  it.effect("uses a cached token with an owner when the caller names no account", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        initialToken: new TokenStore.RemoteDpopAccessToken({
+          environmentId: ENVIRONMENT_ID,
+          label: DESCRIPTOR.label,
+          endpoint: ENDPOINT,
+          accessToken: "account-a-access-token",
+          expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+          dpopThumbprint: "thumbprint-1",
+          accountId: "account-a",
+        }),
+        responses: [websocketTicket("cached-ticket")],
+      });
+
+      const authorized = yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        return yield* remote.authorizeDpop({
+          expectedEnvironmentId: ENVIRONMENT_ID,
+          obtainBootstrap: harness.obtainBootstrap,
+        });
+      }).pipe(Effect.provide(harness.layer));
+
+      expect(authorized.socketUrl).toContain("wsTicket=cached-ticket");
+      expect(yield* Ref.get(harness.bootstrapCalls)).toBe(0);
+    }),
+  );
+
   it.effect("refreshes and persists an expired environment token", () =>
     Effect.gen(function* () {
       const expired = new TokenStore.RemoteDpopAccessToken({
