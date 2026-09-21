@@ -16,7 +16,7 @@ Your browser and desktop can be signed in to different accounts. Check the accou
 
 ## Managing the relay
 
-Open **Settings → Relay** on your desktop or locally hosted web app to see the environment's associated account and relay status. **Refresh status** checks both the local link and the associated account's relay discovery. A configured link is not necessarily online: the page distinguishes a reachable environment, an offline host, and an unavailable health check.
+Open **Settings → Relay** on your desktop or locally hosted web app to see the environment's associated account and relay status. **Refresh status** checks both the local link and the associated account's relay discovery. A configured link is not necessarily online: the page distinguishes a reachable environment, an offline host, and an unavailable health check. A status dot matches the health text: green for online, amber while checking, red for offline or an error, and grey when inactive or unverified. It briefly pulses on status changes and stays still when reduced motion is enabled.
 
 Use **Publish as** to choose the account when linking. To move this environment to another account, choose **Unlink environment**, confirm that remote access and activity publishing will stop, then select the new account and enable Lecturn Connect. Local projects and conversations stay on the host. Merely switching accounts does not transfer the environment.
 
@@ -24,7 +24,7 @@ The hosted web app does not run a relay itself; use its **Connections** page to 
 
 Only one Lecturn installation on a device can publish at a time, including activity-only publishing. Stable, nightly, and development installations share that limit. If another installation owns the relay, Settings → Relay identifies the conflict. Unlink in the owning installation before linking in another; local work remains available in both. Older builds must be updated to participate in this device-wide coordination.
 
-With multiple accounts attached, this host's projects appear under the account that actually publishes it. Unpublished local projects and direct connections remain outside the account sections. Thread cards show a translucent account-colored edge instead of an account chip. Collapsing an account animates its contents out of view; reduced-motion preferences disable the transition.
+With multiple accounts attached, this host's projects appear under the account that actually publishes it. Unpublished local projects and direct connections remain outside the account sections. A single translucent account-colored edge runs from each account header through its contents. Thread cards carry only a faint matching tint on hover. Account, project, and thread-shelf sections expand and collapse with a coordinated glass-edge fold and chevron rotation. Reduced-motion preferences disable the transitions.
 
 ## Choosing an account
 

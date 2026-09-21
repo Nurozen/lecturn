@@ -82,8 +82,8 @@ Submitting a prompt, steering, settling, or stopping work does not pop the notch
 
 ## Multiple Connect accounts
 
-When multiple accounts are available in your app, each signed-in account registers separately for notifications and Live Activities. Account labels and colors distinguish their cards. Tapping a card opens that account's conversation or pull request; if its sign-in has expired, Lecturn asks you to sign back into that account.
+When multiple accounts are available in your app, each signed-in account registers separately for notifications and Live Activities. Account labels and colors distinguish their cards. Tapping a card opens that account's conversation or pull request; if its sign-in has expired, Lecturn asks you to sign back into that account. Conversation taps wait for account and environment discovery before opening the thread, including when the app is starting.
 
 Signing out ends that account's local Live Activities and removes its push registration while retaining your other accounts. If the relay is unreachable during sign-out, registration cleanup is retried when a remaining account reconnects. Your device's notification permission is shared across accounts.
 
-On iPhone, adding another account requires a Connect service that supports notifications for multiple accounts. With an older service, only the primary account registers and Settings explains the limitation. Activity colors complement the explicit account label; they do not replace status labels. On iOS 26 and later, account cards use a glass surface; older versions retain the solid surface.
+On iPhone, adding another account requires a Connect service that supports notifications for multiple accounts. With an older service, only the primary account registers and Settings explains the limitation. The desktop activity panel uses each account’s color as a subtle card background in Work in motion, compact updates, and peek previews. Activity colors complement the explicit account label; they do not replace status labels. On iOS 26 and later, Live Activities use the system glass background; older versions retain the solid surface.

@@ -1,5 +1,5 @@
 /** A configured link alone is not evidence that the relay can reach the host. */
-export function relayHealthLabel(input: {
+export function relayHealthStatus(input: {
   readonly deviceRelayConflict?: string | null | undefined;
   readonly linked: boolean;
   readonly managedTunnel: boolean;
@@ -7,23 +7,33 @@ export function relayHealthLabel(input: {
   readonly error?: string | null | undefined;
   readonly availability?: "checking" | "online" | "offline" | "error" | undefined;
   readonly offline: boolean;
-}): string {
-  if (input.deviceRelayConflict) return "Relay in use by another installation";
-  if (input.error) return input.error;
-  if (input.checking) return "Checking relay status…";
-  if (!input.linked) return "Not linked";
-  if (!input.managedTunnel) return "Activity publishing only · managed relay disabled";
-  if (input.offline) return "This client is offline. Relay health cannot be checked.";
+}): { label: string; tone: "online" | "checking" | "offline" | "error" | "inactive" } {
+  if (input.deviceRelayConflict)
+    return { label: "Relay in use by another installation", tone: "error" };
+  if (input.error) return { label: input.error, tone: "error" };
+  if (input.checking) return { label: "Checking relay status…", tone: "checking" };
+  if (!input.linked) return { label: "Not linked", tone: "inactive" };
+  if (!input.managedTunnel)
+    return { label: "Activity publishing only · managed relay disabled", tone: "inactive" };
+  if (input.offline)
+    return { label: "This client is offline. Relay health cannot be checked.", tone: "offline" };
   switch (input.availability) {
     case "online":
-      return "Online · relay can reach this environment";
+      return { label: "Online · relay can reach this environment", tone: "online" };
     case "offline":
-      return "Offline · relay cannot reach this environment";
+      return { label: "Offline · relay cannot reach this environment", tone: "offline" };
     case "error":
-      return "Relay health check failed";
+      return { label: "Relay health check failed", tone: "error" };
     case "checking":
-      return "Checking relay status…";
+      return { label: "Checking relay status…", tone: "checking" };
     default:
-      return "Linked · sign in to the associated account to check relay health";
+      return {
+        label: "Linked · sign in to the associated account to check relay health",
+        tone: "inactive",
+      };
   }
+}
+
+export function relayHealthLabel(input: Parameters<typeof relayHealthStatus>[0]): string {
+  return relayHealthStatus(input).label;
 }

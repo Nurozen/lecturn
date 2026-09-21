@@ -1,4 +1,3 @@
-import type { CSSProperties } from "react";
 import { accountTintColor } from "@lecturn/shared/accountTint";
 import { useAtomValue } from "@effect/atom-react";
 
@@ -10,12 +9,10 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
  * Names the Connect account that owns an environment. Renders nothing unless
  * two or more accounts are known and the environment has a known owner,
  * so a single-account client looks as it always did.
- * The rail variant sits against a positioned row without using title width.
  */
 export function AccountMark(props: {
   readonly environmentId: string;
   readonly className?: string;
-  readonly variant?: "chip" | "rail";
 }) {
   return <KnownAccountMark {...props} />;
 }
@@ -23,11 +20,9 @@ export function AccountMark(props: {
 function KnownAccountMark({
   environmentId,
   className,
-  variant = "chip",
 }: {
   readonly environmentId: string;
   readonly className?: string;
-  readonly variant?: "chip" | "rail";
 }) {
   const mark = useAtomValue(accountMarkByEnvironmentIdAtom).get(environmentId);
   if (mark === undefined) return null;
@@ -36,23 +31,17 @@ function KnownAccountMark({
       <TooltipTrigger
         render={
           <span
-            style={
-              variant === "rail"
-                ? ({ "--account-tint": accountTintColor(mark.preset) } as CSSProperties)
-                : { borderInlineStart: `3px solid ${accountTintColor(mark.preset)}` }
-            }
+            style={{ borderInlineStart: `3px solid ${accountTintColor(mark.preset)}` }}
             role="img"
             aria-label={`Account ${mark.email}`}
             className={cn(
-              variant === "rail"
-                ? "lecturn-account-rail"
-                : "max-w-16 shrink-0 truncate rounded-sm bg-muted/60 px-1 text-[0.625rem] text-muted-foreground leading-4",
+              "max-w-16 shrink-0 truncate rounded-sm bg-muted/60 px-1 text-[0.625rem] text-muted-foreground leading-4",
               className,
             )}
           />
         }
       >
-        {variant === "chip" ? mark.label : null}
+        {mark.label}
       </TooltipTrigger>
       <TooltipPopup side="top">{mark.email}</TooltipPopup>
     </Tooltip>

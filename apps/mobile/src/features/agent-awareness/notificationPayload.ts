@@ -97,13 +97,10 @@ export function routeAgentNotificationResponseOnce(input: {
     readonly requestSignIn: (accountId: string) => void;
     readonly expandAccount?: (accountId: string) => void;
   };
-}): void {
+}): "handled" | "deferred" {
   const responseId = identifierFromNotificationResponse(input.response);
   if (responseId && input.handledResponseIds.has(responseId)) {
-    return;
-  }
-  if (responseId) {
-    input.handledResponseIds.add(responseId);
+    return "handled";
   }
   const deepLink = extractAgentNotificationDeepLink(input.response);
   if (deepLink) {
@@ -114,16 +111,23 @@ export function routeAgentNotificationResponseOnce(input: {
       const accountId =
         typeof rawAccountId === "string" && rawAccountId.length > 0 ? rawAccountId : owner;
       // Explicit ownership always wins over whichever account happens to be active.
-      if (!accountId) return;
+      if (!accountId) return "deferred";
       if (!input.accountContext.signedInAccountIds.includes(accountId)) {
         input.accountContext.requestSignIn(accountId);
-        return;
+        return "deferred";
       }
-      if (owner !== accountId) return;
+      if (!owner) return "deferred";
+      if (owner !== accountId) {
+        if (responseId) input.handledResponseIds.add(responseId);
+        return "handled";
+      }
       input.accountContext.expandAccount?.(accountId);
       input.navigate(`${deepLink}?accountId=${encodeURIComponent(accountId)}`);
-      return;
+      if (responseId) input.handledResponseIds.add(responseId);
+      return "handled";
     }
     input.navigate(deepLink);
   }
+  if (responseId) input.handledResponseIds.add(responseId);
+  return "handled";
 }

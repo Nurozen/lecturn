@@ -21,6 +21,13 @@ import { ActivitySnapshotChangeTracker } from "./activity/changes.ts";
 import { ActivityHoverIntent } from "./activity/hover.ts";
 import { activityStateColorVariable } from "./activity/theme.ts";
 
+function applyAccountSurface(target: HTMLElement, row: DesktopActivityRow): void {
+  if (row.accountId && row.accountColor && /^#[0-9a-fA-F]{6}$/.test(row.accountColor)) {
+    target.style.setProperty("--activity-account-color", row.accountColor);
+    target.classList.add("account-surface");
+  }
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   const pill = document.getElementById("pill")!;
   const cards = document.getElementById("cards")!;
@@ -314,6 +321,7 @@ window.addEventListener("DOMContentLoaded", () => {
       void ipcRenderer.invoke(Channels.ACTIVITY_PEEK_COUNT, rows.length);
       for (const row of rows) {
         const item = element("button", "", `peek-row activity-state ${stateFor(row)}`);
+        applyAccountSurface(item, row);
         resumeMotion(item, stateFor(row));
         item.dataset.focusKey = `${row.id}:peek`;
         item.setAttribute(
@@ -369,6 +377,7 @@ window.addEventListener("DOMContentLoaded", () => {
       if (group.title) cards.append(element("h2", group.title, "section-title"));
       for (const row of group.rows) {
         const card = document.createElement("article");
+        applyAccountSurface(card, row);
         const checksSummary = activityCheckSummary(row);
         const visualState = stateFor(row);
         const active = visualState === "active";
