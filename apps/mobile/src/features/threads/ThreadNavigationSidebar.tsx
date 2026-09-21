@@ -1,3 +1,10 @@
+import {
+  useAccountSectionDisplayStates,
+  toggleMobileAccountSection,
+  isAccountSectionKey,
+} from "../home/accountSectionExpansion";
+import { useAccountSections, useAccountAttention } from "../home/useAccountSections";
+import { AccountSectionHeader } from "../home/AccountSectionHeader";
 import { GlassCard } from "../../components/GlassCard";
 import { buildSidebarHierarchy } from "./sidebar-hierarchy";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
@@ -47,7 +54,10 @@ import {
   THREAD_SORT_OPTIONS,
   useHomeListOptions,
 } from "../home/home-list-options";
-import { buildHomeListFilterMenu } from "../home/home-list-filter-menu";
+import {
+  buildHomeListFilterMenu,
+  groupAccountFilterEnvironments,
+} from "../home/home-list-filter-menu";
 import {
   buildHomeListLayout,
   buildHomeHierarchyV2Items,
@@ -186,6 +196,8 @@ function NativeSidebarContainer(props: ThreadNavigationSidebarProps) {
 function ThreadNavigationSidebarPane(
   props: ThreadNavigationSidebarProps & { readonly nativeChrome: boolean },
 ) {
+  const accountSections = useAccountSections();
+  const attention = useAccountAttention(accountSections);
   const { themeAppearance } = useAppearancePreferences();
   const light = themeAppearance === "light";
   const insets = useSafeAreaInsets();
@@ -263,11 +275,12 @@ function ThreadNavigationSidebarPane(
   const projectScopes = useMemo(
     () =>
       buildHomeProjectScopes({
+        accountSections,
         projects,
         environmentId: options.selectedEnvironmentId,
         projectGroupingMode: options.projectGroupingMode,
       }),
-    [options.projectGroupingMode, options.selectedEnvironmentId, projects],
+    [accountSections, options.projectGroupingMode, options.selectedEnvironmentId, projects],
   );
   const projectFilterOptions = useMemo(
     () =>
@@ -351,6 +364,7 @@ function ThreadNavigationSidebarPane(
   const groups = useMemo(
     () =>
       buildHomeThreadGroups({
+        accountSections,
         includeStaveProjects: nestSagas,
         sagaIndex,
         projects: scopedProjects,
@@ -364,6 +378,7 @@ function ThreadNavigationSidebarPane(
         projectGroupingMode: options.projectGroupingMode,
       }),
     [
+      accountSections,
       nestSagas,
       sagaIndex,
       matchedThreadKeys,
@@ -378,6 +393,10 @@ function ThreadNavigationSidebarPane(
     ReadonlyMap<string, HomeGroupDisplayState>
   >(() => new Map());
   const updateGroupDisplay = useCallback((key: string, action: HomeGroupDisplayAction) => {
+    if (isAccountSectionKey(key) && action === "toggle-collapsed") {
+      toggleMobileAccountSection(key);
+      return;
+    }
     setGroupDisplayStates((previous) => {
       const next = new Map(previous);
       next.set(
@@ -394,17 +413,19 @@ function ThreadNavigationSidebarPane(
     });
   }, []);
   const hasSearchQuery = props.searchQuery.trim().length > 0;
+  const accountDisplayStates = useAccountSectionDisplayStates(groupDisplayStates);
   const listLayout = useMemo(
     () =>
       threadListV2Enabled
         ? EMPTY_HOME_LIST_LAYOUT
         : buildHomeListLayout({
+            accountSections,
             groups,
-            displayStates: groupDisplayStates,
+            displayStates: accountDisplayStates,
             showAllThreads: hasSearchQuery,
             sagaIndex,
           }),
-    [threadListV2Enabled, groups, groupDisplayStates, hasSearchQuery, sagaIndex],
+    [accountSections, threadListV2Enabled, groups, accountDisplayStates, hasSearchQuery, sagaIndex],
   );
   const projectCwdByKey = useMemo(() => {
     const map = new Map<string, string>();
@@ -624,10 +645,11 @@ function ThreadNavigationSidebarPane(
       snoozeLabelNow: `${nowMinute}:00.000Z`,
     });
     const items: SidebarListItem[] = buildHomeHierarchyV2Items({
+      accountSections,
       groups,
       items: flatItems,
       sagaIndex,
-      displayStates: groupDisplayStates,
+      displayStates: accountDisplayStates,
       searching: hasSearchQuery,
       selectedThreadKey: props.selectedThreadKey,
     });
@@ -640,10 +662,12 @@ function ThreadNavigationSidebarPane(
     }
     return items;
   }, [
+    accountSections,
     listLayout.items,
     groups,
     sagaIndex,
     groupDisplayStates,
+    accountDisplayStates,
     hasSearchQuery,
     props.selectedThreadKey,
     nowMinute,
@@ -669,14 +693,29 @@ function ThreadNavigationSidebarPane(
             subtitle: "Show threads from every environment",
             state: options.selectedEnvironmentId === null ? "on" : "off",
           },
-          ...environments.map((environment) => ({
-            id: `environment:${environment.environmentId}`,
-            title: environment.label,
-            state:
-              options.selectedEnvironmentId === environment.environmentId
-                ? ("on" as const)
-                : ("off" as const),
-          })),
+          ...(accountSections
+            ? groupAccountFilterEnvironments(environments, accountSections, attention).map(
+                (group) => ({
+                  id: `account:${group.id}`,
+                  title: group.label,
+                  subactions: group.environments.map((environment) => ({
+                    id: `environment:${environment.environmentId}`,
+                    title: environment.label,
+                    state:
+                      options.selectedEnvironmentId === environment.environmentId
+                        ? ("on" as const)
+                        : ("off" as const),
+                  })),
+                }),
+              )
+            : environments.map((environment) => ({
+                id: `environment:${environment.environmentId}`,
+                title: environment.label,
+                state:
+                  options.selectedEnvironmentId === environment.environmentId
+                    ? ("on" as const)
+                    : ("off" as const),
+              }))),
         ],
       },
       ...(projectFilterOptions.length === 0
@@ -726,7 +765,15 @@ function ThreadNavigationSidebarPane(
             },
           ] satisfies MenuAction[])),
     ],
-    [environments, options, projectFilterOptions, selectedProjectKey, threadListV2Enabled],
+    [
+      accountSections,
+      attention,
+      environments,
+      options,
+      projectFilterOptions,
+      selectedProjectKey,
+      threadListV2Enabled,
+    ],
   );
   const handleListMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {
@@ -917,6 +964,13 @@ function ThreadNavigationSidebarPane(
   const renderListRow = useCallback(
     ({ item }: { readonly item: SidebarListItem }) => {
       switch (item.type) {
+        case "account-header":
+          return (
+            <AccountSectionHeader
+              item={item}
+              onToggle={() => updateGroupDisplay(item.key, "toggle-collapsed")}
+            />
+          );
         case "v2-pending": {
           const pendingScopeKey = scopedProjectKey(
             item.pendingTask.message.environmentId,
@@ -1211,6 +1265,8 @@ function ThreadNavigationSidebarPane(
   const filterMenu = useMemo(
     () =>
       buildHomeListFilterMenu({
+        accountSections,
+        accountAttention: attention,
         environments,
         projects: projectFilterOptions,
         selectedEnvironmentId: options.selectedEnvironmentId,
@@ -1224,6 +1280,8 @@ function ThreadNavigationSidebarPane(
         listOrganization: !threadListV2Enabled,
       }),
     [
+      accountSections,
+      attention,
       environments,
       options,
       projectFilterOptions,

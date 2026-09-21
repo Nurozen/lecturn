@@ -1,3 +1,5 @@
+import { accountTintColor } from "@lecturn/shared/accountTint";
+import { accountMarkByEnvironmentIdAtom } from "../../cloud/connectAccounts";
 import {
   useLocalThreadActivityIntents,
   localThreadActivityKey,
@@ -30,6 +32,7 @@ import { pullRequestWatchEnvironment, usePullRequestWatches } from "../../state/
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
   watchActivityRows,
+  withActivityAccountMarks,
   contextualActivityRows,
   boundedActivitySnapshot,
   threadActivityRows,
@@ -40,6 +43,7 @@ import { toastManager } from "../ui/toast";
 import { formatEnvironmentQueryError } from "../../state/query";
 
 function EnabledActivityBridge() {
+  const accountMarks = useAtomValue(accountMarkByEnvironmentIdAtom);
   const viewedThread = useParams({ strict: false, select: resolveThreadRouteRef });
   const { environments } = useEnvironments();
   const ids = useMemo(
@@ -370,7 +374,21 @@ function EnabledActivityBridge() {
   });
   useEffect(() => {
     pendingPublication.current = {
-      ...boundedActivitySnapshot(publishedRows),
+      ...boundedActivitySnapshot(
+        withActivityAccountMarks(
+          publishedRows,
+          new Map(
+            [...accountMarks].map(([id, mark]) => [
+              id,
+              {
+                accountId: mark.accountId,
+                label: mark.label,
+                color: accountTintColor(mark.preset),
+              },
+            ]),
+          ),
+        ),
+      ),
       readyEnvironmentIds,
       ...(viewedThread ? { viewedThread } : {}),
     };
@@ -380,7 +398,7 @@ function EnabledActivityBridge() {
       publicationTimer.current = null;
       publishLatest();
     }, 300);
-  }, [publishedRows, readyEnvironmentIds, viewedThread]);
+  }, [publishedRows, readyEnvironmentIds, viewedThread, accountMarks]);
   useEffect(
     () => () => {
       if (publicationTimer.current !== null) clearTimeout(publicationTimer.current);

@@ -88,7 +88,9 @@ export function CloudEnvironmentConnectRows({
     [accountByEnvironmentId, accountStates],
   );
   const accountHeading = (accountId: string | null) =>
-    accountId === null ? "Other environments" : (profiles.get(accountId)?.email ?? "Account");
+    accountId === null
+      ? "Other environments"
+      : (profiles.get(accountId)?.label ?? profiles.get(accountId)?.email ?? "Account");
   const connectRelayEnvironment = useCallback(
     (environment: RelayClientEnvironmentRecord) => {
       // The owner is the account whose discovery listed the environment.
@@ -289,7 +291,7 @@ export function CloudEnvironmentConnectRows({
     );
   };
 
-  // With two or more accounts known, each account's environments sit under its email.
+  // With two or more accounts known, each account's environments sit under its label.
   if (connectMultiAccount && knownAccountIds.length >= 2) {
     return bucketByAccount(
       visibleEnvironments,

@@ -1,3 +1,4 @@
+import { EnvironmentRelinkError } from "../environments/EnvironmentRelinks.ts";
 import { TeamRuntime } from "../teams/TeamRuntime.ts";
 import { isBillingAppOrigin } from "../billing/BillingConfig.ts";
 import { createClerkClient, verifyToken } from "@clerk/backend";
@@ -431,6 +432,7 @@ export const metadataApi = HttpApiBuilder.group(
       .handle("protectedResource", () =>
         Effect.succeed({
           resource: issuer,
+          capabilities: { multiAccountPush: true },
           authorization_servers: [issuer],
           scopes_supported: scopes,
           dpop_bound_access_tokens_required: true,
@@ -1176,6 +1178,7 @@ const currentTraceId = Effect.currentParentSpan.pipe(
 );
 
 const RelayCommonPersistenceError = Schema.Union([
+  EnvironmentRelinkError,
   Devices.DeviceRegistrationPersistenceError,
   Devices.DeviceUnregistrationPersistenceError,
   Devices.DeviceListPersistenceError,

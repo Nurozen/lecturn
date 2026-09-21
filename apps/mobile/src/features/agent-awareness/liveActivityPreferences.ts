@@ -1,3 +1,4 @@
+import { connectMultiAccount } from "../cloud/publicConfig";
 import * as Effect from "effect/Effect";
 
 import type { SavedRemoteConnection } from "../../lib/connection";
@@ -9,6 +10,7 @@ export const setLiveActivityUpdatesEnabled = Effect.fn("setLiveActivityUpdatesEn
     readonly enabled: boolean;
     readonly previousEnabled: boolean;
     readonly clerkToken: string | null;
+    readonly accountId?: string;
     readonly connections: ReadonlyArray<SavedRemoteConnection>;
   }) {
     const linkedConnections = input.connections.filter(
@@ -21,13 +23,14 @@ export const setLiveActivityUpdatesEnabled = Effect.fn("setLiveActivityUpdatesEn
       });
 
       const clerkToken = input.clerkToken;
-      if (!clerkToken) return;
+      if (!connectMultiAccount && !clerkToken) return;
 
       yield* Effect.forEach(
         linkedConnections,
         (connection) =>
           linkEnvironmentToCloudWithPreference({
-            clerkToken,
+            clerkToken: clerkToken ?? "",
+            ...(input.accountId ? { accountId: input.accountId } : {}),
             connection,
             liveActivitiesEnabled: enabled,
           }),
@@ -45,13 +48,14 @@ export const setLiveActivityUpdatesEnabled = Effect.fn("setLiveActivityUpdatesEn
       );
 
       const clerkToken = input.clerkToken;
-      if (!clerkToken) return;
+      if (!connectMultiAccount && !clerkToken) return;
 
       yield* Effect.forEach(
         linkedConnections,
         (connection) =>
           linkEnvironmentToCloudWithPreference({
-            clerkToken,
+            clerkToken: clerkToken ?? "",
+            ...(input.accountId ? { accountId: input.accountId } : {}),
             connection,
             liveActivitiesEnabled: input.previousEnabled,
           }).pipe(

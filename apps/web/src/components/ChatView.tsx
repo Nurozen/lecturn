@@ -1,3 +1,4 @@
+import { useAccountTint } from "../cloud/useAccountTint";
 import { RepositoryPullRequestOverview } from "./pullRequest/RepositoryPullRequestOverview";
 import { useStaveGitSelection } from "./stave/staveGitSelection";
 import {
@@ -1369,6 +1370,7 @@ function releaseChatTimelineAnchor<T extends { readonly messageId: MessageId | n
 }
 
 function ChatViewContent(props: ChatViewProps) {
+  const accountTint = useAccountTint(props.environmentId);
   const {
     environmentId,
     threadId,
@@ -7932,7 +7934,10 @@ function ChatViewContent(props: ChatViewProps) {
   });
 
   return (
-    <div className="lecturn-chat-surface relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+    <div
+      {...accountTint}
+      className="lecturn-chat-surface relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+    >
       {rightPanelControlsAtRoot ? panelLayoutControls : null}
       <div
         className={cn(

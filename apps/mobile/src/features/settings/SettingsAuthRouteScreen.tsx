@@ -1,15 +1,19 @@
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { useAuth } from "@clerk/expo";
 import { AuthView, UserProfileView } from "@clerk/expo/native";
-import { StackActions, useNavigation } from "@react-navigation/native";
+import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { MobileAccountProfile } from "./MobileAccountProfile";
+import { SettingsAddAccountAuthContent } from "./SettingsAddAccountRouteScreen";
 import { AppText } from "../../components/AppText";
-import { hasCloudPublicConfig } from "../cloud/publicConfig";
+import { connectMultiAccount, hasCloudPublicConfig } from "../cloud/publicConfig";
 
-export function SettingsAuthRouteScreen() {
+export function SettingsAuthRouteScreen(
+  props: StaticScreenProps<{ accountId?: string } | undefined>,
+) {
   const navigation = useNavigation();
 
   useLayoutEffect(() => {
@@ -18,7 +22,17 @@ export function SettingsAuthRouteScreen() {
     }
   }, [navigation]);
 
-  return hasCloudPublicConfig() ? <ConfiguredSettingsAuthRouteScreen /> : null;
+  return hasCloudPublicConfig() ? (
+    connectMultiAccount ? (
+      props.route.params?.accountId ? (
+        <MobileAccountProfile accountId={props.route.params.accountId} />
+      ) : (
+        <SettingsAddAccountAuthContent />
+      )
+    ) : (
+      <ConfiguredSettingsAuthRouteScreen />
+    )
+  ) : null;
 }
 
 function ConfiguredSettingsAuthRouteScreen() {

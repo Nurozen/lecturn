@@ -16,6 +16,13 @@ const PREFERENCES_KEY = "lecturn.preferences";
 const PREFERENCES_FALLBACK_KEY = "lecturn.preferences.fallback";
 
 export interface Preferences {
+  readonly connectAccounts?: ReadonlyArray<{
+    readonly accountId: string;
+    readonly email: string;
+    readonly label: string;
+    readonly preset: string;
+  }>;
+  readonly connectAccountsRemoving?: ReadonlyArray<string>;
   readonly liveActivitiesEnabled?: boolean;
   readonly themeId?: MobileThemeId;
   readonly lightThemeId?: MobileThemeId;
@@ -86,6 +93,8 @@ export class MobilePreferencesStore extends Context.Service<
 
 function sanitizePreferences(parsed: Preferences): Preferences {
   const preferences: {
+    connectAccounts?: Preferences["connectAccounts"];
+    connectAccountsRemoving?: ReadonlyArray<string>;
     liveActivitiesEnabled?: boolean;
     themeId?: MobileThemeId;
     lightThemeId?: MobileThemeId;
@@ -107,6 +116,21 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     threadListSnoozedShelfExpanded?: boolean;
   } = {};
 
+  if (Array.isArray(parsed.connectAccounts)) {
+    preferences.connectAccounts = parsed.connectAccounts.filter(
+      (entry) =>
+        entry &&
+        typeof entry.accountId === "string" &&
+        typeof entry.email === "string" &&
+        typeof entry.label === "string" &&
+        typeof entry.preset === "string",
+    );
+  }
+  if (Array.isArray(parsed.connectAccountsRemoving)) {
+    preferences.connectAccountsRemoving = parsed.connectAccountsRemoving.filter(
+      (id) => typeof id === "string",
+    );
+  }
   if (typeof parsed.liveActivitiesEnabled === "boolean") {
     preferences.liveActivitiesEnabled = parsed.liveActivitiesEnabled;
   }

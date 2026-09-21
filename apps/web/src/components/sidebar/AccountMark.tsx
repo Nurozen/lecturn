@@ -1,3 +1,4 @@
+import { accountTintColor } from "@lecturn/shared/accountTint";
 import { useAtomValue } from "@effect/atom-react";
 
 import { accountMarkByEnvironmentIdAtom } from "../../cloud/connectAccounts";
@@ -31,6 +32,7 @@ function KnownAccountMark({
       <TooltipTrigger
         render={
           <span
+            style={{ borderInlineStart: `3px solid ${accountTintColor(mark.preset)}` }}
             role="img"
             aria-label={`Account ${mark.email}`}
             className={cn(

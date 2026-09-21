@@ -91,6 +91,12 @@ export function routeAgentNotificationResponseOnce(input: {
   readonly handledResponseIds: Set<string>;
   readonly response: unknown;
   readonly navigate: (deepLink: string) => void;
+  readonly accountContext?: {
+    readonly signedInAccountIds: ReadonlyArray<string>;
+    readonly accountByEnvironmentId: ReadonlyMap<string, string>;
+    readonly requestSignIn: (accountId: string) => void;
+    readonly expandAccount?: (accountId: string) => void;
+  };
 }): void {
   const responseId = identifierFromNotificationResponse(input.response);
   if (responseId && input.handledResponseIds.has(responseId)) {
@@ -101,6 +107,23 @@ export function routeAgentNotificationResponseOnce(input: {
   }
   const deepLink = extractAgentNotificationDeepLink(input.response);
   if (deepLink) {
+    if (input.accountContext) {
+      const environmentId = decodeURIComponent(deepLink.split("/")[2]!);
+      const rawAccountId = dataFromNotificationResponse(input.response)?.accountId;
+      const owner = input.accountContext.accountByEnvironmentId.get(environmentId);
+      const accountId =
+        typeof rawAccountId === "string" && rawAccountId.length > 0 ? rawAccountId : owner;
+      // Explicit ownership always wins over whichever account happens to be active.
+      if (!accountId) return;
+      if (!input.accountContext.signedInAccountIds.includes(accountId)) {
+        input.accountContext.requestSignIn(accountId);
+        return;
+      }
+      if (owner !== accountId) return;
+      input.accountContext.expandAccount?.(accountId);
+      input.navigate(`${deepLink}?accountId=${encodeURIComponent(accountId)}`);
+      return;
+    }
     input.navigate(deepLink);
   }
 }

@@ -85,6 +85,9 @@ vi.mock("../../connection/catalog", () => ({
   },
 }));
 
+vi.mock("./MultiAccountCloudAuthBridge", () => ({
+  MultiAccountCloudAuthBridge: (props: { readonly children: ReactNode }) => props.children,
+}));
 vi.mock("./cloud-drafts", () => ({ removeCloudEnvironments: {} }));
 vi.mock("../../state/use-composer-drafts", () => ({
   getComposerCloudAccountId: vi.fn(async () => null),

@@ -23,7 +23,8 @@ import {
   unregisterAgentAwarenessDeviceForCurrentUser,
 } from "../agent-awareness/remoteRegistration";
 import { clearConnectOnboardingRequest, requestConnectOnboarding } from "./connectOnboarding";
-import { resolveCloudPublicConfig } from "./publicConfig";
+import { MultiAccountCloudAuthBridge } from "./MultiAccountCloudAuthBridge";
+import { connectMultiAccount, resolveCloudPublicConfig } from "./publicConfig";
 import { makeMobileSingleAccountEnforcer } from "./singleAccountGuard";
 import { useSessionRelayToken } from "./useSessionRelayToken";
 import { removeCloudEnvironments } from "./cloud-drafts";
@@ -262,7 +263,11 @@ export function CloudAuthProvider(props: { readonly children: ReactNode }) {
 
   return (
     <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
-      <CloudAuthBridge>{props.children}</CloudAuthBridge>
+      {connectMultiAccount ? (
+        <MultiAccountCloudAuthBridge>{props.children}</MultiAccountCloudAuthBridge>
+      ) : (
+        <CloudAuthBridge>{props.children}</CloudAuthBridge>
+      )}
     </ClerkProvider>
   );
 }

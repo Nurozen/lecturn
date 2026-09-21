@@ -1,3 +1,5 @@
+import { accountScopedKey } from "@lecturn/client-runtime/relay";
+import { accountForEnvironment, type AccountSectionContext } from "./accountSections";
 import {
   buildProjectGroups,
   derivePhysicalProjectKey,
@@ -52,11 +54,24 @@ function getProjectSortTimestamp(
 }
 
 export function buildHomeProjectScopes(input: {
+  readonly accountSections?: AccountSectionContext | undefined;
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly environmentId: EnvironmentId | null;
   readonly projectGroupingMode: SidebarProjectGroupingMode;
   readonly physicalStaveGroups?: boolean;
 }): ReadonlyArray<HomeProjectScope> {
+  if (input.accountSections) {
+    const context = input.accountSections;
+    return [...context.accounts.map((account) => account.accountId), null].flatMap((accountId) =>
+      buildHomeProjectScopes({
+        ...input,
+        accountSections: undefined,
+        projects: input.projects.filter(
+          (project) => accountForEnvironment(context, project.environmentId) === accountId,
+        ),
+      }).map((scope) => ({ ...scope, key: accountScopedKey(scope.key, accountId) })),
+    );
+  }
   const projects = input.projects.filter(
     (project) => input.environmentId === null || project.environmentId === input.environmentId,
   );
@@ -210,6 +225,7 @@ function selectRecentThreads(
 }
 
 export function buildHomeThreadGroups(input: {
+  readonly accountSections?: AccountSectionContext | undefined;
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
   readonly pendingTasks?: ReadonlyArray<PendingNewTask>;
@@ -224,6 +240,24 @@ export function buildHomeThreadGroups(input: {
   readonly includeStaveProjects?: boolean;
   readonly sagaIndex?: ReadonlyArray<SagaProjectIndexEntry>;
 }): ReadonlyArray<HomeThreadGroup> {
+  if (input.accountSections) {
+    const context = input.accountSections;
+    return [...context.accounts.map((account) => account.accountId), null].flatMap((accountId) =>
+      buildHomeThreadGroups({
+        ...input,
+        accountSections: undefined,
+        projects: input.projects.filter(
+          (project) => accountForEnvironment(context, project.environmentId) === accountId,
+        ),
+        threads: input.threads.filter(
+          (thread) => accountForEnvironment(context, thread.environmentId) === accountId,
+        ),
+        pendingTasks: input.pendingTasks?.filter(
+          (task) => accountForEnvironment(context, task.message.environmentId) === accountId,
+        ),
+      }).map((group) => ({ ...group, key: accountScopedKey(group.key, accountId) })),
+    );
+  }
   const now = input.now ?? Date.now();
   const groups = new Map<string, MutableHomeThreadGroup>();
   const groupTitleByKey = new Map<string, string>();

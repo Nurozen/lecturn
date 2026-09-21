@@ -15,6 +15,8 @@ import {
 import { setLiveActivityUpdatesEnabled } from "./liveActivityPreferences";
 import { updateAgentAwarenessRegistrationPreferences } from "./remoteRegistration";
 
+vi.mock("../cloud/publicConfig", () => ({ connectMultiAccount: false }));
+
 vi.mock("expo-secure-store", () => ({
   deleteItemAsync: vi.fn(),
   getItemAsync: vi.fn(),
@@ -57,9 +59,9 @@ const testLayer = Layer.mergeAll(
       clearSavedConnection: () => Effect.void,
       loadOrCreateAgentAwarenessDeviceId: Effect.succeed("device-1"),
       loadAgentAwarenessDeviceId: Effect.succeed("device-1"),
-      loadAgentAwarenessRegistrationRecord: Effect.succeed(null),
+      loadAgentAwarenessRegistrationRecord: () => Effect.succeed(null),
       saveAgentAwarenessRegistrationRecord: () => Effect.void,
-      clearAgentAwarenessRegistrationRecord: Effect.void,
+      clearAgentAwarenessRegistrationRecord: () => Effect.void,
       loadRecentThreadShortcuts: Effect.succeed([]),
       saveRecentThreadShortcuts: () => Effect.void,
     }),

@@ -77,7 +77,7 @@ export function buildConnectAccountMenu(input: {
     const needsSignIn = !active && input.needsSignIn.includes(accountId);
     return {
       accountId,
-      name: profile?.email ?? UNKNOWN_ACCOUNT_NAME,
+      name: profile?.label ?? profile?.email ?? UNKNOWN_ACCOUNT_NAME,
       initials: accountInitials(profile?.email),
       imageUrl: profile?.imageUrl ?? null,
       active,

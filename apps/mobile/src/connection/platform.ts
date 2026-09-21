@@ -29,6 +29,8 @@ import Constants from "expo-constants";
 import * as Network from "expo-network";
 import { AppState } from "react-native";
 
+import { knownConnectAccountsAtom } from "../features/cloud/knownAccounts";
+import { connectMultiAccount } from "../features/cloud/publicConfig";
 import { authClientMetadata } from "../lib/authClientMetadata";
 import * as Runtime from "../lib/runtime";
 import * as MobileStorage from "../persistence/mobile-storage";
@@ -120,7 +122,11 @@ const capabilitiesLayer = Layer.effectContext(
     return Context.make(
       CloudSession,
       CloudSession.of({
-        accountIds: Effect.sync(() => managedRelayAccountIds(appAtomRegistry)),
+        accountIds: Effect.sync(() =>
+          connectMultiAccount
+            ? appAtomRegistry.get(knownConnectAccountsAtom).map((account) => account.accountId)
+            : managedRelayAccountIds(appAtomRegistry),
+        ),
         clerkToken: Effect.fnUntraced(function* (accountId: string) {
           const session = appAtomRegistry.get(managedRelaySessionsAtom).get(accountId);
           if (session === undefined) {

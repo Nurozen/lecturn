@@ -53,6 +53,7 @@ vi.mock("react-native", () => ({
   },
 }));
 vi.mock("../../cloud/publicConfig", () => ({
+  connectMultiAccount: false,
   resolveCloudPublicConfig: () => ({ relay: { url: "https://relay.example.test" } }),
   resolveRelayClerkTokenOptions: () => ({ template: "relay" }),
 }));

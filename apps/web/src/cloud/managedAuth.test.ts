@@ -77,6 +77,15 @@ const sharedStorage = vi.hoisted(() => {
   return { entries, localStorage };
 });
 
+vi.mock("./useProfileStableAccountId", () => ({
+  useProfileStableAccountId: (id: string | null | undefined) => id,
+}));
+
+vi.mock("./accountAppearance", () => ({
+  initializeAccountAppearance: vi.fn(async () => {}),
+  refreshAccountAppearance: vi.fn(async () => {}),
+}));
+
 vi.mock("@clerk/react", () => ({
   useAuth: () => {
     const session = rendered.stale ?? clerk.session;

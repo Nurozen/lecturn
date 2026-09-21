@@ -1,3 +1,8 @@
+import {
+  readAccountAppearance,
+  resolveAccountTintPreset,
+  type AccountTintPresetId,
+} from "@lecturn/shared/accountTint";
 import { relayAccountByEnvironmentId } from "@lecturn/client-runtime/relay";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -12,6 +17,8 @@ export const ACCOUNT_PROFILES_STORAGE_KEY = "lecturn:account-profiles:v1";
 
 const AccountProfile = Schema.Struct({
   email: Schema.String,
+  label: Schema.optional(Schema.String),
+  preset: Schema.optional(Schema.String),
   imageUrl: Schema.optional(Schema.String),
 });
 const AccountProfilesDocument = Schema.Record(Schema.String, AccountProfile);
@@ -39,6 +46,7 @@ export const connectAccountProfilesAtom = Atom.make<ConnectAccountProfiles>(
 /** A Clerk user as the profile list reads it. */
 export interface ObservedClerkUser {
   readonly id: string;
+  readonly unsafeMetadata?: unknown;
   readonly primaryEmailAddress?: { readonly emailAddress: string } | null | undefined;
   readonly hasImage?: boolean | undefined;
   readonly imageUrl?: string | undefined;
@@ -59,7 +67,15 @@ export function mergeAccountProfiles(input: {
     const email = user?.primaryEmailAddress?.emailAddress;
     const profile =
       user && email
-        ? { email, ...(user.hasImage && user.imageUrl ? { imageUrl: user.imageUrl } : {}) }
+        ? {
+            email,
+            ...readAccountAppearance(
+              user.unsafeMetadata,
+              email,
+              [...next.values()].flatMap((entry) => (entry.preset ? [entry.preset] : [])),
+            ),
+            ...(user.hasImage && user.imageUrl ? { imageUrl: user.imageUrl } : {}),
+          }
         : input.current.get(accountId);
     if (profile) next.set(accountId, profile);
   }
@@ -70,7 +86,12 @@ const sameProfiles = (left: ConnectAccountProfiles, right: ConnectAccountProfile
   left.size === right.size &&
   [...left].every(([accountId, profile]) => {
     const other = right.get(accountId);
-    return other?.email === profile.email && other.imageUrl === profile.imageUrl;
+    return (
+      other?.email === profile.email &&
+      other.imageUrl === profile.imageUrl &&
+      other.label === profile.label &&
+      other.preset === profile.preset
+    );
   });
 
 /** Records the signed-in users' emails next to the known-account list. */
@@ -151,6 +172,8 @@ export function accountMarkLabels(profiles: ConnectAccountProfiles): ReadonlyMap
 }
 
 export interface AccountMark {
+  readonly accountId: string;
+  readonly preset: AccountTintPresetId;
   readonly label: string;
   readonly email: string;
 }
@@ -175,7 +198,12 @@ export function buildAccountMarks(input: {
     const label = labels.get(accountId);
     const email = input.profiles.get(accountId)?.email;
     if (label !== undefined && email !== undefined && input.knownAccountIds.includes(accountId)) {
-      marks.set(environmentId, { label, email });
+      marks.set(environmentId, {
+        accountId,
+        label: input.profiles.get(accountId)?.label ?? label,
+        email,
+        preset: resolveAccountTintPreset(input.profiles.get(accountId)?.preset).id,
+      });
     }
   }
   return marks;

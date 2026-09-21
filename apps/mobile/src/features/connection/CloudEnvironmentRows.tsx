@@ -29,11 +29,15 @@ import { serverEnvironment } from "../../state/server";
 import { ProviderSetupLink } from "../settings/ProviderSetupLink";
 import type { ProviderSetupRouteParams } from "../settings/SettingsProviderSetupRouteScreen";
 import { availableCloudEnvironmentPresentation } from "../cloud/cloudEnvironmentPresentation";
-import { hasCloudPublicConfig } from "../cloud/publicConfig";
+import { environmentCatalog } from "../../connection/catalog";
+import { useConnectAccounts } from "../cloud/knownAccounts";
+import { accountTintColor } from "@lecturn/shared/accountTint";
+import { connectMultiAccount, hasCloudPublicConfig } from "../cloud/publicConfig";
 import { ConnectionStatusDot } from "./ConnectionStatusDot";
 import { type RelayEnvironmentView, useConnectionController } from "./useConnectionController";
 
 interface CloudEnvironmentRowsProps {
+  readonly accountId?: string;
   readonly connectedCloudEnvironments: ReadonlyArray<ConnectedEnvironmentSummary>;
   readonly onReconnectEnvironment: (environmentId: EnvironmentId) => void;
   readonly onSetupProvider?: (target: ProviderSetupRouteParams) => void;
@@ -74,7 +78,9 @@ export function CloudEnvironmentRows(props: CloudEnvironmentRowsProps) {
 
 function SignedInCloudEnvironmentRows(props: CloudEnvironmentRowsProps) {
   const { isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
-  if (!isSignedIn) return <ConnectedOnlyCloudEnvironmentRows {...props} />;
+  const accounts = useConnectAccounts();
+  if (!(connectMultiAccount ? accounts.some((account) => account.signedIn) : isSignedIn))
+    return <ConnectedOnlyCloudEnvironmentRows {...props} />;
   return <CloudEnvironmentRowsContent {...props} />;
 }
 
@@ -87,6 +93,8 @@ function CloudEnvironmentRowsContent(
   props: CloudEnvironmentRowsProps & { readonly discoveryAvailable?: boolean },
 ) {
   const controller = useConnectionController();
+  const accounts = useConnectAccounts();
+  const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
   const discoveryAvailable = props.discoveryAvailable ?? true;
   const availableCloudEnvironments = discoveryAvailable
     ? (props.showcaseAvailableEnvironments ?? controller.availableRelayEnvironments)
@@ -144,28 +152,69 @@ function CloudEnvironmentRowsContent(
 
       {hasCloudRows ? (
         <View collapsable={false} className="overflow-hidden rounded-[24px] bg-card">
-          {props.connectedCloudEnvironments.map((environment, index) => (
-            <ConnectedCloudEnvironmentRow
-              key={environment.environmentId}
-              environment={environment}
-              borderTop={index !== 0}
-              onConnect={() => props.onReconnectEnvironment(environment.environmentId)}
-              onDisconnect={() => handleDisconnectCloudEnvironment(environment.environmentId)}
-              errorExpanded={expandedErrorId === environment.environmentId}
-              onToggleError={() => handleToggleCloudError(environment.environmentId)}
-              onSetupProvider={props.onSetupProvider}
-            />
-          ))}
-          {availableCloudEnvironments.map((environment, index) => (
-            <CloudEnvironmentRow
-              key={environment.environment.environmentId}
-              environment={environment}
-              borderTop={props.connectedCloudEnvironments.length > 0 || index !== 0}
-              onConnect={() => handleConnectCloudEnvironment(environment)}
-              errorExpanded={expandedErrorId === environment.environment.environmentId}
-              onToggleError={() => handleToggleCloudError(environment.environment.environmentId)}
-            />
-          ))}
+          {(connectMultiAccount
+            ? props.accountId
+              ? [props.accountId]
+              : [...accounts.map((account) => account.accountId), null]
+            : [null]
+          ).map((accountId) => {
+            const account = accounts.find((entry) => entry.accountId === accountId);
+            const owns = (environmentId: EnvironmentId) => {
+              const target = catalog.entries.get(environmentId)?.target;
+              return target?._tag === "RelayConnectionTarget" ? (target.accountId ?? null) : null;
+            };
+            const connected = props.connectedCloudEnvironments.filter(
+              (entry) => !connectMultiAccount || owns(entry.environmentId) === accountId,
+            );
+            const available = availableCloudEnvironments.filter(
+              (entry) => !connectMultiAccount || (entry.accountId ?? null) === accountId,
+            );
+            if (!connected.length && !available.length) return null;
+            return (
+              <View key={accountId ?? "unowned"}>
+                {connectMultiAccount ? (
+                  <View className="flex-row items-center gap-2 px-4 py-3">
+                    <View
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: 4,
+                        backgroundColor: account ? accountTintColor(account.preset) : "#888888",
+                      }}
+                    />
+                    <Text className="text-sm font-semibold text-foreground">
+                      {account?.label ?? "No account"}
+                      {account && !account.signedIn ? " · Sign in again" : ""}
+                    </Text>
+                  </View>
+                ) : null}
+                {connected.map((environment, index) => (
+                  <ConnectedCloudEnvironmentRow
+                    key={environment.environmentId}
+                    environment={environment}
+                    borderTop={index !== 0}
+                    onConnect={() => props.onReconnectEnvironment(environment.environmentId)}
+                    onDisconnect={() => handleDisconnectCloudEnvironment(environment.environmentId)}
+                    errorExpanded={expandedErrorId === environment.environmentId}
+                    onToggleError={() => handleToggleCloudError(environment.environmentId)}
+                    onSetupProvider={props.onSetupProvider}
+                  />
+                ))}
+                {available.map((environment, index) => (
+                  <CloudEnvironmentRow
+                    key={environment.environment.environmentId}
+                    environment={environment}
+                    borderTop={connected.length > 0 || index !== 0}
+                    onConnect={() => handleConnectCloudEnvironment(environment)}
+                    errorExpanded={expandedErrorId === environment.environment.environmentId}
+                    onToggleError={() =>
+                      handleToggleCloudError(environment.environment.environmentId)
+                    }
+                  />
+                ))}
+              </View>
+            );
+          })}
         </View>
       ) : controller.relayDiscovery.isRefreshing ? (
         <View collapsable={false} className="items-center gap-3 rounded-[24px] bg-card p-6">

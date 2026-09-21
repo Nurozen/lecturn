@@ -190,6 +190,17 @@ window.addEventListener("DOMContentLoaded", () => {
       icon.replaceChildren(image);
     }
     identity.append(icon, element("span", row.projectLabel ?? row.subtitle, "project-label"));
+    if (row.accountId && row.accountLabel) {
+      const account = element("span", row.accountLabel, "account-mark");
+      account.setAttribute("aria-label", `Connect account: ${row.accountLabel}`);
+      const dot = element("span", "", "account-dot");
+      dot.setAttribute("aria-hidden", "true");
+      if (row.accountColor && /^#[0-9a-fA-F]{6}$/.test(row.accountColor)) {
+        dot.style.backgroundColor = row.accountColor;
+      }
+      account.prepend(dot);
+      identity.append(account);
+    }
     return identity;
   };
   const checkMeter = (row: DesktopActivityRow) => {

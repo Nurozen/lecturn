@@ -1,3 +1,11 @@
+import {
+  useAccountSectionDisplayStates,
+  toggleMobileAccountSection,
+  isAccountSectionKey,
+  setMobileProjectGroupCollapsed,
+} from "./accountSectionExpansion";
+import { useAccountSections } from "./useAccountSections";
+import { AccountSectionHeader } from "./AccountSectionHeader";
 import { useMobileSagaIndex, useSidebarNestSagas } from "../../state/stave";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import {
@@ -20,7 +28,7 @@ import {
   type SidebarProjectGroupingMode,
   type SidebarThreadSortOrder,
 } from "@lecturn/contracts";
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -34,7 +42,7 @@ import type { WorkspaceEnvironment, WorkspaceState } from "../../state/workspace
 import type { SavedRemoteConnection } from "../../lib/connection";
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
-import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { mobilePreferencesAtom } from "../../state/preferences";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2Enabled } from "../threads/use-thread-list-v2-enabled";
 import { environmentServerConfigsAtom } from "../../state/server";
@@ -212,13 +220,13 @@ function HomeTopContentSpacer() {
 /* ─── Main screen ────────────────────────────────────────────────────── */
 
 export function HomeScreen(props: HomeScreenProps) {
+  const accountSections = useAccountSections();
   const [groupDisplayStates, setGroupDisplayStates] = useState<
     ReadonlyMap<string, HomeGroupDisplayState>
   >(() => new Map());
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
   const threadListV2Enabled = useThreadListV2Enabled();
   const nestSagas = useSidebarNestSagas();
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const listRef = useRef<LegendListRef | null>(null);
   const insets = useSafeAreaInsets();
@@ -272,33 +280,28 @@ export function HomeScreen(props: HomeScreenProps) {
   const effectiveGroupDisplayStatesRef = useRef(effectiveGroupDisplayStates);
   effectiveGroupDisplayStatesRef.current = effectiveGroupDisplayStates;
 
-  const updateGroupDisplay = useCallback(
-    (key: string, action: HomeGroupDisplayAction) => {
-      const next = new Map(effectiveGroupDisplayStatesRef.current);
-      next.set(
-        key,
-        nextGroupDisplayState(
-          next.get(key) ?? {
-            ...DEFAULT_GROUP_DISPLAY_STATE,
-            collapsed: key.startsWith("settled:"),
-          },
-          action,
-        ),
-      );
-      effectiveGroupDisplayStatesRef.current = next;
-      setGroupDisplayStates(next);
-      if (action === "toggle-collapsed") {
-        const collapsedProjectGroups: string[] = [];
-        for (const [groupKey, state] of next) {
-          if (state.collapsed) {
-            collapsedProjectGroups.push(groupKey);
-          }
-        }
-        savePreferences({ collapsedProjectGroups });
-      }
-    },
-    [savePreferences],
-  );
+  const updateGroupDisplay = useCallback((key: string, action: HomeGroupDisplayAction) => {
+    if (isAccountSectionKey(key) && action === "toggle-collapsed") {
+      toggleMobileAccountSection(key);
+      return;
+    }
+    const next = new Map(effectiveGroupDisplayStatesRef.current);
+    next.set(
+      key,
+      nextGroupDisplayState(
+        next.get(key) ?? {
+          ...DEFAULT_GROUP_DISPLAY_STATE,
+          collapsed: key.startsWith("settled:"),
+        },
+        action,
+      ),
+    );
+    effectiveGroupDisplayStatesRef.current = next;
+    setGroupDisplayStates(next);
+    if (action === "toggle-collapsed") {
+      setMobileProjectGroupCollapsed(key, next.get(key)?.collapsed === true);
+    }
+  }, []);
 
   const handleSwipeableWillOpen = useCallback((methods: SwipeableMethods) => {
     if (openSwipeableRef.current !== methods) {
@@ -323,11 +326,12 @@ export function HomeScreen(props: HomeScreenProps) {
   const projectScopes = useMemo(
     () =>
       buildHomeProjectScopes({
+        accountSections,
         projects: props.projects,
         environmentId: props.selectedEnvironmentId,
         projectGroupingMode: props.projectGroupingMode,
       }),
-    [props.projectGroupingMode, props.projects, props.selectedEnvironmentId],
+    [accountSections, props.projectGroupingMode, props.projects, props.selectedEnvironmentId],
   );
   const selectedProjectScope = useMemo(
     () =>
@@ -389,6 +393,7 @@ export function HomeScreen(props: HomeScreenProps) {
   const projectGroups = useMemo(
     () =>
       buildHomeThreadGroups({
+        accountSections,
         includeStaveProjects: nestSagas,
         sagaIndex,
         projects: scopedProjects,
@@ -402,6 +407,7 @@ export function HomeScreen(props: HomeScreenProps) {
         projectGroupingMode: props.projectGroupingMode,
       }),
     [
+      accountSections,
       nestSagas,
       sagaIndex,
       props.projectGroupingMode,
@@ -417,17 +423,27 @@ export function HomeScreen(props: HomeScreenProps) {
   );
 
   const hasSearchQuery = props.searchQuery.trim().length > 0;
+  const accountDisplayStates = useAccountSectionDisplayStates(effectiveGroupDisplayStates);
   const listLayout = useMemo(
     () =>
       threadListV2Enabled
         ? EMPTY_HOME_LIST_LAYOUT
         : buildHomeListLayout({
+            accountSections,
             groups: projectGroups,
-            displayStates: effectiveGroupDisplayStates,
+            displayStates: accountDisplayStates,
             showAllThreads: hasSearchQuery,
             sagaIndex,
           }),
-    [threadListV2Enabled, projectGroups, effectiveGroupDisplayStates, hasSearchQuery, sagaIndex],
+    [
+      accountSections,
+      threadListV2Enabled,
+      projectGroups,
+      effectiveGroupDisplayStates,
+      accountDisplayStates,
+      hasSearchQuery,
+      sagaIndex,
+    ],
   );
 
   const projectCwdByKey = useMemo(() => {
@@ -768,17 +784,33 @@ export function HomeScreen(props: HomeScreenProps) {
   const threadListV2Items = useMemo(
     () =>
       buildHomeHierarchyV2Items({
+        accountSections,
         groups: projectGroups,
         items: flatThreadListV2Items,
         sagaIndex,
-        displayStates: effectiveGroupDisplayStates,
+        displayStates: accountDisplayStates,
         searching: hasSearchQuery,
       }),
-    [projectGroups, flatThreadListV2Items, sagaIndex, effectiveGroupDisplayStates, hasSearchQuery],
+    [
+      accountSections,
+      projectGroups,
+      flatThreadListV2Items,
+      sagaIndex,
+      effectiveGroupDisplayStates,
+      accountDisplayStates,
+      hasSearchQuery,
+    ],
   );
 
   const renderV2Row = useCallback(
     ({ item }: { readonly item: HomeHierarchyV2Item; readonly index: number }) => {
+      if (item.type === "account-header")
+        return (
+          <AccountSectionHeader
+            item={item}
+            onToggle={() => updateGroupDisplay(item.key, "toggle-collapsed")}
+          />
+        );
       if (item.type === "header")
         return (
           <ThreadListGroupHeader
@@ -1043,6 +1075,13 @@ export function HomeScreen(props: HomeScreenProps) {
   const renderRow = useCallback(
     ({ item }: LegendListRenderItemProps<HomeListItem>) => {
       switch (item.type) {
+        case "account-header":
+          return (
+            <AccountSectionHeader
+              item={item}
+              onToggle={() => updateGroupDisplay(item.key, "toggle-collapsed")}
+            />
+          );
         case "v2-settled-shelf":
           return (
             <ThreadListV2SettledShelfHeader

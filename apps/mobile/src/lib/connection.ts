@@ -13,6 +13,7 @@ export interface SavedRemoteConnection {
   readonly authenticationMethod?: "bearer" | "dpop";
   readonly dpopAccessToken?: string;
   readonly relayManaged?: true;
+  readonly accountId?: string;
 }
 
 export type RemoteClientConnectionState = EnvironmentConnectionPhase;

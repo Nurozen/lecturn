@@ -79,3 +79,11 @@ Opening a conversation from the notch closes the panel. The Lecturn logo brings 
 A meaningful activity or CI state change briefly bounces and colors the count, then shows a single-item preview when the panel is closed. The preview closes after five seconds unless you interact; leaving it or sending steering dismisses it. Text streaming alone does not trigger alerts, and new alerts do not replace a card you are already using. Reduced motion keeps the color cue without the bounce. Failed steering delivery restores your draft and surfaces an error.
 
 Submitting a prompt, steering, settling, or stopping work does not pop the notch open to report your own action. Later agent results, attention requests and CI changes remain eligible for alerts.
+
+## Multiple Connect accounts
+
+When multiple accounts are available in your app, each signed-in account registers separately for notifications and Live Activities. Account labels and colors distinguish their cards. Tapping a card opens that account's conversation or pull request; if its sign-in has expired, Lecturn asks you to sign back into that account.
+
+Signing out ends that account's local Live Activities and removes its push registration while retaining your other accounts. If the relay is unreachable during sign-out, registration cleanup is retried when a remaining account reconnects. Your device's notification permission is shared across accounts.
+
+On iPhone, adding another account requires a Connect service that supports notifications for multiple accounts. With an older service, only the primary account registers and Settings explains the limitation. Activity colors complement the explicit account label; they do not replace status labels. On iOS 26 and later, account cards use a glass surface; older versions retain the solid surface.

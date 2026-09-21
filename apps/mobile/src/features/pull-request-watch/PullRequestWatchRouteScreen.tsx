@@ -1,3 +1,5 @@
+import { connectMultiAccount } from "../cloud/publicConfig";
+import { PullRequestWatchAccountGuard } from "./PullRequestWatchAccountGuard";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { GlassCard } from "../../components/GlassCard";
 import { WatchActivityFrame, WatchCheckSegments } from "./WatchActivityVisuals";
@@ -172,8 +174,8 @@ function ManagerChoice(props: {
 /** URLs select a watch only. Every write requires the authenticated session and a user action. */
 export function PullRequestWatchRouteScreen({
   route,
-}: StaticScreenProps<{ environmentId: string; watchId: string }>) {
-  return (
+}: StaticScreenProps<{ environmentId: string; watchId: string; accountId?: string }>) {
+  const content = (
     <View className="flex-1 bg-screen">
       <ArcaneBackdrop />
       <PullRequestWatchControls
@@ -182,6 +184,16 @@ export function PullRequestWatchRouteScreen({
         watchId={route.params.watchId}
       />
     </View>
+  );
+  return connectMultiAccount ? (
+    <PullRequestWatchAccountGuard
+      environmentId={route.params.environmentId}
+      accountId={route.params.accountId}
+    >
+      {content}
+    </PullRequestWatchAccountGuard>
+  ) : (
+    content
   );
 }
 

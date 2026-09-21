@@ -38,13 +38,13 @@ export const loadOrCreateAgentAwarenessDeviceId = () =>
   runStorage((storage) => storage.loadOrCreateAgentAwarenessDeviceId);
 export const loadAgentAwarenessDeviceId = () =>
   runStorage((storage) => storage.loadAgentAwarenessDeviceId);
-export const loadAgentAwarenessRegistrationRecord = () =>
-  runStorage((storage) => storage.loadAgentAwarenessRegistrationRecord);
+export const loadAgentAwarenessRegistrationRecord = (accountId?: string) =>
+  runStorage((storage) => storage.loadAgentAwarenessRegistrationRecord(accountId));
 export const saveAgentAwarenessRegistrationRecord = (
   record: MobileStorage.AgentAwarenessRegistrationRecord,
 ) => runStorage((storage) => storage.saveAgentAwarenessRegistrationRecord(record));
-export const clearAgentAwarenessRegistrationRecord = () =>
-  runStorage((storage) => storage.clearAgentAwarenessRegistrationRecord);
+export const clearAgentAwarenessRegistrationRecord = (accountId?: string) =>
+  runStorage((storage) => storage.clearAgentAwarenessRegistrationRecord(accountId));
 
 export const loadRecentThreadShortcuts = () =>
   runStorage((storage) => storage.loadRecentThreadShortcuts);

@@ -1,3 +1,4 @@
+import { useAccountTintVariables } from "./accountTintContext";
 import { useMemo } from "react";
 
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
@@ -16,9 +17,13 @@ import { getMobileThemeRuntimeVariables } from "./mobileThemeVariables";
  */
 export function useUniwindTheme(): MobileThemeVariables {
   const { themeAppearance, themeId } = useAppearancePreferences();
+  const accountTint = useAccountTintVariables();
   const opaqueGlass = useGlassAccessibility();
   return useMemo(() => {
-    const variables = getMobileThemeRuntimeVariables(themeId, themeAppearance);
+    const variables = {
+      ...getMobileThemeRuntimeVariables(themeId, themeAppearance),
+      ...accountTint,
+    };
     return { ...variables, ...glassAccessibilityVariables(variables, opaqueGlass) };
-  }, [themeAppearance, themeId, opaqueGlass]);
+  }, [themeAppearance, themeId, opaqueGlass, accountTint]);
 }

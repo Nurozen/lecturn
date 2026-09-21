@@ -18,6 +18,19 @@ export class ActiveAccountError extends Error {
 
 let clerk: ActiveAccountClerk | null = null;
 let turn: Promise<void> = Promise.resolve();
+let profileSelectedAccountId: string | null | undefined;
+const profileSelectionListeners = new Set<() => void>();
+export const getProfileSelectedAccountId = () => profileSelectedAccountId;
+export function subscribeProfileSelectedAccountId(listener: () => void): () => void {
+  profileSelectionListeners.add(listener);
+  return () => {
+    profileSelectionListeners.delete(listener);
+  };
+}
+function setProfileSelectedAccountId(accountId: string | null | undefined): void {
+  profileSelectedAccountId = accountId;
+  for (const listener of profileSelectionListeners) listener();
+}
 
 /** The mounted auth provider binds its Clerk instance, and unbinds it with null. */
 export function bindActiveAccountClerk(next: ActiveAccountClerk | null): void {
@@ -83,22 +96,63 @@ export function withActiveAccount<A>(
   fn: () => A | Promise<A>,
   timeoutMs?: number,
 ): Promise<A> {
+  return activeAccountTurn(accountId, fn, false, timeoutMs);
+}
+
+/** Metadata reads/writes use /me, but must not change the user's selected account. */
+export function withActiveAccountForProfile<A>(
+  accountId: string,
+  fn: () => A | Promise<A>,
+): Promise<A> {
+  return activeAccountTurn(accountId, fn, true);
+}
+
+function activeAccountTurn<A>(
+  accountId: string,
+  fn: () => A | Promise<A>,
+  restore: boolean,
+  timeoutMs?: number,
+): Promise<A> {
   return withActiveSessionTurn(async (signal) => {
     const bound = clerk;
-    if (bound === null) {
-      throw new ActiveAccountError("Lecturn Connect is not ready yet.");
-    }
-    if (bound.user?.id !== accountId) {
-      const session = bound.client?.signedInSessions.find((entry) => entry.user?.id === accountId);
-      if (!session) {
-        throw new ActiveAccountError("That Lecturn Connect account needs sign-in.");
+    if (bound === null) throw new ActiveAccountError("Lecturn Connect is not ready yet.");
+    const previousAccountId = bound.user?.id;
+    if (restore) setProfileSelectedAccountId(previousAccountId ?? null);
+    try {
+      if (bound.user?.id !== accountId) {
+        const session = bound.client?.signedInSessions.find(
+          (entry) => entry.user?.id === accountId,
+        );
+        if (!session) throw new ActiveAccountError("That Lecturn Connect account needs sign-in.");
+        await bound.setActive({ session: session.id });
       }
-      await bound.setActive({ session: session.id });
+      signal.throwIfAborted();
+      assertActive(bound, accountId, "before");
+      const value = await fn();
+      assertActive(bound, accountId, "after");
+      return value;
+    } finally {
+      // Restore before releasing this turn, including after failed metadata IO.
+      // A selection changed externally during IO belongs to that newer action.
+      try {
+        if (
+          restore &&
+          clerk === bound &&
+          previousAccountId &&
+          previousAccountId !== accountId &&
+          bound.user?.id === accountId
+        ) {
+          const previous = bound.client?.signedInSessions.find(
+            (entry) => entry.user?.id === previousAccountId,
+          );
+          if (previous) {
+            await bound.setActive({ session: previous.id });
+            assertActive(bound, previousAccountId, "restore");
+          }
+        }
+      } finally {
+        if (restore) setProfileSelectedAccountId(undefined);
+      }
     }
-    signal.throwIfAborted();
-    assertActive(bound, accountId, "before");
-    const value = await fn();
-    assertActive(bound, accountId, "after");
-    return value;
   }, timeoutMs);
 }

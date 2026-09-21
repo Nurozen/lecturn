@@ -1,6 +1,7 @@
 import { useSession } from "@clerk/expo";
 import { useLayoutEffect, useMemo } from "react";
-import { resolveRelayClerkTokenOptions } from "./publicConfig";
+import { accountTokenReader } from "./accountTokenReaders";
+import { connectMultiAccount, resolveRelayClerkTokenOptions } from "./publicConfig";
 
 type ClerkSession = NonNullable<ReturnType<typeof useSession>["session"]>;
 
@@ -37,5 +38,5 @@ export function useSessionRelayToken(auth: {
 
   // useAuth().getToken reads Clerk's mutable active session even through an old
   // closure. Retain the actual resource so delayed cleanup cannot use a new account.
-  return provider.read;
+  return connectMultiAccount && userId ? accountTokenReader(userId) : provider.read;
 }

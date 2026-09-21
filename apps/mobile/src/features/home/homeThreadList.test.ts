@@ -762,3 +762,47 @@ describe("buildHomeThreadGroups", () => {
     expect(groups[0]?.newThreadTarget?.id).toBe(desktopProject.id);
   });
 });
+
+it("never merges the same repository across Connect accounts", () => {
+  const projects = ["work", "personal", "direct"].map((id) =>
+    makeProject({
+      environmentId: EnvironmentId.make(id),
+      id: ProjectId.make(id),
+      title: "Shared",
+      repositoryIdentity: {
+        canonicalKey: "github:owner/repo",
+        locator: {
+          source: "git-remote",
+          remoteName: "origin",
+          remoteUrl: "git@github.com:owner/repo.git",
+        },
+      },
+    }),
+  );
+  const accounts = ["user_a", "user_b"].map((accountId) => ({
+    accountId,
+    email: `${accountId}@test.example`,
+    label: accountId,
+    preset: "jade",
+    signedIn: true,
+  }));
+  const scopes = buildHomeProjectScopes({
+    projects,
+    environmentId: null,
+    projectGroupingMode: "repository",
+    accountSections: {
+      accounts,
+      owners: new Map([
+        ["work", "user_a"],
+        ["personal", "user_b"],
+      ]),
+    },
+  });
+  expect(scopes).toHaveLength(3);
+  expect(scopes.map((scope) => scope.projects.map((project) => project.environmentId))).toEqual([
+    ["work"],
+    ["personal"],
+    ["direct"],
+  ]);
+  expect(new Set(scopes.map((scope) => scope.key)).size).toBe(3);
+});

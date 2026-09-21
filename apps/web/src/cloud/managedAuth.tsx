@@ -1,3 +1,5 @@
+import { useProfileStableAccountId } from "./useProfileStableAccountId";
+import { initializeAccountAppearance, refreshAccountAppearance } from "./accountAppearance";
 import { useAuth, useClerk, useSessionList } from "@clerk/react";
 import {
   managedRelaySessionsAtom,
@@ -55,9 +57,14 @@ function relaySessionInput(accountId: string) {
 }
 
 export function ManagedRelayAuthProvider({ children }: { readonly children: ReactNode }) {
-  const { isLoaded, isSignedIn, userId } = useAuth({
+  const {
+    isLoaded,
+    isSignedIn,
+    userId: clerkUserId,
+  } = useAuth({
     treatPendingAsSignedOut: false,
   });
+  const userId = useProfileStableAccountId(clerkUserId);
   const removeRelayEnvironments = useAtomCommand(environmentCatalog.removeRelayEnvironments, {
     reportFailure: false,
     reportDefect: false,
@@ -73,6 +80,23 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
   const accountTransitionRef = useRef<Promise<void> | null>(null);
   const cleanupFailuresRef = useRef(0);
   const cleanupToastRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
+
+  useEffect(() => {
+    if (!isLoaded || signedInSessionKey === undefined || !connectMultiAccount) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") {
+        void refreshAccountAppearance(clerk).then(() => initializeAccountAppearance(clerk));
+      }
+    };
+    // Initial profile observation happens in the lifecycle effect below.
+    void Promise.resolve().then(() => initializeAccountAppearance(clerk));
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [clerk, isLoaded, signedInSessionKey]);
 
   useEffect(() => {
     bindAccountTokenClerk(clerk);

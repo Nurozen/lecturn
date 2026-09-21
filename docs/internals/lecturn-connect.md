@@ -391,3 +391,9 @@ Do not enable an empty allowlist: it blocks all new sign-ups.
 Clerk allowlists control who can sign up. They do not revoke an existing user's active cloud
 access. To remove an already-created user's access, ban that user in Clerk so their active
 sessions are ended and future sign-ins are rejected.
+
+### Account presentation and native clients
+
+`@lecturn/shared/accountTint` supplies six preset hues and contrast-preserving role overlays without a native color-library dependency. User metadata is namespaced under `unsafeMetadata.lecturn` as `label` and `preset`. Unknown presets fall back; labels are bounded display text. Web metadata writes run under `withActiveAccount` and validate the returned user ID. Cached profile presentation remains in `lecturn:account-profiles:v1`; it is never an authority for tokens.
+
+Web subscribes to applied theme/preview updates and scopes semantic token overrides to the conversation. Mobile applies the same roles through `ScopedVariables` and a JS theme context before accessibility substitutions. Native navigation and global chrome stay untinted. The desktop activity IPC carries bounded cosmetic account labels and hex color marks without credentials.

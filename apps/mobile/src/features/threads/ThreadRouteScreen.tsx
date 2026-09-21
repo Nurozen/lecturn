@@ -1,3 +1,9 @@
+import { useAtomValue } from "@effect/atom-react";
+import { environmentCatalog } from "../../connection/catalog";
+import { connectAccountsReadyAtom, useConnectAccounts } from "../cloud/knownAccounts";
+import { connectMultiAccount } from "../cloud/publicConfig";
+import { expandMobileAccountSection } from "../home/accountSectionExpansion";
+import { resolveThreadAccountRoute } from "./threadAccountRoute";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import {
   StackActions,
@@ -104,6 +110,7 @@ function OpeningThreadLoadingScreen() {
 }
 
 type ThreadRouteScreenRouteProps = StaticScreenProps<{
+  readonly accountId?: string;
   readonly environmentId: string;
   readonly threadId: string;
 }>;
@@ -134,6 +141,52 @@ function ThreadUnavailableScreen() {
 }
 
 export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
+  return connectMultiAccount ? (
+    <AccountScopedThreadRouteScreen {...props} />
+  ) : (
+    <ConnectedThreadRouteScreen {...props} />
+  );
+}
+function AccountScopedThreadRouteScreen(props: ThreadRouteScreenProps) {
+  const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
+  const accountsReady = useAtomValue(connectAccountsReadyAtom);
+  const accounts = useConnectAccounts();
+  const navigation = useNavigation();
+  const target = [...catalog.entries.values()].find(
+    (entry) => entry.target.environmentId === props.route.params.environmentId,
+  )?.target;
+  const decision = resolveThreadAccountRoute({
+    catalogReady: catalog.isReady,
+    accountsReady,
+    target,
+    requestedAccountId: props.route.params.accountId,
+    accounts,
+  });
+  const owner = decision.kind === "ready" ? decision.accountId : null;
+  useEffect(() => {
+    if (owner) expandMobileAccountSection(owner);
+  }, [owner]);
+  if (decision.kind === "loading") return <OpeningThreadLoadingScreen />;
+  if (decision.kind === "unavailable") return <ThreadUnavailableScreen />;
+  if (decision.kind === "sign-in")
+    return (
+      <View className="flex-1 justify-center bg-screen p-5">
+        <EmptyState
+          title="Sign in again"
+          detail="Sign in to this thread's Connect account to continue."
+          actionLabel="Sign in again"
+          onAction={() =>
+            navigation.navigate("SettingsSheet", {
+              screen: "SettingsAddAccount",
+              params: { accountId: decision.accountId },
+            })
+          }
+        />
+      </View>
+    );
+  return <ConnectedThreadRouteScreen {...props} />;
+}
+function ConnectedThreadRouteScreen(props: ThreadRouteScreenProps) {
   const { state: workspaceState } = useWorkspaceState();
   const { connectionState } = useRemoteConnectionStatus();
   const { selectedThread } = useThreadSelection();

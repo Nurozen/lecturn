@@ -18,6 +18,7 @@ vi.mock("@clerk/expo", () => ({
   useAuth: () => ({ getToken: () => clerk.active?.getToken() ?? Promise.resolve(null) }),
 }));
 vi.mock("./publicConfig", () => ({
+  connectMultiAccount: false,
   resolveRelayClerkTokenOptions: () => ({ template: "relay" }),
 }));
 

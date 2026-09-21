@@ -7,7 +7,6 @@ import * as Notifications from "expo-notifications";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { SymbolView } from "../../components/AppSymbol";
-import * as Effect from "effect/Effect";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Alert, AppState, Linking, Platform, Pressable, ScrollView, View } from "react-native";
@@ -32,7 +31,7 @@ import {
   subscribeAgentAwarenessRegistrationStatus,
 } from "../agent-awareness/remoteRegistration";
 import { refreshManagedRelayEnvironments } from "../cloud/managedRelayState";
-import { hasCloudPublicConfig, resolveRelayClerkTokenOptions } from "../cloud/publicConfig";
+import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { withNativeGlassHeaderItem } from "../layout/native-glass-header-items";
 import { WorkspaceSidebarToolbar } from "../layout/workspace-sidebar-toolbar";
 import { runtime } from "../../lib/runtime";
@@ -60,6 +59,10 @@ import {
 } from "../updates/app-updates";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { TeamSelector } from "../cloud/TeamSelector";
+import { connectMultiAccount } from "../cloud/publicConfig";
+import { useSessionRelayToken } from "../cloud/useSessionRelayToken";
+import { useConnectAccounts } from "../cloud/knownAccounts";
+import { ConnectAccountsSettings } from "./ConnectAccountsSettings";
 import { ConnectBillingStatus } from "./components/ConnectBillingStatus";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
@@ -166,8 +169,29 @@ function ConfiguredSettingsRouteScreen() {
   const agentAwarenessPlatform = resolveAgentAwarenessPlatformPresentation(Platform.OS);
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { getToken, isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
+  const {
+    userId,
+    sessionId,
+    isLoaded,
+    isSignedIn: activeSignedIn,
+  } = useAuth({ treatPendingAsSignedOut: false });
   const { user } = useUser();
+  const connectAccounts = useConnectAccounts();
+  const isSignedIn = connectMultiAccount
+    ? connectAccounts.some((account) => account.signedIn)
+    : activeSignedIn;
+  const [pickedAccountId, setPickedAccountId] = useState<string | null>(null);
+  const selectedAccountId =
+    pickedAccountId && connectAccounts.some((account) => account.accountId === pickedAccountId)
+      ? pickedAccountId
+      : (connectAccounts.find((account) => account.signedIn)?.accountId ??
+        connectAccounts[0]?.accountId ??
+        null);
+  const getRelayToken = useSessionRelayToken({
+    userId: connectMultiAccount ? selectedAccountId : userId,
+    sessionId,
+    isSignedIn,
+  });
   const { savedConnectionsById } = useSavedRemoteConnections();
   const [notificationStatus, setNotificationStatus] = useState<NotificationStatus>("checking");
   const [liveActivityStatus, setLiveActivityStatus] = useState<LiveActivityStatus>("checking");
@@ -321,7 +345,7 @@ function ConfiguredSettingsRouteScreen() {
     }
 
     setLiveActivityStatus("linking");
-    const tokenResult = await settlePromise(() => getToken(resolveRelayClerkTokenOptions()));
+    const tokenResult = await settlePromise(() => getRelayToken());
     if (tokenResult._tag === "Failure") {
       setLiveActivityStatus("disabled");
       const error = squashAtomCommandFailure(tokenResult);
@@ -344,6 +368,7 @@ function ConfiguredSettingsRouteScreen() {
           previousEnabled: liveActivitiesPreferenceEnabled,
           clerkToken: tokenResult.value,
           connections,
+          ...(connectMultiAccount && selectedAccountId ? { accountId: selectedAccountId } : {}),
         }),
       ),
     );
@@ -381,7 +406,8 @@ function ConfiguredSettingsRouteScreen() {
   }, [
     connections,
     environmentCount,
-    getToken,
+    getRelayToken,
+    selectedAccountId,
     isSignedIn,
     liveActivitiesPreferenceEnabled,
     promptSignIn,
@@ -414,9 +440,7 @@ function ConfiguredSettingsRouteScreen() {
         void (async () => {
           let token: string | null = null;
           if (isSignedIn) {
-            const tokenResult = await settlePromise(() =>
-              getToken(resolveRelayClerkTokenOptions()),
-            );
+            const tokenResult = await settlePromise(() => getRelayToken());
             if (tokenResult._tag === "Failure") {
               reportAtomCommandResult(tokenResult, {
                 label: "live activity disable token lookup",
@@ -433,6 +457,9 @@ function ConfiguredSettingsRouteScreen() {
                 previousEnabled: liveActivitiesPreferenceEnabled,
                 clerkToken: token,
                 connections,
+                ...(connectMultiAccount && selectedAccountId
+                  ? { accountId: selectedAccountId }
+                  : {}),
               }),
             ),
           );
@@ -458,7 +485,8 @@ function ConfiguredSettingsRouteScreen() {
     },
     [
       connections,
-      getToken,
+      getRelayToken,
+      selectedAccountId,
       isSignedIn,
       linkEnvironments,
       liveActivitiesPreferenceEnabled,
@@ -485,16 +513,23 @@ function ConfiguredSettingsRouteScreen() {
         }}
       >
         <View className="gap-3">
-          <SettingsSection title="Account">
-            <SettingsRow
-              icon="person.crop.circle"
-              label="Lecturn Account"
-              value={accountLabel}
-              onPress={openAccount}
+          {connectMultiAccount ? (
+            <ConnectAccountsSettings
+              selectedAccountId={selectedAccountId}
+              onSelect={setPickedAccountId}
             />
-          </SettingsSection>
-          <TeamSelector />
-          <ConnectBillingStatus />
+          ) : (
+            <SettingsSection title="Account">
+              <SettingsRow
+                icon="person.crop.circle"
+                label="Lecturn Account"
+                value={accountLabel}
+                onPress={openAccount}
+              />
+            </SettingsSection>
+          )}
+          <TeamSelector accountId={connectMultiAccount ? selectedAccountId : undefined} />
+          <ConnectBillingStatus accountId={connectMultiAccount ? selectedAccountId : undefined} />
           <Text className="px-2 text-sm text-foreground-muted">
             Lecturn works locally without signing in. Cloud features are optional.
           </Text>

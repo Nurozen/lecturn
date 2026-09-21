@@ -35,8 +35,14 @@ describe("buildAccountMarks", () => {
 
   it("marks relay environments by owner once two accounts are known", () => {
     expect([...marks({})]).toEqual([
-      ["env-a", { label: "ada", email: "ada@work.example" }],
-      ["env-b", { label: "grace", email: "grace@home.example" }],
+      [
+        "env-a",
+        { accountId: "account-a", preset: "jade", label: "ada", email: "ada@work.example" },
+      ],
+      [
+        "env-b",
+        { accountId: "account-b", preset: "jade", label: "grace", email: "grace@home.example" },
+      ],
     ]);
   });
 
@@ -124,7 +130,15 @@ describe("mergeAccountProfiles", () => {
     });
     expect([...next]).toEqual([
       ["account-b", { email: "grace@home.example" }],
-      ["account-c", { email: "lin@work.example", imageUrl: "https://img.example/lin" }],
+      [
+        "account-c",
+        {
+          email: "lin@work.example",
+          label: "work.example",
+          preset: "jade",
+          imageUrl: "https://img.example/lin",
+        },
+      ],
     ]);
   });
 
@@ -141,7 +155,11 @@ describe("mergeAccountProfiles", () => {
         },
       ],
     });
-    expect(next.get("account-a")).toEqual({ email: "ada@work.example" });
+    expect(next.get("account-a")).toEqual({
+      email: "ada@work.example",
+      label: "work.example",
+      preset: "jade",
+    });
   });
 });
 
