@@ -12,6 +12,7 @@ import {
   type ConnectOnboardingRequest,
 } from "~/cloud/connectOnboarding";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
+import { useAccountEmailWhenSeveral } from "~/cloud/useAccountEmailWhenSeveral";
 import { useCloudLinkController } from "~/cloud/useCloudLinkController";
 import { usePrimarySessionState } from "~/environments/primary";
 import { knownConnectAccountsAtom, newlyKnownAccounts } from "~/cloud/knownAccounts";
@@ -94,6 +95,8 @@ function ConfiguredConnectOnboardingDialog() {
   const [isApplying, setIsApplying] = useState(false);
   const prefilledFromLinkStateRef = useRef(false);
   const knownAccounts = useAtomValue(knownConnectAccountsAtom);
+  // The wizard publishes and lists devices as Clerk's active account.
+  const namedAccount = useAccountEmailWhenSeveral(userId);
   const observedKnownAccountsRef = useRef(knownAccounts);
 
   const optOutAccounts = optOutState.optOutAccounts;
@@ -221,9 +224,13 @@ function ConfiguredConnectOnboardingDialog() {
     toastManager.add({
       type: "success",
       title: "Lecturn Connect enabled",
-      description: exposeEnvironment
-        ? "This environment is available to your other devices through Lecturn Connect."
-        : "This environment publishes agent activity to your mobile clients.",
+      description: namedAccount
+        ? exposeEnvironment
+          ? `This environment is available to ${namedAccount}'s other devices through Lecturn Connect.`
+          : `This environment publishes agent activity to ${namedAccount}'s mobile clients.`
+        : exposeEnvironment
+          ? "This environment is available to your other devices through Lecturn Connect."
+          : "This environment publishes agent activity to your mobile clients.",
     });
     setStep("devices");
   };
@@ -241,9 +248,11 @@ function ConfiguredConnectOnboardingDialog() {
         <DialogHeader>
           <DialogTitle>Set up Lecturn Connect</DialogTitle>
           <DialogDescription>
-            Publish this environment and connect your other devices. Managed Connect requires an
-            active subscription, trial, or complimentary access. Local and direct connections remain
-            free.
+            {namedAccount
+              ? `Publish this environment under ${namedAccount} and connect that account's other devices.`
+              : "Publish this environment and connect your other devices."}{" "}
+            Managed Connect requires an active subscription, trial, or complimentary access. Local
+            and direct connections remain free.
           </DialogDescription>
           <TeamSelector />
           {steps.length > 1 ? (

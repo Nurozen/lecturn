@@ -219,6 +219,25 @@ export function forgetKnownAccount(registry: AtomRegistry.AtomRegistry, accountI
   });
 }
 
+/** Bumped when an account is asked to leave without a Clerk session change to announce it. */
+export const knownAccountRemovalsAtom = Atom.make(0).pipe(
+  Atom.keepAlive,
+  Atom.withLabel("connect:known-account-removals"),
+);
+
+/**
+ * Signs out a known account that needs sign-in. Clerk has no session left to
+ * end for it, so it is marked under a stand-in session id, which survives a
+ * reload, and leaves at the next observation, which this asks for.
+ */
+export function removeSignedOutKnownAccount(
+  registry: AtomRegistry.AtomRegistry,
+  accountId: string,
+): void {
+  markConnectSignOutStarted([{ accountId, sessionId: `no-session:${accountId}` }]);
+  registry.set(knownAccountRemovalsAtom, registry.get(knownAccountRemovalsAtom) + 1);
+}
+
 /** Call with the sessions a sign-out is about to end, so their accounts' data is removed afterwards. */
 export function markConnectSignOutStarted(sessions: ReadonlyArray<ObservedClerkSession>): void {
   const startedAt = Date.now();

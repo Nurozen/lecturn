@@ -4,6 +4,7 @@ import {
   setManagedRelayPrimaryAccount,
   syncManagedRelaySessions,
 } from "@lecturn/client-runtime/relay";
+import type { EnvironmentId } from "@lecturn/contracts";
 import { reportAtomCommandResult, settlePromise } from "@lecturn/client-runtime/state/runtime";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -14,8 +15,10 @@ import { environmentCatalog } from "../connection/catalog";
 import { AppAtomRegistryProvider, appAtomRegistry } from "../rpc/atomRegistry";
 import { useAtomCommand } from "../state/use-atom-command";
 import { bindAccountTokenClerk, readToken } from "./accountTokens";
+import { observeAccountProfiles } from "./connectAccounts";
 import {
   forgetKnownAccount,
+  knownAccountRemovalsAtom,
   knownConnectAccountsAtom,
   observeClerkSessions,
 } from "./knownAccounts";
@@ -33,6 +36,16 @@ const CLEANUP_RETRY_MS = 5_000;
 const CLEANUP_RETRY_MAX_MS = 5 * 60 * 1_000;
 const CLEANUP_MAX_RETRIES = 8;
 const CLEANUP_FAILED_MESSAGE = "Could not remove the signed-out Connect account's data.";
+
+// Loaded on use: these stores read session state that is built after this provider.
+async function sweepViewState(environmentIds: ReadonlyArray<EnvironmentId>): Promise<void> {
+  try {
+    const { clearEnvironmentOwnedState } = await import("../environmentOwnedState");
+    environmentIds.forEach(clearEnvironmentOwnedState);
+  } catch (error) {
+    console.warn("Could not clear view state after account sign-out.", error);
+  }
+}
 
 function relaySessionInput(accountId: string) {
   return { accountId, readClerkToken: () => readToken(accountId) };
@@ -97,11 +110,19 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
         session.user ? [{ accountId: session.user.id, sessionId: session.id }] : [],
       );
     // A single-account client sweeps every other account before it serves a new one.
-    const observe = () =>
-      observeClerkSessions(appAtomRegistry, signedInSessions(), {
+    const observe = () => {
+      const result = observeClerkSessions(appAtomRegistry, signedInSessions(), {
         soleAccountId: connectMultiAccount ? null : nextAccount,
         previouslyServed: persistedAccountId,
       });
+      observeAccountProfiles(
+        appAtomRegistry,
+        (clerk.client?.signedInSessions ?? []).flatMap((session) =>
+          session.user ? [session.user] : [],
+        ),
+      );
+      return result;
+    };
     const { leaving } = observe();
     const signedIn = [...new Set(signedInSessions().map((session) => session.accountId))];
     setManagedRelayPrimaryAccount(appAtomRegistry, nextAccount);
@@ -136,6 +157,11 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
       }
       if (results.some((result) => result._tag !== "Success")) {
         throw new Error(CLEANUP_FAILED_MESSAGE);
+      }
+      // Only a signed-out account takes its view state along. Removing an
+      // environment by hand keeps it, so adding it back restores the layout.
+      if (connectMultiAccount && AsyncResult.isSuccess(results[0])) {
+        await sweepViewState(results[0].value);
       }
       forgetKnownAccount(appAtomRegistry, accountId);
     };
@@ -218,6 +244,13 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
       setManagedRelayPrimaryAccount(appAtomRegistry, null);
       syncManagedRelaySessions(appAtomRegistry, []);
     },
+    [],
+  );
+  useEffect(
+    () =>
+      appAtomRegistry.subscribe(knownAccountRemovalsAtom, () =>
+        setRevision((revision) => revision + 1),
+      ),
     [],
   );
   useEffect(() => (connectMultiAccount ? startMultiAccountMarkerHeartbeat() : undefined), []);

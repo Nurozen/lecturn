@@ -16,11 +16,13 @@ import {
   KnownAccountsDocument,
   forgetKnownAccount,
   KNOWN_ACCOUNTS_STORAGE_KEY,
+  knownAccountRemovalsAtom,
   knownConnectAccountsAtom,
   markConnectSignOutStarted,
   newlyKnownAccounts,
   observeClerkSessions,
   reconcileKnownAccounts,
+  removeSignedOutKnownAccount,
   SIGN_OUT_MARK_MAX_AGE_MS,
 } from "./knownAccounts";
 
@@ -122,6 +124,35 @@ describe("known-account store", () => {
       needsSignIn: ["account-a"],
       synced: true,
     });
+  });
+
+  it("lets an account that needs sign-in be signed out, and asks for an observation", () => {
+    observeClerkSessions(registry, [active("account-a"), active("account-b")]);
+    observeClerkSessions(registry, [active("account-b")]);
+    const asked = vi.fn();
+    const unsubscribe = registry.subscribe(knownAccountRemovalsAtom, asked);
+
+    removeSignedOutKnownAccount(registry, "account-a");
+
+    expect(asked).toHaveBeenCalled();
+    expect(observeClerkSessions(registry, [active("account-b")]).leaving).toEqual(["account-a"]);
+    // Signing in again before the cleanup ran keeps the account.
+    expect(
+      observeClerkSessions(registry, [active("account-a", "session-a2"), active("account-b")])
+        .leaving,
+    ).toEqual([]);
+    unsubscribe();
+  });
+
+  it("keeps a needs-sign-in account leaving across a reload", () => {
+    observeClerkSessions(registry, [active("account-a"), active("account-b")]);
+    observeClerkSessions(registry, [active("account-b")]);
+    removeSignedOutKnownAccount(registry, "account-a");
+    restartKeepingStorage();
+
+    expect(observeClerkSessions(registry, [active("account-b")]).leaving).toEqual(["account-a"]);
+    forgetKnownAccount(registry, "account-a");
+    expect(storedDocument()).toEqual({ accountIds: ["account-b"], signingOut: [] });
   });
 
   it("finishes after a restart a sign-out that was started before it", () => {

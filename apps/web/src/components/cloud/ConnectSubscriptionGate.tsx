@@ -1,6 +1,7 @@
 import { useUser } from "@clerk/react";
 import { ExternalLinkIcon, RadioTowerIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
+import { useAccountEmailWhenSeveral } from "../../cloud/useAccountEmailWhenSeveral";
 import { configuredHostedAppUrl } from "../../hostedPairing";
 import { Button } from "../ui/button";
 
@@ -13,6 +14,7 @@ export function ConnectSubscriptionGate({
 }) {
   const titleId = useId();
   const { user } = useUser();
+  const namedAccount = useAccountEmailWhenSeveral(user?.id);
   const [actionError, setActionError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const billingUrl = new URL("/account/billing", configuredHostedAppUrl()).href;
@@ -37,7 +39,7 @@ export function ConnectSubscriptionGate({
         <RadioTowerIcon className="size-4 text-primary" aria-hidden /> Connect your devices
       </h3>
       <p className="text-sm text-muted-foreground">
-        Your account needs Connect access before publishing.{" "}
+        {namedAccount ?? "Your account"} needs Connect access before publishing.{" "}
         {preserveChoices
           ? "Your choices above are saved while you set up your plan."
           : "After setting up your plan, enable the Connect features you want below."}

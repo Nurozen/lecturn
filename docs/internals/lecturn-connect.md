@@ -264,10 +264,71 @@ flow uses a custom redirect URI, add that exact URI to the same allowlist.
 Signed-in users manage Lecturn Connect under **Connections**. The settings sidebar also has dedicated
 controls, rendered by `SettingsSidebarNav.tsx`: `LecturnConnectSidebarSignIn` in the footer shows a
 **Sign in to Lecturn Connect** button while signed out, and `LecturnConnectSidebarAvatar` shows a Clerk
-`UserButton` account control while signed in. Both are gated on cloud public configuration.
+`UserButton` account control while signed in, or the Connect account menu in a multi-account build
+(see [Multiple Signed-in Accounts](#multiple-signed-in-accounts)). Both are gated on cloud public configuration.
 Desktop renders the same web bundle, so it has them too. The waitlist enrollment flow from the
 private beta was removed when Connect went GA; sign-up is open unless a Clerk restriction below is
 enabled.
+
+## Multiple Signed-in Accounts
+
+Web and desktop can serve several Connect accounts at once through Clerk multi-session. An account is
+a Clerk user ID. Mobile stays on one account.
+
+- **Clerk dashboard.** Multi-session is a per-instance setting (**Sessions → Multi-session handling**).
+  It is on for the production instance. A fork on a plan without it keeps working with one account:
+  the loaded environment reports `authConfig.singleSessionMode`, and **Add account** is offered only
+  when that reads `false`. clerk-js exposes the value on an internal field only
+  (`__internal_environment`), so `readClerkSingleSessionMode` checks every step and treats anything
+  unexpected as single-session.
+- **Build constant.** `connectMultiAccount` in `apps/web/src/cloud/publicConfig.ts` switches the
+  feature. There is no remote flag, so changing it means a new build. While it is `false` the footer
+  renders Clerk's `UserButton` exactly as before and none of the account UI mounts.
+- **Single-account guard.** While the constant is off, `decideSingleAccountGuard`
+  (`packages/client-runtime/src/relay/singleAccountGuard.ts`) runs in front of all account-transition
+  handling in `ManagedRelayAuthProvider`. An extra Clerk session, from another tab or Clerk's own UI,
+  is signed out through the non-current path and never reaches cleanup. Hosted web shares one Clerk
+  client across tabs, so a build with the constant on writes the **stand-down marker**
+  (`lecturn:multi-account-enabled`, a timestamp rewritten every 20 minutes and stale after two
+  hours). A guard that sees a fresh marker asks for a reload instead of signing out an account a
+  newer tab added.
+- **Known-account list.** `apps/web/src/cloud/knownAccounts.ts` persists the accounts this client
+  holds data for under `lecturn:accounts:v1`. Clerk's session list is not the source of truth: a
+  session can disappear through expiry, cookie loss, or a 401 refetch without any sign-out. An
+  account leaves the list, and its relay environments, drafts, and token cache are swept, only on a
+  sign-out started in Lecturn. With the constant on, that cleanup also sweeps the view stores keyed
+  by the removed environments (`environmentOwnedState.ts`). Removing an environment by hand, or a
+  platform environment going away, clears drafts only, so adding it back restores its layout. A
+  known account without a signed-in session **needs sign-in**: its environments stay in the catalog,
+  disconnected. Signing one out has no Clerk session to end, so it is recorded as a sign-out mark
+  under `no-session:<accountId>`, after any unpublish succeeded, and survives a reload. Storage is per origin, so a locally
+  served web app keeps one list per port. `connectAccounts.ts` keeps each known account's email and
+  image next to the list (`lecturn:account-profiles:v1`) so an account that needs sign-in still has a
+  name.
+- **Per-account token reads.** `readToken(accountId)` in `apps/web/src/cloud/accountTokens.ts` finds
+  the account's session in `clerk.client.signedInSessions` at call time and reads the
+  `lecturn-relay` template token from it. Template tokens only, since a bare `getToken()` on a
+  non-active session would touch the active session's cookie. All reads share one permit, because on
+  Electron each response rotates the client JWT. The token's `sub` claim must equal the requested
+  account; a mismatch resolves `null` and is logged once.
+- **clerk-js pin.** Reading tokens from a non-active session is undocumented behavior, so hosted web
+  loads exact builds (`PINNED_CLERK_VERSIONS` in `BrowserManagedAuthShell.tsx`) and warns when another
+  version loaded. `accountTokens.test.ts` runs against the pinned build and the one `@clerk/electron`
+  bundles. Bump the pin together with that test.
+- **Ownership.** Relay catalog targets carry an optional `accountId`. `relayAccountByEnvironmentId`
+  builds the environment-to-account lookup from those tags; thread and project view models carry only
+  `environmentId`. Direct, Tailscale, and SSH environments have no owner.
+- **Add-account gate.** `decideAddAccountGate`
+  (`packages/client-runtime/src/relay/connectAccounts.ts`) allows another account when the constant is
+  on, Clerk reports multi-session, fewer than five accounts are known, and no relay entry is untagged.
+  Entries in the registry's in-memory `unlistedRelayEnvironmentIds` are ignored, since no signed-in
+  account lists them and a new account cannot be handed them.
+- **Account UI.** `ConnectAccountMenu.tsx` replaces the `UserButton` popover. **Manage account** calls
+  `clerk.openUserProfile` with the three custom pages from `connectProfilePages.tsx`, mounted through
+  portals the way `UserButton.UserProfilePage` does, and opens for the active account only.
+  `AccountMark.tsx` renders the owner's short mark on sidebar thread rows and Connect environment rows
+  once two accounts are known. Publish, billing, teams, and CLI authorize still act on Clerk's active
+  account and name it by email.
 
 ## Restricting Sign-ups: Known-User Allowlist
 

@@ -215,6 +215,7 @@ import {
 import { useSagaSidebarTree } from "./stave/useSagaSidebarTree";
 import { sagaSidebarThreadOrder } from "./stave/staveSaga.logic";
 import { SidebarContent, SidebarGroup, SidebarMenuButton, useSidebar } from "./ui/sidebar";
+import { AccountMark } from "./sidebar/AccountMark";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
@@ -1519,6 +1520,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               />
             ) : null}
             {title}
+            <AccountMark environmentId={thread.environmentId} />
             {pinIndicator}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
@@ -1697,6 +1699,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ) : (
                 <span className="flex-1" />
               )}
+              <AccountMark environmentId={thread.environmentId} />
               {pinIndicator}
               {/* The visible state owns this slot's width: status at rest,
                   actions on hover/keyboard focus or while the popover is open. Keeping

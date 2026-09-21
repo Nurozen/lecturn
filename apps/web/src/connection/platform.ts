@@ -615,7 +615,7 @@ const platformConnectionSourceLayer = Layer.effect(
   }),
 );
 
-const environmentOwnedDataCleanupLayer = Layer.succeed(
+export const environmentOwnedDataCleanupLayer = Layer.succeed(
   EnvironmentOwnedDataCleanup,
   EnvironmentOwnedDataCleanup.of({
     clear: (environmentId) =>

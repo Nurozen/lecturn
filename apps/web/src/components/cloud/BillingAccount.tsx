@@ -45,7 +45,7 @@ function SignedBillingAccount({
 }) {
   const { userId } = useAuth();
   const clerk = useClerk();
-  const { requestSignOut, signOutDialog } = useConnectSignOut(
+  const { requestSignOut, requestSignOutAll, canSignOutAll, signOutDialog } = useConnectSignOut(
     hosted ? `${window.location.origin}/account/billing` : undefined,
   );
   const { authPrompt, openAuthPrompt } = useLecturnConnectAuthPrompt();
@@ -258,6 +258,11 @@ function SignedBillingAccount({
             <Button variant="ghost" onClick={requestSignOut}>
               Sign out
             </Button>
+            {canSignOutAll ? (
+              <Button variant="ghost" onClick={requestSignOutAll}>
+                Sign out of all accounts
+              </Button>
+            ) : null}
           </div>
           {!hosted && (
             <div className="space-y-3">

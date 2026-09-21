@@ -12,12 +12,18 @@ import * as Fiber from "effect/Fiber";
 import * as Stream from "effect/Stream";
 import { AtomRegistry } from "effect/unstable/reactivity";
 
+import { EnvironmentOwnedDataCleanup } from "@lecturn/client-runtime/platform";
+import { ThreadId } from "@lecturn/contracts";
+
 import { knownConnectAccountsAtom } from "../cloud/knownAccounts.ts";
+import { useComposerDraftStore } from "../composerDraftStore.ts";
+import { useTerminalUiStateStore } from "../terminalUiStateStore.ts";
 import { appAtomRegistry } from "../rpc/atomRegistry.ts";
 import {
   accountsNeedingSignIn,
   canRetainCachedPlatformRegistrationAfterRefreshFailure,
   canReuseCachedPlatformRegistration,
+  environmentOwnedDataCleanupLayer,
   primaryRegistrationToRetainAfterTopologyRead,
   provisionDesktopSshEnvironment,
   readPrimaryEnvironmentTargetResult,
@@ -230,6 +236,37 @@ describe("primary topology cache", () => {
       }),
     ).toBeUndefined();
   });
+});
+
+describe("environment removal cleanup", () => {
+  // View state goes only with a signed-out account, so an environment that is
+  // removed and added back gets its layout again.
+  it.effect("clears the removed environment's drafts and keeps its view state", () =>
+    Effect.gen(function* () {
+      const removed = {
+        environmentId: EnvironmentId.make("environment-b"),
+        threadId: ThreadId.make("t"),
+      };
+      const kept = {
+        environmentId: EnvironmentId.make("environment-a"),
+        threadId: ThreadId.make("t"),
+      };
+      for (const ref of [removed, kept]) {
+        useComposerDraftStore.getState().setPrompt(ref, "draft");
+        useTerminalUiStateStore.getState().setTerminalOpen(ref, true);
+      }
+
+      const cleanup = yield* EnvironmentOwnedDataCleanup;
+      yield* cleanup.clear(removed.environmentId);
+
+      expect(Object.keys(useComposerDraftStore.getState().draftsByThreadKey)).toEqual([
+        "environment-a:t",
+      ]);
+      expect(
+        Object.keys(useTerminalUiStateStore.getState().terminalUiStateByThreadKey).toSorted(),
+      ).toEqual(["environment-a:t", "environment-b:t"]);
+    }).pipe(Effect.provide(environmentOwnedDataCleanupLayer)),
+  );
 });
 
 describe("web cloud session", () => {

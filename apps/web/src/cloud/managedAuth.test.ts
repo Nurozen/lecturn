@@ -59,6 +59,7 @@ const clerk = vi.hoisted(() => {
 const rendered = vi.hoisted(() => ({ stale: null as FakeSession | null }));
 const removeRelayEnvironments = vi.hoisted(() => vi.fn());
 const resetRelayTokenCache = vi.hoisted(() => vi.fn());
+const clearEnvironmentOwnedState = vi.hoisted(() => vi.fn());
 const config = vi.hoisted(() => ({ connectMultiAccount: false }));
 const toastAdd = vi.hoisted(() => vi.fn());
 const toastClose = vi.hoisted(() => vi.fn());
@@ -89,6 +90,8 @@ vi.mock("@clerk/react", () => ({
 }));
 
 vi.mock("./relayTokenCache", () => ({ resetRelayTokenCache }));
+
+vi.mock("../environmentOwnedState", () => ({ clearEnvironmentOwnedState }));
 
 vi.mock("../state/use-atom-command", () => ({
   useAtomCommand: () => removeRelayEnvironments,
@@ -199,6 +202,7 @@ describe("single-account guard in front of account transitions", () => {
     });
     removeRelayEnvironments.mockReset().mockResolvedValue(AsyncResult.success([]));
     resetRelayTokenCache.mockReset().mockResolvedValue(AsyncResult.success(undefined));
+    clearEnvironmentOwnedState.mockReset();
     toastAdd.mockReset().mockReturnValue("toast");
     toastClose.mockReset();
     clerk.setActive.mockReset().mockImplementation(async ({ session }: { session: string }) => {
@@ -329,6 +333,16 @@ describe("single-account guard in front of account transitions", () => {
     await render();
     expect(clerk.signOut).toHaveBeenCalledExactlyOnceWith({ sessionId: "session-b" });
     expect(removeRelayEnvironments).not.toHaveBeenCalled();
+  });
+
+  it("leaves view state alone when a single-account build cleans up an account", async () => {
+    removeRelayEnvironments.mockResolvedValue(AsyncResult.success(["environment-a"]));
+    await observe([sessionA], sessionA);
+    mark(sessionA);
+    await observe([], null);
+
+    expect(removeRelayEnvironments).toHaveBeenCalledTimes(1);
+    expect(clearEnvironmentOwnedState).not.toHaveBeenCalled();
   });
 
   it("cleans up and rewrites the served account on a real sign-out then sign-in", async () => {
@@ -661,6 +675,15 @@ describe("single-account guard in front of account transitions", () => {
       expect(resetRelayTokenCache).toHaveBeenCalledExactlyOnceWith("account-b");
       expect(relayAccountIds()).toEqual(["account-a"]);
       expect(knownAccountIds()).toEqual(["account-a"]);
+    });
+
+    it("sweeps the view state of the environments a signed-out account owned", async () => {
+      removeRelayEnvironments.mockResolvedValue(AsyncResult.success(["environment-b"]));
+      await observe([sessionA, sessionB], sessionB);
+      mark(sessionB);
+      await observe([sessionA], sessionA);
+
+      expect(clearEnvironmentOwnedState.mock.calls.map(([id]) => id)).toEqual(["environment-b"]);
     });
 
     it("keeps an account whose session expired, and everything it owns", async () => {
