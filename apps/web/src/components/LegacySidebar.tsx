@@ -219,6 +219,12 @@ import {
 } from "./Sidebar.logic";
 import { sortThreads } from "../lib/threadSort";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import { AccountMark } from "./sidebar/AccountMark";
+import {
+  namedSnapshotsPerAccount,
+  projectKeyMapPerAccount,
+  useSidebarSegmentation,
+} from "./sidebar/accountProjectGroups";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { CommandDialogTrigger } from "./ui/command";
@@ -867,6 +873,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               </TooltipPopup>
             </Tooltip>
           )}
+          <AccountMark environmentId={thread.environmentId} />
           <ThreadWorktreeIndicator thread={thread} />
           {terminalStatus && (
             <Tooltip>
@@ -3450,16 +3457,20 @@ export default function LegacySidebar() {
     });
   }, [projectOrder, projects]);
 
+  const segmentation = useSidebarSegmentation();
   // Build a mapping from physical project key → logical project key for
   // cross-environment grouping.  Projects that share a repositoryIdentity
   // canonicalKey are treated as one logical project in the sidebar.
   const physicalToLogicalKey = useMemo(() => {
-    return buildPhysicalToLogicalProjectKeyMap({
+    return projectKeyMapPerAccount(
+      segmentation,
+      buildPhysicalToLogicalProjectKeyMap,
+    )({
       projects: orderedProjects,
       settings: projectGroupingSettings,
       primaryEnvironmentId,
     });
-  }, [orderedProjects, projectGroupingSettings, primaryEnvironmentId]);
+  }, [orderedProjects, projectGroupingSettings, primaryEnvironmentId, segmentation]);
   const projectPhysicalKeyByScopedRef = useMemo(
     () =>
       new Map(
@@ -3472,7 +3483,10 @@ export default function LegacySidebar() {
   );
 
   const sidebarProjects = useMemo<SidebarProjectSnapshot[]>(() => {
-    return buildSidebarProjectSnapshots({
+    return namedSnapshotsPerAccount(
+      segmentation,
+      buildSidebarProjectSnapshots,
+    )({
       projects: orderedProjects,
       settings: projectGroupingSettings,
       primaryEnvironmentId,
@@ -3485,6 +3499,7 @@ export default function LegacySidebar() {
     orderedProjects,
     projectGroupingSettings,
     primaryEnvironmentId,
+    segmentation,
   ]);
 
   const sidebarProjectByKey = useMemo(

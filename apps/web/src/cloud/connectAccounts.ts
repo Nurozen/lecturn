@@ -1,4 +1,5 @@
 import { relayAccountByEnvironmentId } from "@lecturn/client-runtime/relay";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
 
@@ -97,12 +98,28 @@ export function observeAccountProfiles(
   }
 }
 
+/**
+ * `previous` when `next` names the same owners, so a catalog change that moves
+ * no owner hands every reader the map it already had.
+ */
+export function keepUnchangedAccountOwners<Owners extends ReadonlyMap<string, string>>(
+  previous: Owners | undefined,
+  next: Owners,
+): Owners {
+  return previous !== undefined &&
+    previous.size === next.size &&
+    [...next].every(([environmentId, accountId]) => previous.get(environmentId) === accountId)
+    ? previous
+    : next;
+}
+
 /** Owning Connect account per relay environment, from the catalog's `accountId` tags. */
-export const accountByEnvironmentIdAtom = Atom.make((get) =>
-  relayAccountByEnvironmentId(
+export const accountByEnvironmentIdAtom = Atom.make((get) => {
+  const owners = relayAccountByEnvironmentId(
     [...get(environmentCatalog.catalogValueAtom).entries.values()].map((entry) => entry.target),
-  ),
-).pipe(Atom.withLabel("connect:account-by-environment"));
+  );
+  return keepUnchangedAccountOwners(Option.getOrUndefined(get.self<typeof owners>()), owners);
+}).pipe(Atom.withLabel("connect:account-by-environment"));
 
 /**
  * Short text that tells the known accounts apart: the email's local part, or

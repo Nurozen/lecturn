@@ -135,7 +135,9 @@ through `patches/alchemy@2.0.0-beta.65.patch` and `pnpm-workspace.yaml`.
 **Connect multiple accounts** sits behind the `connectMultiAccount` constant in
 `apps/web/src/cloud/publicConfig.ts`. Fork-only files:
 `apps/web/src/components/clerk/{ConnectAccountMenu.tsx,ConnectAccountMenu.logic.ts,connectProfilePages.tsx,useConnectSignOut.logic.ts}`,
-`apps/web/src/components/sidebar/AccountMark.tsx`,
+`apps/web/src/components/clerk/{useConnectSignIn.ts,SidebarSignInAgainButton.tsx}`,
+`apps/web/src/components/sidebar/{AccountMark,SidebarAccountBar,SidebarSegments}.tsx`,
+`apps/web/src/components/sidebar/{sidebarSegments.logic,useSidebarSegments,accountProjectGroups}.ts`,
 `apps/web/src/cloud/{connectAccounts,knownAccounts,accountTokens,relayTokenCache,singleAccountGuard,useAccountEmailWhenSeveral}.ts`,
 `packages/client-runtime/src/relay/{connectAccounts,singleAccountGuard}.ts`, and
 their tests.
@@ -146,6 +148,60 @@ Call sites in upstream files, which must survive a merge:
   `<AccountMark environmentId={thread.environmentId} />` line before
   `{pinIndicator}` in each visible `SidebarThreadRow` layout, slim and card.
   If upstream reshapes a row, re-add the single line; never the tooltip.
+- `apps/web/src/components/Sidebar.tsx`, segmented sidebar. Wrap, never
+  extract: upstream's list body stays where it is. Nine sites, all small:
+  1. the `./sidebar/*` imports next to `AccountMark`;
+  2. `const sidebarSegmentation = useSidebarSegmentation();` before
+     `unsortedProjectGroups`, whose memo calls
+     `snapshotsPerAccount(sidebarSegmentation, buildSidebarProjectSnapshots)({...})`
+     and lists `sidebarSegmentation` in its deps;
+  3. the `useSidebarSegments({...})` call right before `orderedThreads`. It
+     takes the partition's lists, the two shelf flags, and the three shelf
+     actions (`toggleSnoozedShelf`, `toggleSettledShelf`, `showMoreSettled`) by
+     name. A list upstream adds to the body has to be added to
+     `SidebarListScope` and passed here;
+  4. `orderedThreads` starts with the
+     `flattenSegmentsForNavigation(sidebarSegments.segments)` early return and
+     lists `sidebarSegments.segments` in its deps. Keyboard order, jump hints,
+     and range select all derive from `orderedThreads`, so nothing else changes;
+  5. the list `<ul ref={attachListAutoAnimateRef} ...>` is `<SidebarSegments ...>`
+     with the same `ref`, `role`, and `className`, and `</ul>` is
+     `</SidebarSegments>`;
+  6. the body IIFE `{(() => {` ... `})()}` is the render prop
+     `{(segment) => {` ... `}}`, and its first lines destructure the list names,
+     the shelf flags, and the shelf toggles from `segment`, shadowing the
+     component's. Upstream's body reads those names unchanged. The "Show more"
+     `<li>` after it stays as the second child: it renders in the one-list
+     sidebar only, and `SidebarSegments.tsx` carries a copy for segments, so
+     restyle both together;
+  7. `SidebarDraftBlock` reads `const ownsEnvironment = useSegmentOwnsEnvironment();`,
+     skips a session when `!ownsEnvironment(session.environmentId)`, and lists
+     `ownsEnvironment` in the `drafts` memo's deps. It is how a draft whose
+     project is not loaded still lands in its account's segment;
+  8. `handlePinnedDragEnd` plans with
+     `orderedIds: pinnedReorderKeysWithinSegment(sidebarSegments.segments, newOrder, activeKey)`
+     and lists `sidebarSegments.segments` in its deps, so a drop never writes to
+     another account's environment. The optimistic order stays the whole block's;
+  9. `projectScopeItems` maps `nameGroupsByAccount(sidebarSegmentation, projectGroups)`
+     and lists `sidebarSegmentation` in its deps.
+- `apps/web/src/components/LegacySidebar.tsx`: the `AccountMark` and
+  `accountProjectGroups` imports, `<AccountMark environmentId={thread.environmentId} />`
+  before `<ThreadWorktreeIndicator thread={thread} />` in the thread row,
+  `const segmentation = useSidebarSegmentation();`, and the two grouping calls
+  wrapped as `projectKeyMapPerAccount(segmentation, buildPhysicalToLogicalProjectKeyMap)({...})`
+  and `namedSnapshotsPerAccount(segmentation, buildSidebarProjectSnapshots)({...})`
+  with `segmentation` in both deps lists. Both must stay wrapped, or the
+  thread-to-project keys stop matching the project keys.
+- `apps/web/src/components/settings/ProjectSettingsPanel.tsx`: a segmented
+  sidebar links to the project page with account-scoped group keys, and the
+  page has to act on that account's members alone. `useSettingsProjectGroups`
+  takes the route's `projectKey`, reads `useProjectAccountScope(projectKey)`,
+  and builds with `snapshotsOfAccountScope(accountScope, buildSidebarProjectSnapshots)({...})`.
+  The breadcrumb and the panel pass their `projectKey`, and the breadcrumb
+  shows the scope's email after the project name.
+- `apps/web/src/components/ui/scroll-area.tsx`: the `scrollFade` class list
+  ends with `data-[scroll-fade=off]:mask-none`, which `SidebarSegments.tsx`
+  sets on the viewport while its opaque bars mark the edges.
 - `apps/web/src/components/clerk/LecturnConnectSidebarSignIn.tsx`:
   `LecturnConnectSidebarAvatar` returns `<ConnectAccountMenu />` when the
   constant is on, and the `UserButton` maps `CONNECT_PROFILE_PAGES` instead of

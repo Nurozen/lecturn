@@ -216,6 +216,10 @@ import { useSagaSidebarTree } from "./stave/useSagaSidebarTree";
 import { sagaSidebarThreadOrder } from "./stave/staveSaga.logic";
 import { SidebarContent, SidebarGroup, SidebarMenuButton, useSidebar } from "./ui/sidebar";
 import { AccountMark } from "./sidebar/AccountMark";
+import { snapshotsPerAccount, useSidebarSegmentation } from "./sidebar/accountProjectGroups";
+import { SidebarSegments, useSegmentOwnsEnvironment } from "./sidebar/SidebarSegments";
+import { flattenSegmentsForNavigation, nameGroupsByAccount } from "./sidebar/sidebarSegments.logic";
+import { pinnedReorderKeysWithinSegment, useSidebarSegments } from "./sidebar/useSidebarSegments";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
@@ -684,6 +688,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
   const draftThreadsByThreadKey = useComposerDraftStore((store) => store.draftThreadsByThreadKey);
   const draftsByThreadKey = useComposerDraftStore((store) => store.draftsByThreadKey);
   const clearDraftThread = useComposerDraftStore((store) => store.clearDraftThread);
+  const ownsEnvironment = useSegmentOwnsEnvironment();
   // The open draft's row is FROZEN at the moment the draft became the route:
   // it stays visible (like a thread row) but never repaints while the user
   // types. A draft that was never navigated away from has no snapshot to
@@ -714,7 +719,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
     // new-thread surfaces mint fresh drafts and leave invested ones behind
     // unmapped, so the mapping only knows about the latest per project.
     for (const [draftKey, session] of Object.entries(draftThreadsByThreadKey)) {
-      if (session.promotedTo != null) {
+      if (session.promotedTo != null || !ownsEnvironment(session.environmentId)) {
         continue;
       }
       if (
@@ -744,6 +749,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
     draftThreadsByThreadKey,
     draftsByThreadKey,
     frozenActive,
+    ownsEnvironment,
     props.routeDraftId,
     props.scopedProjectKeys,
   ]);
@@ -2226,9 +2232,13 @@ export default function Sidebar() {
       }),
     [projectOrder, projects],
   );
+  const sidebarSegmentation = useSidebarSegmentation();
   const unsortedProjectGroups = useMemo(
     () =>
-      buildSidebarProjectSnapshots({
+      snapshotsPerAccount(
+        sidebarSegmentation,
+        buildSidebarProjectSnapshots,
+      )({
         projects: sidebarProjectSortOrder === "manual" ? orderedProjects : projects,
         settings: projectGroupingSettings,
         primaryEnvironmentId,
@@ -2241,6 +2251,7 @@ export default function Sidebar() {
       projectGroupingSettings,
       projects,
       sidebarProjectSortOrder,
+      sidebarSegmentation,
     ],
   );
   const projectGroups = useMemo(
@@ -2339,12 +2350,12 @@ export default function Sidebar() {
   const projectScopeItems = useMemo(
     () => [
       { value: "all", label: "All projects" },
-      ...projectGroups.map((project) => ({
+      ...nameGroupsByAccount(sidebarSegmentation, projectGroups).map((project) => ({
         value: project.projectKey,
         label: project.displayName,
       })),
     ],
-    [projectGroups],
+    [projectGroups, sidebarSegmentation],
   );
   const projectGroupByScopeKey = useMemo(
     () => new Map(projectGroups.map((project) => [project.projectKey, project] as const)),
@@ -2696,7 +2707,33 @@ export default function Sidebar() {
     () => [...settledByProject.values()].flatMap((page) => page.visible),
     [settledByProject],
   );
+  const sidebarSegments = useSidebarSegments({
+    segmentation: sidebarSegmentation,
+    projects,
+    pinnedThreads,
+    activeThreads,
+    snoozedThreads,
+    visibleSnoozedThreads,
+    settledThreads,
+    renderedSettledThreads,
+    nestedSettledThreads,
+    scopedSagaTree,
+    scopedProjectKeys,
+    nestSagaProjects,
+    collapsedProjectKeys,
+    settledVisibleCount,
+    settledPageCount: SETTLED_TAIL_PAGE_COUNT,
+    snoozedShelfExpanded,
+    settledShelfExpanded,
+    toggleSnoozedShelf,
+    toggleSettledShelf,
+    showMoreSettled,
+    routeThreadKey,
+  });
   const orderedThreads = useMemo(() => {
+    if (sidebarSegments.segments !== null) {
+      return flattenSegmentsForNavigation(sidebarSegments.segments);
+    }
     const rows = [
       ...pinnedThreads,
       ...activeThreads,
@@ -2714,6 +2751,7 @@ export default function Sidebar() {
     nestSagaProjects,
     scopedSagaTree,
     collapsedProjectKeys,
+    sidebarSegments.segments,
   ]);
   const orderedThreadKeys = useMemo(
     () =>
@@ -3163,7 +3201,7 @@ export default function Sidebar() {
         reorderable.map((thread, index) => [keys[index]!, thread.pinOrderKey ?? null]),
       );
       const assignments = planPinnedReorder({
-        orderedIds: newOrder,
+        orderedIds: pinnedReorderKeysWithinSegment(sidebarSegments.segments, newOrder, activeKey),
         keysById: keysAtDrop,
         movedId: activeKey,
       });
@@ -3207,7 +3245,7 @@ export default function Sidebar() {
         }
       })();
     },
-    [orderedPinnedThreads, reorderPinnedThread, reorderablePinnedKeys],
+    [orderedPinnedThreads, reorderPinnedThread, reorderablePinnedKeys, sidebarSegments.segments],
   );
   // One snooze per thread at a time — same double-dispatch guard as settle.
   const snoozingThreadKeysRef = useRef(new Set<string>());
@@ -4227,8 +4265,20 @@ export default function Sidebar() {
               closeDelay={0}
               timeout={400}
             >
-              <ul ref={attachListAutoAnimateRef} role="list" className="flex flex-col gap-px">
-                {(() => {
+              <SidebarSegments
+                view={sidebarSegments}
+                orderedThreads={orderedThreads}
+                orderedPinnedThreads={orderedPinnedThreads}
+                ref={attachListAutoAnimateRef}
+                role="list"
+                className="flex flex-col gap-px"
+              >
+                {(segment) => {
+                  const { pinnedThreads, orderedPinnedThreads, activeThreads } = segment;
+                  const { snoozedThreads, visibleSnoozedThreads, settledThreads } = segment;
+                  const { renderedSettledThreads, orderedThreads, scopedSagaTree } = segment;
+                  const { scopedProjectKeys, snoozedShelfExpanded, settledShelfExpanded } = segment;
+                  const { toggleSnoozedShelf, toggleSettledShelf } = segment;
                   const renderThreadRow = (
                     thread: EnvironmentThreadShell,
                     section: "pinned" | "active" | "snoozed" | "settled",
@@ -4808,7 +4858,7 @@ export default function Sidebar() {
                     items.push(renderThreadRow(thread, "settled"));
                   }
                   return items;
-                })()}
+                }}
                 {!nestSagaProjects && settledShelfExpanded && hiddenSettledCount > 0 ? (
                   <li className="list-none">
                     <button
@@ -4821,7 +4871,7 @@ export default function Sidebar() {
                     </button>
                   </li>
                 ) : null}
-              </ul>
+              </SidebarSegments>
             </TooltipProvider>
           ) : null}
           {!isSearchingThreads &&
