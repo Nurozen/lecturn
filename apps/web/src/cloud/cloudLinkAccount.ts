@@ -22,7 +22,6 @@ export interface PublishAccountState {
  * stranger's link stays out of reach, as it always was.
  */
 export function describePublishAccount(input: {
-  readonly multiAccountEnabled: boolean;
   readonly linked: boolean;
   readonly accountId: string | null | undefined;
   readonly accountSignedIn: boolean;
@@ -45,7 +44,6 @@ export function describePublishAccount(input: {
     };
   }
   const publisher = knownPublishingAccount({
-    multiAccountEnabled: input.multiAccountEnabled,
     publisherId: input.publisherId,
     knownAccountIds: input.knownAccountIds,
     needsSignIn: input.needsSignIn,

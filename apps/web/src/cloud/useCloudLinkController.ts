@@ -24,7 +24,6 @@ import {
   updatePrimaryEnvironmentPreferences as updatePrimaryEnvironmentPreferencesAtom,
 } from "./linkEnvironmentAtoms";
 import { usePrimaryCloudLinkState } from "./primaryCloudLinkState";
-import { connectMultiAccount } from "./publicConfig";
 
 export interface CloudLinkDesiredState {
   readonly managedTunnel: boolean;
@@ -124,7 +123,6 @@ export function useCloudLinkController(
 
   const { onSelectAccount } = options;
   const publishAccount = describePublishAccount({
-    multiAccountEnabled: connectMultiAccount,
     linked,
     accountId: userId,
     accountSignedIn: Boolean(isSignedIn),

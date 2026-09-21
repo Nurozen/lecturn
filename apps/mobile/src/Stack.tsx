@@ -53,6 +53,7 @@ import { NewTaskFlowProvider } from "./features/threads/new-task-flow-provider";
 import { NewTaskRouteScreen } from "./features/threads/NewTaskRouteScreen";
 import { SettingsAppearanceRouteScreen } from "./features/settings/SettingsAppearanceRouteScreen";
 import { SettingsClientStorageRouteScreen } from "./features/settings/SettingsClientStorageRouteScreen";
+import { SettingsAddAccountRouteScreen } from "./features/settings/SettingsAddAccountRouteScreen";
 import { SettingsAuthRouteScreen } from "./features/settings/SettingsAuthRouteScreen";
 import { SettingsEnvironmentsRouteScreen } from "./features/settings/SettingsEnvironmentsRouteScreen";
 import { SettingsLegalRouteScreen } from "./features/settings/SettingsLegalRouteScreen";
@@ -227,6 +228,10 @@ const SettingsSheetStack = createNativeStackNavigator({
     SettingsAuth: createNativeStackScreen({
       screen: SettingsAuthRouteScreen,
       linking: "auth",
+    }),
+    SettingsAddAccount: createNativeStackScreen({
+      screen: SettingsAddAccountRouteScreen,
+      linking: "add-account",
     }),
     SettingsWaitlist: createNativeStackScreen({
       // Keep the old deep link working after the Connect GA launch.

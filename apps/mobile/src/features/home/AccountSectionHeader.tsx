@@ -1,0 +1,46 @@
+import { Pressable, View } from "react-native";
+import { accountTintColor } from "@lecturn/shared/accountTint";
+import { AppText } from "../../components/AppText";
+import type { HomeAccountHeaderListItem } from "./homeListItems";
+
+export function AccountSectionHeader({
+  item,
+  onToggle,
+}: {
+  readonly item: HomeAccountHeaderListItem;
+  readonly onToggle: () => void;
+}) {
+  const label = item.account?.label ?? "Direct connections";
+  return (
+    <Pressable
+      onPress={onToggle}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}${item.attention ? `, ${item.attention}` : ""}`}
+      accessibilityState={{ expanded: !item.collapsed }}
+      className="mx-3 mt-4 mb-1 rounded-xl border border-border bg-card px-3 py-3"
+    >
+      <View className="flex-row items-center gap-2">
+        {item.account ? (
+          <View
+            style={{
+              backgroundColor: accountTintColor(item.account.preset),
+              width: 8,
+              height: 8,
+              borderRadius: 4,
+            }}
+          />
+        ) : null}
+        <AppText className="flex-1 font-lecturn-semibold text-sm text-foreground" numberOfLines={1}>
+          {label}
+        </AppText>
+        <AppText className="text-foreground-muted">{item.collapsed ? "›" : "⌄"}</AppText>
+      </View>
+      {item.account && !item.account.signedIn ? (
+        <AppText className="mt-1 text-xs text-foreground-muted">Sign in again</AppText>
+      ) : null}
+      {item.attention ? (
+        <AppText className="mt-1 text-xs text-primary">{item.attention}</AppText>
+      ) : null}
+    </Pressable>
+  );
+}

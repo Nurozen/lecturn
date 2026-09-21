@@ -351,3 +351,24 @@ export function contextualActivityRows(
     };
   });
 }
+
+/** Cosmetic ownership comes from the authenticated catalog, never activity text. */
+export function withActivityAccountMarks(
+  rows: readonly DesktopActivityRow[],
+  marks: ReadonlyMap<
+    string,
+    { readonly accountId: string; readonly label: string; readonly color: string }
+  >,
+): DesktopActivityRow[] {
+  return rows.map(({ accountId: _id, accountLabel: _label, accountColor: _color, ...row }) => {
+    const mark = marks.get(row.environmentId);
+    return mark
+      ? {
+          ...row,
+          accountId: mark.accountId,
+          accountLabel: mark.label.slice(0, 80),
+          accountColor: mark.color,
+        }
+      : row;
+  });
+}

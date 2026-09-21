@@ -91,6 +91,7 @@ function contentState(state: RelayAgentActivityAggregateState) {
 }
 
 interface LiveActivityRequestBase {
+  readonly accountId?: string;
   readonly token: string;
   readonly nowEpochSeconds: number;
   readonly nowIso: string;
@@ -155,7 +156,7 @@ function makeLiveActivityRequest(input: MakeLiveActivityRequestInput): ApnsLiveA
         ...(input.event === "start"
           ? {
               "attributes-type": "LiveActivityAttributes",
-              attributes: {},
+              attributes: input.accountId ? { accountId: input.accountId } : {},
               "input-push-token": 1,
               alert: {
                 title: state.title,
@@ -186,6 +187,7 @@ function makePushNotificationRequest(input: {
         },
         sound: "default",
       },
+      ...(input.notification.accountId ? { accountId: input.notification.accountId } : {}),
       environmentId: input.notification.environmentId,
       threadId: input.notification.threadId,
       deepLink: input.notification.deepLink,

@@ -4,8 +4,8 @@ import { AppText as Text } from "../../../components/AppText";
 import { useConnectBillingStatus } from "./useConnectBillingStatus";
 
 /** Native companion status only: no purchase prompts, prices or external billing links. */
-export function ConnectBillingStatus() {
-  const { signedIn, status, loading, refresh } = useConnectBillingStatus();
+export function ConnectBillingStatus(props: { readonly accountId?: string | null } = {}) {
+  const { signedIn, status, loading, refresh } = useConnectBillingStatus(props.accountId);
   if (!signedIn) return null;
   const summary = status ? connectBillingSummary(status) : null;
   return (

@@ -16,32 +16,9 @@ const accounts = [
 const icons = { add: null, goTo: null, signOut: null };
 
 describe("buildConnectAccountActionItems", () => {
-  it("adds nothing to a single-account build, so the palette keeps exactly its actions", () => {
-    const items = buildConnectAccountActionItems({
-      multiAccountEnabled: false,
-      accounts,
-      commands: commands(),
-      goToAccount: vi.fn(),
-      icons,
-    });
-    expect(items).toEqual([]);
-    const settings = {
-      kind: "action" as const,
-      value: "action:settings",
-      searchTerms: ["settings"],
-      title: "Open settings",
-      icon: null,
-      run: async () => {},
-    };
-    expect(buildRootGroups({ actionItems: [settings, ...items], recentThreadItems: [] })).toEqual(
-      buildRootGroups({ actionItems: [settings], recentThreadItems: [] }),
-    );
-  });
-
   it("adds nothing until the Connect host is there to run the actions", () => {
     expect(
       buildConnectAccountActionItems({
-        multiAccountEnabled: true,
         accounts,
         commands: null,
         goToAccount: vi.fn(),
@@ -52,7 +29,6 @@ describe("buildConnectAccountActionItems", () => {
 
   it("offers add and sign-out for one account, without go-to or sign-out-of-all", () => {
     const items = buildConnectAccountActionItems({
-      multiAccountEnabled: true,
       accounts: accounts.slice(0, 1),
       commands: commands(),
       goToAccount: vi.fn(),
@@ -68,7 +44,6 @@ describe("buildConnectAccountActionItems", () => {
     const run = commands();
     const goToAccount = vi.fn();
     const items = buildConnectAccountActionItems({
-      multiAccountEnabled: true,
       accounts,
       commands: run,
       goToAccount,
@@ -92,7 +67,6 @@ describe("buildConnectAccountActionItems", () => {
 
   it("shows a closed add-account gate as a disabled action that says why", () => {
     const [add] = buildConnectAccountActionItems({
-      multiAccountEnabled: true,
       accounts,
       commands: { ...commands(), addAccountBlockedReason: "Sign out of one to add another." },
       goToAccount: vi.fn(),
@@ -106,7 +80,6 @@ describe("buildConnectAccountActionItems", () => {
 
   it("is found by account email and by what it does", () => {
     const items = buildConnectAccountActionItems({
-      multiAccountEnabled: true,
       accounts,
       commands: commands(),
       goToAccount: vi.fn(),

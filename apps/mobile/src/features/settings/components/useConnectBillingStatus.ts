@@ -6,10 +6,18 @@ import { useCallback, useState } from "react";
 import { AppState } from "react-native";
 import { resolveCloudPublicConfig } from "../../cloud/publicConfig";
 
+import { useConnectAccounts } from "../../cloud/knownAccounts";
 import { useSessionRelayToken } from "../../cloud/useSessionRelayToken";
 
-export function useConnectBillingStatus() {
-  const { userId, sessionId, isSignedIn } = useAuth();
+export function useConnectBillingStatus(accountId?: string | null) {
+  const auth = useAuth();
+  const accounts = useConnectAccounts();
+  const userId = accountId === undefined ? auth.userId : accountId;
+  const sessionId = auth.sessionId;
+  const isSignedIn =
+    accountId === undefined
+      ? auth.isSignedIn
+      : accounts.some((account) => account.accountId === userId && account.signedIn);
   const getRelayToken = useSessionRelayToken({ userId, sessionId, isSignedIn });
   const [refreshKey, setRefreshKey] = useState(0);
   const [result, setResult] = useState<{

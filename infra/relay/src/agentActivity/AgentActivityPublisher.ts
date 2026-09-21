@@ -57,11 +57,14 @@ export const make = Effect.gen(function* () {
   const apnsDeliveries = yield* ApnsDeliveries.ApnsDeliveries;
   const teams = yield* Effect.serviceOption(TeamRuntime);
 
-  const publishForDeliveryUser = Effect.fnUntraced(function* (input: {
+  const publishForDeliveryUser = Effect.fn(
+    "relay.agent_activity_publisher.publish_for_delivery_user",
+  )(function* (input: {
     readonly deliveryUser: EnvironmentLinks.AgentAwarenessDeliveryUserRecord;
     readonly state: RelayAgentActivityState | null;
     readonly nowMs: number;
   }) {
+    yield* Effect.annotateCurrentSpan({ "user.id": input.deliveryUser.userId });
     const activeStates = yield* rows.listForUser({ userId: input.deliveryUser.userId });
     const liveActivityAggregate = input.deliveryUser.liveActivitiesEnabled
       ? makeAggregateState({
@@ -111,6 +114,7 @@ export const make = Effect.gen(function* () {
     )(function* (input) {
       yield* Effect.annotateCurrentSpan({
         "relay.mobile.device_id": input.deviceId,
+        "user.id": input.userId,
         "relay.operation": "replayForLiveActivityRegistration",
       });
       const { activeStates, targets } = yield* Effect.all(

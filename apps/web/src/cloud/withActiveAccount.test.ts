@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { ActiveAccountError, bindActiveAccountClerk, withActiveAccount } from "./withActiveAccount";
+import {
+  ActiveAccountError,
+  bindActiveAccountClerk,
+  withActiveAccount,
+  withActiveAccountForProfile,
+  getProfileSelectedAccountId,
+} from "./withActiveAccount";
 
 function makeClerk(options: { readonly active: string | null; readonly stuck?: boolean }) {
   const sessions = [
@@ -69,6 +75,31 @@ describe("withActiveAccount", () => {
       "first ends as account-b",
       "second runs as account-a",
     ]);
+  });
+
+  it("restores selection before another profile turn and after failed IO", async () => {
+    const clerk = makeClerk({ active: "account-a" });
+    bindActiveAccountClerk(clerk);
+    const seen: string[] = [];
+    await Promise.all([
+      withActiveAccountForProfile("account-b", () => {
+        seen.push(clerk.user!.id);
+        expect(getProfileSelectedAccountId()).toBe("account-a");
+      }),
+      withActiveAccountForProfile("account-a", () => {
+        seen.push(clerk.user!.id);
+      }),
+    ]);
+    expect(seen).toEqual(["account-b", "account-a"]);
+    expect(clerk.user?.id).toBe("account-a");
+    expect(clerk.setActive.mock.calls).toEqual([
+      [{ session: "session-b" }],
+      [{ session: "session-a" }],
+    ]);
+    await expect(
+      withActiveAccountForProfile("account-b", () => Promise.reject(new Error("offline"))),
+    ).rejects.toThrow("offline");
+    expect(clerk.user?.id).toBe("account-a");
   });
 
   it("does not run when Clerk did not switch", async () => {

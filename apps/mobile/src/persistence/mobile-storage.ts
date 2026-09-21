@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import { pipe } from "effect/Function";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 
 import {
   isRelayManagedConnection,
@@ -57,6 +58,43 @@ export interface AgentAwarenessRegistrationRecord {
   readonly pushToStartToken?: string;
 }
 
+export interface AgentAwarenessRegistrationDocument {
+  readonly version: 2;
+  readonly records: Readonly<Record<string, AgentAwarenessRegistrationRecord>>;
+}
+/** Migration preserves the legacy record under its own identity, never the active account. */
+export function decodeAgentAwarenessRegistrationDocument(
+  value: unknown,
+): AgentAwarenessRegistrationDocument {
+  const valid = (entry: unknown): entry is AgentAwarenessRegistrationRecord =>
+    typeof entry === "object" &&
+    entry !== null &&
+    "identity" in entry &&
+    typeof entry.identity === "string" &&
+    "signature" in entry &&
+    typeof entry.signature === "string";
+  if (valid(value)) return { version: 2, records: { [value.identity]: value } };
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "version" in value &&
+    value.version === 2 &&
+    "records" in value &&
+    typeof value.records === "object" &&
+    value.records !== null
+  ) {
+    return {
+      version: 2,
+      records: Object.fromEntries(
+        Object.entries(value.records).filter(
+          ([id, entry]) => valid(entry) && entry.identity === id,
+        ),
+      ),
+    };
+  }
+  return { version: 2, records: {} };
+}
+
 export interface RecentThreadShortcut {
   readonly environmentId: string;
   readonly threadId: string;
@@ -90,7 +128,9 @@ export class MobileStorage extends Context.Service<
       string | null,
       MobileSecureStorage.MobileSecureStorageError
     >;
-    readonly loadAgentAwarenessRegistrationRecord: Effect.Effect<
+    readonly loadAgentAwarenessRegistrationRecord: (
+      accountId?: string,
+    ) => Effect.Effect<
       AgentAwarenessRegistrationRecord | null,
       MobileSecureStorage.MobileSecureStorageError
     >;
@@ -100,9 +140,11 @@ export class MobileStorage extends Context.Service<
       void,
       MobileSecureStorage.MobileSecureStorageError | MobileStorageEncodeError
     >;
-    readonly clearAgentAwarenessRegistrationRecord: Effect.Effect<
+    readonly clearAgentAwarenessRegistrationRecord: (
+      accountId?: string,
+    ) => Effect.Effect<
       void,
-      MobileSecureStorage.MobileSecureStorageError
+      MobileSecureStorage.MobileSecureStorageError | MobileStorageEncodeError
     >;
     readonly loadRecentThreadShortcuts: Effect.Effect<
       ReadonlyArray<RecentThreadShortcut>,
@@ -203,27 +245,40 @@ export const make = Effect.fn("MobileStorage.make")(function* () {
     .getItem(AGENT_AWARENESS_DEVICE_ID_KEY)
     .pipe(Effect.map((existing) => (existing?.trim() ? existing : null)));
 
-  const loadAgentAwarenessRegistrationRecord = readJson<AgentAwarenessRegistrationRecord>(
-    AGENT_AWARENESS_REGISTRATION_KEY,
-  ).pipe(
-    Effect.map((parsed) => {
-      if (
-        !parsed ||
-        typeof parsed !== "object" ||
-        typeof parsed.identity !== "string" ||
-        typeof parsed.signature !== "string"
-      ) {
-        return null;
-      }
-      return {
-        identity: parsed.identity,
-        signature: parsed.signature,
-        ...(typeof parsed.pushToStartToken === "string" && parsed.pushToStartToken
-          ? { pushToStartToken: parsed.pushToStartToken }
-          : {}),
-      };
-    }),
+  const registrationLock = yield* Semaphore.make(1);
+  const loadRegistrationDocument = readJson<unknown>(AGENT_AWARENESS_REGISTRATION_KEY).pipe(
+    Effect.map(decodeAgentAwarenessRegistrationDocument),
   );
+  const loadAgentAwarenessRegistrationRecord = (accountId?: string) =>
+    loadRegistrationDocument.pipe(
+      Effect.map((document) =>
+        accountId === undefined
+          ? (Object.values(document.records)[0] ?? null)
+          : (document.records[accountId] ?? null),
+      ),
+    );
+  const saveAgentAwarenessRegistrationRecord = (record: AgentAwarenessRegistrationRecord) =>
+    registrationLock.withPermits(1)(
+      Effect.gen(function* () {
+        const document = yield* loadRegistrationDocument;
+        yield* writeJson(AGENT_AWARENESS_REGISTRATION_KEY, {
+          version: 2,
+          records: { ...document.records, [record.identity]: record },
+        });
+      }),
+    );
+  const clearAgentAwarenessRegistrationRecord = (accountId?: string) =>
+    registrationLock.withPermits(1)(
+      Effect.gen(function* () {
+        const document = yield* loadRegistrationDocument;
+        const records = Object.fromEntries(
+          Object.entries(document.records).filter(
+            ([id]) => accountId !== undefined && id !== accountId,
+          ),
+        );
+        yield* writeJson(AGENT_AWARENESS_REGISTRATION_KEY, { version: 2, records });
+      }),
+    );
 
   // Threads most recently opened on this device, newest first — the source
   // for the launcher's dynamic "recent thread" app shortcuts.
@@ -252,12 +307,8 @@ export const make = Effect.fn("MobileStorage.make")(function* () {
     loadOrCreateAgentAwarenessDeviceId,
     loadAgentAwarenessDeviceId,
     loadAgentAwarenessRegistrationRecord,
-    saveAgentAwarenessRegistrationRecord: (record) =>
-      writeJson(AGENT_AWARENESS_REGISTRATION_KEY, record),
-    clearAgentAwarenessRegistrationRecord: secureStorage.setItem(
-      AGENT_AWARENESS_REGISTRATION_KEY,
-      "",
-    ),
+    saveAgentAwarenessRegistrationRecord,
+    clearAgentAwarenessRegistrationRecord,
     loadRecentThreadShortcuts,
     saveRecentThreadShortcuts: (threads) => writeJson(RECENT_THREAD_SHORTCUTS_KEY, { threads }),
   });

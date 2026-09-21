@@ -1088,6 +1088,9 @@ export const ActivityVisualState = Schema.Literals([
 ]);
 export type ActivityVisualState = typeof ActivityVisualState.Type;
 export const DesktopActivityRowSchema = Schema.Struct({
+  accountId: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
+  accountLabel: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(80))),
+  accountColor: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^#[0-9a-fA-F]{6}$/))),
   userPromptAt: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(100))),
   userSettled: Schema.optionalKey(Schema.Boolean),
   userStopped: Schema.optionalKey(Schema.Boolean),

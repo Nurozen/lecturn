@@ -3,6 +3,7 @@ import type { ComponentProps, ReactNode } from "react";
 import type { RelayPullRequestActivity } from "@lecturn/contracts";
 import {
   activityBackgroundTint,
+  glassEffect,
   background,
   clipShape,
   font,
@@ -47,6 +48,10 @@ export interface AgentActivityRowProps {
 }
 
 export interface AgentActivityProps {
+  readonly accountId?: string;
+  readonly accountLabel?: string;
+  readonly accountColor?: string;
+  readonly iosMajorVersion?: number;
   readonly title: string;
   readonly subtitle: string;
   readonly activeCount: number;
@@ -65,10 +70,11 @@ export function AgentActivity(
 
   // Keep these literals inside the serialized widget function. Match Lecturn's
   // dark app chrome even when macOS mirrors the activity in a light appearance.
+  const glass = (props.iosMajorVersion ?? 18) >= 26;
   const navy = "#061522";
-  const primaryForeground = "#dfc7a4";
-  const secondaryForeground = "#a5957f";
-  const gold = "#e6bc63";
+  const primaryForeground = glass ? "primary" : "#dfc7a4";
+  const secondaryForeground = glass ? "secondary" : "#a5957f";
+  const gold = props.accountColor ?? "#e6bc63";
   const subdued = environment.isLuminanceReduced === true;
   // The compact/minimal host chrome remains system-owned (including on Mac).
   const systemGold = environment.colorScheme === "light" ? "#996918" : gold;
@@ -163,7 +169,7 @@ export function AgentActivity(
   const deepLinkRow = attentionRow ?? row0;
   const deepLink =
     deepLinkRow && deepLinkRow.deepLink.startsWith("/") && !deepLinkRow.deepLink.startsWith("//")
-      ? `lecturn://${deepLinkRow.deepLink.slice(1)}`
+      ? `lecturn://${deepLinkRow.deepLink.slice(1)}${props.accountId ? `?accountId=${encodeURIComponent(props.accountId)}` : ""}`
       : null;
 
   // A scannable status glyph per phase — reads faster than colored words and
@@ -284,7 +290,7 @@ export function AgentActivity(
     );
     const destination =
       row.deepLink.startsWith("/pr-watches/") && !/[?#]/.test(row.deepLink)
-        ? `lecturn://${row.deepLink.slice(1)}`
+        ? `lecturn://${row.deepLink.slice(1)}${props.accountId ? `?accountId=${encodeURIComponent(props.accountId)}` : ""}`
         : null;
     return destination ? <Link destination={destination}>{content}</Link> : content;
   };
@@ -321,7 +327,9 @@ export function AgentActivity(
   // The image has lower layout priority so the content decides the widget's
   // height. It is a bundled original-color asset, never a remote image fetch.
   const brandedSurface = (content: ReactNode, radius = 20) => (
-    <ZStack modifiers={[background(navy), clipShape("roundedRectangle", radius)]}>
+    <ZStack
+      modifiers={[...(glass ? [] : [background(navy)]), clipShape("roundedRectangle", radius)]}
+    >
       <HStack modifiers={[layoutPriority(-1), opacity(subdued ? 0.16 : 0.6)]}>
         <Image assetName="LecturnNightSky" modifiers={[resizable()]} />
       </HStack>
@@ -336,7 +344,16 @@ export function AgentActivity(
       cornerRadius: 20,
       shape: "roundedRectangle",
     }),
-    activityBackgroundTint(navy),
+    ...(glass
+      ? [
+          glassEffect({
+            glass: { variant: "regular", tint: props.accountColor ?? gold },
+            shape: "roundedRectangle",
+            cornerRadius: 20,
+          }),
+          activityBackgroundTint("#00000000"),
+        ]
+      : [activityBackgroundTint(navy)]),
   ];
 
   return {
@@ -360,7 +377,7 @@ export function AgentActivity(
                 lineLimit(1),
               ]}
             >
-              {agentsLabel}
+              {props.accountLabel ? `${props.accountLabel} · ${agentsLabel}` : agentsLabel}
             </Text>
             {attentionSuffix ? (
               <Text

@@ -14,6 +14,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildHomeListLayout,
+  homeListItemsAreEqual,
   buildHomeHierarchyV2Items,
   DEFAULT_GROUP_DISPLAY_STATE,
   HOME_INITIAL_VISIBLE_THREADS,
@@ -679,5 +680,53 @@ describe("saga list layout", () => {
         ["a", 1],
       ]);
     }
+  });
+});
+
+describe("account sections", () => {
+  const account = {
+    accountId: "user_a",
+    email: "a@example.test",
+    label: "Work",
+    preset: "jade",
+    signedIn: true,
+  };
+  const other = { ...account, accountId: "user_b", label: "Personal" };
+  const accountSections = {
+    accounts: [account, other],
+    owners: new Map([[environmentId, account.accountId]]),
+  };
+  it("retains attention on a collapsed account and restores its threads without changing the other section", () => {
+    const group = makeGroup("work", 2);
+    const groups = [
+      {
+        ...group,
+        threads: group.threads.map((thread) => ({ ...thread, hasPendingApprovals: true })),
+      },
+    ];
+    const expanded = buildHomeListLayout({ groups, displayStates: new Map(), accountSections });
+    const collapsed = buildHomeListLayout({
+      groups,
+      displayStates: displayStates({
+        "connect-account:user_a": { collapsed: true, visibleCount: 6 },
+      }),
+      accountSections,
+    });
+    expect(collapsed.items.map((item) => item.type)).toEqual(["account-header", "account-header"]);
+    expect(collapsed.items[0]).toMatchObject({ attention: "2 awaiting approval", collapsed: true });
+    expect(expanded.items.some((item) => item.type === "thread")).toBe(true);
+    expect(homeListItemsAreEqual(expanded.items[0]!, collapsed.items[0]!)).toBe(false);
+    expect(homeListItemsAreEqual(expanded.items.at(-1)!, collapsed.items.at(-1)!)).toBe(true);
+    expect(expanded.stickyHeaderIndices).toEqual([]);
+  });
+  it("keeps expired empty accounts visible with a sign-in state", () => {
+    const layout = buildHomeHierarchyV2Items({
+      groups: [],
+      items: [],
+      displayStates: new Map(),
+      accountSections: { ...accountSections, accounts: [{ ...account, signedIn: false }, other] },
+    });
+    expect(layout).toHaveLength(2);
+    expect(layout[0]).toMatchObject({ type: "account-header", account: { signedIn: false } });
   });
 });

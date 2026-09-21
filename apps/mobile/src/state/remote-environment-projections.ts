@@ -68,6 +68,10 @@ export function createRemoteEnvironmentProjectionAtoms(input: {
           ? {
               authenticationMethod: "dpop" as const,
               relayManaged: true as const,
+              ...(presentation.entry.target._tag === "RelayConnectionTarget" &&
+              presentation.entry.target.accountId
+                ? { accountId: presentation.entry.target.accountId }
+                : {}),
               ...(authorization?._tag === "Dpop"
                 ? { dpopAccessToken: authorization.accessToken }
                 : {}),

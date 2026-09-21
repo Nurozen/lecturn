@@ -62,21 +62,6 @@ describe("reconcileKnownAccounts", () => {
       "account-b",
     ]);
   });
-
-  it("sweeps every other account before a single-account client serves a new one", () => {
-    const expiredA = { known: ["account-a"], signingOut: [] };
-    expect(
-      reconcileKnownAccounts({ ...expiredA, signedIn: ["account-b"], soleAccountId: "account-b" }),
-    ).toEqual({ known: ["account-a"], leaving: ["account-a"] });
-    // Signed out is not another account: the same user finds their data again.
-    expect(reconcileKnownAccounts({ ...expiredA, signedIn: [], soleAccountId: null })).toEqual({
-      known: ["account-a"],
-      leaving: [],
-    });
-    expect(
-      reconcileKnownAccounts({ ...expiredA, signedIn: ["account-a"], soleAccountId: "account-a" }),
-    ).toEqual({ known: ["account-a"], leaving: [] });
-  });
 });
 
 describe("known-account store", () => {
@@ -266,15 +251,6 @@ describe("known-account store", () => {
       leaving: ["account-b"],
     });
     expect(storedDocument()).toEqual({ accountIds: ["account-a", "account-b"], signingOut: [] });
-  });
-
-  it("knows the account served before the list existed", () => {
-    expect(
-      observeClerkSessions(registry, [active("account-b")], {
-        soleAccountId: "account-b",
-        previouslyServed: "account-a",
-      }),
-    ).toEqual({ known: ["account-a"], leaving: ["account-a"] });
   });
 });
 

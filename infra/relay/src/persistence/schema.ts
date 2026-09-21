@@ -1,3 +1,4 @@
+import type { ManagedEndpointDeprovisionTarget } from "../environments/ManagedEndpointProvider.ts";
 import { sql } from "drizzle-orm";
 import type {
   RelayAgentActivityAggregateState,
@@ -24,6 +25,8 @@ export const relayMobileDevices = pgTable(
     userId: varchar("user_id", { length: 255 }).notNull(),
     deviceId: varchar("device_id", { length: 255 }).notNull(),
     label: text("label").notNull().default("iOS device"),
+    accountLabel: text("account_label"),
+    accountColor: varchar("account_color", { length: 7 }),
     platform: varchar("platform", { length: 16 }).notNull().$type<"ios">(),
     iosMajorVersion: integer("ios_major_version").notNull(),
     appVersion: varchar("app_version", { length: 64 }),
@@ -37,8 +40,11 @@ export const relayMobileDevices = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.userId, table.deviceId] }),
-    uniqueIndex("idx_relay_mobile_devices_push_token").on(table.pushToken),
-    uniqueIndex("idx_relay_mobile_devices_push_to_start_token").on(table.pushToStartToken),
+    uniqueIndex("idx_relay_mobile_devices_push_token").on(table.userId, table.pushToken),
+    uniqueIndex("idx_relay_mobile_devices_push_to_start_token").on(
+      table.userId,
+      table.pushToStartToken,
+    ),
   ],
 );
 
@@ -58,7 +64,10 @@ export const relayLiveActivities = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.userId, table.deviceId] }),
-    uniqueIndex("idx_relay_live_activities_activity_push_token").on(table.activityPushToken),
+    uniqueIndex("idx_relay_live_activities_activity_push_token").on(
+      table.userId,
+      table.activityPushToken,
+    ),
   ],
 );
 
@@ -436,3 +445,29 @@ export const relayTeamDeletedUsers = pgTable("relay_team_deleted_users", {
   userId: text("user_id").primaryKey(),
   deletedAt: bigint("deleted_at", { mode: "number" }).notNull(),
 });
+
+/** Serializes token claims across users, including concurrent first registration. */
+export const relayPushTokenOwners = pgTable(
+  "relay_push_token_owners",
+  {
+    kind: text("kind").notNull(),
+    token: text("token").notNull(),
+    deviceId: varchar("device_id", { length: 255 }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.kind, table.token] })],
+);
+
+export const relayEnvironmentLinkOwners = pgTable("relay_environment_link_owners", {
+  legacyCleanupPending: boolean("legacy_cleanup_pending").notNull().default(false),
+  environmentId: varchar("environment_id", { length: 191 }).primaryKey(),
+});
+export const relayEnvironmentLinkCleanup = pgTable(
+  "relay_environment_link_cleanup",
+  {
+    userId: varchar("user_id", { length: 191 }).notNull(),
+    environmentId: varchar("environment_id", { length: 191 }).notNull(),
+    target: jsonb("target").$type<ManagedEndpointDeprovisionTarget | null>(),
+    organizationId: text("organization_id"),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.environmentId] })],
+);

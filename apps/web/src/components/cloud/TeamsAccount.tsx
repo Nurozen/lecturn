@@ -10,8 +10,8 @@ import { TeamSelector, useSelectedTeam, useTeamClient } from "./TeamSelector";
 
 const inputClass = "w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground";
 /**
- * `account` is the dialog's chosen account. Without a choice, as in every
- * single-account build, teams follow Clerk's active account.
+ * `account` is the dialog's chosen account. Without a choice,
+ * teams follow Clerk's active account.
  */
 export function TeamsAccount({ account }: { readonly account?: PickedConnectAccount }) {
   const chosen = account?.visible ? account : null;

@@ -1,7 +1,7 @@
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { NativeHeaderToolbar } from "../../native/StackHeader";
 import { useAuth } from "@clerk/expo";
-import { StackActions, useNavigation } from "@react-navigation/native";
+import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useCallback, useEffect, useState } from "react";
 import { Platform, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,6 +15,7 @@ import { splitEnvironmentSections } from "../connection/environmentSections";
 import { useConnectionController } from "../connection/useConnectionController";
 import { optOutOfConnectOnboarding } from "./connectOnboardingOptOut";
 import { TeamSelector } from "./TeamSelector";
+import { useConnectAccounts } from "./knownAccounts";
 import { hasCloudPublicConfig } from "./publicConfig";
 
 /**
@@ -24,7 +25,9 @@ import { hasCloudPublicConfig } from "./publicConfig";
  * device can be connected in one go. It shows on every sign-in: sign-out
  * clears the connected environments, so each new session starts from zero.
  */
-export function ConnectOnboardingRouteScreen() {
+export function ConnectOnboardingRouteScreen(
+  props: StaticScreenProps<{ accountId?: string } | undefined>,
+) {
   const navigation = useNavigation();
 
   // The route is deep-linkable; without cloud config the sheet would present
@@ -40,13 +43,18 @@ export function ConnectOnboardingRouteScreen() {
     }
   }, [navigation]);
 
-  return hasCloudPublicConfig() ? <ConfiguredConnectOnboardingRouteScreen /> : null;
+  return hasCloudPublicConfig() ? (
+    <ConfiguredConnectOnboardingRouteScreen accountId={props.route.params?.accountId} />
+  ) : null;
 }
 
-function ConfiguredConnectOnboardingRouteScreen() {
+function ConfiguredConnectOnboardingRouteScreen(props: { readonly accountId?: string }) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { isSignedIn, userId } = useAuth({ treatPendingAsSignedOut: false });
+  const auth = useAuth({ treatPendingAsSignedOut: false });
+  const accounts = useConnectAccounts();
+  const userId = props.accountId ?? auth.userId;
+  const isSignedIn = accounts.some((account) => account.accountId === userId && account.signedIn);
   const { connectedEnvironments, onReconnectEnvironment } = useRemoteConnections();
   const { refreshRelayEnvironments } = useConnectionController();
   const { connectedCloudEnvironments } = splitEnvironmentSections({
@@ -116,6 +124,7 @@ function ConfiguredConnectOnboardingRouteScreen() {
         </Text>
         {isSignedIn ? (
           <CloudEnvironmentRows
+            accountId={userId ?? undefined}
             connectedCloudEnvironments={connectedCloudEnvironments}
             onReconnectEnvironment={onReconnectEnvironment}
             onSetupProvider={(params) =>
@@ -144,7 +153,7 @@ function ConfiguredConnectOnboardingRouteScreen() {
             <Text className="text-xs text-foreground-muted">{"Don't show this again"}</Text>
           </Pressable>
         ) : null}
-        <TeamSelector />
+        <TeamSelector accountId={userId} />
       </ScrollView>
     </View>
   );

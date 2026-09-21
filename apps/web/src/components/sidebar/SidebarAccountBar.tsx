@@ -1,3 +1,6 @@
+import { useAtomValue } from "@effect/atom-react";
+import { accountTintColor } from "@lecturn/shared/accountTint";
+import { connectAccountProfilesAtom } from "../../cloud/connectAccounts";
 import { ChevronDownIcon } from "lucide-react";
 import { lazy, Suspense, type CSSProperties } from "react";
 
@@ -29,14 +32,18 @@ export function SidebarAccountBar(props: {
   readonly stickyOffsets: CSSProperties;
   readonly onToggle: (accountId: string) => void;
 }) {
-  const { label } = props;
+  const profile = useAtomValue(connectAccountProfilesAtom).get(props.accountId);
+  const label = profile?.label ?? props.label;
   return (
     <div
       data-thread-selection-safe
       data-sidebar-account-bar={props.accountId}
       // h-7 is `ACCOUNT_BAR_HEIGHT_REM`, which the sticky offsets count in.
       className="sticky z-10 flex h-7 shrink-0 items-center gap-1.5 bg-sidebar px-1 text-xs"
-      style={props.stickyOffsets}
+      style={{
+        ...props.stickyOffsets,
+        borderInlineStart: `3px solid ${accountTintColor(profile?.preset)}`,
+      }}
     >
       <Tooltip>
         <TooltipTrigger

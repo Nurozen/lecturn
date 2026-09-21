@@ -56,6 +56,7 @@ describe("ApnsClient", () => {
       const apns = yield* ApnsClient.ApnsClient;
       const request = apns.makeLiveActivityRequest({
         event: "start",
+        accountId: "account-A",
         token: "token",
         state,
         nowEpochSeconds: Math.floor(now.epochMilliseconds / 1_000),
@@ -67,6 +68,7 @@ describe("ApnsClient", () => {
         aps: {
           event: "start",
           "attributes-type": "LiveActivityAttributes",
+          attributes: { accountId: "account-A" },
           "input-push-token": 1,
           "content-state": {
             name: "AgentActivity",

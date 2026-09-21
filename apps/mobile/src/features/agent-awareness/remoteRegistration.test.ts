@@ -6,6 +6,7 @@ import { beforeEach, vi } from "vite-plus/test";
 import { describe, expect, it } from "@effect/vitest";
 import Constants from "expo-constants";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";
@@ -28,6 +29,8 @@ import {
 import type { Preferences } from "../../persistence/mobile-preferences";
 import { makeRelayDeviceRegistrationRequest, resolveApsEnvironment } from "./registrationPayload";
 import {
+  syncAgentAwarenessAccounts,
+  unregisterAgentAwarenessAccount,
   AgentAwarenessOperationError,
   __resetAgentAwarenessRemoteRegistrationForTest,
   armAgentAwarenessLiveActivityForLocalWork,
@@ -242,6 +245,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     vi.unstubAllGlobals();
     vi.stubGlobal("__DEV__", false);
     secureStore.clear();
+
     vi.mocked(Notifications.getDevicePushTokenAsync)
       .mockReset()
       .mockResolvedValue({ type: "ios", data: "apns-token" });
@@ -397,6 +401,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     };
 
     return Effect.gen(function* () {
+      setAgentAwarenessRelayTokenProvider(async () => "token", "account-a");
       expect(yield* registerLiveActivityPushToken({ activity: activity as never })).toBe(false);
       expect(yield* registerLiveActivityPushToken({ activity: activity as never })).toBe(false);
 
@@ -1108,4 +1113,215 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(widgetMocks.start).toHaveBeenCalledTimes(1);
   });
+  it.effect(
+    "registers each account with the complete device set and falls back to primary on an older relay",
+    () => {
+      Constants.expoConfig!.extra = { relay: { url: "https://relay.example.test" } };
+      const requests: Array<{ deviceAccountIds?: string[] }> = [];
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        if (request.url.endsWith("/dpop-token"))
+          return Response.json({
+            access_token: "relay-dpop-token",
+            issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+            token_type: "DPoP",
+            expires_in: 300,
+            scope: "mobile:registration",
+          });
+        if (request.url.endsWith("/devices") && request.method === "POST")
+          requests.push(await request.json());
+        return Response.json({ ok: true });
+      });
+      const providers = new Map([
+        ["a", async () => "token-a"],
+        ["b", async () => "token-b"],
+      ]);
+      syncAgentAwarenessAccounts(providers, "a", true);
+      return Effect.gen(function* () {
+        yield* runBackgroundOperations();
+        expect(requests.length).toBeGreaterThanOrEqual(2);
+        expect(requests.every((request) => request.deviceAccountIds?.join(",") === "a,b")).toBe(
+          true,
+        );
+        expect(
+          new Set(
+            vi
+              .mocked(saveAgentAwarenessRegistrationRecord)
+              .mock.calls.map(([record]) => record.identity),
+          ),
+        ).toEqual(new Set(["a", "b"]));
+        requests.length = 0;
+        syncAgentAwarenessAccounts(providers, "a", false);
+        yield* runBackgroundOperations();
+        expect(requests.length).toBeGreaterThan(0);
+        expect(requests.every((request) => request.deviceAccountIds === undefined)).toBe(true);
+      }).pipe(
+        Effect.provide(relayTestLayer),
+        Effect.provideService(FetchHttpClient.Fetch, fetchMock),
+      );
+    },
+  );
+
+  it.effect("ending account B preserves A's activity and clears only B's registration", () => {
+    const a = {
+      getId: () => "activity-a",
+      getAccountId: () => "a",
+      end: vi.fn(async () => {}),
+      getPushToken: async () => null,
+      addPushTokenListener: vi.fn(),
+    };
+    const b = {
+      getId: () => "activity-b",
+      getAccountId: () => "b",
+      end: vi.fn(async () => {}),
+      getPushToken: async () => null,
+      addPushTokenListener: vi.fn(),
+    };
+    widgetMocks.getInstances.mockReturnValue([a, b] as never);
+    syncAgentAwarenessAccounts(
+      new Map([
+        ["a", async () => "a"],
+        ["b", async () => "b"],
+      ]),
+      "a",
+      true,
+    );
+    return Effect.gen(function* () {
+      yield* runBackgroundOperations();
+      yield* unregisterAgentAwarenessAccount("b", async () => "b");
+      expect(a.end).not.toHaveBeenCalled();
+      expect(b.end).toHaveBeenCalledWith("immediate");
+      expect(clearAgentAwarenessRegistrationRecord).toHaveBeenCalledWith("b");
+    }).pipe(Effect.provide(relayTestLayer));
+  });
+  it.each([true, false])(
+    "retires revoked and unowned native cards on cold sync while preserving signed-in owners (supported=%s)",
+    (supported) => {
+      const card = (id: string, owner: string | null) => ({
+        getId: () => id,
+        getAccountId: () => owner,
+        end: vi.fn(async () => {}),
+      });
+      const expired = card("expired", "expired-account");
+      const primary = card("primary", "a");
+      const secondary = card("secondary", "b");
+      const unowned = card("legacy", null);
+      widgetMocks.getInstances.mockReturnValue([expired, primary, secondary, unowned] as never);
+      syncAgentAwarenessAccounts(
+        new Map([
+          ["a", async () => "a"],
+          ["b", async () => "b"],
+        ]),
+        "a",
+        supported,
+      );
+      expect(expired.end).toHaveBeenCalledWith("immediate");
+      expect(unowned.end).toHaveBeenCalledWith("immediate");
+      expect(primary.end).not.toHaveBeenCalled();
+      expect(secondary.end).not.toHaveBeenCalled();
+      expect(clearAgentAwarenessRegistrationRecord).toHaveBeenCalledWith("expired-account");
+      expect(clearAgentAwarenessRegistrationRecord).not.toHaveBeenCalledWith("a");
+      expect(clearAgentAwarenessRegistrationRecord).not.toHaveBeenCalledWith("b");
+    },
+  );
+  it("retires only removed sessions' local cards when revocation bypasses explicit sign-out", () => {
+    const a = { getId: () => "a", getAccountId: () => "a", end: vi.fn(async () => {}) };
+    const b = { getId: () => "b", getAccountId: () => "b", end: vi.fn(async () => {}) };
+    widgetMocks.getInstances.mockReturnValue([a, b] as never);
+    const aProvider = async () => "a";
+    syncAgentAwarenessAccounts(
+      new Map([
+        ["a", aProvider],
+        ["b", async () => "b"],
+      ]),
+      "a",
+      true,
+    );
+    syncAgentAwarenessAccounts(new Map([["a", aProvider]]), "a", true);
+    expect(a.end).not.toHaveBeenCalled();
+    expect(b.end).toHaveBeenCalledWith("immediate");
+    expect(clearAgentAwarenessRegistrationRecord).toHaveBeenCalledWith("b");
+  });
+  it.effect(
+    "orders a delayed A-only token claim before B joins and rebuilds queued claims with both owners",
+    () => {
+      Constants.expoConfig!.extra = { relay: { url: "https://relay.example.test" } };
+      return Effect.gen(function* () {
+        const originalClient = yield* ManagedRelay.ManagedRelayClient;
+        const oldAStarted = yield* Deferred.make<void>();
+        const releaseOldA = yield* Deferred.make<void>();
+        const bAuthRead = Promise.withResolvers<void>();
+        const requests: Array<{ owner: string; accounts: ReadonlyArray<string> }> = [];
+        const tokenOwners = new Set<string>();
+        const client: typeof originalClient = {
+          ...originalClient,
+          registerDevice: ({ clerkToken: owner, payload }) =>
+            Effect.gen(function* () {
+              requests.push({ owner, accounts: payload.deviceAccountIds ?? [owner] });
+              if (requests.length === 1) {
+                yield* Deferred.succeed(oldAStarted, undefined);
+                yield* Deferred.await(releaseOldA);
+              }
+              // Same retention rule as relay token claiming: omitted owners are evicted.
+              for (const id of tokenOwners)
+                if (!payload.deviceAccountIds?.includes(id)) tokenOwners.delete(id);
+              tokenOwners.add(owner);
+              return { ok: true as const };
+            }),
+        };
+        yield* Effect.gen(function* () {
+          const fibers: Array<Fiber.Fiber<unknown, unknown>> = [];
+          const startQueued = Effect.gen(function* () {
+            for (const pending of backgroundRuntime.pending.splice(0)) {
+              fibers.push(
+                yield* Effect.forkChild(
+                  (
+                    pending.operation as Effect.Effect<
+                      unknown,
+                      unknown,
+                      ManagedRelay.ManagedRelayClient
+                    >
+                  ).pipe(
+                    Effect.exit,
+                    Effect.tap((exit) => Effect.sync(() => pending.resolve(exit))),
+                  ),
+                ),
+              );
+            }
+          });
+          const a = async () => "a";
+          syncAgentAwarenessAccounts(new Map([["a", a]]), "a", true);
+          yield* startQueued;
+          yield* Deferred.await(oldAStarted);
+          expect(requests).toEqual([{ owner: "a", accounts: ["a"] }]);
+          syncAgentAwarenessAccounts(
+            new Map([
+              ["a", a],
+              [
+                "b",
+                async () => {
+                  bAuthRead.resolve();
+                  return "b";
+                },
+              ],
+            ]),
+            "a",
+            true,
+          );
+          yield* startQueued;
+          yield* Effect.promise(() => bAuthRead.promise);
+          // Drain already-resolved native/storage promise continuations without timers.
+          for (let pass = 0; pass < 6; pass++) yield* Effect.promise(() => Promise.resolve());
+          expect(requests).toHaveLength(1);
+          yield* Deferred.succeed(releaseOldA, undefined);
+          yield* Effect.forEach(fibers, (fiber) => Fiber.join(fiber));
+          yield* runBackgroundOperations();
+          expect(tokenOwners).toEqual(new Set(["a", "b"]));
+          expect(requests.slice(1).every((request) => request.accounts.join(",") === "a,b")).toBe(
+            true,
+          );
+        }).pipe(Effect.provideService(ManagedRelay.ManagedRelayClient, client));
+      }).pipe(Effect.provide(relayTestLayer));
+    },
+  );
 });

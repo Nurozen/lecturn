@@ -9,16 +9,14 @@ import {
 } from "./accountPicker";
 
 const two = {
-  multiAccountEnabled: true,
   knownAccountIds: ["account-a", "account-b", "account-c"],
   needsSignIn: [] as string[],
   activeAccountId: "account-a",
 };
 
 describe("accountPickerVisible", () => {
-  it("needs the feature on and two known accounts", () => {
+  it("needs two known accounts", () => {
     expect(accountPickerVisible(two)).toBe(true);
-    expect(accountPickerVisible({ ...two, multiAccountEnabled: false })).toBe(false);
     expect(accountPickerVisible({ ...two, knownAccountIds: ["account-a"] })).toBe(false);
   });
 });
@@ -31,15 +29,10 @@ describe("resolvePickedAccount", () => {
       threadOwnerAccountId: "account-b",
       lastUsedAccountId: "account-b",
     };
-    expect(resolvePickedAccount({ ...two, ...everything, multiAccountEnabled: false })).toBe(
-      "account-a",
-    );
     expect(resolvePickedAccount({ ...two, ...everything, knownAccountIds: ["account-a"] })).toBe(
       "account-a",
     );
-    expect(
-      resolvePickedAccount({ ...two, multiAccountEnabled: false, activeAccountId: null }),
-    ).toBeNull();
+    expect(resolvePickedAccount({ ...two, knownAccountIds: [], activeAccountId: null })).toBeNull();
   });
 
   it("defaults to the open thread's owner, then the last used account, then the active one", () => {

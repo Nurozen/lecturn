@@ -17,7 +17,6 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 
 import { accountByEnvironmentIdAtom, connectAccountProfilesAtom } from "~/cloud/connectAccounts";
 import { knownConnectAccountsAtom } from "~/cloud/knownAccounts";
-import { connectMultiAccount } from "~/cloud/publicConfig";
 import { environmentCatalog } from "~/connection/catalog";
 import { cn } from "~/lib/utils";
 import { relayEnvironmentDiscovery } from "~/state/relay";
@@ -88,7 +87,9 @@ export function CloudEnvironmentConnectRows({
     [accountByEnvironmentId, accountStates],
   );
   const accountHeading = (accountId: string | null) =>
-    accountId === null ? "Other environments" : (profiles.get(accountId)?.email ?? "Account");
+    accountId === null
+      ? "Other environments"
+      : (profiles.get(accountId)?.label ?? profiles.get(accountId)?.email ?? "Account");
   const connectRelayEnvironment = useCallback(
     (environment: RelayClientEnvironmentRecord) => {
       // The owner is the account whose discovery listed the environment.
@@ -289,8 +290,8 @@ export function CloudEnvironmentConnectRows({
     );
   };
 
-  // With two or more accounts known, each account's environments sit under its email.
-  if (connectMultiAccount && knownAccountIds.length >= 2) {
+  // With two or more accounts known, each account's environments sit under its label.
+  if (knownAccountIds.length >= 2) {
     return bucketByAccount(
       visibleEnvironments,
       ({ environment }) => ownerOf(environment.environmentId),

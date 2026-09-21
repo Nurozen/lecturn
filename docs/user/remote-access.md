@@ -307,3 +307,9 @@ After signing out on desktop, sign in with the new account and run Connect setup
 If this computer was already published to another account, the sign-out dialog explains that it will stop the local relay, while the previous account may retain an offline registration. Sign in to the previous account to remove that registration. Lecturn does not revoke another account's registration using your current account.
 
 You can also stop publication explicitly from **Settings → Connections → Unlink environment** while signed in to the account that published it.
+
+## Separate Connect identities
+
+When multiple Connect accounts are available, add them from the account menu on web or desktop, or **Settings → Connect accounts** on mobile. Each account retains its own environments, subscription, and team selection. Labels and colors help distinguish accounts across devices. Directly paired environments remain separate from Connect accounts.
+
+Signing out of one account removes its saved Connect access on that client without signing out your other accounts. An expired sign-in keeps an account section visible so you can restore access. Adding an account does not share a computer with another person or grant that account access to another account's environment.

@@ -1,13 +1,12 @@
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { LECTURN_LEGAL_NOTICES } from "@lecturn/shared/legalNotices";
-import { useAuth, useUser } from "@clerk/expo";
+import { useAuth } from "@clerk/expo";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { SymbolView } from "../../components/AppSymbol";
-import * as Effect from "effect/Effect";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Alert, AppState, Linking, Platform, Pressable, ScrollView, View } from "react-native";
@@ -32,7 +31,7 @@ import {
   subscribeAgentAwarenessRegistrationStatus,
 } from "../agent-awareness/remoteRegistration";
 import { refreshManagedRelayEnvironments } from "../cloud/managedRelayState";
-import { hasCloudPublicConfig, resolveRelayClerkTokenOptions } from "../cloud/publicConfig";
+import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { withNativeGlassHeaderItem } from "../layout/native-glass-header-items";
 import { WorkspaceSidebarToolbar } from "../layout/workspace-sidebar-toolbar";
 import { runtime } from "../../lib/runtime";
@@ -60,6 +59,9 @@ import {
 } from "../updates/app-updates";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { TeamSelector } from "../cloud/TeamSelector";
+import { useSessionRelayToken } from "../cloud/useSessionRelayToken";
+import { useConnectAccounts } from "../cloud/knownAccounts";
+import { ConnectAccountsSettings } from "./ConnectAccountsSettings";
 import { ConnectBillingStatus } from "./components/ConnectBillingStatus";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
@@ -166,8 +168,21 @@ function ConfiguredSettingsRouteScreen() {
   const agentAwarenessPlatform = resolveAgentAwarenessPlatformPresentation(Platform.OS);
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { getToken, isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
-  const { user } = useUser();
+  const { sessionId, isLoaded } = useAuth({ treatPendingAsSignedOut: false });
+  const connectAccounts = useConnectAccounts();
+  const isSignedIn = connectAccounts.some((account) => account.signedIn);
+  const [pickedAccountId, setPickedAccountId] = useState<string | null>(null);
+  const selectedAccountId =
+    pickedAccountId && connectAccounts.some((account) => account.accountId === pickedAccountId)
+      ? pickedAccountId
+      : (connectAccounts.find((account) => account.signedIn)?.accountId ??
+        connectAccounts[0]?.accountId ??
+        null);
+  const getRelayToken = useSessionRelayToken({
+    userId: selectedAccountId,
+    sessionId,
+    isSignedIn,
+  });
   const { savedConnectionsById } = useSavedRemoteConnections();
   const [notificationStatus, setNotificationStatus] = useState<NotificationStatus>("checking");
   const [liveActivityStatus, setLiveActivityStatus] = useState<LiveActivityStatus>("checking");
@@ -184,12 +199,6 @@ function ConfiguredSettingsRouteScreen() {
 
   const connections = useMemo(() => Object.values(savedConnectionsById), [savedConnectionsById]);
   const environmentCount = connections.length;
-  const accountLabel = useMemo(() => {
-    if (!isLoaded) return "Checking";
-    if (!isSignedIn) return "Sign in";
-    return user?.primaryEmailAddress?.emailAddress ?? "Signed in";
-  }, [isLoaded, isSignedIn, user?.primaryEmailAddress?.emailAddress]);
-
   const refreshNotifications = useCallback(async () => {
     if (process.env.EXPO_OS !== "ios") {
       setNotificationStatus("unsupported");
@@ -321,7 +330,7 @@ function ConfiguredSettingsRouteScreen() {
     }
 
     setLiveActivityStatus("linking");
-    const tokenResult = await settlePromise(() => getToken(resolveRelayClerkTokenOptions()));
+    const tokenResult = await settlePromise(() => getRelayToken());
     if (tokenResult._tag === "Failure") {
       setLiveActivityStatus("disabled");
       const error = squashAtomCommandFailure(tokenResult);
@@ -344,6 +353,7 @@ function ConfiguredSettingsRouteScreen() {
           previousEnabled: liveActivitiesPreferenceEnabled,
           clerkToken: tokenResult.value,
           connections,
+          ...(selectedAccountId ? { accountId: selectedAccountId } : {}),
         }),
       ),
     );
@@ -381,7 +391,8 @@ function ConfiguredSettingsRouteScreen() {
   }, [
     connections,
     environmentCount,
-    getToken,
+    getRelayToken,
+    selectedAccountId,
     isSignedIn,
     liveActivitiesPreferenceEnabled,
     promptSignIn,
@@ -414,9 +425,7 @@ function ConfiguredSettingsRouteScreen() {
         void (async () => {
           let token: string | null = null;
           if (isSignedIn) {
-            const tokenResult = await settlePromise(() =>
-              getToken(resolveRelayClerkTokenOptions()),
-            );
+            const tokenResult = await settlePromise(() => getRelayToken());
             if (tokenResult._tag === "Failure") {
               reportAtomCommandResult(tokenResult, {
                 label: "live activity disable token lookup",
@@ -433,6 +442,7 @@ function ConfiguredSettingsRouteScreen() {
                 previousEnabled: liveActivitiesPreferenceEnabled,
                 clerkToken: token,
                 connections,
+                ...(selectedAccountId ? { accountId: selectedAccountId } : {}),
               }),
             ),
           );
@@ -458,7 +468,8 @@ function ConfiguredSettingsRouteScreen() {
     },
     [
       connections,
-      getToken,
+      getRelayToken,
+      selectedAccountId,
       isSignedIn,
       linkEnvironments,
       liveActivitiesPreferenceEnabled,
@@ -466,11 +477,6 @@ function ConfiguredSettingsRouteScreen() {
       savePreferences,
     ],
   );
-
-  const openAccount = useCallback(() => {
-    if (!isLoaded) return;
-    navigation.navigate("SettingsSheet", { screen: "SettingsAuth" });
-  }, [isLoaded, navigation]);
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
@@ -485,16 +491,12 @@ function ConfiguredSettingsRouteScreen() {
         }}
       >
         <View className="gap-3">
-          <SettingsSection title="Account">
-            <SettingsRow
-              icon="person.crop.circle"
-              label="Lecturn Account"
-              value={accountLabel}
-              onPress={openAccount}
-            />
-          </SettingsSection>
-          <TeamSelector />
-          <ConnectBillingStatus />
+          <ConnectAccountsSettings
+            selectedAccountId={selectedAccountId}
+            onSelect={setPickedAccountId}
+          />
+          <TeamSelector accountId={selectedAccountId} />
+          <ConnectBillingStatus accountId={selectedAccountId} />
           <Text className="px-2 text-sm text-foreground-muted">
             Lecturn works locally without signing in. Cloud features are optional.
           </Text>

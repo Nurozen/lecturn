@@ -8,7 +8,6 @@ import {
   connectAccountProfilesAtom,
 } from "../../cloud/connectAccounts";
 import { knownConnectAccountsAtom } from "../../cloud/knownAccounts";
-import { connectMultiAccount } from "../../cloud/publicConfig";
 import type {
   buildPhysicalToLogicalProjectKeyMap,
   buildSidebarProjectSnapshots,
@@ -30,7 +29,6 @@ function useKnownSidebarSegmentation(): SidebarSegmentation | null {
   return useMemo(
     () =>
       resolveSidebarSegmentation({
-        multiAccountEnabled: true,
         knownAccountIds: accountIds,
         accountByEnvironmentId,
         accountLabels,
@@ -41,11 +39,8 @@ function useKnownSidebarSegmentation(): SidebarSegmentation | null {
 
 /**
  * The accounts both sidebars split by, or null while they render as one list.
- * A single-account build subscribes to nothing.
  */
-export const useSidebarSegmentation: () => SidebarSegmentation | null = connectMultiAccount
-  ? useKnownSidebarSegmentation
-  : () => null;
+export const useSidebarSegmentation: () => SidebarSegmentation | null = useKnownSidebarSegmentation;
 
 type BuildSnapshots = typeof buildSidebarProjectSnapshots;
 type BuildKeyMap = typeof buildPhysicalToLogicalProjectKeyMap;
@@ -111,11 +106,10 @@ function useKnownProjectAccountScope(projectKey: string): ProjectAccountScope | 
 }
 
 /**
- * The account in an account-scoped project key, or null for a plain key. A
- * single-account build never scopes a key, so it parses nothing.
+ * The account in an account-scoped project key, or null for a plain key.
  */
 export const useProjectAccountScope: (projectKey: string) => ProjectAccountScope | null =
-  connectMultiAccount ? useKnownProjectAccountScope : () => null;
+  useKnownProjectAccountScope;
 
 /**
  * Wraps `buildSidebarProjectSnapshots` for the project page. Under a scope it

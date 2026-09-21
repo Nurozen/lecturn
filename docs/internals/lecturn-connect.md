@@ -273,7 +273,8 @@ enabled.
 ## Multiple Signed-in Accounts
 
 Web and desktop can serve several Connect accounts at once through Clerk multi-session. An account is
-a Clerk user ID. Mobile stays on one account.
+a Clerk user ID. Native mobile retains multiple accounts too, with account-scoped push registration
+and Live Activities when the relay advertises the required capability.
 
 - **Clerk dashboard.** Multi-session is a per-instance setting (**Sessions → Multi-session handling**).
   It is on for the production instance. A fork on a plan without it keeps working with one account:
@@ -281,22 +282,18 @@ a Clerk user ID. Mobile stays on one account.
   when that reads `false`. clerk-js exposes the value on an internal field only
   (`__internal_environment`), so `readClerkSingleSessionMode` checks every step and treats anything
   unexpected as single-session.
-- **Build constant.** `connectMultiAccount` in `apps/web/src/cloud/publicConfig.ts` switches the
-  feature. There is no remote flag, so changing it means a new build. While it is `false` the footer
-  renders Clerk's `UserButton` exactly as before and none of the account UI mounts.
-- **Single-account guard.** While the constant is off, `decideSingleAccountGuard`
-  (`packages/client-runtime/src/relay/singleAccountGuard.ts`) runs in front of all account-transition
-  handling in `ManagedRelayAuthProvider`. An extra Clerk session, from another tab or Clerk's own UI,
-  is signed out through the non-current path and never reaches cleanup. Hosted web shares one Clerk
-  client across tabs, so a build with the constant on writes the **stand-down marker**
-  (`lecturn:multi-account-enabled`, a timestamp rewritten every 20 minutes and stale after two
-  hours). A guard that sees a fresh marker asks for a reload instead of signing out an account a
-  newer tab added.
+- **Always enabled.** Multi-account support ships in web, desktop, and native mobile. There is no
+  build flag. Clerk multi-session support, account limits, environment ownership, and mobile relay
+  capability checks still control whether another account can be added.
+- **Older browser tabs.** Hosted web shares one Clerk client across tabs. Current clients keep
+  writing `lecturn:multi-account-enabled` every 20 minutes so older single-account clients ask for
+  a reload rather than signing out an account the updated app added. The compatibility marker
+  becomes stale after two hours without a writer.
 - **Known-account list.** `apps/web/src/cloud/knownAccounts.ts` persists the accounts this client
   holds data for under `lecturn:accounts:v1`. Clerk's session list is not the source of truth: a
   session can disappear through expiry, cookie loss, or a 401 refetch without any sign-out. An
   account leaves the list, and its relay environments, drafts, and token cache are swept, only on a
-  sign-out started in Lecturn. With the constant on, that cleanup also sweeps the view stores keyed
+  sign-out started in Lecturn. That cleanup also sweeps the view stores keyed
   by the removed environments (`environmentOwnedState.ts`). Removing an environment by hand, or a
   platform environment going away, clears drafts only, so adding it back restores its layout. A
   known account without a signed-in session **needs sign-in**: its environments stay in the catalog,
@@ -319,8 +316,8 @@ a Clerk user ID. Mobile stays on one account.
   builds the environment-to-account lookup from those tags; thread and project view models carry only
   `environmentId`. Direct, Tailscale, and SSH environments have no owner.
 - **Add-account gate.** `decideAddAccountGate`
-  (`packages/client-runtime/src/relay/connectAccounts.ts`) allows another account when the constant is
-  on, Clerk reports multi-session, fewer than five accounts are known, and no relay entry is untagged.
+  (`packages/client-runtime/src/relay/connectAccounts.ts`) allows another account when
+  Clerk reports multi-session, fewer than five accounts are known, and no relay entry is untagged.
   Entries in the registry's in-memory `unlistedRelayEnvironmentIds` are ignored, since no signed-in
   account lists them and a new account cannot be handed them.
 - **Account UI.** `ConnectAccountMenu.tsx` replaces the `UserButton` popover. **Manage account** calls
@@ -340,12 +337,11 @@ a Clerk user ID. Mobile stays on one account.
   until the in-flight Clerk request settles; it cannot run a late authorization callback. Expired
   queued turns do not start. Use it only where Clerk itself has to
   act as the account: the CLI authorize redirect, opening Clerk's profile, and **Make active** in the
-  account menu. Do not add a second `setActive` caller. (The sign-out plan and the single-account
-  guard also call `setActive`, to pick the session that survives a sign-out, not to choose an account.)
+  account menu. Do not add a second `setActive` caller. (The sign-out plan also calls `setActive` to pick the session that survives a sign-out.)
 - **Account pickers.** A surface that acts for one account calls `useConnectAccountPicker(surface)`
   (`apps/web/src/components/clerk/ConnectAccountPicker.tsx`). It returns the account to act as and a
-  `picker` node, which is `null` while the constant is off or fewer than two accounts are known; the
-  account is then Clerk's active one, as before. `resolvePickedAccount`
+  `picker` node, which is `null` when fewer than two accounts are known; the
+  account is then Clerk's active one. `resolvePickedAccount`
   (`apps/web/src/cloud/accountPicker.ts`) picks the default among signed-in accounts: the choice made
   in this picker, the surface's own account (the onboarding wizard's new account), the open thread's
   owner, the account last used on that surface (`lecturn:account-picker:v1`), then the active
@@ -358,8 +354,8 @@ a Clerk user ID. Mobile stays on one account.
   team, and checks the subscription as `accountId`. The computer still links to one account.
   `describePublishAccount` (`cloudLinkAccount.ts`) decides what another account may do about an
   existing link: a known publisher is named by email and can be chosen in the picker or unlinked
-  (with its token when it is signed in, without one when it needs sign-in); a stranger's link, and
-  every mismatch in a single-account build, stays blocked with the old advice.
+  (with its token when it is signed in, without one when it needs sign-in); an unknown publisher's link
+  stays blocked with guidance to sign in to its owner.
 - **CLI authorize.** Clerk's OAuth authorize endpoint acts as the active account.
   `decideConnectCliAuthorizeStep` (`connectCliAuth.ts`) keeps the immediate redirect for one account
   and shows the chooser for two or more, then redirects inside `withActiveAccount`. The chosen account
@@ -391,3 +387,9 @@ Do not enable an empty allowlist: it blocks all new sign-ups.
 Clerk allowlists control who can sign up. They do not revoke an existing user's active cloud
 access. To remove an already-created user's access, ban that user in Clerk so their active
 sessions are ended and future sign-ins are rejected.
+
+### Account presentation and native clients
+
+`@lecturn/shared/accountTint` supplies six preset hues and contrast-preserving role overlays without a native color-library dependency. User metadata is namespaced under `unsafeMetadata.lecturn` as `label` and `preset`. Unknown presets fall back; labels are bounded display text. Web metadata writes run under `withActiveAccount` and validate the returned user ID. Cached profile presentation remains in `lecturn:account-profiles:v1`; it is never an authority for tokens.
+
+Web subscribes to applied theme/preview updates and scopes semantic token overrides to the conversation. Mobile applies the same roles through `ScopedVariables` and a JS theme context before accessibility substitutions. Native navigation and global chrome stay untinted. The desktop activity IPC carries bounded cosmetic account labels and hex color marks without credentials.

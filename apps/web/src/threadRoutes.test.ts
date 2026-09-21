@@ -172,7 +172,7 @@ describe("threadRoutes", () => {
     expect(
       resolveThreadRouteRenderState({ ...gone, bootstrapComplete: true, accountGone: true }),
     ).toBe("account-gone");
-    // A single-account build never sets it, and keeps the states it had.
+    // Without an account-gone override, keep the connection state.
     expect(resolveThreadRouteRenderState(gone)).toBe("loading");
     expect(resolveThreadRouteRenderState({ ...gone, bootstrapComplete: true })).toBe("missing");
     expect(

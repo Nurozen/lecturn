@@ -3,7 +3,6 @@ import { LogOutIcon, PanelLeftIcon, UserPlusIcon } from "lucide-react";
 
 import { connectAccountProfilesAtom } from "../../cloud/connectAccounts";
 import { knownConnectAccountsAtom } from "../../cloud/knownAccounts";
-import { connectMultiAccount } from "../../cloud/publicConfig";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { ITEM_ICON_CLASS, type CommandPaletteActionItem } from "../CommandPalette.logic";
 import {
@@ -19,7 +18,7 @@ import {
 } from "./connectAccountCommands";
 import { UNKNOWN_ACCOUNT_NAME } from "./ConnectAccountMenu.logic";
 
-/** The command palette's Lecturn Connect account actions. Empty in a single-account build. */
+/** The command palette's Lecturn Connect account actions. */
 export function useConnectAccountPaletteItems(): CommandPaletteActionItem[] {
   const known = useAtomValue(knownConnectAccountsAtom);
   const profiles = useAtomValue(connectAccountProfilesAtom);
@@ -30,7 +29,6 @@ export function useConnectAccountPaletteItems(): CommandPaletteActionItem[] {
     SegmentCollapsedSchema,
   );
   return buildConnectAccountActionItems({
-    multiAccountEnabled: connectMultiAccount,
     accounts: known.accountIds.map((accountId) => ({
       accountId,
       name: profiles.get(accountId)?.email ?? UNKNOWN_ACCOUNT_NAME,

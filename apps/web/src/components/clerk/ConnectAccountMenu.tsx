@@ -1,7 +1,10 @@
+import { useProfileStableAccountId } from "../../cloud/useProfileStableAccountId";
+import { refreshAccountAppearance } from "../../cloud/accountAppearance";
+import { AccountAppearanceDialog } from "./AccountAppearanceDialog";
 import { useAuth, useClerk } from "@clerk/react";
 import { useAtomValue } from "@effect/atom-react";
 import { useLocation } from "@tanstack/react-router";
-import { CheckIcon, LogInIcon, LogOutIcon, PlusIcon, UserCogIcon } from "lucide-react";
+import { CheckIcon, LogInIcon, LogOutIcon, PlusIcon, PaletteIcon, UserCogIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -101,16 +104,21 @@ function useConnectProfilePages() {
 
 /**
  * The Connect accounts signed in on this client, in place of Clerk's
- * `UserButton` popover. Only mounted while `connectMultiAccount` is on.
+ * `UserButton` popover.
  */
 export function ConnectAccountMenu() {
   const clerk = useClerk();
-  const { isLoaded, userId } = useAuth();
+  const { isLoaded, userId: clerkUserId } = useAuth();
+  const userId = useProfileStableAccountId(clerkUserId);
   const known = useAtomValue(knownConnectAccountsAtom);
   const profiles = useAtomValue(connectAccountProfilesAtom);
   const { requestSignOutAccount, requestSignOutAll, signOutDialog } = useConnectSignOut();
   const { customPages, portals } = useConnectProfilePages();
   const [open, setOpen] = useState(false);
+  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+  useEffect(() => {
+    if (open) void refreshAccountAppearance(clerk);
+  }, [clerk, open]);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const hash = useLocation({ select: (location) => location.hash });
 
@@ -150,6 +158,14 @@ export function ConnectAccountMenu() {
 
   return (
     <>
+      {editingAccountId ? (
+        <AccountAppearanceDialog
+          key={editingAccountId}
+          accountId={editingAccountId}
+          profile={profiles.get(editingAccountId)}
+          onClose={() => setEditingAccountId(null)}
+        />
+      ) : null}
       {signOutDialog}
       {authPrompt}
       {portals}
@@ -179,6 +195,11 @@ export function ConnectAccountMenu() {
                   <AccountAvatar row={row} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">{row.name}</span>
+                    {profiles.get(row.accountId)?.label ? (
+                      <span className="block truncate text-muted-foreground text-xs">
+                        {profiles.get(row.accountId)?.email}
+                      </span>
+                    ) : null}
                     {row.needsSignIn ? (
                       <span className="block text-warning text-xs">Needs sign-in</span>
                     ) : null}
@@ -191,13 +212,22 @@ export function ConnectAccountMenu() {
                   {row.canManage ? (
                     <MenuItem
                       onClick={() =>
-                        row.active
-                          ? clerk.openUserProfile({ customPages })
-                          : asActive(row.accountId, () => clerk.openUserProfile({ customPages }))
+                        asActive(row.accountId, () => clerk.openUserProfile({ customPages }))
                       }
                     >
                       <UserCogIcon />
                       Manage account
+                    </MenuItem>
+                  ) : null}
+                  {row.canManage ? (
+                    <MenuItem
+                      onClick={() => {
+                        setOpen(false);
+                        setEditingAccountId(row.accountId);
+                      }}
+                    >
+                      <PaletteIcon />
+                      Label and color
                     </MenuItem>
                   ) : null}
                   {row.canActivate ? (

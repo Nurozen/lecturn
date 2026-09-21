@@ -35,3 +35,7 @@ preview circle inside a card to change only that appearance.
 
 **System** follows the device appearance automatically. Theme, text, code, and terminal appearance
 preferences are stored on the device.
+
+## Account colors
+
+When multiple Connect accounts are available, account labels and colors identify their thread sections. An account’s conversation and composer use its selected tint over your current theme. Direct connections and native navigation headers keep the base theme. Reduce Transparency and increased contrast continue to take precedence over translucent surfaces.

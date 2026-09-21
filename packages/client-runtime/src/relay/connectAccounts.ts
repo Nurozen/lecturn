@@ -1,3 +1,15 @@
+/** Compatibility marker read by older single-account browser tabs. */
+export const MULTI_ACCOUNT_ENABLED_MARKER_KEY = "lecturn:multi-account-enabled";
+
+/** Freshness window understood by older clients reading the compatibility marker. */
+export const MULTI_ACCOUNT_MARKER_MAX_AGE_MS = 2 * 60 * 60 * 1_000;
+
+export function isMultiAccountMarkerFresh(value: string | null, now: number): boolean {
+  if (value === null || value.trim() === "") return false;
+  const writtenAt = Number(value);
+  return Number.isFinite(writtenAt) && Math.abs(now - writtenAt) < MULTI_ACCOUNT_MARKER_MAX_AGE_MS;
+}
+
 /** Most Connect accounts one client keeps signed in at once. */
 export const MAX_CONNECT_ACCOUNTS = 5;
 
@@ -9,8 +21,6 @@ export interface AccountOwnedTarget {
 }
 
 export type AddAccountBlockedReason =
-  /** The build serves a single account. */
-  | "disabled"
   /** Clerk's multi-session setting is off, or could not be read. */
   | "single-session"
   /** A relay environment has no owner yet, so a second account could claim it. */
@@ -29,15 +39,11 @@ export type AddAccountGate =
  * no signed-in account lists those, so none can be handed to the new account.
  */
 export function decideAddAccountGate(input: {
-  readonly multiAccountEnabled: boolean;
   readonly clerkSingleSessionMode: boolean | undefined;
   readonly targets: Iterable<AccountOwnedTarget>;
   readonly unlistedRelayEnvironmentIds: ReadonlySet<string>;
   readonly knownAccountCount: number;
 }): AddAccountGate {
-  if (!input.multiAccountEnabled) {
-    return { available: false, reason: "disabled" };
-  }
   if (input.clerkSingleSessionMode !== false) {
     return { available: false, reason: "single-session" };
   }

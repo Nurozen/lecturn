@@ -18,7 +18,6 @@ import { useEnvironmentQuery } from "../state/query";
 import { environmentShell } from "../state/shell";
 import { resolveAccountGone, signedOutEnvironmentsAtom } from "../cloud/accountGone";
 import { openThreadEnvironmentIdAtom } from "../cloud/accountPicker";
-import { connectMultiAccount } from "../cloud/publicConfig";
 import { environmentCatalog } from "../connection/catalog";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 
@@ -53,7 +52,6 @@ function ChatThreadRouteView() {
   const signedOutEnvironments = useAtomValue(signedOutEnvironmentsAtom);
   const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
   const accountGone = resolveAccountGone({
-    multiAccountEnabled: connectMultiAccount,
     environmentId: threadRef?.environmentId ?? null,
     signedOutEnvironments,
     environmentInCatalog: threadRef !== null && catalog.entries.has(threadRef.environmentId),

@@ -575,6 +575,9 @@ const recoverApnsDeliveryTransportError = (
 };
 
 interface LiveActivityDeliveryTarget {
+  readonly account_label?: string | null;
+  readonly account_color?: string | null;
+  readonly ios_major_version?: number;
   readonly user_id: string;
   readonly device_id: string;
   readonly bundle_id?: string | null;
@@ -638,9 +641,16 @@ function makeLiveActivityDeliveryRequest(
 ) {
   const epochSeconds = Math.floor(now.epochMilliseconds / 1_000);
   const base = {
+    accountId: input.target.user_id,
     token: input.token,
     nowEpochSeconds: epochSeconds,
     nowIso: DateTime.formatIso(now),
+  };
+  const account = {
+    accountId: input.target.user_id,
+    accountLabel: input.target.account_label ?? undefined,
+    accountColor: input.target.account_color ?? undefined,
+    iosMajorVersion: input.target.ios_major_version,
   };
   switch (input.kind) {
     case "live_activity_start":
@@ -651,7 +661,7 @@ function makeLiveActivityDeliveryRequest(
         request: apns.makeLiveActivityRequest({
           ...base,
           event: deliveryEvent(input.kind),
-          state: input.aggregate,
+          state: sanitizeAgentActivityAggregateState({ ...input.aggregate, ...account }),
           alert: input.alert ?? null,
         }),
       };
@@ -662,7 +672,9 @@ function makeLiveActivityDeliveryRequest(
         request: apns.makeLiveActivityRequest({
           ...base,
           event: "end",
-          state: input.aggregate,
+          state: input.aggregate
+            ? sanitizeAgentActivityAggregateState({ ...input.aggregate, ...account })
+            : null,
           alert: input.alert ?? null,
         }),
       };
@@ -903,6 +915,7 @@ export const make = Effect.gen(function* () {
   )(function* (input) {
     yield* Effect.annotateCurrentSpan({
       "relay.mobile.device_id": input.target.device_id,
+      "user.id": input.target.user_id,
       "relay.delivery.kind": input.kind,
       ...(input.sourceJobId ? { "relay.delivery.job_id": input.sourceJobId } : {}),
     });
@@ -956,9 +969,21 @@ export const make = Effect.gen(function* () {
     const now = yield* DateTime.now;
     const aggregate =
       input.aggregate === null ? null : sanitizeAgentActivityAggregateState(input.aggregate);
+    const registeredTarget = (yield* liveActivities.listTargets({
+      userId: input.target.user_id,
+    })).find((row) => row.device_id === input.target.device_id);
     const { epochSeconds, iso, request } = makeLiveActivityDeliveryRequest(
       apns,
-      { ...input, aggregate } as SendLiveActivityDeliveryInput,
+      {
+        ...input,
+        target: {
+          ...input.target,
+          account_label: registeredTarget?.account_label,
+          account_color: registeredTarget?.account_color,
+          ios_major_version: registeredTarget?.ios_major_version,
+        },
+        aggregate,
+      } as SendLiveActivityDeliveryInput,
       now,
     );
     const recoverTransportError = (cause: Apns.ApnsError) =>
@@ -1124,6 +1149,7 @@ export const make = Effect.gen(function* () {
   )(function* (input) {
     yield* Effect.annotateCurrentSpan({
       "relay.mobile.device_id": input.target.device_id,
+      "user.id": input.target.user_id,
       "relay.delivery.kind": "push_notification",
       ...(input.sourceJobId ? { "relay.delivery.job_id": input.sourceJobId } : {}),
     });
@@ -1147,7 +1173,7 @@ export const make = Effect.gen(function* () {
     });
     const request = apns.makePushNotificationRequest({
       token: input.token,
-      notification,
+      notification: { ...notification, accountId: input.target.user_id },
     });
     const recoverTransportError = (cause: Apns.ApnsError) =>
       recoverApnsDeliveryTransportError(
@@ -1293,6 +1319,7 @@ export const make = Effect.gen(function* () {
     }
     yield* Effect.annotateCurrentSpan({
       "relay.mobile.device_id": payload.target.deviceId,
+      "user.id": payload.target.userId,
       "relay.delivery.kind": payload.kind,
       "relay.delivery.job_id": payload.jobId,
     });

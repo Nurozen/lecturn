@@ -1,3 +1,4 @@
+import * as EnvironmentRelinks from "./environments/EnvironmentRelinks.ts";
 import { TeamStore, makeTeamStore, TeamError } from "./teams/TeamStore.ts";
 import { TeamDirectory, makeTeamDirectory } from "./teams/TeamDirectory.ts";
 import { TeamRuntime } from "./teams/TeamRuntime.ts";
@@ -566,7 +567,9 @@ export const ApiLive = Api.make(
         ),
         Layer.provideMerge(AgentActivityPublisher.layer),
         Layer.provideMerge(EnvironmentConnector.layer.pipe(Layer.provide(gatewayHttpClientLayer))),
-        Layer.provideMerge(EnvironmentLinker.layer),
+        Layer.provideMerge(
+          EnvironmentLinker.layer.pipe(Layer.provideMerge(EnvironmentRelinks.layer)),
+        ),
         Layer.provideMerge(EnvironmentPublishSignatures.layer),
         Layer.provideMerge(
           ManagedEndpointProvider.layerCloudflareBindings(
@@ -661,6 +664,9 @@ export const ApiLive = Api.make(
               }),
             ),
           ),
+        ),
+        Effect.andThen(
+          EnvironmentRelinks.EnvironmentRelinks.pipe(Effect.flatMap((relinks) => relinks.drain())),
         ),
         Effect.withSpan("relay.cron.prune_expired_state"),
         Effect.provide(runtimeLayer),

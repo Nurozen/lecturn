@@ -26,12 +26,11 @@ export const openThreadEnvironmentIdAtom = Atom.make<EnvironmentId | null>(null)
   Atom.withLabel("connect:open-thread-environment"),
 );
 
-/** A picker only exists with the feature on and a real choice to make. */
+/** A picker only exists with a real choice to make. */
 export function accountPickerVisible(input: {
-  readonly multiAccountEnabled: boolean;
   readonly knownAccountIds: ReadonlyArray<string>;
 }): boolean {
-  return input.multiAccountEnabled && input.knownAccountIds.length >= 2;
+  return input.knownAccountIds.length >= 2;
 }
 
 /**
@@ -43,7 +42,6 @@ export function accountPickerVisible(input: {
  * the answer, since it has no token to act with.
  */
 export function resolvePickedAccount(input: {
-  readonly multiAccountEnabled: boolean;
   readonly knownAccountIds: ReadonlyArray<string>;
   readonly needsSignIn: ReadonlyArray<string>;
   readonly activeAccountId: string | null;
@@ -173,12 +171,10 @@ const BILLING_ACCOUNT_STORAGE_KEY = "lecturn-connect-billing-account";
  * returns with `session_id`. Only a known account counts.
  */
 export function resolveBillingAccountHint(input: {
-  readonly multiAccountEnabled: boolean;
   readonly search: string;
   readonly checkoutAccountId: string | null;
   readonly knownAccountIds: ReadonlyArray<string>;
 }): string | null {
-  if (!input.multiAccountEnabled) return null;
   const params = new URLSearchParams(input.search);
   const hint = params.get("account") ?? (params.has("session_id") ? input.checkoutAccountId : null);
   return hint !== null && input.knownAccountIds.includes(hint) ? hint : null;

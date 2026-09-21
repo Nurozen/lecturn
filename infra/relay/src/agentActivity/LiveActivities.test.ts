@@ -9,7 +9,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as RelayDb from "../db.ts";
-import { relayLiveActivities } from "../persistence/schema.ts";
+import { relayPushTokenOwners, relayLiveActivities } from "../persistence/schema.ts";
 import * as LiveActivities from "./LiveActivities.ts";
 
 const aggregate: RelayAgentActivityAggregateState = {
@@ -52,6 +52,7 @@ describe("LiveActivities", () => {
       const dialect = new PgDialect();
 
       const fakeDb = {
+        $client: { withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect },
         update: (table: unknown) => {
           expect(table).toBe(relayLiveActivities);
           calls.push("update");
@@ -71,6 +72,8 @@ describe("LiveActivities", () => {
           };
         },
         insert: (table: unknown) => {
+          if (table === relayPushTokenOwners)
+            return { values: () => ({ onConflictDoUpdate: () => Effect.void }) };
           expect(table).toBe(relayLiveActivities);
           calls.push("insert");
           return {
@@ -152,7 +155,10 @@ describe("LiveActivities", () => {
     }> = [];
 
     const fakeDb = {
+      $client: { withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect },
       insert: (table: unknown) => {
+        if (table === relayPushTokenOwners)
+          return { values: () => ({ onConflictDoUpdate: () => Effect.void }) };
         expect(table).toBe(relayLiveActivities);
         return {
           values: (values: Record<string, unknown>) => {
@@ -201,6 +207,7 @@ describe("LiveActivities", () => {
   it.effect("retires the previous activity token when a start or end is delivered", () => {
     const conflictConfigs: Array<{ readonly set?: Record<string, unknown> }> = [];
     const fakeDb = {
+      $client: { withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect },
       insert: () => ({
         values: () => ({
           onConflictDoUpdate: (config: { readonly set?: Record<string, unknown> }) => {
@@ -257,6 +264,7 @@ describe("LiveActivities", () => {
         "activity-push-token" as RelayLiveActivityRegistrationRequest["activityPushToken"],
     };
     const fakeDb = {
+      $client: { withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect },
       update: () => ({
         set: () => ({ where: () => Effect.fail(cause) }),
       }),

@@ -26,7 +26,6 @@ describe("resolveAccountGone", () => {
     ["environment-b", { accountId: "account-b", email: "b@example.com" }],
   ]);
   const base = {
-    multiAccountEnabled: true,
     environmentId: "environment-b",
     signedOutEnvironments,
     environmentInCatalog: false,
@@ -34,10 +33,6 @@ describe("resolveAccountGone", () => {
 
   it("names the signed-out account behind a removed environment", () => {
     expect(resolveAccountGone(base)?.email).toBe("b@example.com");
-  });
-
-  it("is never reached in a single-account build", () => {
-    expect(resolveAccountGone({ ...base, multiAccountEnabled: false })).toBeNull();
   });
 
   it("stays quiet while the environment is in the catalog, and for any other environment", () => {

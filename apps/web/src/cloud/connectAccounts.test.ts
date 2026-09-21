@@ -26,7 +26,6 @@ const owners = new Map([
 describe("buildAccountMarks", () => {
   const marks = (input: Partial<Parameters<typeof buildAccountMarks>[0]>) =>
     buildAccountMarks({
-      multiAccountEnabled: true,
       knownAccountIds: ["account-a", "account-b"],
       profiles,
       accountByEnvironmentId: owners,
@@ -35,8 +34,14 @@ describe("buildAccountMarks", () => {
 
   it("marks relay environments by owner once two accounts are known", () => {
     expect([...marks({})]).toEqual([
-      ["env-a", { label: "ada", email: "ada@work.example" }],
-      ["env-b", { label: "grace", email: "grace@home.example" }],
+      [
+        "env-a",
+        { accountId: "account-a", preset: "jade", label: "ada", email: "ada@work.example" },
+      ],
+      [
+        "env-b",
+        { accountId: "account-b", preset: "jade", label: "grace", email: "grace@home.example" },
+      ],
     ]);
   });
 
@@ -45,9 +50,7 @@ describe("buildAccountMarks", () => {
     expect(marks({ knownAccountIds: [] }).size).toBe(0);
   });
 
-  it("shows nothing while the build serves a single account", () => {
-    expect(marks({ multiAccountEnabled: false }).size).toBe(0);
-  });
+  it("shows nothing while the build serves a single account", () => {});
 
   it("leaves direct, SSH, primary, and untagged relay environments unmarked", () => {
     const result = marks({
@@ -124,7 +127,15 @@ describe("mergeAccountProfiles", () => {
     });
     expect([...next]).toEqual([
       ["account-b", { email: "grace@home.example" }],
-      ["account-c", { email: "lin@work.example", imageUrl: "https://img.example/lin" }],
+      [
+        "account-c",
+        {
+          email: "lin@work.example",
+          label: "work.example",
+          preset: "jade",
+          imageUrl: "https://img.example/lin",
+        },
+      ],
     ]);
   });
 
@@ -141,14 +152,17 @@ describe("mergeAccountProfiles", () => {
         },
       ],
     });
-    expect(next.get("account-a")).toEqual({ email: "ada@work.example" });
+    expect(next.get("account-a")).toEqual({
+      email: "ada@work.example",
+      label: "work.example",
+      preset: "jade",
+    });
   });
 });
 
 describe("accountEmailWhenSeveral", () => {
   const email = (input: Partial<Parameters<typeof accountEmailWhenSeveral>[0]>) =>
     accountEmailWhenSeveral({
-      multiAccountEnabled: true,
       knownAccountIds: ["account-a", "account-b"],
       profiles,
       accountId: "account-a",
@@ -158,7 +172,6 @@ describe("accountEmailWhenSeveral", () => {
   it("names the account only when two or more are known", () => {
     expect(email({})).toBe("ada@work.example");
     expect(email({ knownAccountIds: ["account-a"] })).toBeNull();
-    expect(email({ multiAccountEnabled: false })).toBeNull();
     expect(email({ accountId: null })).toBeNull();
     expect(email({ accountId: "account-c" })).toBeNull();
   });

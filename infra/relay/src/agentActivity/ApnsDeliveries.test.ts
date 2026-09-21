@@ -1,3 +1,4 @@
+import * as Schema from "effect/Schema";
 import { stableStringify } from "@lecturn/shared/relaySigning";
 import type {
   RelayAgentActivityAggregateState,
@@ -40,6 +41,28 @@ import {
   layerDisabled,
 } from "../billing/ManagedAccess.ts";
 import * as ApnsProviderTokens from "./ApnsProviderTokens.ts";
+
+const decodeCardPayload = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      aps: Schema.Struct({
+        "content-state": Schema.Struct({
+          props: Schema.fromJsonString(
+            Schema.Struct({
+              accountId: Schema.String,
+              accountLabel: Schema.String,
+              accountColor: Schema.String,
+              iosMajorVersion: Schema.Int,
+            }),
+          ),
+        }),
+      }),
+    }),
+  ),
+);
+const decodeAccountPayload = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Struct({ accountId: Schema.String })),
+);
 
 const config = RelayConfiguration.RelayConfiguration.of({
   relayIssuer: "https://relay.example.test",
@@ -486,7 +509,7 @@ describe("ApnsDeliveries", () => {
       token: "activity-token",
       bundleId: "com.cloudgatherer.lecturn.preview",
       apsEnvironment: "sandbox",
-      aggregate,
+      aggregate: { ...aggregate, accountId: "host-forged-account" },
       createdAt: "1970-01-01T00:00:00.000Z",
       expiresAt: "1970-01-01T00:10:00.000Z",
       jobId: "job-routing-1",
@@ -508,6 +531,19 @@ describe("ApnsDeliveries", () => {
       expect(result.ok).toBe(true);
       expect(requests).toHaveLength(1);
       expect(requests[0]?.url).toBe("https://api.sandbox.push.apple.com/3/device/activity-token");
+      const body = requests[0]!.body;
+      expect(body._tag).toBe("Uint8Array");
+      if (body._tag === "Uint8Array") {
+        const text = new TextDecoder().decode(body.body);
+        const payload = yield* decodeCardPayload(text);
+        expect(payload.aps["content-state"].props).toEqual({
+          accountId: target.user_id,
+          accountLabel: "Work",
+          accountColor: "#123456",
+          iosMajorVersion: 26,
+        });
+        expect(text).not.toContain("host-forged-account");
+      }
       expect(requests[0]?.headers["apns-topic"]).toBe(
         "com.cloudgatherer.lecturn.preview.push-type.liveactivity",
       );
@@ -515,6 +551,9 @@ describe("ApnsDeliveries", () => {
       Effect.provide(
         makeLayer({
           attempts,
+          currentTargets: [
+            { ...target, account_label: "Work", account_color: "#123456", ios_major_version: 26 },
+          ],
           config: signingConfig,
           execute,
         }),
@@ -1009,6 +1048,7 @@ describe("ApnsDeliveries", () => {
   });
 
   it.effect("processes signed push notification jobs through APNs and records attempts", () => {
+    let sentBody = "";
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
     const payload = makeApnsDeliveryJobPayload({
       kind: "push_notification",
@@ -1017,6 +1057,7 @@ describe("ApnsDeliveries", () => {
       token: "apns-device-token",
       aggregate: null,
       notification: {
+        accountId: "forged-host-account",
         title: "Thread",
         body: "Input: Project",
         environmentId: "env",
@@ -1032,12 +1073,19 @@ describe("ApnsDeliveries", () => {
       payload,
     });
     const execute = (request: HttpClientRequest.HttpClientRequest) =>
-      Effect.succeed(HttpClientResponse.fromWeb(request, new Response("", { status: 200 })));
+      Effect.sync(() => {
+        if (request.body._tag === "Uint8Array")
+          sentBody = new TextDecoder().decode(request.body.body);
+        return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+      });
 
     return Effect.gen(function* () {
       const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
       const result = yield* deliveries.processSignedJob(signed);
 
+      const delivered = yield* decodeAccountPayload(sentBody);
+      expect(delivered.accountId).toBe(target.user_id);
+      expect(sentBody).not.toContain("forged-host-account");
       expect(result.kind).toBe("push_notification");
       expect(result.ok).toBe(true);
       expect(result.apnsStatus).toBe(200);

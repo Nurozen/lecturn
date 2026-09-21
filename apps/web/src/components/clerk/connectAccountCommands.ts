@@ -25,11 +25,10 @@ export const connectAccountCommandsAtom = Atom.make<ConnectAccountCommands | nul
 
 /**
  * Lecturn Connect account actions. Empty unless several accounts can be
- * served, so a single-account build keeps exactly the actions it had.
+ * served.
  * `commands` is null until the Connect host that runs them has mounted.
  */
 export function buildConnectAccountActionItems(input: {
-  readonly multiAccountEnabled: boolean;
   readonly accounts: ReadonlyArray<{ readonly accountId: string; readonly name: string }>;
   readonly commands: ConnectAccountCommands | null;
   readonly goToAccount: (accountId: string) => void;
@@ -40,7 +39,7 @@ export function buildConnectAccountActionItems(input: {
   };
 }): CommandPaletteActionItem[] {
   const { commands } = input;
-  if (!input.multiAccountEnabled || commands === null) {
+  if (commands === null) {
     return [];
   }
   const several = input.accounts.length >= 2;

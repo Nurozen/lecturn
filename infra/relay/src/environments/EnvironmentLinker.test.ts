@@ -1,3 +1,4 @@
+import { EnvironmentRelinks } from "./EnvironmentRelinks.ts";
 import * as NodeCrypto from "node:crypto";
 import type {
   RelayEnvironmentLinkProofPayload,
@@ -117,6 +118,7 @@ function testLayer(input?: {
   readonly access?: ManagedAccess.ManagedAccess["Service"];
   readonly teams?: TeamRuntime["Service"];
   readonly upsert?: EnvironmentLinks.EnvironmentLinks["Service"]["upsert"];
+  readonly displace?: EnvironmentRelinks["Service"]["displace"];
   readonly consume?: DpopProofs.DpopProofReplay["Service"]["consume"];
   readonly deprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["deprovision"];
 }) {
@@ -124,6 +126,11 @@ function testLayer(input?: {
     Layer.provideMerge(RelayTokens.layer),
     Layer.provide(
       Layer.mergeAll(
+        Layer.succeed(EnvironmentRelinks, {
+          withLinkLock: (_id, effect) => effect,
+          displace: input?.displace ?? (() => Effect.void),
+          drain: () => Effect.void,
+        }),
         input?.teams ? Layer.succeed(TeamRuntime, input.teams) : Layer.empty,
         Layer.succeed(ManagedAccess.ManagedAccess, input?.access ?? ManagedAccess.disabled),
         RelayConfiguration.layer(config),
@@ -468,6 +475,10 @@ describe("EnvironmentLinker", () => {
     }).pipe(
       Effect.provide(
         testLayer({
+          displace: () =>
+            Effect.sync(() => {
+              persisted = true;
+            }),
           upsert: () =>
             Effect.sync(() => {
               persisted = true;

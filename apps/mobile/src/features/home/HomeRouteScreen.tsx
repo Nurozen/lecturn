@@ -1,3 +1,4 @@
+import { useAccountSections } from "./useAccountSections";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
@@ -27,6 +28,7 @@ import { getConnectionAwareBrandHeaderOptions } from "./WorkspaceConnectionTitle
 /* ─── Route screen ───────────────────────────────────────────────────── */
 
 export function HomeRouteScreen() {
+  const accountSections = useAccountSections();
   const { width: windowWidth } = useWindowDimensions();
   const { layout } = useAdaptiveWorkspaceLayout();
   const projects = useProjects();
@@ -100,6 +102,7 @@ export function HomeRouteScreen() {
   const projectFilterOptions = useMemo(
     () =>
       buildHomeProjectScopes({
+        accountSections,
         projects,
         environmentId: selectedEnvironmentId,
         projectGroupingMode: listOptions.projectGroupingMode,
@@ -107,7 +110,7 @@ export function HomeRouteScreen() {
         key: scope.key,
         label: scope.title,
       })),
-    [listOptions.projectGroupingMode, projects, selectedEnvironmentId],
+    [accountSections, listOptions.projectGroupingMode, projects, selectedEnvironmentId],
   );
   useEffect(() => {
     if (
