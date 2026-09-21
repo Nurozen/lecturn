@@ -3,6 +3,7 @@ import { AuthView } from "@clerk/expo/native";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useEffect, useRef, useState } from "react";
 import { Alert, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useConnectAccounts } from "../cloud/knownAccounts";
 import { signOutMobileConnectAccount } from "../cloud/mobileAccountSignOut";
 import { useAddConnectAccountGate } from "../cloud/useAddConnectAccountGate";
@@ -69,10 +70,20 @@ export function SettingsAddAccountAuthContent({
   return (
     <View className="flex-1 bg-sheet">
       {entry !== null ? (
-        <AuthView
-          isDismissible={false}
-          onHostBack={() => navigation.dispatch(StackActions.popTo("SettingsContent"))}
-        />
+        <>
+          <SafeAreaView edges={["top"]}>
+            <View className="border-b border-border px-5 py-3">
+              <AppText className="text-center text-sm text-muted-foreground">
+                Can't find your verification email? Be sure to check your spam or junk folder for an
+                email from Lecturn.
+              </AppText>
+            </View>
+          </SafeAreaView>
+          <AuthView
+            isDismissible={false}
+            onHostBack={() => navigation.dispatch(StackActions.popTo("SettingsContent"))}
+          />
+        </>
       ) : (
         <AppText className="p-5 text-foreground">
           {gate.reason ?? "Adding an account is unavailable."}
