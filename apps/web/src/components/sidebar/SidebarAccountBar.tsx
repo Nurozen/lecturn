@@ -1,5 +1,4 @@
 import { useAtomValue } from "@effect/atom-react";
-import { accountTintColor } from "@lecturn/shared/accountTint";
 import { connectAccountProfilesAtom } from "../../cloud/connectAccounts";
 import { ChevronDownIcon } from "lucide-react";
 import { lazy, Suspense, type CSSProperties } from "react";
@@ -39,11 +38,8 @@ export function SidebarAccountBar(props: {
       data-thread-selection-safe
       data-sidebar-account-bar={props.accountId}
       // h-7 is `ACCOUNT_BAR_HEIGHT_REM`, which the sticky offsets count in.
-      className="sticky z-10 flex h-7 shrink-0 items-center gap-1.5 bg-sidebar px-1 text-xs"
-      style={{
-        ...props.stickyOffsets,
-        borderInlineStart: `3px solid ${accountTintColor(profile?.preset)}`,
-      }}
+      className="sticky z-10 flex h-7 shrink-0 items-center gap-1.5 bg-sidebar pl-2 pr-1 text-xs"
+      style={props.stickyOffsets}
     >
       <Tooltip>
         <TooltipTrigger
@@ -62,7 +58,7 @@ export function SidebarAccountBar(props: {
           <ChevronDownIcon
             aria-hidden
             className={cn(
-              "size-3.5 shrink-0 transition-transform duration-200 motion-reduce:transition-none",
+              "size-3.5 shrink-0 lecturn-hierarchy-chevron",
               props.collapsed && "-rotate-90",
             )}
           />

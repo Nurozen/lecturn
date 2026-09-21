@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { relayHealthLabel } from "./RelaySettings.logic";
+import { relayHealthLabel, relayHealthStatus } from "./RelaySettings.logic";
 
 const linked = { linked: true, managedTunnel: true, checking: false, offline: false } as const;
 describe("relayHealthLabel", () => {
@@ -40,5 +40,24 @@ describe("relayHealthLabel", () => {
       "Activity publishing only",
     );
     expect(relayHealthLabel({ ...linked, linked: false })).toBe("Not linked");
+  });
+});
+
+describe("relay health indicator", () => {
+  it("never shows healthy green from stale online discovery", () => {
+    const online = { ...linked, availability: "online" as const };
+    expect(relayHealthStatus(online).tone).toBe("online");
+    expect(relayHealthStatus({ ...online, checking: true }).tone).toBe("checking");
+    expect(relayHealthStatus({ ...online, offline: true }).tone).toBe("offline");
+    expect(relayHealthStatus({ ...online, linked: false }).tone).toBe("inactive");
+    expect(relayHealthStatus({ ...online, managedTunnel: false }).tone).toBe("inactive");
+    expect(relayHealthStatus({ ...online, error: "Unauthorized" }).tone).toBe("error");
+    expect(relayHealthStatus({ ...online, deviceRelayConflict: "In use" }).tone).toBe("error");
+  });
+  it("distinguishes unknown health from an offline or checking environment", () => {
+    expect(relayHealthStatus(linked).tone).toBe("inactive");
+    expect(relayHealthStatus({ ...linked, availability: "checking" }).tone).toBe("checking");
+    expect(relayHealthStatus({ ...linked, availability: "offline" }).tone).toBe("offline");
+    expect(relayHealthStatus({ ...linked, availability: "error" }).tone).toBe("error");
   });
 });

@@ -236,6 +236,29 @@ describe("buildSidebarSegmentViews", () => {
     ]);
   });
 
+  it("keeps the page limit independent of the extra deep-linked row across shelf toggles", () => {
+    const settledThreads = [1, 2, 3, 4, 5].map((id) => thread(`work-${id}`, "relay-work"));
+    const isRouteThread = (entry: TestThread) => entry.id === "work-5";
+    for (const settledShelfExpanded of [true, false, true]) {
+      const [segment] = views({
+        settledThreads,
+        settledShelfExpanded,
+        settledVisibleCount: 1,
+        shelves: new Map([["account-work", { settledVisibleCount: 2 }]]),
+        isRouteThread,
+      });
+      expect(segment!.settledVisibleCount).toBe(2);
+      const expanded = pageSegmentSettledThreads({
+        settledThreads: segment!.settledThreads,
+        visibleCount: segment!.settledVisibleCount,
+        shelfExpanded: true,
+        isRouteThread,
+      });
+      expect(ids(expanded.rendered)).toEqual(["work-1", "work-2", "work-5"]);
+      expect(segment!.hiddenSettledCount).toBe(2);
+    }
+  });
+
   it("gives each segment its own project tree in hierarchy mode", () => {
     const work = thread("work-1", "relay-work");
     const home = thread("home-1", "relay-home");

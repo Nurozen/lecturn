@@ -3,7 +3,6 @@ import type { ComponentProps, ReactNode } from "react";
 import type { RelayPullRequestActivity } from "@lecturn/contracts";
 import {
   activityBackgroundTint,
-  glassEffect,
   background,
   clipShape,
   font,
@@ -74,7 +73,24 @@ export function AgentActivity(
   const navy = "#061522";
   const primaryForeground = glass ? "primary" : "#dfc7a4";
   const secondaryForeground = glass ? "secondary" : "#a5957f";
-  const gold = props.accountColor ?? "#e6bc63";
+  const gold = "#e6bc63";
+  const accountColor = /^#[0-9a-f]{6}$/i.test(props.accountColor ?? "")
+    ? props.accountColor
+    : undefined;
+  // Tint the system-owned glass, leaving the brand and status colors stable.
+  const glassBackground = accountColor ? `${accountColor}40` : "#00000000";
+  const darkBackground = accountColor
+    ? `#${[1, 3, 5]
+        .map((offset) =>
+          Math.round(
+            parseInt(navy.slice(offset, offset + 2), 16) * 0.75 +
+              parseInt(accountColor.slice(offset, offset + 2), 16) * 0.25,
+          )
+            .toString(16)
+            .padStart(2, "0"),
+        )
+        .join("")}`
+    : navy;
   const subdued = environment.isLuminanceReduced === true;
   // The compact/minimal host chrome remains system-owned (including on Mac).
   const systemGold = environment.colorScheme === "light" ? "#996918" : gold;
@@ -326,9 +342,16 @@ export function AgentActivity(
   );
   // The image has lower layout priority so the content decides the widget's
   // height. It is a bundled original-color asset, never a remote image fetch.
-  const brandedSurface = (content: ReactNode, radius = 20) => (
+  const brandedSurface = (content: ReactNode, radius = 20, expanded = false) => (
     <ZStack
-      modifiers={[...(glass ? [] : [background(navy)]), clipShape("roundedRectangle", radius)]}
+      modifiers={[
+        ...(glass
+          ? expanded && accountColor
+            ? [background(glassBackground)]
+            : []
+          : [background(darkBackground)]),
+        clipShape("roundedRectangle", radius),
+      ]}
     >
       <HStack modifiers={[layoutPriority(-1), opacity(subdued ? 0.16 : 0.6)]}>
         <Image assetName="LecturnNightSky" modifiers={[resizable()]} />
@@ -344,16 +367,10 @@ export function AgentActivity(
       cornerRadius: 20,
       shape: "roundedRectangle",
     }),
-    ...(glass
-      ? [
-          glassEffect({
-            glass: { variant: "regular", tint: props.accountColor ?? gold },
-            shape: "roundedRectangle",
-            cornerRadius: 20,
-          }),
-          activityBackgroundTint("#00000000"),
-        ]
-      : [activityBackgroundTint(navy)]),
+    // iOS owns the Live Activity glass surface. Applying glassEffect to its
+    // content makes the native iOS 26 widget render an empty card, even though
+    // the serialized layout contains all of its text and rows.
+    activityBackgroundTint(glass ? glassBackground : darkBackground),
   ];
 
   return {
@@ -472,7 +489,7 @@ export function AgentActivity(
         alignment="center"
         modifiers={[
           padding({ horizontal: 8, vertical: 4 }),
-          background(navy),
+          background(glass && accountColor ? glassBackground : darkBackground),
           clipShape("roundedRectangle", 10),
         ]}
       >
@@ -514,6 +531,7 @@ export function AgentActivity(
         {!hasPullRequests && row2 ? renderCompactRow(row2) : null}
       </VStack>,
       10,
+      true,
     ),
   };
 }

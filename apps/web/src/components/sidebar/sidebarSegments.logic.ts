@@ -324,6 +324,8 @@ export interface SidebarSegmentView<Thread, Node> extends SidebarListScope<Threa
   readonly hasRows: boolean;
   /** Settled rows behind "Show more". */
   readonly hiddenSettledCount: number;
+  /** Configured page size, excluding any extra deep-linked current row. */
+  readonly settledVisibleCount: number;
   /** Which drafts the segment's draft block keeps, inside `scopedProjectKeys`. */
   readonly ownsEnvironment: OwnsEnvironment;
 }
@@ -468,6 +470,7 @@ export function buildSidebarSegmentViews<
       attention: rollupAttention([...pinnedThreads, ...activeThreads].map(input.statusOf)),
       hasRows: segment.threads.length > 0 || (input.nestSagaProjects && scopedSagaTree.length > 0),
       hiddenSettledCount: settledPage.hiddenCount,
+      settledVisibleCount: shelf.settledVisibleCount ?? input.settledVisibleCount,
       pinnedThreads,
       activeThreads,
       snoozedThreads,

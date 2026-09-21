@@ -13,7 +13,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { Button } from "../ui/button";
 import { CloudLinkRow } from "./ConnectionsSettings";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
-import { relayHealthLabel } from "./RelaySettings.logic";
+import { relayHealthStatus } from "./RelaySettings.logic";
 
 function ConfiguredRelaySettings() {
   const primary = usePrimaryEnvironment();
@@ -33,7 +33,7 @@ function ConfiguredRelaySettings() {
   const owner = ownerId ? profiles.get(ownerId) : undefined;
   const accountState = ownerId ? accounts.get(ownerId) : undefined;
   const environment = primary ? accountState?.environments.get(primary.environmentId) : undefined;
-  const status = relayHealthLabel({
+  const status = relayHealthStatus({
     deviceRelayConflict: link.data?.deviceRelayConflict,
     linked: link.data?.linked ?? false,
     managedTunnel: link.data?.managedTunnelActive ?? link.data?.linked ?? false,
@@ -64,7 +64,17 @@ function ConfiguredRelaySettings() {
       <SettingsSection id="relay-health" title="Relay health">
         <SettingsRow
           title={primary?.label ?? "This environment"}
-          description={status}
+          description={
+            <span role="status" className="flex items-start gap-2">
+              <span
+                key={status.tone}
+                aria-hidden="true"
+                className="lecturn-relay-status-dot mt-1.5 shrink-0"
+                data-status={status.tone}
+              />
+              <span>{status.label}</span>
+            </span>
+          }
           status={environment ? Option.getOrNull(environment.error)?.message : undefined}
           control={
             <Button
@@ -95,7 +105,7 @@ function ConfiguredRelaySettings() {
         ) : null}
       </SettingsSection>
       <SettingsSection id="relay-publishing" title="Publishing">
-        <p className="text-sm text-muted-foreground">
+        <p className="px-3 py-4 text-sm leading-relaxed text-muted-foreground sm:px-4">
           This device can publish through one relay at a time, across all Lecturn installations. The
           relay belongs to one account. Switching accounts does not move its projects. Unlink it
           before publishing to another account.

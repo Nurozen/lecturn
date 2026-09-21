@@ -4,7 +4,6 @@ import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/model
 import { PlusIcon } from "lucide-react";
 import {
   createContext,
-  Fragment,
   useContext,
   useLayoutEffect,
   useRef,
@@ -114,7 +113,18 @@ function SegmentedLists<Node>(
         const listId = segmentListDomId(segment.id);
         const actions = view.shelfActionsOf(segment.id);
         return (
-          <Fragment key={segment.id}>
+          <div
+            key={segment.id}
+            className={segment.accountId === null ? "contents" : "lecturn-account-section contents"}
+            data-account-collapsed={segment.collapsed || undefined}
+            style={
+              segment.accountId === null
+                ? undefined
+                : ({
+                    "--account-tint": accountTintColor(profiles.get(segment.accountId)?.preset),
+                  } as CSSProperties)
+            }
+          >
             {segment.accountId === null ? (
               // No account, no label: a rule that ends the last account's segment.
               <div
@@ -146,12 +156,9 @@ function SegmentedLists<Node>(
               <CollapsiblePanel
                 inert={segment.collapsed || undefined}
                 aria-hidden={segment.collapsed || undefined}
-                className="lecturn-account-collapse motion-reduce:transition-none"
+                className="lecturn-account-collapse lecturn-hierarchy-panel"
                 style={(state) =>
                   ({
-                    "--account-tint": accountTintColor(
-                      profiles.get(segment.accountId ?? "")?.preset,
-                    ),
                     // Preserve row focus rings and project glow when the fold is idle.
                     ...(state.open && state.transitionStatus === "idle"
                       ? { overflow: "visible" }
@@ -208,7 +215,7 @@ function SegmentedLists<Node>(
                 </ul>
               </CollapsiblePanel>
             </Collapsible>
-          </Fragment>
+          </div>
         );
       })}
     </div>
