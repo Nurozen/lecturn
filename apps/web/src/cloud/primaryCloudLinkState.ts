@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentCloudLinkStateResult } from "@lecturn/contracts";
+import { EnvironmentId, type EnvironmentCloudLinkStateResult } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -9,6 +9,9 @@ import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { HttpClient } from "effect/unstable/http";
 import { useCallback, useMemo } from "react";
 
+import { connectedGenerationSignal } from "./primaryCloudLinkRefresh";
+
+import { environmentCatalog } from "../connection/catalog";
 import { usePrimaryEnvironment } from "../state/environments";
 import { runtime } from "../lib/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -25,13 +28,26 @@ const primaryCloudLinkAtomRuntime = Atom.runtime(
 
 const primaryCloudLinkStateAtom = Atom.family((key: string) => {
   const target = JSON.parse(key) as CloudLinkTarget;
-  return primaryCloudLinkAtomRuntime
-    .atom(readPrimaryCloudLinkState({ target }))
-    .pipe(
-      Atom.swr({ staleTime: 5_000, revalidateOnMount: true }),
-      Atom.setIdleTTL(5 * 60_000),
-      Atom.withLabel(`primary-cloud-link:${target.environmentId}`),
-    );
+  const connectedGeneration = connectedGenerationSignal(
+    Atom.make((get) =>
+      Option.getOrUndefined(
+        AsyncResult.value(
+          get(environmentCatalog.stateAtom(EnvironmentId.make(target.environmentId))),
+        ),
+      ),
+    ),
+  );
+  return primaryCloudLinkAtomRuntime.atom(readPrimaryCloudLinkState({ target })).pipe(
+    Atom.swr({
+      staleTime: 5_000,
+      revalidateOnMount: true,
+      revalidateOnFocus: true,
+      focusSignal: typeof window === "undefined" ? undefined : Atom.windowFocusSignal,
+    }),
+    Atom.makeRefreshOnSignal(connectedGeneration),
+    Atom.setIdleTTL(5 * 60_000),
+    Atom.withLabel(`primary-cloud-link:${target.environmentId}`),
+  );
 });
 
 const EMPTY_PRIMARY_CLOUD_LINK_STATE_ATOM = Atom.make(
@@ -41,6 +57,26 @@ const EMPTY_PRIMARY_CLOUD_LINK_STATE_ATOM = Atom.make(
 function targetKey(target: CloudLinkTarget): string {
   return JSON.stringify(target);
 }
+
+/** The local host's publisher is authoritative even when another account is active. */
+export const primaryCloudPublisherAtom = Atom.make((get) => {
+  for (const [environmentId, entry] of get(environmentCatalog.catalogValueAtom).entries) {
+    if (entry.target._tag !== "PrimaryConnectionTarget") continue;
+    const target: CloudLinkTarget = {
+      environmentId,
+      label: entry.target.label,
+      httpBaseUrl: entry.target.httpBaseUrl,
+      wsBaseUrl: entry.target.wsBaseUrl,
+    };
+    const state = Option.getOrNull(
+      AsyncResult.value(get(primaryCloudLinkStateAtom(targetKey(target)))),
+    );
+    return state?.linked && state.cloudUserId && !state.deviceRelayConflict
+      ? { environmentId, accountId: state.cloudUserId }
+      : null;
+  }
+  return null;
+}).pipe(Atom.withLabel("primary-cloud-publisher"));
 
 export function refreshPrimaryCloudLinkState(target: CloudLinkTarget | null): void {
   if (target) {

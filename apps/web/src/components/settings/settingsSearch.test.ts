@@ -203,7 +203,9 @@ describe("searchSettings", () => {
       hasStave: false,
     };
     const accountActions = (items: ReadonlyArray<SettingsSearchItem>) =>
-      searchSettings("connect account", items).map((item) => item.id);
+      searchSettings("connect account", items)
+        .filter((item) => item.connectAccountMenuOnly)
+        .map((item) => item.id);
 
     expect(accountActions(filterAvailableSettingsSearchItems(availability))).toEqual([]);
     expect(

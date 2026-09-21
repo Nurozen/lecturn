@@ -133,6 +133,7 @@ import {
 } from "./cloud/http.ts";
 import { serverRelayBrokerTracingLayer } from "./cloud/relayTracing.ts";
 import { shouldRetryCloudLink } from "./cloud/relayResponse.ts";
+import * as DeviceRelayReservation from "./cloud/DeviceRelayReservation.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
 import * as CloudCliState from "./cloud/CliState.ts";
@@ -542,6 +543,7 @@ const AuthLayerLive = EnvironmentAuth.layer.pipe(
 const CloudManagedEndpointRuntimeLive = Layer.mergeAll(
   RelayClientLive,
   CloudManagedEndpointRuntime.layer.pipe(
+    Layer.provide(DeviceRelayReservation.layer.pipe(Layer.provide(ServerEnvironmentLayerLive))),
     Layer.provide(ServerSecretStore.layer),
     Layer.provide(RelayClientLive),
   ),

@@ -61,7 +61,10 @@ export function SidebarAccountBar(props: {
         >
           <ChevronDownIcon
             aria-hidden
-            className={cn("size-3.5 shrink-0", props.collapsed && "-rotate-90")}
+            className={cn(
+              "size-3.5 shrink-0 transition-transform duration-200 motion-reduce:transition-none",
+              props.collapsed && "-rotate-90",
+            )}
           />
           <span id={props.labelId} className="min-w-0 truncate">
             {label}

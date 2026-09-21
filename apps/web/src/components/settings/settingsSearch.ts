@@ -8,6 +8,7 @@ export type SettingsPath =
   | "/settings/providers"
   | "/settings/integrations"
   | "/settings/source-control"
+  | "/settings/relay"
   | "/settings/connections"
   | "/settings/archived";
 
@@ -67,6 +68,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/integrations": "Integrations",
   "/settings/source-control": "Source Control",
   "/settings/connections": "Connections",
+  "/settings/relay": "Relay",
   "/settings/archived": "Archive",
 };
 
@@ -76,6 +78,14 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
  * that may not be mounted point at their nearest stable section instead.
  */
 export const SETTINGS_SEARCH_ITEMS = [
+  {
+    id: "relay-health",
+    title: "Relay health and account",
+    to: "/settings/relay",
+    targetId: "relay-health",
+    searchTerms: ["connect tunnel status online offline publishing account unlink health"],
+    cloudOnly: true,
+  },
   {
     id: "color-scheme",
     title: "Color scheme",
@@ -570,17 +580,16 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "lecturn-connect",
     title: "Lecturn Connect",
-    to: "/settings/connections",
-    targetId: "connections-environment",
+    to: "/settings/relay",
+    targetId: "relay-publishing",
     searchTerms: ["managed tunnel cloud other devices remote"],
-    desktopOnly: true,
     cloudOnly: true,
   },
   {
     id: "publish-agent-activity",
     title: "Publish agent activity",
-    to: "/settings/connections",
-    targetId: "connections-environment",
+    to: "/settings/relay",
+    targetId: "relay-publishing",
     searchTerms: ["mobile push notifications live activities cloud tunnel"],
     cloudOnly: true,
   },

@@ -16,7 +16,13 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import { CLOUD_ENDPOINT_RUNTIME_CONFIG, decodeRuntimeConfig } from "./config.ts";
+import * as DeviceReservation from "./DeviceRelayReservation.ts";
+import type { DeviceRelayLease } from "./deviceRelayLease.ts";
+import {
+  CLOUD_LINKED_USER_ID,
+  CLOUD_ENDPOINT_RUNTIME_CONFIG,
+  decodeRuntimeConfig,
+} from "./config.ts";
 
 function bytesToString(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
@@ -59,6 +65,7 @@ export class CloudManagedEndpointRuntime extends Context.Service<
   {
     readonly applyConfig: (
       config: RelayManagedEndpointRuntimeConfig | null,
+      options?: { readonly published: boolean },
     ) => Effect.Effect<CloudManagedEndpointRuntimeStatus>;
   }
 >()("lecturn/cloud/ManagedEndpointRuntime/CloudManagedEndpointRuntime") {}
@@ -112,6 +119,17 @@ const stopConnector = (connector: ActiveConnector | null) =>
     : Effect.void;
 
 export const make = Effect.gen(function* () {
+  const reservation = yield* DeviceReservation.DeviceRelayReservation;
+  const secrets = yield* ServerSecretStore.ServerSecretStore;
+  let deviceLease: DeviceRelayLease | null = null;
+  DeviceReservation.setDeviceRelayPublicationActive(secrets, false);
+  const releaseDeviceLease = Effect.gen(function* () {
+    const lease = deviceLease;
+    deviceLease = null;
+    DeviceReservation.setDeviceRelayPublicationActive(secrets, false);
+    if (lease) yield* Effect.promise(() => lease.release());
+    DeviceReservation.setDeviceRelayConflict(secrets, null);
+  });
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const relayClient = yield* RelayClient.RelayClient;
   const activeRef = yield* Ref.make<ActiveConnector | null>(null);
@@ -344,19 +362,49 @@ export const make = Effect.gen(function* () {
   });
 
   const applyConfig = Effect.fn("CloudManagedEndpointRuntime.applyConfig")(
-    (config: RelayManagedEndpointRuntimeConfig | null) =>
+    (config: RelayManagedEndpointRuntimeConfig | null, options?: { readonly published: boolean }) =>
       reconcileSemaphore.withPermits(1)(
-        // An explicit config change starts over with a fresh backoff.
-        Ref.set(restartDelayRef, 0).pipe(
-          Effect.andThen(Ref.set(desiredConfigRef, config)),
-          Effect.andThen(reconcileConfig(config)),
-        ),
+        Effect.gen(function* () {
+          const published = options?.published ?? config !== null;
+          const newlyClaimed = published && !deviceLease;
+          if (published && !deviceLease) {
+            const result = yield* Effect.result(reservation.acquire);
+            if (Result.isFailure(result)) {
+              DeviceReservation.setDeviceRelayConflict(secrets, result.failure.message);
+              return {
+                status: "failed",
+                providerKind: config?.providerKind ?? "cloudflare_tunnel",
+                reason: result.failure.message,
+              } satisfies CloudManagedEndpointRuntimeStatus;
+            }
+            deviceLease = result.success;
+            DeviceReservation.setDeviceRelayPublicationActive(secrets, true);
+            DeviceReservation.setDeviceRelayConflict(secrets, null);
+          }
+          yield* Ref.set(restartDelayRef, 0);
+          yield* Ref.set(desiredConfigRef, config);
+          const status = yield* reconcileConfig(config);
+          if (!published) yield* releaseDeviceLease;
+          else if (
+            newlyClaimed &&
+            (status.status === "failed" || status.status === "unsupported")
+          ) {
+            const alreadyLinked = yield* secrets.get(CLOUD_LINKED_USER_ID).pipe(
+              Effect.map(Option.isSome),
+              Effect.orElseSucceed(() => true),
+            );
+            if (!alreadyLinked) yield* releaseDeviceLease;
+          }
+          return status;
+        }).pipe(Effect.uninterruptible),
       ),
   );
 
   const runtime = CloudManagedEndpointRuntime.of({
     applyConfig,
   });
+  // Register before startup can acquire the reservation, including interruption.
+  yield* Effect.addFinalizer(() => runtime.applyConfig(null));
 
   const initialConfig = yield* readRuntimeConfig.pipe(
     Effect.catch((cause) =>
@@ -365,8 +413,11 @@ export const make = Effect.gen(function* () {
       ),
     ),
   );
-  yield* runtime.applyConfig(initialConfig);
-  yield* Effect.addFinalizer(() => runtime.applyConfig(null));
+  const linked = yield* secrets.get(CLOUD_LINKED_USER_ID).pipe(
+    Effect.map(Option.isSome),
+    Effect.orElseSucceed(() => false),
+  );
+  yield* runtime.applyConfig(initialConfig, { published: linked || initialConfig !== null });
   return runtime;
 });
 

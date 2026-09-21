@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("../connection/catalog", () => ({ environmentCatalog: {} }));
+vi.mock("./primaryCloudLinkState", () => ({ primaryCloudPublisherAtom: {} }));
 
 import { relayAccountByEnvironmentId } from "@lecturn/client-runtime/relay";
 

@@ -1,3 +1,4 @@
+import { accountTintColor } from "@lecturn/shared/accountTint";
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/models";
 import { PlusIcon } from "lucide-react";
@@ -22,6 +23,7 @@ import {
   segmentLabelDomId,
   segmentListDomId,
 } from "./sidebarSegments.logic";
+import { Collapsible, CollapsiblePanel } from "../ui/collapsible";
 import { SidebarAccountBar } from "./SidebarAccountBar";
 import type {
   SidebarSegmentsView,
@@ -140,55 +142,72 @@ function SegmentedLists<Node>(
                 onToggle={view.toggleSegment}
               />
             )}
-            {segment.collapsed ? null : (
-              <ul
-                ref={ref}
-                role={role}
-                id={listId}
-                {...(segment.accountId === null
-                  ? { "aria-label": "Threads outside Lecturn Connect accounts" }
-                  : { "aria-labelledby": labelId })}
-                // A row scrolled to by focus stays clear of the bars stuck over its edges.
-                className={cn(
-                  className,
-                  "[&_:is(a,button,[tabindex])]:scroll-mt-(--covered-top) [&_:is(a,button,[tabindex])]:scroll-mb-(--covered-bottom)",
-                  // The bar already says an account has no threads: drop the bare list heading.
-                  segment.accountId !== null &&
-                    !segment.hasRows &&
-                    "[&>li[data-thread-selection-safe]]:hidden",
-                )}
-                style={
-                  {
-                    "--covered-top": coveredTop,
-                    "--covered-bottom": coveredBottom,
-                  } as CSSProperties
+            <Collapsible open={!segment.collapsed} className="contents">
+              <CollapsiblePanel
+                inert={segment.collapsed || undefined}
+                aria-hidden={segment.collapsed || undefined}
+                className="lecturn-account-collapse motion-reduce:transition-none"
+                style={(state) =>
+                  ({
+                    "--account-tint": accountTintColor(
+                      profiles.get(segment.accountId ?? "")?.preset,
+                    ),
+                    // Preserve row focus rings and project glow when the fold is idle.
+                    ...(state.open && state.transitionStatus === "idle"
+                      ? { overflow: "visible" }
+                      : {}),
+                  }) as CSSProperties
                 }
               >
-                <SegmentOwnsEnvironment value={segment.ownsEnvironment}>
-                  {renderBody({
-                    ...segment,
-                    ...actions,
-                    orderedPinnedThreads: props.orderedPinnedThreads.filter((thread) =>
-                      pinned.has(thread),
-                    ),
-                  })}
-                </SegmentOwnsEnvironment>
-                {!view.nestSagaProjects &&
-                segment.settledShelfExpanded &&
-                segment.hiddenSettledCount > 0 ? (
-                  <li className="list-none">
-                    <button
-                      type="button"
-                      onClick={actions.showMoreSettled}
-                      className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-                    >
-                      <PlusIcon aria-hidden className="size-4 shrink-0" />
-                      Show {Math.min(segment.hiddenSettledCount, view.settledPageCount)} more
-                    </button>
-                  </li>
-                ) : null}
-              </ul>
-            )}
+                <ul
+                  ref={ref}
+                  role={role}
+                  id={listId}
+                  {...(segment.accountId === null
+                    ? { "aria-label": "Threads outside Lecturn Connect accounts" }
+                    : { "aria-labelledby": labelId })}
+                  // A row scrolled to by focus stays clear of the bars stuck over its edges.
+                  className={cn(
+                    className,
+                    "[&_:is(a,button,[tabindex])]:scroll-mt-(--covered-top) [&_:is(a,button,[tabindex])]:scroll-mb-(--covered-bottom)",
+                    // The bar already says an account has no threads: drop the bare list heading.
+                    segment.accountId !== null &&
+                      !segment.hasRows &&
+                      "[&>li[data-thread-selection-safe]]:hidden",
+                  )}
+                  style={
+                    {
+                      "--covered-top": coveredTop,
+                      "--covered-bottom": coveredBottom,
+                    } as CSSProperties
+                  }
+                >
+                  <SegmentOwnsEnvironment value={segment.ownsEnvironment}>
+                    {renderBody({
+                      ...segment,
+                      ...actions,
+                      orderedPinnedThreads: props.orderedPinnedThreads.filter((thread) =>
+                        pinned.has(thread),
+                      ),
+                    })}
+                  </SegmentOwnsEnvironment>
+                  {!view.nestSagaProjects &&
+                  segment.settledShelfExpanded &&
+                  segment.hiddenSettledCount > 0 ? (
+                    <li className="list-none">
+                      <button
+                        type="button"
+                        onClick={actions.showMoreSettled}
+                        className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                      >
+                        <PlusIcon aria-hidden className="size-4 shrink-0" />
+                        Show {Math.min(segment.hiddenSettledCount, view.settledPageCount)} more
+                      </button>
+                    </li>
+                  ) : null}
+                </ul>
+              </CollapsiblePanel>
+            </Collapsible>
           </Fragment>
         );
       })}

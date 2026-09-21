@@ -14,6 +14,18 @@ Open **Settings → Billing** to check your signed-in account's Connect access a
 
 Your browser and desktop can be signed in to different accounts. Check the account email before managing a subscription. Returning from Checkout alone does not activate access; Lecturn must receive payment confirmation.
 
+## Managing the relay
+
+Open **Settings → Relay** on your desktop or locally hosted web app to see the environment's associated account and relay status. **Refresh status** checks both the local link and the associated account's relay discovery. A configured link is not necessarily online: the page distinguishes a reachable environment, an offline host, and an unavailable health check.
+
+Use **Publish as** to choose the account when linking. To move this environment to another account, choose **Unlink environment**, confirm that remote access and activity publishing will stop, then select the new account and enable Lecturn Connect. Local projects and conversations stay on the host. Merely switching accounts does not transfer the environment.
+
+The hosted web app does not run a relay itself; use its **Connections** page to connect to a published host. Relay management belongs to the host's settings.
+
+Only one Lecturn installation on a device can publish at a time, including activity-only publishing. Stable, nightly, and development installations share that limit. If another installation owns the relay, Settings → Relay identifies the conflict. Unlink in the owning installation before linking in another; local work remains available in both. Older builds must be updated to participate in this device-wide coordination.
+
+With multiple accounts attached, this host's projects appear under the account that actually publishes it. Unpublished local projects and direct connections remain outside the account sections. Thread cards show a translucent account-colored edge instead of an account chip. Collapsing an account animates its contents out of view; reduced-motion preferences disable the transition.
+
 ## Choosing an account
 
 If your web or desktop client supports multiple signed-in Connect accounts, the **Account** picker in account settings chooses whose subscription you see. Billing and Teams keep the same choice while the dialog is open. The initial choice follows the open thread's account, then your last choice. An account that needs sign-in cannot be selected until you sign in again.

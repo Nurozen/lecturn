@@ -10,6 +10,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import {
+  RadioTowerIcon,
   ArchiveIcon,
   BlocksIcon,
   BotIcon,
@@ -72,6 +73,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/integrations": BlocksIcon,
   "/settings/source-control": GitBranchIcon,
   "/settings/connections": Link2Icon,
+  "/settings/relay": RadioTowerIcon,
   "/settings/archived": ArchiveIcon,
 };
 
