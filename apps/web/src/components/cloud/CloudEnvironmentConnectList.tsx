@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import { findErrorTraceId } from "@lecturn/client-runtime/errors";
 import {
   type EnvironmentConnectionPresentation,
@@ -69,17 +70,24 @@ export function CloudEnvironmentConnectRows({
   const refreshRelayEnvironments = useAtomCommand(relayEnvironmentDiscovery.refresh, {
     reportFailure: false,
   });
+  const accountStates = useAtomValue(relayEnvironmentDiscovery.accountStatesValueAtom);
   const connectRelayEnvironment = useCallback(
-    (environment: RelayClientEnvironmentRecord) =>
-      registerEnvironment(
+    (environment: RelayClientEnvironmentRecord) => {
+      // The owner is the account whose discovery listed the environment.
+      const accountId = [...accountStates].find(([, account]) =>
+        account.environments.has(environment.environmentId),
+      )?.[0];
+      return registerEnvironment(
         new RelayConnectionRegistration({
           target: new RelayConnectionTarget({
             environmentId: environment.environmentId,
             label: environment.label,
+            ...(accountId === undefined ? {} : { accountId }),
           }),
         }),
-      ),
-    [registerEnvironment],
+      );
+    },
+    [accountStates, registerEnvironment],
   );
   const [connectingEnvironmentId, setConnectingEnvironmentId] = useState<EnvironmentId | null>(
     null,

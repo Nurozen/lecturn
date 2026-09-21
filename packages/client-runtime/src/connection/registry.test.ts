@@ -141,6 +141,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
       target: ConnectionTarget,
     ) => Effect.Effect<void, Persistence.ConnectionPersistenceError>;
     readonly accountIds?: ReadonlyArray<string>;
+    readonly knownAccountIds?: ReadonlyArray<string>;
   },
 ) {
   const accountIds = yield* Ref.make(options?.accountIds ?? []);
@@ -391,6 +392,9 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
           ClientCapabilities.CloudSession,
           ClientCapabilities.CloudSession.of({
             accountIds: Ref.get(accountIds),
+            ...(options?.knownAccountIds === undefined
+              ? {}
+              : { knownAccountIds: Effect.succeed(options.knownAccountIds) }),
             clerkToken: () => Effect.die(new Error("Clerk tokens are not used by registry tests.")),
           }),
         ),
@@ -938,6 +942,30 @@ describe("EnvironmentRegistry", () => {
           // The signed-out account's entry is not A's to call unlisted.
           expect(yield* unlisted(registry)).toEqual([RELAY_TARGET.environmentId]);
           yield* expectNothingRemoved(harness, 2);
+        }).pipe(Effect.provide(harness.layer), Effect.scoped);
+      }),
+    );
+
+    it.effect("calls nothing unlisted while a known account needs sign-in", () =>
+      Effect.gen(function* () {
+        const expired = tagged(SECOND_RELAY_TARGET, "account-expired");
+        const harness = yield* makeHarness([RELAY_TARGET, expired], [], [], {
+          accountIds: ["account-b"],
+          knownAccountIds: ["account-expired", "account-b"],
+        });
+
+        yield* Effect.gen(function* () {
+          const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+          // The untagged entry may be the expired account's, which cannot list.
+          yield* registry.reconcileRelayEnvironments("account-b", [
+            SECOND_RELAY_TARGET.environmentId,
+          ]);
+
+          expect(yield* unlisted(registry)).toEqual([]);
+          expect([...(yield* Ref.get(harness.storedTargets)).values()]).toEqual([
+            RELAY_TARGET,
+            expired,
+          ]);
         }).pipe(Effect.provide(harness.layer), Effect.scoped);
       }),
     );

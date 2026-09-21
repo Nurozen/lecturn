@@ -11,6 +11,7 @@ import {
   createTeamsClient,
   selectedTeam,
 } from "@lecturn/client-runtime/relay";
+import { readToken } from "./accountTokens";
 import { isConnectSubscriptionRequired } from "./connectSubscriptionGate";
 
 import { toastManager } from "../components/ui/toast";
@@ -22,7 +23,7 @@ import {
   updatePrimaryEnvironmentPreferences as updatePrimaryEnvironmentPreferencesAtom,
 } from "./linkEnvironmentAtoms";
 import { usePrimaryCloudLinkState } from "./primaryCloudLinkState";
-import { resolveCloudPublicConfig, resolveRelayClerkTokenOptions } from "./publicConfig";
+import { resolveCloudPublicConfig } from "./publicConfig";
 
 export interface CloudLinkDesiredState {
   readonly managedTunnel: boolean;
@@ -39,7 +40,8 @@ export interface CloudLinkDesiredState {
  * changes, so flipping publish alone is cheap.
  */
 export function useCloudLinkController() {
-  const { getToken, isSignedIn, userId } = useAuth();
+  const { isSignedIn, userId } = useAuth();
+  const readActiveToken = () => (userId ? readToken(userId) : Promise.resolve(null));
   const refreshRelayEnvironments = useAtomCommand(relayEnvironmentDiscovery.refresh, {
     reportFailure: false,
   });
@@ -119,8 +121,7 @@ export function useCloudLinkController() {
       if (organizationId) {
         const result = await createTeamsClient({
           relayUrl: resolveCloudPublicConfig().relayUrl ?? "",
-          getToken: () =>
-            clerkToken ? Promise.resolve(clerkToken) : getToken(resolveRelayClerkTokenOptions()),
+          getToken: () => (clerkToken ? Promise.resolve(clerkToken) : readActiveToken()),
         }).list();
         if (accountRef.current !== account || (!linked && selectedTeam(account) !== organizationId))
           return false;
@@ -140,8 +141,7 @@ export function useCloudLinkController() {
       }
       const status = await createBillingClient({
         relayUrl: resolveCloudPublicConfig().relayUrl ?? "",
-        getToken: () =>
-          clerkToken ? Promise.resolve(clerkToken) : getToken(resolveRelayClerkTokenOptions()),
+        getToken: () => (clerkToken ? Promise.resolve(clerkToken) : readActiveToken()),
       }).getStatus();
       if (!account || accountRef.current !== account) return false;
       if (status.state === "unavailable")
@@ -171,7 +171,7 @@ export function useCloudLinkController() {
       reportUpdateFailure(new Error(accountMismatchMessage));
       return false;
     }
-    const tokenResult = await settlePromise(() => getToken(resolveRelayClerkTokenOptions()));
+    const tokenResult = await settlePromise(readActiveToken);
     const wantsLink = desired.managedTunnel || desired.publish;
 
     // A failure after this point may follow a partially applied mutation (e.g.

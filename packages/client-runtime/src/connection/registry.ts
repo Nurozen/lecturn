@@ -110,7 +110,7 @@ export class EnvironmentRegistry extends Context.Service<
     ) => Effect.Effect<void, Persistence.ConnectionPersistenceError>;
     /**
      * Relay environments that no signed-in account lists, known once every
-     * signed-in account has listed. In memory only; entries owned by accounts
+     * known account has listed. In memory only; entries owned by accounts
      * that are not signed in are never included.
      */
     readonly unlistedRelayEnvironmentIds: SubscriptionRef.SubscriptionRef<
@@ -707,10 +707,13 @@ export const make = Effect.gen(function* () {
 
   const refreshUnlistedRelayEnvironments = Effect.gen(function* () {
     const accountIds = yield* cloudSession.accountIds;
+    const knownAccountIds = yield* ClientCapabilities.knownAccountIds(cloudSession);
     const listings = yield* Ref.get(relayListings);
     // An entry another account has yet to list may be that account's, or on
-    // its way there through a relink.
-    const complete = accountIds.length > 0 && accountIds.every((id) => listings.has(id));
+    // its way there through a relink. A known account that needs sign-in
+    // cannot list, so nothing is called unlisted while one exists.
+    const complete =
+      accountIds.length > 0 && [...accountIds, ...knownAccountIds].every((id) => listings.has(id));
     const next = new Set(
       complete
         ? (yield* relayTargets)

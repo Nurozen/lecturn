@@ -4,7 +4,8 @@ import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime"
 
 import { unpublishBeforeSignOut } from "../../cloud/linkEnvironmentAtoms";
 import { usePrimaryCloudLinkState } from "../../cloud/primaryCloudLinkState";
-import { resolveRelayClerkTokenOptions } from "../../cloud/publicConfig";
+import { readToken } from "../../cloud/accountTokens";
+import { clearConnectSignOutStarted, markConnectSignOutStarted } from "../../cloud/knownAccounts";
 import { setConnectSignOutRequest } from "../../cloud/singleAccountGuard";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
@@ -19,7 +20,7 @@ import {
 
 export function useConnectSignOut(redirectUrl?: string) {
   const clerk = useClerk();
-  const { getToken, sessionId, userId } = useAuth();
+  const { sessionId, userId } = useAuth();
   const link = usePrimaryCloudLinkState();
   const unpublish = useAtomCommand(unpublishBeforeSignOut, { reportFailure: false });
   const [open, setOpen] = useState(false);
@@ -52,17 +53,38 @@ export function useConnectSignOut(redirectUrl?: string) {
             "This computer is not ready for Connect cleanup. Retry before signing out.",
           );
         if (!userId) throw new Error("Your signed-in account is still loading. Please retry.");
-        const clerkToken = await getToken(resolveRelayClerkTokenOptions()).catch(() => null);
+        const clerkToken = await readToken(userId).catch(() => null);
         const result = await unpublish({ target: link.target, clerkToken, userId });
         if (result._tag === "Failure") throw squashAtomCommandFailure(result);
         link.refresh();
       }
       // Without a sessionId Clerk ends every signed-in session. Name the
       // current one so this only ends the account the user is looking at.
-      await clerk.signOut({
-        ...(sessionId && !awaited.current?.everySession ? { sessionId } : {}),
-        ...(redirectUrl ? { redirectUrl } : {}),
-      });
+      const onlySessionId = sessionId && !awaited.current?.everySession ? sessionId : null;
+      const signedInSessions = () => clerk.client?.signedInSessions ?? [];
+      // Only the sessions this call ends are marked, so another account that
+      // expires later is not taken for signed out.
+      const ending = signedInSessions().flatMap((session) =>
+        session.user && (onlySessionId === null || session.id === onlySessionId)
+          ? [{ accountId: session.user.id, sessionId: session.id }]
+          : [],
+      );
+      markConnectSignOutStarted(ending);
+      const clearMarks = (sessionIds: ReadonlyArray<string>) =>
+        clearConnectSignOutStarted(
+          ending.map((mark) => mark.sessionId).filter((id) => sessionIds.includes(id)),
+        );
+      try {
+        await clerk.signOut({
+          ...(onlySessionId ? { sessionId: onlySessionId } : {}),
+          ...(redirectUrl ? { redirectUrl } : {}),
+        });
+      } catch (cause) {
+        clearMarks(ending.map((mark) => mark.sessionId));
+        throw cause;
+      }
+      // A session that outlived the call was not signed out.
+      clearMarks(signedInSessions().map((session) => session.id));
       awaited.current?.resolve();
       awaited.current = null;
       setOpen(false);

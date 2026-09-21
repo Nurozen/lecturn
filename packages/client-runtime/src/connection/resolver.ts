@@ -168,12 +168,20 @@ const makeRelayBroker = Effect.fn("clientRuntime.connection.broker.makeRelay")(f
 
   return Effect.fnUntraced(
     function* (target: RelayConnectionTarget) {
-      // The owner is the tagged account, else the only signed-in account.
-      // Never try each account: the relay would see every account ask for it.
-      const accountIds = yield* session.accountIds;
+      // The owner is the tagged account, else the only known account. Never
+      // try each account: the relay would see every account ask for it.
+      const accountIds = yield* ClientCapabilities.knownAccountIds(session);
       const accountId = target.accountId ?? (accountIds.length === 1 ? accountIds[0] : undefined);
       if (accountId === undefined && accountIds.length > 0) {
         return yield* relayAccountUnresolvedError(accountIds.length);
+      }
+      // A cached token outlives its account's session. Once sign-in state is
+      // loaded, whoever is signed in instead must not connect with it.
+      if (accountId !== undefined && session.accountsSynced !== undefined) {
+        const signedIn = yield* session.accountIds;
+        if ((yield* session.accountsSynced) && !signedIn.includes(accountId)) {
+          return yield* relayAccountUnresolvedError(0);
+        }
       }
       const authorized = yield* remote.authorizeDpop({
         expectedEnvironmentId: target.environmentId,

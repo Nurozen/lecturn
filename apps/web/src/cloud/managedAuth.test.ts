@@ -1,24 +1,26 @@
 import {
   MULTI_ACCOUNT_ENABLED_MARKER_KEY,
   MULTI_ACCOUNT_MARKER_MAX_AGE_MS,
+  isMultiAccountMarkerFresh,
   managedRelaySessionAtom,
-  setManagedRelaySession,
+  managedRelaySessionsAtom,
 } from "@lecturn/client-runtime/relay";
-import * as Exit from "effect/Exit";
+import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { readToken } from "./accountTokens";
 import {
-  activateManagedRelayAuthentication,
-  deactivateManagedRelayAuthentication,
-  ManagedRelayAuthProvider,
-  readManagedRelayClerkToken,
-} from "./managedAuth";
+  forgetKnownAccount,
+  KNOWN_ACCOUNTS_STORAGE_KEY,
+  knownConnectAccountsAtom,
+  markConnectSignOutStarted,
+} from "./knownAccounts";
+import { ManagedRelayAuthProvider } from "./managedAuth";
 import {
-  clearLastConnectAccountId,
   openConnectSignIn,
   readLastConnectAccountId,
   setConnectSignOutRequest,
@@ -29,6 +31,7 @@ interface FakeSession {
   readonly status: "active";
   readonly createdAt: Date;
   readonly user: { readonly id: string };
+  readonly getToken: (options: { readonly template: string }) => Promise<string>;
 }
 
 const clerk = vi.hoisted(() => {
@@ -36,7 +39,12 @@ const clerk = vi.hoisted(() => {
   return {
     // undefined while Clerk is between states, as clerk-js reports it.
     session: null as FakeSession | null | undefined,
-    client: { signedInSessions: [] as FakeSession[] },
+    client: {
+      sessions: [] as FakeSession[],
+      get signedInSessions() {
+        return this.sessions.filter((session) => session.status === "active");
+      },
+    },
     setActive: vi.fn(),
     signOut: vi.fn(),
     listeners,
@@ -50,41 +58,53 @@ const clerk = vi.hoisted(() => {
 // When set, the hooks keep rendering this session while Clerk has moved on.
 const rendered = vi.hoisted(() => ({ stale: null as FakeSession | null }));
 const removeRelayEnvironments = vi.hoisted(() => vi.fn());
+const resetRelayTokenCache = vi.hoisted(() => vi.fn());
+const config = vi.hoisted(() => ({ connectMultiAccount: false }));
 const toastAdd = vi.hoisted(() => vi.fn());
+const toastClose = vi.hoisted(() => vi.fn());
+// Stubbed before any module loads, so the stores under test bind to this
+// storage as they bind to the browser's, and not to their in-memory fallback.
+const sharedStorage = vi.hoisted(() => {
+  const entries = new Map<string, string>();
+  const localStorage = {
+    getItem: (key: string) => entries.get(key) ?? null,
+    setItem: (key: string, value: string) => void entries.set(key, value),
+    removeItem: (key: string) => void entries.delete(key),
+  };
+  vi.stubGlobal("window", { localStorage });
+  return { entries, localStorage };
+});
 
 vi.mock("@clerk/react", () => ({
   useAuth: () => {
     const session = rendered.stale ?? clerk.session;
     return {
-      getToken: async () => `${clerk.session?.user.id}-token`,
       isLoaded: session !== undefined,
       isSignedIn: session === undefined ? undefined : session !== null,
       userId: session?.user.id ?? null,
     };
   },
   useClerk: () => clerk,
-  useSessionList: () => ({ sessions: clerk.client.signedInSessions }),
+  useSessionList: () => ({ sessions: clerk.client.sessions }),
 }));
 
-vi.mock("../lib/runtime", () => ({
-  runtime: {
-    runPromiseExit: vi.fn(async () => Exit.void),
-  },
-}));
+vi.mock("./relayTokenCache", () => ({ resetRelayTokenCache }));
 
 vi.mock("../state/use-atom-command", () => ({
   useAtomCommand: () => removeRelayEnvironments,
 }));
 
 vi.mock("../components/ui/toast", () => ({
-  toastManager: { add: toastAdd, close: vi.fn() },
+  toastManager: { add: toastAdd, close: toastClose },
 }));
 
 // The dialog needs a real DOM. Tests register their own sign-out flow instead.
 vi.mock("../components/clerk/useConnectSignOut", () => ({ ConnectSignOutHost: () => null }));
 
 vi.mock("./publicConfig", () => ({
-  connectMultiAccount: false,
+  get connectMultiAccount() {
+    return config.connectMultiAccount;
+  },
   resolveRelayClerkTokenOptions: () => ({ template: "relay" }),
 }));
 
@@ -94,56 +114,33 @@ vi.mock("../connection/catalog", () => ({
   },
 }));
 
-afterEach(() => {
-  deactivateManagedRelayAuthentication();
-});
+function relayToken(name: string) {
+  const payload = Buffer.from(JSON.stringify({ sub: `account-${name}` })).toString("base64url");
+  return `header.${payload}.signature`;
+}
 
-describe("managed relay authentication", () => {
-  it("clears all token access synchronously before account cleanup can fail", async () => {
-    activateManagedRelayAuthentication("account-1", async () => "account-1-token");
-    expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-1");
-    expect(await readManagedRelayClerkToken()).toBe("account-1-token");
+function fakeSession(name: string, createdAt: number, id = `session-${name}`): FakeSession {
+  return {
+    id,
+    status: "active",
+    createdAt: new Date(createdAt),
+    user: { id: `account-${name}` },
+    getToken: vi.fn(async () => relayToken(name)),
+  };
+}
 
-    deactivateManagedRelayAuthentication();
-    const cleanup = Promise.reject(new Error("Persistence removal failed.")).catch(() => undefined);
+const mark = (...sessions: FakeSession[]) =>
+  markConnectSignOutStarted(
+    sessions.map((session) => ({ accountId: session.user.id, sessionId: session.id })),
+  );
 
-    expect(appAtomRegistry.get(managedRelaySessionAtom)).toBeNull();
-    expect(await readManagedRelayClerkToken()).toBeNull();
-    await cleanup;
-  });
-
-  it("replaces an existing account session atomically", () => {
-    setManagedRelaySession(appAtomRegistry, {
-      accountId: "account-1",
-      readClerkToken: async () => "account-1-token",
-    });
-
-    activateManagedRelayAuthentication("account-2", async () => "account-2-token");
-
-    expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-2");
-  });
-});
+const relayAccountIds = () => [...appAtomRegistry.get(managedRelaySessionsAtom).keys()];
+const knownAccountIds = () => appAtomRegistry.get(knownConnectAccountsAtom).accountIds;
 
 describe("single-account guard in front of account transitions", () => {
-  const sessionA: FakeSession = {
-    id: "session-a",
-    status: "active",
-    createdAt: new Date(1_000),
-    user: { id: "account-a" },
-  };
-  const sessionB: FakeSession = {
-    id: "session-b",
-    status: "active",
-    createdAt: new Date(2_000),
-    user: { id: "account-b" },
-  };
-  const sessionC: FakeSession = {
-    id: "session-c",
-    status: "active",
-    createdAt: new Date(3_000),
-    user: { id: "account-c" },
-  };
-  const sharedStorage = new Map<string, string>();
+  const sessionA = fakeSession("a", 1_000);
+  const sessionB = fakeSession("b", 2_000);
+  const sessionC = fakeSession("c", 3_000);
   const windowListeners = new Map<string, () => void>();
   let root: Root;
 
@@ -157,7 +154,7 @@ describe("single-account guard in front of account transitions", () => {
     });
   };
   const observe = async (sessions: FakeSession[], active: FakeSession | null | undefined) => {
-    clerk.client.signedInSessions = sessions;
+    clerk.client.sessions = sessions;
     clerk.session = active;
     await render();
   };
@@ -177,25 +174,39 @@ describe("single-account guard in front of account transitions", () => {
     vi.stubGlobal("window", {
       document,
       HTMLIFrameElement: EventTarget,
-      localStorage: { getItem: (key: string) => sharedStorage.get(key) ?? null },
+      localStorage: sharedStorage.localStorage,
       addEventListener: (type: string, listener: () => void) => windowListeners.set(type, listener),
       removeEventListener: (type: string) => windowListeners.delete(type),
     });
     windowListeners.clear();
+    for (const session of [sessionA, sessionB, sessionC]) {
+      vi.mocked(session.getToken).mockClear();
+    }
     clerk.listeners.clear();
     rendered.stale = null;
     setConnectSignOutRequest(null);
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    sharedStorage.clear();
-    clearLastConnectAccountId();
-    removeRelayEnvironments.mockReset().mockResolvedValue(AsyncResult.success(undefined));
-    toastAdd.mockReset();
+    config.connectMultiAccount = false;
+    // Forgetting also drops what the store keeps in memory for the page.
+    for (const accountId of ["account-a", "account-b", "account-c"]) {
+      forgetKnownAccount(appAtomRegistry, accountId);
+    }
+    sharedStorage.entries.clear();
+    appAtomRegistry.set(knownConnectAccountsAtom, {
+      accountIds: [],
+      needsSignIn: [],
+      synced: false,
+    });
+    removeRelayEnvironments.mockReset().mockResolvedValue(AsyncResult.success([]));
+    resetRelayTokenCache.mockReset().mockResolvedValue(AsyncResult.success(undefined));
+    toastAdd.mockReset().mockReturnValue("toast");
+    toastClose.mockReset();
     clerk.setActive.mockReset().mockImplementation(async ({ session }: { session: string }) => {
       clerk.session = clerk.client.signedInSessions.find((entry) => entry.id === session) ?? null;
     });
     // Mirrors clerk-js: signing out the current session leaves none active.
     clerk.signOut.mockReset().mockImplementation(async (options?: { sessionId: string }) => {
-      clerk.client.signedInSessions = clerk.client.signedInSessions.filter(
+      clerk.client.sessions = clerk.client.signedInSessions.filter(
         (entry) => options !== undefined && entry.id !== options.sessionId,
       );
       if (options === undefined || clerk.session?.id === options.sessionId) {
@@ -235,24 +246,29 @@ describe("single-account guard in front of account transitions", () => {
     expect(toastAdd).toHaveBeenCalledTimes(1);
     expect(removeRelayEnvironments).not.toHaveBeenCalled();
     expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-a");
-    expect(await readManagedRelayClerkToken()).toBe("account-a-token");
+    expect(await readToken("account-a")).toBe(relayToken("a"));
   });
 
-  it("never hands the served account a token while another session is active", async () => {
+  it("reads the served account's token from its own session while another is active", async () => {
     await observe([sessionA], sessionA);
     clerk.setActive.mockImplementation(async () => undefined);
     clerk.signOut.mockImplementation(async () => undefined);
     await observe([sessionA, sessionB], sessionB);
 
-    expect(await readManagedRelayClerkToken()).toBeNull();
+    expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-a");
+    expect(await readToken("account-a")).toBe(relayToken("a"));
+    expect(sessionA.getToken).toHaveBeenCalledExactlyOnceWith({ template: "relay" });
+    expect(sessionB.getToken).not.toHaveBeenCalled();
   });
 
   it("still cleans up when the served account really signs out and another signs in", async () => {
     await observe([sessionA], sessionA);
+    mark(sessionA);
     await observe([sessionB], sessionB);
 
     expect(clerk.signOut).not.toHaveBeenCalled();
-    expect(removeRelayEnvironments).toHaveBeenCalledTimes(1);
+    expect(removeRelayEnvironments).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(knownAccountIds()).toEqual(["account-b"]);
     expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-b");
   });
 
@@ -294,7 +310,7 @@ describe("single-account guard in front of account transitions", () => {
 
   it("stands down for a fresh multi-account marker and ignores a stale one", async () => {
     await observe([sessionA], sessionA);
-    sharedStorage.set(
+    sharedStorage.entries.set(
       MULTI_ACCOUNT_ENABLED_MARKER_KEY,
       String(Date.now() - MULTI_ACCOUNT_MARKER_MAX_AGE_MS + 60_000),
     );
@@ -304,11 +320,12 @@ describe("single-account guard in front of account transitions", () => {
       expect.objectContaining({ actionProps: expect.objectContaining({ children: "Reload" }) }),
     );
 
-    sharedStorage.set(
+    sharedStorage.entries.set(
       MULTI_ACCOUNT_ENABLED_MARKER_KEY,
       String(Date.now() - MULTI_ACCOUNT_MARKER_MAX_AGE_MS),
     );
-    await render();
+    // The guard looks again on Clerk's next change, not on a bare re-render.
+    await observe([sessionA, sessionB], sessionA);
     await render();
     expect(clerk.signOut).toHaveBeenCalledExactlyOnceWith({ sessionId: "session-b" });
     expect(removeRelayEnvironments).not.toHaveBeenCalled();
@@ -318,9 +335,12 @@ describe("single-account guard in front of account transitions", () => {
     await observe([sessionA], sessionA);
     expect(readLastConnectAccountId()).toBe("account-a");
 
+    mark(sessionA);
     await observe([], null);
     expect(readLastConnectAccountId()).toBeNull();
-    expect(removeRelayEnvironments).toHaveBeenCalledTimes(1);
+    // The last known account takes the untagged relay environments with it.
+    expect(removeRelayEnvironments).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(resetRelayTokenCache).toHaveBeenCalledExactlyOnceWith(undefined);
 
     await observe([sessionB], sessionB);
     expect(clerk.signOut).not.toHaveBeenCalled();
@@ -335,8 +355,9 @@ describe("single-account guard in front of account transitions", () => {
     expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-a");
     await observe([sessionA], sessionA);
     expect(removeRelayEnvironments).not.toHaveBeenCalled();
-    expect(await readManagedRelayClerkToken()).toBe("account-a-token");
+    expect(await readToken("account-a")).toBe(relayToken("a"));
 
+    mark(sessionA);
     await observe([], undefined);
     expect(removeRelayEnvironments).not.toHaveBeenCalled();
     await observe([], null);
@@ -352,7 +373,77 @@ describe("single-account guard in front of account transitions", () => {
     expect(toastAdd).not.toHaveBeenCalled();
   });
 
-  it("cleans up when the served account expires while the extra one is still there", async () => {
+  // What the next account could see at the moment the previous one's data went.
+  const recordSweep = () => {
+    const seen: Array<{ known: ReadonlyArray<string>; relay: ReadonlyArray<string> }> = [];
+    removeRelayEnvironments.mockImplementation(async () => {
+      seen.push({ known: knownAccountIds(), relay: relayAccountIds() });
+      return AsyncResult.success([]);
+    });
+    return seen;
+  };
+
+  it("keeps an expired account's data until another account is served, then sweeps it first", async () => {
+    await observe([sessionA], sessionA);
+    await observe([], null);
+    expect(appAtomRegistry.get(managedRelaySessionAtom)).toBeNull();
+    expect(knownAccountIds()).toEqual(["account-a"]);
+    expect(removeRelayEnvironments).not.toHaveBeenCalled();
+
+    const sweep = recordSweep();
+    await observe([sessionB], sessionB);
+    // Everything relay goes, untagged included, before B is known or connected.
+    expect(removeRelayEnvironments).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(resetRelayTokenCache).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(sweep).toEqual([{ known: ["account-a"], relay: [] }]);
+    expect(knownAccountIds()).toEqual(["account-b"]);
+    expect(relayAccountIds()).toEqual(["account-b"]);
+  });
+
+  it("gives the same account its data back when it signs in again after expiring", async () => {
+    await observe([sessionA], sessionA);
+    await observe([], null);
+    await observe([fakeSession("a", 4_000, "session-a2")], fakeSession("a", 4_000, "session-a2"));
+
+    expect(removeRelayEnvironments).not.toHaveBeenCalled();
+    expect(resetRelayTokenCache).not.toHaveBeenCalled();
+    expect(relayAccountIds()).toEqual(["account-a"]);
+  });
+
+  it("sweeps a stored account on a cold start as somebody else", async () => {
+    sharedStorage.entries.set(
+      KNOWN_ACCOUNTS_STORAGE_KEY,
+      JSON.stringify({ accountIds: ["account-a"] }),
+    );
+    const sweep = recordSweep();
+    await observe([sessionB], sessionB);
+
+    expect(sweep).toEqual([{ known: ["account-a"], relay: [] }]);
+    expect(knownAccountIds()).toEqual(["account-b"]);
+    expect(relayAccountIds()).toEqual(["account-b"]);
+  });
+
+  it("sweeps the last served account on a cold start that has no account list yet", async () => {
+    sharedStorage.entries.set("lecturn:last-connect-account-id", JSON.stringify("account-a"));
+    const sweep = recordSweep();
+    await observe([], null);
+    expect(sweep).toEqual([]);
+
+    await observe([sessionB], sessionB);
+    expect(sweep).toEqual([{ known: ["account-a"], relay: [] }]);
+    expect(relayAccountIds()).toEqual(["account-b"]);
+  });
+
+  it("removes nothing on a cold start that is signed out with a catalog present", async () => {
+    await observe([], null);
+    await observe([sessionB], sessionB);
+
+    expect(removeRelayEnvironments).not.toHaveBeenCalled();
+    expect(resetRelayTokenCache).not.toHaveBeenCalled();
+    expect(relayAccountIds()).toEqual(["account-b"]);
+  });
+
+  it("serves the extra account once the served one has expired, after sweeping it", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       await observe([sessionA], sessionA);
@@ -360,9 +451,10 @@ describe("single-account guard in front of account transitions", () => {
       await observe([sessionA, sessionB], sessionB);
       expect(removeRelayEnvironments).not.toHaveBeenCalled();
 
+      const sweep = recordSweep();
       await observe([sessionB], sessionB);
       expect(clerk.signOut).not.toHaveBeenCalled();
-      expect(removeRelayEnvironments).toHaveBeenCalledTimes(1);
+      expect(sweep).toEqual([{ known: ["account-a"], relay: [] }]);
       expect(readLastConnectAccountId()).toBe("account-b");
       expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-b");
     } finally {
@@ -374,7 +466,7 @@ describe("single-account guard in front of account transitions", () => {
     await observe([sessionA], sessionA);
     clerk.signOut.mockImplementation(async () => {
       // clerk-js ends every session once only one is left, whatever id it is given.
-      clerk.client.signedInSessions = [];
+      clerk.client.sessions = [];
       clerk.session = null;
     });
     let finishSetActive = () => {};
@@ -383,7 +475,7 @@ describe("single-account guard in front of account transitions", () => {
     );
     await observe([sessionA, sessionB], sessionB);
 
-    clerk.client.signedInSessions = [sessionA];
+    clerk.client.sessions = [sessionA];
     clerk.session = sessionA;
     finishSetActive();
     await render();
@@ -471,7 +563,7 @@ describe("single-account guard in front of account transitions", () => {
     const signOutRequest = vi.fn(async () => undefined);
     setConnectSignOutRequest(signOutRequest);
     await observe([sessionA], sessionA);
-    sharedStorage.set(MULTI_ACCOUNT_ENABLED_MARKER_KEY, String(Date.now()));
+    sharedStorage.entries.set(MULTI_ACCOUNT_ENABLED_MARKER_KEY, String(Date.now()));
     await observe([sessionA, sessionB], sessionA);
 
     toastAdd.mock.calls[0]![0].data.secondaryActionProps.onClick();
@@ -520,5 +612,225 @@ describe("single-account guard in front of account transitions", () => {
     // Clerk reports a pending session as not signed in.
     openConnectSignIn({ isSignedIn: false, openSignIn }, {});
     expect(openSignIn).toHaveBeenCalledTimes(1);
+  });
+  describe("with multi-account on", () => {
+    beforeEach(() => {
+      config.connectMultiAccount = true;
+    });
+
+    it("lets a second account join the first and follows Clerk's active user", async () => {
+      await observe([sessionA], sessionA);
+      const relaySessionA = appAtomRegistry.get(managedRelaySessionsAtom).get("account-a");
+      await observe([sessionA, sessionB], sessionB);
+
+      expect(relayAccountIds()).toEqual(["account-a", "account-b"]);
+      // Reconnect leases hang on the session object, so A keeps its own.
+      expect(appAtomRegistry.get(managedRelaySessionsAtom).get("account-a")).toBe(relaySessionA);
+      expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-b");
+      expect(knownAccountIds()).toEqual(["account-a", "account-b"]);
+      expect(await readToken("account-a")).toBe(relayToken("a"));
+      expect(clerk.setActive).not.toHaveBeenCalled();
+      expect(clerk.signOut).not.toHaveBeenCalled();
+      expect(removeRelayEnvironments).not.toHaveBeenCalled();
+      expect(toastAdd).not.toHaveBeenCalled();
+      expect(
+        isMultiAccountMarkerFresh(
+          sharedStorage.entries.get(MULTI_ACCOUNT_ENABLED_MARKER_KEY) ?? null,
+          Date.now(),
+        ),
+      ).toBe(true);
+    });
+
+    it("changes nothing when the active account flips within the same set", async () => {
+      await observe([sessionA, sessionB], sessionB);
+      const relaySessions = appAtomRegistry.get(managedRelaySessionsAtom);
+      await observe([sessionA, sessionB], sessionA);
+
+      expect(appAtomRegistry.get(managedRelaySessionsAtom)).toBe(relaySessions);
+      expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-a");
+      expect(removeRelayEnvironments).not.toHaveBeenCalled();
+      expect(resetRelayTokenCache).not.toHaveBeenCalled();
+    });
+
+    it("removes only the account whose sign-out was started in Lecturn", async () => {
+      await observe([sessionA, sessionB], sessionB);
+      mark(sessionB);
+      await observe([sessionA], sessionA);
+
+      expect(removeRelayEnvironments).toHaveBeenCalledExactlyOnceWith({ accountId: "account-b" });
+      expect(resetRelayTokenCache).toHaveBeenCalledExactlyOnceWith("account-b");
+      expect(relayAccountIds()).toEqual(["account-a"]);
+      expect(knownAccountIds()).toEqual(["account-a"]);
+    });
+
+    it("keeps an account whose session expired, and everything it owns", async () => {
+      await observe([sessionA, sessionB], sessionB);
+      await observe([sessionB], sessionB);
+
+      expect(removeRelayEnvironments).not.toHaveBeenCalled();
+      expect(resetRelayTokenCache).not.toHaveBeenCalled();
+      expect(relayAccountIds()).toEqual(["account-b"]);
+      expect(await readToken("account-a")).toBeNull();
+      // What the broker blocks A's targets on: known, synced, and not signed in.
+      expect(appAtomRegistry.get(knownConnectAccountsAtom)).toEqual({
+        accountIds: ["account-a", "account-b"],
+        needsSignIn: ["account-a"],
+        synced: true,
+      });
+    });
+
+    it("keeps an expired account's data when another account then signs in", async () => {
+      await observe([sessionA], sessionA);
+      await observe([], null);
+      await observe([sessionB], sessionB);
+
+      expect(removeRelayEnvironments).not.toHaveBeenCalled();
+      expect(resetRelayTokenCache).not.toHaveBeenCalled();
+      expect(relayAccountIds()).toEqual(["account-b"]);
+      expect(appAtomRegistry.get(knownConnectAccountsAtom)).toEqual({
+        accountIds: ["account-a", "account-b"],
+        needsSignIn: ["account-a"],
+        synced: true,
+      });
+    });
+
+    it("does not sweep an account that a later expiry finds with a stale mark", async () => {
+      // The stand-down toast's sign-out ends one session. The other account stays.
+      await observe([sessionA, sessionB], sessionB);
+      mark(sessionB);
+      await observe([sessionA], sessionA);
+      expect(removeRelayEnvironments).toHaveBeenCalledExactlyOnceWith({ accountId: "account-b" });
+
+      await observe([], null);
+      expect(removeRelayEnvironments).toHaveBeenCalledTimes(1);
+      expect(knownAccountIds()).toEqual(["account-a"]);
+    });
+
+    it("skips a queued cleanup whose account has signed in again", async () => {
+      await observe([sessionA, sessionB], sessionB);
+      let finishFirstCleanup = () => {};
+      removeRelayEnvironments.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => (finishFirstCleanup = () => resolve(AsyncResult.success([])))),
+      );
+      mark(sessionA, sessionB);
+      await observe([], null);
+      expect(removeRelayEnvironments).toHaveBeenCalledExactlyOnceWith({ accountId: "account-a" });
+
+      // B is back before its turn, and React has not rendered that yet.
+      clerk.client.sessions = [fakeSession("b", 5_000, "session-b2")];
+      await act(async () => finishFirstCleanup());
+      await render();
+
+      expect(removeRelayEnvironments).toHaveBeenCalledTimes(1);
+      expect(knownAccountIds()).toEqual(["account-b"]);
+    });
+
+    it("removes nothing when the Clerk client comes back empty", async () => {
+      await observe([sessionA, sessionB], sessionB);
+      await observe([], null);
+      expect(relayAccountIds()).toEqual([]);
+
+      await observe([sessionA, sessionB], sessionB);
+      expect(removeRelayEnvironments).not.toHaveBeenCalled();
+      expect(resetRelayTokenCache).not.toHaveBeenCalled();
+      expect(knownAccountIds()).toEqual(["account-a", "account-b"]);
+      expect(relayAccountIds()).toEqual(["account-a", "account-b"]);
+    });
+
+    it("removes the untagged environments too once the last account leaves", async () => {
+      await observe([sessionA, sessionB], sessionB);
+      mark(sessionA, sessionB);
+      await observe([], null);
+
+      expect(removeRelayEnvironments.mock.calls).toEqual([
+        [{ accountId: "account-a" }],
+        [undefined],
+      ]);
+      expect(resetRelayTokenCache.mock.calls).toEqual([["account-a"], [undefined]]);
+      expect(knownAccountIds()).toEqual([]);
+    });
+
+    it("backs off a failing cleanup, says so once, and retries from the message", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        await observe([sessionA], sessionA);
+        // The environments go, the cached tokens do not.
+        resetRelayTokenCache.mockResolvedValue(
+          AsyncResult.failure(Cause.fail(new Error("Token store is read-only."))),
+        );
+        mark(sessionA);
+        await observe([sessionB], sessionB);
+        expect(resetRelayTokenCache).toHaveBeenCalledTimes(1);
+        expect(relayAccountIds()).toEqual([]);
+        expect(knownAccountIds()).toEqual(["account-a", "account-b"]);
+
+        const advance = async (ms: number) => {
+          await act(async () => {
+            vi.advanceTimersByTime(ms);
+          });
+          await render();
+        };
+        await advance(4_999);
+        expect(resetRelayTokenCache).toHaveBeenCalledTimes(1);
+        await advance(1);
+        expect(resetRelayTokenCache).toHaveBeenCalledTimes(2);
+        await advance(9_999);
+        expect(resetRelayTokenCache).toHaveBeenCalledTimes(2);
+        await advance(1);
+        expect(resetRelayTokenCache).toHaveBeenCalledTimes(3);
+        expect(toastAdd).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            timeout: 0,
+            actionProps: expect.objectContaining({ children: "Retry" }),
+          }),
+        );
+
+        resetRelayTokenCache.mockResolvedValue(AsyncResult.success(undefined));
+        await act(async () => {
+          toastAdd.mock.calls[0]![0].actionProps.onClick();
+        });
+        await render();
+        expect(resetRelayTokenCache).toHaveBeenCalledTimes(4);
+        expect(relayAccountIds()).toEqual(["account-b"]);
+        expect(knownAccountIds()).toEqual(["account-b"]);
+        expect(toastClose).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+        consoleWarn.mockRestore();
+        consoleError.mockRestore();
+      }
+    });
+
+    it("does not activate a replacement account until a failed cleanup has succeeded", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        await observe([sessionA], sessionA);
+        removeRelayEnvironments.mockResolvedValue(
+          AsyncResult.failure(Cause.fail(new Error("Persistence removal failed."))),
+        );
+        mark(sessionA);
+        await observe([sessionB], sessionB);
+        expect(relayAccountIds()).toEqual([]);
+        expect(knownAccountIds()).toEqual(["account-a", "account-b"]);
+
+        removeRelayEnvironments.mockResolvedValue(AsyncResult.success([]));
+        await act(async () => {
+          vi.runOnlyPendingTimers();
+        });
+        await render();
+        expect(removeRelayEnvironments).toHaveBeenCalledTimes(2);
+        expect(relayAccountIds()).toEqual(["account-b"]);
+        expect(knownAccountIds()).toEqual(["account-b"]);
+      } finally {
+        vi.useRealTimers();
+        consoleWarn.mockRestore();
+        consoleError.mockRestore();
+      }
+    });
   });
 });

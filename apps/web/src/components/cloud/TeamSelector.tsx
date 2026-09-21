@@ -7,17 +7,18 @@ import {
 } from "@lecturn/client-runtime/relay";
 import type { RelayTeamOrganization } from "@lecturn/contracts";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { resolveCloudPublicConfig, resolveRelayClerkTokenOptions } from "../../cloud/publicConfig";
+import { readToken } from "../../cloud/accountTokens";
+import { resolveCloudPublicConfig } from "../../cloud/publicConfig";
 
 export function useTeamClient() {
-  const { getToken } = useAuth();
+  const { userId } = useAuth();
   return useMemo(
     () =>
       createTeamsClient({
         relayUrl: resolveCloudPublicConfig().relayUrl ?? "",
-        getToken: () => getToken(resolveRelayClerkTokenOptions()),
+        getToken: () => (userId ? readToken(userId) : Promise.resolve(null)),
       }),
-    [getToken],
+    [userId],
   );
 }
 export function useSelectedTeam() {

@@ -104,7 +104,7 @@ describe("isMultiAccountMarkerFresh", () => {
     expect(isMultiAccountMarkerFresh(String(now - 60_000), now)).toBe(true);
   });
 
-  it("outlives one missed hourly heartbeat and no more", () => {
+  it("stays fresh for two hours and no more", () => {
     const hour = 60 * 60 * 1_000;
     expect(isMultiAccountMarkerFresh(String(now - 2 * hour + 1), now)).toBe(true);
     expect(isMultiAccountMarkerFresh(String(now - 2 * hour), now)).toBe(false);

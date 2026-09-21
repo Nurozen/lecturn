@@ -6,9 +6,16 @@ import {
   type DesktopSshEnvironmentTarget,
 } from "@lecturn/contracts";
 import { describe, expect, it } from "@effect/vitest";
+import { vi } from "vite-plus/test";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Stream from "effect/Stream";
+import { AtomRegistry } from "effect/unstable/reactivity";
 
+import { knownConnectAccountsAtom } from "../cloud/knownAccounts.ts";
+import { appAtomRegistry } from "../rpc/atomRegistry.ts";
 import {
+  accountsNeedingSignIn,
   canRetainCachedPlatformRegistrationAfterRefreshFailure,
   canReuseCachedPlatformRegistration,
   primaryRegistrationToRetainAfterTopologyRead,
@@ -17,6 +24,7 @@ import {
   secondaryRegistrationsToRetainAfterTopologyRead,
   secondaryBearerExpiresAtEpochMs,
   secondaryBearerRefreshAtEpochMs,
+  webCloudSession,
 } from "./platform.ts";
 
 const TARGET: DesktopSshEnvironmentTarget = {
@@ -222,4 +230,60 @@ describe("primary topology cache", () => {
       }),
     ).toBeUndefined();
   });
+});
+
+describe("web cloud session", () => {
+  it.effect("reports the known accounts, expired ones included, and when they are synced", () =>
+    Effect.gen(function* () {
+      appAtomRegistry.set(knownConnectAccountsAtom, {
+        accountIds: ["account-expired"],
+        needsSignIn: [],
+        synced: false,
+      });
+      expect(yield* webCloudSession.knownAccountIds!).toEqual(["account-expired"]);
+      expect(yield* webCloudSession.accountsSynced!).toBe(false);
+
+      appAtomRegistry.set(knownConnectAccountsAtom, {
+        accountIds: ["account-expired", "account-b"],
+        needsSignIn: ["account-expired"],
+        synced: true,
+      });
+      expect(yield* webCloudSession.knownAccountIds!).toEqual(["account-expired", "account-b"]);
+      expect(yield* webCloudSession.accountsSynced!).toBe(true);
+      // Only accounts with a relay session count as signed in.
+      expect(yield* webCloudSession.accountIds).toEqual([]);
+    }),
+  );
+
+  it.effect("wakes the targets of an account that turns out to need sign-in", () =>
+    Effect.gen(function* () {
+      const registry = AtomRegistry.make();
+      registry.set(knownConnectAccountsAtom, {
+        accountIds: ["account-a"],
+        needsSignIn: [],
+        synced: false,
+      });
+      const wakeups = yield* accountsNeedingSignIn(registry).pipe(
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* Effect.promise(() =>
+        vi.waitFor(() => {
+          expect(registry.getNodes().get(knownConnectAccountsAtom)?.listeners.size).toBeGreaterThan(
+            0,
+          );
+        }),
+      );
+      registry.set(knownConnectAccountsAtom, {
+        accountIds: ["account-a", "account-b"],
+        needsSignIn: ["account-a"],
+        synced: true,
+      });
+
+      expect((yield* Fiber.join(wakeups)).map((wakeup) => [...wakeup.accountIds])).toEqual([
+        ["account-a"],
+      ]);
+    }),
+  );
 });

@@ -1,12 +1,12 @@
 /**
  * Shared-storage key a build with multi-account enabled writes on hosted web,
- * where every tab shares one Clerk client. Nothing writes it yet: the value is
- * `String(Date.now())`, rewritten at least hourly while such a tab is open and
- * never removed, so a rollback lets it go stale within two heartbeats.
+ * where every tab shares one Clerk client. The value is `String(Date.now())`,
+ * rewritten every 20 minutes while such a tab is open and never removed, so a
+ * rollback lets it go stale within two hours.
  */
 export const MULTI_ACCOUNT_ENABLED_MARKER_KEY = "lecturn:multi-account-enabled";
 
-/** Twice the writer's hourly heartbeat. An older marker has no running writer. */
+/** Six of the writer's 20-minute heartbeats. An older marker has no running writer. */
 export const MULTI_ACCOUNT_MARKER_MAX_AGE_MS = 2 * 60 * 60 * 1_000;
 
 export function isMultiAccountMarkerFresh(value: string | null, now: number): boolean {

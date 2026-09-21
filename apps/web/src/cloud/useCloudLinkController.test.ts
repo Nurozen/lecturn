@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => ({
   refresh: vi.fn(async () => ({ _tag: "Success" })),
 }));
 vi.mock("@clerk/react", () => ({
-  useAuth: () => ({ isSignedIn: mocks.isSignedIn, userId: mocks.userId, getToken: mocks.getToken }),
+  useAuth: () => ({ isSignedIn: mocks.isSignedIn, userId: mocks.userId }),
 }));
 vi.mock("react", () => ({
   useState: () => [null, vi.fn()],
@@ -55,6 +55,7 @@ vi.mock("./primaryCloudLinkState", () => ({
     refresh: vi.fn(),
   }),
 }));
+vi.mock("./accountTokens", () => ({ readToken: mocks.getToken }));
 vi.mock("./publicConfig", () => ({
   resolveRelayClerkTokenOptions: () => ({}),
   resolveCloudPublicConfig: () => ({ relayUrl: "https://relay.example.com" }),

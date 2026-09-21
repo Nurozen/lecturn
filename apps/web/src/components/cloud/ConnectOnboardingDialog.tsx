@@ -1,4 +1,5 @@
 import { useAuth } from "@clerk/react";
+import { useAtomValue } from "@effect/atom-react";
 import { AuthAdministrativeScopes, AuthRelayWriteScope } from "@lecturn/contracts";
 import { CheckIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -7,10 +8,13 @@ import {
   CONNECT_ONBOARDING_OPT_OUT_STORAGE_KEY,
   ConnectOnboardingOptOutSchema,
   EMPTY_CONNECT_ONBOARDING_OPT_OUT_STATE,
+  pendingOnboardingRequests,
+  type ConnectOnboardingRequest,
 } from "~/cloud/connectOnboarding";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { useCloudLinkController } from "~/cloud/useCloudLinkController";
 import { usePrimarySessionState } from "~/environments/primary";
+import { knownConnectAccountsAtom, newlyKnownAccounts } from "~/cloud/knownAccounts";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { cn } from "~/lib/utils";
 import { useEnvironments, usePrimaryEnvironment } from "~/state/environments";
@@ -32,9 +36,9 @@ import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 
 /**
- * Post-sign-in onboarding wizard for Lecturn Connect. Opens on every in-session
- * sign-in — sign-out removes the connected relay environments, so each new
- * session starts with no devices to reach. It first prompts to publish this
+ * Post-sign-in onboarding wizard for Lecturn Connect. Opens when an account
+ * that is new to this client signs in, since it has no devices to reach yet:
+ * sign-out removes an account's relay environments. It first prompts to publish this
  * environment (managed tunnel + agent activity, both defaulting on) when the
  * current session is authorized to manage the relay link, then lists the
  * account's Lecturn Connect environments so every device can be connected right
@@ -81,7 +85,7 @@ function ConfiguredConnectOnboardingDialog() {
     ? ["publish", "devices"]
     : ["devices"];
 
-  const [requestedAccount, setRequestedAccount] = useState<string | null>(null);
+  const [requests, setRequests] = useState<ReadonlyArray<ConnectOnboardingRequest>>([]);
   const [openForAccount, setOpenForAccount] = useState<string | null>(null);
   const [step, setStep] = useState<OnboardingStep>("devices");
   const [exposeEnvironment, setExposeEnvironment] = useState(true);
@@ -89,27 +93,33 @@ function ConfiguredConnectOnboardingDialog() {
   const [dontShowAgain, setDontShowAgain] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const prefilledFromLinkStateRef = useRef(false);
-  const observedAccountRef = useRef<string | null | undefined>(undefined);
+  const knownAccounts = useAtomValue(knownConnectAccountsAtom);
+  const observedKnownAccountsRef = useRef(knownAccounts);
 
   const optOutAccounts = optOutState.optOutAccounts;
 
-  // Every sign-in or account switch that completes during this session
-  // requests the wizard — account transitions clear the connected relay
-  // environments, so each new session starts with no devices to reach. A cold
-  // load observes undefined → account and must not re-prompt.
+  // An account that is new to this client requests the wizard: it starts with
+  // no devices to reach. Switching between known accounts, a known account
+  // signing in again, and sessions restored on a cold load do not. Requests
+  // queue, so two accounts added together each get their turn, and one that
+  // never becomes active lapses instead of opening on a later switch.
   useEffect(() => {
-    if (!isLoaded) return;
-    // A loaded-but-incomplete snapshot (signed in, user id not yet populated)
-    // must not be recorded as signed-out — the next render would then look
-    // like a fresh sign-in on a cold load.
-    if (isSignedIn && !userId) return;
-    const previousAccount = observedAccountRef.current;
-    const nextAccount = isSignedIn && userId ? userId : null;
-    observedAccountRef.current = nextAccount;
-    if (previousAccount !== undefined && previousAccount !== nextAccount && nextAccount !== null) {
-      setRequestedAccount(nextAccount);
-    }
-  }, [isLoaded, isSignedIn, userId]);
+    const previous = observedKnownAccountsRef.current;
+    observedKnownAccountsRef.current = knownAccounts;
+    setRequests((current) => {
+      const next = pendingOnboardingRequests({
+        requests: current,
+        added: newlyKnownAccounts(previous, knownAccounts),
+        knownAccountIds: knownAccounts.accountIds,
+        optOutAccounts,
+        now: Date.now(),
+      });
+      return next.length === current.length && next.every((entry, i) => entry === current[i])
+        ? current
+        : next;
+    });
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- userId only re-runs it, so a switch drops lapsed requests
+  }, [knownAccounts, optOutAccounts, userId]);
 
   // A manageable session implies a primary environment, so when the scopes
   // allow publishing, wait for the connection target too — otherwise the
@@ -120,27 +130,35 @@ function ConfiguredConnectOnboardingDialog() {
   // Open once the session scopes resolve so the step set is stable. Accounts
   // that chose "Don't show this again" are skipped.
   useEffect(() => {
-    if (requestedAccount === null || openForAccount !== null) return;
-    if (optOutAccounts.includes(requestedAccount)) {
-      setRequestedAccount(null);
-      return;
-    }
+    if (openForAccount !== null || !isLoaded) return;
+    // The wizard acts on the active account, which Clerk makes the new one.
+    const request = pendingOnboardingRequests({
+      requests,
+      added: [],
+      knownAccountIds: knownAccounts.accountIds,
+      optOutAccounts,
+      now: Date.now(),
+    }).find((entry) => entry.accountId === userId);
+    if (request === undefined) return;
     if (!sessionScopesKnown || !publishStepDecided) return;
-    setRequestedAccount(null);
+    setRequests((current) => current.filter((entry) => entry !== request));
     prefilledFromLinkStateRef.current = false;
     setExposeEnvironment(true);
     setPublishAgentActivity(true);
     setDontShowAgain(false);
     setStep(canManageRelay && controller.linkState.target !== null ? "publish" : "devices");
-    setOpenForAccount(requestedAccount);
+    setOpenForAccount(request.accountId);
   }, [
     canManageRelay,
     controller.linkState.target,
+    isLoaded,
+    knownAccounts.accountIds,
     openForAccount,
     optOutAccounts,
     publishStepDecided,
-    requestedAccount,
+    requests,
     sessionScopesKnown,
+    userId,
   ]);
 
   // Signing out (or switching accounts) mid-wizard invalidates everything the
@@ -149,10 +167,10 @@ function ConfiguredConnectOnboardingDialog() {
     if (openForAccount !== null && (!isSignedIn || userId !== openForAccount)) {
       setOpenForAccount(null);
     }
-    if (requestedAccount !== null && (!isSignedIn || userId !== requestedAccount)) {
-      setRequestedAccount(null);
+    if (requests.length > 0 && isLoaded && !isSignedIn) {
+      setRequests([]);
     }
-  }, [isSignedIn, openForAccount, requestedAccount, userId]);
+  }, [isLoaded, isSignedIn, openForAccount, requests, userId]);
 
   // Toggles default on, but an environment that is already linked should show
   // its actual configuration instead of silently proposing to rewrite it.

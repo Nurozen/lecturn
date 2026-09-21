@@ -93,6 +93,8 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
   readonly profiles?: ReadonlyArray<ConnectionProfile>;
   readonly credentials?: ReadonlyArray<readonly [string, ConnectionCredential]>;
   readonly accountIds?: ReadonlyArray<string>;
+  readonly knownAccountIds?: ReadonlyArray<string>;
+  readonly accountsSynced?: boolean;
   readonly connectEnvironment?: ManagedRelay.ManagedRelayClient["Service"]["connectEnvironment"];
   readonly authorizeBearer?: RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization["Service"]["authorizeBearer"];
   readonly authorizeDpop?: RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization["Service"]["authorizeDpop"];
@@ -170,6 +172,12 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
       ClientCapabilities.CloudSession,
       ClientCapabilities.CloudSession.of({
         accountIds: Effect.succeed(options?.accountIds ?? ["account-1"]),
+        ...(options?.knownAccountIds === undefined
+          ? {}
+          : { knownAccountIds: Effect.succeed(options.knownAccountIds) }),
+        ...(options?.accountsSynced === undefined
+          ? {}
+          : { accountsSynced: Effect.succeed(options.accountsSynced) }),
         clerkToken: (accountId) => Effect.succeed(`clerk-session:${accountId}`),
       }),
     ),
@@ -383,6 +391,8 @@ describe("ConnectionResolver", () => {
 
   const prepareRelayAs = Effect.fn("test.prepareRelayAs")(function* (input: {
     readonly accountIds: ReadonlyArray<string>;
+    readonly knownAccountIds?: ReadonlyArray<string>;
+    readonly accountsSynced?: boolean;
     readonly targetAccountId?: string;
     /** Whether the authorization service already holds a usable access token. */
     readonly cachedToken?: boolean;
@@ -396,6 +406,8 @@ describe("ConnectionResolver", () => {
     >([]);
     const brokerLayer = yield* makeDependencies({
       accountIds: input.accountIds,
+      ...(input.knownAccountIds === undefined ? {} : { knownAccountIds: input.knownAccountIds }),
+      ...(input.accountsSynced === undefined ? {} : { accountsSynced: input.accountsSynced }),
       connectEnvironment: (request) =>
         Ref.update(clerkTokens, (values) => [...values, request.clerkToken]).pipe(
           Effect.as({
@@ -475,6 +487,23 @@ describe("ConnectionResolver", () => {
     }),
   );
 
+  it.effect("does not guess the signed-in account while a known account needs sign-in", () =>
+    Effect.gen(function* () {
+      const prepared = yield* prepareRelayAs({
+        accountIds: ["account-b"],
+        knownAccountIds: ["account-expired", "account-b"],
+        cachedToken: true,
+      });
+
+      expect(prepared.clerkTokens).toEqual([]);
+      expect(prepared.owners).toEqual([]);
+      expect(prepared.result).toMatchObject({
+        _tag: "Failure",
+        failure: { _tag: "ConnectionBlockedError", reason: "authentication" },
+      });
+    }),
+  );
+
   it.effect("connects from a cached token while no account is signed in", () =>
     Effect.gen(function* () {
       const prepared = yield* prepareRelayAs({ accountIds: [], cachedToken: true });
@@ -511,6 +540,91 @@ describe("ConnectionResolver", () => {
 
       expect(prepared.result._tag).toBe("Success");
       expect(prepared.owners).toEqual([{ accountId: "account-a", acceptUnstampedToken: true }]);
+    }),
+  );
+
+  it.effect(
+    "blocks a signed-out owner's target before the token cache once accounts are synced",
+    () =>
+      Effect.gen(function* () {
+        const prepared = yield* prepareRelayAs({
+          accountIds: ["account-b"],
+          knownAccountIds: ["account-a", "account-b"],
+          accountsSynced: true,
+          targetAccountId: "account-a",
+          cachedToken: true,
+        });
+
+        // authorizeDpop owns the cache, and is never reached.
+        expect(prepared.owners).toEqual([]);
+        expect(prepared.clerkTokens).toEqual([]);
+        expect(prepared.result).toMatchObject({
+          _tag: "Failure",
+          failure: {
+            _tag: "ConnectionBlockedError",
+            reason: "authentication",
+            detail: "Sign in to Lecturn Connect to connect this environment.",
+          },
+        });
+      }),
+  );
+
+  it.effect("blocks the only known account's untagged target once it is synced as signed out", () =>
+    Effect.gen(function* () {
+      const prepared = yield* prepareRelayAs({
+        accountIds: [],
+        knownAccountIds: ["account-a"],
+        accountsSynced: true,
+        cachedToken: true,
+      });
+
+      expect(prepared.owners).toEqual([]);
+      expect(prepared.result).toMatchObject({
+        _tag: "Failure",
+        failure: { _tag: "ConnectionBlockedError", reason: "authentication" },
+      });
+    }),
+  );
+
+  it.effect("connects a signed-out owner's target from cache until accounts are synced", () =>
+    Effect.gen(function* () {
+      const prepared = yield* prepareRelayAs({
+        accountIds: [],
+        knownAccountIds: ["account-a"],
+        accountsSynced: false,
+        targetAccountId: "account-a",
+        cachedToken: true,
+      });
+
+      expect(prepared.result._tag).toBe("Success");
+      expect(prepared.owners).toEqual([{ accountId: "account-a", acceptUnstampedToken: true }]);
+    }),
+  );
+
+  it.effect("connects a signed-in owner's target once accounts are synced", () =>
+    Effect.gen(function* () {
+      const prepared = yield* prepareRelayAs({
+        accountIds: ["account-a"],
+        knownAccountIds: ["account-a"],
+        accountsSynced: true,
+        targetAccountId: "account-a",
+      });
+
+      expect(prepared.result._tag).toBe("Success");
+      expect(prepared.clerkTokens).toEqual(["clerk-session:account-a"]);
+    }),
+  );
+
+  it.effect("leaves a session without a known list or synced flag as it was, as on mobile", () =>
+    Effect.gen(function* () {
+      const prepared = yield* prepareRelayAs({
+        accountIds: ["account-b"],
+        targetAccountId: "account-a",
+        cachedToken: true,
+      });
+
+      expect(prepared.result._tag).toBe("Success");
+      expect(prepared.owners).toEqual([{ accountId: "account-a", acceptUnstampedToken: false }]);
     }),
   );
 
