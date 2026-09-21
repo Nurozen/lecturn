@@ -157,6 +157,43 @@ describe("forkClaudeSession with the installed SDK", () => {
     }
   });
 
+  it("forks a session whose final line is still being written", async () => {
+    const f = await fixture();
+    try {
+      const torn = `${f.contents}{"type":"assistant","uuid":"`;
+      await NodeFSP.writeFile(f.sourcePath, torn);
+      const child = await forkClaudeSession({
+        sourceSessionId: f.sessionId,
+        environment: f.environment,
+      });
+      expect(
+        (await readEntries(f.directory, child.sessionId))
+          .filter((entry) => entry.type === "user" || entry.type === "assistant")
+          .map((entry) => entry.message.content),
+      ).toEqual(["Message 0", "Message 1", "Message 2"]);
+      expect(await NodeFSP.readFile(f.sourcePath, "utf8")).toBe(torn);
+    } finally {
+      await NodeFSP.rm(f.root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed for a corrupt line in the middle of the transcript", async () => {
+    const f = await fixture();
+    try {
+      const [first, ...rest] = f.contents.split("\n");
+      await NodeFSP.writeFile(
+        f.sourcePath,
+        [first, '{"type":"assistant","uuid":"', ...rest].join("\n"),
+      );
+      await expect(
+        forkClaudeSession({ sourceSessionId: f.sessionId, environment: f.environment }),
+      ).rejects.toThrow();
+      expect(await NodeFSP.readdir(f.directory)).toEqual([`${f.sessionId}.jsonl`]);
+    } finally {
+      await NodeFSP.rm(f.root, { recursive: true, force: true });
+    }
+  });
+
   it("only searches the configured provider home", async () => {
     const f = await fixture();
     const other = await fixture();

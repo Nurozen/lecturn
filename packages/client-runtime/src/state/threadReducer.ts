@@ -1,6 +1,7 @@
 import { pipe } from "effect/Function";
 import * as Arr from "effect/Array";
 import * as O from "effect/Order";
+import { isImportedHistoryRow } from "@lecturn/contracts";
 import type {
   MessageId,
   OrchestrationCheckpointSummary,
@@ -623,7 +624,7 @@ function reduceThreadDetailEvent(
       const retainedTurnIds = new Set(Arr.map(checkpoints, (entry) => entry.turnId));
       const latestCheckpoint = checkpoints.at(-1) ?? null;
       const messages = retainMessagesAfterRevert(
-        thread.messages,
+        thread,
         retainedTurnIds,
         latestCheckpoint?.completedAt ?? null,
       );
@@ -816,7 +817,7 @@ function rebindCheckpointAssistantMessage(
 }
 
 function retainMessagesAfterRevert(
-  messages: ReadonlyArray<OrchestrationMessage>,
+  thread: Pick<OrchestrationThread, "messages" | "importedFrom">,
   retainedTurnIds: ReadonlySet<string>,
   retainedThrough: string | null,
 ): OrchestrationMessage[] {
@@ -825,8 +826,9 @@ function retainMessagesAfterRevert(
   // sent before the latest retained checkpoint completed started a retained
   // turn. The server prunes the same way; keeping every unbound user message
   // would leave reverted prompts on screen with no reply and no revert arrow.
-  return Arr.filter(messages, (message) => {
-    if (message.role === "system") {
+  // Imported history predates every turn, so no revert reaches it.
+  return Arr.filter(thread.messages, (message) => {
+    if (message.role === "system" || isImportedHistoryRow(thread, message)) {
       return true;
     }
     if (message.turnId === null) {

@@ -33,8 +33,9 @@ import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   OrchestrationProject,
   OrchestrationProjectShell,
+  isImportedHistoryRow,
 } from "./orchestration.ts";
-import { ProviderInstanceId } from "./providerInstance.ts";
+import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
 const decodeFullThreadDiffInput = Schema.decodeUnknownEffect(OrchestrationGetFullThreadDiffInput);
@@ -1407,3 +1408,120 @@ it.effect("decodes Stave project info and drops unknown state and notice kinds",
     assert.strictEqual(nullified.notice, null);
   }),
 );
+
+it.effect("decodes a client thread.import command and keeps the raw shape undispatchable", () =>
+  Effect.gen(function* () {
+    const clientShape = {
+      type: "thread.import",
+      commandId: "cmd-import-1",
+      threadId: "thread-imported",
+      projectId: "project-1",
+      providerInstanceId: "claudeAgent",
+      sessionId: "external-session-1",
+      modelSelection: { instanceId: "claudeAgent", model: "claude-sonnet-4-5" },
+      runtimeMode: "full-access",
+      branch: null,
+      worktreePath: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    const parsed = yield* decodeClientOrchestrationCommand(clientShape);
+
+    assert.strictEqual(parsed.type, "thread.import");
+    if (parsed.type === "thread.import") {
+      assert.strictEqual(parsed.sessionId, "external-session-1");
+      assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
+      assert.strictEqual(parsed.title, undefined);
+    }
+
+    // Only the server-materialized import (carrying the forked session's
+    // cursor and history) decodes as an OrchestrationCommand.
+    const rejected = yield* Effect.exit(decodeOrchestrationCommand(clientShape));
+    assert.strictEqual(rejected._tag, "Failure");
+  }),
+);
+
+it.effect("decodes a thread.imported event and an imported thread's read model", () =>
+  Effect.gen(function* () {
+    const importedFrom = {
+      providerInstanceId: "claudeAgent",
+      driverKind: "claudeAgent",
+      sessionId: "external-session-1",
+      cwd: "/workspace",
+      title: "",
+      importedAt: "2026-01-02T00:00:00.000Z",
+      historyTruncated: false,
+    };
+    const parsed = yield* decodeOrchestrationEvent({
+      sequence: 8,
+      eventId: "event-import-1",
+      aggregateKind: "thread",
+      aggregateId: "thread-imported",
+      type: "thread.imported",
+      occurredAt: "2026-01-02T00:00:00.000Z",
+      commandId: "cmd-import-1",
+      causationEventId: "event-created-2",
+      correlationId: "cmd-import-1",
+      metadata: {},
+      payload: {
+        threadId: "thread-imported",
+        importedFrom,
+        importSource: { providerInstanceId: "claudeAgent", resumeCursor: { resume: "fork-1" } },
+        history: { messages: [], activities: [], proposedPlans: [], turns: [] },
+      },
+    });
+    if (parsed.type !== "thread.imported") {
+      assert.fail(`Expected thread.imported event, received ${parsed.type}.`);
+    }
+    assert.strictEqual(parsed.payload.importedFrom.sessionId, "external-session-1");
+    assert.deepStrictEqual(parsed.payload.importSource.resumeCursor, { resume: "fork-1" });
+
+    const shell = yield* decodeOrchestrationThreadShell({
+      id: "thread-imported",
+      projectId: "project-1",
+      title: "Imported",
+      modelSelection: { instanceId: "claudeAgent", model: "claude-sonnet-4-5" },
+      runtimeMode: "full-access",
+      branch: null,
+      worktreePath: null,
+      importedFrom,
+      latestTurn: null,
+      createdAt: "2026-01-02T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z",
+      session: null,
+      latestUserMessageAt: null,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      hasActionableProposedPlan: false,
+    });
+    assert.deepStrictEqual(shell.importedFrom, importedFrom);
+    // The read-model origin has no slot for the fork's cursor.
+    assert.notProperty(shell.importedFrom, "resumeCursor");
+  }),
+);
+
+it("isImportedHistoryRow bounds imported rows by importedAt, not the thread's createdAt", () => {
+  const importedAt = "2026-01-02T00:00:00.000Z";
+  // A fork of an imported thread: inherits the origin, created later.
+  const forkedChild = {
+    createdAt: "2026-01-03T00:00:00.000Z",
+    importedFrom: {
+      providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+      driverKind: ProviderDriverKind.make("claudeAgent"),
+      sessionId: "external-session-1",
+      cwd: "/workspace",
+      title: "",
+      importedAt,
+      historyTruncated: false,
+    },
+  };
+  // The history builder clamps the newest row to importedAt itself.
+  assert.isTrue(isImportedHistoryRow(forkedChild, { turnId: null, createdAt: importedAt }));
+  // The parent's own turnless user message, sent after the import.
+  assert.isFalse(
+    isImportedHistoryRow(forkedChild, { turnId: null, createdAt: "2026-01-02T00:00:00.001Z" }),
+  );
+  assert.isFalse(isImportedHistoryRow(forkedChild, { turnId: "turn-1", createdAt: importedAt }));
+  assert.isFalse(
+    isImportedHistoryRow({ importedFrom: null }, { turnId: null, createdAt: importedAt }),
+  );
+});
