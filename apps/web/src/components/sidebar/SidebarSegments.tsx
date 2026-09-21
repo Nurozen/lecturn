@@ -150,6 +150,10 @@ function SegmentedLists<Node>(
                 className={cn(
                   className,
                   "[&_:is(a,button,[tabindex])]:scroll-mt-(--covered-top) [&_:is(a,button,[tabindex])]:scroll-mb-(--covered-bottom)",
+                  // The bar already says an account has no threads: drop the bare list heading.
+                  segment.accountId !== null &&
+                    !segment.hasRows &&
+                    "[&>li[data-thread-selection-safe]]:hidden",
                 )}
                 style={
                   {
