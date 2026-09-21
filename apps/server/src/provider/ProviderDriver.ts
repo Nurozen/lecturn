@@ -22,13 +22,17 @@
  * @module provider/ProviderDriver
  */
 import type {
+  ExternalSessionImportError,
   ExternalSessionsListError,
   ExternalSessionSummary,
+  IsoDateTime,
+  OrchestrationThreadActivityTone,
   ProviderConsumeResetCreditOutcome,
   ProviderDriverKind,
   ProviderInstanceEnvironment,
   ProviderInstanceId,
   ServerProvider,
+  ToolLifecycleItemType,
 } from "@lecturn/contracts";
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
@@ -87,6 +91,51 @@ export interface ListExternalSessionsResult {
   readonly truncated: boolean;
 }
 
+export interface ImportExternalSessionInput {
+  /** The external session to fork, as reported by `listExternalSessions`. */
+  readonly sessionId: string;
+  /** The importing thread's effective cwd (its worktree, else the project root). */
+  readonly cwd: string;
+}
+
+/**
+ * One row of an external session's history, provider-neutral and
+ * summary-level: activities name the work that happened and never carry tool
+ * inputs or outputs.
+ */
+export type ImportedTranscriptEntry =
+  | {
+      readonly kind: "message";
+      readonly role: "user" | "assistant";
+      readonly text: string;
+      readonly createdAt: IsoDateTime;
+    }
+  | {
+      readonly kind: "activity";
+      readonly tone: OrchestrationThreadActivityTone;
+      /** The thread activity's kind, e.g. `tool.completed`. */
+      readonly activityKind: string;
+      readonly summary: string;
+      /** Picks the work-log icon; absent renders as generic work. */
+      readonly itemType?: ToolLifecycleItemType | undefined;
+      /** One short line, e.g. the command or file path. */
+      readonly detail?: string | undefined;
+      readonly createdAt: IsoDateTime;
+    };
+
+export interface ImportedExternalSession {
+  /**
+   * Cursor of the native FORK cut from the external session, in the adapter's
+   * own resume cursor format. The original session is never resumed.
+   */
+  readonly resumeCursor: unknown;
+  readonly title: string;
+  /** The external session's own cwd, which may differ from the input cwd. */
+  readonly cwd: string;
+  /** Chronological. */
+  readonly transcript: ReadonlyArray<ImportedTranscriptEntry>;
+}
+
 /**
  * One materialized provider instance. Held by the registry, looked up by
  * `instanceId`, torn down by closing the scope it was created in.
@@ -125,6 +174,15 @@ export interface ProviderInstance {
   readonly listExternalSessions?: (
     input: ListExternalSessionsInput,
   ) => Effect.Effect<ListExternalSessionsResult, ExternalSessionsListError>;
+  /**
+   * Natively fork one external session and read its history, so a new thread
+   * can continue it without touching the original. The fork is a local
+   * operation: no auth, no model call. Absent means unsupported; a driver that
+   * sets it must also set `listExternalSessions`.
+   */
+  readonly importExternalSession?: (
+    input: ImportExternalSessionInput,
+  ) => Effect.Effect<ImportedExternalSession, ExternalSessionImportError>;
   readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
   readonly textGeneration: TextGeneration.TextGeneration["Service"];
   readonly auth?: ProviderAuthController;

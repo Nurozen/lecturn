@@ -139,9 +139,18 @@ The seam is an optional `listExternalSessions` on `ProviderInstance` in
 (`supported` or `unsupported`). Absent means unsupported, on both sides. It sits on the instance,
 not the adapter, because it reads the instance's own session store.
 [`externalSessions.ts`][external-sessions] resolves the instance, passes the lister every resume
-cursor Lecturn has persisted (for all instances, since instances can share a home; a lister skips
-cursors its own schema cannot parse), and shapes the rows. Failures are `provider-unsupported`,
+cursor Lecturn has persisted (provider bindings plus the forks of imported threads that have not
+been sent to yet, for all instances, since instances can share a home; a lister skips cursors its
+own schema cannot parse), and shapes the rows. Failures are `provider-unsupported`,
 `provider-unavailable` (unknown or disabled instance), or `unreadable`.
+
+A second optional seam, `importExternalSession`, backs `thread.import`: it natively forks one
+listed session (a local operation, no auth and no model call) and returns the fork's resume
+cursor, the session's title and cwd, and a summary-level transcript that never carries tool inputs
+or outputs. A driver that sets it must also set `listExternalSessions`. The original session is
+never resumed or written. Callers validate before invoking it, since the fork stays on disk even
+if the import is later rejected. Flow, history rules, and per-provider notes are in
+[thread-forking.md](./thread-forking.md#importing-external-sessions).
 
 - **Claude** ([`ClaudeExternalSessions.ts`][claude-external]) calls the SDK's `listSessions` with
   `includeProgrammatic: false`, which drops the sessions Lecturn creates, then removes any session
@@ -161,14 +170,14 @@ provider: Codex matches natively on the thread title, Claude matches title, firs
 branch. `truncated` is true when more matching sessions exist than were returned, including when
 a lister stopped at its own scan cap.
 
-| Driver kind   | `externalSessions` | Source                                      |
-| ------------- | ------------------ | ------------------------------------------- |
-| `codex`       | `supported`        | app-server `thread/list` on the Codex home  |
-| `claudeAgent` | `supported`        | SDK `listSessions` on the default home only |
-| `cursor`      | `unsupported`      | none                                        |
-| `grok`        | `unsupported`      | none                                        |
-| `opencode`    | `unsupported`      | none                                        |
-| `antigravity` | `unsupported`      | none                                        |
+| Driver kind   | `externalSessions` | Source                                      | Importer                                               |
+| ------------- | ------------------ | ------------------------------------------- | ------------------------------------------------------ |
+| `codex`       | `supported`        | app-server `thread/list` on the Codex home  | app-server `thread/fork`, turns read from the fork     |
+| `claudeAgent` | `supported`        | SDK `listSessions` on the default home only | SDK `forkSession` beside the source, default home only |
+| `cursor`      | `unsupported`      | none                                        | none                                                   |
+| `grok`        | `unsupported`      | none                                        | none                                                   |
+| `opencode`    | `unsupported`      | none                                        | none                                                   |
+| `antigravity` | `unsupported`      | none                                        | none                                                   |
 
 ## Antigravity ownership and protocol
 

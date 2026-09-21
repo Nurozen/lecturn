@@ -154,7 +154,7 @@ function mapCodexRuntimeError(
   });
 }
 
-type CodexLifecycleItem =
+export type CodexLifecycleItem =
   | EffectCodexSchema.V2ItemStartedNotification["item"]
   | EffectCodexSchema.V2ItemCompletedNotification["item"];
 
@@ -477,7 +477,7 @@ function normalizeItemType(raw: string | undefined | null): string {
     .toLowerCase();
 }
 
-function toCanonicalItemType(raw: string | undefined | null): CanonicalItemType {
+export function toCanonicalItemType(raw: string | undefined | null): CanonicalItemType {
   const type = normalizeItemType(raw);
   if (type.includes("user")) return "user_message";
   if (type.includes("agent message") || type.includes("assistant")) return "assistant_message";
@@ -562,7 +562,7 @@ function computerUseToolTitle(
   }
 }
 
-function itemTitle(
+export function itemTitle(
   itemType: CanonicalItemType,
   item?: CodexLifecycleItem,
   presentation: McpToolPresentation = {},
@@ -604,7 +604,10 @@ function itemTitle(
   }
 }
 
-function itemDetail(itemType: CanonicalItemType, item: CodexLifecycleItem): string | undefined {
+export function itemDetail(
+  itemType: CanonicalItemType,
+  item: CodexLifecycleItem,
+): string | undefined {
   const itemRecord = item as Record<string, unknown>;
   const action = itemRecord.action as Record<string, unknown> | undefined;
   const actionQueries = Array.isArray(action?.queries) ? action.queries : [];

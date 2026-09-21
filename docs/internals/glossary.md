@@ -71,6 +71,10 @@ The turn boundary a fork continues from: through turn _N_, inclusive. It is anch
 
 The messages, activities, proposed plans, and turns copied into a fork through the fork point, keeping their original timestamps. The `ThreadForkHistory` payload in [the contracts][1] is projected into real rows for the child by [projector.ts][4].
 
+#### Imported thread
+
+A thread created from an [external session](#external-session) by the server-materialized `thread.import` command, which emits `thread.created` plus `thread.imported`. It runs on a native fork of that session cut at import time, so the original is never touched; the copied history belongs to no turn and cannot be reverted or diffed. Origin is stored as `importedFrom` in [the contracts][1], and a fork of an imported thread inherits it so its copy of that history stays protected; the flow is in [thread forking][30].
+
 ### Orchestration
 
 Orchestration is the server-side domain layer that turns runtime activity into stable app state. The main entry point is [OrchestrationEngine.ts][7], with core logic in [decider.ts][8] and [projector.ts][4].
@@ -131,7 +135,7 @@ The live provider-backed runtime attached to a thread. Session shape is in [the 
 
 #### External session
 
-A provider session created outside Lecturn, by a provider CLI or desktop app writing to the same provider home. The read-only `externalSessions.list` RPC lists them per provider instance and hides the sessions Lecturn started itself. Shape is in [the external session contracts][29]; per-provider behavior is in the [provider architecture][16] external sessions section.
+A provider session created outside Lecturn, by a provider CLI or desktop app writing to the same provider home. The read-only `externalSessions.list` RPC lists them per provider instance and hides the sessions Lecturn started itself, including the forks of imports that have not been sent to yet. Shape is in [the external session contracts][29]; per-provider behavior is in the [provider architecture][16] external sessions section.
 
 #### Runtime mode
 
@@ -255,3 +259,4 @@ See [Teams architecture](teams.md) for enforcement boundaries.
 [27]: ../../apps/server/src/orchestration/threadFork.ts
 [28]: ./stave-integration.md
 [29]: ../../packages/contracts/src/externalSessions.ts
+[30]: ./thread-forking.md#importing-external-sessions

@@ -680,6 +680,35 @@ const make = Effect.gen(function* () {
     };
   });
 
+  // An imported thread runs on a native fork of the external session that was
+  // cut at import time, so its first provider session plainly resumes that
+  // fork's cursor. Once the thread has a binding of its own the persisted
+  // cursor takes over. A cursor is only meaningful to the instance that
+  // minted it, so a first send on any other instance fails: starting cold
+  // would bind a session that knows nothing of the history the thread shows.
+  const resolveImportStartOptions = Effect.fnUntraced(function* (
+    threadId: ThreadId,
+    providerInstanceId: ProviderInstanceId,
+  ) {
+    const importSource = Option.getOrUndefined(
+      yield* projectionSnapshotQuery.getThreadImportSourceById(threadId),
+    );
+    if (
+      importSource === undefined ||
+      Option.isSome(yield* providerSessionDirectory.getBinding(threadId))
+    ) {
+      return undefined;
+    }
+    if (importSource.providerInstanceId !== providerInstanceId) {
+      return yield* new ProviderAdapterRequestError({
+        provider: providerErrorLabelFromInstanceHint({ instanceId: String(providerInstanceId) }),
+        method: "thread.turn.start",
+        detail: `Thread '${threadId}' was imported on provider instance '${importSource.providerInstanceId}' and cannot start on '${providerInstanceId}'; the imported session only continues on the instance it was imported with. Switch back to it to send.`,
+      });
+    }
+    return { resumeCursor: importSource.resumeCursor };
+  });
+
   const ensureSessionForThread = Effect.fn("ensureSessionForThread")(function* (
     threadId: ThreadId,
     createdAt: string,
@@ -941,7 +970,10 @@ const make = Effect.gen(function* () {
       return restartedSession.threadId;
     }
 
-    const startedSession = yield* startProviderSession(yield* resolveForkStartOptions(threadId));
+    const startedSession = yield* startProviderSession(
+      (yield* resolveForkStartOptions(threadId)) ??
+        (yield* resolveImportStartOptions(threadId, desiredInstanceId)),
+    );
     yield* bindSessionToThread(startedSession);
     return startedSession.threadId;
   });

@@ -38,6 +38,7 @@ import {
   type OrchestrationProjectShell,
   type OrchestrationThreadShell,
   TerminalNotRunningError,
+  type ClientOrchestrationCommand,
   type OrchestrationCommand,
   type OrchestrationEvent,
   ORCHESTRATION_WS_METHODS,
@@ -147,7 +148,7 @@ import {
   AntigravityInstallation,
   AntigravityInstallationError,
 } from "./provider/AntigravityInstallation.ts";
-import type { ProviderInstance } from "./provider/ProviderDriver.ts";
+import type { ImportedTranscriptEntry, ProviderInstance } from "./provider/ProviderDriver.ts";
 import { ProviderAdapterRequestError } from "./provider/Errors.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/providerMaintenance.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -12237,6 +12238,356 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
       assertInclude(String(error), "cursor_legacy");
       assertInclude(String(error), "does not support forking");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  // thread.import materialization: the native fork of the external session is
+  // a side effect nothing can undo, so every rejection must land before it.
+  const importProjectId = ProjectId.make("import-project");
+  const importInstanceId = ProviderInstanceId.make("claudeAgent");
+  const importProjectShell: OrchestrationProjectShell = {
+    id: importProjectId,
+    title: "Import Project",
+    workspaceRoot: "/tmp/import-project",
+    defaultModelSelection: null,
+    scripts: [],
+    createdAt: "2026-07-01T00:00:00.000Z",
+    updatedAt: "2026-07-01T00:00:00.000Z",
+  };
+  // Importing reads the session store only: it must never reach the adapter,
+  // the snapshot probe or text generation.
+  const makeImportInstance = (
+    importExternalSession?: ProviderInstance["importExternalSession"],
+  ): ProviderInstance => ({
+    instanceId: importInstanceId,
+    driverKind: ProviderDriverKind.make("claudeAgent"),
+    enabled: true,
+    displayName: "Claude",
+    continuationIdentity: {
+      driverKind: ProviderDriverKind.make("claudeAgent"),
+      continuationKey: importInstanceId,
+    },
+    ...(importExternalSession === undefined ? {} : { importExternalSession }),
+    get adapter(): never {
+      throw new Error("Importing a session must not start a chat session.");
+    },
+    get snapshot(): never {
+      throw new Error("Importing a session must not probe the provider.");
+    },
+    get textGeneration(): never {
+      throw new Error("Importing a session must not generate text.");
+    },
+  });
+  const makeImportCommand = (suffix: string) =>
+    ({
+      type: "thread.import",
+      commandId: CommandId.make(`import-${suffix}-cmd`),
+      threadId: ThreadId.make(`import-${suffix}-thread`),
+      projectId: importProjectId,
+      providerInstanceId: importInstanceId,
+      sessionId: "external-session-1",
+      modelSelection: { instanceId: importInstanceId, model: "claude-sonnet-4-5" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt: "2020-01-01T00:00:00.000Z",
+    }) as const;
+  const makeImportHarness = (transcript: ReadonlyArray<ImportedTranscriptEntry>) => {
+    const importerCalls: Array<{ readonly sessionId: string; readonly cwd: string }> = [];
+    const dispatched: Array<OrchestrationCommand> = [];
+    const analyticsEvents: Array<string> = [];
+    const importInstance = makeImportInstance((input) =>
+      Effect.sync(() => {
+        importerCalls.push(input);
+        return {
+          resumeCursor: { resume: "forked-session-1" },
+          title: "  Fix the flaky test  ",
+          cwd: "/tmp/elsewhere",
+          transcript,
+        };
+      }),
+    );
+    const layers = {
+      providerInstanceRegistry: {
+        getInstance: (instanceId: ProviderInstanceId) =>
+          Effect.succeed(instanceId === importInstanceId ? importInstance : undefined),
+      },
+      orchestrationEngine: {
+        dispatch: (command: OrchestrationCommand) =>
+          Effect.sync(() => {
+            dispatched.push(command);
+            return { sequence: 7 };
+          }),
+      },
+      analyticsService: {
+        record: (event: string) => Effect.sync(() => analyticsEvents.push(event)),
+      },
+    };
+    return { importerCalls, dispatched, analyticsEvents, layers };
+  };
+  const importTranscript: ReadonlyArray<ImportedTranscriptEntry> = [
+    { kind: "message", role: "user", text: "fix it", createdAt: "2026-06-30T10:00:00.000Z" },
+    {
+      kind: "activity",
+      tone: "tool",
+      activityKind: "tool.completed",
+      summary: "Ran command",
+      itemType: "command_execution",
+      createdAt: "2026-06-30T10:00:01.000Z",
+    },
+    { kind: "message", role: "assistant", text: "fixed", createdAt: "2026-06-30T10:00:02.000Z" },
+  ];
+
+  it.effect("rejects thread.import before forking when the kill switch is off", () =>
+    Effect.gen(function* () {
+      const harness = makeImportHarness(importTranscript);
+      yield* buildAppUnderTest({
+        config: { threadForkingEnabled: false },
+        layers: {
+          ...harness.layers,
+          projectionSnapshotQuery: {
+            getProjectShellById: () => Effect.succeed(Option.some(importProjectShell)),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const error = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand](makeImportCommand("disabled")).pipe(
+            Effect.flip,
+          ),
+        ),
+      );
+      assert.equal(error._tag, "OrchestrationDispatchCommandError");
+      assert.equal(
+        error._tag === "OrchestrationDispatchCommandError" ? error.threadImportFailure : null,
+        "forking-disabled",
+      );
+      assert.deepEqual(harness.importerCalls, []);
+      assert.deepEqual(harness.dispatched, []);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects thread.import before forking when the project or thread id is invalid", () =>
+    Effect.gen(function* () {
+      const harness = makeImportHarness(importTranscript);
+      const takenThreadId = makeImportCommand("taken").threadId;
+      const missingProjectId = ProjectId.make("import-project-missing");
+      yield* buildAppUnderTest({
+        layers: {
+          ...harness.layers,
+          projectionSnapshotQuery: {
+            getProjectShellById: (projectId) =>
+              Effect.succeed(
+                projectId === importProjectId ? Option.some(importProjectShell) : Option.none(),
+              ),
+            getThreadShellById: (threadId) =>
+              Effect.succeed(
+                threadId === takenThreadId
+                  ? Option.some(makeDefaultOrchestrationThreadShell())
+                  : Option.none(),
+              ),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const dispatchExpectingFailure = (command: ClientOrchestrationCommand) =>
+        Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.dispatchCommand](command).pipe(Effect.flip),
+          ),
+        );
+
+      assertInclude(
+        String(
+          yield* dispatchExpectingFailure({
+            ...makeImportCommand("no-project"),
+            projectId: missingProjectId,
+          }),
+        ),
+        "no longer exists",
+      );
+      assertInclude(
+        String(yield* dispatchExpectingFailure(makeImportCommand("taken"))),
+        "already exists",
+      );
+      assertInclude(
+        String(
+          yield* dispatchExpectingFailure({
+            ...makeImportCommand("other-instance"),
+            modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+          }),
+        ),
+        "imported from",
+      );
+
+      assert.deepEqual(harness.importerCalls, []);
+      assert.deepEqual(harness.dispatched, []);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects thread.import of a session without messages", () =>
+    Effect.gen(function* () {
+      const harness = makeImportHarness(
+        importTranscript.filter((entry) => entry.kind === "activity"),
+      );
+      yield* buildAppUnderTest({
+        layers: {
+          ...harness.layers,
+          projectionSnapshotQuery: {
+            getProjectShellById: () => Effect.succeed(Option.some(importProjectShell)),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const error = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand](makeImportCommand("empty")).pipe(
+            Effect.flip,
+          ),
+        ),
+      );
+      assert.equal(
+        error._tag === "OrchestrationDispatchCommandError" ? error.threadImportFailure : null,
+        "empty-session",
+      );
+      assert.equal(harness.importerCalls.length, 1);
+      assert.deepEqual(harness.dispatched, []);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("reports an instance without an importer as provider-unsupported", () =>
+    Effect.gen(function* () {
+      const harness = makeImportHarness(importTranscript);
+      yield* buildAppUnderTest({
+        layers: {
+          ...harness.layers,
+          providerInstanceRegistry: {
+            getInstance: () => Effect.succeed(makeImportInstance()),
+          },
+          projectionSnapshotQuery: {
+            getProjectShellById: () => Effect.succeed(Option.some(importProjectShell)),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const error = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand](makeImportCommand("unsupported")).pipe(
+            Effect.flip,
+          ),
+        ),
+      );
+      assert.equal(
+        error._tag === "OrchestrationDispatchCommandError" ? error.threadImportFailure : null,
+        "provider-unsupported",
+      );
+      assert.deepEqual(harness.dispatched, []);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("caps a client-supplied thread.import title and keeps the session's own", () =>
+    Effect.gen(function* () {
+      const harness = makeImportHarness(importTranscript);
+      yield* buildAppUnderTest({
+        layers: {
+          ...harness.layers,
+          projectionSnapshotQuery: {
+            getProjectShellById: () => Effect.succeed(Option.some(importProjectShell)),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            ...makeImportCommand("titled"),
+            title: "n".repeat(300),
+          }),
+        ),
+      );
+      const materialized = harness.dispatched[0];
+      assert.equal(materialized?.type, "thread.import");
+      if (materialized?.type !== "thread.import") return;
+      assert.equal(materialized.thread.title.length, 200);
+      assert.equal(materialized.importedFrom.title, "Fix the flaky test");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("materializes thread.import from the forked session and dispatches it once", () =>
+    Effect.gen(function* () {
+      const harness = makeImportHarness(importTranscript);
+      yield* buildAppUnderTest({
+        layers: {
+          ...harness.layers,
+          projectionSnapshotQuery: {
+            getProjectShellById: () => Effect.succeed(Option.some(importProjectShell)),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const command = makeImportCommand("happy");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand](command),
+        ),
+      );
+      assert.equal(result.sequence, 7);
+      // The importer forks against the thread's effective cwd.
+      assert.deepEqual(harness.importerCalls, [
+        { sessionId: "external-session-1", cwd: "/tmp/import-project" },
+      ]);
+      assert.equal(
+        harness.analyticsEvents.filter((event) => event === "client.thread.imported").length,
+        1,
+      );
+
+      assert.equal(harness.dispatched.length, 1);
+      const materialized = harness.dispatched[0];
+      assert.equal(materialized?.type, "thread.import");
+      if (materialized?.type !== "thread.import") return;
+      assert.equal(materialized.commandId, command.commandId);
+      assert.equal(materialized.threadId, command.threadId);
+      // Server time, not the client's stale clock.
+      assert.notEqual(materialized.createdAt, command.createdAt);
+      assert.equal(materialized.thread.title, "Fix the flaky test");
+      assert.equal(materialized.thread.projectId, importProjectId);
+      assert.deepEqual(materialized.importedFrom, {
+        providerInstanceId: importInstanceId,
+        driverKind: ProviderDriverKind.make("claudeAgent"),
+        sessionId: "external-session-1",
+        cwd: "/tmp/elsewhere",
+        title: "Fix the flaky test",
+        importedAt: materialized.createdAt,
+        historyTruncated: false,
+      });
+      assert.deepEqual(materialized.importSource, {
+        providerInstanceId: importInstanceId,
+        resumeCursor: { resume: "forked-session-1" },
+      });
+      assert.deepEqual(
+        materialized.history.messages.map((message) => [
+          message.role,
+          message.text,
+          message.turnId,
+        ]),
+        [
+          ["user", "fix it", null],
+          ["assistant", "fixed", null],
+        ],
+      );
+      assert.deepEqual(
+        materialized.history.activities.map((activity) => activity.summary),
+        ["Ran command"],
+      );
+      assert.deepEqual(materialized.history.turns, []);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 });

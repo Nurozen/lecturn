@@ -1,5 +1,6 @@
 import {
   ApprovalRequestId,
+  isImportedHistoryRow,
   StaveSagaTeardownAuthorization,
   type ChatAttachment,
   type OrchestrationEvent,
@@ -35,7 +36,10 @@ import {
   type ProjectionTurn,
   ProjectionTurnRepository,
 } from "../../persistence/Services/ProjectionTurns.ts";
-import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
+import {
+  type ProjectionThread,
+  ProjectionThreadRepository,
+} from "../../persistence/Services/ProjectionThreads.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layers/ProjectionPendingApprovals.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionStateRepositoryLive } from "../../persistence/Layers/ProjectionState.ts";
@@ -231,11 +235,20 @@ function deriveHasActionableProposedPlan(input: {
   return latestPlan !== null && latestPlan.implementedAt === null;
 }
 
+/**
+ * Messages a revert to `turnCount` keeps. Imported history predates every
+ * Lecturn turn, so it always survives and never counts towards the per-turn
+ * fallbacks below: only `turnMessages` compete for those slots.
+ */
 function retainProjectionMessagesAfterRevert(
-  messages: ReadonlyArray<ProjectionThreadMessage>,
+  allMessages: ReadonlyArray<ProjectionThreadMessage>,
   turns: ReadonlyArray<ProjectionTurn>,
   turnCount: number,
+  thread: Pick<ProjectionThread, "importedFrom"> | undefined,
 ): ReadonlyArray<ProjectionThreadMessage> {
+  const isImported = (message: ProjectionThreadMessage) =>
+    thread !== undefined && isImportedHistoryRow(thread, message);
+  const messages = allMessages.filter((message) => !isImported(message));
   const retainedMessageIds = new Set<string>();
   const retainedTurnIds = new Set<string>();
   const keptTurns = turns.filter(
@@ -312,7 +325,9 @@ function retainProjectionMessagesAfterRevert(
     }
   }
 
-  return messages.filter((message) => retainedMessageIds.has(message.messageId));
+  return allMessages.filter(
+    (message) => isImported(message) || retainedMessageIds.has(message.messageId),
+  );
 }
 
 function retainProjectionActivitiesAfterRevert(
@@ -670,8 +685,29 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...existingRow.value,
             forkedFrom: event.payload.forkedFrom,
             forkSource: event.payload.forkSource,
+            // The child forks the parent's live session as usual, so only the
+            // origin is inherited, never the parent's importSource.
+            importedFrom: event.payload.importedFrom ?? null,
             linkedPullRequest: event.payload.linkedPullRequest ?? null,
             latestTurnId: event.payload.forkedFrom.turnId,
+            updatedAt: event.occurredAt,
+          });
+          yield* refreshThreadShellSummary(event.payload.threadId);
+          return;
+        }
+
+        case "thread.imported": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          // No turns ride along, so latestTurnId stays null.
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            importedFrom: event.payload.importedFrom,
+            importSource: event.payload.importSource,
             updatedAt: event.occurredAt,
           });
           yield* refreshThreadShellSummary(event.payload.threadId);
@@ -1052,6 +1088,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
 
         case "thread.forked":
+        case "thread.imported":
           yield* Effect.forEach(
             event.payload.history.messages,
             (message) =>
@@ -1134,10 +1171,14 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           const existingTurns = yield* projectionTurnRepository.listByThreadId({
             threadId: event.payload.threadId,
           });
+          const threadRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
           const keptRows = retainProjectionMessagesAfterRevert(
             existingRows,
             existingTurns,
             event.payload.turnCount,
+            Option.getOrUndefined(threadRow),
           );
           if (keptRows.length === existingRows.length) {
             return;
@@ -1172,6 +1213,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
 
         case "thread.forked":
+        case "thread.imported":
           yield* Effect.forEach(
             event.payload.history.proposedPlans,
             (plan) =>
@@ -1247,6 +1289,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
 
         case "thread.forked":
+        case "thread.imported":
           yield* Effect.forEach(
             event.payload.history.activities,
             (activity) =>
@@ -1348,6 +1391,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
 
         case "thread.forked":
+        case "thread.imported":
           yield* Effect.forEach(
             event.payload.history.turns,
             (turn) =>
