@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   billingStatus: vi.fn(async () => ({ state: "active", hasAccess: true })),
   userId: "account-b",
   isSignedIn: true,
+  connectMultiAccount: false,
+  known: { accountIds: [] as string[], needsSignIn: [] as string[], synced: true },
+  setActive: vi.fn(async () => undefined),
   getToken: vi.fn(async (): Promise<string | null> => "token"),
   state: {
     linked: true,
@@ -24,8 +27,18 @@ const mocks = vi.hoisted(() => ({
   refresh: vi.fn(async () => ({ _tag: "Success" })),
 }));
 vi.mock("@clerk/react", () => ({
-  useAuth: () => ({ isSignedIn: mocks.isSignedIn, userId: mocks.userId, getToken: mocks.getToken }),
+  useAuth: () => ({ isSignedIn: mocks.isSignedIn, userId: mocks.userId }),
+  useClerk: () => ({
+    client: { signedInSessions: [{ id: "session-a", user: { id: "account-a" } }] },
+    setActive: mocks.setActive,
+  }),
 }));
+vi.mock("@effect/atom-react", () => ({
+  useAtomValue: (atom: "known" | "profiles") =>
+    atom === "known" ? mocks.known : new Map([["account-a", { email: "a@example.com" }]]),
+}));
+vi.mock("./knownAccounts", () => ({ knownConnectAccountsAtom: "known" }));
+vi.mock("../connection/catalog", () => ({ environmentCatalog: {} }));
 vi.mock("react", () => ({
   useState: () => [null, vi.fn()],
   useRef: (current: unknown) => ({ current }),
@@ -55,7 +68,11 @@ vi.mock("./primaryCloudLinkState", () => ({
     refresh: vi.fn(),
   }),
 }));
+vi.mock("./accountTokens", () => ({ readToken: mocks.getToken }));
 vi.mock("./publicConfig", () => ({
+  get connectMultiAccount() {
+    return mocks.connectMultiAccount;
+  },
   resolveRelayClerkTokenOptions: () => ({}),
   resolveCloudPublicConfig: () => ({ relayUrl: "https://relay.example.com" }),
 }));
@@ -72,6 +89,8 @@ describe("Connect account ownership during reconciliation", () => {
     mocks.isSignedIn = true;
     mocks.getToken.mockResolvedValue("token");
     mocks.state.linked = true;
+    mocks.connectMultiAccount = false;
+    mocks.known = { accountIds: [], needsSignIn: [], synced: true };
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -84,6 +103,31 @@ describe("Connect account ownership during reconciliation", () => {
     expect(mocks.link).not.toHaveBeenCalled();
     expect(mocks.preferences).not.toHaveBeenCalled();
     expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+
+  it("offers the publishing account instead of a sign-out once it is one of this client's", () => {
+    mocks.known = { accountIds: ["account-a", "account-b"], needsSignIn: [], synced: true };
+    // A single-account build keeps its advice, whatever the known list says.
+    expect(useCloudLinkController().accountMismatchMessage).toContain("Sign out");
+    expect(useCloudLinkController().accountMismatchAction).toBeNull();
+
+    mocks.connectMultiAccount = true;
+    const controller = useCloudLinkController();
+    expect(controller.accountMismatchMessage).toBe(
+      "a@example.com published this computer. Make it the active account to change publishing.",
+    );
+    expect(controller.accountMismatchAction?.label).toBe("Make a@example.com active");
+    controller.accountMismatchAction?.run();
+    expect(mocks.setActive).toHaveBeenCalledExactlyOnceWith({ session: "session-a" });
+
+    mocks.known = { ...mocks.known, needsSignIn: ["account-a"] };
+    const expired = useCloudLinkController();
+    expect(expired.accountMismatchMessage).toContain("Sign in to it again");
+    expect(expired.accountMismatchAction).toBeNull();
+
+    // A publisher this client never held is still a stranger.
+    mocks.known = { accountIds: ["account-b"], needsSignIn: [], synced: true };
+    expect(useCloudLinkController().accountMismatchMessage).toContain("Sign out");
   });
 
   it("does not silently remove another account's publication", async () => {

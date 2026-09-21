@@ -230,6 +230,20 @@ ships Lecturn already matching it.
 
 See [Teams architecture](teams.md) for enforcement boundaries.
 
+## Connect account terminology
+
+- **Connect account**: a Clerk user ID signed in to Lecturn Connect. Web and desktop can hold up to five at once.
+- **Active account**: the account of Clerk's active session. Publish, billing, teams, and CLI authorize act on it.
+- **Known account**: an account this client holds data for, from its first sign-in until a sign-out started in Lecturn. The list is kept per origin.
+- **Needs sign-in**: a known account without a signed-in session. Its environments stay in the catalog, disconnected, and its data is kept.
+- **Owning account**: the account a relay environment is tagged with (`accountId` on its catalog target). Direct, Tailscale, and SSH environments have none.
+- **Account mark**: the short text, taken from the owner's email, shown on rows once two accounts are known.
+- **Unlisted environment**: a relay environment no signed-in account lists. It is disconnected and kept, and the user can remove it.
+- **Single-account guard**: the enforcement that keeps one Clerk session while `connectMultiAccount` is off.
+- **Stand-down marker**: the shared-storage timestamp a multi-account build writes so a single-account tab on the same origin asks for a reload instead of signing out the extra account.
+
+See [Lecturn Connect](lecturn-connect.md#multiple-signed-in-accounts) for the mechanics.
+
 [1]: ../../packages/contracts/src/orchestration.ts
 [2]: ./workspace-layout.md
 [3]: ../../apps/server/src/vcs/GitVcsDriverCore.ts

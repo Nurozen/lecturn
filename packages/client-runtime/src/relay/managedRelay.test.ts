@@ -187,7 +187,7 @@ describe("ManagedRelayClient", () => {
       yield* relayClient.getEnvironmentStatus(statusInput);
       expect(tokenExchangeCount).toBe(2);
 
-      yield* relayClient.resetTokenCache;
+      yield* relayClient.resetTokenCache();
       yield* relayClient.getEnvironmentStatus(statusInput);
       expect(tokenExchangeCount).toBe(3);
     }).pipe(Effect.provide(managedRelayTestLayer(fetchFn)));
@@ -279,7 +279,7 @@ describe("ManagedRelayClient", () => {
         "cached-status-token",
         "expanded-scope-token",
       ]);
-      yield* relayClient.resetTokenCache;
+      yield* relayClient.resetTokenCache();
       expect(persistedTokens).toEqual([]);
       yield* relayClient.getEnvironmentStatus(expandedScopeInput);
       expect(tokenExchangeCount).toBe(2);
@@ -359,6 +359,136 @@ describe("ManagedRelayClient", () => {
 
       expect(tokenExchangeCount).toBe(1);
     });
+  });
+
+  it.effect("clears one account's tokens and keeps the other account's across a restart", () => {
+    let tokenExchangeCount = 0;
+    let clearCount = 0;
+    let persistedTokens: ReadonlyArray<ManagedRelay.ManagedRelayAccessTokenCacheEntry> = [];
+    const accessTokenStore: ManagedRelay.ManagedRelayAccessTokenStore = {
+      load: Effect.sync(() => persistedTokens),
+      save: (entries) =>
+        Effect.sync(() => {
+          persistedTokens = entries;
+        }),
+      clear: Effect.sync(() => {
+        clearCount += 1;
+        persistedTokens = [];
+      }),
+    };
+    const fetchFn = ((input) => {
+      if (String(input).endsWith("/v1/client/dpop-token")) {
+        tokenExchangeCount += 1;
+        return Promise.resolve(
+          Response.json({
+            access_token: `relay-token-${tokenExchangeCount}`,
+            issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+            token_type: "DPoP",
+            expires_in: 1_800,
+            scope: RelayEnvironmentStatusScope,
+          }),
+        );
+      }
+      return Promise.resolve(
+        Response.json({
+          environmentId: "env-1",
+          endpoint: {
+            httpBaseUrl: "https://desktop.example.test/",
+            wsBaseUrl: "wss://desktop.example.test/ws",
+            providerKind: "cloudflare_tunnel",
+          },
+          status: "online",
+          checkedAt: "2026-06-05T20:00:00.000Z",
+        }),
+      );
+    }) satisfies typeof globalThis.fetch;
+    const statusInput = (accountId: string) =>
+      ({
+        clerkToken: clerkToken(accountId, "session-1"),
+        scopes: [RelayEnvironmentStatusScope],
+        environmentId: EnvironmentId.make("env-1"),
+      }) as const;
+
+    return Effect.gen(function* () {
+      yield* Effect.gen(function* () {
+        const relayClient = yield* ManagedRelay.ManagedRelayClient;
+        yield* relayClient.getEnvironmentStatus(statusInput("account-a"));
+        yield* relayClient.getEnvironmentStatus(statusInput("account-b"));
+        yield* relayClient.resetTokenCache("account-b");
+      }).pipe(Effect.provide(managedRelayTestLayer(fetchFn, undefined, accessTokenStore)));
+
+      expect(clearCount).toBe(0);
+      expect(tokenExchangeCount).toBe(2);
+      expect(persistedTokens.map((token) => token.accountId)).toEqual(["account-a"]);
+
+      // A rebuilt client only knows what the store kept.
+      yield* Effect.gen(function* () {
+        const relayClient = yield* ManagedRelay.ManagedRelayClient;
+        yield* relayClient.getEnvironmentStatus(statusInput("account-a"));
+        yield* relayClient.getEnvironmentStatus(statusInput("account-b"));
+      }).pipe(Effect.provide(managedRelayTestLayer(fetchFn, undefined, accessTokenStore)));
+
+      // Only account B had to exchange again.
+      expect(tokenExchangeCount).toBe(3);
+      expect(persistedTokens.map((token) => token.accountId)).toEqual(["account-a", "account-b"]);
+    });
+  });
+
+  it.effect("leaves the token store alone when the account holds no tokens", () => {
+    let saveCount = 0;
+    let clearCount = 0;
+    let persistedTokens: ReadonlyArray<ManagedRelay.ManagedRelayAccessTokenCacheEntry> = [];
+    const accessTokenStore: ManagedRelay.ManagedRelayAccessTokenStore = {
+      load: Effect.sync(() => persistedTokens),
+      save: (entries) =>
+        Effect.sync(() => {
+          saveCount += 1;
+          persistedTokens = entries;
+        }),
+      clear: Effect.sync(() => {
+        clearCount += 1;
+        persistedTokens = [];
+      }),
+    };
+    const fetchFn = ((input) =>
+      Promise.resolve(
+        String(input).endsWith("/v1/client/dpop-token")
+          ? Response.json({
+              access_token: "relay-token",
+              issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+              token_type: "DPoP",
+              expires_in: 1_800,
+              scope: RelayEnvironmentStatusScope,
+            })
+          : Response.json({
+              environmentId: "env-1",
+              endpoint: {
+                httpBaseUrl: "https://desktop.example.test/",
+                wsBaseUrl: "wss://desktop.example.test/ws",
+                providerKind: "cloudflare_tunnel",
+              },
+              status: "online",
+              checkedAt: "2026-06-05T20:00:00.000Z",
+            }),
+      )) satisfies typeof globalThis.fetch;
+
+    return Effect.gen(function* () {
+      const relayClient = yield* ManagedRelay.ManagedRelayClient;
+      yield* relayClient.getEnvironmentStatus({
+        clerkToken: clerkToken("account-a", "session-1"),
+        scopes: [RelayEnvironmentStatusScope],
+        environmentId: EnvironmentId.make("env-1"),
+      });
+      expect(saveCount).toBe(1);
+
+      yield* relayClient.resetTokenCache("account-b");
+      expect([saveCount, clearCount]).toEqual([1, 0]);
+      expect(persistedTokens.map((token) => token.accountId)).toEqual(["account-a"]);
+
+      // The last account out clears the store instead of leaving an empty list in it.
+      yield* relayClient.resetTokenCache("account-a");
+      expect([saveCount, clearCount]).toEqual([1, 1]);
+    }).pipe(Effect.provide(managedRelayTestLayer(fetchFn, undefined, accessTokenStore)));
   });
 
   it.effect("refreshes a persisted DPoP token once when the relay rejects it", () => {

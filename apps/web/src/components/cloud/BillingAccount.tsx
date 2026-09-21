@@ -2,7 +2,9 @@ import { useAuth, useClerk, useUser } from "@clerk/react";
 import { createBillingClient } from "@lecturn/client-runtime/relay";
 import type { RelayBillingStatus } from "@lecturn/contracts";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { resolveCloudPublicConfig, resolveRelayClerkTokenOptions } from "../../cloud/publicConfig";
+import { readToken } from "../../cloud/accountTokens";
+import { resolveCloudPublicConfig } from "../../cloud/publicConfig";
+import { openConnectSignIn } from "../../cloud/singleAccountGuard";
 import { configuredHostedAppUrl, isHostedStaticApp } from "../../hostedPairing";
 import { CreditCardIcon, RadioTowerIcon } from "lucide-react";
 import { Button } from "../ui/button";
@@ -41,9 +43,9 @@ function SignedBillingAccount({
   embedded: boolean;
   hosted: boolean;
 }) {
-  const { getToken } = useAuth();
+  const { userId } = useAuth();
   const clerk = useClerk();
-  const { requestSignOut, signOutDialog } = useConnectSignOut(
+  const { requestSignOut, requestSignOutAll, canSignOutAll, signOutDialog } = useConnectSignOut(
     hosted ? `${window.location.origin}/account/billing` : undefined,
   );
   const { authPrompt, openAuthPrompt } = useLecturnConnectAuthPrompt();
@@ -58,9 +60,9 @@ function SignedBillingAccount({
     () =>
       createBillingClient({
         relayUrl: resolveCloudPublicConfig().relayUrl ?? "",
-        getToken: () => getToken(resolveRelayClerkTokenOptions()),
+        getToken: () => (userId ? readToken(userId) : Promise.resolve(null)),
       }),
-    [getToken],
+    [userId],
   );
 
   useEffect(() => {
@@ -129,7 +131,7 @@ function SignedBillingAccount({
         <Button
           onClick={() =>
             hosted
-              ? void clerk.openSignIn({
+              ? openConnectSignIn(clerk, {
                   forceRedirectUrl: `${window.location.origin}/account/billing`,
                 })
               : openAuthPrompt()
@@ -256,6 +258,11 @@ function SignedBillingAccount({
             <Button variant="ghost" onClick={requestSignOut}>
               Sign out
             </Button>
+            {canSignOutAll ? (
+              <Button variant="ghost" onClick={requestSignOutAll}>
+                Sign out of all accounts
+              </Button>
+            ) : null}
           </div>
           {!hosted && (
             <div className="space-y-3">

@@ -1,12 +1,28 @@
 import { useAuth, useClerk } from "@clerk/react";
-import { useRef, useState } from "react";
+import { useAtomValue } from "@effect/atom-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
 
 import { unpublishBeforeSignOut } from "../../cloud/linkEnvironmentAtoms";
 import { usePrimaryCloudLinkState } from "../../cloud/primaryCloudLinkState";
-import { resolveRelayClerkTokenOptions } from "../../cloud/publicConfig";
+import { readToken } from "../../cloud/accountTokens";
+import { connectAccountProfilesAtom } from "../../cloud/connectAccounts";
+import { knownConnectAccountsAtom, removeSignedOutKnownAccount } from "../../cloud/knownAccounts";
+import { connectMultiAccount } from "../../cloud/publicConfig";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { setConnectSignOutRequest } from "../../cloud/singleAccountGuard";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
+import {
+  SIGN_OUT_HOST_NOT_READY_MESSAGE,
+  canSignOutAllAccounts,
+  planConnectSignOut,
+  readSignOutSessions,
+  runConnectSignOut,
+  signOutDialogCopy,
+  type SignOutHost,
+  type SignOutTargets,
+} from "./useConnectSignOut.logic";
 import {
   AlertDialog,
   AlertDialogPopup,
@@ -16,38 +32,106 @@ import {
   AlertDialogFooter,
 } from "../ui/alert-dialog";
 
-export function useConnectSignOut(redirectUrl?: string) {
+export function useConnectSignOut(redirectUrl?: string, accountId?: string) {
   const clerk = useClerk();
-  const { getToken, userId } = useAuth();
+  const { userId } = useAuth();
   const link = usePrimaryCloudLinkState();
   const unpublish = useAtomCommand(unpublishBeforeSignOut, { reportFailure: false });
-  const [open, setOpen] = useState(false);
+  // Set while the dialog is open: the accounts it signs out.
+  const [targets, setTargets] = useState<SignOutTargets | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const busy = useRef(false);
+  // Set while the single-account guard waits on this dialog's outcome.
+  const awaited = useRef<{
+    readonly resolve: () => void;
+    readonly reject: (cause: Error) => void;
+  } | null>(null);
+  const close = () => {
+    awaited.current?.reject(new Error("Sign out was cancelled."));
+    awaited.current = null;
+    setTargets(null);
+  };
+  const request = (next: SignOutTargets | null) => {
+    setError(null);
+    setTargets(next);
+  };
+  const targetAccountId = accountId ?? userId ?? null;
   // A browser may be controlling someone else's remote server. Only the
   // desktop shell owns the local host that signing out should unpublish.
   const localHost = Boolean(window.desktopBridge);
+  const host: SignOutHost = !localHost
+    ? { _tag: "none" }
+    : link.data
+      ? { _tag: "known", publishingAccountId: link.data.linked ? link.data.cloudUserId : null }
+      : { _tag: "unknown" };
+  const signedInUsers = (clerk.client?.signedInSessions ?? []).flatMap((session) =>
+    session.user ? [session.user] : [],
+  );
+  const profiles = useAtomValue(connectAccountProfilesAtom);
+  const known = useAtomValue(knownConnectAccountsAtom);
+  // An account that needs sign-in has no session for Clerk to end.
+  const sessionless =
+    connectMultiAccount && targets !== null
+      ? known.needsSignIn.filter((id) => targets === "all" || targets.includes(id))
+      : [];
+  const emailOf = (id: string | null | undefined) =>
+    signedInUsers.find((user) => user.id === id)?.primaryEmailAddress?.emailAddress ??
+    (id ? profiles.get(id)?.email : undefined) ??
+    null;
+  const plan =
+    targets === null
+      ? null
+      : planConnectSignOut({
+          sessions: readSignOutSessions(clerk),
+          activeSessionId: clerk.session?.id ?? null,
+          targets,
+          host,
+          multiAccount: connectMultiAccount,
+          sessionless,
+        });
+  const unpublishStep =
+    plan?._tag === "ready" ? plan.steps.find((step) => step._tag === "unpublish") : undefined;
+  const copy = signOutDialogCopy({
+    multiAccount: connectMultiAccount,
+    knownAccountCount: known.accountIds.length,
+    targets: targets ?? "all",
+    email: targets === null || targets === "all" ? null : emailOf(targets[0]),
+    localHost,
+    unpublishes: unpublishStep !== undefined || plan?._tag !== "ready",
+  });
   const confirm = async () => {
-    if (busy.current) return;
+    if (busy.current || targets === null) return;
     busy.current = true;
     setPending(true);
     setError(null);
     try {
-      if (localHost) {
-        if (!link.target)
-          throw new Error(
-            "This computer is not ready for Connect cleanup. Retry before signing out.",
-          );
-        if (!userId) throw new Error("Your signed-in account is still loading. Please retry.");
-        const clerkToken = await getToken(resolveRelayClerkTokenOptions()).catch(() => null);
-        const result = await unpublish({ target: link.target, clerkToken, userId });
-        if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-        link.refresh();
-      }
-      await clerk.signOut(redirectUrl ? { redirectUrl } : undefined);
-      setOpen(false);
+      await runConnectSignOut({
+        clerk,
+        targets,
+        host,
+        multiAccount: connectMultiAccount,
+        sessionless,
+        removeSessionless: (id) => removeSignedOutKnownAccount(appAtomRegistry, id),
+        unpublish: async (leavingAccountId) => {
+          if (!link.target) throw new Error(SIGN_OUT_HOST_NOT_READY_MESSAGE);
+          const clerkToken = await readToken(leavingAccountId).catch(() => null);
+          const result = await unpublish({
+            target: link.target,
+            clerkToken,
+            userId: leavingAccountId,
+          });
+          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+          link.refresh();
+        },
+        stayUrl: window.location.href,
+        signedOutUrl: redirectUrl,
+      });
+      awaited.current?.resolve();
+      awaited.current = null;
+      setTargets(null);
     } catch (cause) {
+      if (plan?._tag === "blocked") link.refresh();
       setError(
         cause instanceof Error ? cause.message : "Could not complete sign out. Please retry.",
       );
@@ -57,26 +141,46 @@ export function useConnectSignOut(redirectUrl?: string) {
     }
   };
   return {
-    requestSignOut: () => {
-      setError(null);
-      setOpen(true);
-    },
+    requestSignOut: () => request(targetAccountId === null ? "all" : [targetAccountId]),
+    /** Asks to sign out one account, whichever this hook was made for. */
+    requestSignOutAccount: (id: string) => request([id]),
+    requestSignOutAll: () => request("all"),
+    /** True with two or more accounts signed in, when signing out of all of them is a second action. */
+    canSignOutAll: canSignOutAllAccounts({
+      multiAccount: connectMultiAccount,
+      signedInAccountIds: signedInUsers.map((user) => user.id),
+    }),
+    /** Settles once the dialog signed out, and rejects when it closes without. */
+    requestSignOutOf: useCallback(
+      ({ everySession }: { readonly everySession: boolean }) =>
+        new Promise<void>((resolve, reject) => {
+          awaited.current?.reject(new Error("Sign out was cancelled."));
+          awaited.current = { resolve, reject };
+          setError(null);
+          setTargets(everySession || targetAccountId === null ? "all" : [targetAccountId]);
+        }),
+      [targetAccountId],
+    ),
     signOutDialog: (
       <AlertDialog
-        open={open}
+        open={targets !== null}
         onOpenChange={(next) => {
-          if (!busy.current) setOpen(next);
+          if (busy.current || next) return;
+          close();
         }}
       >
         <AlertDialogPopup>
           <AlertDialogHeader>
-            <AlertDialogTitle>Sign out of Lecturn?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {localHost
-                ? "Signing out will unpublish this computer from Connect and stop its notifications and Live Activities. Other devices will lose remote access. Your local projects and conversations stay on this computer."
-                : "This signs out this client. Your published computers will stay available to your other devices."}
-            </AlertDialogDescription>
-            {localHost && link.data?.linked && link.data.cloudUserId !== userId ? (
+            <AlertDialogTitle>{copy.title}</AlertDialogTitle>
+            <AlertDialogDescription>{copy.description}</AlertDialogDescription>
+            {unpublishStep && sessionless.includes(unpublishStep.accountId) ? (
+              <p className="text-sm text-muted-foreground">
+                This account needs sign-in, so Lecturn cannot remove its registration. Other devices
+                may still list this computer as offline.
+              </p>
+            ) : unpublishStep &&
+              link.data?.linked &&
+              link.data.cloudUserId !== unpublishStep.accountId ? (
               <p className="text-sm text-muted-foreground">
                 This computer is published to another account. Signing out will stop its local
                 relay; the previous account may still list it as offline until its owner removes the
@@ -90,7 +194,7 @@ export function useConnectSignOut(redirectUrl?: string) {
             ) : null}
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <Button variant="outline" disabled={pending} onClick={() => setOpen(false)}>
+            <Button variant="outline" disabled={pending} onClick={close}>
               Cancel
             </Button>
             <Button disabled={pending} onClick={() => void confirm()}>
@@ -101,4 +205,14 @@ export function useConnectSignOut(redirectUrl?: string) {
       </AlertDialog>
     ),
   };
+}
+
+/** Lets the single-account guard's messages open the same sign-out flow. */
+export function ConnectSignOutHost() {
+  const { requestSignOutOf, signOutDialog } = useConnectSignOut();
+  useEffect(() => {
+    setConnectSignOutRequest(requestSignOutOf);
+    return () => setConnectSignOutRequest(null);
+  }, [requestSignOutOf]);
+  return signOutDialog;
 }

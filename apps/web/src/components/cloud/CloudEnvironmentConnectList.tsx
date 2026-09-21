@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import { findErrorTraceId } from "@lecturn/client-runtime/errors";
 import {
   type EnvironmentConnectionPresentation,
@@ -8,17 +9,22 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
+import { bucketByAccount } from "@lecturn/client-runtime/relay";
 import type { EnvironmentId } from "@lecturn/contracts";
 import type { RelayClientEnvironmentRecord } from "@lecturn/contracts/relay";
 import * as Option from "effect/Option";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 
+import { accountByEnvironmentIdAtom, connectAccountProfilesAtom } from "~/cloud/connectAccounts";
+import { knownConnectAccountsAtom } from "~/cloud/knownAccounts";
+import { connectMultiAccount } from "~/cloud/publicConfig";
 import { environmentCatalog } from "~/connection/catalog";
 import { cn } from "~/lib/utils";
 import { relayEnvironmentDiscovery } from "~/state/relay";
 import { useRelayEnvironmentDiscovery } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { ConnectionStatusDot } from "../ConnectionStatusDot";
+import { AccountMark } from "../sidebar/AccountMark";
 import { ITEM_ROW_CLASSNAME, ITEM_ROW_INNER_CLASSNAME } from "../settings/itemRows";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
@@ -69,17 +75,37 @@ export function CloudEnvironmentConnectRows({
   const refreshRelayEnvironments = useAtomCommand(relayEnvironmentDiscovery.refresh, {
     reportFailure: false,
   });
+  const accountStates = useAtomValue(relayEnvironmentDiscovery.accountStatesValueAtom);
+  const knownAccountIds = useAtomValue(knownConnectAccountsAtom).accountIds;
+  const profiles = useAtomValue(connectAccountProfilesAtom);
+  const accountByEnvironmentId = useAtomValue(accountByEnvironmentIdAtom);
+  // A saved environment's owner is its catalog tag. One that is only listed
+  // belongs to the account whose discovery listed it.
+  const ownerOf = useCallback(
+    (environmentId: EnvironmentId) =>
+      accountByEnvironmentId.get(environmentId) ??
+      [...accountStates].find(([, account]) => account.environments.has(environmentId))?.[0],
+    [accountByEnvironmentId, accountStates],
+  );
+  const accountHeading = (accountId: string | null) =>
+    accountId === null ? "Other environments" : (profiles.get(accountId)?.email ?? "Account");
   const connectRelayEnvironment = useCallback(
-    (environment: RelayClientEnvironmentRecord) =>
-      registerEnvironment(
+    (environment: RelayClientEnvironmentRecord) => {
+      // The owner is the account whose discovery listed the environment.
+      const accountId = [...accountStates].find(([, account]) =>
+        account.environments.has(environment.environmentId),
+      )?.[0];
+      return registerEnvironment(
         new RelayConnectionRegistration({
           target: new RelayConnectionTarget({
             environmentId: environment.environmentId,
             label: environment.label,
+            ...(accountId === undefined ? {} : { accountId }),
           }),
         }),
-      ),
-    [registerEnvironment],
+      );
+    },
+    [accountStates, registerEnvironment],
   );
   const [connectingEnvironmentId, setConnectingEnvironmentId] = useState<EnvironmentId | null>(
     null,
@@ -171,7 +197,11 @@ export function CloudEnvironmentConnectRows({
     return empty;
   }
 
-  return visibleEnvironments.map(({ environment, availability, error }) => {
+  const renderRow = ({
+    environment,
+    availability,
+    error,
+  }: (typeof visibleEnvironments)[number]) => {
     const savedEnvironment = savedById.get(environment.environmentId);
     const savedConnection = savedEnvironment
       ? presentSavedCloudEnvironmentConnection(savedEnvironment.connection)
@@ -226,6 +256,7 @@ export function CloudEnvironmentConnectRows({
                 }
               />
               <p className="truncate text-sm font-medium">{environment.label}</p>
+              <AccountMark environmentId={environment.environmentId} />
             </div>
             <p
               className={cn(
@@ -256,5 +287,23 @@ export function CloudEnvironmentConnectRows({
         </div>
       </div>
     );
-  });
+  };
+
+  // With two or more accounts known, each account's environments sit under its email.
+  if (connectMultiAccount && knownAccountIds.length >= 2) {
+    return bucketByAccount(
+      visibleEnvironments,
+      ({ environment }) => ownerOf(environment.environmentId),
+      knownAccountIds,
+    ).map((bucket) => (
+      <section key={bucket.accountId ?? "none"} aria-label={accountHeading(bucket.accountId)}>
+        <p className="px-3 pt-3 font-medium text-muted-foreground text-xs sm:px-4">
+          {accountHeading(bucket.accountId)}
+        </p>
+        {bucket.items.map(renderRow)}
+      </section>
+    ));
+  }
+
+  return visibleEnvironments.map(renderRow);
 }

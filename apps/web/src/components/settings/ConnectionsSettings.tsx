@@ -1640,6 +1640,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     operationError,
     linked,
     accountMismatchMessage,
+    accountMismatchAction,
     reconcileCloudState,
     subscriptionRequired,
     checkSubscription,
@@ -1725,14 +1726,20 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
             "Stop publishing this environment and agent activity to your Lecturn account. Local work stays on this device."
           }
           control={
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={isBusy || Boolean(accountMismatchMessage)}
-              onClick={() => setConfirmUnlink(true)}
-            >
-              Unlink environment
-            </Button>
+            accountMismatchAction ? (
+              <Button variant="outline" size="sm" onClick={accountMismatchAction.run}>
+                <span className="max-w-56 truncate">{accountMismatchAction.label}</span>
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isBusy || Boolean(accountMismatchMessage)}
+                onClick={() => setConfirmUnlink(true)}
+              >
+                Unlink environment
+              </Button>
+            )
           }
         />
       ) : null}

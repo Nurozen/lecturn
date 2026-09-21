@@ -292,6 +292,12 @@ controls remain in **Settings** → **Connections** on web and desktop or **Sett
 
 ### Signing out and switching your Connect account
 
+Signing out removes that account's Connect environments from this client, together with their drafts and cached threads. Signing in as a different account does the same for the previous account.
+
+If your session expires without a sign-out, your Connect environments stay in your list, disconnected, along with their drafts and cached threads. Sign in again with the same account to reconnect them.
+
+The signed-in account belongs to the app you are using. The hosted web app, the desktop app, and a locally served web app each keep their own. A locally served web app keeps a separate one for each port it is served on, so signing in on one port does not sign you in on another.
+
 Desktop sign-out asks for confirmation before unpublishing this computer. Confirming stops its remote Connect access, notifications and Live Activities, then signs out. Your local projects and conversations stay on the computer. If cleanup fails, Lecturn keeps you signed in and offers a retry.
 
 Browser sign-out affects that client only; it does not unpublish a remote computer you are viewing.

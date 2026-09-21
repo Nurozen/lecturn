@@ -192,6 +192,42 @@ describe("searchSettings", () => {
     ]);
   });
 
+  it("offers the Connect account actions only where the account menu exists", () => {
+    const availability = {
+      hasCloudPublicConfig: true,
+      hasPrimaryEnvironment: true,
+      hasProviderSettingsEnvironment: false,
+      canManageLocalBackend: false,
+      isWslSettingsRowVisible: false,
+      hasThreadAutoSettlement: false,
+      hasStave: false,
+    };
+    const accountActions = (items: ReadonlyArray<SettingsSearchItem>) =>
+      searchSettings("connect account", items).map((item) => item.id);
+
+    expect(accountActions(filterAvailableSettingsSearchItems(availability))).toEqual([]);
+    expect(
+      accountActions(
+        filterAvailableSettingsSearchItems({ ...availability, hasConnectAccountMenu: false }),
+      ),
+    ).toEqual([]);
+    expect(
+      accountActions(
+        filterAvailableSettingsSearchItems({
+          ...availability,
+          hasCloudPublicConfig: false,
+          hasConnectAccountMenu: true,
+        }),
+      ),
+    ).toEqual([]);
+    const withMenu = filterAvailableSettingsSearchItems({
+      ...availability,
+      hasConnectAccountMenu: true,
+    });
+    expect(accountActions(withMenu)).toEqual(["connect-add-account", "connect-sign-out-account"]);
+    expect(searchSettings("sign out", withMenu)[0]?.id).toBe("connect-sign-out-account");
+  });
+
   it("shows Stave settings when the server supports it", () => {
     const available = filterAvailableSettingsSearchItems({
       hasCloudPublicConfig: false,

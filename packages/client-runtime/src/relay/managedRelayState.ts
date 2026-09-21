@@ -68,9 +68,32 @@ export class ManagedRelaySnapshotError extends Data.TaggedError("ManagedRelaySna
   readonly message: string;
 }> {}
 
-export const managedRelaySessionAtom = Atom.make<ManagedRelaySession | null>(null).pipe(
+/** Signed-in Connect accounts and their sessions, in the order they were added. */
+export const managedRelaySessionsAtom = Atom.make<ReadonlyMap<string, ManagedRelaySession>>(
+  new Map(),
+).pipe(Atom.keepAlive, Atom.withLabel("managed-relay:sessions"));
+
+const managedRelayPrimaryAccountIdAtom = Atom.make<string | null>(null).pipe(
   Atom.keepAlive,
-  Atom.withLabel("managed-relay:session"),
+  Atom.withLabel("managed-relay:primary-account"),
+);
+
+/**
+ * The primary account's session, for readers that still act on one account.
+ * Resolves to the designated primary account, else the first signed-in account.
+ */
+export const managedRelaySessionAtom = Atom.make((get): ManagedRelaySession | null => {
+  const sessions = get(managedRelaySessionsAtom);
+  const primaryAccountId = get(managedRelayPrimaryAccountIdAtom);
+  const primary = primaryAccountId === null ? undefined : sessions.get(primaryAccountId);
+  return primary ?? sessions.values().next().value ?? null;
+}).pipe(Atom.keepAlive, Atom.withLabel("managed-relay:session"));
+
+/** One account's session. Unlike the map, it only changes when that account's session does. */
+export const managedRelayAccountSessionAtom = Atom.family((accountId: string) =>
+  Atom.make((get) => get(managedRelaySessionsAtom).get(accountId) ?? null).pipe(
+    Atom.withLabel(`managed-relay:session:${accountId}`),
+  ),
 );
 
 const managedRelaySessionControls = new WeakMap<ManagedRelaySession, ManagedRelaySessionControl>();
@@ -143,36 +166,79 @@ export function createManagedRelaySession(input: ManagedRelaySessionInput): Mana
   return session;
 }
 
-export function setManagedRelaySession(
+/** Replaces the signed-in accounts. Sessions are added, updated, and removed by diff. */
+export function syncManagedRelaySessions(
   registry: AtomRegistry.AtomRegistry,
-  input: ManagedRelaySessionInput | null,
+  accounts: ReadonlyArray<ManagedRelaySessionInput>,
 ): void {
-  const current = registry.get(managedRelaySessionAtom);
-  if (input === null) {
-    if (current !== null) {
-      registry.set(managedRelaySessionAtom, null);
+  const current = registry.get(managedRelaySessionsAtom);
+  const next = new Map<string, ManagedRelaySession>();
+  for (const [accountId, session] of current) {
+    if (accounts.some((input) => input.accountId === accountId)) {
+      next.set(accountId, session);
     }
-    return;
   }
-  if (current?.accountId === input.accountId) {
-    const control = managedRelaySessionControls.get(current);
+  let changed = next.size !== current.size;
+  for (const input of accounts) {
+    const existing = next.get(input.accountId);
+    const control = existing && managedRelaySessionControls.get(existing);
     if (control) {
       // Clerk can replace its token reader during routine same-account refreshes.
       // Keep the session stable so those refreshes do not invalidate queries or reconnect leases.
       control.updateReadClerkToken(input.readClerkToken);
-      return;
+      continue;
     }
+    next.set(input.accountId, createManagedRelaySession(input));
+    changed = true;
   }
-  registry.set(managedRelaySessionAtom, createManagedRelaySession(input));
+  if (changed) {
+    registry.set(managedRelaySessionsAtom, next);
+  }
+}
+
+/** Single-account producers: the one signed-in account, or null when signed out. */
+export function setManagedRelaySession(
+  registry: AtomRegistry.AtomRegistry,
+  input: ManagedRelaySessionInput | null,
+): void {
+  syncManagedRelaySessions(registry, input === null ? [] : [input]);
+}
+
+/** Designates the account that `managedRelaySessionAtom` resolves to. */
+export function setManagedRelayPrimaryAccount(
+  registry: AtomRegistry.AtomRegistry,
+  accountId: string | null,
+): void {
+  registry.set(managedRelayPrimaryAccountIdAtom, accountId);
+}
+
+/** Signed-in account IDs, primary account first. */
+export function managedRelayAccountIds(registry: AtomRegistry.AtomRegistry): ReadonlyArray<string> {
+  const accountIds = [...registry.get(managedRelaySessionsAtom).keys()];
+  const primary = registry.get(managedRelaySessionAtom)?.accountId;
+  return primary === undefined
+    ? accountIds
+    : [primary, ...accountIds.filter((accountId) => accountId !== primary)];
+}
+
+export interface ManagedRelayAccountChange {
+  readonly added: ReadonlySet<string>;
+  readonly removed: ReadonlySet<string>;
 }
 
 export function managedRelayAccountChanges(
   registry: AtomRegistry.AtomRegistry,
-): Stream.Stream<string | null> {
-  return AtomRegistry.toStream(registry, managedRelaySessionAtom).pipe(
-    Stream.map((session) => session?.accountId ?? null),
-    Stream.changes,
-    Stream.drop(1),
+): Stream.Stream<ManagedRelayAccountChange> {
+  return AtomRegistry.toStream(registry, managedRelaySessionsAtom).pipe(
+    Stream.zipWithPrevious,
+    Stream.map(([previous, sessions]): ManagedRelayAccountChange => {
+      const before = Option.getOrElse(previous, () => sessions);
+      return {
+        added: new Set([...sessions.keys()].filter((accountId) => !before.has(accountId))),
+        removed: new Set([...before.keys()].filter((accountId) => !sessions.has(accountId))),
+      };
+    }),
+    Stream.filter((change) => change.added.size > 0 || change.removed.size > 0),
   );
 }
 
@@ -194,7 +260,7 @@ function readSessionClerkToken(
 
 export const waitForManagedRelayClerkToken = Effect.fn(
   "clientRuntime.managedRelaySession.waitForClerkToken",
-)(function* (registry: AtomRegistry.AtomRegistry) {
+)(function* (registry: AtomRegistry.AtomRegistry, accountId: string) {
   return yield* Effect.callback<string, ManagedRelaySessionError>((resume) => {
     let unsubscribe: (() => void) | undefined;
     let completed = false;
@@ -202,7 +268,7 @@ export const waitForManagedRelayClerkToken = Effect.fn(
       if (completed) {
         return true;
       }
-      const session = registry.get(managedRelaySessionAtom);
+      const session = registry.get(managedRelaySessionsAtom).get(accountId);
       if (!session) {
         return false;
       }
@@ -216,21 +282,21 @@ export const waitForManagedRelayClerkToken = Effect.fn(
       return;
     }
 
-    unsubscribe = registry.subscribe(managedRelaySessionAtom, readCurrentSession);
+    unsubscribe = registry.subscribe(managedRelaySessionsAtom, readCurrentSession);
     readCurrentSession();
     return Effect.sync(() => unsubscribe?.());
   });
 });
 
-/** Removes an environment from the signed-in account without contacting that environment. */
+/** Removes an environment from one signed-in account without contacting that environment. */
 export const deregisterManagedRelayEnvironment = Effect.fn(
   "clientRuntime.managedRelaySession.deregisterEnvironment",
 )(function* (
   registry: AtomRegistry.AtomRegistry,
   input: { readonly accountId: string; readonly environmentId: EnvironmentId },
 ) {
-  const session = registry.get(managedRelaySessionAtom);
-  if (!session || session.accountId !== input.accountId) {
+  const session = registry.get(managedRelaySessionsAtom).get(input.accountId);
+  if (!session) {
     return yield* new ManagedRelaySessionError({
       message: "Sign in to Lecturn Connect before deregistering an environment.",
     });
@@ -244,8 +310,8 @@ function requireClerkToken(
   get: Atom.AtomContext,
   accountId: string,
 ): Effect.Effect<string, ManagedRelaySessionError> {
-  const session = get(managedRelaySessionAtom);
-  if (!session || session.accountId !== accountId) {
+  const session = get(managedRelayAccountSessionAtom(accountId));
+  if (!session) {
     return Effect.fail(
       new ManagedRelaySessionError({
         message: "Sign in to Lecturn Connect before loading relay data.",

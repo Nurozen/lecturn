@@ -1,5 +1,7 @@
 import { EnvironmentId } from "@lecturn/contracts";
+import { RelayManagedEndpoint } from "@lecturn/contracts/relay";
 import { describe, expect, it } from "@effect/vitest";
+import * as Schema from "effect/Schema";
 
 import * as TokenStore from "../authorization/tokenStore.ts";
 import {
@@ -16,6 +18,7 @@ import {
   SshConnectionTarget,
 } from "../connection/model.ts";
 import {
+  ConnectionCatalogDocument,
   EMPTY_CONNECTION_CATALOG_DOCUMENT,
   registerConnectionInCatalog,
   removeConnectionFromCatalog,
@@ -142,5 +145,128 @@ describe("ConnectionCatalogDocument", () => {
     expect(document.targets).toEqual([target]);
     expect(document.profiles).toEqual([profile]);
     expect(document.credentials).toEqual([]);
+  });
+});
+
+// A frozen copy of the relay target, token, and document schemas as they
+// shipped before `accountId` existed. It stands in for an older build reading
+// a catalog written by a newer one.
+class PreAccountRelayConnectionTarget extends Schema.TaggedClass<PreAccountRelayConnectionTarget>()(
+  "RelayConnectionTarget",
+  {
+    environmentId: EnvironmentId,
+    label: Schema.String,
+  },
+) {}
+class PreAccountRemoteDpopAccessToken extends Schema.Class<PreAccountRemoteDpopAccessToken>(
+  "test/PreAccountRemoteDpopAccessToken",
+)({
+  environmentId: EnvironmentId,
+  label: Schema.String,
+  endpoint: RelayManagedEndpoint,
+  accessToken: Schema.String,
+  expiresAtEpochMs: Schema.Number,
+  dpopThumbprint: Schema.String,
+}) {}
+const PreAccountConnectionCatalogDocument = Schema.Struct({
+  schemaVersion: Schema.Literal(1),
+  targets: Schema.Array(
+    Schema.Union([BearerConnectionTarget, PreAccountRelayConnectionTarget, SshConnectionTarget]),
+  ),
+  profiles: Schema.Array(Schema.Union([BearerConnectionProfile, SshConnectionProfile])),
+  credentials: Schema.Array(
+    Schema.Struct({
+      connectionId: Schema.String,
+      credential: Schema.Union([BearerConnectionCredential]),
+    }),
+  ),
+  remoteDpopTokens: Schema.Array(PreAccountRemoteDpopAccessToken),
+});
+
+const CatalogJson = Schema.fromJsonString(ConnectionCatalogDocument);
+const decodeCatalogJson = Schema.decodeUnknownSync(CatalogJson);
+const encodeCatalogJson = Schema.encodeSync(CatalogJson);
+const decodePreAccountCatalogJson = Schema.decodeUnknownSync(
+  Schema.fromJsonString(PreAccountConnectionCatalogDocument),
+);
+
+const REMOTE_TOKEN_JSON = {
+  environmentId: "environment-1",
+  label: "Remote",
+  endpoint: REMOTE_TOKEN.endpoint,
+  accessToken: "dpop-token",
+  expiresAtEpochMs: 1_000_000,
+  dpopThumbprint: "thumbprint",
+};
+const UNTAGGED_CATALOG_JSON = JSON.stringify({
+  schemaVersion: 1,
+  targets: [{ _tag: "RelayConnectionTarget", environmentId: "environment-1", label: "Remote" }],
+  profiles: [],
+  credentials: [],
+  remoteDpopTokens: [REMOTE_TOKEN_JSON],
+});
+const TAGGED_CATALOG_JSON = JSON.stringify({
+  schemaVersion: 1,
+  targets: [
+    {
+      _tag: "RelayConnectionTarget",
+      environmentId: "environment-1",
+      label: "Remote",
+      accountId: "user_a",
+    },
+  ],
+  profiles: [],
+  credentials: [],
+  remoteDpopTokens: [{ ...REMOTE_TOKEN_JSON, accountId: "user_a" }],
+});
+
+describe("ConnectionCatalogDocument accountId", () => {
+  it("decodes a document written before accountId existed and re-encodes it unchanged", () => {
+    const document = decodeCatalogJson(UNTAGGED_CATALOG_JSON);
+
+    expect(document.targets).toEqual([
+      new RelayConnectionTarget({ environmentId: ENVIRONMENT_ID, label: "Remote" }),
+    ]);
+    expect(document.remoteDpopTokens).toEqual([REMOTE_TOKEN]);
+    expect(JSON.parse(encodeCatalogJson(document))).toEqual(JSON.parse(UNTAGGED_CATALOG_JSON));
+  });
+
+  it("round-trips a tagged relay target and token", () => {
+    const document = decodeCatalogJson(TAGGED_CATALOG_JSON);
+
+    expect(document.targets).toEqual([
+      new RelayConnectionTarget({
+        environmentId: ENVIRONMENT_ID,
+        label: "Remote",
+        accountId: "user_a",
+      }),
+    ]);
+    expect(document.remoteDpopTokens[0]?.accountId).toBe("user_a");
+    expect(JSON.parse(encodeCatalogJson(document))).toEqual(JSON.parse(TAGGED_CATALOG_JSON));
+  });
+
+  it("keeps the tag through a catalog registration", () => {
+    const target = new RelayConnectionTarget({
+      environmentId: ENVIRONMENT_ID,
+      label: "Remote",
+      accountId: "user_a",
+    });
+    const document = registerConnectionInCatalog(
+      EMPTY_CONNECTION_CATALOG_DOCUMENT,
+      new RelayConnectionRegistration({ target }),
+    );
+
+    expect(document.targets[0]).toEqual(target);
+  });
+
+  it("lets a build from before accountId decode a tagged document", () => {
+    const document = decodePreAccountCatalogJson(TAGGED_CATALOG_JSON);
+
+    // The older build ignores the tag rather than rejecting the catalog.
+    expect(document.targets).toEqual([
+      new PreAccountRelayConnectionTarget({ environmentId: ENVIRONMENT_ID, label: "Remote" }),
+    ]);
+    expect(document.remoteDpopTokens).toHaveLength(1);
+    expect("accountId" in document.remoteDpopTokens[0]!).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import { ClerkProvider, useAuth } from "@clerk/expo";
+import { ClerkProvider, useAuth, useClerk, useSessionList } from "@clerk/expo";
 import { tokenCache } from "@clerk/expo/token-cache";
 import { ManagedRelay, setManagedRelaySession } from "@lecturn/client-runtime/relay";
 import {
@@ -8,7 +8,7 @@ import {
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
 import * as Effect from "effect/Effect";
-import { type ReactNode, useEffect, useRef } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { runtime } from "../../lib/runtime";
 import { appAtomRegistry } from "../../state/atom-registry";
@@ -24,13 +24,14 @@ import {
 } from "../agent-awareness/remoteRegistration";
 import { clearConnectOnboardingRequest, requestConnectOnboarding } from "./connectOnboarding";
 import { resolveCloudPublicConfig } from "./publicConfig";
+import { makeMobileSingleAccountEnforcer } from "./singleAccountGuard";
 import { useSessionRelayToken } from "./useSessionRelayToken";
 import { removeCloudEnvironments } from "./cloud-drafts";
 
 function resetManagedRelayTokenCache() {
   return settleAsyncResult(() =>
     runtime.runPromiseExit(
-      ManagedRelay.ManagedRelayClient.pipe(Effect.flatMap((client) => client.resetTokenCache)),
+      ManagedRelay.ManagedRelayClient.pipe(Effect.flatMap((client) => client.resetTokenCache())),
     ),
   );
 }
@@ -66,10 +67,43 @@ function CloudAuthBridge(props: { readonly children: ReactNode }) {
   } | null>(null);
   const observedAccountRef = useRef<string | null | undefined>(undefined);
   const accountTransitionRef = useRef<Promise<void> | null>(null);
+  const clerk = useClerk();
+  const signedInSessionKey = useSessionList()
+    .sessions?.map((session) => `${session.id}:${session.status}`)
+    .join(",");
+  const [singleAccountEnforcer] = useState(makeMobileSingleAccountEnforcer);
+  // Bumped when a rejection settles, so the guard looks at Clerk again.
+  const [guardRevision, setGuardRevision] = useState(0);
+  // undefined until the persisted account has loaded from disk.
+  const [persistedAccountId, setPersistedAccountId] = useState<string | null | undefined>();
 
   useEffect(() => {
     let cancelled = false;
-    if (!isLoaded) {
+    void settlePromise(getComposerCloudAccountId).then((result) => {
+      if (!cancelled) setPersistedAccountId(result._tag === "Success" ? result.value : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isLoaded || signedInSessionKey === undefined) {
+      return;
+    }
+    // An extra Clerk session, from a native session sync or Clerk's own UI, is
+    // rejected here in front of the transition handling so it never reads as an
+    // account change. signedInSessionKey is a dependency so those re-run it.
+    if (
+      !singleAccountEnforcer.evaluate({
+        clerk,
+        renderedAccountId: isSignedIn && userId ? userId : null,
+        observedAccountId: observedAccountRef.current,
+        persistedAccountId,
+        onSettled: () => setGuardRevision((revision) => revision + 1),
+      })
+    ) {
       return;
     }
 
@@ -181,7 +215,19 @@ function CloudAuthBridge(props: { readonly children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [tokenProvider, isLoaded, isSignedIn, removeRelayEnvironments, userId]);
+  }, [
+    clerk,
+    tokenProvider,
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- only a re-run trigger
+    guardRevision,
+    isLoaded,
+    isSignedIn,
+    persistedAccountId,
+    removeRelayEnvironments,
+    signedInSessionKey,
+    singleAccountEnforcer,
+    userId,
+  ]);
 
   useEffect(
     () => () => {
@@ -194,6 +240,7 @@ function CloudAuthBridge(props: { readonly children: ReactNode }) {
     },
     [],
   );
+  useEffect(() => () => singleAccountEnforcer.dispose(), [singleAccountEnforcer]);
 
   return props.children;
 }

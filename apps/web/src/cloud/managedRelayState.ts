@@ -3,6 +3,7 @@ import {
   createManagedRelayQueryManager,
   deregisterManagedRelayEnvironment,
   ManagedRelay,
+  managedRelayAccountIds,
   managedRelaySessionAtom,
   readManagedRelaySnapshotState,
 } from "@lecturn/client-runtime/relay";
@@ -116,8 +117,7 @@ export function useManagedRelayDevices() {
 }
 
 export function refreshManagedRelayEnvironments(): void {
-  const session = appAtomRegistry.get(managedRelaySessionAtom);
-  if (session) {
-    managedRelayQueryManager.refreshEnvironments(appAtomRegistry, session.accountId);
+  for (const accountId of managedRelayAccountIds(appAtomRegistry)) {
+    managedRelayQueryManager.refreshEnvironments(appAtomRegistry, accountId);
   }
 }

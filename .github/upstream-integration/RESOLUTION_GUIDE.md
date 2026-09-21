@@ -132,6 +132,36 @@ usually resolve as the **union** of both sides:
 `infra/relay/scripts/alchemy-output.test.ts`, plus the alchemy patch pinned
 through `patches/alchemy@2.0.0-beta.65.patch` and `pnpm-workspace.yaml`.
 
+**Connect multiple accounts** sits behind the `connectMultiAccount` constant in
+`apps/web/src/cloud/publicConfig.ts`. Fork-only files:
+`apps/web/src/components/clerk/{ConnectAccountMenu.tsx,ConnectAccountMenu.logic.ts,connectProfilePages.tsx,useConnectSignOut.logic.ts}`,
+`apps/web/src/components/sidebar/AccountMark.tsx`,
+`apps/web/src/cloud/{connectAccounts,knownAccounts,accountTokens,relayTokenCache,singleAccountGuard,useAccountEmailWhenSeveral}.ts`,
+`packages/client-runtime/src/relay/{connectAccounts,singleAccountGuard}.ts`, and
+their tests.
+
+Call sites in upstream files, which must survive a merge:
+
+- `apps/web/src/components/Sidebar.tsx` (very high churn): one import and one
+  `<AccountMark environmentId={thread.environmentId} />` line before
+  `{pinIndicator}` in each visible `SidebarThreadRow` layout, slim and card.
+  If upstream reshapes a row, re-add the single line; never the tooltip.
+- `apps/web/src/components/clerk/LecturnConnectSidebarSignIn.tsx`:
+  `LecturnConnectSidebarAvatar` returns `<ConnectAccountMenu />` when the
+  constant is on, and the `UserButton` maps `CONNECT_PROFILE_PAGES` instead of
+  listing its three `UserProfilePage` tabs. A tab upstream adds goes into
+  `connectProfilePages.tsx` so both paths get it.
+- `apps/web/src/components/cloud/CloudEnvironmentConnectList.tsx`: the row
+  body is the `renderRow` closure, followed by the grouped return. Take
+  upstream's row markup inside the closure and keep the `AccountMark` line.
+- `apps/web/src/components/cloud/{ConnectSubscriptionGate,ConnectOnboardingDialog}.tsx`:
+  `useAccountEmailWhenSeveral` and the copy that reads it.
+- `apps/web/src/components/settings/{settingsSearch.ts,useAvailableSettingsSearchItems.ts}`:
+  the two `connectAccountMenuOnly` rows and `hasConnectAccountMenu`.
+- `apps/web/src/cloud/managedAuth.tsx`, `apps/web/src/components/clerk/useConnectSignOut.tsx`,
+  and `packages/client-runtime/src/state/connections.ts`
+  (`unlistedRelayEnvironmentIdsValueAtom`): resolve as the union.
+
 ## Recurring mechanical conflicts
 
 **Published migration identities are persistent data.** The fork's

@@ -24,6 +24,21 @@ export function createRelayEnvironmentDiscoveryAtoms<R, E>(
       () => RelayEnvironmentDiscovery.EMPTY_RELAY_ENVIRONMENT_DISCOVERY_STATE,
     ),
   ).pipe(Atom.withLabel("relay-environment-discovery-value"));
+  const accountStatesAtom = runtime.atom(
+    Stream.unwrap(
+      RelayEnvironmentDiscovery.RelayEnvironmentDiscovery.pipe(
+        Effect.map((discovery) => SubscriptionRef.changes(discovery.accountStates)),
+      ),
+    ),
+    { initialValue: new Map<string, RelayEnvironmentDiscovery.RelayEnvironmentDiscoveryState>() },
+  );
+  /** Discovery per signed-in account, primary account first. */
+  const accountStatesValueAtom = Atom.make((get) =>
+    Option.getOrElse(
+      AsyncResult.value(get(accountStatesAtom)),
+      () => new Map<string, RelayEnvironmentDiscovery.RelayEnvironmentDiscoveryState>(),
+    ),
+  ).pipe(Atom.withLabel("relay-environment-discovery-accounts-value"));
   const refresh = createRuntimeCommand(runtime, {
     label: "relay-environment-discovery:refresh",
     concurrency: { mode: "singleFlight", key: () => "refresh" },
@@ -36,6 +51,7 @@ export function createRelayEnvironmentDiscoveryAtoms<R, E>(
   return {
     stateAtom,
     stateValueAtom,
+    accountStatesValueAtom,
     refresh,
   };
 }
