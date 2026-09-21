@@ -1,7 +1,6 @@
 import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
 
 import { accountByEnvironmentIdAtom, connectAccountProfilesAtom } from "./connectAccounts";
-import { connectMultiAccount } from "./publicConfig";
 
 export interface SignedOutEnvironment {
   readonly accountId: string;
@@ -32,13 +31,12 @@ export function withSignedOutAccount(input: {
 /**
  * Call before a signed-out account's environments are removed, while the
  * catalog still says which ones it owns, so an open thread can say why it
- * went away. Does nothing in a single-account build.
+ * went away.
  */
 export function recordSignedOutAccount(
   registry: AtomRegistry.AtomRegistry,
   accountId: string,
 ): void {
-  if (!connectMultiAccount) return;
   registry.set(
     signedOutEnvironmentsAtom,
     withSignedOutAccount({
@@ -56,12 +54,11 @@ export function recordSignedOutAccount(
  * catalog, and signing in again brings it back.
  */
 export function resolveAccountGone(input: {
-  readonly multiAccountEnabled: boolean;
   readonly environmentId: string | null;
   readonly signedOutEnvironments: ReadonlyMap<string, SignedOutEnvironment>;
   readonly environmentInCatalog: boolean;
 }): SignedOutEnvironment | null {
-  if (!input.multiAccountEnabled || input.environmentId === null) return null;
+  if (input.environmentId === null) return null;
   if (input.environmentInCatalog) return null;
   return input.signedOutEnvironments.get(input.environmentId) ?? null;
 }

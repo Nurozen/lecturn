@@ -8,7 +8,7 @@ import { connectAccountCommandsAtom } from "./connectAccountCommands";
 import { useConnectSignIn } from "./useConnectSignIn";
 import { useConnectSignOut } from "./useConnectSignOut";
 
-/** Runs the palette's account actions, and owns the dialogs they open. Multi-account builds only. */
+/** Runs the palette's account actions, and owns the dialogs they open. */
 export function ConnectAccountCommandsHost() {
   const signIn = useConnectSignIn();
   const signOut = useConnectSignOut();

@@ -105,21 +105,15 @@ describe("resolveSidebarSegmentation", () => {
     accountLabels,
   };
 
-  it("segments only with the build constant on and two or more known accounts", () => {
-    expect(resolveSidebarSegmentation({ ...input, multiAccountEnabled: true })).toEqual(
-      segmentation,
-    );
-    expect(resolveSidebarSegmentation({ ...input, multiAccountEnabled: false })).toBeNull();
+  it("segments only with two or more known accounts", () => {
+    expect(resolveSidebarSegmentation({ ...input })).toEqual(segmentation);
     expect(
       resolveSidebarSegmentation({
         ...input,
-        multiAccountEnabled: true,
         knownAccountIds: ["account-work"],
       }),
     ).toBeNull();
-    expect(
-      resolveSidebarSegmentation({ ...input, multiAccountEnabled: true, knownAccountIds: [] }),
-    ).toBeNull();
+    expect(resolveSidebarSegmentation({ ...input, knownAccountIds: [] })).toBeNull();
   });
 });
 

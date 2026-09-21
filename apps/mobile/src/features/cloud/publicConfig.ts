@@ -14,12 +14,6 @@ export class CloudPublicConfigMissingError extends Schema.TaggedErrorClass<Cloud
   }
 }
 
-/**
- * Build-time switch for serving several Connect accounts at once. While it is
- * off the app keeps a single signed-in Clerk session.
- */
-export const connectMultiAccount: boolean = false;
-
 export interface CloudPublicConfig {
   readonly clerk: {
     readonly publishableKey: string | null;

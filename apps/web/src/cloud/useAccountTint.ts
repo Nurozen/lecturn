@@ -10,7 +10,6 @@ import {
   toCanonicalThemeColor,
 } from "../themePalette";
 import { accountByEnvironmentIdAtom, connectAccountProfilesAtom } from "./connectAccounts";
-import { connectMultiAccount } from "./publicConfig";
 
 /** Subscribes to the actual applied palette so previews and same-id refreshes also recompute the tint. */
 export function useAccountTint(environmentId: EnvironmentId | null | undefined): {
@@ -27,7 +26,7 @@ export function useAccountTint(environmentId: EnvironmentId | null | undefined):
   const accountId = environmentId ? owners.get(environmentId) : undefined;
   const preset = accountId ? (profiles.get(accountId)?.preset ?? "jade") : null;
   return useMemo(() => {
-    if (!connectMultiAccount || !accountId || !preset || !colors) return {};
+    if (!accountId || !preset || !colors) return {};
     const canonical = Object.fromEntries(
       THEME_COLOR_ROLES.map((role) => [role, toCanonicalThemeColor(colors[role]) ?? colors[role]]),
     ) as unknown as ThemeColors;

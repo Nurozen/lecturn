@@ -10,7 +10,6 @@ const mocks = vi.hoisted(() => ({
   billingStatus: vi.fn(async () => ({ state: "active", hasAccess: true })),
   userId: "account-b",
   isSignedIn: true,
-  connectMultiAccount: false,
   known: { accountIds: [] as string[], needsSignIn: [] as string[], synced: true },
   setActive: vi.fn(async () => undefined),
   getToken: vi.fn(async (_accountId?: string): Promise<string | null> => "token"),
@@ -70,9 +69,6 @@ vi.mock("./primaryCloudLinkState", () => ({
 }));
 vi.mock("./accountTokens", () => ({ readToken: mocks.getToken }));
 vi.mock("./publicConfig", () => ({
-  get connectMultiAccount() {
-    return mocks.connectMultiAccount;
-  },
   resolveRelayClerkTokenOptions: () => ({}),
   resolveCloudPublicConfig: () => ({ relayUrl: "https://relay.example.com" }),
 }));
@@ -89,7 +85,6 @@ describe("Connect account ownership during reconciliation", () => {
     mocks.isSignedIn = true;
     mocks.getToken.mockResolvedValue("token");
     mocks.state.linked = true;
-    mocks.connectMultiAccount = false;
     mocks.known = { accountIds: [], needsSignIn: [], synced: true };
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
@@ -108,13 +103,7 @@ describe("Connect account ownership during reconciliation", () => {
   it("offers the publishing account instead of a sign-out once it is one of this client's", () => {
     mocks.known = { accountIds: ["account-a", "account-b"], needsSignIn: [], synced: true };
     const onSelectAccount = vi.fn();
-    // A single-account build keeps its advice, whatever the known list says.
-    const single = useCloudLinkController({ onSelectAccount });
-    expect(single.accountMismatchMessage).toContain("Sign out");
-    expect(single.accountMismatchAction).toBeNull();
-    expect(single.unlinkBlocked).toBe(true);
 
-    mocks.connectMultiAccount = true;
     const controller = useCloudLinkController({ accountId: "account-b", onSelectAccount });
     expect(controller.accountMismatchMessage).toBe(
       "a@example.com published this computer. Choose it to change publishing, or unlink this computer.",
@@ -136,7 +125,6 @@ describe("Connect account ownership during reconciliation", () => {
   });
 
   it("acts as the chosen account, not Clerk's active one, with that account's token", async () => {
-    mocks.connectMultiAccount = true;
     mocks.known = { accountIds: ["account-a", "account-b"], needsSignIn: [], synced: true };
     mocks.state.linked = false;
     mocks.getToken.mockImplementation(async (accountId?: string) => `token-of-${accountId}`);
@@ -152,7 +140,6 @@ describe("Connect account ownership during reconciliation", () => {
   });
 
   it("treats a chosen account that needs sign-in as signed out", () => {
-    mocks.connectMultiAccount = true;
     mocks.known = {
       accountIds: ["account-a", "account-b"],
       needsSignIn: ["account-a"],
@@ -162,7 +149,6 @@ describe("Connect account ownership during reconciliation", () => {
   });
 
   it("unlinks a known publisher's link with the publisher's token, and refuses to relink over it", async () => {
-    mocks.connectMultiAccount = true;
     mocks.known = { accountIds: ["account-a", "account-b"], needsSignIn: [], synced: true };
     mocks.getToken.mockImplementation(async (accountId?: string) => `token-of-${accountId}`);
     const controller = useCloudLinkController({ accountId: "account-b" });

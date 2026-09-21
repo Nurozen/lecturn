@@ -6,16 +6,15 @@ import { Alert, View } from "react-native";
 import { useConnectAccounts } from "../cloud/knownAccounts";
 import { signOutMobileConnectAccount } from "../cloud/mobileAccountSignOut";
 import { useAddConnectAccountGate } from "../cloud/useAddConnectAccountGate";
-import { connectMultiAccount, hasCloudPublicConfig } from "../cloud/publicConfig";
+import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { AppText } from "../../components/AppText";
 
 export function SettingsAddAccountRouteScreen(props: StaticScreenProps<{ accountId?: string }>) {
   const navigation = useNavigation();
   useEffect(() => {
-    if (!connectMultiAccount || !hasCloudPublicConfig())
-      navigation.dispatch(StackActions.popTo("SettingsContent"));
+    if (!hasCloudPublicConfig()) navigation.dispatch(StackActions.popTo("SettingsContent"));
   }, [navigation]);
-  return connectMultiAccount && hasCloudPublicConfig() ? (
+  return hasCloudPublicConfig() ? (
     <SettingsAddAccountAuthContent expectedAccountId={props.route.params?.accountId} />
   ) : null;
 }

@@ -41,7 +41,7 @@ const publishedBy = (publishingAccountId: string | null): SignOutHost => ({
 
 type PlanInput = Parameters<typeof planConnectSignOut>[0];
 const steps = (input: Omit<PlanInput, "multiAccount"> & { readonly multiAccount?: boolean }) => {
-  const plan = planConnectSignOut({ multiAccount: true, ...input });
+  const plan = planConnectSignOut({ ...input });
   if (plan._tag === "blocked") throw new Error("blocked");
   return plan.steps;
 };
@@ -114,7 +114,6 @@ describe("planConnectSignOut", () => {
         activeSessionId: A.sessionId,
         targets: [B.accountId],
         host: { _tag: "unknown" },
-        multiAccount: true,
       }),
     ).toEqual({ _tag: "blocked" });
   });
@@ -156,7 +155,6 @@ describe("planConnectSignOut", () => {
         ...input,
         targets: ["account-x"],
         host: { _tag: "unknown" },
-        multiAccount: true,
       }),
     ).toEqual({ _tag: "blocked" });
     expect(
@@ -177,55 +175,16 @@ describe("planConnectSignOut", () => {
       }).map((step) => step._tag),
     ).toEqual(["signOut"]);
   });
-
-  it("ends the current session and navigates in a single-account build", () => {
-    // The guard's stand-down state: a newer tab added B, and this tab serves A.
-    expect(
-      steps({
-        sessions: [A, B],
-        activeSessionId: A.sessionId,
-        targets: [A.accountId],
-        host: publishedBy(B.accountId),
-        multiAccount: false,
-      }),
-    ).toEqual([
-      { _tag: "unpublish", accountId: A.accountId },
-      { _tag: "signOut", sessionId: A.sessionId, ending: [mark(A)], redirect: "signedOut" },
-    ]);
-    expect(
-      steps({
-        sessions: [A, B],
-        activeSessionId: A.sessionId,
-        targets: "all",
-        host: none,
-        multiAccount: false,
-      }),
-    ).toEqual([
-      { _tag: "signOut", sessionId: null, ending: [mark(A), mark(B)], redirect: "signedOut" },
-    ]);
-  });
 });
 
 describe("signOutDialogCopy", () => {
   const input = {
-    multiAccount: true,
     knownAccountCount: 2,
     targets: ["account-a"],
     email: "a@example.com",
     localHost: true,
     unpublishes: false,
   };
-
-  it("keeps the original copy while multi-account is off, whatever is signed in", () => {
-    for (const targets of [["account-a"], "all"] as const) {
-      const copy = signOutDialogCopy({ ...input, multiAccount: false, targets });
-      expect(copy.title).toBe("Sign out of Lecturn?");
-      expect(copy.description).toContain("will unpublish this computer");
-    }
-    expect(signOutDialogCopy({ ...input, multiAccount: false, localHost: false }).description).toBe(
-      "This signs out this client. Your published computers will stay available to your other devices.",
-    );
-  });
 
   it("names the account only once more than one is known", () => {
     expect(signOutDialogCopy({ ...input, knownAccountCount: 1, unpublishes: true }).title).toBe(
@@ -238,15 +197,10 @@ describe("signOutDialogCopy", () => {
 });
 
 describe("canSignOutAllAccounts", () => {
-  it("is never offered by a single-account build, even with two sessions", () => {
+  it("is offered only for multiple distinct signed-in accounts", () => {
     const signedIn = ["account-a", "account-b"];
-    expect(canSignOutAllAccounts({ multiAccount: false, signedInAccountIds: signedIn })).toBe(
-      false,
-    );
-    expect(canSignOutAllAccounts({ multiAccount: true, signedInAccountIds: signedIn })).toBe(true);
-    expect(
-      canSignOutAllAccounts({ multiAccount: true, signedInAccountIds: ["account-a", "account-a"] }),
-    ).toBe(false);
+    expect(canSignOutAllAccounts({ signedInAccountIds: signedIn })).toBe(true);
+    expect(canSignOutAllAccounts({ signedInAccountIds: ["account-a", "account-a"] })).toBe(false);
   });
 });
 
@@ -304,7 +258,6 @@ describe("runConnectSignOut", () => {
       clerk,
       targets: ["account-b"],
       host: none,
-      multiAccount: true,
       unpublish: async () => undefined,
       stayUrl: "https://app.test/here",
       signedOutUrl: "https://app.test/signed-out",
@@ -447,23 +400,5 @@ describe("runConnectSignOut", () => {
     await expect(run(clerk, { targets: "all", host: publishedBy(null) })).rejects.toThrow(
       SIGN_OUT_ACCOUNT_LOADING_MESSAGE,
     );
-  });
-
-  it("ends the current session and navigates in a single-account build", async () => {
-    const clerk = fakeClerk(["a", "b"], "a");
-    const unpublish = vi.fn(async () => undefined);
-    await run(clerk, {
-      targets: ["account-a"],
-      host: publishedBy("account-b"),
-      multiAccount: false,
-      unpublish,
-    });
-    expect(unpublish).toHaveBeenCalledExactlyOnceWith("account-a");
-    expect(clerk.setActive).not.toHaveBeenCalled();
-    expect(clerk.signOut).toHaveBeenCalledExactlyOnceWith({
-      sessionId: "session-a",
-      redirectUrl: "https://app.test/signed-out",
-    });
-    expect(clerk.navigations).toEqual(["https://app.test/signed-out"]);
   });
 });

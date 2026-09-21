@@ -12,7 +12,6 @@ import { AsyncResult } from "effect/unstable/reactivity";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { ConnectAccountCommandsHost } from "../components/clerk/ConnectAccountCommandsHost";
-import { ConnectSignOutHost } from "../components/clerk/useConnectSignOut";
 import { toastManager } from "../components/ui/toast";
 import { environmentCatalog } from "../connection/catalog";
 import { AppAtomRegistryProvider, appAtomRegistry } from "../rpc/atomRegistry";
@@ -26,16 +25,9 @@ import {
   knownConnectAccountsAtom,
   observeClerkSessions,
 } from "./knownAccounts";
-import { connectMultiAccount } from "./publicConfig";
 import { resetRelayTokenCache } from "./relayTokenCache";
 import { bindActiveAccountClerk } from "./withActiveAccount";
-import {
-  clearLastConnectAccountId,
-  makeWebSingleAccountEnforcer,
-  persistLastConnectAccountId,
-  readLastConnectAccountId,
-  startMultiAccountMarkerHeartbeat,
-} from "./singleAccountGuard";
+import { startMultiAccountMarkerHeartbeat } from "./connectAuthCompatibility";
 
 const CLEANUP_RETRY_MS = 5_000;
 const CLEANUP_RETRY_MAX_MS = 5 * 60 * 1_000;
@@ -73,16 +65,14 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
   const signedInSessionKey = useSessionList()
     .sessions?.map((session) => `${session.id}:${session.status}`)
     .join(",");
-  const [singleAccountEnforcer] = useState(makeWebSingleAccountEnforcer);
-  // Bumped to look at Clerk again: a rejection settled, or a cleanup is due a retry.
+  // Bumped when account removal or a cleanup retry needs another observation.
   const [revision, setRevision] = useState(0);
-  const observedAccountRef = useRef<string | null | undefined>(undefined);
   const accountTransitionRef = useRef<Promise<void> | null>(null);
   const cleanupFailuresRef = useRef(0);
   const cleanupToastRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
 
   useEffect(() => {
-    if (!isLoaded || signedInSessionKey === undefined || !connectMultiAccount) return;
+    if (!isLoaded || signedInSessionKey === undefined) return;
     const refresh = () => {
       if (document.visibilityState === "visible") {
         void refreshAccountAppearance(clerk).then(() => initializeAccountAppearance(clerk));
@@ -111,41 +101,15 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
     if (!isLoaded || signedInSessionKey === undefined) {
       return;
     }
-    // An extra Clerk session, from another tab or Clerk's own UI, is rejected
-    // here in front of the transition handling so it never reads as an account
-    // change. signedInSessionKey is a dependency so those additions re-run it.
-    const persistedAccountId = readLastConnectAccountId();
-    if (
-      !singleAccountEnforcer.evaluate({
-        clerk,
-        renderedAccountId: isSignedIn && userId ? userId : null,
-        observedAccountId: observedAccountRef.current,
-        persistedAccountId,
-        onSettled: () => setRevision((revision) => revision + 1),
-      })
-    ) {
-      return;
-    }
-
     let cancelled = false;
     const nextAccount = isSignedIn && userId ? userId : null;
-    observedAccountRef.current = nextAccount;
-    if (nextAccount === null) {
-      clearLastConnectAccountId();
-    } else {
-      persistLastConnectAccountId(nextAccount);
-    }
 
     const signedInSessions = () =>
       (clerk.client?.signedInSessions ?? []).flatMap((session) =>
         session.user ? [{ accountId: session.user.id, sessionId: session.id }] : [],
       );
-    // A single-account client sweeps every other account before it serves a new one.
     const observe = () => {
-      const result = observeClerkSessions(appAtomRegistry, signedInSessions(), {
-        soleAccountId: connectMultiAccount ? null : nextAccount,
-        previouslyServed: persistedAccountId,
-      });
+      const result = observeClerkSessions(appAtomRegistry, signedInSessions());
       observeAccountProfiles(
         appAtomRegistry,
         (clerk.client?.signedInSessions ?? []).flatMap((session) =>
@@ -192,7 +156,7 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
       }
       // Only a signed-out account takes its view state along. Removing an
       // environment by hand keeps it, so adding it back restores the layout.
-      if (connectMultiAccount && AsyncResult.isSuccess(results[0])) {
+      if (AsyncResult.isSuccess(results[0])) {
         await sweepViewState(results[0].value);
       }
       forgetKnownAccount(appAtomRegistry, accountId);
@@ -267,7 +231,6 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
     isSignedIn,
     removeRelayEnvironments,
     signedInSessionKey,
-    singleAccountEnforcer,
     userId,
   ]);
 
@@ -285,16 +248,14 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
       ),
     [],
   );
-  useEffect(() => (connectMultiAccount ? startMultiAccountMarkerHeartbeat() : undefined), []);
-  useEffect(() => () => singleAccountEnforcer.dispose(), [singleAccountEnforcer]);
+  useEffect(startMultiAccountMarkerHeartbeat, []);
 
   // This provider sits above the app's atom registry, which the dialog reads.
   return (
     <>
       {children}
       <AppAtomRegistryProvider>
-        <ConnectSignOutHost />
-        {connectMultiAccount ? <ConnectAccountCommandsHost /> : null}
+        <ConnectAccountCommandsHost />
       </AppAtomRegistryProvider>
     </>
   );

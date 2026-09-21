@@ -8,7 +8,6 @@ import {
 } from "./accountAppearance";
 
 const observed = vi.hoisted(() => vi.fn());
-vi.mock("./publicConfig", () => ({ connectMultiAccount: true }));
 vi.mock("../rpc/atomRegistry", () => ({ appAtomRegistry: {} }));
 vi.mock("./connectAccounts", () => ({ observeAccountProfiles: observed }));
 afterEach(() => {

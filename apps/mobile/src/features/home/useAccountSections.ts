@@ -5,14 +5,13 @@ import { relayAccountByEnvironmentId } from "@lecturn/client-runtime/relay";
 import { useMemo } from "react";
 import { environmentCatalog } from "../../connection/catalog";
 import { useConnectAccounts } from "../cloud/knownAccounts";
-import { connectMultiAccount } from "../cloud/publicConfig";
 import type { AccountSectionContext } from "./accountSections";
 export function useAccountSections(): AccountSectionContext | undefined {
   const accounts = useConnectAccounts();
   const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
   return useMemo(
     () =>
-      connectMultiAccount && accounts.length > 1
+      accounts.length > 1
         ? {
             accounts,
             owners: relayAccountByEnvironmentId(

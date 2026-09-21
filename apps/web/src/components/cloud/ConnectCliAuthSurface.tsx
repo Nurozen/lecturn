@@ -14,9 +14,8 @@ import {
   readConnectCliCallbackResult,
   rememberConnectCliAuthState,
 } from "../../cloud/connectCliAuth";
-import { connectMultiAccount } from "../../cloud/publicConfig";
 import { withActiveAccount } from "../../cloud/withActiveAccount";
-import { openConnectSignIn } from "../../cloud/singleAccountGuard";
+import { openConnectSignIn } from "../../cloud/connectAuthCompatibility";
 import { isElectron } from "../../env";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { AuthSurfaceShell } from "../auth/AuthSurfaceShell";
@@ -75,7 +74,6 @@ export function ConnectCliAuthorizeSurface() {
   const step = decideConnectCliAuthorizeStep({
     isLoaded,
     isSignedIn: Boolean(isSignedIn),
-    multiAccountEnabled: connectMultiAccount,
     knownAccountIds: known.accountIds,
     knownAccountsSynced: known.synced,
     confirmedAccountId,
@@ -195,10 +193,10 @@ export function ConnectCliCallbackSurface() {
   const [result] = useState(readConnectCliCallbackResult);
   const [expectedState] = useState(readConnectCliAuthState);
   const [chosenAccountId] = useState(() =>
-    connectMultiAccount && result ? readConnectCliAuthAccount(result.state) : null,
+    result ? readConnectCliAuthAccount(result.state) : null,
   );
   useEffect(() => {
-    if (connectMultiAccount) forgetConnectCliAuthAccount();
+    forgetConnectCliAuthAccount();
   }, []);
   const { user } = useUser();
   const { copyToClipboard, isCopied } = useCopyToClipboard({ target: "authentication code" });

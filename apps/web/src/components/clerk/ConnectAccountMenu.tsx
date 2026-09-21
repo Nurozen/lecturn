@@ -104,7 +104,7 @@ function useConnectProfilePages() {
 
 /**
  * The Connect accounts signed in on this client, in place of Clerk's
- * `UserButton` popover. Only mounted while `connectMultiAccount` is on.
+ * `UserButton` popover.
  */
 export function ConnectAccountMenu() {
   const clerk = useClerk();

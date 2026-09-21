@@ -3,7 +3,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { AuthAccessWriteScope } from "@lecturn/contracts";
 
 import { knownConnectAccountsAtom } from "~/cloud/knownAccounts";
-import { connectMultiAccount, hasCloudPublicConfig } from "~/cloud/publicConfig";
+import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { isElectron } from "~/env";
 import { desktopWslStateAtom } from "~/state/desktopWslState";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
@@ -19,8 +19,7 @@ export function useAvailableSettingsSearchItems() {
   const { environments } = useEnvironments();
   const primarySessionState = usePrimarySessionState();
   const primaryServerConfig = useAtomValue(primaryServerConfigAtom);
-  const hasConnectAccountMenu =
-    useAtomValue(knownConnectAccountsAtom).accountIds.length > 0 && connectMultiAccount;
+  const hasConnectAccountMenu = useAtomValue(knownConnectAccountsAtom).accountIds.length > 0;
   const desktopWsl = useEnvironmentQuery(isElectron ? desktopWslStateAtom : null);
   const canManageLocalBackend =
     isElectron ||

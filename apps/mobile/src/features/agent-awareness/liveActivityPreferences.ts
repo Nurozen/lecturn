@@ -1,4 +1,3 @@
-import { connectMultiAccount } from "../cloud/publicConfig";
 import * as Effect from "effect/Effect";
 
 import type { SavedRemoteConnection } from "../../lib/connection";
@@ -23,7 +22,6 @@ export const setLiveActivityUpdatesEnabled = Effect.fn("setLiveActivityUpdatesEn
       });
 
       const clerkToken = input.clerkToken;
-      if (!connectMultiAccount && !clerkToken) return;
 
       yield* Effect.forEach(
         linkedConnections,
@@ -48,7 +46,6 @@ export const setLiveActivityUpdatesEnabled = Effect.fn("setLiveActivityUpdatesEn
       );
 
       const clerkToken = input.clerkToken;
-      if (!connectMultiAccount && !clerkToken) return;
 
       yield* Effect.forEach(
         linkedConnections,

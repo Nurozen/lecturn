@@ -1,4 +1,3 @@
-import { connectMultiAccount } from "../cloud/publicConfig";
 import { PullRequestWatchAccountGuard } from "./PullRequestWatchAccountGuard";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { GlassCard } from "../../components/GlassCard";
@@ -185,15 +184,13 @@ export function PullRequestWatchRouteScreen({
       />
     </View>
   );
-  return connectMultiAccount ? (
+  return (
     <PullRequestWatchAccountGuard
       environmentId={route.params.environmentId}
       accountId={route.params.accountId}
     >
       {content}
     </PullRequestWatchAccountGuard>
-  ) : (
-    content
   );
 }
 

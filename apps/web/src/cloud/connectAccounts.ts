@@ -11,7 +11,6 @@ import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
 import { environmentCatalog } from "../connection/catalog";
 import { getLocalStorageItem, setLocalStorageItem } from "../hooks/useLocalStorage";
 import { knownConnectAccountsAtom } from "./knownAccounts";
-import { connectMultiAccount } from "./publicConfig";
 
 export const ACCOUNT_PROFILES_STORAGE_KEY = "lecturn:account-profiles:v1";
 
@@ -99,7 +98,6 @@ export function observeAccountProfiles(
   registry: AtomRegistry.AtomRegistry,
   users: ReadonlyArray<ObservedClerkUser>,
 ): void {
-  if (!connectMultiAccount) return;
   const current = registry.get(connectAccountProfilesAtom);
   const next = mergeAccountProfiles({
     current,
@@ -184,12 +182,11 @@ export interface AccountMark {
  * untagged relay entry) never has one.
  */
 export function buildAccountMarks(input: {
-  readonly multiAccountEnabled: boolean;
   readonly knownAccountIds: ReadonlyArray<string>;
   readonly profiles: ConnectAccountProfiles;
   readonly accountByEnvironmentId: ReadonlyMap<string, string>;
 }): ReadonlyMap<string, AccountMark> {
-  if (!input.multiAccountEnabled || input.knownAccountIds.length < 2) {
+  if (input.knownAccountIds.length < 2) {
     return new Map();
   }
   const labels = accountMarkLabels(input.profiles);
@@ -211,7 +208,6 @@ export function buildAccountMarks(input: {
 
 export const accountMarkByEnvironmentIdAtom = Atom.make((get) =>
   buildAccountMarks({
-    multiAccountEnabled: connectMultiAccount,
     knownAccountIds: get(knownConnectAccountsAtom).accountIds,
     profiles: get(connectAccountProfilesAtom),
     accountByEnvironmentId: get(accountByEnvironmentIdAtom),
@@ -223,12 +219,11 @@ export const accountMarkByEnvironmentIdAtom = Atom.make((get) =>
  * known, when "your account" is already unambiguous.
  */
 export function accountEmailWhenSeveral(input: {
-  readonly multiAccountEnabled: boolean;
   readonly knownAccountIds: ReadonlyArray<string>;
   readonly profiles: ConnectAccountProfiles;
   readonly accountId: string | null | undefined;
 }): string | null {
-  if (!input.multiAccountEnabled || input.knownAccountIds.length < 2 || !input.accountId) {
+  if (input.knownAccountIds.length < 2 || !input.accountId) {
     return null;
   }
   return input.profiles.get(input.accountId)?.email ?? null;
@@ -236,11 +231,10 @@ export function accountEmailWhenSeveral(input: {
 
 /**
  * The known account that published this computer while another account is
- * active. null in a single-account build, or when the publisher is a stranger
+ * active. null when the publisher is a stranger
  * to this client, where signing out stays the way to take the computer over.
  */
 export function knownPublishingAccount(input: {
-  readonly multiAccountEnabled: boolean;
   readonly publisherId: string | null | undefined;
   readonly knownAccountIds: ReadonlyArray<string>;
   readonly needsSignIn: ReadonlyArray<string>;
@@ -251,7 +245,7 @@ export function knownPublishingAccount(input: {
   readonly signedIn: boolean;
 } | null {
   const { publisherId } = input;
-  if (!input.multiAccountEnabled || !publisherId || !input.knownAccountIds.includes(publisherId)) {
+  if (!publisherId || !input.knownAccountIds.includes(publisherId)) {
     return null;
   }
   return {

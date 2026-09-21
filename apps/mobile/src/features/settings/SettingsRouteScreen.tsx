@@ -1,6 +1,6 @@
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { LECTURN_LEGAL_NOTICES } from "@lecturn/shared/legalNotices";
-import { useAuth, useUser } from "@clerk/expo";
+import { useAuth } from "@clerk/expo";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
@@ -59,7 +59,6 @@ import {
 } from "../updates/app-updates";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { TeamSelector } from "../cloud/TeamSelector";
-import { connectMultiAccount } from "../cloud/publicConfig";
 import { useSessionRelayToken } from "../cloud/useSessionRelayToken";
 import { useConnectAccounts } from "../cloud/knownAccounts";
 import { ConnectAccountsSettings } from "./ConnectAccountsSettings";
@@ -169,17 +168,9 @@ function ConfiguredSettingsRouteScreen() {
   const agentAwarenessPlatform = resolveAgentAwarenessPlatformPresentation(Platform.OS);
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const {
-    userId,
-    sessionId,
-    isLoaded,
-    isSignedIn: activeSignedIn,
-  } = useAuth({ treatPendingAsSignedOut: false });
-  const { user } = useUser();
+  const { sessionId, isLoaded } = useAuth({ treatPendingAsSignedOut: false });
   const connectAccounts = useConnectAccounts();
-  const isSignedIn = connectMultiAccount
-    ? connectAccounts.some((account) => account.signedIn)
-    : activeSignedIn;
+  const isSignedIn = connectAccounts.some((account) => account.signedIn);
   const [pickedAccountId, setPickedAccountId] = useState<string | null>(null);
   const selectedAccountId =
     pickedAccountId && connectAccounts.some((account) => account.accountId === pickedAccountId)
@@ -188,7 +179,7 @@ function ConfiguredSettingsRouteScreen() {
         connectAccounts[0]?.accountId ??
         null);
   const getRelayToken = useSessionRelayToken({
-    userId: connectMultiAccount ? selectedAccountId : userId,
+    userId: selectedAccountId,
     sessionId,
     isSignedIn,
   });
@@ -208,12 +199,6 @@ function ConfiguredSettingsRouteScreen() {
 
   const connections = useMemo(() => Object.values(savedConnectionsById), [savedConnectionsById]);
   const environmentCount = connections.length;
-  const accountLabel = useMemo(() => {
-    if (!isLoaded) return "Checking";
-    if (!isSignedIn) return "Sign in";
-    return user?.primaryEmailAddress?.emailAddress ?? "Signed in";
-  }, [isLoaded, isSignedIn, user?.primaryEmailAddress?.emailAddress]);
-
   const refreshNotifications = useCallback(async () => {
     if (process.env.EXPO_OS !== "ios") {
       setNotificationStatus("unsupported");
@@ -368,7 +353,7 @@ function ConfiguredSettingsRouteScreen() {
           previousEnabled: liveActivitiesPreferenceEnabled,
           clerkToken: tokenResult.value,
           connections,
-          ...(connectMultiAccount && selectedAccountId ? { accountId: selectedAccountId } : {}),
+          ...(selectedAccountId ? { accountId: selectedAccountId } : {}),
         }),
       ),
     );
@@ -457,9 +442,7 @@ function ConfiguredSettingsRouteScreen() {
                 previousEnabled: liveActivitiesPreferenceEnabled,
                 clerkToken: token,
                 connections,
-                ...(connectMultiAccount && selectedAccountId
-                  ? { accountId: selectedAccountId }
-                  : {}),
+                ...(selectedAccountId ? { accountId: selectedAccountId } : {}),
               }),
             ),
           );
@@ -495,11 +478,6 @@ function ConfiguredSettingsRouteScreen() {
     ],
   );
 
-  const openAccount = useCallback(() => {
-    if (!isLoaded) return;
-    navigation.navigate("SettingsSheet", { screen: "SettingsAuth" });
-  }, [isLoaded, navigation]);
-
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
       <ArcaneBackdrop emphasis="sidebar" />
@@ -513,23 +491,12 @@ function ConfiguredSettingsRouteScreen() {
         }}
       >
         <View className="gap-3">
-          {connectMultiAccount ? (
-            <ConnectAccountsSettings
-              selectedAccountId={selectedAccountId}
-              onSelect={setPickedAccountId}
-            />
-          ) : (
-            <SettingsSection title="Account">
-              <SettingsRow
-                icon="person.crop.circle"
-                label="Lecturn Account"
-                value={accountLabel}
-                onPress={openAccount}
-              />
-            </SettingsSection>
-          )}
-          <TeamSelector accountId={connectMultiAccount ? selectedAccountId : undefined} />
-          <ConnectBillingStatus accountId={connectMultiAccount ? selectedAccountId : undefined} />
+          <ConnectAccountsSettings
+            selectedAccountId={selectedAccountId}
+            onSelect={setPickedAccountId}
+          />
+          <TeamSelector accountId={selectedAccountId} />
+          <ConnectBillingStatus accountId={selectedAccountId} />
           <Text className="px-2 text-sm text-foreground-muted">
             Lecturn works locally without signing in. Cloud features are optional.
           </Text>

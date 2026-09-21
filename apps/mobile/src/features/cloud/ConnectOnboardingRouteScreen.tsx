@@ -16,7 +16,7 @@ import { useConnectionController } from "../connection/useConnectionController";
 import { optOutOfConnectOnboarding } from "./connectOnboardingOptOut";
 import { TeamSelector } from "./TeamSelector";
 import { useConnectAccounts } from "./knownAccounts";
-import { connectMultiAccount, hasCloudPublicConfig } from "./publicConfig";
+import { hasCloudPublicConfig } from "./publicConfig";
 
 /**
  * Post-sign-in onboarding sheet for Lecturn Connect. Mobile never publishes
@@ -53,10 +53,8 @@ function ConfiguredConnectOnboardingRouteScreen(props: { readonly accountId?: st
   const insets = useSafeAreaInsets();
   const auth = useAuth({ treatPendingAsSignedOut: false });
   const accounts = useConnectAccounts();
-  const userId = connectMultiAccount ? (props.accountId ?? auth.userId) : auth.userId;
-  const isSignedIn = connectMultiAccount
-    ? accounts.some((account) => account.accountId === userId && account.signedIn)
-    : auth.isSignedIn;
+  const userId = props.accountId ?? auth.userId;
+  const isSignedIn = accounts.some((account) => account.accountId === userId && account.signedIn);
   const { connectedEnvironments, onReconnectEnvironment } = useRemoteConnections();
   const { refreshRelayEnvironments } = useConnectionController();
   const { connectedCloudEnvironments } = splitEnvironmentSections({
@@ -126,7 +124,7 @@ function ConfiguredConnectOnboardingRouteScreen(props: { readonly accountId?: st
         </Text>
         {isSignedIn ? (
           <CloudEnvironmentRows
-            accountId={connectMultiAccount ? (userId ?? undefined) : undefined}
+            accountId={userId ?? undefined}
             connectedCloudEnvironments={connectedCloudEnvironments}
             onReconnectEnvironment={onReconnectEnvironment}
             onSetupProvider={(params) =>
@@ -155,7 +153,7 @@ function ConfiguredConnectOnboardingRouteScreen(props: { readonly accountId?: st
             <Text className="text-xs text-foreground-muted">{"Don't show this again"}</Text>
           </Pressable>
         ) : null}
-        <TeamSelector accountId={connectMultiAccount ? userId : undefined} />
+        <TeamSelector accountId={userId} />
       </ScrollView>
     </View>
   );

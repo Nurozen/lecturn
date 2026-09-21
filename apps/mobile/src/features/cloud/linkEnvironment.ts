@@ -39,7 +39,7 @@ import type { SavedRemoteConnection } from "../../lib/connection";
 import * as MobilePreferences from "../../persistence/mobile-preferences";
 import * as MobileStorage from "../../persistence/mobile-storage";
 import { accountTokenReader } from "./accountTokenReaders";
-import { connectMultiAccount, resolveCloudPublicConfig } from "./publicConfig";
+import { resolveCloudPublicConfig } from "./publicConfig";
 
 const RELAY_STATUS_AND_CONNECT_SCOPES = [
   RelayEnvironmentStatusScope,
@@ -265,32 +265,28 @@ export function linkEnvironmentToCloudWithPreference(
     }
     const localBearerToken = input.connection.bearerToken;
     const environmentClient = yield* makeEnvironmentHttpApiClient(input.connection.httpBaseUrl);
-    let clerkToken = input.clerkToken;
-    let ownerAccountId: string | undefined;
-    if (connectMultiAccount) {
-      const host = yield* environmentClient.connect
-        .linkState({ headers: { authorization: `Bearer ${localBearerToken}` } })
-        .pipe(
-          Effect.mapError(
-            cloudEnvironmentLinkError("Could not check the environment's owning account."),
-          ),
-        );
-      const owner = host.cloudUserId ?? input.connection.accountId ?? input.accountId;
-      ownerAccountId = owner;
-      if (!owner)
-        return yield* new CloudEnvironmentLinkError({
-          message: "Choose a Connect account before linking this environment.",
-        });
-      const token = yield* Effect.tryPromise({
-        try: accountTokenReader(owner),
-        catch: cloudEnvironmentLinkError("Could not read the environment owner's token."),
+    const host = yield* environmentClient.connect
+      .linkState({ headers: { authorization: `Bearer ${localBearerToken}` } })
+      .pipe(
+        Effect.mapError(
+          cloudEnvironmentLinkError("Could not check the environment's owning account."),
+        ),
+      );
+    const owner = host.cloudUserId ?? input.connection.accountId ?? input.accountId;
+    const ownerAccountId = owner;
+    if (!owner)
+      return yield* new CloudEnvironmentLinkError({
+        message: "Choose a Connect account before linking this environment.",
       });
-      if (!token)
-        return yield* new CloudEnvironmentLinkError({
-          message: "Sign in to the environment's owning account before changing Live Activities.",
-        });
-      clerkToken = token;
-    }
+    const token = yield* Effect.tryPromise({
+      try: accountTokenReader(owner),
+      catch: cloudEnvironmentLinkError("Could not read the environment owner's token."),
+    });
+    if (!token)
+      return yield* new CloudEnvironmentLinkError({
+        message: "Sign in to the environment's owning account before changing Live Activities.",
+      });
+    const clerkToken = token;
     const relayUrl = yield* requireRelayUrl();
     const relayClient = yield* ManagedRelay.ManagedRelayClient;
     const storage = yield* MobileStorage.MobileStorage;

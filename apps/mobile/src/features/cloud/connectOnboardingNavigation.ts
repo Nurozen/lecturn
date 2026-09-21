@@ -2,7 +2,6 @@ import { useAtomValue } from "@effect/atom-react";
 import { useNavigation } from "@react-navigation/native";
 import { useEffect } from "react";
 
-import { connectMultiAccount } from "./publicConfig";
 import { knownConnectAccountsAtom } from "./knownAccounts";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { clearConnectOnboardingRequest, connectOnboardingRequestAtom } from "./connectOnboarding";
@@ -40,10 +39,9 @@ export function useConnectOnboardingNavigation(): void {
         clearConnectOnboardingRequest();
         if (
           !optedOut &&
-          (!connectMultiAccount ||
-            appAtomRegistry
-              .get(knownConnectAccountsAtom)
-              .some((account) => account.accountId === requestedAccountId && account.signedIn))
+          appAtomRegistry
+            .get(knownConnectAccountsAtom)
+            .some((account) => account.accountId === requestedAccountId && account.signedIn)
         ) {
           navigation.navigate("ConnectOnboarding", { accountId: requestedAccountId });
         }

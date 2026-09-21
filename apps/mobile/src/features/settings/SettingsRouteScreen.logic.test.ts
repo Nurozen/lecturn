@@ -23,7 +23,6 @@ describe("resolveAgentAwarenessPlatformPresentation", () => {
 
 describe("mobile add-account gate", () => {
   const base = {
-    enabled: true,
     loaded: true,
     accountCount: 1,
     sharedGateAvailable: true,
@@ -42,7 +41,6 @@ describe("mobile add-account gate", () => {
     expect(mobileAccountAdditionAllowed({ ...base, platform: "android" })).toBe(true);
   });
   it("honors the build, Clerk, ownership, and loading gates", () => {
-    expect(mobileAccountAdditionAllowed({ ...base, enabled: false, accountCount: 0 })).toBe(false);
     expect(mobileAccountAdditionAllowed({ ...base, loaded: false, accountCount: 0 })).toBe(false);
     expect(
       mobileAccountAdditionAllowed({ ...base, platform: "android", sharedGateAvailable: false }),

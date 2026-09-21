@@ -85,9 +85,8 @@ describe("buildConnectAccountMenu", () => {
     expect(build({ knownAccountIds: ["account-a"] }).canSignOutAll).toBe(false);
   });
 
-  it("enables, explains, or hides Add account from the gate", () => {
+  it("enables or explains Add account from the gate", () => {
     expect(build({}).addAccount).toEqual({ enabled: true });
-    expect(build({ gate: { available: false, reason: "disabled" } }).addAccount).toBeNull();
     const reasons = (["single-session", "unowned-environments", "account-limit"] as const).map(
       (reason) => {
         const addAccount = build({ gate: { available: false, reason } }).addAccount;

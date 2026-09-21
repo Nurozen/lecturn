@@ -44,7 +44,6 @@ vi.mock("../cloud/knownAccounts", () => ({
   connectAccountsReadyAtom: state.accountReadyAtom,
   knownConnectAccountsAtom: state.accountsAtom,
 }));
-vi.mock("../cloud/publicConfig", () => ({ connectMultiAccount: true }));
 vi.mock("../home/accountSectionExpansion", () => ({ expandMobileAccountSection: state.expand }));
 vi.mock("expo-notifications", () => ({
   addNotificationResponseReceivedListener: state.listen,

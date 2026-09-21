@@ -33,7 +33,7 @@ import {
   saveAgentAwarenessRegistrationRecord,
 } from "../../persistence/imperative";
 import AgentActivity, { type AgentActivityProps } from "../../widgets/AgentActivity";
-import { connectMultiAccount, resolveCloudPublicConfig } from "../cloud/publicConfig";
+import { resolveCloudPublicConfig } from "../cloud/publicConfig";
 import { supportsAgentAwarenessPush } from "./capabilities";
 import { makeRelayDeviceRegistrationRequest, resolveApsEnvironment } from "./registrationPayload";
 
@@ -1363,11 +1363,6 @@ export function syncAgentAwarenessAccounts(
   primaryId: string | null,
   supported: boolean,
 ): void {
-  if (!connectMultiAccount) {
-    const provider = primaryId ? providers.get(primaryId) : providers.values().next().value;
-    legacy.setAgentAwarenessRelayTokenProvider(provider ?? null, primaryId ?? undefined);
-    return;
-  }
   legacy.releaseAgentAwarenessRelayTokenProvider();
   if (accounts.size === 0 && Platform.OS === "ios") {
     try {

@@ -21,13 +21,7 @@ import {
   refreshCloudEnvironmentConnection,
 } from "./linkEnvironment";
 
-const accountMode = vi.hoisted(() => ({ enabled: false, read: vi.fn() }));
-vi.mock("./publicConfig", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./publicConfig")>()),
-  get connectMultiAccount() {
-    return accountMode.enabled;
-  },
-}));
+const accountMode = vi.hoisted(() => ({ read: vi.fn() }));
 vi.mock("./accountTokenReaders", () => ({
   accountTokenReader: (id: string) => () => accountMode.read(id),
 }));
@@ -201,7 +195,6 @@ function listedEnvironment(environmentId: string) {
 
 describe("mobile cloud link environment client", () => {
   beforeEach(() => {
-    accountMode.enabled = false;
     accountMode.read.mockReset().mockResolvedValue("owner-token");
     vi.restoreAllMocks();
     createProofMock.mockClear();
@@ -633,6 +626,17 @@ describe("mobile cloud link environment client", () => {
     () =>
       Effect.gen(function* () {
         const fetchMock = vi.fn((url: string | URL) => {
+          if (String(url).endsWith("/api/connect/link-state")) {
+            return Promise.resolve(
+              Response.json({
+                linked: true,
+                cloudUserId: "user_123",
+                relayUrl: "https://relay.example.test",
+                relayIssuer: "https://relay.example.test",
+                publishAgentActivity: true,
+              }),
+            );
+          }
           if (String(url).endsWith("/v1/client/environment-link-challenges")) {
             return Promise.resolve(Response.json(validLinkChallengeResponse()));
           }
@@ -653,13 +657,24 @@ describe("mobile cloud link environment client", () => {
           _tag: "CloudEnvironmentLinkError",
           message: "Relay returned credentials for a different environment.",
         });
-        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(fetchMock).toHaveBeenCalledTimes(4);
       }),
   );
 
   it.effect("preserves typed local environment failures while obtaining a link proof", () =>
     Effect.gen(function* () {
       const fetchMock = vi.fn((url: string | URL) => {
+        if (String(url).endsWith("/api/connect/link-state")) {
+          return Promise.resolve(
+            Response.json({
+              linked: true,
+              cloudUserId: "user_123",
+              relayUrl: "https://relay.example.test",
+              relayIssuer: "https://relay.example.test",
+              publishAgentActivity: true,
+            }),
+          );
+        }
         if (String(url).endsWith("/v1/client/environment-link-challenges")) {
           return Promise.resolve(Response.json(validLinkChallengeResponse()));
         }
@@ -685,13 +700,24 @@ describe("mobile cloud link environment client", () => {
       expect(error.message).toBe(
         "Could not obtain environment link proof: Invalid environment bearer session.",
       );
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
     }),
   );
 
   it.effect("preserves typed relay error bodies while linking environments", () =>
     Effect.gen(function* () {
       const fetchMock = vi.fn((url: string | URL) => {
+        if (String(url).endsWith("/api/connect/link-state")) {
+          return Promise.resolve(
+            Response.json({
+              linked: true,
+              cloudUserId: "user_123",
+              relayUrl: "https://relay.example.test",
+              relayIssuer: "https://relay.example.test",
+              publishAgentActivity: true,
+            }),
+          );
+        }
         if (String(url).endsWith("/v1/client/environment-link-challenges")) {
           return Promise.resolve(Response.json(validLinkChallengeResponse()));
         }
@@ -724,13 +750,24 @@ describe("mobile cloud link environment client", () => {
           "https://relay.example.test/v1/client/environment-links failed: Relay rejected the environment link proof (origin_not_allowed).",
         traceId: "trace-test",
       });
-      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
     }),
   );
 
   it.effect("rejects relay link credentials for a different managed endpoint provider", () =>
     Effect.gen(function* () {
       const fetchMock = vi.fn((url: string | URL) => {
+        if (String(url).endsWith("/api/connect/link-state")) {
+          return Promise.resolve(
+            Response.json({
+              linked: true,
+              cloudUserId: "user_123",
+              relayUrl: "https://relay.example.test",
+              relayIssuer: "https://relay.example.test",
+              publishAgentActivity: true,
+            }),
+          );
+        }
         if (String(url).endsWith("/v1/client/environment-link-challenges")) {
           return Promise.resolve(Response.json(validLinkChallengeResponse()));
         }
@@ -759,7 +796,7 @@ describe("mobile cloud link environment client", () => {
         _tag: "CloudEnvironmentLinkError",
         message: "Relay returned credentials for a different endpoint provider.",
       });
-      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
     }),
   );
 
@@ -771,6 +808,17 @@ describe("mobile cloud link environment client", () => {
         if (init?.body) {
           // @effect-diagnostics-next-line preferSchemaOverJson:off
           bodies.push(JSON.parse(requestBodyText(init.body)));
+        }
+        if (String(url).endsWith("/api/connect/link-state")) {
+          return Promise.resolve(
+            Response.json({
+              linked: true,
+              cloudUserId: "user_123",
+              relayUrl: "https://relay.example.test",
+              relayIssuer: "https://relay.example.test",
+              publishAgentActivity: true,
+            }),
+          );
         }
         if (String(url).endsWith("/v1/client/environment-link-challenges")) {
           return Promise.resolve(Response.json(validLinkChallengeResponse()));
@@ -826,6 +874,17 @@ describe("mobile cloud link environment client", () => {
         if (init?.body) {
           // @effect-diagnostics-next-line preferSchemaOverJson:off
           bodies.push(JSON.parse(requestBodyText(init.body)) as Record<string, unknown>);
+        }
+        if (String(url).endsWith("/api/connect/link-state")) {
+          return Promise.resolve(
+            Response.json({
+              linked: true,
+              cloudUserId: "user_123",
+              relayUrl: "https://relay.example.test",
+              relayIssuer: "https://relay.example.test",
+              publishAgentActivity: true,
+            }),
+          );
         }
         if (String(url).endsWith("/v1/client/environment-link-challenges")) {
           return Promise.resolve(Response.json(validLinkChallengeResponse()));
@@ -1286,7 +1345,6 @@ describe("mobile cloud link environment client", () => {
 describe("multi-account host ownership", () => {
   it.effect("uses the published host owner for forward and rollback updates", () =>
     Effect.gen(function* () {
-      accountMode.enabled = true;
       accountMode.read.mockReset().mockResolvedValue("owner-token");
       const relayTokens: string[] = [];
       vi.stubGlobal(
@@ -1302,6 +1360,17 @@ describe("multi-account host ownership", () => {
                 publishAgentActivity: true,
               }),
             );
+          if (String(url).endsWith("/api/connect/link-state")) {
+            return Promise.resolve(
+              Response.json({
+                linked: true,
+                cloudUserId: "user_123",
+                relayUrl: "https://relay.example.test",
+                relayIssuer: "https://relay.example.test",
+                publishAgentActivity: true,
+              }),
+            );
+          }
           if (String(url).endsWith("/v1/client/environment-link-challenges")) {
             relayTokens.push(new Headers(init?.headers).get("authorization") ?? "");
             return Promise.resolve(Response.json(validLinkChallengeResponse()));
@@ -1324,12 +1393,10 @@ describe("multi-account host ownership", () => {
         );
       expect(accountMode.read.mock.calls).toEqual([["user_123"], ["user_123"]]);
       expect(relayTokens).toEqual(["Bearer owner-token", "Bearer owner-token"]);
-      accountMode.enabled = false;
     }),
   );
   it.effect("requires an explicit account for an unpublished host", () =>
     Effect.gen(function* () {
-      accountMode.enabled = true;
       const fetchMock = vi.fn(() =>
         Promise.resolve(
           Response.json({
@@ -1351,7 +1418,6 @@ describe("multi-account host ownership", () => {
       ).pipe(Effect.flip);
       expect(error.message).toContain("Choose a Connect account");
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      accountMode.enabled = false;
     }),
   );
 });

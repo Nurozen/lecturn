@@ -38,12 +38,11 @@ export interface SidebarSegmentation {
 }
 
 export function resolveSidebarSegmentation(input: {
-  readonly multiAccountEnabled: boolean;
   readonly knownAccountIds: ReadonlyArray<string>;
   readonly accountByEnvironmentId: ReadonlyMap<string, string>;
   readonly accountLabels: ReadonlyMap<string, string>;
 }): SidebarSegmentation | null {
-  return input.multiAccountEnabled && input.knownAccountIds.length >= 2
+  return input.knownAccountIds.length >= 2
     ? {
         knownAccountIds: input.knownAccountIds,
         accountByEnvironmentId: input.accountByEnvironmentId,

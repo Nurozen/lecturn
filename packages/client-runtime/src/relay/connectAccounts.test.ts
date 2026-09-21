@@ -21,7 +21,6 @@ const primary: AccountOwnedTarget = { _tag: "PrimaryConnectionTarget", environme
 
 const decide = (input: Partial<Parameters<typeof decideAddAccountGate>[0]>) =>
   decideAddAccountGate({
-    multiAccountEnabled: true,
     clerkSingleSessionMode: false,
     targets: [relay("env-a", "account-a"), direct, ssh, primary],
     unlistedRelayEnvironmentIds: new Set(),
@@ -32,21 +31,9 @@ const decide = (input: Partial<Parameters<typeof decideAddAccountGate>[0]>) =>
 const blocked = (reason: string) => ({ available: false, reason });
 
 describe("decideAddAccountGate", () => {
-  it("is available with the constant on, multi-session on, owned relay entries, and room", () => {
+  it("is available with multi-session on, owned relay entries, and room", () => {
     expect(decide({})).toEqual({ available: true });
     expect(decide({ targets: [], knownAccountCount: 0 })).toEqual({ available: true });
-  });
-
-  it("is off while the build serves a single account, whatever else holds", () => {
-    expect(decide({ multiAccountEnabled: false })).toEqual(blocked("disabled"));
-    expect(
-      decide({
-        multiAccountEnabled: false,
-        clerkSingleSessionMode: true,
-        targets: [relay("env-untagged")],
-        knownAccountCount: MAX_CONNECT_ACCOUNTS,
-      }),
-    ).toEqual(blocked("disabled"));
   });
 
   it("needs Clerk to report multi-session, and treats unknown as single-session", () => {

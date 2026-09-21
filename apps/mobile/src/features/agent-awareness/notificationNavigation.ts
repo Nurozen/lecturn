@@ -4,7 +4,6 @@ import { relayAccountByEnvironmentId } from "@lecturn/client-runtime/relay";
 import { environmentCatalog } from "../../connection/catalog";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { connectAccountsReadyAtom, knownConnectAccountsAtom } from "../cloud/knownAccounts";
-import { connectMultiAccount } from "../cloud/publicConfig";
 import { useEffect, useRef } from "react";
 import * as Notifications from "expo-notifications";
 import { useLinkTo, useNavigation } from "@react-navigation/native";
@@ -20,33 +19,29 @@ export function useAgentNotificationNavigation(): void {
   const handledResponseIds = useRef(new Set<string>());
 
   useEffect(() => {
-    if (connectMultiAccount && (!accountsReady || !catalogReady)) return;
+    if (!accountsReady || !catalogReady) return;
     const handleResponse = (response: Notifications.NotificationResponse): void => {
       routeAgentNotificationResponseOnce({
         handledResponseIds: handledResponseIds.current,
         response,
         navigate: linkTo,
-        ...(connectMultiAccount
-          ? {
-              accountContext: {
-                signedInAccountIds: appAtomRegistry
-                  .get(knownConnectAccountsAtom)
-                  .filter((account) => account.signedIn)
-                  .map((account) => account.accountId),
-                accountByEnvironmentId: relayAccountByEnvironmentId(
-                  [
-                    ...appAtomRegistry.get(environmentCatalog.catalogValueAtom).entries.values(),
-                  ].map((entry) => entry.target),
-                ),
-                expandAccount: expandMobileAccountSection,
-                requestSignIn: (accountId: string) =>
-                  navigation.navigate("SettingsSheet", {
-                    screen: "SettingsAddAccount",
-                    params: { accountId },
-                  }),
-              },
-            }
-          : {}),
+        accountContext: {
+          signedInAccountIds: appAtomRegistry
+            .get(knownConnectAccountsAtom)
+            .filter((account) => account.signedIn)
+            .map((account) => account.accountId),
+          accountByEnvironmentId: relayAccountByEnvironmentId(
+            [...appAtomRegistry.get(environmentCatalog.catalogValueAtom).entries.values()].map(
+              (entry) => entry.target,
+            ),
+          ),
+          expandAccount: expandMobileAccountSection,
+          requestSignIn: (accountId: string) =>
+            navigation.navigate("SettingsSheet", {
+              screen: "SettingsAddAccount",
+              params: { accountId },
+            }),
+        },
       });
     };
 

@@ -1,6 +1,6 @@
 import { useClerk } from "@clerk/react";
 
-import { openConnectSignIn } from "../../cloud/singleAccountGuard";
+import { openConnectSignIn } from "../../cloud/connectAuthCompatibility";
 import { isElectron } from "../../env";
 import { resolveClerkSignInProps } from "./authRedirect";
 

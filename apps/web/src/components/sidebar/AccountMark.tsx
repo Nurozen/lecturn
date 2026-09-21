@@ -2,7 +2,6 @@ import { accountTintColor } from "@lecturn/shared/accountTint";
 import { useAtomValue } from "@effect/atom-react";
 
 import { accountMarkByEnvironmentIdAtom } from "../../cloud/connectAccounts";
-import { connectMultiAccount } from "../../cloud/publicConfig";
 import { cn } from "../../lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -15,7 +14,7 @@ export function AccountMark(props: {
   readonly environmentId: string;
   readonly className?: string;
 }) {
-  return connectMultiAccount ? <KnownAccountMark {...props} /> : null;
+  return <KnownAccountMark {...props} />;
 }
 
 function KnownAccountMark({

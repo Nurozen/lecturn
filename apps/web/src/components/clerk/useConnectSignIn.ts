@@ -57,7 +57,6 @@ function settleSignInAgain(clerk: Clerk, known: KnownConnectAccounts): void {
     targets: [rejected.accountId],
     // A new account cannot have published this computer.
     host: { _tag: "none" },
-    multiAccount: true,
     unpublish: async () => undefined,
     stayUrl: window.location.href,
   }).catch((cause: unknown) =>
@@ -121,7 +120,6 @@ export function useConnectSignIn() {
   }, []);
 
   const gate = decideAddAccountGate({
-    multiAccountEnabled: true,
     clerkSingleSessionMode: isLoaded ? readClerkSingleSessionMode(clerk) : undefined,
     targets: [...catalog.entries.values()].map((entry) => entry.target),
     unlistedRelayEnvironmentIds: unlisted,

@@ -1,6 +1,5 @@
 import {
   MULTI_ACCOUNT_ENABLED_MARKER_KEY,
-  MULTI_ACCOUNT_MARKER_MAX_AGE_MS,
   isMultiAccountMarkerFresh,
   managedRelaySessionAtom,
   managedRelaySessionsAtom,
@@ -16,16 +15,11 @@ import { signedOutEnvironmentsAtom } from "./accountGone";
 import { readToken } from "./accountTokens";
 import {
   forgetKnownAccount,
-  KNOWN_ACCOUNTS_STORAGE_KEY,
   knownConnectAccountsAtom,
   markConnectSignOutStarted,
 } from "./knownAccounts";
 import { ManagedRelayAuthProvider } from "./managedAuth";
-import {
-  openConnectSignIn,
-  readLastConnectAccountId,
-  setConnectSignOutRequest,
-} from "./singleAccountGuard";
+import { openConnectSignIn } from "./connectAuthCompatibility";
 
 interface FakeSession {
   readonly id: string;
@@ -61,7 +55,6 @@ const rendered = vi.hoisted(() => ({ stale: null as FakeSession | null }));
 const removeRelayEnvironments = vi.hoisted(() => vi.fn());
 const resetRelayTokenCache = vi.hoisted(() => vi.fn());
 const clearEnvironmentOwnedState = vi.hoisted(() => vi.fn());
-const config = vi.hoisted(() => ({ connectMultiAccount: false }));
 const toastAdd = vi.hoisted(() => vi.fn());
 const toastClose = vi.hoisted(() => vi.fn());
 // Stubbed before any module loads, so the stores under test bind to this
@@ -111,16 +104,11 @@ vi.mock("../components/ui/toast", () => ({
   toastManager: { add: toastAdd, close: toastClose },
 }));
 
-// The dialog needs a real DOM. Tests register their own sign-out flow instead.
-vi.mock("../components/clerk/useConnectSignOut", () => ({ ConnectSignOutHost: () => null }));
 vi.mock("../components/clerk/ConnectAccountCommandsHost", () => ({
   ConnectAccountCommandsHost: () => null,
 }));
 
 vi.mock("./publicConfig", () => ({
-  get connectMultiAccount() {
-    return config.connectMultiAccount;
-  },
   resolveRelayClerkTokenOptions: () => ({ template: "relay" }),
 }));
 
@@ -217,9 +205,7 @@ describe("single-account guard in front of account transitions", () => {
     }
     clerk.listeners.clear();
     rendered.stale = null;
-    setConnectSignOutRequest(null);
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    config.connectMultiAccount = false;
     // Forgetting also drops what the store keeps in memory for the page.
     for (const accountId of ["account-a", "account-b", "account-c"]) {
       forgetKnownAccount(appAtomRegistry, accountId);
@@ -255,413 +241,13 @@ describe("single-account guard in front of account transitions", () => {
     vi.unstubAllGlobals();
   });
 
-  it("rejects a second account without removing the first account's environments", async () => {
-    await observe([sessionA], sessionA);
-    expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-a");
-
-    // B signs in through Clerk's UI and becomes the active session. Clerk
-    // takes a while to switch back, and passes through other states meanwhile.
-    let finishSetActive = () => {};
-    clerk.setActive.mockImplementation(
-      () => new Promise<void>((resolve) => (finishSetActive = resolve)),
-    );
-    await observe([sessionA, sessionB], sessionB);
-    await observe([sessionA, sessionB], null);
-    await observe([sessionA, sessionB], sessionB);
-    expect(clerk.setActive).toHaveBeenCalledExactlyOnceWith({ session: "session-a" });
-    expect(clerk.signOut).not.toHaveBeenCalled();
-
-    clerk.session = sessionA;
-    finishSetActive();
-    await render();
-    await observe([sessionA], sessionA);
-
-    expect(clerk.signOut).toHaveBeenCalledExactlyOnceWith({ sessionId: "session-b" });
-    expect(toastAdd).toHaveBeenCalledTimes(1);
-    expect(removeRelayEnvironments).not.toHaveBeenCalled();
-    expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-a");
-    expect(await readToken("account-a")).toBe(relayToken("a"));
-  });
-
-  it("reads the served account's token from its own session while another is active", async () => {
-    await observe([sessionA], sessionA);
-    clerk.setActive.mockImplementation(async () => undefined);
-    clerk.signOut.mockImplementation(async () => undefined);
-    await observe([sessionA, sessionB], sessionB);
-
-    expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-a");
-    expect(await readToken("account-a")).toBe(relayToken("a"));
-    expect(sessionA.getToken).toHaveBeenCalledExactlyOnceWith({ template: "relay" });
-    expect(sessionB.getToken).not.toHaveBeenCalled();
-  });
-
-  it("still cleans up when the served account really signs out and another signs in", async () => {
-    await observe([sessionA], sessionA);
-    mark(sessionA);
-    await observe([sessionB], sessionB);
-
-    expect(clerk.signOut).not.toHaveBeenCalled();
-    expect(removeRelayEnvironments).toHaveBeenCalledExactlyOnceWith(undefined);
-    expect(knownAccountIds()).toEqual(["account-b"]);
-    expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-b");
-  });
-
-  it("keeps the first account when Clerk activates the second one mid sign-out", async () => {
-    await observe([sessionA], sessionA);
-    const signOut = clerk.signOut.getMockImplementation()!;
-    let releaseSignOut = () => {};
-    const signOutReleased = new Promise<void>((resolve) => (releaseSignOut = resolve));
-    clerk.signOut.mockImplementationOnce(async (options) => {
-      await signOutReleased;
-      return signOut(options);
-    });
-
-    // Clerk adds an account in two steps: B appears with A still active, then
-    // B becomes active. The second step lands while B is being signed out, so
-    // clerk-js takes the current-session path and leaves no active session.
-    await observe([sessionA, sessionB], sessionA);
-    await observe([sessionA, sessionB], sessionB);
-    releaseSignOut();
-    await render();
-    await render();
-
-    expect(clerk.session).toBe(sessionA);
-    expect(clerk.client.signedInSessions).toEqual([sessionA]);
-    expect(removeRelayEnvironments).not.toHaveBeenCalled();
-    expect(readLastConnectAccountId()).toBe("account-a");
-    expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-a");
-    expect(toastAdd).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps the active account on a first run that already has two sessions", async () => {
-    await observe([sessionA, sessionB], sessionB);
-    await render();
-
-    expect(clerk.signOut).toHaveBeenCalledExactlyOnceWith({ sessionId: "session-a" });
-    expect(removeRelayEnvironments).not.toHaveBeenCalled();
-    expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-b");
-  });
-
-  it("stands down for a fresh multi-account marker and ignores a stale one", async () => {
-    await observe([sessionA], sessionA);
-    sharedStorage.entries.set(
-      MULTI_ACCOUNT_ENABLED_MARKER_KEY,
-      String(Date.now() - MULTI_ACCOUNT_MARKER_MAX_AGE_MS + 60_000),
-    );
-    await observe([sessionA, sessionB], sessionB);
-    expect(clerk.signOut).not.toHaveBeenCalled();
-    expect(toastAdd).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ actionProps: expect.objectContaining({ children: "Reload" }) }),
-    );
-
-    sharedStorage.entries.set(
-      MULTI_ACCOUNT_ENABLED_MARKER_KEY,
-      String(Date.now() - MULTI_ACCOUNT_MARKER_MAX_AGE_MS),
-    );
-    // The guard looks again on Clerk's next change, not on a bare re-render.
-    await observe([sessionA, sessionB], sessionA);
-    await render();
-    expect(clerk.signOut).toHaveBeenCalledExactlyOnceWith({ sessionId: "session-b" });
-    expect(removeRelayEnvironments).not.toHaveBeenCalled();
-  });
-
-  it("leaves view state alone when a single-account build cleans up an account", async () => {
-    removeRelayEnvironments.mockResolvedValue(AsyncResult.success(["environment-a"]));
-    await observe([sessionA], sessionA);
-    mark(sessionA);
-    await observe([], null);
-
-    expect(removeRelayEnvironments).toHaveBeenCalledTimes(1);
-    expect(clearEnvironmentOwnedState).not.toHaveBeenCalled();
-  });
-
-  it("cleans up and rewrites the served account on a real sign-out then sign-in", async () => {
-    await observe([sessionA], sessionA);
-    expect(readLastConnectAccountId()).toBe("account-a");
-
-    mark(sessionA);
-    await observe([], null);
-    expect(readLastConnectAccountId()).toBeNull();
-    // The last known account takes the untagged relay environments with it.
-    expect(removeRelayEnvironments).toHaveBeenCalledExactlyOnceWith(undefined);
-    expect(resetRelayTokenCache).toHaveBeenCalledExactlyOnceWith(undefined);
-
-    await observe([sessionB], sessionB);
-    expect(clerk.signOut).not.toHaveBeenCalled();
-    expect(clerk.setActive).not.toHaveBeenCalled();
-    expect(readLastConnectAccountId()).toBe("account-b");
-    expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-b");
-  });
-
-  it("behaves as it did before the guard while there is never a second session", async () => {
-    await observe([sessionA], sessionA);
-    await observe([sessionA], undefined);
-    expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-a");
-    await observe([sessionA], sessionA);
-    expect(removeRelayEnvironments).not.toHaveBeenCalled();
-    expect(await readToken("account-a")).toBe(relayToken("a"));
-
-    mark(sessionA);
-    await observe([], undefined);
-    expect(removeRelayEnvironments).not.toHaveBeenCalled();
-    await observe([], null);
-    expect(removeRelayEnvironments).toHaveBeenCalledTimes(1);
-    expect(appAtomRegistry.get(managedRelaySessionAtom)).toBeNull();
-
-    await observe([sessionB], undefined);
-    await observe([sessionB], sessionB);
-    expect(removeRelayEnvironments).toHaveBeenCalledTimes(1);
-    expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-b");
-    expect(clerk.setActive).not.toHaveBeenCalled();
-    expect(clerk.signOut).not.toHaveBeenCalled();
-    expect(toastAdd).not.toHaveBeenCalled();
-  });
-
-  // What the next account could see at the moment the previous one's data went.
-  const recordSweep = () => {
-    const seen: Array<{ known: ReadonlyArray<string>; relay: ReadonlyArray<string> }> = [];
-    removeRelayEnvironments.mockImplementation(async () => {
-      seen.push({ known: knownAccountIds(), relay: relayAccountIds() });
-      return AsyncResult.success([]);
-    });
-    return seen;
-  };
-
-  it("keeps an expired account's data until another account is served, then sweeps it first", async () => {
-    await observe([sessionA], sessionA);
-    await observe([], null);
-    expect(appAtomRegistry.get(managedRelaySessionAtom)).toBeNull();
-    expect(knownAccountIds()).toEqual(["account-a"]);
-    expect(removeRelayEnvironments).not.toHaveBeenCalled();
-
-    const sweep = recordSweep();
-    await observe([sessionB], sessionB);
-    // Everything relay goes, untagged included, before B is known or connected.
-    expect(removeRelayEnvironments).toHaveBeenCalledExactlyOnceWith(undefined);
-    expect(resetRelayTokenCache).toHaveBeenCalledExactlyOnceWith(undefined);
-    expect(sweep).toEqual([{ known: ["account-a"], relay: [] }]);
-    expect(knownAccountIds()).toEqual(["account-b"]);
-    expect(relayAccountIds()).toEqual(["account-b"]);
-  });
-
-  it("gives the same account its data back when it signs in again after expiring", async () => {
-    await observe([sessionA], sessionA);
-    await observe([], null);
-    await observe([fakeSession("a", 4_000, "session-a2")], fakeSession("a", 4_000, "session-a2"));
-
-    expect(removeRelayEnvironments).not.toHaveBeenCalled();
-    expect(resetRelayTokenCache).not.toHaveBeenCalled();
-    expect(relayAccountIds()).toEqual(["account-a"]);
-  });
-
-  it("sweeps a stored account on a cold start as somebody else", async () => {
-    sharedStorage.entries.set(
-      KNOWN_ACCOUNTS_STORAGE_KEY,
-      JSON.stringify({ accountIds: ["account-a"] }),
-    );
-    const sweep = recordSweep();
-    await observe([sessionB], sessionB);
-
-    expect(sweep).toEqual([{ known: ["account-a"], relay: [] }]);
-    expect(knownAccountIds()).toEqual(["account-b"]);
-    expect(relayAccountIds()).toEqual(["account-b"]);
-  });
-
-  it("sweeps the last served account on a cold start that has no account list yet", async () => {
-    sharedStorage.entries.set("lecturn:last-connect-account-id", JSON.stringify("account-a"));
-    const sweep = recordSweep();
-    await observe([], null);
-    expect(sweep).toEqual([]);
-
-    await observe([sessionB], sessionB);
-    expect(sweep).toEqual([{ known: ["account-a"], relay: [] }]);
-    expect(relayAccountIds()).toEqual(["account-b"]);
-  });
-
-  it("removes nothing on a cold start that is signed out with a catalog present", async () => {
-    await observe([], null);
-    await observe([sessionB], sessionB);
-
-    expect(removeRelayEnvironments).not.toHaveBeenCalled();
-    expect(resetRelayTokenCache).not.toHaveBeenCalled();
-    expect(relayAccountIds()).toEqual(["account-b"]);
-  });
-
-  it("serves the extra account once the served one has expired, after sweeping it", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      await observe([sessionA], sessionA);
-      clerk.setActive.mockRejectedValue(new Error("session expired"));
-      await observe([sessionA, sessionB], sessionB);
-      expect(removeRelayEnvironments).not.toHaveBeenCalled();
-
-      const sweep = recordSweep();
-      await observe([sessionB], sessionB);
-      expect(clerk.signOut).not.toHaveBeenCalled();
-      expect(sweep).toEqual([{ known: ["account-a"], relay: [] }]);
-      expect(readLastConnectAccountId()).toBe("account-b");
-      expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-b");
-    } finally {
-      consoleError.mockRestore();
-    }
-  });
-
-  it("keeps the served account when another tab removes the extra one mid-rejection", async () => {
-    await observe([sessionA], sessionA);
-    clerk.signOut.mockImplementation(async () => {
-      // clerk-js ends every session once only one is left, whatever id it is given.
-      clerk.client.sessions = [];
-      clerk.session = null;
-    });
-    let finishSetActive = () => {};
-    clerk.setActive.mockImplementation(
-      () => new Promise<void>((resolve) => (finishSetActive = resolve)),
-    );
-    await observe([sessionA, sessionB], sessionB);
-
-    clerk.client.sessions = [sessionA];
-    clerk.session = sessionA;
-    finishSetActive();
-    await render();
-    await render();
-
-    expect(clerk.signOut).not.toHaveBeenCalled();
-    expect(removeRelayEnvironments).not.toHaveBeenCalled();
-    expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-a");
-  });
-
-  it("rides out being offline and recovers when the browser comes back online", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      await observe([sessionA], sessionA);
-      const setActive = clerk.setActive.getMockImplementation()!;
-      clerk.setActive.mockRejectedValue(new TypeError("Failed to fetch"));
-      await observe([sessionA, sessionB], sessionB);
-      for (let retry = 0; retry < 6; retry += 1) {
-        await act(async () => {
-          vi.runOnlyPendingTimers();
-        });
-        await render();
-      }
-      expect(clerk.setActive.mock.calls.length).toBeGreaterThan(3);
-      expect(toastAdd).not.toHaveBeenCalled();
-
-      clerk.setActive.mockImplementation(setActive);
-      await act(async () => {
-        windowListeners.get("online")!();
-      });
-      await render();
-      await render();
-
-      expect(clerk.signOut).toHaveBeenCalledExactlyOnceWith({ sessionId: "session-b" });
-      expect(toastAdd).toHaveBeenCalledTimes(1);
-      expect(removeRelayEnvironments).not.toHaveBeenCalled();
-      expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-a");
-    } finally {
-      vi.useRealTimers();
-      consoleError.mockRestore();
-    }
-  });
-
-  it("offers the full sign-out through the sign-out dialog, and again when that fails", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      const signOutRequest = vi.fn<(options: { everySession: boolean }) => Promise<void>>();
-      setConnectSignOutRequest(signOutRequest);
-      await observe([sessionA], sessionA);
-      clerk.signOut.mockRejectedValue(new Error("refused"));
-      await observe([sessionA, sessionB], sessionA);
-      for (let retry = 0; retry < 3; retry += 1) {
-        await act(async () => {
-          vi.runOnlyPendingTimers();
-        });
-        await render();
-      }
-      expect(toastAdd).toHaveBeenCalledTimes(1);
-      const press = (call: number) =>
-        act(async () => {
-          toastAdd.mock.calls[call]![0].actionProps.onClick();
-        });
-
-      // Desktop could not unpublish this computer, so nothing was signed out.
-      signOutRequest.mockRejectedValueOnce(new Error("unpublish failed"));
-      await press(0);
-      await render();
-      expect(signOutRequest).toHaveBeenCalledExactlyOnceWith({ everySession: true });
-      expect(clerk.signOut).toHaveBeenCalledTimes(3);
-      expect(toastAdd).toHaveBeenCalledTimes(2);
-
-      signOutRequest.mockResolvedValueOnce(undefined);
-      await press(1);
-      expect(signOutRequest).toHaveBeenCalledTimes(2);
-      expect(toastAdd).toHaveBeenCalledTimes(2);
-    } finally {
-      vi.useRealTimers();
-      consoleError.mockRestore();
-    }
-  });
-
-  it("lets a stood-down tab sign out through the sign-out dialog", async () => {
-    const signOutRequest = vi.fn(async () => undefined);
-    setConnectSignOutRequest(signOutRequest);
-    await observe([sessionA], sessionA);
-    sharedStorage.entries.set(MULTI_ACCOUNT_ENABLED_MARKER_KEY, String(Date.now()));
-    await observe([sessionA, sessionB], sessionA);
-
-    toastAdd.mock.calls[0]![0].data.secondaryActionProps.onClick();
-    expect(signOutRequest).toHaveBeenCalledExactlyOnceWith({ everySession: false });
-    expect(clerk.signOut).not.toHaveBeenCalled();
-  });
-
-  it("looks at Clerk again after a rejection even if the revision moved meanwhile", async () => {
-    await observe([sessionA], sessionA);
-    const setActive = clerk.setActive.getMockImplementation()!;
-    let finishSetActive = () => {};
-    clerk.setActive.mockImplementationOnce(
-      () => new Promise<void>((resolve) => (finishSetActive = resolve)),
-    );
-    await observe([sessionA, sessionB], sessionB);
-
-    // While that rejection is on the network, React is a render behind Clerk,
-    // and Clerk's next emit bumps the revision from under the rejection.
-    rendered.stale = sessionB;
-    await observe([sessionA, sessionB, sessionC], sessionA);
-    await act(async () => {
-      for (const listener of clerk.listeners) listener();
-    });
-
-    rendered.stale = null;
-    await act(async () => {
-      finishSetActive();
-      await setActive({ session: "session-a" });
-    });
-    await act(async () => {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    });
-
-    expect(clerk.signOut.mock.calls).toEqual([
-      [{ sessionId: "session-b" }],
-      [{ sessionId: "session-c" }],
-    ]);
-    expect(removeRelayEnvironments).not.toHaveBeenCalled();
-  });
-
-  it("does not let a pending session block the sign-in prompt", () => {
+  it("opens sign-in for existing and pending sessions", () => {
     const openSignIn = vi.fn();
     openConnectSignIn({ isSignedIn: true, openSignIn }, {});
-    expect(openSignIn).not.toHaveBeenCalled();
-
-    // Clerk reports a pending session as not signed in.
     openConnectSignIn({ isSignedIn: false, openSignIn }, {});
-    expect(openSignIn).toHaveBeenCalledTimes(1);
+    expect(openSignIn).toHaveBeenCalledTimes(2);
   });
-  describe("with multi-account on", () => {
-    beforeEach(() => {
-      config.connectMultiAccount = true;
-    });
-
+  describe("multi-account lifecycle", () => {
     it("lets a second account join the first and follows Clerk's active user", async () => {
       await observe([sessionA], sessionA);
       const relaySessionA = appAtomRegistry.get(managedRelaySessionsAtom).get("account-a");

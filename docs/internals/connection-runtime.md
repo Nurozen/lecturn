@@ -197,6 +197,6 @@ Required coverage includes:
 
 ## Multi-account client lifecycle
 
-The dark-launched Connect multi-account path keeps an ordered set of known Clerk user IDs independently of the SDK's active session. Token readers resolve a specific signed-in session at call time. Session expiry marks an account as needing sign-in while preserving its environment catalog and drafts. Explicit sign-out removes only that account's managed environments, credentials, cached shells, and shortcuts; mobile archives its drafts for the same identity. Direct connections remain device-scoped.
+The Connect multi-account path keeps an ordered set of known Clerk user IDs independently of the SDK's active session. Token readers resolve a specific signed-in session at call time. Session expiry marks an account as needing sign-in while preserving its environment catalog and drafts. Explicit sign-out removes only that account's managed environments, credentials, cached shells, and shortcuts; mobile archives its drafts for the same identity. Direct connections remain device-scoped.
 
 Mobile registers push ownership per account only when the relay advertises `capabilities.multiAccountPush`. Until then its registration adapter keeps the primary-only behavior and the iOS Add Account entry is unavailable. Native account attributes require a rebuilt widget extension; an OTA JavaScript update alone is insufficient.

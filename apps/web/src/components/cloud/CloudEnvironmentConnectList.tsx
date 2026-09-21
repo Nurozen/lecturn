@@ -17,7 +17,6 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 
 import { accountByEnvironmentIdAtom, connectAccountProfilesAtom } from "~/cloud/connectAccounts";
 import { knownConnectAccountsAtom } from "~/cloud/knownAccounts";
-import { connectMultiAccount } from "~/cloud/publicConfig";
 import { environmentCatalog } from "~/connection/catalog";
 import { cn } from "~/lib/utils";
 import { relayEnvironmentDiscovery } from "~/state/relay";
@@ -292,7 +291,7 @@ export function CloudEnvironmentConnectRows({
   };
 
   // With two or more accounts known, each account's environments sit under its label.
-  if (connectMultiAccount && knownAccountIds.length >= 2) {
+  if (knownAccountIds.length >= 2) {
     return bucketByAccount(
       visibleEnvironments,
       ({ environment }) => ownerOf(environment.environmentId),

@@ -132,7 +132,6 @@ export type ConnectCliAuthorizeStep =
 export function decideConnectCliAuthorizeStep(input: {
   readonly isLoaded: boolean;
   readonly isSignedIn: boolean;
-  readonly multiAccountEnabled: boolean;
   readonly knownAccountIds: ReadonlyArray<string>;
   /** False until Clerk's sessions were applied to the known list. */
   readonly knownAccountsSynced: boolean;
@@ -140,7 +139,6 @@ export function decideConnectCliAuthorizeStep(input: {
 }): ConnectCliAuthorizeStep {
   if (!input.isLoaded) return { _tag: "wait" };
   if (!input.isSignedIn) return { _tag: "sign-in" };
-  if (!input.multiAccountEnabled) return { _tag: "redirect", accountId: null };
   if (!input.knownAccountsSynced) return { _tag: "wait" };
   if (input.knownAccountIds.length < 2) return { _tag: "redirect", accountId: null };
   return input.confirmedAccountId === null

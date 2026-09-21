@@ -9,7 +9,6 @@ export function resolveAgentAwarenessPlatformPresentation(platform: string): {
 
 /** First sign-in works on older relays; only adding another iOS account needs push fan-out. */
 export function mobileAccountAdditionAllowed(input: {
-  readonly enabled: boolean;
   readonly loaded: boolean;
   readonly accountCount: number;
   readonly sharedGateAvailable: boolean;
@@ -18,7 +17,6 @@ export function mobileAccountAdditionAllowed(input: {
   readonly multiAccountPush: boolean;
 }): boolean {
   return (
-    input.enabled &&
     input.loaded &&
     (input.accountCount === 0 ||
       (input.sharedGateAvailable &&

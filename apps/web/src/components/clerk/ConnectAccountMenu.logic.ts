@@ -31,7 +31,7 @@ export interface ConnectAccountMenuModel {
   readonly canSignOutAll: boolean;
 }
 
-export const BLOCKED_REASONS: Record<Exclude<AddAccountBlockedReason, "disabled">, string> = {
+export const BLOCKED_REASONS: Record<AddAccountBlockedReason, string> = {
   "single-session": "This Lecturn Connect service allows one signed-in account at a time.",
   "unowned-environments":
     "A saved Connect environment has no owner account yet. Remove it in Settings, or wait until its account lists it.",
@@ -47,9 +47,7 @@ export function addAccountBlockedReason(input: {
   readonly knownAccountCount: number;
 }): string | null {
   const { gate } = input;
-  return gate.available || gate.reason === "disabled" || input.knownAccountCount === 0
-    ? null
-    : BLOCKED_REASONS[gate.reason];
+  return gate.available || input.knownAccountCount === 0 ? null : BLOCKED_REASONS[gate.reason];
 }
 
 export const UNKNOWN_ACCOUNT_NAME = "Lecturn Connect account";
@@ -90,9 +88,7 @@ export function buildConnectAccountMenu(input: {
     rows,
     addAccount: input.gate.available
       ? { enabled: true }
-      : input.gate.reason === "disabled"
-        ? null
-        : { enabled: false, reason: BLOCKED_REASONS[input.gate.reason] },
+      : { enabled: false, reason: BLOCKED_REASONS[input.gate.reason] },
     canSignOutAll: rows.length > 1,
   };
 }
@@ -128,7 +124,7 @@ export function unexpectedSignInToReject(input: {
   readonly needsSignIn: ReadonlyArray<string>;
 }): { readonly accountId: string; readonly reason: string } | null {
   const { pending } = input;
-  if (pending.gate.available || pending.gate.reason === "disabled") {
+  if (pending.gate.available) {
     return null;
   }
   const accountId = input.knownAccountIds.find(

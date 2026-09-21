@@ -1,126 +1,48 @@
-import { useAuth } from "@clerk/expo";
-import { act, useEffect } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { bindAccountTokenClerk } from "./accountTokenReaders";
 import { useSessionRelayToken } from "./useSessionRelayToken";
 
-const clerk = vi.hoisted(() => ({
-  active: null as null | {
-    id: string;
-    user: { id: string };
-    token: string;
-    getToken(): Promise<string>;
-  },
-}));
-vi.mock("@clerk/expo", () => ({
-  useSession: () => ({ session: clerk.active }),
-  // Clerk's real useAuth getter reads the active session at invocation time.
-  useAuth: () => ({ getToken: () => clerk.active?.getToken() ?? Promise.resolve(null) }),
-}));
 vi.mock("./publicConfig", () => ({
-  connectMultiAccount: false,
   resolveRelayClerkTokenOptions: () => ({ template: "relay" }),
 }));
-
-let root: Root;
-let tokenProvider: () => Promise<string | null>;
-let activeTokenProvider: () => Promise<string | null>;
-const connect = vi.fn();
-function Probe(props: { account: string | null; session: string | null; token: string }) {
-  const { getToken } = useAuth();
-  useEffect(() => {
-    activeTokenProvider = getToken;
-  }, [getToken]);
-  const provider = useSessionRelayToken({
-    userId: props.account,
-    sessionId: props.session,
-    isSignedIn: props.account !== null,
-  });
-  useEffect(() => {
-    tokenProvider = provider;
-    connect(provider);
-  }, [provider]);
-  return null;
-}
-async function render(account: string | null, session: string | null, token: string) {
-  if (account && session) {
-    if (clerk.active?.id === session) clerk.active.token = token;
-    else
-      clerk.active = {
-        id: session,
-        user: { id: account },
-        token,
-        async getToken() {
-          return this.token;
-        },
-      };
-  } else clerk.active = null;
-  await act(() => root.render(<Probe account={account} session={session} token={token} />));
-}
-
-beforeEach(() => {
-  connect.mockClear();
-  clerk.active = null;
-  const document = { nodeType: 9, addEventListener() {}, removeEventListener() {} };
-  const container = {
-    nodeType: 1,
-    tagName: "DIV",
-    namespaceURI: "http://www.w3.org/1999/xhtml",
-    ownerDocument: document,
-    addEventListener() {},
-    removeEventListener() {},
-  };
-  vi.stubGlobal("document", document);
-  vi.stubGlobal("window", { document, HTMLIFrameElement: EventTarget });
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  root = createRoot(container as unknown as HTMLElement);
+const token = (accountId: string, revision: string) =>
+  `header.${btoa(JSON.stringify({ sub: accountId, revision }))}.signature`;
+const session = (accountId: string, revision: string) => ({
+  user: { id: accountId },
+  getToken: vi.fn(async () => token(accountId, revision)),
 });
-afterEach(async () => {
-  await act(() => root.unmount());
-  vi.unstubAllGlobals();
-});
+const reader = (userId: string | null, sessionId = userId) =>
+  useSessionRelayToken({ userId, sessionId, isSignedIn: userId !== null });
+afterEach(() => bindAccountTokenClerk(null));
 
-describe("session-scoped relay credentials", () => {
-  it("restarts relay effects when the matching session resource becomes available", async () => {
-    await act(() => root.render(<Probe account="account-a" session="session-a" token="unused" />));
-    const waiting = tokenProvider;
-    expect(await waiting()).toBeNull();
-    await render("account-a", "session-a", "available-token");
-    expect(connect).toHaveBeenCalledTimes(2);
-    expect(tokenProvider).not.toBe(waiting);
-    expect(await tokenProvider()).toBe("available-token");
-    expect(await waiting()).toBeNull();
+describe("account-scoped relay credentials", () => {
+  it("uses hydrated credentials through the same stable reader", async () => {
+    const read = reader("a");
+    expect(await read()).toBeNull();
+    bindAccountTokenClerk({ client: { signedInSessions: [session("a", "ready")] } });
+    expect(reader("a")).toBe(read);
+    expect(await read()).toBe(token("a", "ready"));
   });
-
-  it("uses refreshed credentials without restarting relay effects on every render", async () => {
-    await render("account-a", "session-a", "first-token");
-    const original = tokenProvider;
-    await render("account-a", "session-a", "refreshed-token");
-    expect(connect).toHaveBeenCalledTimes(1);
-    expect(tokenProvider).toBe(original);
-    expect(await original()).toBe("refreshed-token");
+  it("reads refreshed resources without restarting account effects", async () => {
+    const client = { signedInSessions: [session("a", "first")] };
+    bindAccountTokenClerk({ client });
+    const read = reader("a", "old-session");
+    expect(await read()).toBe(token("a", "first"));
+    client.signedInSessions = [session("a", "new")];
+    expect(reader("a", "new-session")).toBe(read);
+    expect(await read()).toBe(token("a", "new"));
   });
-
-  it("keeps delayed old-account cleanup bound to the old account", async () => {
-    await render("account-a", "session-a", "account-a-token");
-    const cleanupToken = tokenProvider;
-    const unsafeCleanupToken = activeTokenProvider;
-    await render("account-b", "session-b", "account-b-token");
-    expect(await unsafeCleanupToken()).toBe("account-b-token");
-    expect(await cleanupToken()).toBe("account-a-token");
-    expect(await tokenProvider()).toBe("account-b-token");
-    expect(connect).toHaveBeenCalledTimes(2);
-    await render(null, null, "must-not-be-used");
-    expect(await tokenProvider()).toBeNull();
-    expect(await cleanupToken()).toBe("account-a-token");
-  });
-
-  it("replaces the provider on a new session for the same account", async () => {
-    await render("account-a", "session-a", "first-session-token");
-    const previousSession = tokenProvider;
-    await render("account-a", "session-b", "second-session-token");
-    expect(connect).toHaveBeenCalledTimes(2);
-    expect(await previousSession()).toBe("first-session-token");
-    expect(await tokenProvider()).toBe("second-session-token");
+  it("keeps concurrent accounts isolated and stops using revoked credentials", async () => {
+    const a = session("a", "active"),
+      b = session("b", "active");
+    const client = { signedInSessions: [a, b] };
+    bindAccountTokenClerk({ client });
+    const oldReader = reader("a");
+    expect(await oldReader()).toBe(token("a", "active"));
+    expect(await reader("b")()).toBe(token("b", "active"));
+    client.signedInSessions = [b];
+    expect(await oldReader()).toBeNull();
+    expect(await reader(null)()).toBeNull();
+    expect(await reader("b")()).toBe(token("b", "active"));
   });
 });

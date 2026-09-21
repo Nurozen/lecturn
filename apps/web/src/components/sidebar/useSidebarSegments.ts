@@ -2,7 +2,6 @@ import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/model
 import { scopedThreadKey, scopeThreadRef } from "@lecturn/client-runtime/environment";
 import { useCallback, useMemo, useState } from "react";
 
-import { connectMultiAccount } from "../../cloud/publicConfig";
 import { composerDraftHasUserContent, useComposerDraftStore } from "../../composerDraftStore";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { resolveThreadStatusPill } from "../Sidebar.logic";
@@ -63,17 +62,6 @@ type SidebarSegmentsInput<Node> = Omit<SidebarThreadListScope<Node>, "orderedThr
 type UseSidebarSegments = <Node extends SegmentSagaNode>(
   input: SidebarSegmentsInput<Node>,
 ) => SidebarSegmentsView<Node>;
-
-const ignoreToggle = () => undefined;
-
-const useOneSidebarList: UseSidebarSegments = (input) => ({
-  segments: null,
-  unsegmented: input,
-  nestSagaProjects: input.nestSagaProjects,
-  settledPageCount: input.settledPageCount,
-  toggleSegment: ignoreToggle,
-  shelfActionsOf: () => input,
-});
 
 const threadKeyOf = (thread: EnvironmentThreadShell) =>
   scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
@@ -238,9 +226,6 @@ const useAccountSidebarSegments: UseSidebarSegments = <Node extends SegmentSagaN
 
 /**
  * Splits the sidebar's already partitioned lists by account. It narrows what
- * the sidebar computed once and starts no timers of its own. A single-account
- * build returns the one list and reads no storage.
+ * the sidebar computed once and starts no timers of its own.
  */
-export const useSidebarSegments: UseSidebarSegments = connectMultiAccount
-  ? useAccountSidebarSegments
-  : useOneSidebarList;
+export const useSidebarSegments: UseSidebarSegments = useAccountSidebarSegments;

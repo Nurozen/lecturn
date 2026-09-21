@@ -22,7 +22,6 @@ import {
   connectAccountProfilesAtom,
 } from "../../cloud/connectAccounts";
 import { knownConnectAccountsAtom, type KnownConnectAccounts } from "../../cloud/knownAccounts";
-import { connectMultiAccount } from "../../cloud/publicConfig";
 import { cn } from "../../lib/utils";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -125,7 +124,6 @@ const accountPickerContextAtom = Atom.make((get) => {
   const known = get(knownConnectAccountsAtom);
   if (
     !accountPickerVisible({
-      multiAccountEnabled: connectMultiAccount,
       knownAccountIds: known.accountIds,
     })
   ) {
@@ -164,7 +162,6 @@ function useChosenConnectAccount(
   }
   const { known, profiles } = context;
   const accountId = resolvePickedAccount({
-    multiAccountEnabled: connectMultiAccount,
     knownAccountIds: known.accountIds,
     needsSignIn: known.needsSignIn,
     activeAccountId: userId ?? null,
@@ -200,24 +197,8 @@ function useChosenConnectAccount(
   };
 }
 
-/**
- * The account a surface acts as, and the picker to show for it. One call is
- * one choice, so a surface with tabs calls it once, above them. With the
- * feature off, or fewer than two known accounts, there is no picker and the
- * surface follows Clerk's active account. A single-account build subscribes
- * to nothing and reads no storage: the constant is a build-time literal, so
- * which hook this is never changes.
- */
-export const useConnectAccountPicker: (
-  surface: AccountPickerSurface,
-  options?: ConnectAccountPickerOptions,
-) => PickedConnectAccount = connectMultiAccount
-  ? useChosenConnectAccount
-  : () => FOLLOWS_ACTIVE_ACCOUNT;
+/** The account a surface acts as. With fewer than two accounts it follows the active account. */
+export const useConnectAccountPicker = useChosenConnectAccount;
 
-const NO_KNOWN_ACCOUNTS: KnownConnectAccounts = { accountIds: [], needsSignIn: [], synced: true };
-
-/** The known accounts, for a surface that asks only in a multi-account build. Any other build reads nothing. */
-export const useKnownAccountsToChooseFrom: () => KnownConnectAccounts = connectMultiAccount
-  ? () => useAtomValue(knownConnectAccountsAtom)
-  : () => NO_KNOWN_ACCOUNTS;
+export const useKnownAccountsToChooseFrom = (): KnownConnectAccounts =>
+  useAtomValue(knownConnectAccountsAtom);

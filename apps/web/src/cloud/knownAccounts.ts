@@ -91,30 +91,18 @@ export interface ObservedClerkSession {
  * Lecturn makes an account leave: a session that merely disappeared (expiry,
  * cookie loss, an empty client, a 401 refetch) keeps it known. Leaving accounts
  * stay in `known` until their cleanup succeeds and `forgetKnownAccount` drops them.
- *
- * A single-account client passes the account it is about to serve as
- * `soleAccountId`. Every other account then leaves, and a new sole account only
- * becomes known once they are gone, so the last of them takes the untagged
- * environments along as it did before accounts were kept.
  */
 export function reconcileKnownAccounts(input: {
   readonly known: ReadonlyArray<string>;
   readonly signedIn: ReadonlyArray<string>;
   readonly signingOut: ReadonlyArray<string>;
-  readonly soleAccountId?: string | null | undefined;
 }): { readonly known: ReadonlyArray<string>; readonly leaving: ReadonlyArray<string> } {
-  const sole = input.soleAccountId ?? null;
   const known = [...new Set([...input.known, ...input.signedIn])];
   const leaving = known.filter(
-    (accountId) =>
-      !input.signedIn.includes(accountId) &&
-      (input.signingOut.includes(accountId) || (sole !== null && accountId !== sole)),
+    (accountId) => !input.signedIn.includes(accountId) && input.signingOut.includes(accountId),
   );
   return {
-    known:
-      leaving.length > 0 && sole !== null && !input.known.includes(sole)
-        ? known.filter((accountId) => accountId !== sole)
-        : known,
+    known,
     leaving,
   };
 }
@@ -123,11 +111,6 @@ export function reconcileKnownAccounts(input: {
 export function observeClerkSessions(
   registry: AtomRegistry.AtomRegistry,
   sessions: ReadonlyArray<ObservedClerkSession>,
-  options: {
-    readonly soleAccountId?: string | null | undefined;
-    /** Account served before this list existed. It is known even though no list says so. */
-    readonly previouslyServed?: string | null | undefined;
-  } = {},
 ): { readonly known: ReadonlyArray<string>; readonly leaving: ReadonlyArray<string> } {
   const inMemory = registry.get(knownConnectAccountsAtom);
   const document = readDocument();
@@ -162,11 +145,7 @@ export function observeClerkSessions(
     }
   }
   const result = reconcileKnownAccounts({
-    known: [
-      ...inMemory.accountIds,
-      ...(document?.accountIds ?? []),
-      ...(document === null && options.previouslyServed ? [options.previouslyServed] : []),
-    ],
+    known: [...inMemory.accountIds, ...(document?.accountIds ?? [])],
     signedIn,
     signingOut: [
       ...leavingThisPage,
@@ -175,7 +154,6 @@ export function observeClerkSessions(
         ? []
         : inMemory.accountIds.filter((accountId) => !document.accountIds.includes(accountId))),
     ],
-    soleAccountId: options.soleAccountId,
   });
   commit(registry, result.known, signedIn);
   return result;

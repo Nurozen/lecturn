@@ -15,7 +15,6 @@ import {
 } from "@lecturn/client-runtime/connection";
 import {
   managedRelayAccountChanges,
-  managedRelayAccountIds,
   managedRelaySessionsAtom,
 } from "@lecturn/client-runtime/relay";
 import { AuthStandardClientScopes } from "@lecturn/contracts";
@@ -30,7 +29,6 @@ import * as Network from "expo-network";
 import { AppState } from "react-native";
 
 import { knownConnectAccountsAtom } from "../features/cloud/knownAccounts";
-import { connectMultiAccount } from "../features/cloud/publicConfig";
 import { authClientMetadata } from "../lib/authClientMetadata";
 import * as Runtime from "../lib/runtime";
 import * as MobileStorage from "../persistence/mobile-storage";
@@ -123,9 +121,7 @@ const capabilitiesLayer = Layer.effectContext(
       CloudSession,
       CloudSession.of({
         accountIds: Effect.sync(() =>
-          connectMultiAccount
-            ? appAtomRegistry.get(knownConnectAccountsAtom).map((account) => account.accountId)
-            : managedRelayAccountIds(appAtomRegistry),
+          appAtomRegistry.get(knownConnectAccountsAtom).map((account) => account.accountId),
         ),
         clerkToken: Effect.fnUntraced(function* (accountId: string) {
           const session = appAtomRegistry.get(managedRelaySessionsAtom).get(accountId);

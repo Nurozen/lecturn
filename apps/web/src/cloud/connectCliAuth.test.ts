@@ -122,7 +122,6 @@ describe("decideConnectCliAuthorizeStep", () => {
   const signedIn = {
     isLoaded: true,
     isSignedIn: true,
-    multiAccountEnabled: true,
     knownAccountIds: ["account-a", "account-b"],
     knownAccountsSynced: true,
     confirmedAccountId: null,
@@ -138,14 +137,6 @@ describe("decideConnectCliAuthorizeStep", () => {
     expect(decideConnectCliAuthorizeStep({ ...signedIn, knownAccountIds: ["account-a"] })).toEqual(
       asActive,
     );
-    // A single-account build ignores the known list, synced or not.
-    expect(
-      decideConnectCliAuthorizeStep({
-        ...signedIn,
-        multiAccountEnabled: false,
-        knownAccountsSynced: false,
-      }),
-    ).toEqual(asActive);
   });
 
   it("shows the chooser with two accounts, and redirects as the chosen one once confirmed", () => {

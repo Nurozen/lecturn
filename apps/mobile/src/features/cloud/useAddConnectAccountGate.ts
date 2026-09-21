@@ -6,7 +6,6 @@ import { environmentCatalog } from "../../connection/catalog";
 import { mobileAccountAdditionAllowed } from "../settings/SettingsRouteScreen.logic";
 import { useMultiAccountPushSupported } from "../agent-awareness/multiAccountCapability";
 import { connectAccountsReadyAtom, useConnectAccounts } from "./knownAccounts";
-import { connectMultiAccount } from "./publicConfig";
 
 export function useAddConnectAccountGate() {
   const clerk = useClerk();
@@ -23,14 +22,12 @@ export function useAddConnectAccountGate() {
   ).__internal_environment;
   const mode = environment?.authConfig?.singleSessionMode;
   const gate = decideAddAccountGate({
-    multiAccountEnabled: connectMultiAccount,
     clerkSingleSessionMode: isLoaded && typeof mode === "boolean" ? mode : undefined,
     targets: [...catalog.entries.values()].map((entry) => entry.target),
     unlistedRelayEnvironmentIds: unlisted,
     knownAccountCount: accounts.length,
   });
   const available = mobileAccountAdditionAllowed({
-    enabled: connectMultiAccount,
     loaded: isLoaded && accountsReady,
     accountCount: accounts.length,
     sharedGateAvailable: gate.available,

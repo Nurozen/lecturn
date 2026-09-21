@@ -15,8 +15,6 @@ import {
 import { setLiveActivityUpdatesEnabled } from "./liveActivityPreferences";
 import { updateAgentAwarenessRegistrationPreferences } from "./remoteRegistration";
 
-vi.mock("../cloud/publicConfig", () => ({ connectMultiAccount: false }));
-
 vi.mock("expo-secure-store", () => ({
   deleteItemAsync: vi.fn(),
   getItemAsync: vi.fn(),
@@ -113,7 +111,7 @@ describe("liveActivityPreferences", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
-  it.effect("keeps local preferences refreshable when signed out", () =>
+  it.effect("uses environment-owner credentials even when the active account has no token", () =>
     Effect.gen(function* () {
       yield* setLiveActivityUpdatesEnabled({
         enabled: false,
@@ -125,7 +123,11 @@ describe("liveActivityPreferences", () => {
       expect(updateAgentAwarenessRegistrationPreferences).toHaveBeenCalledWith({
         liveActivitiesEnabled: false,
       });
-      expect(linkEnvironmentToCloudWithPreference).not.toHaveBeenCalled();
+      expect(linkEnvironmentToCloudWithPreference).toHaveBeenCalledWith({
+        clerkToken: "",
+        connection,
+        liveActivitiesEnabled: false,
+      });
     }).pipe(Effect.provide(testLayer)),
   );
 

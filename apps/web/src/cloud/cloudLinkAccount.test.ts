@@ -5,7 +5,6 @@ vi.mock("../connection/catalog", () => ({ environmentCatalog: {} }));
 import { describePublishAccount } from "./cloudLinkAccount";
 
 const base = {
-  multiAccountEnabled: true,
   linked: true,
   accountId: "account-b",
   accountSignedIn: true,
@@ -49,11 +48,8 @@ describe("describePublishAccount", () => {
     expect(state.unlink).toEqual({ allowed: true, tokenAccountId: null });
   });
 
-  it("keeps a stranger's link, and every link in a single-account build, out of reach", () => {
-    for (const input of [
-      { ...base, knownAccountIds: ["account-b"] },
-      { ...base, multiAccountEnabled: false },
-    ]) {
+  it("keeps a stranger's link out of reach", () => {
+    for (const input of [{ ...base, knownAccountIds: ["account-b"] }]) {
       const state = describePublishAccount(input);
       expect(state.message).toContain("Sign out to stop its local relay");
       expect(state.actAs).toBeNull();

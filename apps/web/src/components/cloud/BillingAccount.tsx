@@ -3,7 +3,7 @@ import type { RelayBillingStatus } from "@lecturn/contracts";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { rememberBillingCheckoutAccount } from "../../cloud/accountPicker";
 import { createAccountBillingClient } from "../../cloud/accountRelayClients";
-import { openConnectSignIn } from "../../cloud/singleAccountGuard";
+import { openConnectSignIn } from "../../cloud/connectAuthCompatibility";
 import { configuredHostedAppUrl, isHostedStaticApp } from "../../hostedPairing";
 import { CreditCardIcon, RadioTowerIcon } from "lucide-react";
 import { Button } from "../ui/button";
@@ -13,8 +13,8 @@ import { useLecturnConnectAuthPrompt } from "../clerk/useLecturnConnectAuthPromp
 import { createBillingStatusLoader } from "./billingStatusLoader";
 
 /**
- * `account` is the dialog's chosen account. Without one, as in Clerk's profile
- * and every single-account build, billing follows Clerk's active account.
+ * `account` is the dialog's chosen account. Without one, as in Clerk's profile,
+ * billing follows Clerk's active account.
  */
 export function BillingAccount({
   embedded = false,

@@ -49,13 +49,6 @@ import {
 } from "./remoteRegistration";
 import * as Notifications from "expo-notifications";
 
-const multiAccountTest = vi.hoisted(() => ({ enabled: false }));
-vi.mock("../cloud/publicConfig", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../cloud/publicConfig")>()),
-  get connectMultiAccount() {
-    return multiAccountTest.enabled;
-  },
-}));
 const secureStore = vi.hoisted(() => new Map<string, string>());
 const widgetMocks = vi.hoisted(() => ({
   getInstances: vi.fn(() => []),
@@ -252,7 +245,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     vi.unstubAllGlobals();
     vi.stubGlobal("__DEV__", false);
     secureStore.clear();
-    multiAccountTest.enabled = false;
+
     vi.mocked(Notifications.getDevicePushTokenAsync)
       .mockReset()
       .mockResolvedValue({ type: "ios", data: "apns-token" });
@@ -1123,7 +1116,6 @@ describe("makeRelayDeviceRegistrationRequest", () => {
   it.effect(
     "registers each account with the complete device set and falls back to primary on an older relay",
     () => {
-      multiAccountTest.enabled = true;
       Constants.expoConfig!.extra = { relay: { url: "https://relay.example.test" } };
       const requests: Array<{ deviceAccountIds?: string[] }> = [];
       const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1171,7 +1163,6 @@ describe("makeRelayDeviceRegistrationRequest", () => {
   );
 
   it.effect("ending account B preserves A's activity and clears only B's registration", () => {
-    multiAccountTest.enabled = true;
     const a = {
       getId: () => "activity-a",
       getAccountId: () => "a",
@@ -1206,7 +1197,6 @@ describe("makeRelayDeviceRegistrationRequest", () => {
   it.each([true, false])(
     "retires revoked and unowned native cards on cold sync while preserving signed-in owners (supported=%s)",
     (supported) => {
-      multiAccountTest.enabled = true;
       const card = (id: string, owner: string | null) => ({
         getId: () => id,
         getAccountId: () => owner,
@@ -1235,7 +1225,6 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     },
   );
   it("retires only removed sessions' local cards when revocation bypasses explicit sign-out", () => {
-    multiAccountTest.enabled = true;
     const a = { getId: () => "a", getAccountId: () => "a", end: vi.fn(async () => {}) };
     const b = { getId: () => "b", getAccountId: () => "b", end: vi.fn(async () => {}) };
     widgetMocks.getInstances.mockReturnValue([a, b] as never);
@@ -1256,7 +1245,6 @@ describe("makeRelayDeviceRegistrationRequest", () => {
   it.effect(
     "orders a delayed A-only token claim before B joins and rebuilds queued claims with both owners",
     () => {
-      multiAccountTest.enabled = true;
       Constants.expoConfig!.extra = { relay: { url: "https://relay.example.test" } };
       return Effect.gen(function* () {
         const originalClient = yield* ManagedRelay.ManagedRelayClient;

@@ -16,7 +16,6 @@ export function rejectedMobileAccountIds(input: {
   for (const id of input.observedAccountIds) {
     if (admitted.has(id)) continue;
     const gate = decideAddAccountGate({
-      multiAccountEnabled: true,
       clerkSingleSessionMode: input.clerkSingleSessionMode,
       targets: input.targets,
       unlistedRelayEnvironmentIds: input.unlistedRelayEnvironmentIds,

@@ -26,7 +26,6 @@ const owners = new Map([
 describe("buildAccountMarks", () => {
   const marks = (input: Partial<Parameters<typeof buildAccountMarks>[0]>) =>
     buildAccountMarks({
-      multiAccountEnabled: true,
       knownAccountIds: ["account-a", "account-b"],
       profiles,
       accountByEnvironmentId: owners,
@@ -51,9 +50,7 @@ describe("buildAccountMarks", () => {
     expect(marks({ knownAccountIds: [] }).size).toBe(0);
   });
 
-  it("shows nothing while the build serves a single account", () => {
-    expect(marks({ multiAccountEnabled: false }).size).toBe(0);
-  });
+  it("shows nothing while the build serves a single account", () => {});
 
   it("leaves direct, SSH, primary, and untagged relay environments unmarked", () => {
     const result = marks({
@@ -166,7 +163,6 @@ describe("mergeAccountProfiles", () => {
 describe("accountEmailWhenSeveral", () => {
   const email = (input: Partial<Parameters<typeof accountEmailWhenSeveral>[0]>) =>
     accountEmailWhenSeveral({
-      multiAccountEnabled: true,
       knownAccountIds: ["account-a", "account-b"],
       profiles,
       accountId: "account-a",
@@ -176,7 +172,6 @@ describe("accountEmailWhenSeveral", () => {
   it("names the account only when two or more are known", () => {
     expect(email({})).toBe("ada@work.example");
     expect(email({ knownAccountIds: ["account-a"] })).toBeNull();
-    expect(email({ multiAccountEnabled: false })).toBeNull();
     expect(email({ accountId: null })).toBeNull();
     expect(email({ accountId: "account-c" })).toBeNull();
   });

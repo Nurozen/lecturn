@@ -1,4 +1,3 @@
-import { useAuth } from "@clerk/expo";
 import { SymbolView } from "../../components/AppSymbol";
 import {
   connectionStatusText,
@@ -32,7 +31,7 @@ import { availableCloudEnvironmentPresentation } from "../cloud/cloudEnvironment
 import { environmentCatalog } from "../../connection/catalog";
 import { useConnectAccounts } from "../cloud/knownAccounts";
 import { accountTintColor } from "@lecturn/shared/accountTint";
-import { connectMultiAccount, hasCloudPublicConfig } from "../cloud/publicConfig";
+import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { ConnectionStatusDot } from "./ConnectionStatusDot";
 import { type RelayEnvironmentView, useConnectionController } from "./useConnectionController";
 
@@ -77,9 +76,8 @@ export function CloudEnvironmentRows(props: CloudEnvironmentRowsProps) {
 }
 
 function SignedInCloudEnvironmentRows(props: CloudEnvironmentRowsProps) {
-  const { isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
   const accounts = useConnectAccounts();
-  if (!(connectMultiAccount ? accounts.some((account) => account.signedIn) : isSignedIn))
+  if (!accounts.some((account) => account.signedIn))
     return <ConnectedOnlyCloudEnvironmentRows {...props} />;
   return <CloudEnvironmentRowsContent {...props} />;
 }
@@ -152,11 +150,9 @@ function CloudEnvironmentRowsContent(
 
       {hasCloudRows ? (
         <View collapsable={false} className="overflow-hidden rounded-[24px] bg-card">
-          {(connectMultiAccount
-            ? props.accountId
-              ? [props.accountId]
-              : [...accounts.map((account) => account.accountId), null]
-            : [null]
+          {(props.accountId
+            ? [props.accountId]
+            : [...accounts.map((account) => account.accountId), null]
           ).map((accountId) => {
             const account = accounts.find((entry) => entry.accountId === accountId);
             const owns = (environmentId: EnvironmentId) => {
@@ -164,30 +160,28 @@ function CloudEnvironmentRowsContent(
               return target?._tag === "RelayConnectionTarget" ? (target.accountId ?? null) : null;
             };
             const connected = props.connectedCloudEnvironments.filter(
-              (entry) => !connectMultiAccount || owns(entry.environmentId) === accountId,
+              (entry) => owns(entry.environmentId) === accountId,
             );
             const available = availableCloudEnvironments.filter(
-              (entry) => !connectMultiAccount || (entry.accountId ?? null) === accountId,
+              (entry) => (entry.accountId ?? null) === accountId,
             );
             if (!connected.length && !available.length) return null;
             return (
               <View key={accountId ?? "unowned"}>
-                {connectMultiAccount ? (
-                  <View className="flex-row items-center gap-2 px-4 py-3">
-                    <View
-                      style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: 4,
-                        backgroundColor: account ? accountTintColor(account.preset) : "#888888",
-                      }}
-                    />
-                    <Text className="text-sm font-semibold text-foreground">
-                      {account?.label ?? "No account"}
-                      {account && !account.signedIn ? " · Sign in again" : ""}
-                    </Text>
-                  </View>
-                ) : null}
+                <View className="flex-row items-center gap-2 px-4 py-3">
+                  <View
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: 4,
+                      backgroundColor: account ? accountTintColor(account.preset) : "#888888",
+                    }}
+                  />
+                  <Text className="text-sm font-semibold text-foreground">
+                    {account?.label ?? "No account"}
+                    {account && !account.signedIn ? " · Sign in again" : ""}
+                  </Text>
+                </View>
                 {connected.map((environment, index) => (
                   <ConnectedCloudEnvironmentRow
                     key={environment.environmentId}

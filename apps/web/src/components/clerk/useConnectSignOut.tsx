@@ -1,6 +1,6 @@
 import { useAuth, useClerk } from "@clerk/react";
 import { useAtomValue } from "@effect/atom-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
 
 import { unpublishBeforeSignOut } from "../../cloud/linkEnvironmentAtoms";
@@ -8,9 +8,7 @@ import { usePrimaryCloudLinkState } from "../../cloud/primaryCloudLinkState";
 import { readToken } from "../../cloud/accountTokens";
 import { connectAccountProfilesAtom } from "../../cloud/connectAccounts";
 import { knownConnectAccountsAtom, removeSignedOutKnownAccount } from "../../cloud/knownAccounts";
-import { connectMultiAccount } from "../../cloud/publicConfig";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
-import { setConnectSignOutRequest } from "../../cloud/singleAccountGuard";
 import { withActiveSessionTurn } from "../../cloud/withActiveAccount";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
@@ -43,16 +41,7 @@ export function useConnectSignOut(redirectUrl?: string, accountId?: string) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const busy = useRef(false);
-  // Set while the single-account guard waits on this dialog's outcome.
-  const awaited = useRef<{
-    readonly resolve: () => void;
-    readonly reject: (cause: Error) => void;
-  } | null>(null);
-  const close = () => {
-    awaited.current?.reject(new Error("Sign out was cancelled."));
-    awaited.current = null;
-    setTargets(null);
-  };
+  const close = () => setTargets(null);
   const request = (next: SignOutTargets | null) => {
     setError(null);
     setTargets(next);
@@ -73,7 +62,7 @@ export function useConnectSignOut(redirectUrl?: string, accountId?: string) {
   const known = useAtomValue(knownConnectAccountsAtom);
   // An account that needs sign-in has no session for Clerk to end.
   const sessionless =
-    connectMultiAccount && targets !== null
+    targets !== null
       ? known.needsSignIn.filter((id) => targets === "all" || targets.includes(id))
       : [];
   const emailOf = (id: string | null | undefined) =>
@@ -88,13 +77,11 @@ export function useConnectSignOut(redirectUrl?: string, accountId?: string) {
           activeSessionId: clerk.session?.id ?? null,
           targets,
           host,
-          multiAccount: connectMultiAccount,
           sessionless,
         });
   const unpublishStep =
     plan?._tag === "ready" ? plan.steps.find((step) => step._tag === "unpublish") : undefined;
   const copy = signOutDialogCopy({
-    multiAccount: connectMultiAccount,
     knownAccountCount: known.accountIds.length,
     targets: targets ?? "all",
     email: targets === null || targets === "all" ? null : emailOf(targets[0]),
@@ -111,7 +98,6 @@ export function useConnectSignOut(redirectUrl?: string, accountId?: string) {
         clerk,
         targets,
         host,
-        multiAccount: connectMultiAccount,
         sessionless,
         removeSessionless: (id) => removeSignedOutKnownAccount(appAtomRegistry, id),
         unpublish: async (leavingAccountId) => {
@@ -128,12 +114,8 @@ export function useConnectSignOut(redirectUrl?: string, accountId?: string) {
         stayUrl: window.location.href,
         signedOutUrl: redirectUrl,
         // A sign-out ends sessions over the network, so its turn gets longer than a switch.
-        ...(connectMultiAccount
-          ? { clerkTurn: (steps: () => Promise<void>) => withActiveSessionTurn(steps, 60_000) }
-          : {}),
+        clerkTurn: (steps: () => Promise<void>) => withActiveSessionTurn(steps, 60_000),
       });
-      awaited.current?.resolve();
-      awaited.current = null;
       setTargets(null);
     } catch (cause) {
       if (plan?._tag === "blocked") link.refresh();
@@ -152,20 +134,8 @@ export function useConnectSignOut(redirectUrl?: string, accountId?: string) {
     requestSignOutAll: () => request("all"),
     /** True with two or more accounts signed in, when signing out of all of them is a second action. */
     canSignOutAll: canSignOutAllAccounts({
-      multiAccount: connectMultiAccount,
       signedInAccountIds: signedInUsers.map((user) => user.id),
     }),
-    /** Settles once the dialog signed out, and rejects when it closes without. */
-    requestSignOutOf: useCallback(
-      ({ everySession }: { readonly everySession: boolean }) =>
-        new Promise<void>((resolve, reject) => {
-          awaited.current?.reject(new Error("Sign out was cancelled."));
-          awaited.current = { resolve, reject };
-          setError(null);
-          setTargets(everySession || targetAccountId === null ? "all" : [targetAccountId]);
-        }),
-      [targetAccountId],
-    ),
     signOutDialog: (
       <AlertDialog
         open={targets !== null}
@@ -210,14 +180,4 @@ export function useConnectSignOut(redirectUrl?: string, accountId?: string) {
       </AlertDialog>
     ),
   };
-}
-
-/** Lets the single-account guard's messages open the same sign-out flow. */
-export function ConnectSignOutHost() {
-  const { requestSignOutOf, signOutDialog } = useConnectSignOut();
-  useEffect(() => {
-    setConnectSignOutRequest(requestSignOutOf);
-    return () => setConnectSignOutRequest(null);
-  }, [requestSignOutOf]);
-  return signOutDialog;
 }

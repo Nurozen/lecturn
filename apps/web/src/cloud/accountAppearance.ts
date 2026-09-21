@@ -1,7 +1,6 @@
 import { readAccountAppearance, type AccountAppearance } from "@lecturn/shared/accountTint";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { observeAccountProfiles, type ObservedClerkUser } from "./connectAccounts";
-import { connectMultiAccount } from "./publicConfig";
 import { withActiveAccountForProfile } from "./withActiveAccount";
 
 export interface AppearanceUser extends ObservedClerkUser {
@@ -29,7 +28,6 @@ export async function saveAccountAppearance(
   accountId: string,
   appearance: AccountAppearance,
 ): Promise<void> {
-  if (!connectMultiAccount) return;
   await withActiveAccountForProfile(accountId, async () => {
     const user = usersOf(clerk).find((user) => user.id === accountId);
     if (!user) throw new Error("That account needs sign-in before its appearance can change.");
@@ -53,7 +51,6 @@ export async function saveAccountAppearance(
 let refresh: Promise<void> | null = null;
 /** Reloads every signed-in profile on foreground/menu open; a failed account keeps its cached appearance. */
 export function refreshAccountAppearance(clerk: AppearanceClerk): Promise<void> {
-  if (!connectMultiAccount) return Promise.resolve();
   if (refresh) return refresh;
   refresh = (async () => {
     const reloaded: AppearanceUser[] = [];
@@ -79,7 +76,6 @@ export function refreshAccountAppearance(clerk: AppearanceClerk): Promise<void> 
 let initializationTurn: Promise<void> = Promise.resolve();
 /** Persist defaults once an account joins; repeated session observations share each pending write. */
 export function initializeAccountAppearance(clerk: AppearanceClerk): Promise<void> {
-  if (!connectMultiAccount) return Promise.resolve();
   initializationTurn = initializationTurn
     .catch(() => undefined)
     .then(async () => {

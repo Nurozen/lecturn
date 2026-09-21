@@ -1,7 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { environmentCatalog } from "../../connection/catalog";
 import { connectAccountsReadyAtom, useConnectAccounts } from "../cloud/knownAccounts";
-import { connectMultiAccount } from "../cloud/publicConfig";
 import { expandMobileAccountSection } from "../home/accountSectionExpansion";
 import { resolveThreadAccountRoute } from "./threadAccountRoute";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
@@ -141,11 +140,7 @@ function ThreadUnavailableScreen() {
 }
 
 export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
-  return connectMultiAccount ? (
-    <AccountScopedThreadRouteScreen {...props} />
-  ) : (
-    <ConnectedThreadRouteScreen {...props} />
-  );
+  return <AccountScopedThreadRouteScreen {...props} />;
 }
 function AccountScopedThreadRouteScreen(props: ThreadRouteScreenProps) {
   const catalog = useAtomValue(environmentCatalog.catalogValueAtom);

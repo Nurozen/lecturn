@@ -47,8 +47,6 @@ export function planConnectSignOut(input: {
   readonly activeSessionId: string | null;
   readonly targets: SignOutTargets;
   readonly host: SignOutHost;
-  /** False in a single-account build, which signs out as it did before accounts were kept. */
-  readonly multiAccount: boolean;
   /** Leaving accounts that need sign-in, so Clerk has no session to end for them. */
   readonly sessionless?: ReadonlyArray<string> | undefined;
   /** The host was already unpublished by this sign-out. */
@@ -60,29 +58,7 @@ export function planConnectSignOut(input: {
   const ending = sessions.filter(
     (session) => targets === "all" || targets.includes(session.accountId),
   );
-  if (!input.multiAccount) {
-    // Ends the current session and navigates, and always unpublishes a local host.
-    const current = ending.find((session) => session.sessionId === activeSessionId) ?? ending[0];
-    if (current === undefined) {
-      return { _tag: "ready", steps: [] };
-    }
-    const every = targets === "all" && ending.length > 1;
-    return {
-      _tag: "ready",
-      steps: [
-        ...(unpublishes ? [{ _tag: "unpublish" as const, accountId: current.accountId }] : []),
-        {
-          _tag: "signOut",
-          sessionId: every ? null : current.sessionId,
-          ending: (every ? ending : [current]).map(({ accountId, sessionId }) => ({
-            accountId,
-            sessionId,
-          })),
-          redirect: "signedOut",
-        },
-      ],
-    };
-  }
+
   if (ending.length === 0 && sessionless.length === 0) {
     return { _tag: "ready", steps: [] };
   }
@@ -140,10 +116,9 @@ export function planConnectSignOut(input: {
 
 /** Signing out of all accounts is a second action only where several can be signed in. */
 export function canSignOutAllAccounts(input: {
-  readonly multiAccount: boolean;
   readonly signedInAccountIds: ReadonlyArray<string>;
 }): boolean {
-  return input.multiAccount && new Set(input.signedInAccountIds).size > 1;
+  return new Set(input.signedInAccountIds).size > 1;
 }
 
 export interface SignOutClerk {
@@ -194,7 +169,6 @@ export async function runConnectSignOut(input: {
   readonly clerk: SignOutClerk;
   readonly targets: SignOutTargets;
   readonly host: SignOutHost;
-  readonly multiAccount: boolean;
   readonly sessionless?: ReadonlyArray<string> | undefined;
   /** Rejects when the host could not be unpublished, which stops the sign-out. */
   readonly unpublish: (accountId: string) => Promise<void>;
@@ -229,7 +203,6 @@ export async function runConnectSignOut(input: {
       activeSessionId: clerk.session?.id ?? null,
       targets: input.targets,
       host: input.host,
-      multiAccount: input.multiAccount,
       sessionless,
       unpublished,
     });
@@ -298,9 +271,8 @@ const SIGN_OUT_UNPUBLISH_COPY =
 const SIGN_OUT_STAYS_PUBLISHED_COPY =
   "This signs out this account on this computer. This computer stays published to Connect. Your local projects and conversations stay on this computer.";
 
-/** The dialog names accounts only once a multi-account build knows more than one. */
+/** The dialog names accounts only once more than one is known. */
 export function signOutDialogCopy(input: {
-  readonly multiAccount: boolean;
   readonly knownAccountCount: number;
   readonly targets: SignOutTargets;
   readonly email: string | null;
@@ -308,7 +280,7 @@ export function signOutDialogCopy(input: {
   /** The sign-out unpublishes this computer, or cannot tell yet. */
   readonly unpublishes: boolean;
 }): { readonly title: string; readonly description: string } {
-  const several = input.multiAccount && input.knownAccountCount > 1;
+  const several = input.knownAccountCount > 1;
   return {
     title: !several
       ? "Sign out of Lecturn?"

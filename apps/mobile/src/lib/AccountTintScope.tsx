@@ -4,7 +4,6 @@ import type { EnvironmentId } from "@lecturn/contracts";
 import { ScopedVariables } from "uniwind";
 import { environmentCatalog } from "../connection/catalog";
 import { useConnectAccounts } from "../features/cloud/knownAccounts";
-import { connectMultiAccount } from "../features/cloud/publicConfig";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 import { mobileAccountTintVariables } from "./accountTint";
 import { glassAccessibilityVariables } from "./glassTheme";
@@ -23,9 +22,7 @@ export function AccountTintScope({
   const accounts = useConnectAccounts();
   const target = catalog.entries.get(environmentId)?.target;
   const id = target?._tag === "RelayConnectionTarget" ? target.accountId : undefined;
-  const preset = connectMultiAccount
-    ? accounts.find((account) => account.accountId === id)?.preset
-    : undefined;
+  const preset = accounts.find((account) => account.accountId === id)?.preset;
   const { themeId, themeAppearance } = useAppearancePreferences();
   const opaque = useGlassAccessibility();
   const tint = useMemo(

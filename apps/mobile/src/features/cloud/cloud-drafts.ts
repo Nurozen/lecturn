@@ -4,7 +4,6 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
-import { connectMultiAccount } from "./publicConfig";
 import { MobileDatabase } from "../../persistence/mobile-database";
 import { connectionAtomRuntime } from "../../connection/runtime";
 import { archiveCloudComposerDrafts } from "../../state/use-composer-drafts";
@@ -25,15 +24,14 @@ export class CloudDraftArchiveError extends Schema.TaggedErrorClass<CloudDraftAr
 export const removeCloudEnvironments = createRuntimeCommand(connectionAtomRuntime, {
   label: "cloud:preserve-drafts-and-remove-environments",
   execute: Effect.fn("removeCloudEnvironments")(function* (accountId: string | null) {
-    if (connectMultiAccount && accountId === null) return;
+    if (accountId === null) return;
     const registry = yield* EnvironmentRegistry;
     const entries = yield* SubscriptionRef.get(registry.entries);
     const environmentIds = new Set(
       [...entries.values()]
         .filter(
           (entry) =>
-            entry.target._tag === "RelayConnectionTarget" &&
-            (!connectMultiAccount || entry.target.accountId === accountId),
+            entry.target._tag === "RelayConnectionTarget" && entry.target.accountId === accountId,
         )
         .map((entry) => entry.target.environmentId),
     );
@@ -48,13 +46,9 @@ export const removeCloudEnvironments = createRuntimeCommand(connectionAtomRuntim
           cause,
         }),
     });
-    if (connectMultiAccount && accountId !== null) {
-      const database = yield* MobileDatabase;
-      for (const environmentId of environmentIds)
-        yield* database.clearEnvironmentCache(environmentId);
-    }
-    yield* registry.removeRelayEnvironments(
-      connectMultiAccount && accountId !== null ? { accountId } : undefined,
-    );
+    const database = yield* MobileDatabase;
+    for (const environmentId of environmentIds)
+      yield* database.clearEnvironmentCache(environmentId);
+    yield* registry.removeRelayEnvironments({ accountId });
   }),
 });
