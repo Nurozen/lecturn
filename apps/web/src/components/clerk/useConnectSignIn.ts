@@ -1,4 +1,4 @@
-import { useClerk } from "@clerk/react";
+import { useAuth, useClerk } from "@clerk/react";
 import { useAtomValue } from "@effect/atom-react";
 import { decideAddAccountGate } from "@lecturn/client-runtime/relay";
 import { useEffect } from "react";
@@ -97,6 +97,9 @@ const reportPendingFlow = (event: PromiseRejectionEvent) => {
  */
 export function useConnectSignIn() {
   const clerk = useClerk();
+  // `clerk` keeps one identity while its environment loads behind it, so the
+  // read below is keyed on `isLoaded` to run again once Clerk is ready.
+  const { isLoaded } = useAuth();
   const known = useAtomValue(knownConnectAccountsAtom);
   const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
   const unlisted = useAtomValue(environmentCatalog.unlistedRelayEnvironmentIdsValueAtom);
@@ -119,7 +122,7 @@ export function useConnectSignIn() {
 
   const gate = decideAddAccountGate({
     multiAccountEnabled: true,
-    clerkSingleSessionMode: readClerkSingleSessionMode(clerk),
+    clerkSingleSessionMode: isLoaded ? readClerkSingleSessionMode(clerk) : undefined,
     targets: [...catalog.entries.values()].map((entry) => entry.target),
     unlistedRelayEnvironmentIds: unlisted,
     knownAccountCount: known.accountIds.length,
