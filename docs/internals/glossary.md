@@ -238,6 +238,8 @@ See [Teams architecture](teams.md) for enforcement boundaries.
 - **Needs sign-in**: a known account without a signed-in session. Its environments stay in the catalog, disconnected, and its data is kept.
 - **Owning account**: the account a relay environment is tagged with (`accountId` on its catalog target). Direct, Tailscale, and SSH environments have none.
 - **Account mark**: the short text, taken from the owner's email, shown on rows once two accounts are known.
+- **Segment**: one account's part of the thread sidebar, shown once two accounts are known: a sticky account bar, then the usual composition over that account's environments. Environments without an owning account form one last segment without a bar. Collapsing a segment hides its rows and changes nothing about the connection. See [sidebarSegments.logic.ts](../../apps/web/src/components/sidebar/sidebarSegments.logic.ts).
+- **Account-scoped key**: a project group key with its owning account appended. Project groups are built once per account so a repository under two accounts stays two groups, and the scope keeps their keys apart. `parseAccountScopedKey` reads the account back, and only from a well-formed scope at the end of the key. The project page uses it to act on that account's members alone.
 - **Unlisted environment**: a relay environment no signed-in account lists. It is disconnected and kept, and the user can remove it.
 - **Single-account guard**: the enforcement that keeps one Clerk session while `connectMultiAccount` is off.
 - **Stand-down marker**: the shared-storage timestamp a multi-account build writes so a single-account tab on the same origin asks for a reload instead of signing out the extra account.

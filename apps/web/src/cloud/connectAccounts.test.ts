@@ -8,6 +8,7 @@ import {
   accountEmailWhenSeveral,
   accountMarkLabels,
   buildAccountMarks,
+  keepUnchangedAccountOwners,
   mergeAccountProfiles,
   readClerkSingleSessionMode,
   type ConnectAccountProfiles,
@@ -63,6 +64,26 @@ describe("buildAccountMarks", () => {
 
   it("leaves out an owner that is no longer known or has no email yet", () => {
     expect([...marks({ knownAccountIds: ["account-a", "account-c"] }).keys()]).toEqual(["env-a"]);
+  });
+});
+
+describe("keepUnchangedAccountOwners", () => {
+  it("hands back the map it had while the owners are the same", () => {
+    expect(keepUnchangedAccountOwners(owners, new Map(owners))).toBe(owners);
+  });
+
+  it("takes the new map when an owner moved, came, or left", () => {
+    for (const next of [
+      new Map([...owners, ["env-c", "account-a"]]),
+      new Map([["env-a", "account-a"]]),
+      new Map([
+        ["env-a", "account-b"],
+        ["env-b", "account-b"],
+      ]),
+    ]) {
+      expect(keepUnchangedAccountOwners(owners, next)).toBe(next);
+    }
+    expect(keepUnchangedAccountOwners(undefined, owners)).toBe(owners);
   });
 });
 

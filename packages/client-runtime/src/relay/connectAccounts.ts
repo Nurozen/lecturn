@@ -96,3 +96,30 @@ export function bucketByAccount<Item>(
     .map((accountId) => ({ accountId, items: items.filter((item) => owned(item) === accountId) }))
     .filter((bucket) => bucket.items.length > 0);
 }
+
+const ACCOUNT_KEY_MARKER = "@account:";
+
+/**
+ * A group key that is unique per account, for groups built once per account
+ * bucket: the same repository on two accounts derives the same key twice.
+ * What no account owns keeps its key.
+ */
+export function accountScopedKey(key: string, accountId: string | null): string {
+  return accountId === null ? key : `${key}${ACCOUNT_KEY_MARKER}${accountId}`;
+}
+
+// Clerk user ids are `user_` plus letters and digits. The scope counts only at
+// the end of the key, where `accountScopedKey` writes it.
+const ACCOUNT_SCOPE = new RegExp(`^(.*)${ACCOUNT_KEY_MARKER}(user_[A-Za-z0-9_]+)$`, "s");
+
+/**
+ * Takes an account-scoped key apart. A key that only contains the marker, or
+ * carries it anywhere but the end, is not scoped and comes back whole.
+ */
+export function parseAccountScopedKey(key: string): {
+  readonly key: string;
+  readonly accountId: string | null;
+} {
+  const match = ACCOUNT_SCOPE.exec(key);
+  return match === null ? { key, accountId: null } : { key: match[1]!, accountId: match[2]! };
+}

@@ -2,8 +2,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   MAX_CONNECT_ACCOUNTS,
+  accountScopedKey,
   bucketByAccount,
   decideAddAccountGate,
+  parseAccountScopedKey,
   relayAccountByEnvironmentId,
   type AccountOwnedTarget,
 } from "./connectAccounts.ts";
@@ -123,5 +125,39 @@ describe("bucketByAccount", () => {
   it("leaves out empty buckets", () => {
     expect(bucket(["env-a1"])).toEqual([{ accountId: "account-a", items: ["env-a1"] }]);
     expect(bucket([])).toEqual([]);
+  });
+});
+
+describe("accountScopedKey", () => {
+  it("scopes a key to its account and gives the plain key back", () => {
+    const scoped = accountScopedKey("github.com/nurozen/lecturn", "user_a");
+    expect(scoped).not.toBe(accountScopedKey("github.com/nurozen/lecturn", "user_b"));
+    expect(parseAccountScopedKey(scoped).key).toBe("github.com/nurozen/lecturn");
+  });
+
+  it("leaves a key that no account owns as it is", () => {
+    expect(accountScopedKey("env:/work/lecturn", null)).toBe("env:/work/lecturn");
+    expect(parseAccountScopedKey("env:/work/lecturn")).toEqual({
+      key: "env:/work/lecturn",
+      accountId: null,
+    });
+  });
+
+  it("reads the account back out of a scoped key", () => {
+    expect(parseAccountScopedKey(accountScopedKey("env:/work/lecturn", "user_2abC9"))).toEqual({
+      key: "env:/work/lecturn",
+      accountId: "user_2abC9",
+    });
+  });
+
+  it("leaves a key that only contains the marker whole", () => {
+    for (const key of ["env:/work/@account:team/lecturn", "env:/work/lecturn@account:"]) {
+      expect(parseAccountScopedKey(key)).toEqual({ key, accountId: null });
+    }
+  });
+
+  it("leaves a saga split key whole, physical part included", () => {
+    const split = `${accountScopedKey("github.com/nurozen/lecturn", "user_a")}::env:/work/lecturn`;
+    expect(parseAccountScopedKey(split)).toEqual({ key: split, accountId: null });
   });
 });

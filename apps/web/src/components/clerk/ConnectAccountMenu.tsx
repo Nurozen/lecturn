@@ -1,18 +1,12 @@
 import { useAuth, useClerk } from "@clerk/react";
 import { useAtomValue } from "@effect/atom-react";
-import { decideAddAccountGate } from "@lecturn/client-runtime/relay";
 import { useLocation } from "@tanstack/react-router";
 import { CheckIcon, LogInIcon, LogOutIcon, PlusIcon, UserCogIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import {
-  connectAccountProfilesAtom,
-  readClerkSingleSessionMode,
-} from "../../cloud/connectAccounts";
+import { connectAccountProfilesAtom } from "../../cloud/connectAccounts";
 import { knownConnectAccountsAtom } from "../../cloud/knownAccounts";
-import { environmentCatalog } from "../../connection/catalog";
-import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import {
   Menu,
@@ -28,17 +22,10 @@ import {
 } from "../ui/menu";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import {
-  buildConnectAccountMenu,
-  isOAuthFlowPendingError,
-  unexpectedSignInToReject,
-  type ConnectAccountMenuRow,
-  type PendingSignInAgain,
-} from "./ConnectAccountMenu.logic";
+import { buildConnectAccountMenu, type ConnectAccountMenuRow } from "./ConnectAccountMenu.logic";
 import { CONNECT_PROFILE_PAGES } from "./connectProfilePages";
 import { useConnectSignOut } from "./useConnectSignOut";
-import { runConnectSignOut } from "./useConnectSignOut.logic";
-import { useLecturnConnectAuthPrompt } from "./useLecturnConnectAuthPrompt";
+import { useConnectSignIn } from "./useConnectSignIn";
 
 /** Settings search lands here: the hash opens the menu and the id takes focus. */
 export const CONNECT_ACCOUNT_MENU_TARGET_ID = "connect-accounts";
@@ -120,9 +107,6 @@ export function ConnectAccountMenu() {
   const { isLoaded, userId } = useAuth();
   const known = useAtomValue(knownConnectAccountsAtom);
   const profiles = useAtomValue(connectAccountProfilesAtom);
-  const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
-  const unlisted = useAtomValue(environmentCatalog.unlistedRelayEnvironmentIdsValueAtom);
-  const { openAuthPrompt, authPrompt } = useLecturnConnectAuthPrompt();
   const { requestSignOutAccount, requestSignOutAll, signOutDialog } = useConnectSignOut();
   const { customPages, portals } = useConnectProfilePages();
   const [open, setOpen] = useState(false);
@@ -139,30 +123,7 @@ export function ConnectAccountMenu() {
     if (targeted) triggerRef.current?.focus();
   }, [targeted]);
 
-  // The desktop shell runs one browser sign-in at a time and rejects a second
-  // from inside Clerk's own component, where nothing else reports it.
-  useEffect(() => {
-    if (!isElectron) return;
-    const report = (event: PromiseRejectionEvent) => {
-      if (!isOAuthFlowPendingError(event.reason)) return;
-      event.preventDefault();
-      toastManager.add({
-        type: "warning",
-        title: "A sign-in is already waiting in your browser",
-        description: "Finish or close it there, then try again.",
-      });
-    };
-    window.addEventListener("unhandledrejection", report);
-    return () => window.removeEventListener("unhandledrejection", report);
-  }, []);
-
-  const gate = decideAddAccountGate({
-    multiAccountEnabled: true,
-    clerkSingleSessionMode: readClerkSingleSessionMode(clerk),
-    targets: [...catalog.entries.values()].map((entry) => entry.target),
-    unlistedRelayEnvironmentIds: unlisted,
-    knownAccountCount: known.accountIds.length,
-  });
+  const { gate, authPrompt, addAccount, signInAgainAs } = useConnectSignIn();
   const model = buildConnectAccountMenu({
     knownAccountIds: known.accountIds,
     needsSignIn: known.needsSignIn,
@@ -170,62 +131,6 @@ export function ConnectAccountMenu() {
     profiles,
     gate,
   });
-
-  // Somebody new who came out of "Sign in again" past a closed gate is signed out again.
-  const signInAgain = useRef<PendingSignInAgain | null>(null);
-  useEffect(() => {
-    const pending = signInAgain.current;
-    if (pending === null) return;
-    if (!known.needsSignIn.includes(pending.expectedAccountId)) {
-      signInAgain.current = null;
-      return;
-    }
-    const rejected = unexpectedSignInToReject({
-      pending,
-      knownAccountIds: known.accountIds,
-      needsSignIn: known.needsSignIn,
-    });
-    if (rejected === null) return;
-    signInAgain.current = null;
-    toastManager.add({
-      type: "warning",
-      title: "That account was not added",
-      description: rejected.reason,
-    });
-    void runConnectSignOut({
-      clerk,
-      targets: [rejected.accountId],
-      // A new account cannot have published this computer.
-      host: { _tag: "none" },
-      multiAccount: true,
-      unpublish: async () => undefined,
-      stayUrl: window.location.href,
-    }).catch((cause: unknown) =>
-      toastManager.add({
-        type: "error",
-        title: "Could not sign that account out",
-        description: cause instanceof Error ? cause.message : undefined,
-      }),
-    );
-  }, [clerk, known]);
-
-  const signIn = () => {
-    try {
-      openAuthPrompt();
-    } catch (cause) {
-      toastManager.add({
-        type: "error",
-        title: isOAuthFlowPendingError(cause)
-          ? "A sign-in is already waiting in your browser"
-          : "Could not open sign-in",
-        description: isOAuthFlowPendingError(cause)
-          ? "Finish or close it there, then try again."
-          : cause instanceof Error
-            ? cause.message
-            : undefined,
-      });
-    }
-  };
 
   // Publishing, billing, teams, and Clerk's profile follow the active account.
   const activate = (accountId: string) => {
@@ -298,16 +203,7 @@ export function ConnectAccountMenu() {
                     </MenuItem>
                   ) : null}
                   {row.needsSignIn ? (
-                    <MenuItem
-                      onClick={() => {
-                        signInAgain.current = {
-                          expectedAccountId: row.accountId,
-                          knownAccountIds: known.accountIds,
-                          gate,
-                        };
-                        signIn();
-                      }}
-                    >
+                    <MenuItem onClick={() => signInAgainAs(row.accountId)}>
                       <LogInIcon />
                       Sign in again
                     </MenuItem>
@@ -322,12 +218,7 @@ export function ConnectAccountMenu() {
           </MenuGroup>
           <MenuSeparator />
           {model.addAccount === null ? null : model.addAccount.enabled ? (
-            <MenuItem
-              onClick={() => {
-                signInAgain.current = null;
-                signIn();
-              }}
-            >
+            <MenuItem onClick={addAccount}>
               <PlusIcon />
               Add account
             </MenuItem>
