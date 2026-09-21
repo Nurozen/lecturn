@@ -16,6 +16,7 @@ export async function refreshMultiAccountPushCapability(): Promise<void> {
     try {
       const response = await fetch(
         `${relay.replace(/\/$/, "")}/.well-known/oauth-protected-resource`,
+        { signal: AbortSignal.timeout(10_000) },
       );
       if (response.ok) {
         const document: unknown = await response.json();

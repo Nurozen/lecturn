@@ -16,6 +16,15 @@ const fixtures = vi.hoisted(() => ({
   remove: vi.fn(),
   pendingRemoval: new Set<string>(),
   restore: vi.fn(),
+  capability: vi.fn(),
+  pushSupported: true,
+}));
+vi.mock("react-native", () => ({ Platform: { OS: "ios" }, Alert: { alert: vi.fn() } }));
+vi.mock("../../connection/catalog", () => ({
+  environmentCatalog: {
+    catalogValueAtom: Atom.make({ isReady: true, entries: new Map() }),
+    unlistedRelayEnvironmentIdsValueAtom: Atom.make(new Set()),
+  },
 }));
 vi.mock("@clerk/expo", () => ({
   useClerk: () => clerk,
@@ -23,6 +32,13 @@ vi.mock("@clerk/expo", () => ({
   useSessionList: () => ({ sessions: fixtures.sessions }),
 }));
 const clerk = {
+  get session() {
+    return fixtures.sessions.find((session) => session.user.id === fixtures.active);
+  },
+  setActive: vi.fn(async ({ session: id }: { session: string }) => {
+    fixtures.active = fixtures.sessions.find((session) => session.id === id)?.user.id ?? null;
+  }),
+  __internal_environment: { authConfig: { singleSessionMode: false } },
   client: {
     get sessions() {
       return fixtures.sessions;
@@ -33,7 +49,9 @@ const clerk = {
   },
 };
 vi.mock("../agent-awareness/multiAccountCapability", () => ({
-  useMultiAccountPushSupported: () => true,
+  useMultiAccountPushSupported: () => fixtures.pushSupported,
+  getMultiAccountPushSupported: () => fixtures.pushSupported,
+  refreshMultiAccountPushCapability: () => fixtures.capability(),
 }));
 vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => fixtures.remove }));
 vi.mock("../../state/use-composer-drafts", () => ({
@@ -110,6 +128,8 @@ beforeEach(() => {
   vi.stubGlobal("document", document);
   vi.stubGlobal("window", { document, HTMLIFrameElement: EventTarget });
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  fixtures.pushSupported = true;
+  fixtures.capability.mockReset().mockResolvedValue(undefined);
   fixtures.remove.mockReset().mockResolvedValue(AsyncResult.success(undefined));
   fixtures.restore.mockReset().mockResolvedValue(undefined);
   fixtures.pendingRemoval.clear();
@@ -122,6 +142,33 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 describe("mobile multi-account lifecycle", () => {
+  it("waits for capability then removes only the native-added session and restores the prior active account", async () => {
+    await observe([session("a")], "a");
+    let resolve!: () => void;
+    fixtures.capability.mockImplementationOnce(
+      () =>
+        new Promise<void>((done) => {
+          resolve = done;
+        }),
+    );
+    fixtures.pushSupported = false;
+    const rejected = {
+      ...session("b"),
+      remove: vi.fn(async () => {
+        fixtures.sessions = fixtures.sessions.filter((s) => s.user.id !== "b");
+      }),
+    };
+    await observe([session("a"), rejected], "b");
+    expect(rejected.remove).not.toHaveBeenCalled();
+    expect(appAtomRegistry.get(knownConnectAccountsAtom).map((a) => a.accountId)).toEqual(["a"]);
+    await act(async () => {
+      resolve();
+    });
+    expect(rejected.remove).toHaveBeenCalledOnce();
+    expect(clerk.setActive).toHaveBeenLastCalledWith({ session: "session-a" });
+    expect(appAtomRegistry.get(managedRelaySessionsAtom).has("b")).toBe(false);
+    expect(fixtures.remove).not.toHaveBeenCalled();
+  });
   it("keeps both live sessions and their identities across an active-account flip", async () => {
     await observe([session("a"), session("b")], "a");
     const a = appAtomRegistry.get(managedRelaySessionsAtom).get("a");
