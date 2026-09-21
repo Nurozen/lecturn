@@ -41,6 +41,8 @@ const THREAD_STORE_NAME = "thread";
 const SERVER_CONFIG_STORE_NAME = "server-config";
 const VCS_REFS_STORE_NAME = "vcs-refs";
 const CATALOG_KEY = "document";
+const CATALOG_QUARANTINE_KEY_PREFIX = `${CATALOG_KEY}:corrupt:`;
+const MAX_QUARANTINED_CATALOGS = 3;
 const SHELL_SNAPSHOT_CACHE_SCHEMA_VERSION = 1;
 
 const StoredShellSnapshot = Schema.Struct({
@@ -229,6 +231,60 @@ function removeDatabaseValuesInRange(database: IDBDatabase, storeName: string, r
   }).pipe(Effect.withSpan("web.connectionStorage.removeDatabaseValuesInRange"));
 }
 
+/**
+ * Decides how to keep `raw` among the quarantined catalogs, given the existing
+ * entries in ascending key order: skip a blob that is already kept, and drop
+ * the oldest entries beyond the fixed limit.
+ */
+export function planCatalogQuarantine(
+  existing: ReadonlyArray<{ readonly key: string; readonly value: unknown }>,
+  raw: string,
+  now: number,
+): { readonly put: string | null; readonly remove: ReadonlyArray<string> } {
+  const put = existing.some((entry) => entry.value === raw)
+    ? null
+    : `${CATALOG_QUARANTINE_KEY_PREFIX}${now}`;
+  const keys = existing.map((entry) => entry.key).filter((key) => key !== put);
+  const kept = MAX_QUARANTINED_CATALOGS - (put === null ? 0 : 1);
+  return { put, remove: keys.slice(0, Math.max(0, keys.length - kept)) };
+}
+
+function quarantineCatalogValue(database: IDBDatabase, raw: string) {
+  return Effect.callback<void, ConnectionTransientError>((resume) => {
+    const transaction = database.transaction(CATALOG_STORE_NAME, "readwrite");
+    transaction.addEventListener("error", () => {
+      resume(
+        Effect.fail(
+          catalogError("quarantine", transaction.error ?? "Unknown IndexedDB write error"),
+        ),
+      );
+    });
+    transaction.addEventListener("complete", () => {
+      resume(Effect.void);
+    });
+    const store = transaction.objectStore(CATALOG_STORE_NAME);
+    const existing: Array<{ key: string; value: unknown }> = [];
+    const request = store.openCursor(
+      IDBKeyRange.bound(CATALOG_QUARANTINE_KEY_PREFIX, `${CATALOG_QUARANTINE_KEY_PREFIX}\uffff`),
+    );
+    request.addEventListener("success", () => {
+      const cursor = request.result;
+      if (cursor !== null) {
+        existing.push({ key: String(cursor.key), value: cursor.value });
+        cursor.continue();
+        return;
+      }
+      const plan = planCatalogQuarantine(existing, raw, Date.now());
+      if (plan.put !== null) {
+        store.put(raw, plan.put);
+      }
+      for (const key of plan.remove) {
+        store.delete(key);
+      }
+    });
+  }).pipe(Effect.withSpan("web.connectionStorage.quarantineCatalogValue"));
+}
+
 function threadCacheKey(environmentId: EnvironmentId, threadId: ThreadId) {
   return `${environmentId}:${threadId}`;
 }
@@ -254,6 +310,8 @@ const encodeCatalog = Effect.fn("web.connectionStorage.encodeCatalog")(function*
 export interface CatalogBackend {
   readonly read: Effect.Effect<string | null, ConnectionTransientError>;
   readonly write: (raw: string) => Effect.Effect<void, ConnectionTransientError>;
+  // Keeps a copy of a catalog that failed to decode. The desktop backend omits
+  // it because the desktop store quarantines its own file before overwriting.
   readonly quarantine?: (raw: string) => Effect.Effect<void, ConnectionTransientError>;
 }
 
@@ -289,8 +347,7 @@ export function makeCatalogBackend(database: IDBDatabase): CatalogBackend {
       Effect.map((value) => (typeof value === "string" ? value : null)),
     ),
     write: (raw) => writeDatabaseValue(database, CATALOG_STORE_NAME, CATALOG_KEY, raw),
-    quarantine: (raw) =>
-      writeDatabaseValue(database, CATALOG_STORE_NAME, `${CATALOG_KEY}:corrupt:${Date.now()}`, raw),
+    quarantine: (raw) => quarantineCatalogValue(database, raw),
   };
 }
 
@@ -305,6 +362,9 @@ export const makeCatalogStore = Effect.fn("web.connectionStorage.makeCatalogStor
   backend: CatalogBackend,
 ) {
   const state = yield* Ref.make<Option.Option<ConnectionCatalogDocumentType>>(Option.none());
+  // An undecodable blob that still has no quarantine copy. It is never
+  // overwritten until one exists.
+  const unquarantined = yield* Ref.make<Option.Option<string>>(Option.none());
   const lock = yield* Semaphore.make(1);
 
   const loadUnlocked = Effect.fn("web.connectionStorage.loadCatalog")(function* () {
@@ -318,7 +378,9 @@ export const makeCatalogStore = Effect.fn("web.connectionStorage.makeCatalogStor
       catalog = yield* decodeCatalog(raw).pipe(
         Effect.catch((error) =>
           Effect.gen(function* () {
-            yield* Effect.logWarning("Discarding a corrupt web connection catalog.", {
+            // Start empty in memory only. The stored blob stays in place until a
+            // later save replaces it.
+            yield* Effect.logWarning("Keeping an undecodable web connection catalog.", {
               error: error.message,
             });
             if (backend.quarantine !== undefined) {
@@ -326,18 +388,10 @@ export const makeCatalogStore = Effect.fn("web.connectionStorage.makeCatalogStor
                 Effect.catch((cause) =>
                   Effect.logWarning("Could not quarantine the corrupt web connection catalog.", {
                     error: cause.message,
-                  }),
+                  }).pipe(Effect.andThen(Ref.set(unquarantined, Option.some(raw)))),
                 ),
               );
             }
-            const encoded = yield* encodeCatalog(EMPTY_CONNECTION_CATALOG_DOCUMENT);
-            yield* backend.write(encoded).pipe(
-              Effect.catch((cause) =>
-                Effect.logWarning("Could not persist the recovered web connection catalog.", {
-                  error: cause.message,
-                }),
-              ),
-            );
             return EMPTY_CONNECTION_CATALOG_DOCUMENT;
           }),
         ),
@@ -353,6 +407,11 @@ export const makeCatalogStore = Effect.fn("web.connectionStorage.makeCatalogStor
       yield* lock.withPermits(1)(
         Effect.gen(function* () {
           const next = transform(yield* loadUnlocked());
+          const pending = yield* Ref.get(unquarantined);
+          if (Option.isSome(pending) && backend.quarantine !== undefined) {
+            yield* backend.quarantine(pending.value);
+            yield* Ref.set(unquarantined, Option.none());
+          }
           yield* backend.write(yield* encodeCatalog(next));
           yield* Ref.set(state, Option.some(next));
         }),
