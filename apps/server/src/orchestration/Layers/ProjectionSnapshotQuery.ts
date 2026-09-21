@@ -28,6 +28,8 @@ import {
   ProjectId,
   ThreadForkOrigin,
   ThreadForkProviderSource,
+  ThreadImportOrigin,
+  ThreadImportSource,
   ThreadLinkedPullRequest,
   ThreadId,
 } from "@lecturn/contracts";
@@ -116,6 +118,7 @@ const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
     linkedPullRequest: Schema.NullOr(Schema.fromJsonString(ThreadLinkedPullRequest)),
     forkedFrom: Schema.NullOr(Schema.fromJsonString(ThreadForkOrigin)),
     forkSource: Schema.NullOr(Schema.fromJsonString(ThreadForkProviderSource)),
+    importedFrom: Schema.NullOr(Schema.fromJsonString(ThreadImportOrigin)),
   }),
 );
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
@@ -141,6 +144,9 @@ const ProjectionTurnDbRowSchema = ProjectionTurn.mapFields(
 const ProjectionThreadForkContextRowSchema = Schema.Struct({
   forkedFrom: Schema.NullOr(Schema.fromJsonString(ThreadForkOrigin)),
   forkSource: Schema.NullOr(Schema.fromJsonString(ThreadForkProviderSource)),
+});
+const ProjectionThreadImportSourceRowSchema = Schema.Struct({
+  importSource: Schema.NullOr(Schema.fromJsonString(ThreadImportSource)),
 });
 const WorktreePathLookupInput = Schema.Struct({
   worktreePath: Schema.String,
@@ -610,6 +616,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           linked_pull_request_json AS "linkedPullRequest",
           forked_from_json AS "forkedFrom",
           fork_source_json AS "forkSource",
+          imported_from_json AS "importedFrom",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -650,6 +657,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           linked_pull_request_json AS "linkedPullRequest",
           forked_from_json AS "forkedFrom",
           fork_source_json AS "forkSource",
+          imported_from_json AS "importedFrom",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -692,6 +700,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           linked_pull_request_json AS "linkedPullRequest",
           forked_from_json AS "forkedFrom",
           fork_source_json AS "forkSource",
+          imported_from_json AS "importedFrom",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -1156,6 +1165,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           linked_pull_request_json AS "linkedPullRequest",
           forked_from_json AS "forkedFrom",
           fork_source_json AS "forkSource",
+          imported_from_json AS "importedFrom",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -1528,6 +1538,31 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         WHERE thread_id = ${threadId}
           AND deleted_at IS NULL
         LIMIT 1
+      `,
+  });
+
+  const getThreadImportSourceRow = SqlSchema.findOneOption({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionThreadImportSourceRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT import_source_json AS "importSource"
+        FROM projection_threads
+        WHERE thread_id = ${threadId}
+          AND deleted_at IS NULL
+        LIMIT 1
+      `,
+  });
+
+  const listThreadImportSourceRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionThreadImportSourceRowSchema,
+    execute: () =>
+      sql`
+        SELECT import_source_json AS "importSource"
+        FROM projection_threads
+        WHERE import_source_json IS NOT NULL
+          AND deleted_at IS NULL
       `,
   });
 
@@ -2178,6 +2213,7 @@ pending_approval_requests AS (
                   ? {}
                   : { linkedPullRequest: row.linkedPullRequest }),
                 ...(row.forkedFrom === null ? {} : { forkedFrom: row.forkedFrom }),
+                ...(row.importedFrom === null ? {} : { importedFrom: row.importedFrom }),
                 latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
@@ -2379,6 +2415,7 @@ pending_approval_requests AS (
                     ? {}
                     : { linkedPullRequest: row.linkedPullRequest }),
                   ...(row.forkedFrom === null ? {} : { forkedFrom: row.forkedFrom }),
+                  ...(row.importedFrom === null ? {} : { importedFrom: row.importedFrom }),
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
@@ -2523,6 +2560,7 @@ pending_approval_requests AS (
                         ? {}
                         : { linkedPullRequest: row.linkedPullRequest }),
                       ...(row.forkedFrom === null ? {} : { forkedFrom: row.forkedFrom }),
+                      ...(row.importedFrom === null ? {} : { importedFrom: row.importedFrom }),
                       latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                       createdAt: row.createdAt,
                       updatedAt: row.updatedAt,
@@ -2675,6 +2713,7 @@ pending_approval_requests AS (
                   ? {}
                   : { linkedPullRequest: row.linkedPullRequest }),
                 ...(row.forkedFrom === null ? {} : { forkedFrom: row.forkedFrom }),
+                ...(row.importedFrom === null ? {} : { importedFrom: row.importedFrom }),
                 latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
@@ -2964,6 +3003,9 @@ pending_approval_requests AS (
           ? {}
           : { linkedPullRequest: threadRow.value.linkedPullRequest }),
         ...(threadRow.value.forkedFrom === null ? {} : { forkedFrom: threadRow.value.forkedFrom }),
+        ...(threadRow.value.importedFrom === null
+          ? {}
+          : { importedFrom: threadRow.value.importedFrom }),
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
@@ -3223,6 +3265,9 @@ pending_approval_requests AS (
           ? {}
           : { linkedPullRequest: threadRow.value.linkedPullRequest }),
         ...(threadRow.value.forkedFrom === null ? {} : { forkedFrom: threadRow.value.forkedFrom }),
+        ...(threadRow.value.importedFrom === null
+          ? {}
+          : { importedFrom: threadRow.value.importedFrom }),
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
@@ -3340,33 +3385,6 @@ pending_approval_requests AS (
           );
 
           const oldest = windowRows[0];
-          // An empty window (no turns before the cursor, or a thread with no
-          // turns at all) still returns thread metadata with empty collections
-          // for turn-linked rows; turnless rows are bounded to the same empty
-          // range. The first page of a turnless thread stays unwindowed so
-          // pre-turn content (e.g. a just-created thread) is not hidden.
-          const bounds: ThreadDetailBounds | undefined =
-            oldest === undefined && cursor === null
-              ? undefined
-              : {
-                  minAnchorAt: oldest?.anchorAt ?? "",
-                  minTurnKey: oldest?.turnKey ?? "",
-                  beforeAnchorAt: cursor?.beforeAnchorAt ?? ANCHOR_UNBOUNDED,
-                  beforeTurnKey: cursor?.beforeTurnId ?? "",
-                };
-          // Empty window behind a cursor: nothing older remains.
-          const emptyBounds =
-            oldest === undefined && cursor !== null
-              ? { minAnchorAt: "", minTurnKey: "", beforeAnchorAt: "", beforeTurnKey: "" }
-              : undefined;
-
-          const thread = yield* getThreadDetailByIdBounded(threadId, emptyBounds ?? bounds, {
-            mode: "client",
-          });
-          if (Option.isNone(thread)) {
-            return Option.none<OrchestrationThreadDetailSnapshot>();
-          }
-
           const hasMore =
             oldest !== undefined &&
             (yield* listTurnWindowRows({
@@ -3383,6 +3401,36 @@ pending_approval_requests AS (
                 ),
               ),
             )).length > 0;
+
+          // An empty window (no turns before the cursor, or a thread with no
+          // turns at all) still returns thread metadata with empty collections
+          // for turn-linked rows; turnless rows are bounded to the same empty
+          // range. The first page of a turnless thread stays unwindowed so
+          // pre-turn content (e.g. a just-created thread) is not hidden.
+          // The page holding the thread's oldest turn has no lower bound for
+          // the same reason: turnless rows that predate the first turn (pre-turn
+          // activities, imported history) have no older page to land on.
+          const bounds: ThreadDetailBounds | undefined =
+            oldest === undefined && cursor === null
+              ? undefined
+              : {
+                  minAnchorAt: hasMore ? (oldest?.anchorAt ?? "") : "",
+                  minTurnKey: hasMore ? (oldest?.turnKey ?? "") : "",
+                  beforeAnchorAt: cursor?.beforeAnchorAt ?? ANCHOR_UNBOUNDED,
+                  beforeTurnKey: cursor?.beforeTurnId ?? "",
+                };
+          // Empty window behind a cursor: nothing older remains.
+          const emptyBounds =
+            oldest === undefined && cursor !== null
+              ? { minAnchorAt: "", minTurnKey: "", beforeAnchorAt: "", beforeTurnKey: "" }
+              : undefined;
+
+          const thread = yield* getThreadDetailByIdBounded(threadId, emptyBounds ?? bounds, {
+            mode: "client",
+          });
+          if (Option.isNone(thread)) {
+            return Option.none<OrchestrationThreadDetailSnapshot>();
+          }
 
           const { snapshotSequence } = yield* getSnapshotSequence();
           const watermarkRow = yield* getThreadEventWatermarkRow({
@@ -3526,6 +3574,32 @@ pending_approval_requests AS (
       ),
     );
 
+  const getThreadImportSourceById: ProjectionSnapshotQueryShape["getThreadImportSourceById"] = (
+    threadId,
+  ) =>
+    getThreadImportSourceRow({ threadId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getThreadImportSourceById:query",
+          "ProjectionSnapshotQuery.getThreadImportSourceById:decodeRow",
+        ),
+      ),
+      Effect.map(Option.flatMapNullishOr((row) => row.importSource)),
+    );
+
+  const listThreadImportSources: ProjectionSnapshotQueryShape["listThreadImportSources"] = () =>
+    listThreadImportSourceRows(undefined).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.listThreadImportSources:query",
+          "ProjectionSnapshotQuery.listThreadImportSources:decodeRows",
+        ),
+      ),
+      Effect.map((rows) =>
+        rows.flatMap((row) => (row.importSource === null ? [] : [row.importSource])),
+      ),
+    );
+
   const listThreadLifecycleAnchorsByProjectId: ProjectionSnapshotQueryShape["listThreadLifecycleAnchorsByProjectId"] =
     (projectId) =>
       sql`SELECT thread_id AS "threadId", created_at AS "createdAt", updated_at AS "updatedAt",
@@ -3620,6 +3694,8 @@ pending_approval_requests AS (
     listThreadTurnsById,
     getInferenceTurnPairs,
     getThreadForkContextById,
+    getThreadImportSourceById,
+    listThreadImportSources,
     listThreadIdsByWorktreePath,
     listThreadLifecycleAnchorsByProjectId,
     listActiveProjectRootsUnder,

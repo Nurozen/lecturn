@@ -104,6 +104,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         "thread.meta.update",
         "thread.turn.start",
         "thread.fork",
+        "thread.import",
         "thread.unsettle",
         "thread.pin",
         "thread.unarchive",
@@ -115,7 +116,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         ? commandReadModel.threads.find((t) => t.id === command.threadId)
         : undefined;
     const projectId =
-      command.type === "thread.fork"
+      command.type === "thread.fork" || command.type === "thread.import"
         ? command.thread.projectId
         : "projectId" in command
           ? command.projectId
@@ -127,9 +128,12 @@ const makeOrchestrationEngine = Effect.gen(function* () {
     return {
       projectRoot: project.workspaceRoot,
       projectId: project.id,
-      intent: command.type as StaveAdmissionInput["intent"],
+      // An import creates a thread, so it answers to the creation rule.
+      intent: (command.type === "thread.import"
+        ? "thread.create"
+        : command.type) as StaveAdmissionInput["intent"],
       worktreePath:
-        (command.type === "thread.fork"
+        (command.type === "thread.fork" || command.type === "thread.import"
           ? command.thread.worktreePath
           : "worktreePath" in command
             ? command.worktreePath

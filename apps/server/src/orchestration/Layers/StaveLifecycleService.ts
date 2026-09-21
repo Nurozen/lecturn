@@ -40,6 +40,7 @@ function changesLifecycleEligibility(event: OrchestrationEvent): boolean {
     case "project.deleted":
     case "thread.created":
     case "thread.forked":
+    case "thread.imported":
     case "thread.deleted":
     case "thread.archived":
     case "thread.unarchived":

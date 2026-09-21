@@ -31,6 +31,11 @@ import {
   FilesystemBrowseError,
 } from "./filesystem.ts";
 import {
+  ExternalSessionsListError,
+  ExternalSessionsListInput,
+  ExternalSessionsListResult,
+} from "./externalSessions.ts";
+import {
   AssetAccessError,
   AssetCreateUrlInput,
   AssetCreateUrlResult,
@@ -264,6 +269,7 @@ export const WS_METHODS = {
 
   // Filesystem methods
   filesystemBrowse: "filesystem.browse",
+  externalSessionsList: "externalSessions.list",
   assetsCreateUrl: "assets.createUrl",
   attachmentsCreateUploadUrl: "attachments.createUploadUrl",
   attachmentsDelete: "attachments.delete",
@@ -994,6 +1000,12 @@ export const WsFilesystemBrowseRpc = Rpc.make(WS_METHODS.filesystemBrowse, {
   error: Schema.Union([FilesystemBrowseError, EnvironmentAuthorizationError]),
 });
 
+export const WsExternalSessionsListRpc = Rpc.make(WS_METHODS.externalSessionsList, {
+  payload: ExternalSessionsListInput,
+  success: ExternalSessionsListResult,
+  error: Schema.Union([ExternalSessionsListError, EnvironmentAuthorizationError]),
+});
+
 export const WsAssetsCreateUrlRpc = Rpc.make(WS_METHODS.assetsCreateUrl, {
   payload: AssetCreateUrlInput,
   success: AssetCreateUrlResult,
@@ -1491,6 +1503,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
+  WsExternalSessionsListRpc,
   WsAssetsCreateUrlRpc,
   WsAttachmentsCreateUploadUrlRpc,
   WsAttachmentsDeleteRpc,

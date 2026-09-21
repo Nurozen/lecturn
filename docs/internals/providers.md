@@ -126,6 +126,59 @@ session start that carries a `fork` input with a `ProviderAdapterValidationError
 silently starting a session that never saw the forked transcript. See
 [thread-forking.md](./thread-forking.md) for how the fork input is produced.
 
+## External sessions
+
+An external session is a provider session created outside Lecturn: Claude Code CLI or Claude
+Desktop sessions under the Claude home, and Codex CLI, Codex Desktop, or ChatGPT app threads under
+the Codex home. The read-only RPC `externalSessions.list` ([contract][external-contract], scope
+`orchestration:read`) lists them for one provider instance, optionally narrowed by `cwd` and
+`searchTerm`.
+
+The seam is an optional `listExternalSessions` on `ProviderInstance` in
+[`ProviderDriver.ts`][driver], paired with the `externalSessions` snapshot field
+(`supported` or `unsupported`). Absent means unsupported, on both sides. It sits on the instance,
+not the adapter, because it reads the instance's own session store.
+[`externalSessions.ts`][external-sessions] resolves the instance, passes the lister every resume
+cursor Lecturn has persisted (provider bindings plus the forks of imported threads that have not
+been sent to yet, for all instances, since instances can share a home; a lister skips cursors its
+own schema cannot parse), and shapes the rows. Failures are `provider-unsupported`,
+`provider-unavailable` (unknown or disabled instance), or `unreadable`.
+
+A second optional seam, `importExternalSession`, backs `thread.import`: it natively forks one
+listed session (a local operation, no auth and no model call) and returns the fork's resume
+cursor, the session's title and cwd, and a summary-level transcript that never carries tool inputs
+or outputs. A driver that sets it must also set `listExternalSessions`. The original session is
+never resumed or written. Callers validate before invoking it, since the fork stays on disk even
+if the import is later rejected. Flow, history rules, and per-provider notes are in
+[thread-forking.md](./thread-forking.md#importing-external-sessions).
+
+- **Claude** ([`ClaudeExternalSessions.ts`][claude-external]) calls the SDK's `listSessions` with
+  `includeProgrammatic: false`, which drops the sessions Lecturn creates, then removes any session
+  named by a known resume cursor. `origin` comes from the `entrypoint` field in the first 16 KiB of
+  the transcript, read only for the returned page; transcripts are never read in full. The SDK
+  lister reads `process.env`, so an instance with a custom Claude home reports `unsupported`.
+- **Codex** ([`CodexExternalSessions.ts`][codex-external]) opens a short-lived app-server, pages
+  `thread/list` newest first in fixed pages of 100 until the limit is filled or 1000 threads are
+  scanned, and closes it after each call, one call at a time per instance. Lecturn's threads are
+  hidden by `originator` and known resume cursors, not by `source`: desktop apps and Lecturn both
+  report `vscode`. Ephemeral and subagent threads are dropped too. The state-database-only list
+  mode is not used because it returns stale rows.
+
+Results are newest first and bounded: at most 100 rows per request, `title` and `firstPrompt`
+capped at 200 characters, search applied before the limit. `searchTerm` semantics differ per
+provider: Codex matches natively on the thread title, Claude matches title, first prompt, cwd and
+branch. `truncated` is true when more matching sessions exist than were returned, including when
+a lister stopped at its own scan cap.
+
+| Driver kind   | `externalSessions` | Source                                      | Importer                                               |
+| ------------- | ------------------ | ------------------------------------------- | ------------------------------------------------------ |
+| `codex`       | `supported`        | app-server `thread/list` on the Codex home  | app-server `thread/fork`, turns read from the fork     |
+| `claudeAgent` | `supported`        | SDK `listSessions` on the default home only | SDK `forkSession` beside the source, default home only |
+| `cursor`      | `unsupported`      | none                                        | none                                                   |
+| `grok`        | `unsupported`      | none                                        | none                                                   |
+| `opencode`    | `unsupported`      | none                                        | none                                                   |
+| `antigravity` | `unsupported`      | none                                        | none                                                   |
+
 ## Antigravity ownership and protocol
 
 [`AntigravityDriver`][antigravity] uses Google's official ACP executable. The instance config
@@ -423,6 +476,11 @@ when a request opens (approval) or user input is requested, via
 [provider-setup]: ../../packages/contracts/src/providerSetup.ts
 [opencode-server-owner]: ../../apps/server/src/provider/OpenCodeServerOwner.ts
 [adapter]: ../../apps/server/src/provider/Services/ProviderAdapter.ts
+[driver]: ../../apps/server/src/provider/ProviderDriver.ts
+[external-contract]: ../../packages/contracts/src/externalSessions.ts
+[external-sessions]: ../../apps/server/src/provider/externalSessions.ts
+[claude-external]: ../../apps/server/src/provider/Drivers/ClaudeExternalSessions.ts
+[codex-external]: ../../apps/server/src/provider/Drivers/CodexExternalSessions.ts
 [instances]: ../../apps/server/src/provider/Services/ProviderInstanceRegistry.ts
 [registry]: ../../apps/server/src/provider/Services/ProviderAdapterRegistry.ts
 [service]: ../../apps/server/src/provider/Layers/ProviderService.ts

@@ -6,7 +6,7 @@ import * as NodePath from "node:path";
 import { forkSession, type SessionStoreEntry } from "@anthropic-ai/claude-agent-sdk";
 import * as Schema from "effect/Schema";
 
-class ClaudeSessionNotFound extends Error {}
+export class ClaudeSessionNotFound extends Error {}
 
 const Uuid = Schema.String.check(Schema.isUUID());
 const isUuid = Schema.is(Uuid);
@@ -48,9 +48,16 @@ export async function forkClaudeSession(input: {
         throw error;
       }
       const entries: SessionStoreEntry[] = [];
-      for (const line of transcript.split("\n")) {
-        if (!line.trim()) continue;
-        const entry = decodeEntry(line);
+      const lines = transcript.split("\n").filter((line) => line.trim());
+      for (const [index, line] of lines.entries()) {
+        let entry;
+        try {
+          entry = decodeEntry(line);
+        } catch (error) {
+          // A session being appended to right now ends in a half-written line.
+          if (index === lines.length - 1) break;
+          throw error;
+        }
         if (isEntry(entry)) entries.push(entry);
       }
       const session = { directory, entries };

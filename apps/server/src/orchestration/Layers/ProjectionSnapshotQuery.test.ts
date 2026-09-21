@@ -3031,6 +3031,186 @@ projectionSnapshotLayer("ProjectionSnapshotQuery windowed thread detail", (it) =
     }),
   );
 
+  // An imported thread: turnless history stamped before the thread's
+  // createdAt, followed by `realTurnCount` ordinary turns one minute apart.
+  const threadImp = ThreadId.make("thread-imp");
+  const importedMessageIds = ["imp-msg-1", "imp-msg-2", "imp-msg-3"];
+  const importedActivityIds = ["imp-activity-1", "imp-activity-2"];
+  const seedImportedThread = Effect.fnUntraced(function* (realTurnCount: number) {
+    const sql = yield* SqlClient.SqlClient;
+
+    yield* sql`DELETE FROM projection_projects`;
+    yield* sql`DELETE FROM projection_threads`;
+    yield* sql`DELETE FROM projection_turns`;
+    yield* sql`DELETE FROM projection_thread_messages`;
+    yield* sql`DELETE FROM projection_thread_activities`;
+    yield* sql`DELETE FROM projection_state`;
+
+    yield* sql`
+      INSERT INTO projection_projects (
+        project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at
+      )
+      VALUES ('project-imp', 'Imported', '/tmp/project-imp', '[]',
+        '2026-03-01T00:00:00.000Z', '2026-03-01T00:00:00.000Z', NULL)
+    `;
+    const importedFrom =
+      '{"providerInstanceId":"claudeAgent","driverKind":"claudeAgent",' +
+      '"sessionId":"external-session-imp","cwd":"/tmp/project-imp","title":"External session",' +
+      '"importedAt":"2026-03-01T00:00:00.000Z","historyTruncated":false}';
+    yield* sql`
+      INSERT INTO projection_threads (
+        thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode,
+        latest_turn_id, pending_approval_count, pending_user_input_count,
+        has_actionable_proposed_plan, imported_from_json, created_at, updated_at, deleted_at
+      )
+      VALUES ('thread-imp', 'project-imp', 'Imported thread',
+        '{"provider":"codex","model":"gpt-5-codex"}', 'full-access', 'default',
+        ${realTurnCount === 0 ? null : `turn-${realTurnCount}`}, 0, 0, 0, ${importedFrom},
+        '2026-03-01T00:00:00.000Z', '2026-03-01T00:00:00.000Z', NULL)
+    `;
+
+    for (const [index, messageId] of importedMessageIds.entries()) {
+      const at = `2026-02-28T10:00:0${index * 2}.000Z`;
+      yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id, thread_id, turn_id, role, text, is_streaming, created_at, updated_at
+        )
+        VALUES (${messageId}, 'thread-imp', NULL, ${index % 2 === 0 ? "user" : "assistant"},
+          ${"imported " + messageId}, 0, ${at}, ${at})
+      `;
+    }
+    for (const [index, activityId] of importedActivityIds.entries()) {
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json, created_at
+        )
+        VALUES (${activityId}, 'thread-imp', NULL, 'tool', 'tool.completed', 'ran tool',
+          '{"title":"ran tool"}', ${`2026-02-28T10:00:0${index * 2 + 1}.000Z`})
+      `;
+    }
+
+    for (let turn = 1; turn <= realTurnCount; turn += 1) {
+      const at = `2026-03-01T00:${String(turn).padStart(2, "0")}:00.000Z`;
+      const turnId = `turn-${turn}`;
+      yield* sql`
+        INSERT INTO projection_turns (
+          thread_id, turn_id, pending_message_id, state, requested_at, started_at, completed_at,
+          checkpoint_files_json
+        )
+        VALUES ('thread-imp', ${turnId}, ${"user-" + turnId}, 'completed', ${at}, ${at}, ${at}, '[]')
+      `;
+      yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id, thread_id, turn_id, role, text, is_streaming, created_at, updated_at
+        )
+        VALUES (${"user-" + turnId}, 'thread-imp', NULL, 'user', 'prompt', 0, ${at}, ${at}),
+          (${"reply-" + turnId}, 'thread-imp', ${turnId}, 'assistant', 'reply', 0, ${at}, ${at})
+      `;
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json, created_at
+        )
+        VALUES (${"activity-" + turnId}, 'thread-imp', ${turnId}, 'tool', 'tool.completed',
+          'ran tool', '{"ok":true}', ${at})
+      `;
+    }
+
+    for (const projector of Object.values(ORCHESTRATION_PROJECTOR_NAMES)) {
+      yield* sql`
+        INSERT INTO projection_state (projector, last_applied_sequence, updated_at)
+        VALUES (${projector}, 9, '2026-03-01T00:00:00.000Z')
+      `;
+    }
+  });
+
+  it.effect("the page holding the oldest turn carries the turnless history before it", () =>
+    Effect.gen(function* () {
+      yield* seedImportedThread(1);
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+
+      const snapshot = Option.getOrThrow(
+        yield* snapshotQuery.getThreadDetailSnapshot(threadImp, { turnLimit: 20 }),
+      );
+      assert.deepEqual(
+        snapshot.thread.messages.map((message) => message.id),
+        [...importedMessageIds, "reply-turn-1", "user-turn-1"],
+      );
+      assert.deepEqual(
+        snapshot.thread.activities.map((activity) => activity.id),
+        [...importedActivityIds, "activity-turn-1"],
+      );
+      assert.equal(snapshot.page?.hasMore, false);
+      assert.equal(snapshot.page?.beforeCursor, null);
+    }),
+  );
+
+  it.effect("pages turnless pre-turn history exactly once, on the oldest page", () =>
+    Effect.gen(function* () {
+      yield* seedImportedThread(25);
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+
+      const firstPage = Option.getOrThrow(
+        yield* snapshotQuery.getThreadDetailSnapshot(threadImp, { turnLimit: 20 }),
+      );
+      assert.equal(firstPage.page?.hasMore, true);
+      assert.equal(firstPage.thread.messages.length, 40);
+      assert.equal(firstPage.thread.activities.length, 20);
+      for (const id of importedMessageIds) {
+        assert.notInclude(messageIds(firstPage), id);
+      }
+      for (const id of importedActivityIds) {
+        assert.notInclude(activityIds(firstPage), id);
+      }
+
+      const cursor = firstPage.page?.beforeCursor;
+      assert.isString(cursor);
+      if (typeof cursor !== "string") return;
+      const olderPage = Option.getOrThrow(
+        yield* snapshotQuery.getThreadDetailSnapshot(threadImp, {
+          turnLimit: 20,
+          beforeCursor: cursor,
+        }),
+      );
+      assert.equal(olderPage.page?.hasMore, false);
+      assert.deepEqual(
+        olderPage.thread.messages.slice(0, 3).map((message) => message.id),
+        importedMessageIds,
+      );
+      assert.deepEqual(
+        olderPage.thread.activities.slice(0, 2).map((activity) => activity.id),
+        importedActivityIds,
+      );
+
+      // Every row lands on exactly one page.
+      const allMessageIds = [...messageIds(firstPage), ...messageIds(olderPage)];
+      const allActivityIds = [...activityIds(firstPage), ...activityIds(olderPage)];
+      assert.equal(allMessageIds.length, 3 + 25 * 2);
+      assert.equal(new Set(allMessageIds).size, allMessageIds.length);
+      assert.equal(allActivityIds.length, 2 + 25);
+      assert.equal(new Set(allActivityIds).size, allActivityIds.length);
+    }),
+  );
+
+  it.effect("an imported thread with no turns yet returns its whole history", () =>
+    Effect.gen(function* () {
+      yield* seedImportedThread(0);
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+
+      const snapshot = Option.getOrThrow(
+        yield* snapshotQuery.getThreadDetailSnapshot(threadImp, { turnLimit: 20 }),
+      );
+      assert.deepEqual(
+        snapshot.thread.messages.map((message) => message.id),
+        importedMessageIds,
+      );
+      assert.deepEqual(
+        snapshot.thread.activities.map((activity) => activity.id),
+        importedActivityIds,
+      );
+      assert.equal(snapshot.page?.hasMore, false);
+    }),
+  );
+
   it.effect("surfaces fork lineage on wire shapes without exposing the provider source", () =>
     Effect.gen(function* () {
       const snapshotQuery = yield* ProjectionSnapshotQuery;

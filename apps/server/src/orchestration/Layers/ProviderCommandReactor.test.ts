@@ -10,6 +10,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderSetupError,
+  type ThreadImportSource,
 } from "@lecturn/contracts";
 import { createModelSelection } from "@lecturn/shared/model";
 import {
@@ -181,6 +182,7 @@ describe("ProviderCommandReactor", () => {
     readonly conversationForkRequiresAnchor?: boolean;
     readonly requiresNewThreadForModelChange?: boolean;
     readonly forkContextByThreadId?: Readonly<Record<string, ProjectionThreadForkContext>>;
+    readonly importSourceByThreadId?: Readonly<Record<string, ThreadImportSource>>;
     readonly providerBindings?: ReadonlyArray<ProviderRuntimeBinding>;
     readonly titleRegenerationCompletionDispatchFailures?: number;
     readonly titleRegenerationBeforeStart?: "one" | "two";
@@ -431,6 +433,8 @@ describe("ProviderCommandReactor", () => {
     // does not drive; tests seed it per thread and everything else delegates
     // to the real snapshot query.
     const forkContexts = new Map(Object.entries(input?.forkContextByThreadId ?? {}));
+    // Likewise the import source, which only the thread.import decider writes.
+    const importSources = new Map(Object.entries(input?.importSourceByThreadId ?? {}));
     const reactorSnapshotLayer = Layer.effect(
       ProjectionSnapshotQuery,
       Effect.gen(function* () {
@@ -442,6 +446,12 @@ describe("ProviderCommandReactor", () => {
             return seeded !== undefined
               ? Effect.succeed(Option.some(seeded))
               : real.getThreadForkContextById(threadId);
+          },
+          getThreadImportSourceById: (threadId: ThreadId) => {
+            const seeded = importSources.get(String(threadId));
+            return seeded !== undefined
+              ? Effect.succeed(Option.some(seeded))
+              : real.getThreadImportSourceById(threadId);
           },
         };
       }),
@@ -4432,6 +4442,95 @@ describe("ProviderCommandReactor", () => {
         providerInstanceId: ProviderInstanceId.make("codex_work"),
         resumeCursor: { opaque: "resume-1" },
       });
+    });
+  });
+
+  describe("imported thread first send", () => {
+    const importSource: ThreadImportSource = {
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      resumeCursor: { opaque: "import-fork-cursor" },
+    };
+
+    const dispatchTurnStart = (
+      harness: Awaited<ReturnType<typeof createHarness>>,
+      suffix: string,
+      modelSelection?: ModelSelection,
+    ) =>
+      harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make(`cmd-turn-start-import-${suffix}`),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId(`user-message-import-${suffix}`),
+            role: "user",
+            text: "continue the imported session",
+            attachments: [],
+          },
+          ...(modelSelection !== undefined ? { modelSelection } : {}),
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        }),
+      );
+
+    it("resumes the import fork's cursor, without a fork input, when the thread has no binding", async () => {
+      const harness = await createHarness({ importSourceByThreadId: { "thread-1": importSource } });
+
+      await dispatchTurnStart(harness, "a");
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+
+      const startInput = harness.startSession.mock.calls[0]?.[1];
+      expect(startInput).toMatchObject({
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        resumeCursor: { opaque: "import-fork-cursor" },
+      });
+      expect(startInput).not.toHaveProperty("fork");
+    });
+
+    it("fails the turn start when a different instance than the import's is started", async () => {
+      const harness = await createHarness({ importSourceByThreadId: { "thread-1": importSource } });
+
+      await dispatchTurnStart(harness, "b", {
+        instanceId: ProviderInstanceId.make("codex_work"),
+        model: "gpt-5-codex",
+      });
+      const failure = async () => {
+        const readModel = await harness.readModel();
+        return readModel.threads
+          .find((entry) => entry.id === ThreadId.make("thread-1"))
+          ?.activities.find((activity) => activity.kind === "provider.turn.start.failed");
+      };
+      await waitFor(async () => (await failure()) !== undefined);
+
+      // No cold session is started or bound, so switching back still resumes.
+      expect(harness.startSession.mock.calls.length).toBe(0);
+      expect(harness.sendTurn.mock.calls.length).toBe(0);
+      expect(await failure()).toMatchObject({
+        payload: { detail: expect.stringContaining("imported on provider instance 'codex'") },
+      });
+    });
+
+    it("leaves the cursor to the persisted binding once the thread has one", async () => {
+      const harness = await createHarness({
+        importSourceByThreadId: { "thread-1": importSource },
+        providerBindings: [
+          {
+            threadId: ThreadId.make("thread-1"),
+            provider: ProviderDriverKind.make("codex"),
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            resumeCursor: { opaque: "thread-own-cursor" },
+          },
+        ],
+      });
+
+      await dispatchTurnStart(harness, "c");
+      await waitFor(() => harness.startSession.mock.calls.length === 1);
+
+      // No request cursor: ProviderService resolves the persisted one.
+      const startInput = harness.startSession.mock.calls[0]?.[1];
+      expect(startInput).not.toHaveProperty("resumeCursor");
+      expect(startInput).not.toHaveProperty("fork");
     });
   });
 });

@@ -57,6 +57,8 @@ export const CLAUDE_PRESENTATION = {
   showInteractionModeToggle: true,
   conversationFork: "native",
   conversationForkRequiresAnchor: true,
+  // The driver turns this off for instances running against a custom home.
+  externalSessions: "supported",
 } as const;
 function toTitleCaseWords(value: string): string {
   const parts: Array<string> = [];

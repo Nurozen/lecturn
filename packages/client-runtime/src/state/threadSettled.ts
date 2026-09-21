@@ -1,5 +1,5 @@
 // @effect-diagnostics globalDate:off -- UI snooze presets use local calendar boundaries and Intl labels.
-import type { OrchestrationThreadShell } from "@lecturn/contracts";
+import { isImportedHistoryRow, type OrchestrationThreadShell } from "@lecturn/contracts";
 
 /**
  * A queued turn start lives for at most this long: session adoption takes
@@ -11,6 +11,11 @@ import type { OrchestrationThreadShell } from "@lecturn/contracts";
 export const QUEUED_TURN_START_GRACE_MS = 2 * 60 * 1_000;
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
+type QueuedTurnStartShell = Pick<
+  OrchestrationThreadShell,
+  "latestUserMessageAt" | "latestTurn" | "session" | "importedFrom"
+>;
+
 /**
  * A user message no turn has picked up yet: the turn.start command was
  * dispatched (message-sent + turn-start-requested) but no session has
@@ -21,10 +26,14 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
  * within the adoption grace window.
  */
 export function hasQueuedTurnStart(
-  shell: Pick<OrchestrationThreadShell, "latestUserMessageAt" | "latestTurn" | "session">,
+  shell: QueuedTurnStartShell,
   options: { readonly now: string },
 ): boolean {
   if (shell.latestUserMessageAt == null) return false;
+  // An imported user message was never sent here: no turn will adopt it.
+  if (isImportedHistoryRow(shell, { turnId: null, createdAt: shell.latestUserMessageAt })) {
+    return false;
+  }
   // A failed session start clears the queued state: the failure is already
   // visible (status edge / error).
   if (shell.session?.status === "error") return false;
@@ -102,7 +111,12 @@ export function threadRaisedHandWhileSnoozed(shell: ThreadSnoozeShell): boolean 
 export function canSnooze(
   shell: Pick<
     OrchestrationThreadShell,
-    "hasPendingApprovals" | "hasPendingUserInput" | "latestUserMessageAt" | "latestTurn" | "session"
+    | "hasPendingApprovals"
+    | "hasPendingUserInput"
+    | "latestUserMessageAt"
+    | "latestTurn"
+    | "session"
+    | "importedFrom"
   >,
   options: { readonly now: string },
 ): boolean {

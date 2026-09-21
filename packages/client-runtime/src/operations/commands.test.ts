@@ -3,6 +3,7 @@ import {
   EnvironmentId,
   ORCHESTRATION_WS_METHODS,
   ProjectId,
+  ProviderInstanceId,
   ThreadId,
   TurnId,
   type ClientOrchestrationCommand,
@@ -26,6 +27,7 @@ import {
   archiveThread,
   createProject,
   forkThread,
+  importThread,
   settleThread,
   stopThreadSession,
   unsettleThread,
@@ -126,6 +128,37 @@ describe("environment commands", () => {
           workspace: "inherit",
           createdAt: "2026-06-06T00:02:00.000Z",
         },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("dispatches thread.import with timestamped command metadata", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+      const input = {
+        threadId: ThreadId.make("thread-imported"),
+        projectId: ProjectId.make("project-1"),
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        sessionId: "external-session-1",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-sonnet-4-5",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdAt: "2026-06-06T00:03:00.000Z",
+      } as const;
+
+      const result = yield* importThread(input).pipe(
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+      );
+
+      expect(result).toEqual({ sequence: 1 });
+      expect(dispatched).toEqual([
+        { ...input, type: "thread.import", commandId: "00000000-0000-4000-8000-000000000000" },
       ]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
   );
