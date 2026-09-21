@@ -44,6 +44,7 @@ import {
   type ProviderDriver,
   type ProviderInstance,
 } from "../ProviderDriver.ts";
+import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
@@ -57,7 +58,15 @@ import {
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
 } from "../providerUpdateSettings.ts";
-import { makeClaudeCapabilitiesCacheKey, makeClaudeContinuationGroupKey } from "./ClaudeHome.ts";
+import {
+  claudeExternalSessionsConfigDir,
+  makeClaudeExternalSessionsLister,
+} from "./ClaudeExternalSessions.ts";
+import {
+  makeClaudeCapabilitiesCacheKey,
+  makeClaudeContinuationGroupKey,
+  makeClaudeEnvironment,
+} from "./ClaudeHome.ts";
 import { discoverClaudeSkills } from "./ClaudeSkills.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
@@ -127,12 +136,21 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         env: processEnv,
       });
       const continuationGroupKey = yield* makeClaudeContinuationGroupKey(effectiveConfig);
-      const stampIdentity = withInstanceIdentity({
+      // External sessions are only listable from the server process's own
+      // Claude home, so a custom-home instance reports the capability off.
+      const externalSessionsConfigDir = claudeExternalSessionsConfigDir(
+        yield* makeClaudeEnvironment(effectiveConfig, processEnv),
+      );
+      const stampInstanceIdentity = withInstanceIdentity({
         instanceId,
         driverKind: DRIVER_KIND,
         displayName,
         accentColor,
         continuationGroupKey,
+      });
+      const stampIdentity = (draft: ServerProviderDraft) => ({
+        ...stampInstanceIdentity(draft),
+        externalSessions: externalSessionsConfigDir === undefined ? "unsupported" : "supported",
       });
 
       // One per instance: the status probe writes the model-scoped bucket
@@ -248,6 +266,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         enabled,
         snapshot,
         snapshotForCwd,
+        ...(externalSessionsConfigDir === undefined
+          ? {}
+          : {
+              listExternalSessions: makeClaudeExternalSessionsLister({
+                instanceId,
+                configDir: externalSessionsConfigDir,
+              }),
+            }),
         adapter,
         textGeneration,
       } satisfies ProviderInstance;

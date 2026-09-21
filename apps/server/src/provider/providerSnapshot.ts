@@ -66,6 +66,9 @@ export interface ServerProviderPresentation {
   readonly requiresNewThreadForModelChange?: boolean;
   readonly conversationFork?: "native" | "unsupported";
   readonly conversationForkRequiresAnchor?: boolean;
+  // Must agree with whether the driver's `ProviderInstance` carries a
+  // `listExternalSessions` lister.
+  readonly externalSessions?: "supported" | "unsupported";
 }
 
 export type ServerProviderDraft = Omit<ServerProvider, "instanceId" | "driver">;
@@ -253,6 +256,9 @@ export function buildServerProvider(input: {
       : {}),
     ...(input.presentation.conversationForkRequiresAnchor !== undefined
       ? { conversationForkRequiresAnchor: input.presentation.conversationForkRequiresAnchor }
+      : {}),
+    ...(input.presentation.externalSessions
+      ? { externalSessions: input.presentation.externalSessions }
       : {}),
     enabled: input.enabled,
     installed: input.probe.installed,

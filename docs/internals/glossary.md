@@ -129,6 +129,10 @@ The backend agent runtime that actually performs work. Six drivers ship built in
 
 The live provider-backed runtime attached to a thread. Session shape is in [the orchestration contracts][1], and lifecycle is managed in [ProviderService.ts][14].
 
+#### External session
+
+A provider session created outside Lecturn, by a provider CLI or desktop app writing to the same provider home. The read-only `externalSessions.list` RPC lists them per provider instance and hides the sessions Lecturn started itself. Shape is in [the external session contracts][29]; per-provider behavior is in the [provider architecture][16] external sessions section.
+
 #### Runtime mode
 
 The safety/access mode for a thread or session. [The contracts][1] define four values: `approval-required`, `auto-accept-edits`, `auto`, and `full-access`. See [permission modes][18].
@@ -250,3 +254,4 @@ See [Teams architecture](teams.md) for enforcement boundaries.
 [26]: ../user/environment-theme.md
 [27]: ../../apps/server/src/orchestration/threadFork.ts
 [28]: ./stave-integration.md
+[29]: ../../packages/contracts/src/externalSessions.ts

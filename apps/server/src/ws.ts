@@ -120,6 +120,7 @@ import {
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import * as ProviderService from "./provider/Services/ProviderService.ts";
 import * as ProviderSessionDirectory from "./provider/Services/ProviderSessionDirectory.ts";
+import { listExternalSessions } from "./provider/externalSessions.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
 import { ProviderInstanceRegistry } from "./provider/Services/ProviderInstanceRegistry.ts";
@@ -2783,6 +2784,18 @@ const makeWsRpcLayer = (
               ),
             ),
             { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.externalSessionsList]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.externalSessionsList,
+            listExternalSessions(input).pipe(
+              Effect.provideService(ProviderInstanceRegistry, providerInstances),
+              Effect.provideService(
+                ProviderSessionDirectory.ProviderSessionDirectory,
+                providerSessionDirectory,
+              ),
+            ),
+            { "rpc.aggregate": "provider" },
           ),
         [WS_METHODS.attachmentsCreateUploadUrl]: (input) =>
           observeRpcEffect(WS_METHODS.attachmentsCreateUploadUrl, issueAttachmentUploadUrl(input), {

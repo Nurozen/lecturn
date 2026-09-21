@@ -732,7 +732,7 @@ function asRuntimeRequestId(value: ApprovalRequestId): RuntimeRequestId {
   return RuntimeRequestId.make(value);
 }
 
-function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undefined {
+export function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undefined {
   if (!resumeCursor || typeof resumeCursor !== "object") {
     return undefined;
   }
