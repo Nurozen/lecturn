@@ -23,7 +23,8 @@ import {
   TrimmedString,
   TurnId,
 } from "./baseSchemas.ts";
-import { ProviderInstanceId } from "./providerInstance.ts";
+import { ExternalSessionImportFailure } from "./externalSessions.ts";
+import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -526,6 +527,55 @@ export const ThreadForkProviderSource = Schema.Struct({
 });
 export type ThreadForkProviderSource = typeof ThreadForkProviderSource.Type;
 
+/** Where an imported thread came from: a provider session created outside Lecturn. */
+export const ThreadImportOrigin = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  driverKind: ProviderDriverKind,
+  // The original external session. Never resumed or modified: the thread runs
+  // on a native fork of it (see ThreadImportSource).
+  sessionId: TrimmedNonEmptyString,
+  cwd: TrimmedNonEmptyString,
+  title: TrimmedString,
+  importedAt: IsoDateTime,
+  // The session held more history than the import carried over.
+  historyTruncated: Schema.Boolean,
+});
+export type ThreadImportOrigin = typeof ThreadImportOrigin.Type;
+
+/**
+ * Server-only provider session an imported thread runs on, persisted in
+ * `projection_threads.import_source_json`: the native fork of the external
+ * session, cut at import time, which the thread's first send resumes. Never
+ * exposed on thread shells or details.
+ */
+export const ThreadImportSource = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  // The fork's native session cursor (opaque per adapter).
+  resumeCursor: Schema.Unknown,
+});
+export type ThreadImportSource = typeof ThreadImportSource.Type;
+
+/**
+ * Whether a message or activity row is history an import copied in, rather
+ * than work done in Lecturn. Imported rows belong to no turn and are stamped
+ * at or before `importedFrom.importedAt`; everything done in Lecturn is newer.
+ * The boundary is the import time, not the thread's `createdAt`, because a
+ * fork of an imported thread inherits `importedFrom` along with the rows, and
+ * its own creation time would also cover the parent's turnless messages.
+ * Server projections and clients share this so a revert never prunes imported
+ * history and a queued-turn check never counts it.
+ */
+export function isImportedHistoryRow(
+  thread: { readonly importedFrom?: ThreadImportOrigin | null | undefined },
+  row: { readonly turnId: string | null; readonly createdAt: string },
+): boolean {
+  return (
+    thread.importedFrom != null &&
+    row.turnId === null &&
+    Date.parse(row.createdAt) <= Date.parse(thread.importedFrom.importedAt)
+  );
+}
+
 export const ProjectionThreadTurnStatus = Schema.Literals([
   "running",
   "completed",
@@ -585,6 +635,9 @@ export const OrchestrationThread = Schema.Struct({
   // Lineage of a forked thread. Optional so payloads from pre-fork servers
   // and cached snapshots still decode.
   forkedFrom: Schema.optional(Schema.NullOr(ThreadForkOrigin)),
+  // Origin of a thread imported from an external provider session. Optional
+  // for the same reason as forkedFrom.
+  importedFrom: Schema.optional(Schema.NullOr(ThreadImportOrigin)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   // Detail-window fork points. Absent on older servers and shell-only snapshots.
   completedTurns: Schema.optional(Schema.Array(OrchestrationCompletedTurn)),
@@ -671,6 +724,9 @@ export const OrchestrationThreadShell = Schema.Struct({
   // Lineage of a forked thread. Optional so payloads from pre-fork servers
   // and cached snapshots still decode.
   forkedFrom: Schema.optional(Schema.NullOr(ThreadForkOrigin)),
+  // Origin of a thread imported from an external provider session. Optional
+  // for the same reason as forkedFrom.
+  importedFrom: Schema.optional(Schema.NullOr(ThreadImportOrigin)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -1142,6 +1198,58 @@ const ThreadForkCommand = Schema.Struct({
   }),
   forkedFrom: ThreadForkOrigin,
   forkSource: Schema.NullOr(ThreadForkProviderSource),
+  // The parent's import origin, when the fork keeps imported history rows.
+  importedFrom: Schema.optional(Schema.NullOr(ThreadImportOrigin)),
+  history: ThreadForkHistory,
+});
+
+// Client wire shape of an import request: bind a new thread to a native fork
+// of a session listed by externalSessions.list. Lives in
+// ClientOrchestrationCommand only; the server materializes it (forking the
+// session and reading its transcript) before dispatch.
+const ClientThreadImportCommand = Schema.Struct({
+  type: Schema.Literal("thread.import"),
+  commandId: CommandId,
+  // The new thread id, minted by the client.
+  threadId: ThreadId,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  // The external session to import, as listed by externalSessions.list.
+  sessionId: TrimmedNonEmptyString,
+  // Absent falls back to the external session's title.
+  title: Schema.optional(TrimmedNonEmptyString),
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
+  ),
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
+// Server-materialized import command, sharing the "thread.import" literal with
+// the client shape the way the fork pair does. Lives in
+// DispatchableClientOrchestrationCommand only; the ws dispatcher is its sole
+// producer.
+const ThreadImportCommand = Schema.Struct({
+  type: Schema.Literal("thread.import"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+  thread: Schema.Struct({
+    projectId: ProjectId,
+    title: TrimmedNonEmptyString,
+    modelSelection: ModelSelection,
+    runtimeMode: RuntimeMode,
+    interactionMode: ProviderInteractionMode,
+    branch: Schema.NullOr(TrimmedNonEmptyString),
+    worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  }),
+  importedFrom: ThreadImportOrigin,
+  importSource: ThreadImportSource,
+  // Imported rows belong to no Lecturn turn: every turnId is null and
+  // `turns` is empty.
   history: ThreadForkHistory,
 });
 
@@ -1198,6 +1306,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectDeleteCommand,
   ThreadCreateCommand,
   ThreadForkCommand,
+  ThreadImportCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
@@ -1227,6 +1336,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectDeleteCommand,
   ThreadCreateCommand,
   ClientThreadForkCommand,
+  ClientThreadImportCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
@@ -1389,6 +1499,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.turn-diff-completed",
   "thread.activity-appended",
   "thread.forked",
+  "thread.imported",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -1646,12 +1757,26 @@ export const ThreadForkedPayload = Schema.Struct({
   // Server-only provider snapshot for the child's first send; never mapped
   // onto wire thread shapes.
   forkSource: Schema.NullOr(ThreadForkProviderSource),
+  // Inherited from an imported parent so the child's copy of the imported
+  // rows stays protected (see isImportedHistoryRow). Optional so events
+  // recorded before imports existed still decode.
+  importedFrom: Schema.optional(Schema.NullOr(ThreadImportOrigin)),
   history: ThreadForkHistory,
   // The fork inherits the parent's linked pull request. Optional so events
   // recorded by pre-fork servers still decode.
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
 });
 export type ThreadForkedPayload = typeof ThreadForkedPayload.Type;
+
+export const ThreadImportedPayload = Schema.Struct({
+  threadId: ThreadId,
+  importedFrom: ThreadImportOrigin,
+  // Server-only fork cursor for the thread's first send; never mapped onto
+  // wire thread shapes.
+  importSource: ThreadImportSource,
+  history: ThreadForkHistory,
+});
+export type ThreadImportedPayload = typeof ThreadImportedPayload.Type;
 
 /**
  * Which client connection dispatched the command that produced an event.
@@ -1842,6 +1967,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.forked"),
     payload: ThreadForkedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.imported"),
+    payload: ThreadImportedPayload,
   }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;
@@ -2093,6 +2223,9 @@ export class OrchestrationDispatchCommandError extends Schema.TaggedErrorClass<O
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),
     bootstrapThreadDisposition: Schema.optional(Schema.Literal("deleted")),
+    // Why a thread.import could not be materialized, so clients can explain
+    // the failure without parsing the message.
+    threadImportFailure: Schema.optional(ExternalSessionImportFailure),
   },
 ) {}
 

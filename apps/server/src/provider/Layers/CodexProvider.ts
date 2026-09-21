@@ -58,6 +58,7 @@ export const CODEX_PRESENTATION = {
   displayName: "Codex",
   showInteractionModeToggle: true,
   conversationFork: "native",
+  externalSessions: "supported",
 } as const;
 
 export interface CodexAppServerProviderSnapshot {
@@ -326,10 +327,17 @@ const requestAllCodexModels = Effect.fn("requestAllCodexModels")(function* (
   return models;
 });
 
+/**
+ * The client name Lecturn sends in `initialize`. Codex records it as the
+ * `originator` of every thread Lecturn starts, which is how the external
+ * session lister tells Lecturn's own threads from the desktop apps'.
+ */
+export const LECTURN_CODEX_CLIENT_NAME = "lecturn_desktop";
+
 export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
   return {
     clientInfo: {
-      name: "lecturn_desktop",
+      name: LECTURN_CODEX_CLIENT_NAME,
       title: "Lecturn Desktop",
       version: packageJson.version,
     },

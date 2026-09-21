@@ -6,6 +6,7 @@ import {
   EventId,
   MessageId,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
   TurnId,
@@ -1416,6 +1417,45 @@ describe("applyThreadDetailEvent", () => {
         const result = revertTo(threeTurnThread, 0);
         if (result.kind !== "updated") throw new Error("Expected revert");
         expect(result.thread.messages).toEqual([]);
+      });
+
+      it("keeps imported history, user messages included, through a revert to turn 0", () => {
+        // Imported rows carry no turn id and predate importedAt. Shaped like a
+        // fork of an imported thread cut after turn 1: the origin is inherited
+        // and the child's createdAt is newer than the parent's turnless user-1,
+        // which must still go with its turn.
+        const importedThread: OrchestrationThread = {
+          ...threeTurnThread,
+          createdAt: "2026-04-01T01:45:00.000Z",
+          importedFrom: {
+            providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+            driverKind: ProviderDriverKind.make("claudeAgent"),
+            sessionId: "external-session",
+            cwd: "/repo",
+            title: "External session",
+            importedAt: "2026-04-01T00:30:00.000Z",
+            historyTruncated: false,
+          },
+          messages: [
+            message("imported-user", "user", null, "2026-03-31T10:00:00.000Z"),
+            message("imported-asst", "assistant", null, "2026-03-31T10:00:01.000Z"),
+            ...threeTurnThread.messages,
+          ],
+        };
+        const toFirstTurn = revertTo(importedThread, 1);
+        if (toFirstTurn.kind !== "updated") throw new Error("Expected revert");
+        expect(toFirstTurn.thread.messages.map((entry) => entry.id)).toEqual([
+          "imported-user",
+          "imported-asst",
+          "user-1",
+          "asst-1",
+        ]);
+        const toStart = revertTo(importedThread, 0);
+        if (toStart.kind !== "updated") throw new Error("Expected revert");
+        expect(toStart.thread.messages.map((entry) => entry.id)).toEqual([
+          "imported-user",
+          "imported-asst",
+        ]);
       });
 
       it("keeps earlier turns intact across a second revert", () => {

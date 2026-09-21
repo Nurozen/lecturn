@@ -204,6 +204,7 @@ describe("conversationFork capability/presentation parity", () => {
       },
     });
     expect(snapshot.conversationFork).toBe(presentation.conversationFork);
+    expect(snapshot.externalSessions).toBe(presentation.externalSessions);
     expect(snapshot.conversationForkRequiresAnchor ?? false).toBe(
       "conversationForkRequiresAnchor" in presentation &&
         presentation.conversationForkRequiresAnchor,

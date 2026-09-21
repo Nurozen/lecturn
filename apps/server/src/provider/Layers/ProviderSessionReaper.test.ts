@@ -238,6 +238,8 @@ describe("ProviderSessionReaper", () => {
           getInferenceTurnPairs: () => Effect.succeed([]),
           listThreadTurnsById: () => Effect.die("unused"),
           getThreadForkContextById: () => Effect.die("unused"),
+          getThreadImportSourceById: () => Effect.die("unused"),
+          listThreadImportSources: () => Effect.die("unused"),
           listThreadIdsByWorktreePath: () => Effect.die("unused"),
           searchThreads: () => Effect.succeed({ matches: [] }),
         }),

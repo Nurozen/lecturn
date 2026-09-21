@@ -35,6 +35,7 @@ export const ANTIGRAVITY_PRESENTATION = {
   showInteractionModeToggle: false,
   conversationFork: "unsupported",
   conversationForkRequiresAnchor: false,
+  externalSessions: "unsupported",
 } as const;
 
 const EMPTY_MODEL_CAPABILITIES = createModelCapabilities({ optionDescriptors: [] });

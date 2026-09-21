@@ -12,6 +12,7 @@ import {
   type CreateThreadInput,
   type DeleteThreadInput,
   type ForkThreadInput,
+  type ImportThreadInput,
   type InterruptThreadTurnInput,
   type RespondToThreadApprovalInput,
   type RespondToThreadUserInputInput,
@@ -33,6 +34,7 @@ import {
   createThread,
   deleteThread,
   forkThread,
+  importThread,
   interruptThreadTurn,
   respondToThreadApproval,
   respondToThreadUserInput,
@@ -58,6 +60,7 @@ export type {
   CreateThreadInput,
   DeleteThreadInput,
   ForkThreadInput,
+  ImportThreadInput,
   InterruptThreadTurnInput,
   RespondToThreadApprovalInput,
   RespondToThreadUserInputInput,
@@ -98,6 +101,13 @@ export function createThreadEnvironmentAtoms<R, E>(
     fork: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:fork",
       execute: (input: ForkThreadInput) => forkThread(input),
+      scheduler,
+      concurrency,
+    }),
+    // Import input's threadId is the new thread's id, minted by the client.
+    import: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:import",
+      execute: (input: ImportThreadInput) => importThread(input),
       scheduler,
       concurrency,
     }),

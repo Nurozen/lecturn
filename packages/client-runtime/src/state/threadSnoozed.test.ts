@@ -1,5 +1,5 @@
 // @effect-diagnostics globalDate:off -- Tests exercise local calendar snooze boundaries.
-import { ThreadId } from "@lecturn/contracts";
+import { ProviderDriverKind, ProviderInstanceId, ThreadId } from "@lecturn/contracts";
 import { TurnId } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -65,7 +65,7 @@ function makeShell(input: {
 
 type QueuedTurnShell = Pick<
   OrchestrationThreadShell,
-  "latestUserMessageAt" | "latestTurn" | "session"
+  "latestUserMessageAt" | "latestTurn" | "session" | "importedFrom"
 >;
 
 function makeQueuedTurnShell(overrides: Partial<QueuedTurnShell> = {}): QueuedTurnShell {
@@ -248,6 +248,31 @@ describe("hasQueuedTurnStart", () => {
     });
     expect(hasQueuedTurnStart(adopted, { now: NOW })).toBe(false);
     expect(hasQueuedTurnStart(failed, { now: NOW })).toBe(false);
+  });
+
+  it("never treats an imported user message as a queued turn start", () => {
+    const importedFrom = {
+      providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+      driverKind: ProviderDriverKind.make("claudeAgent"),
+      sessionId: "external-session",
+      cwd: "/repo",
+      title: "External session",
+      importedAt: "2026-04-10T11:59:30.000Z",
+      historyTruncated: false,
+    };
+    // The external session's last prompt is a minute old when it is imported.
+    const justImported = makeQueuedTurnShell({
+      importedFrom,
+      latestUserMessageAt: "2026-04-10T11:59:00.000Z",
+    });
+    expect(hasQueuedTurnStart(justImported, { now: NOW })).toBe(false);
+    // A message sent in Lecturn afterwards queues like on any thread.
+    expect(
+      hasQueuedTurnStart(
+        { ...justImported, latestUserMessageAt: "2026-04-10T11:59:45.000Z" },
+        { now: NOW },
+      ),
+    ).toBe(true);
   });
 
   it("bounds future client clock skew", () => {

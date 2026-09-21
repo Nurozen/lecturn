@@ -33,6 +33,7 @@ export type UpdateProjectInput = CommandInput<"project.meta.update">;
 export type DeleteProjectInput = CommandInput<"project.delete">;
 export type CreateThreadInput = CommandInput<"thread.create">;
 export type ForkThreadInput = CommandInput<"thread.fork">;
+export type ImportThreadInput = CommandInput<"thread.import">;
 export type DeleteThreadInput = CommandInput<"thread.delete">;
 export type ArchiveThreadInput = CommandInput<"thread.archive">;
 export type UnarchiveThreadInput = CommandInput<"thread.unarchive">;
@@ -138,6 +139,18 @@ export const forkThread: (input: ForkThreadInput) => CommandEffect = Effect.fn(
   return yield* dispatch({
     ...input,
     type: "thread.fork",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const importThread: (input: ImportThreadInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.importThread",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.import",
     commandId: metadata.commandId,
     createdAt: metadata.createdAt,
   });
