@@ -14,6 +14,12 @@ Open **Settings → Billing** to check your signed-in account's Connect access a
 
 Your browser and desktop can be signed in to different accounts. Check the account email before managing a subscription. Returning from Checkout alone does not activate access; Lecturn must receive payment confirmation.
 
+## Choosing an account
+
+If your web or desktop client supports multiple signed-in Connect accounts, the **Account** picker in account settings chooses whose subscription you see. Billing and Teams keep the same choice while the dialog is open. The initial choice follows the open thread's account, then your last choice. An account that needs sign-in cannot be selected until you sign in again.
+
+Changing this picker does not move environments or transfer a subscription. When you open billing in your browser, check that the same account is selected there. Signing out from billing signs out the selected account; other signed-in accounts stay connected.
+
 ## iPhone and iPad
 
 Open **Settings** to check Connect access, managed environment usage and any access end date. Refresh the status after an account change. The iOS app is a free companion: it uses your existing account access and does not sell subscriptions or provide payment links.

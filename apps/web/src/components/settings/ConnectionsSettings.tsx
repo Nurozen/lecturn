@@ -127,6 +127,7 @@ import {
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { useCloudLinkController } from "~/cloud/useCloudLinkController";
 import { ConnectSubscriptionGate } from "../cloud/ConnectSubscriptionGate";
+import { useConnectAccountPicker } from "../clerk/ConnectAccountPicker";
 import { authEnvironment } from "~/state/auth";
 import { environmentCatalog } from "~/connection/catalog";
 import {
@@ -1632,6 +1633,7 @@ function CloudLinkSwitch({
 }
 
 function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: boolean }) {
+  const account = useConnectAccountPicker("publish", { label: "Publish as", labelHidden: true });
   const {
     isSignedIn,
     linkState: primaryCloudLinkState,
@@ -1641,10 +1643,11 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     linked,
     accountMismatchMessage,
     accountMismatchAction,
+    unlinkBlocked,
     reconcileCloudState,
     subscriptionRequired,
     checkSubscription,
-  } = useCloudLinkController();
+  } = useCloudLinkController({ accountId: account.accountId, onSelectAccount: account.select });
   const [isUpdating, setIsUpdating] = useState(false);
   const [isUpdatingPreference, setIsUpdatingPreference] = useState(false);
   const [confirmUnlink, setConfirmUnlink] = useState(false);
@@ -1694,10 +1697,32 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     setIsUpdatingPreference(false);
   };
 
+  const unlinkButton = (
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={isBusy || unlinkBlocked}
+      onClick={() => setConfirmUnlink(true)}
+    >
+      Unlink environment
+    </Button>
+  );
+
   return (
     <>
       {subscriptionRequired ? (
-        <ConnectSubscriptionGate onRefresh={checkSubscription} preserveChoices={false} />
+        <ConnectSubscriptionGate
+          accountId={account.accountId}
+          onRefresh={checkSubscription}
+          preserveChoices={false}
+        />
+      ) : null}
+      {account.picker ? (
+        <SettingsRow
+          title="Publish as"
+          description="The Lecturn Connect account this computer is published under."
+          control={account.picker}
+        />
       ) : null}
       {window.desktopBridge ? (
         <SettingsRow
@@ -1727,18 +1752,14 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
           }
           control={
             accountMismatchAction ? (
-              <Button variant="outline" size="sm" onClick={accountMismatchAction.run}>
-                <span className="max-w-56 truncate">{accountMismatchAction.label}</span>
-              </Button>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={accountMismatchAction.run}>
+                  <span className="max-w-56 truncate">{accountMismatchAction.label}</span>
+                </Button>
+                {unlinkButton}
+              </div>
             ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={isBusy || Boolean(accountMismatchMessage)}
-                onClick={() => setConfirmUnlink(true)}
-              >
-                Unlink environment
-              </Button>
+              unlinkButton
             )
           }
         />

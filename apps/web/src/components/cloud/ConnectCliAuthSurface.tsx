@@ -5,15 +5,26 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   buildConnectCliClerkAuthorizeUrl,
   connectCliSignInRedirectUrl,
+  decideConnectCliAuthorizeStep,
+  forgetConnectCliAuthAccount,
+  leaveForConnectCliAuthorize,
+  nameConnectCliAuthorizedAccount,
+  readConnectCliAuthAccount,
   readConnectCliAuthState,
   readConnectCliCallbackResult,
   rememberConnectCliAuthState,
 } from "../../cloud/connectCliAuth";
+import { connectMultiAccount } from "../../cloud/publicConfig";
+import { withActiveAccount } from "../../cloud/withActiveAccount";
 import { openConnectSignIn } from "../../cloud/singleAccountGuard";
 import { isElectron } from "../../env";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { AuthSurfaceShell } from "../auth/AuthSurfaceShell";
 import { resolveClerkSignInProps } from "../clerk/authRedirect";
+import {
+  useConnectAccountPicker,
+  useKnownAccountsToChooseFrom,
+} from "../clerk/ConnectAccountPicker";
 import { Button } from "../ui/button";
 
 function ConnectCliAuthMessage({
@@ -57,6 +68,20 @@ export function ConnectCliAuthorizeSurface() {
   const { isLoaded, isSignedIn } = useAuth();
   const signInOpened = useRef(false);
   const redirecting = useRef(false);
+  const known = useKnownAccountsToChooseFrom();
+  const account = useConnectAccountPicker("cli-authorize", { label: "Authorize as" });
+  const [confirmedAccountId, setConfirmedAccountId] = useState<string | null>(null);
+  const [switchError, setSwitchError] = useState<string | null>(null);
+  const step = decideConnectCliAuthorizeStep({
+    isLoaded,
+    isSignedIn: Boolean(isSignedIn),
+    multiAccountEnabled: connectMultiAccount,
+    knownAccountIds: known.accountIds,
+    knownAccountsSynced: known.synced,
+    confirmedAccountId,
+  });
+  const stepTag = step._tag;
+  const redirectAccountId = step._tag === "redirect" ? step.accountId : null;
 
   const openSignIn = useCallback(() => {
     if (!request) {
@@ -75,14 +100,17 @@ export function ConnectCliAuthorizeSurface() {
   }, [clerk, request]);
 
   useEffect(() => {
-    if (!request || !isLoaded || redirecting.current) {
+    if (!request || redirecting.current) {
       return;
     }
-    if (!isSignedIn) {
+    if (stepTag === "sign-in") {
       if (!signInOpened.current) {
         signInOpened.current = true;
         openSignIn();
       }
+      return;
+    }
+    if (stepTag !== "redirect") {
       return;
     }
     const authorizeUrl = buildConnectCliClerkAuthorizeUrl(request);
@@ -90,9 +118,18 @@ export function ConnectCliAuthorizeSurface() {
       return;
     }
     redirecting.current = true;
-    rememberConnectCliAuthState(request.state);
-    window.location.assign(authorizeUrl);
-  }, [isLoaded, isSignedIn, openSignIn, request]);
+    // Clerk authorizes its active account, so the chosen one is made active first.
+    void leaveForConnectCliAuthorize({
+      state: request.state,
+      accountId: redirectAccountId,
+      asAccount: withActiveAccount,
+      navigate: () => window.location.assign(authorizeUrl),
+    }).catch((cause: unknown) => {
+      redirecting.current = false;
+      setConfirmedAccountId(null);
+      setSwitchError(cause instanceof Error ? cause.message : "Could not switch accounts.");
+    });
+  }, [openSignIn, redirectAccountId, request, stepTag]);
 
   if (!request) {
     return (
@@ -112,11 +149,33 @@ export function ConnectCliAuthorizeSurface() {
         }
         title="Connecting your terminal"
         description={
-          isSignedIn
-            ? "Redirecting to authorize Lecturn Connect for your CLI…"
-            : "Sign in to continue authorizing Lecturn Connect for your CLI."
+          stepTag === "choose"
+            ? "Choose the Lecturn Connect account your terminal connects as."
+            : isSignedIn
+              ? "Redirecting to authorize Lecturn Connect for your CLI…"
+              : "Sign in to continue authorizing Lecturn Connect for your CLI."
         }
       />
+      {stepTag === "choose" ? (
+        <div className="mt-6 space-y-4">
+          {account.picker}
+          {switchError ? (
+            <p role="alert" className="text-sm text-destructive">
+              {switchError}
+            </p>
+          ) : null}
+          <Button
+            type="button"
+            disabled={account.accountId == null}
+            onClick={() => {
+              setSwitchError(null);
+              setConfirmedAccountId(account.accountId ?? null);
+            }}
+          >
+            {account.email ? `Continue as ${account.email}` : "Continue"}
+          </Button>
+        </div>
+      ) : null}
       {isLoaded && !isSignedIn ? (
         <div className="mt-6">
           <Button type="button" onClick={openSignIn}>
@@ -135,6 +194,12 @@ export function ConnectCliAuthorizeSurface() {
 export function ConnectCliCallbackSurface() {
   const [result] = useState(readConnectCliCallbackResult);
   const [expectedState] = useState(readConnectCliAuthState);
+  const [chosenAccountId] = useState(() =>
+    connectMultiAccount && result ? readConnectCliAuthAccount(result.state) : null,
+  );
+  useEffect(() => {
+    if (connectMultiAccount) forgetConnectCliAuthAccount();
+  }, []);
   const { user } = useUser();
   const { copyToClipboard, isCopied } = useCopyToClipboard({ target: "authentication code" });
 
@@ -166,7 +231,13 @@ export function ConnectCliCallbackSurface() {
     );
   }
 
-  const accountLabel = user?.primaryEmailAddress?.emailAddress ?? user?.username ?? null;
+  const authorized = nameConnectCliAuthorizedAccount({
+    chosenAccountId,
+    user: user
+      ? { id: user.id, label: user.primaryEmailAddress?.emailAddress ?? user.username ?? null }
+      : null,
+  });
+  const accountLabel = authorized.label;
   const authCode = encodeConnectAuthCode(result);
 
   return (
@@ -180,6 +251,12 @@ export function ConnectCliCallbackSurface() {
             : "Enter this code in your waiting terminal to finish connecting."
         }
       />
+
+      {authorized.differsFromChoice ? (
+        <p role="alert" className="mt-4 text-sm text-destructive">
+          This is not the account you chose. Re-run `lecturn connect` to use another account.
+        </p>
+      ) : null}
 
       <div className="mt-6 overflow-hidden rounded-xl border border-border/80 bg-background/65">
         <div className="flex items-center justify-between border-b border-border/70 px-4 py-2.5">

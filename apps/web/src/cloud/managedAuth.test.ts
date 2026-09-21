@@ -12,6 +12,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { signedOutEnvironmentsAtom } from "./accountGone";
 import { readToken } from "./accountTokens";
 import {
   forgetKnownAccount,
@@ -103,6 +104,9 @@ vi.mock("../components/ui/toast", () => ({
 
 // The dialog needs a real DOM. Tests register their own sign-out flow instead.
 vi.mock("../components/clerk/useConnectSignOut", () => ({ ConnectSignOutHost: () => null }));
+vi.mock("../components/clerk/ConnectAccountCommandsHost", () => ({
+  ConnectAccountCommandsHost: () => null,
+}));
 
 vi.mock("./publicConfig", () => ({
   get connectMultiAccount() {
@@ -111,11 +115,28 @@ vi.mock("./publicConfig", () => ({
   resolveRelayClerkTokenOptions: () => ({ template: "relay" }),
 }));
 
-vi.mock("../connection/catalog", () => ({
-  environmentCatalog: {
-    removeRelayEnvironments: {},
-  },
-}));
+vi.mock("../connection/catalog", async () => {
+  const { Atom } = await import("effect/unstable/reactivity");
+  return {
+    environmentCatalog: {
+      removeRelayEnvironments: {},
+      catalogValueAtom: Atom.make({
+        entries: new Map([
+          [
+            "environment-b",
+            {
+              target: {
+                _tag: "RelayConnectionTarget",
+                environmentId: "environment-b",
+                accountId: "account-b",
+              },
+            },
+          ],
+        ]),
+      }),
+    },
+  };
+});
 
 function relayToken(name: string) {
   const payload = Buffer.from(JSON.stringify({ sub: `account-${name}` })).toString("base64url");
@@ -684,6 +705,23 @@ describe("single-account guard in front of account transitions", () => {
       await observe([sessionA], sessionA);
 
       expect(clearEnvironmentOwnedState.mock.calls.map(([id]) => id)).toEqual(["environment-b"]);
+    });
+
+    it("records a signed-out account's environments before they are removed", async () => {
+      let recordedAtRemoval: ReadonlyArray<string> = [];
+      removeRelayEnvironments.mockImplementation(async () => {
+        recordedAtRemoval = [...appAtomRegistry.get(signedOutEnvironmentsAtom).keys()];
+        return AsyncResult.success(["environment-b"]);
+      });
+      await observe([sessionA, sessionB], sessionB);
+      mark(sessionB);
+      await observe([sessionA], sessionA);
+
+      expect(recordedAtRemoval).toEqual(["environment-b"]);
+      expect(appAtomRegistry.get(signedOutEnvironmentsAtom).get("environment-b")).toEqual({
+        accountId: "account-b",
+        email: null,
+      });
     });
 
     it("keeps an account whose session expired, and everything it owns", async () => {

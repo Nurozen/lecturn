@@ -11,6 +11,7 @@ import { knownConnectAccountsAtom, removeSignedOutKnownAccount } from "../../clo
 import { connectMultiAccount } from "../../cloud/publicConfig";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { setConnectSignOutRequest } from "../../cloud/singleAccountGuard";
+import { withActiveSessionTurn } from "../../cloud/withActiveAccount";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import {
@@ -126,6 +127,10 @@ export function useConnectSignOut(redirectUrl?: string, accountId?: string) {
         },
         stayUrl: window.location.href,
         signedOutUrl: redirectUrl,
+        // A sign-out ends sessions over the network, so its turn gets longer than a switch.
+        ...(connectMultiAccount
+          ? { clerkTurn: (steps: () => Promise<void>) => withActiveSessionTurn(steps, 60_000) }
+          : {}),
       });
       awaited.current?.resolve();
       awaited.current = null;

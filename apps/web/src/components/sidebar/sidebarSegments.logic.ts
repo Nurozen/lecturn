@@ -16,6 +16,11 @@ export const NO_SEGMENTS_COLLAPSED: ReadonlyArray<string> = [];
 /** Id of the segment for environments no account owns. It has no bar and never collapses. */
 export const NO_ACCOUNT_SEGMENT_ID = "no-account";
 
+/** DOM id of a segment's label, which names its list. */
+export const segmentLabelDomId = (segmentId: string) => `sidebar-account-${segmentId}`;
+/** DOM id of a segment's thread list, which its bar opens and closes. */
+export const segmentListDomId = (segmentId: string) => `sidebar-account-${segmentId}-threads`;
+
 interface EnvironmentScoped {
   readonly environmentId: string;
 }

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  BLOCKED_REASONS,
   UNKNOWN_ACCOUNT_NAME,
   accountInitials,
+  addAccountBlockedReason,
   buildConnectAccountMenu,
   isOAuthFlowPendingError,
   unexpectedSignInToReject,
@@ -43,7 +45,8 @@ describe("buildConnectAccountMenu", () => {
         imageUrl: null,
         active: false,
         needsSignIn: false,
-        canManage: false,
+        // Managing a signed-in account makes it active first.
+        canManage: true,
         canActivate: true,
       },
     ]);
@@ -93,6 +96,17 @@ describe("buildConnectAccountMenu", () => {
     );
     expect(reasons.every((reason) => typeof reason === "string" && reason.length > 0)).toBe(true);
     expect(new Set(reasons).size).toBe(3);
+  });
+});
+
+describe("addAccountBlockedReason", () => {
+  it("explains a closed gate, and lets a client without accounts sign in", () => {
+    const closed = { available: false, reason: "account-limit" } as const;
+    expect(addAccountBlockedReason({ gate: { available: true }, knownAccountCount: 2 })).toBeNull();
+    expect(addAccountBlockedReason({ gate: closed, knownAccountCount: 5 })).toBe(
+      BLOCKED_REASONS["account-limit"],
+    );
+    expect(addAccountBlockedReason({ gate: closed, knownAccountCount: 0 })).toBeNull();
   });
 });
 

@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 
 import { connectAccountProfilesAtom } from "../../cloud/connectAccounts";
 import { knownConnectAccountsAtom } from "../../cloud/knownAccounts";
+import { withActiveAccount } from "../../cloud/withActiveAccount";
 import { cn } from "../../lib/utils";
 import {
   Menu,
@@ -132,18 +133,15 @@ export function ConnectAccountMenu() {
     gate,
   });
 
-  // Publishing, billing, teams, and Clerk's profile follow the active account.
-  const activate = (accountId: string) => {
-    const session = clerk.client?.signedInSessions.find((entry) => entry.user?.id === accountId);
-    if (!session) return;
-    void clerk.setActive({ session: session.id }).catch((cause: unknown) =>
+  // Clerk's profile belongs to the active account, so the account is made active to open it.
+  const asActive = (accountId: string, run: () => void) =>
+    void withActiveAccount(accountId, run).catch((cause: unknown) =>
       toastManager.add({
         type: "error",
         title: "Could not switch accounts",
         description: cause instanceof Error ? cause.message : undefined,
       }),
     );
-  };
 
   if (!isLoaded || model.rows.length === 0) return null;
 
@@ -191,13 +189,19 @@ export function ConnectAccountMenu() {
                 </MenuSubTrigger>
                 <MenuSubPopup className="w-64">
                   {row.canManage ? (
-                    <MenuItem onClick={() => clerk.openUserProfile({ customPages })}>
+                    <MenuItem
+                      onClick={() =>
+                        row.active
+                          ? clerk.openUserProfile({ customPages })
+                          : asActive(row.accountId, () => clerk.openUserProfile({ customPages }))
+                      }
+                    >
                       <UserCogIcon />
                       Manage account
                     </MenuItem>
                   ) : null}
                   {row.canActivate ? (
-                    <MenuItem onClick={() => activate(row.accountId)}>
+                    <MenuItem onClick={() => asActive(row.accountId, () => undefined)}>
                       <CheckIcon />
                       Make active
                     </MenuItem>

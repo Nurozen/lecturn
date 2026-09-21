@@ -202,14 +202,28 @@ export async function runConnectSignOut(input: {
   readonly removeSessionless?: ((accountId: string) => void) | undefined;
   readonly stayUrl: string;
   readonly signedOutUrl?: string | undefined;
+  /**
+   * Runs the Clerk steps as one turn, so nothing else moves the active session
+   * between making a staying account active and ending the leaving sessions.
+   */
+  readonly clerkTurn?: ((steps: () => Promise<void>) => Promise<void>) | undefined;
 }): Promise<void> {
   const { clerk } = input;
   let unpublished = false;
   let sessionless = input.sessionless ?? [];
+  let count = 0;
   const signedInIds = () => readSignOutSessions(clerk).map((session) => session.sessionId);
   // Every step ends a session or moves the active one, so this many always suffice.
   const maxSteps = readSignOutSessions(clerk).length * 2 + 2;
-  for (let count = 0; count < maxSteps; count += 1) {
+  /** Resolves false at the first Clerk step when `inTurn` is false, so the turn can start there. */
+  const runSteps = async (inTurn: boolean): Promise<boolean> => {
+    for (; count < maxSteps; count += 1) {
+      const finished = await runStep(inTurn);
+      if (finished !== null) return finished;
+    }
+    throw new Error("Could not complete sign out. Please retry.");
+  };
+  const runStep = async (inTurn: boolean): Promise<boolean | null> => {
     const plan = planConnectSignOut({
       sessions: readSignOutSessions(clerk),
       activeSessionId: clerk.session?.id ?? null,
@@ -234,7 +248,10 @@ export async function runConnectSignOut(input: {
     if (step?._tag === "unpublish") {
       await input.unpublish(step.accountId);
       unpublished = true;
-      continue;
+      return null;
+    }
+    if (!inTurn) {
+      return false;
     }
     // Their data goes only now, so a failed unpublish leaves them as they were.
     for (const accountId of sessionless) {
@@ -242,11 +259,11 @@ export async function runConnectSignOut(input: {
     }
     sessionless = [];
     if (step === undefined) {
-      return;
+      return true;
     }
     if (step._tag === "setActive") {
       await clerk.setActive({ session: step.sessionId });
-      continue;
+      return null;
     }
     const endingIds = step.ending.map((mark) => mark.sessionId);
     const redirectUrl = step.redirect === "stay" ? input.stayUrl : input.signedOutUrl;
@@ -265,8 +282,13 @@ export async function runConnectSignOut(input: {
       clearConnectSignOutStarted(outlived);
       throw new Error("Could not complete sign out. Please retry.");
     }
+    return null;
+  };
+  if (!(await runSteps(false))) {
+    await (input.clerkTurn ?? ((steps) => steps()))(async () => {
+      await runSteps(true);
+    });
   }
-  throw new Error("Could not complete sign out. Please retry.");
 }
 
 const SIGN_OUT_BROWSER_COPY =

@@ -19,6 +19,8 @@ import {
   layoutSegmentBars,
   NO_ACCOUNT_SEGMENT_ID,
   OWNS_EVERY_ENVIRONMENT,
+  segmentLabelDomId,
+  segmentListDomId,
 } from "./sidebarSegments.logic";
 import { SidebarAccountBar } from "./SidebarAccountBar";
 import type {
@@ -106,8 +108,8 @@ function SegmentedLists<Node>(
       {segments.map((segment, index) => {
         const pinned = new Set(segment.pinnedThreads);
         const { top, bottom, coveredTop, coveredBottom } = layout[index]!;
-        const labelId = `sidebar-account-${segment.id}`;
-        const listId = `sidebar-account-${segment.id}-threads`;
+        const labelId = segmentLabelDomId(segment.id);
+        const listId = segmentListDomId(segment.id);
         const actions = view.shelfActionsOf(segment.id);
         return (
           <Fragment key={segment.id}>

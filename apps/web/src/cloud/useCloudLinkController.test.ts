@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   connectMultiAccount: false,
   known: { accountIds: [] as string[], needsSignIn: [] as string[], synced: true },
   setActive: vi.fn(async () => undefined),
-  getToken: vi.fn(async (): Promise<string | null> => "token"),
+  getToken: vi.fn(async (_accountId?: string): Promise<string | null> => "token"),
   state: {
     linked: true,
     organizationId: null as string | null,
@@ -107,27 +107,90 @@ describe("Connect account ownership during reconciliation", () => {
 
   it("offers the publishing account instead of a sign-out once it is one of this client's", () => {
     mocks.known = { accountIds: ["account-a", "account-b"], needsSignIn: [], synced: true };
+    const onSelectAccount = vi.fn();
     // A single-account build keeps its advice, whatever the known list says.
-    expect(useCloudLinkController().accountMismatchMessage).toContain("Sign out");
-    expect(useCloudLinkController().accountMismatchAction).toBeNull();
+    const single = useCloudLinkController({ onSelectAccount });
+    expect(single.accountMismatchMessage).toContain("Sign out");
+    expect(single.accountMismatchAction).toBeNull();
+    expect(single.unlinkBlocked).toBe(true);
 
     mocks.connectMultiAccount = true;
-    const controller = useCloudLinkController();
+    const controller = useCloudLinkController({ accountId: "account-b", onSelectAccount });
     expect(controller.accountMismatchMessage).toBe(
-      "a@example.com published this computer. Make it the active account to change publishing.",
+      "a@example.com published this computer. Choose it to change publishing, or unlink this computer.",
     );
-    expect(controller.accountMismatchAction?.label).toBe("Make a@example.com active");
+    expect(controller.unlinkBlocked).toBe(false);
+    expect(controller.accountMismatchAction?.label).toBe("Use a@example.com");
     controller.accountMismatchAction?.run();
-    expect(mocks.setActive).toHaveBeenCalledExactlyOnceWith({ session: "session-a" });
+    expect(onSelectAccount).toHaveBeenCalledExactlyOnceWith("account-a");
+    expect(mocks.setActive).not.toHaveBeenCalled();
 
     mocks.known = { ...mocks.known, needsSignIn: ["account-a"] };
-    const expired = useCloudLinkController();
+    const expired = useCloudLinkController({ accountId: "account-b", onSelectAccount });
     expect(expired.accountMismatchMessage).toContain("Sign in to it again");
     expect(expired.accountMismatchAction).toBeNull();
 
     // A publisher this client never held is still a stranger.
     mocks.known = { accountIds: ["account-b"], needsSignIn: [], synced: true };
     expect(useCloudLinkController().accountMismatchMessage).toContain("Sign out");
+  });
+
+  it("acts as the chosen account, not Clerk's active one, with that account's token", async () => {
+    mocks.connectMultiAccount = true;
+    mocks.known = { accountIds: ["account-a", "account-b"], needsSignIn: [], synced: true };
+    mocks.state.linked = false;
+    mocks.getToken.mockImplementation(async (accountId?: string) => `token-of-${accountId}`);
+    const controller = useCloudLinkController({ accountId: "account-a" });
+    expect(controller.isSignedIn).toBe(true);
+    expect(await controller.reconcileCloudState({ managedTunnel: true, publish: true })).toBe(true);
+    expect(mocks.getToken.mock.calls.every(([accountId]) => accountId === "account-a")).toBe(true);
+    expect(mocks.link).toHaveBeenCalledWith(
+      expect.objectContaining({ clerkToken: "token-of-account-a" }),
+    );
+    expect(await controller.checkSubscription()).toBe(true);
+    expect(mocks.getToken.mock.calls.every(([accountId]) => accountId === "account-a")).toBe(true);
+  });
+
+  it("treats a chosen account that needs sign-in as signed out", () => {
+    mocks.connectMultiAccount = true;
+    mocks.known = {
+      accountIds: ["account-a", "account-b"],
+      needsSignIn: ["account-a"],
+      synced: true,
+    };
+    expect(useCloudLinkController({ accountId: "account-a" }).isSignedIn).toBe(false);
+  });
+
+  it("unlinks a known publisher's link with the publisher's token, and refuses to relink over it", async () => {
+    mocks.connectMultiAccount = true;
+    mocks.known = { accountIds: ["account-a", "account-b"], needsSignIn: [], synced: true };
+    mocks.getToken.mockImplementation(async (accountId?: string) => `token-of-${accountId}`);
+    const controller = useCloudLinkController({ accountId: "account-b" });
+    expect(await controller.reconcileCloudState({ managedTunnel: true, publish: true })).toBe(
+      false,
+    );
+    expect(mocks.link).not.toHaveBeenCalled();
+    expect(await controller.reconcileCloudState({ managedTunnel: false, publish: false })).toBe(
+      true,
+    );
+    expect(mocks.unlink).toHaveBeenCalledWith({
+      target: { environmentId: "desktop" },
+      clerkToken: "token-of-account-a",
+    });
+
+    // A publisher that needs sign-in has no token: only the local relay stops.
+    mocks.known = { ...mocks.known, needsSignIn: ["account-a"] };
+    mocks.unlink.mockClear();
+    expect(
+      await useCloudLinkController({ accountId: "account-b" }).reconcileCloudState({
+        managedTunnel: false,
+        publish: false,
+      }),
+    ).toBe(true);
+    expect(mocks.unlink).toHaveBeenCalledWith({
+      target: { environmentId: "desktop" },
+      clerkToken: null,
+    });
   });
 
   it("does not silently remove another account's publication", async () => {

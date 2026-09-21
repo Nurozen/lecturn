@@ -19,6 +19,7 @@ import { knownConnectAccountsAtom, newlyKnownAccounts } from "~/cloud/knownAccou
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { cn } from "~/lib/utils";
 import { useEnvironments, usePrimaryEnvironment } from "~/state/environments";
+import { useConnectAccountPicker } from "../clerk/ConnectAccountPicker";
 import { ConnectSubscriptionGate } from "./ConnectSubscriptionGate";
 import { CloudEnvironmentConnectRows } from "./CloudEnvironmentConnectList";
 import { Button } from "../ui/button";
@@ -80,14 +81,24 @@ function ConfiguredConnectOnboardingDialog() {
     primarySessionState.data !== null ||
     primarySessionState.error !== null;
 
-  const controller = useCloudLinkController();
+  const [openForAccount, setOpenForAccount] = useState<string | null>(null);
+  // The wizard opens for a new account, which stays the default over the open thread's owner.
+  // The dialog stays mounted, so a choice made in it ends when it closes or opens for another.
+  const account = useConnectAccountPicker("publish", {
+    label: "Publish as",
+    preferredAccountId: openForAccount,
+    open: openForAccount !== null,
+  });
+  const controller = useCloudLinkController({
+    accountId: account.accountId,
+    onSelectAccount: account.select,
+  });
   const showPublishStep = canManageRelay && controller.linkState.target !== null;
   const steps: ReadonlyArray<OnboardingStep> = showPublishStep
     ? ["publish", "devices"]
     : ["devices"];
 
   const [requests, setRequests] = useState<ReadonlyArray<ConnectOnboardingRequest>>([]);
-  const [openForAccount, setOpenForAccount] = useState<string | null>(null);
   const [step, setStep] = useState<OnboardingStep>("devices");
   const [exposeEnvironment, setExposeEnvironment] = useState(true);
   const [publishAgentActivity, setPublishAgentActivity] = useState(true);
@@ -95,8 +106,7 @@ function ConfiguredConnectOnboardingDialog() {
   const [isApplying, setIsApplying] = useState(false);
   const prefilledFromLinkStateRef = useRef(false);
   const knownAccounts = useAtomValue(knownConnectAccountsAtom);
-  // The wizard publishes and lists devices as Clerk's active account.
-  const namedAccount = useAccountEmailWhenSeveral(userId);
+  const namedAccount = useAccountEmailWhenSeveral(account.visible ? account.accountId : userId);
   const observedKnownAccountsRef = useRef(knownAccounts);
 
   const optOutAccounts = optOutState.optOutAccounts;
@@ -254,7 +264,8 @@ function ConfiguredConnectOnboardingDialog() {
             Managed Connect requires an active subscription, trial, or complimentary access. Local
             and direct connections remain free.
           </DialogDescription>
-          <TeamSelector />
+          {step === "publish" ? account.picker : null}
+          <TeamSelector accountId={account.accountId} />
           {steps.length > 1 ? (
             <OnboardingStepper
               steps={steps}
@@ -276,7 +287,10 @@ function ConfiguredConnectOnboardingDialog() {
                 onPublishAgentActivityChange={setPublishAgentActivity}
               />
               {controller.subscriptionRequired ? (
-                <ConnectSubscriptionGate onRefresh={controller.checkSubscription} />
+                <ConnectSubscriptionGate
+                  accountId={account.accountId}
+                  onRefresh={controller.checkSubscription}
+                />
               ) : null}
             </>
           ) : (
