@@ -1,11 +1,47 @@
 import { CreditCardIcon, Link2Icon } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { hasCloudPublicConfig } from "../../cloud/publicConfig";
+import { useAtomValue } from "@effect/atom-react";
+import { readBillingCheckoutAccount, resolveBillingAccountHint } from "../../cloud/accountPicker";
+import { knownConnectAccountsAtom } from "../../cloud/knownAccounts";
+import { connectMultiAccount, hasCloudPublicConfig } from "../../cloud/publicConfig";
+import { isHostedStaticApp } from "../../hostedPairing";
+import { useConnectAccountPicker } from "../clerk/ConnectAccountPicker";
 import { Dialog, DialogPopup, DialogTitle, DialogDescription } from "../ui/dialog";
 import { SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
 import { TeamsAccount } from "./TeamsAccount";
 import { BillingAccount } from "./BillingAccount";
+
+/** A single-account build renders the tabs as it always did. */
+const AccountSettingsTab = connectMultiAccount
+  ? ChosenAccountSettingsTab
+  : ActiveAccountSettingsTab;
+
+function ActiveAccountSettingsTab({ tab }: { readonly tab: "billing" | "teams" }) {
+  return tab === "billing" ? <BillingAccount embedded /> : <TeamsAccount />;
+}
+
+/** Holds the one account both tabs act as. It lives as long as the dialog is open. */
+function ChosenAccountSettingsTab({ tab }: { readonly tab: "billing" | "teams" }) {
+  const known = useAtomValue(knownConnectAccountsAtom);
+  const [hosted] = useState(isHostedStaticApp);
+  const [checkoutAccountId] = useState(() => (hosted ? readBillingCheckoutAccount() : null));
+  const account = useConnectAccountPicker("account-settings", {
+    preferredAccountId: hosted
+      ? resolveBillingAccountHint({
+          multiAccountEnabled: connectMultiAccount,
+          search: window.location.search,
+          checkoutAccountId,
+          knownAccountIds: known.accountIds,
+        })
+      : null,
+  });
+  return tab === "billing" ? (
+    <BillingAccount embedded account={account} />
+  ) : (
+    <TeamsAccount account={account} />
+  );
+}
 
 export function BillingSettingsDialog({
   open,
@@ -72,7 +108,7 @@ export function BillingSettingsDialog({
             </p>
           </aside>
           <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain sm:pt-3">
-            {tab === "billing" ? <BillingAccount embedded /> : <TeamsAccount />}
+            <AccountSettingsTab tab={tab} />
           </div>
         </div>
       </DialogPopup>

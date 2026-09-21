@@ -15,9 +15,9 @@ export interface ConnectAccountMenuRow {
   readonly active: boolean;
   /** Known, but without a signed-in session. Its environments stay disconnected. */
   readonly needsSignIn: boolean;
-  /** Clerk's profile only opens for the active account. */
+  /** Signed in. Clerk's profile opens for the active account, so managing makes it active. */
   readonly canManage: boolean;
-  /** Signed in but not active. Publishing, billing, and teams follow the active account. */
+  /** Signed in but not active. Surfaces without a picker follow the active account. */
   readonly canActivate: boolean;
 }
 
@@ -37,6 +37,20 @@ export const BLOCKED_REASONS: Record<Exclude<AddAccountBlockedReason, "disabled"
     "A saved Connect environment has no owner account yet. Remove it in Settings, or wait until its account lists it.",
   "account-limit": `You can stay signed in to ${MAX_CONNECT_ACCOUNTS} accounts. Sign out of one to add another.`,
 };
+
+/**
+ * Why another account cannot be added, or null when one can. The first
+ * sign-in on a client adds nothing to a list, so no gate applies to it.
+ */
+export function addAccountBlockedReason(input: {
+  readonly gate: AddAccountGate;
+  readonly knownAccountCount: number;
+}): string | null {
+  const { gate } = input;
+  return gate.available || gate.reason === "disabled" || input.knownAccountCount === 0
+    ? null
+    : BLOCKED_REASONS[gate.reason];
+}
 
 export const UNKNOWN_ACCOUNT_NAME = "Lecturn Connect account";
 
@@ -68,7 +82,7 @@ export function buildConnectAccountMenu(input: {
       imageUrl: profile?.imageUrl ?? null,
       active,
       needsSignIn,
-      canManage: active,
+      canManage: active || !input.needsSignIn.includes(accountId),
       canActivate: !active && !input.needsSignIn.includes(accountId),
     };
   });

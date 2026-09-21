@@ -159,4 +159,24 @@ describe("threadRoutes", () => {
       }),
     ).toBe("missing");
   });
+
+  it("explains a thread whose account was signed out instead of treating it as missing", () => {
+    const gone = {
+      bootstrapComplete: false,
+      serverThreadShellExists: false,
+      serverThreadDetailExists: false,
+      serverThreadDetailDeleted: false,
+      draftThreadExists: false,
+    };
+    expect(resolveThreadRouteRenderState({ ...gone, accountGone: true })).toBe("account-gone");
+    expect(
+      resolveThreadRouteRenderState({ ...gone, bootstrapComplete: true, accountGone: true }),
+    ).toBe("account-gone");
+    // A single-account build never sets it, and keeps the states it had.
+    expect(resolveThreadRouteRenderState(gone)).toBe("loading");
+    expect(resolveThreadRouteRenderState({ ...gone, bootstrapComplete: true })).toBe("missing");
+    expect(
+      resolveThreadRouteRenderState({ ...gone, bootstrapComplete: true, accountGone: false }),
+    ).toBe("missing");
+  });
 });

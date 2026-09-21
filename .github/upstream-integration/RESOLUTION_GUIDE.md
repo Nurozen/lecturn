@@ -139,6 +139,9 @@ through `patches/alchemy@2.0.0-beta.65.patch` and `pnpm-workspace.yaml`.
 `apps/web/src/components/sidebar/{AccountMark,SidebarAccountBar,SidebarSegments}.tsx`,
 `apps/web/src/components/sidebar/{sidebarSegments.logic,useSidebarSegments,accountProjectGroups}.ts`,
 `apps/web/src/cloud/{connectAccounts,knownAccounts,accountTokens,relayTokenCache,singleAccountGuard,useAccountEmailWhenSeveral}.ts`,
+`apps/web/src/cloud/{withActiveAccount,accountPicker,accountRelayClients,cloudLinkAccount,accountGone}.ts`,
+`apps/web/src/components/clerk/{ConnectAccountPicker,ConnectAccountCommandsHost,AccountGoneNotice,useConnectAccountPaletteItems}.tsx`,
+`apps/web/src/components/clerk/connectAccountCommands.ts`,
 `packages/client-runtime/src/relay/{connectAccounts,singleAccountGuard}.ts`, and
 their tests.
 
@@ -212,6 +215,39 @@ Call sites in upstream files, which must survive a merge:
   upstream's row markup inside the closure and keep the `AccountMark` line.
 - `apps/web/src/components/cloud/{ConnectSubscriptionGate,ConnectOnboardingDialog}.tsx`:
   `useAccountEmailWhenSeveral` and the copy that reads it.
+  Both also take the picked account: `ConnectSubscriptionGate` has an
+  `accountId` prop, and the dialog calls `useConnectAccountPicker("publish", ...)`,
+  passes `account.accountId` to `useCloudLinkController`, `TeamSelector`, and
+  the gate, and renders `account.picker` on the publish step.
+- `apps/web/src/components/CommandPalette.tsx` (very high churn): three lines.
+  The `useConnectAccountPaletteItems` import, `const connectAccountItems =
+useConnectAccountPaletteItems();` above `const actionItems`, and
+  `actionItems.push(...connectAccountItems);` right before `buildRootGroups`.
+  The builder is in `clerk/connectAccountCommands.ts`, not in
+  `CommandPalette.logic.ts`. Never import `@clerk/react` from the palette.
+- `apps/web/src/components/settings/ConnectionsSettings.tsx` (very high churn),
+  all inside `ConfiguredCloudLinkRow`: the `useConnectAccountPicker("publish", ...)`
+  call, the options passed to `useCloudLinkController`, `unlinkBlocked` in the
+  destructure, the `unlinkButton` constant, the "Publish as" `SettingsRow`, the
+  gate's `accountId`, and the unlink row's control, which shows the mismatch
+  action next to `unlinkButton`. Take upstream's rows and re-add these.
+- `apps/web/src/cloud/useCloudLinkController.ts`: takes `{ accountId,
+onSelectAccount }`, reads every token through `readToken(accountId)`, and gets
+  its mismatch state from `describePublishAccount`. It must not call
+  `useClerk` or `setActive`.
+- `apps/web/src/components/cloud/{BillingAccount,TeamsAccount,TeamSelector}.tsx`:
+  each takes the picked account instead of `useAuth().userId`, builds its relay
+  client with `accountRelayClients.ts`, and keeps the `key={accountId}` remount.
+- `apps/web/src/components/cloud/ConnectCliAuthSurface.tsx` and
+  `apps/web/src/cloud/connectCliAuth.ts`: the effect follows
+  `decideConnectCliAuthorizeStep`, and the redirect for a chosen account runs
+  inside `withActiveAccount`.
+- `apps/web/src/threadRoutes.ts` and `apps/web/src/routes/_chat.$environmentId.$threadId.tsx`:
+  the `account-gone` render state, the lazy `AccountGoneNotice`, and the effect
+  that sets `openThreadEnvironmentIdAtom`.
+- `apps/web/src/components/sidebar/SidebarSegments.tsx` takes its DOM ids from
+  `segmentLabelDomId` and `segmentListDomId`, which the palette's "Go to
+  account" scrolls to.
 - `apps/web/src/components/settings/{settingsSearch.ts,useAvailableSettingsSearchItems.ts}`:
   the two `connectAccountMenuOnly` rows and `hasConnectAccountMenu`.
 - `apps/web/src/cloud/managedAuth.tsx`, `apps/web/src/components/clerk/useConnectSignOut.tsx`,

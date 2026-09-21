@@ -3,6 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   buildConnectCliClerkAuthorizeUrl,
   connectCliSignInRedirectUrl,
+  decideConnectCliAuthorizeStep,
+  parseConnectCliAuthAccount,
+  leaveForConnectCliAuthorize,
+  nameConnectCliAuthorizedAccount,
   hasConnectCliAuthConfig,
   readConnectCliCallbackResult,
 } from "./connectCliAuth";
@@ -111,5 +115,124 @@ describe("connectCliAuth", () => {
         new URL("https://lecturn.cloudgatherer.net/connect/callback?state=s"),
       ),
     ).toBeNull();
+  });
+});
+
+describe("decideConnectCliAuthorizeStep", () => {
+  const signedIn = {
+    isLoaded: true,
+    isSignedIn: true,
+    multiAccountEnabled: true,
+    knownAccountIds: ["account-a", "account-b"],
+    knownAccountsSynced: true,
+    confirmedAccountId: null,
+  };
+
+  it("waits for Clerk, then asks a signed-out visitor to sign in", () => {
+    expect(decideConnectCliAuthorizeStep({ ...signedIn, isLoaded: false })._tag).toBe("wait");
+    expect(decideConnectCliAuthorizeStep({ ...signedIn, isSignedIn: false })._tag).toBe("sign-in");
+  });
+
+  it("redirects at once as the active account with one account, as it always did", () => {
+    const asActive = { _tag: "redirect", accountId: null };
+    expect(decideConnectCliAuthorizeStep({ ...signedIn, knownAccountIds: ["account-a"] })).toEqual(
+      asActive,
+    );
+    // A single-account build ignores the known list, synced or not.
+    expect(
+      decideConnectCliAuthorizeStep({
+        ...signedIn,
+        multiAccountEnabled: false,
+        knownAccountsSynced: false,
+      }),
+    ).toEqual(asActive);
+  });
+
+  it("shows the chooser with two accounts, and redirects as the chosen one once confirmed", () => {
+    expect(decideConnectCliAuthorizeStep(signedIn)).toEqual({ _tag: "choose" });
+    expect(decideConnectCliAuthorizeStep({ ...signedIn, confirmedAccountId: "account-b" })).toEqual(
+      { _tag: "redirect", accountId: "account-b" },
+    );
+  });
+
+  it("does not redirect before the known accounts were read from Clerk", () => {
+    expect(
+      decideConnectCliAuthorizeStep({
+        ...signedIn,
+        knownAccountIds: ["account-a"],
+        knownAccountsSynced: false,
+      })._tag,
+    ).toBe("wait");
+  });
+});
+
+describe("parseConnectCliAuthAccount", () => {
+  it("reads the chosen account ID only for the request it was chosen for", () => {
+    const stored = JSON.stringify({ state: "state-1", accountId: "account-b" });
+    expect(parseConnectCliAuthAccount(stored, "state-1")).toBe("account-b");
+    expect(parseConnectCliAuthAccount(stored, "state-2")).toBeNull();
+    expect(parseConnectCliAuthAccount(null, "state-1")).toBeNull();
+    expect(parseConnectCliAuthAccount("not json", "state-1")).toBeNull();
+    expect(parseConnectCliAuthAccount(JSON.stringify({ state: "state-1" }), "state-1")).toBeNull();
+  });
+});
+
+describe("CLI account authorization", () => {
+  it("records the chosen ID only after switching and before navigating", async () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      },
+      removeItem: (key: string) => {
+        values.delete(key);
+      },
+    };
+    const events: string[] = [];
+    await leaveForConnectCliAuthorize({
+      state: "request-1",
+      accountId: "account-b",
+      storage,
+      asAccount: async (accountId, leave) => {
+        expect(values.size).toBe(0);
+        events.push(accountId);
+        leave();
+      },
+      navigate: () => {
+        expect(
+          [...values.values()].some(
+            (value) => parseConnectCliAuthAccount(value, "request-1") === "account-b",
+          ),
+        ).toBe(true);
+        events.push("navigate");
+      },
+    });
+    expect(events).toEqual(["account-b", "navigate"]);
+  });
+
+  it("never redirects when switching fails", async () => {
+    const navigate = vi.fn();
+    await expect(
+      leaveForConnectCliAuthorize({
+        state: "request-1",
+        accountId: "account-b",
+        storage: null,
+        asAccount: async () => {
+          throw new Error("switch failed");
+        },
+        navigate,
+      }),
+    ).rejects.toThrow("switch failed");
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("names the actual authorized user and flags a different chosen account", () => {
+    expect(
+      nameConnectCliAuthorizedAccount({
+        chosenAccountId: "account-b",
+        user: { id: "account-a", label: "a@example.com" },
+      }),
+    ).toEqual({ label: "a@example.com", differsFromChoice: true });
   });
 });

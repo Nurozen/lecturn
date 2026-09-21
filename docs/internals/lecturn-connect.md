@@ -325,10 +325,55 @@ a Clerk user ID. Mobile stays on one account.
   account lists them and a new account cannot be handed them.
 - **Account UI.** `ConnectAccountMenu.tsx` replaces the `UserButton` popover. **Manage account** calls
   `clerk.openUserProfile` with the three custom pages from `connectProfilePages.tsx`, mounted through
-  portals the way `UserButton.UserProfilePage` does, and opens for the active account only.
+  portals the way `UserButton.UserProfilePage` does. Clerk's profile belongs to the active account, so
+  it opens under `withActiveAccount` for any signed-in account, and its Billing tab
+  (`BillingAccount activeAccountOnly`) has no picker.
   `AccountMark.tsx` renders the owner's short mark on sidebar thread rows and Connect environment rows
-  once two accounts are known. Publish, billing, teams, and CLI authorize still act on Clerk's active
-  account and name it by email.
+  once two accounts are known.
+- **Reads never depend on the active session.** Relay-backed data (billing, teams, environment lists,
+  link and unlink) is fetched with the chosen account's own token: `readToken(accountId)`, or the
+  clients in `apps/web/src/cloud/accountRelayClients.ts` that wrap it. `setActive`, to choose an
+  account, is called in one place only: `withActiveAccount(accountId, fn)` in
+  `apps/web/src/cloud/withActiveAccount.ts`. It holds one mutex, switches only when the account is not
+  already active, checks `clerk.user.id` before and after `fn`, throws `ActiveAccountError` on a
+  mismatch, and does not restore the previous active session. A timed-out switch retains its mutex
+  until the in-flight Clerk request settles; it cannot run a late authorization callback. Expired
+  queued turns do not start. Use it only where Clerk itself has to
+  act as the account: the CLI authorize redirect, opening Clerk's profile, and **Make active** in the
+  account menu. Do not add a second `setActive` caller. (The sign-out plan and the single-account
+  guard also call `setActive`, to pick the session that survives a sign-out, not to choose an account.)
+- **Account pickers.** A surface that acts for one account calls `useConnectAccountPicker(surface)`
+  (`apps/web/src/components/clerk/ConnectAccountPicker.tsx`). It returns the account to act as and a
+  `picker` node, which is `null` while the constant is off or fewer than two accounts are known; the
+  account is then Clerk's active one, as before. `resolvePickedAccount`
+  (`apps/web/src/cloud/accountPicker.ts`) picks the default among signed-in accounts: the choice made
+  in this picker, the surface's own account (the onboarding wizard's new account), the open thread's
+  owner, the account last used on that surface (`lecturn:account-picker:v1`), then the active
+  account. The thread route records its environment in `openThreadEnvironmentIdAtom`, because
+  Settings replaces that route. Accounts that need sign-in are listed disabled with the reason in a
+  tooltip. Surfaces: publish (`ConnectionsSettings.tsx` and `ConnectOnboardingDialog.tsx`, surface
+  `publish`), Billing and Teams (`account-settings`, shared so both tabs show one account, and keyed
+  by account id so a switch remounts), and `/connect` (`cli-authorize`).
+- **Publishing.** `useCloudLinkController({ accountId, onSelectAccount })` links, unlinks, selects the
+  team, and checks the subscription as `accountId`. The computer still links to one account.
+  `describePublishAccount` (`cloudLinkAccount.ts`) decides what another account may do about an
+  existing link: a known publisher is named by email and can be chosen in the picker or unlinked
+  (with its token when it is signed in, without one when it needs sign-in); a stranger's link, and
+  every mismatch in a single-account build, stays blocked with the old advice.
+- **CLI authorize.** Clerk's OAuth authorize endpoint acts as the active account.
+  `decideConnectCliAuthorizeStep` (`connectCliAuth.ts`) keeps the immediate redirect for one account
+  and shows the chooser for two or more, then redirects inside `withActiveAccount`. The chosen account
+  ID is kept in `sessionStorage` with the request's `state`. The callback names Clerk's actual user
+  and flags a mismatch with the choice.
+- **Command palette.** `useConnectAccountPaletteItems` adds "Add Lecturn Connect account", "Go to
+  account", "Sign out of", and "Sign out of all accounts". The palette renders without Clerk, so the
+  actions run in `ConnectAccountCommandsHost`, mounted by `ManagedRelayAuthProvider`, and reach the
+  palette through `connectAccountCommandsAtom`. The atom lives in `connectAccountCommands.ts`, apart
+  from the host, so the palette does not import Clerk.
+- **Signed-out account behind an open thread.** Before a leaving account's environments are removed,
+  `recordSignedOutAccount` (`accountGone.ts`) notes which ones it owned. The thread route resolves
+  `account-gone` from that record while the environment is absent from the catalog, and renders
+  `AccountGoneNotice` instead of redirecting to `/`. The record lasts for the page.
 
 ## Restricting Sign-ups: Known-User Allowlist
 

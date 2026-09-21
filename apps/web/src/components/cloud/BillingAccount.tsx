@@ -1,23 +1,50 @@
 import { useAuth, useClerk, useUser } from "@clerk/react";
-import { createBillingClient } from "@lecturn/client-runtime/relay";
 import type { RelayBillingStatus } from "@lecturn/contracts";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { readToken } from "../../cloud/accountTokens";
-import { resolveCloudPublicConfig } from "../../cloud/publicConfig";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { rememberBillingCheckoutAccount } from "../../cloud/accountPicker";
+import { createAccountBillingClient } from "../../cloud/accountRelayClients";
 import { openConnectSignIn } from "../../cloud/singleAccountGuard";
 import { configuredHostedAppUrl, isHostedStaticApp } from "../../hostedPairing";
 import { CreditCardIcon, RadioTowerIcon } from "lucide-react";
 import { Button } from "../ui/button";
+import type { PickedConnectAccount } from "../clerk/ConnectAccountPicker";
 import { useConnectSignOut } from "../clerk/useConnectSignOut";
 import { useLecturnConnectAuthPrompt } from "../clerk/useLecturnConnectAuthPrompt";
 import { createBillingStatusLoader } from "./billingStatusLoader";
 
-export function BillingAccount({ embedded = false }: { embedded?: boolean }) {
-  return <HostedBillingAccount embedded={embedded} hosted={isHostedStaticApp()} />;
+/**
+ * `account` is the dialog's chosen account. Without one, as in Clerk's profile
+ * and every single-account build, billing follows Clerk's active account.
+ */
+export function BillingAccount({
+  embedded = false,
+  account,
+}: {
+  embedded?: boolean;
+  account?: PickedConnectAccount;
+}) {
+  return (
+    <HostedBillingAccount
+      embedded={embedded}
+      hosted={isHostedStaticApp()}
+      account={account?.visible ? account : null}
+    />
+  );
 }
 
-function HostedBillingAccount({ embedded, hosted }: { embedded: boolean; hosted: boolean }) {
-  const { isLoaded, isSignedIn, userId } = useAuth();
+function HostedBillingAccount({
+  embedded,
+  hosted,
+  account,
+}: {
+  embedded: boolean;
+  hosted: boolean;
+  account: PickedConnectAccount | null;
+}) {
+  const auth = useAuth();
+  const { isLoaded } = auth;
+  const userId = account ? account.accountId : auth.userId;
+  const isSignedIn = account ? account.accountId != null : auth.isSignedIn;
   if (!isLoaded)
     return (
       <div className="p-8" role="status">
@@ -27,6 +54,9 @@ function HostedBillingAccount({ embedded, hosted }: { embedded: boolean; hosted:
   return (
     <SignedBillingAccount
       key={userId ?? "signed-out"}
+      accountId={userId ?? null}
+      email={account?.email ?? null}
+      picker={account?.picker ?? null}
       signedIn={Boolean(isSignedIn)}
       embedded={embedded}
       hosted={hosted}
@@ -35,18 +65,26 @@ function HostedBillingAccount({ embedded, hosted }: { embedded: boolean; hosted:
 }
 
 function SignedBillingAccount({
+  accountId: userId,
+  email,
+  picker,
   signedIn,
   embedded,
   hosted,
 }: {
+  /** The account whose billing this is, read with its own token. */
+  accountId: string | null;
+  /** The chosen account's email. null names Clerk's active user. */
+  email: string | null;
+  picker: ReactNode;
   signedIn: boolean;
   embedded: boolean;
   hosted: boolean;
 }) {
-  const { userId } = useAuth();
   const clerk = useClerk();
   const { requestSignOut, requestSignOutAll, canSignOutAll, signOutDialog } = useConnectSignOut(
     hosted ? `${window.location.origin}/account/billing` : undefined,
+    userId ?? undefined,
   );
   const { authPrompt, openAuthPrompt } = useLecturnConnectAuthPrompt();
   const { user } = useUser();
@@ -56,14 +94,7 @@ function SignedBillingAccount({
   const mounted = useRef(true);
   const busy = useRef(false);
   const statusLoader = useRef<ReturnType<typeof createBillingStatusLoader> | null>(null);
-  const client = useMemo(
-    () =>
-      createBillingClient({
-        relayUrl: resolveCloudPublicConfig().relayUrl ?? "",
-        getToken: () => (userId ? readToken(userId) : Promise.resolve(null)),
-      }),
-    [userId],
-  );
+  const client = useMemo(() => createAccountBillingClient(userId), [userId]);
 
   useEffect(() => {
     mounted.current = true;
@@ -101,8 +132,10 @@ function SignedBillingAccount({
     try {
       const result = await action();
       if (!mounted.current) return;
-      if (typeof result === "string") window.location.assign(result);
-      else if (result) setStatus(result);
+      if (typeof result === "string") {
+        if (picker && userId) rememberBillingCheckoutAccount(userId);
+        window.location.assign(result);
+      } else if (result) setStatus(result);
     } catch {
       if (mounted.current)
         setError("The billing request could not be completed. Refresh your status and try again.");
@@ -141,8 +174,10 @@ function SignedBillingAccount({
         </Button>
       ) : (
         <>
+          {picker}
           <p className="text-sm">
-            Signed in as {user?.primaryEmailAddress?.emailAddress ?? "your Lecturn account"}
+            Signed in as{" "}
+            {(picker ? email : user?.primaryEmailAddress?.emailAddress) ?? "your Lecturn account"}
           </p>
           {error && <p role="alert">{error}</p>}
           {!status && !error && <p role="status">Checking subscription…</p>}

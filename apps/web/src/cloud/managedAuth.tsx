@@ -9,11 +9,13 @@ import { reportAtomCommandResult, settlePromise } from "@lecturn/client-runtime/
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { ConnectAccountCommandsHost } from "../components/clerk/ConnectAccountCommandsHost";
 import { ConnectSignOutHost } from "../components/clerk/useConnectSignOut";
 import { toastManager } from "../components/ui/toast";
 import { environmentCatalog } from "../connection/catalog";
 import { AppAtomRegistryProvider, appAtomRegistry } from "../rpc/atomRegistry";
 import { useAtomCommand } from "../state/use-atom-command";
+import { recordSignedOutAccount } from "./accountGone";
 import { bindAccountTokenClerk, readToken } from "./accountTokens";
 import { observeAccountProfiles } from "./connectAccounts";
 import {
@@ -24,6 +26,7 @@ import {
 } from "./knownAccounts";
 import { connectMultiAccount } from "./publicConfig";
 import { resetRelayTokenCache } from "./relayTokenCache";
+import { bindActiveAccountClerk } from "./withActiveAccount";
 import {
   clearLastConnectAccountId,
   makeWebSingleAccountEnforcer,
@@ -73,7 +76,11 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
 
   useEffect(() => {
     bindAccountTokenClerk(clerk);
-    return () => bindAccountTokenClerk(null);
+    bindActiveAccountClerk(clerk);
+    return () => {
+      bindAccountTokenClerk(null);
+      bindActiveAccountClerk(null);
+    };
   }, [clerk]);
 
   useEffect(() => {
@@ -147,6 +154,7 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
       ) {
         return;
       }
+      recordSignedOutAccount(appAtomRegistry, accountId);
       const scope = known.length === 1 ? undefined : accountId;
       const results = await Promise.all([
         removeRelayEnvironments(scope === undefined ? undefined : { accountId: scope }),
@@ -262,6 +270,7 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
       {children}
       <AppAtomRegistryProvider>
         <ConnectSignOutHost />
+        {connectMultiAccount ? <ConnectAccountCommandsHost /> : null}
       </AppAtomRegistryProvider>
     </>
   );
