@@ -2,7 +2,7 @@ import { UserButton, useAuth } from "@clerk/react";
 import { CreditCardIcon, LogInIcon, LogOutIcon, ServerIcon, SmartphoneIcon } from "lucide-react";
 
 import { BillingAccount } from "../cloud/BillingAccount";
-import { hasCloudPublicConfig } from "../../cloud/publicConfig";
+import { connectMultiAccount, hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
 import { MobileClientsUserProfilePage } from "./MobileClientsUserProfilePage";
 import { LecturnConnectUserProfilePage } from "./LecturnConnectUserProfilePage";
@@ -36,6 +36,11 @@ function ConfiguredLecturnConnectSidebarAvatar() {
             avatarBox: "size-7",
             userButtonPopoverActionButton__signOut: { display: "none" },
             userButtonPopoverActionButton__signOutAll: { display: "none" },
+            // Clerk's multi-session popover. Its other-session rows carry no
+            // element key, so the single-account guard keeps that list empty.
+            ...(connectMultiAccount
+              ? {}
+              : { userButtonPopoverActionButton__addAccount: { display: "none" } }),
             userButtonTrigger: "rounded-lg p-1 hover:bg-sidebar-row-hover",
           },
         }}

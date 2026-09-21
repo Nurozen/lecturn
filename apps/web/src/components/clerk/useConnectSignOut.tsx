@@ -1,10 +1,11 @@
 import { useAuth, useClerk } from "@clerk/react";
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
 
 import { unpublishBeforeSignOut } from "../../cloud/linkEnvironmentAtoms";
 import { usePrimaryCloudLinkState } from "../../cloud/primaryCloudLinkState";
 import { resolveRelayClerkTokenOptions } from "../../cloud/publicConfig";
+import { setConnectSignOutRequest } from "../../cloud/singleAccountGuard";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import {
@@ -18,13 +19,24 @@ import {
 
 export function useConnectSignOut(redirectUrl?: string) {
   const clerk = useClerk();
-  const { getToken, userId } = useAuth();
+  const { getToken, sessionId, userId } = useAuth();
   const link = usePrimaryCloudLinkState();
   const unpublish = useAtomCommand(unpublishBeforeSignOut, { reportFailure: false });
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const busy = useRef(false);
+  // Set while the single-account guard waits on this dialog's outcome.
+  const awaited = useRef<{
+    readonly everySession: boolean;
+    readonly resolve: () => void;
+    readonly reject: (cause: Error) => void;
+  } | null>(null);
+  const close = () => {
+    awaited.current?.reject(new Error("Sign out was cancelled."));
+    awaited.current = null;
+    setOpen(false);
+  };
   // A browser may be controlling someone else's remote server. Only the
   // desktop shell owns the local host that signing out should unpublish.
   const localHost = Boolean(window.desktopBridge);
@@ -45,7 +57,14 @@ export function useConnectSignOut(redirectUrl?: string) {
         if (result._tag === "Failure") throw squashAtomCommandFailure(result);
         link.refresh();
       }
-      await clerk.signOut(redirectUrl ? { redirectUrl } : undefined);
+      // Without a sessionId Clerk ends every signed-in session. Name the
+      // current one so this only ends the account the user is looking at.
+      await clerk.signOut({
+        ...(sessionId && !awaited.current?.everySession ? { sessionId } : {}),
+        ...(redirectUrl ? { redirectUrl } : {}),
+      });
+      awaited.current?.resolve();
+      awaited.current = null;
       setOpen(false);
     } catch (cause) {
       setError(
@@ -61,11 +80,24 @@ export function useConnectSignOut(redirectUrl?: string) {
       setError(null);
       setOpen(true);
     },
+    /** Settles once the dialog signed out, and rejects when it closes without. */
+    requestSignOutOf: useCallback(
+      ({ everySession }: { readonly everySession: boolean }) =>
+        new Promise<void>((resolve, reject) => {
+          awaited.current?.reject(new Error("Sign out was cancelled."));
+          awaited.current = { everySession, resolve, reject };
+          setError(null);
+          setOpen(true);
+        }),
+      [],
+    ),
     signOutDialog: (
       <AlertDialog
         open={open}
         onOpenChange={(next) => {
-          if (!busy.current) setOpen(next);
+          if (busy.current) return;
+          if (next) setOpen(true);
+          else close();
         }}
       >
         <AlertDialogPopup>
@@ -90,7 +122,7 @@ export function useConnectSignOut(redirectUrl?: string) {
             ) : null}
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <Button variant="outline" disabled={pending} onClick={() => setOpen(false)}>
+            <Button variant="outline" disabled={pending} onClick={close}>
               Cancel
             </Button>
             <Button disabled={pending} onClick={() => void confirm()}>
@@ -101,4 +133,14 @@ export function useConnectSignOut(redirectUrl?: string) {
       </AlertDialog>
     ),
   };
+}
+
+/** Lets the single-account guard's messages open the same sign-out flow. */
+export function ConnectSignOutHost() {
+  const { requestSignOutOf, signOutDialog } = useConnectSignOut();
+  useEffect(() => {
+    setConnectSignOutRequest(requestSignOutOf);
+    return () => setConnectSignOutRequest(null);
+  }, [requestSignOutOf]);
+  return signOutDialog;
 }

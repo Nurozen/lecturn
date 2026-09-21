@@ -3,6 +3,7 @@ import { createBillingClient } from "@lecturn/client-runtime/relay";
 import type { RelayBillingStatus } from "@lecturn/contracts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { resolveCloudPublicConfig, resolveRelayClerkTokenOptions } from "../../cloud/publicConfig";
+import { openConnectSignIn } from "../../cloud/singleAccountGuard";
 import { configuredHostedAppUrl, isHostedStaticApp } from "../../hostedPairing";
 import { CreditCardIcon, RadioTowerIcon } from "lucide-react";
 import { Button } from "../ui/button";
@@ -129,7 +130,7 @@ function SignedBillingAccount({
         <Button
           onClick={() =>
             hosted
-              ? void clerk.openSignIn({
+              ? openConnectSignIn(clerk, {
                   forceRedirectUrl: `${window.location.origin}/account/billing`,
                 })
               : openAuthPrompt()

@@ -1,4 +1,4 @@
-import { useAuth } from "@clerk/react";
+import { useAuth, useClerk, useSessionList } from "@clerk/react";
 import { ManagedRelay, setManagedRelaySession } from "@lecturn/client-runtime/relay";
 import {
   reportAtomCommandResult,
@@ -6,13 +6,20 @@ import {
   settlePromise,
 } from "@lecturn/client-runtime/state/runtime";
 import * as Effect from "effect/Effect";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { ConnectSignOutHost } from "../components/clerk/useConnectSignOut";
 import { environmentCatalog } from "../connection/catalog";
 import { runtime } from "../lib/runtime";
-import { appAtomRegistry } from "../rpc/atomRegistry";
+import { AppAtomRegistryProvider, appAtomRegistry } from "../rpc/atomRegistry";
 import { useAtomCommand } from "../state/use-atom-command";
 import { resolveRelayClerkTokenOptions } from "./publicConfig";
+import {
+  clearLastConnectAccountId,
+  makeWebSingleAccountEnforcer,
+  persistLastConnectAccountId,
+  readLastConnectAccountId,
+} from "./singleAccountGuard";
 
 let relayTokenProvider: (() => Promise<string | null>) | null = null;
 
@@ -44,11 +51,32 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
     reportFailure: false,
     reportDefect: false,
   });
+  const clerk = useClerk();
+  const signedInSessionKey = useSessionList()
+    .sessions?.map((session) => `${session.id}:${session.status}`)
+    .join(",");
+  const [singleAccountEnforcer] = useState(makeWebSingleAccountEnforcer);
+  // Bumped when a rejection settles, so the guard looks at Clerk again.
+  const [guardRevision, setGuardRevision] = useState(0);
   const observedAccountRef = useRef<string | null | undefined>(undefined);
   const accountTransitionRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
-    if (!isLoaded) {
+    if (!isLoaded || signedInSessionKey === undefined) {
+      return;
+    }
+    // An extra Clerk session, from another tab or Clerk's own UI, is rejected
+    // here in front of the transition handling so it never reads as an account
+    // change. signedInSessionKey is a dependency so those additions re-run it.
+    if (
+      !singleAccountEnforcer.evaluate({
+        clerk,
+        renderedAccountId: isSignedIn && userId ? userId : null,
+        observedAccountId: observedAccountRef.current,
+        persistedAccountId: readLastConnectAccountId(),
+        onSettled: () => setGuardRevision((revision) => revision + 1),
+      })
+    ) {
       return;
     }
 
@@ -65,7 +93,7 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
           settleAsyncResult(() =>
             runtime.runPromiseExit(
               ManagedRelay.ManagedRelayClient.pipe(
-                Effect.flatMap((client) => client.resetTokenCache),
+                Effect.flatMap((client) => client.resetTokenCache()),
               ),
             ),
           ),
@@ -79,11 +107,16 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
 
     if (!isSignedIn || !userId) {
       deactivateManagedRelayAuthentication();
+      clearLastConnectAccountId();
       if (previousAccount !== null) {
         void queueAccountCleanup();
       }
     } else {
-      const tokenProvider = () => getToken(resolveRelayClerkTokenOptions());
+      persistLastConnectAccountId(userId);
+      // getToken reads Clerk's active session at call time. Never hand this
+      // account a token while another session is briefly active.
+      const tokenProvider = async () =>
+        clerk.session?.user.id === userId ? getToken(resolveRelayClerkTokenOptions()) : null;
       const activateSession = () => {
         if (!cancelled) {
           activateManagedRelayAuthentication(userId, tokenProvider);
@@ -108,9 +141,29 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
     return () => {
       cancelled = true;
     };
-  }, [getToken, isLoaded, isSignedIn, removeRelayEnvironments, userId]);
+  }, [
+    clerk,
+    getToken,
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- only a re-run trigger
+    guardRevision,
+    isLoaded,
+    isSignedIn,
+    removeRelayEnvironments,
+    signedInSessionKey,
+    singleAccountEnforcer,
+    userId,
+  ]);
 
   useEffect(() => () => deactivateManagedRelayAuthentication(), []);
+  useEffect(() => () => singleAccountEnforcer.dispose(), [singleAccountEnforcer]);
 
-  return children;
+  // This provider sits above the app's atom registry, which the dialog reads.
+  return (
+    <>
+      {children}
+      <AppAtomRegistryProvider>
+        <ConnectSignOutHost />
+      </AppAtomRegistryProvider>
+    </>
+  );
 }
