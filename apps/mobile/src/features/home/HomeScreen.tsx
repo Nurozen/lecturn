@@ -1,3 +1,5 @@
+import { AccountSurfaceColorContext } from "../../lib/accountTintContext";
+import { useAccountRowColors } from "./useAccountRowColors";
 import {
   useAccountSectionDisplayStates,
   toggleMobileAccountSection,
@@ -988,6 +990,9 @@ export function HomeScreen(props: HomeScreenProps) {
       nowMinute,
     ],
   );
+  const accountRowColors = useAccountRowColors(
+    threadListV2Enabled ? threadListV2Items : listLayout.items,
+  );
   const renderV2Item = useCallback(
     (props: { readonly item: HomeHierarchyV2Item; readonly index: number }) => (
       <View
@@ -1017,15 +1022,18 @@ export function HomeScreen(props: HomeScreenProps) {
                     props.item.settledBranch &&
                     level === (props.item.depth ?? 0) - 1
                       ? "#ff866f"
-                      : "#b9893f",
+                      : (accountRowColors.get(props.item.key) ?? "#b9893f") + "aa",
+                  borderRadius: 2,
                 }}
               />
             ))
           : null}
-        {renderV2Row(props)}
+        <AccountSurfaceColorContext.Provider value={accountRowColors.get(props.item.key)}>
+          {renderV2Row(props)}
+        </AccountSurfaceColorContext.Provider>
       </View>
     ),
-    [renderV2Row],
+    [renderV2Row, accountRowColors],
   );
   const v2KeyExtractor = useCallback((item: HomeHierarchyV2Item) => item.key, []);
 
@@ -1239,15 +1247,18 @@ export function HomeScreen(props: HomeScreenProps) {
                     props.item.settledBranch &&
                     level === (props.item.depth ?? 0) - 1
                       ? "#ff866f"
-                      : "#b9893f",
+                      : (accountRowColors.get(props.item.key) ?? "#b9893f") + "aa",
+                  borderRadius: 2,
                 }}
               />
             ))
           : null}
-        {renderRow(props)}
+        <AccountSurfaceColorContext.Provider value={accountRowColors.get(props.item.key)}>
+          {renderRow(props)}
+        </AccountSurfaceColorContext.Provider>
       </View>
     ),
-    [renderRow],
+    [renderRow, accountRowColors],
   );
 
   const keyExtractor = useCallback((item: HomeListItem) => item.key, []);

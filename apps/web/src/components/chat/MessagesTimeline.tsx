@@ -1,3 +1,7 @@
+import "./message-glass.css";
+import "./timeline-reveal.css";
+import { fadeOutTimeline, revealTimeline } from "./timelineExit";
+
 import {
   type AssistantCitation,
   type EnvironmentId,
@@ -551,6 +555,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const [timelineViewportElement, setTimelineViewportElement] = useState<HTMLDivElement | null>(
     null,
   );
+  useLayoutEffect(() => {
+    if (!timelineViewportElement) return;
+    // Cleanup runs before React removes this keyed thread's DOM.
+    return () => fadeOutTimeline(timelineViewportElement);
+  }, [timelineViewportElement]);
   const {
     target: readyCitationRequest,
     positioning: citationPositioning,
@@ -567,6 +576,24 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     onExpandTurn: expandCitedTurn,
     onManualNavigation,
   });
+  // LegendList measures and restores its initial scroll while hidden. Reveal the
+  // whole timeline once, after that work, instead of flashing measured rows on.
+  const [initialLayoutReady, setInitialLayoutReady] = useState(false);
+  const [hasRevealed, setHasRevealed] = useState(false);
+  useEffect(() => {
+    if (hasRevealed || !initialLayoutReady || citationHistoryLoading) return;
+    // The load callback can precede the container's visibility commit. Give it
+    // a frame, and wait for cold-thread details rather than showing shell rows.
+    const frame = requestAnimationFrame(() => setHasRevealed(true));
+    return () => cancelAnimationFrame(frame);
+  }, [initialLayoutReady, citationHistoryLoading, hasRevealed]);
+  useLayoutEffect(() => {
+    if (hasRevealed && timelineViewportElement) revealTimeline(timelineViewportElement);
+  }, [hasRevealed, timelineViewportElement]);
+  const handleInitialListLoad = useCallback(() => {
+    onCitationListLoad();
+    setInitialLayoutReady(true);
+  }, [onCitationListLoad]);
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
   const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0);
   const handleAnchorReady = useCallback(
@@ -746,7 +773,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       <TimelineRowActivityCtx value={activityState}>
         <div
           ref={setTimelineViewportElement}
-          className="relative h-full min-h-0"
+          className="lecturn-timeline-reveal relative h-full min-h-0"
+          data-timeline-ready={hasRevealed || undefined}
+          inert={!hasRevealed || undefined}
+          aria-hidden={!hasRevealed || undefined}
           data-assistant-citation-viewport="true"
         >
           {onCiteAssistantText && citationThreadRef ? (
@@ -768,7 +798,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             // Legend needs a data refresh to mount new pins without a scroll event.
             {...(readyCitationRequest ? { dataVersion: readyCitationRequest.key } : {})}
             {...(citationAlwaysRender ? { alwaysRender: citationAlwaysRender } : {})}
-            onLoad={onCitationListLoad}
+            onLoad={handleInitialListLoad}
             {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
             contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
             maintainScrollAtEnd={
@@ -1266,7 +1296,10 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
+      <div
+        data-chat-user-message-bubble="true"
+        className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground"
+      >
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
             {regularImages.map((image) => (

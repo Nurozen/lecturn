@@ -37,8 +37,8 @@ export function SidebarAccountBar(props: {
     <div
       data-thread-selection-safe
       data-sidebar-account-bar={props.accountId}
-      // h-7 is `ACCOUNT_BAR_HEIGHT_REM`, which the sticky offsets count in.
-      className="sticky z-10 flex h-7 shrink-0 items-center gap-1.5 bg-sidebar pl-2 pr-1 text-xs"
+      // h-9 is `ACCOUNT_BAR_HEIGHT_REM`, which the sticky offsets count in.
+      className="lecturn-account-header sticky z-10 flex h-9 shrink-0 items-center gap-1.5 bg-sidebar pl-2 pr-1 text-xs"
       style={props.stickyOffsets}
     >
       <Tooltip>

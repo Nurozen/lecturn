@@ -1,0 +1,31 @@
+/* A material change only: bubble alignment, width, typography and spacing
+   remain the normal conversation layout. The opaque color is the fallback. */
+.lecturn-account-surface [data-chat-user-message-bubble] {
+  background: var(--message-surface);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--foreground) 13%, transparent),
+    inset 0 1px 0 color-mix(in srgb, white 20%, transparent),
+    0 4px 14px #0000000a;
+}
+@supports (backdrop-filter: blur(1px)) {
+  .lecturn-account-surface [data-chat-user-message-bubble] {
+    background:
+      linear-gradient(150deg, #ffffff0d, transparent 45%, #ffffff03),
+      color-mix(in srgb, var(--message-surface) 55%, transparent);
+    backdrop-filter: blur(14px) saturate(1.15);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .lecturn-account-surface [data-chat-user-message-bubble] {
+    background: var(--message-surface);
+    backdrop-filter: none;
+  }
+}
+@media (forced-colors: active) {
+  .lecturn-account-surface [data-chat-user-message-bubble] {
+    background: Canvas;
+    outline: 1px solid CanvasText;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+}

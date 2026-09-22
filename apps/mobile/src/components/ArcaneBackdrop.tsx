@@ -1,3 +1,7 @@
+import { useId } from "react";
+import Svg, { Defs, LinearGradient, RadialGradient, Rect, Stop } from "react-native-svg";
+import { useAccountSurfaceColor } from "../lib/accountTintContext";
+import { useGlassAccessibility } from "../lib/useGlassAccessibility";
 import { Image } from "expo-image";
 import { StyleSheet, View } from "react-native";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
@@ -10,12 +14,19 @@ export function ArcaneBackdrop({
 }: {
   readonly emphasis?: "quiet" | "sidebar";
 }) {
+  const accountColor = useAccountSurfaceColor();
+  const opaque = useGlassAccessibility();
+  const gradientId = useId().replace(/:/g, "");
   const { themeAppearance } = useAppearancePreferences();
-  const opacity =
-    themeAppearance === "dark"
+  const dark = themeAppearance === "dark";
+  const opacity = opaque
+    ? dark
+      ? 0.12
+      : 0.025
+    : dark
       ? emphasis === "sidebar"
-        ? 0.34
-        : 0.17
+        ? 0.4
+        : 0.24
       : emphasis === "sidebar"
         ? 0.07
         : 0.035;
@@ -25,15 +36,53 @@ export function ArcaneBackdrop({
       accessible={false}
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={[StyleSheet.absoluteFill, { opacity, overflow: "hidden" }]}
+      style={[StyleSheet.absoluteFill, { overflow: "hidden" }]}
     >
       <Image
         source={nightSky}
         contentFit="cover"
         contentPosition="right center"
         transition={0}
-        style={StyleSheet.absoluteFill}
+        style={[StyleSheet.absoluteFill, { opacity }]}
       />
+      {!opaque ? (
+        <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
+          <Defs>
+            <LinearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="0%">
+              <Stop
+                offset="0%"
+                stopColor={accountColor ?? "#8aa5b3"}
+                stopOpacity={accountColor ? (dark ? 0.3 : 0.13) : 0.06}
+              />
+              <Stop
+                offset="8%"
+                stopColor={accountColor ?? "#8aa5b3"}
+                stopOpacity={dark ? 0.09 : 0.035}
+              />
+              <Stop offset="48%" stopColor={accountColor ?? "#8aa5b3"} stopOpacity={0} />
+              <Stop offset="85%" stopColor={accountColor ?? "#8aa5b3"} stopOpacity={0} />
+              <Stop
+                offset="100%"
+                stopColor={accountColor ?? "#8aa5b3"}
+                stopOpacity={accountColor ? (dark ? 0.1 : 0.04) : 0.025}
+              />
+            </LinearGradient>
+            <RadialGradient id={`${gradientId}-bloom`} cx="0%" cy="48%" rx="72%" ry="65%">
+              <Stop
+                offset="0%"
+                stopColor={accountColor ?? "#8aa5b3"}
+                stopOpacity={accountColor ? (dark ? 0.13 : 0.045) : 0}
+              />
+              <Stop offset="100%" stopColor={accountColor ?? "#8aa5b3"} stopOpacity={0} />
+            </RadialGradient>
+          </Defs>
+          <Rect width="100%" height="100%" fill={`url(#${gradientId})`} />
+          <Rect width="100%" height="100%" fill={`url(#${gradientId}-bloom)`} />
+          {accountColor ? (
+            <Rect width={1} height="100%" fill={accountColor} opacity={dark ? 0.72 : 0.4} />
+          ) : null}
+        </Svg>
+      ) : null}
     </View>
   );
 }

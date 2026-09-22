@@ -1,3 +1,7 @@
+import { accountByEnvironmentIdAtom } from "../cloud/connectAccounts";
+import { useRevealActiveThread } from "./sidebar/useRevealActiveThread";
+import { useSidebarAccountStyle } from "./sidebar/useSidebarAccountStyle";
+import "./sidebar/account-glass.css";
 import { SidebarHierarchyPanel } from "./sidebar/SidebarHierarchyPanel";
 import { StaveLifecycleBadge } from "./stave/StaveLifecycleBadge";
 import { useSagaSidebarTree } from "./stave/useSagaSidebarTree";
@@ -383,6 +387,7 @@ interface SidebarThreadRowProps {
 }
 
 export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
+  const sidebarAccountStyle = useSidebarAccountStyle();
   const {
     orderedProjectThreadKeys,
     isActive,
@@ -411,8 +416,10 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
+  const threadAccountId = useAtomValue(accountByEnvironmentIdAtom).get(thread.environmentId);
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(isActive);
   const [borderRow, setBorderRow] = useState<HTMLElement | null>(null);
+  useRevealActiveThread(borderRow, isActive);
   const [borderVisible, setBorderVisible] = useState(false);
   const attachRow = useCallback(
     (node: HTMLElement | null) => {
@@ -773,6 +780,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
       ref={attachRow}
       className="w-full"
       data-thread-item
+      style={sidebarAccountStyle([thread.environmentId])}
       onMouseLeave={handleMouseLeave}
       onBlurCapture={handleBlurCapture}
     >
@@ -781,6 +789,10 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         size="sm"
         isActive={isActive}
         data-lecturn-thread-surface
+        data-thread-project={`${thread.environmentId}:${thread.projectId}`}
+        data-thread-account={threadAccountId}
+        data-thread-active={isActive || undefined}
+        data-account-selected={isActive || isSelected || undefined}
         data-testid={`thread-row-${thread.id}`}
         className={`${resolveThreadRowClassName({
           isActive,
@@ -840,7 +852,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               <TooltipTrigger
                 render={
                   <span
-                    className="min-w-0 flex-1 truncate text-sm"
+                    className="lecturn-thread-title min-w-0 flex-1 truncate text-sm"
                     data-testid={`thread-title-${thread.id}`}
                   >
                     {thread.title}
@@ -2486,7 +2498,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
   return (
     <>
-      <div className="group/project-header relative">
+      <div className="lecturn-project-header group/project-header relative">
         {project.stave?.isSaga ? (
           <div className="flex items-center gap-1 pr-8">
             {isManualProjectSorting && dragHandleProps ? (
@@ -3203,11 +3215,13 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     [updateSettings],
   );
 
+  const sidebarAccountStyle = useSidebarAccountStyle();
   const renderProject = (
     project: SidebarProjectSnapshot,
     dragHandleProps: SortableProjectHandleProps | null,
   ) => (
     <div
+      style={sidebarAccountStyle(project.memberProjects.map((member) => member.environmentId))}
       className={
         nestedProjectKeys.has(project.projectKey)
           ? "lecturn-hierarchy-branch lecturn-hierarchy-branch-last pl-7"
@@ -3248,7 +3262,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
   );
   return (
     <SidebarContent
-      className="gap-0"
+      className="lecturn-sidebar-tree gap-0"
       fixedHeader={
         // Lifted above the stage backdrop, whose fade bleeds below the
         // header and would otherwise paint across the search row's outline.
@@ -3341,7 +3355,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
             onDragEnd={handleProjectDragEnd}
             onDragCancel={handleProjectDragCancel}
           >
-            <SidebarMenu ref={attachProjectListAutoAnimateRef}>
+            <SidebarMenu ref={attachProjectListAutoAnimateRef} className="lecturn-local-enclosure">
               <SortableContext
                 items={sortedProjects
                   .filter((project) => !nestedProjectKeys.has(project.projectKey))
@@ -3363,7 +3377,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
             </SidebarMenu>
           </DndContext>
         ) : (
-          <SidebarMenu ref={attachProjectListAutoAnimateRef}>
+          <SidebarMenu ref={attachProjectListAutoAnimateRef} className="lecturn-local-enclosure">
             {sortedProjects.map((project) => (
               <SidebarMenuItem key={project.projectKey} className="rounded-md">
                 {renderProject(project, null)}

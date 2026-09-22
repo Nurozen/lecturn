@@ -1,3 +1,4 @@
+import "./account-glass.css";
 import { accountTintColor } from "@lecturn/shared/accountTint";
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/models";
@@ -59,7 +60,11 @@ export function SidebarSegments<Node>(props: SidebarSegmentsProps<Node>) {
   const [renderBody, oneListTail] = children;
   if (view.segments === null) {
     return (
-      <ul ref={ref} role={role} className={className}>
+      <ul
+        ref={ref}
+        role={role}
+        className={cn("lecturn-sidebar-tree lecturn-local-enclosure", className)}
+      >
         {renderBody({
           ...view.unsegmented,
           orderedThreads: props.orderedThreads,
@@ -105,7 +110,7 @@ function SegmentedLists<Node>(
   }, []);
 
   return (
-    <div ref={rootRef} data-sidebar-segments className="flex flex-col">
+    <div ref={rootRef} data-sidebar-segments className="lecturn-sidebar-tree flex flex-col">
       {segments.map((segment, index) => {
         const pinned = new Set(segment.pinnedThreads);
         const { top, bottom, coveredTop, coveredBottom } = layout[index]!;
@@ -176,6 +181,8 @@ function SegmentedLists<Node>(
                   // A row scrolled to by focus stays clear of the bars stuck over its edges.
                   className={cn(
                     className,
+                    "lecturn-account-list",
+                    segment.accountId === null && "lecturn-local-enclosure",
                     "[&_:is(a,button,[tabindex])]:scroll-mt-(--covered-top) [&_:is(a,button,[tabindex])]:scroll-mb-(--covered-bottom)",
                     // The bar already says an account has no threads: drop the bare list heading.
                     segment.accountId !== null &&

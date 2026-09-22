@@ -1,3 +1,5 @@
+import { AccountSurfaceColorContext } from "../../lib/accountTintContext";
+import { useAccountRowColors } from "../home/useAccountRowColors";
 import {
   useAccountSectionDisplayStates,
   toggleMobileAccountSection,
@@ -1303,6 +1305,7 @@ function ThreadNavigationSidebarPane(
   );
   // Snoozed threads need no special case: the shelf header is a list row
   // even while collapsed.
+  const accountRowColors = useAccountRowColors(listItems);
   const renderListItem = useCallback(
     (props: { readonly item: SidebarListItem }) => (
       <View style={{ paddingLeft: (props.item.depth ?? 0) * 18 }}>
@@ -1331,9 +1334,9 @@ function ThreadNavigationSidebarPane(
                   ? light
                     ? "#ad3c2f"
                     : "#ff866f"
-                  : light
-                    ? "#82472c"
-                    : "#ffe1a0",
+                  : (accountRowColors.get(props.item.key) ?? (light ? "#82472c" : "#ffe1a0")),
+              borderRadius: 2,
+              opacity: 0.72,
               boxShadow: light
                 ? "0 0 3px #bc764233"
                 : (props.item.type === "thread" || props.item.type === "v2-thread") &&
@@ -1341,10 +1344,10 @@ function ThreadNavigationSidebarPane(
                     props.item.settledBranch &&
                     level === (props.item.depth ?? 0) - 1
                   ? "0 0 6px 1px #e64d3d88"
-                  : "0 0 5px 1px #dca64e55",
+                  : `0 0 4px ${accountRowColors.get(props.item.key) ?? "#dca64e"}44`,
             }}
           >
-            {light ? (
+            {light && !accountRowColors.has(props.item.key) ? (
               <LightHierarchySheen
                 copper={Boolean(
                   (props.item.type === "thread" || props.item.type === "v2-thread") &&
@@ -1378,19 +1381,19 @@ function ThreadNavigationSidebarPane(
                   ? light
                     ? "#ad3c2f"
                     : "#ff866f"
-                  : light
-                    ? "#82472c"
-                    : "#ffe1a0",
+                  : (accountRowColors.get(props.item.key) ?? (light ? "#82472c" : "#ffe1a0")),
+              borderRadius: 2,
+              opacity: 0.72,
               boxShadow: light
                 ? "0 0 3px #bc764233"
                 : (props.item.type === "thread" || props.item.type === "v2-thread") &&
                     "settledBranch" in props.item &&
                     props.item.settledBranch
                   ? "0 0 6px 1px #e64d3d88"
-                  : "0 0 5px 1px #dca64e55",
+                  : `0 0 4px ${accountRowColors.get(props.item.key) ?? "#dca64e"}44`,
             }}
           >
-            {light ? (
+            {light && !accountRowColors.has(props.item.key) ? (
               <LightHierarchySheen
                 horizontal
                 copper={Boolean(
@@ -1402,10 +1405,12 @@ function ThreadNavigationSidebarPane(
             ) : null}
           </View>
         ) : null}
-        {renderListRow(props)}
+        <AccountSurfaceColorContext.Provider value={accountRowColors.get(props.item.key)}>
+          {renderListRow(props)}
+        </AccountSurfaceColorContext.Provider>
       </View>
     ),
-    [hierarchyGuides, light, renderListRow],
+    [hierarchyGuides, light, renderListRow, accountRowColors],
   );
 
   const listEmpty = (

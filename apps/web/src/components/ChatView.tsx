@@ -1,4 +1,4 @@
-import { useAccountTint } from "../cloud/useAccountTint";
+import { AccountSurface } from "./AccountSurface";
 import { RepositoryPullRequestOverview } from "./pullRequest/RepositoryPullRequestOverview";
 import { useStaveGitSelection } from "./stave/staveGitSelection";
 import {
@@ -1370,7 +1370,6 @@ function releaseChatTimelineAnchor<T extends { readonly messageId: MessageId | n
 }
 
 function ChatViewContent(props: ChatViewProps) {
-  const accountTint = useAccountTint(props.environmentId);
   const {
     environmentId,
     threadId,
@@ -5005,13 +5004,21 @@ function ChatViewContent(props: ChatViewProps) {
 
   useEffect(() => {
     if (!activeThread?.id || terminalUiState.terminalOpen) return;
+    // Browsing existing conversations should retain the resting glass composer.
+    // Empty threads still focus immediately, and explicit focus shortcuts work as before.
+    if (settings.composerCollapseOnBlur && activeThread.messages.length > 0) return;
     const frame = window.requestAnimationFrame(() => {
       focusComposer();
     });
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [activeThread?.id, focusComposer, terminalUiState.terminalOpen]);
+  }, [
+    activeThread?.id,
+    focusComposer,
+    terminalUiState.terminalOpen,
+    settings.composerCollapseOnBlur,
+  ]);
 
   useEffect(() => {
     if (!activeThread?.id) return;
@@ -7934,8 +7941,13 @@ function ChatViewContent(props: ChatViewProps) {
   });
 
   return (
-    <div
-      {...accountTint}
+    <AccountSurface
+      environmentId={props.environmentId}
+      projectKey={
+        activeThread ? `${activeThread.environmentId}:${activeThread.projectId}` : undefined
+      }
+      animate
+      data-chat-has-messages={!isDraftHeroState || undefined}
       className="lecturn-chat-surface relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
     >
       {rightPanelControlsAtRoot ? panelLayoutControls : null}
@@ -8054,7 +8066,10 @@ function ChatViewContent(props: ChatViewProps) {
               />
             </div>
             {/* Messages Wrapper */}
-            <div className="relative flex min-h-0 flex-1 flex-col">
+            <div
+              className="relative flex min-h-0 flex-1 flex-col"
+              data-timeline-loading={threadDetailLoading || undefined}
+            >
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
                 citationRequest={citationRequest}
@@ -8554,7 +8569,7 @@ function ChatViewContent(props: ChatViewProps) {
           onClose={closeExpandedImage}
         />
       )}
-    </div>
+    </AccountSurface>
   );
 }
 

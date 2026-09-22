@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
-import type { MobileThemeVariables } from "./mobileTheme";
-export const AccountTintContext = createContext<MobileThemeVariables>({});
-export function useAccountTintVariables(): MobileThemeVariables {
-  return useContext(AccountTintContext);
+
+/** Decorative ownership color is independent of semantic theme colors. */
+export const AccountSurfaceColorContext = createContext<string | undefined>(undefined);
+export function useAccountSurfaceColor() {
+  return useContext(AccountSurfaceColorContext);
 }

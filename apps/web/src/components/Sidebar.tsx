@@ -1,3 +1,6 @@
+import { accountByEnvironmentIdAtom } from "../cloud/connectAccounts";
+import { useRevealActiveThread } from "./sidebar/useRevealActiveThread";
+import { useSidebarAccountStyle } from "./sidebar/useSidebarAccountStyle";
 import {
   selectThreadPullRequestWatches,
   threadPullRequestLinks,
@@ -886,8 +889,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     [thread.environmentId, thread.id],
   );
   const threadKey = scopedThreadKey(threadRef);
+  const threadAccountId = useAtomValue(accountByEnvironmentIdAtom).get(thread.environmentId);
+  const sidebarAccountStyle = useSidebarAccountStyle();
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(props.isActive);
   const [borderRow, setBorderRow] = useState<HTMLElement | null>(null);
+  useRevealActiveThread(borderRow, props.isActive);
   const [borderVisible, setBorderVisible] = useState(false);
   const attachRow = useCallback(
     (node: HTMLElement | null) => {
@@ -1357,7 +1363,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   ) : (
     <span
       className={cn(
-        "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
+        "lecturn-thread-title min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
         shouldRecede ? "font-normal" : "font-medium",
         variant === "card"
           ? cn(
@@ -1487,6 +1493,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     return (
       <li
         data-thread-item
+        style={sidebarAccountStyle([thread.environmentId])}
         className="list-none [content-visibility:auto] [contain-intrinsic-size:auto_34px]"
       >
         <Tooltip>
@@ -1497,6 +1504,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 role="button"
                 tabIndex={0}
                 data-lecturn-thread-surface
+                data-thread-project={`${thread.environmentId}:${thread.projectId}`}
+                data-thread-account={threadAccountId}
+                data-thread-active={props.isActive || undefined}
+                data-account-selected={props.isActive || isSelected || undefined}
                 data-testid="sidebar-row-slim"
                 aria-busy={isRegeneratingTitle || undefined}
                 className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
@@ -1639,14 +1650,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     <li
       data-thread-item
       ref={sortable?.setNodeRef}
-      style={
-        sortable
+      style={{
+        ...sidebarAccountStyle([thread.environmentId]),
+        ...(sortable
           ? {
               transform: CSS.Translate.toString(sortable.transform),
               transition: sortable.transition,
             }
-          : undefined
-      }
+          : {}),
+      }}
       {...(sortable?.listeners ?? {})}
       className={cn(
         "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_96px]",
@@ -1661,6 +1673,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               role="button"
               tabIndex={0}
               data-lecturn-thread-surface
+              data-thread-project={`${thread.environmentId}:${thread.projectId}`}
+              data-thread-account={threadAccountId}
+              data-thread-active={props.isActive || undefined}
+              data-account-selected={props.isActive || isSelected || undefined}
               data-testid="sidebar-row-card"
               aria-busy={isRegeneratingTitle || status === "working" || undefined}
               aria-label={status === "working" ? `${thread.title} · Working` : undefined}
@@ -2077,6 +2093,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 });
 
 export default function Sidebar() {
+  const sidebarAccountStyle = useSidebarAccountStyle();
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
@@ -4468,9 +4485,15 @@ export default function Sidebar() {
                       return (
                         <li
                           key={node.group.key}
+                          style={sidebarAccountStyle(
+                            project.memberProjects.map((member) => member.environmentId),
+                          )}
                           className={nested ? "lecturn-hierarchy-branch list-none" : "list-none"}
                         >
-                          <div data-thread-selection-safe className="flex items-center gap-1 pt-2">
+                          <div
+                            data-thread-selection-safe
+                            className="lecturn-project-header flex items-center gap-1 pt-2"
+                          >
                             <button
                               type="button"
                               data-lecturn-hover
@@ -4739,7 +4762,7 @@ export default function Sidebar() {
                         />
                         <li
                           data-thread-selection-safe
-                          className="flex list-none items-center gap-2 px-2 py-2 text-xs text-muted-foreground"
+                          className="lecturn-projects-heading flex list-none items-center gap-2 px-2 py-2 text-xs text-muted-foreground"
                         >
                           <span className="mr-auto font-medium">Projects</span>
                           {snoozedThreads.length ? (
