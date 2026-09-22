@@ -23,6 +23,7 @@ import {
   isTerminalPhase,
   sanitizeAgentActivityAggregateState,
   sanitizeApnsNotificationPayload,
+  statusForAgentActivity,
 } from "./agentActivityPayloads.ts";
 import * as Apns from "./ApnsClient.ts";
 import {
@@ -462,6 +463,7 @@ export function decidePushNotification(input: {
       threadId: activity.threadId,
       deepLink: activity.deepLink,
       phase: activity.phase,
+      status: activity.status,
       updatedAt: activity.updatedAt,
     },
     notified,
@@ -919,6 +921,7 @@ export const make = Effect.gen(function* () {
     readonly environmentId: string;
     readonly threadId: string;
     readonly phase: RelayAgentActivityAggregateState["activities"][number]["phase"];
+    readonly status?: string;
   }) {
     return yield* activityRows
       .getForUserThread({
@@ -927,10 +930,15 @@ export const make = Effect.gen(function* () {
         threadId: input.threadId,
       })
       .pipe(
-        // Phase only, not updatedAt: a republish of the same event with a new
-        // timestamp no longer queues its own push, so this job is still the
-        // one delivery for that event and must not be dropped as superseded.
-        Effect.map((current) => current !== null && current.phase === input.phase),
+        // Heartbeats may change updatedAt without changing the event. A stale
+        // PR or changed semantic status must still invalidate its queued alert.
+        Effect.map(
+          (current) =>
+            current !== null &&
+            current.phase === input.phase &&
+            current.pullRequest?.stale !== true &&
+            (input.status === undefined || statusForAgentActivity(current) === input.status),
+        ),
         // A transient persistence failure must not permanently discard a
         // legitimate alert. Fail open and let the signed job's retry/dedupe
         // protections handle transport failures as usual.
@@ -988,6 +996,7 @@ export const make = Effect.gen(function* () {
       environmentId: input.notification.environmentId,
       threadId: input.notification.threadId,
       phase: input.notification.phase,
+      ...(input.notification.status !== undefined ? { status: input.notification.status } : {}),
     });
   });
 
@@ -1508,154 +1517,167 @@ export const make = Effect.gen(function* () {
     }).pipe(withSpanAttributes({ "user.id": payload.target.userId }));
   });
 
-  return ApnsDeliveries.of({
-    sendLiveActivity,
-    sendPushNotification,
-    processSignedJob,
-    sendPushNotificationForTarget: Effect.fnUntraced(function* (input) {
-      const now = yield* DateTime.now;
-      const decision = decidePushNotification({
-        target: input.target,
-        aggregate: input.aggregate,
-        nowMs: now.epochMilliseconds,
-      });
-      const { notification } = decision;
-      const token = input.target.push_token;
-      if (
-        !notification ||
-        !token ||
-        !(yield* permitted(
-          input.target.user_id,
-          "push_notification",
-          undefined,
-          notification.environmentId,
-        ))
-      ) {
-        yield* persistNotifiedPushEvents(input.target, decision.notified);
-        return null;
-      }
+  const sendPushNotificationForTarget = Effect.fnUntraced(function* (
+    input: Parameters<ApnsDeliveries["Service"]["sendPushNotificationForTarget"]>[0],
+  ) {
+    const now = yield* DateTime.now;
+    const decision = decidePushNotification({
+      target: input.target,
+      aggregate: input.aggregate,
+      nowMs: now.epochMilliseconds,
+    });
+    const { notification } = decision;
+    const token = input.target.push_token;
+    if (
+      !notification ||
+      !token ||
+      !(yield* permitted(
+        input.target.user_id,
+        "push_notification",
+        undefined,
+        notification.environmentId,
+      ))
+    ) {
+      yield* persistNotifiedPushEvents(input.target, decision.notified);
+      return null;
+    }
+    const result = yield* deliveryQueue.enqueuePushNotification({
+      userId: input.target.user_id,
+      deviceId: input.target.device_id,
+      token,
+      bundleId: input.target.bundle_id,
+      apsEnvironment: input.target.aps_environment,
+      notification,
+    });
+    yield* persistNotifiedPushEvents(input.target, decision.notifiedIfQueued);
+    return result;
+  });
+  const sendForTarget = Effect.fnUntraced(function* (
+    input: Parameters<ApnsDeliveries["Service"]["sendForTarget"]>[0],
+  ) {
+    const aggregate = yield* filterPermittedActivity(
+      managedAccess,
+      input.target.user_id,
+      input.aggregate,
+    );
+    input = { ...input, aggregate };
+    const decision = decidePushNotification(input);
+    const { notification } = decision;
+    const delivery = chooseDelivery({
+      target: input.target,
+      aggregate: input.aggregate,
+      notification,
+      nowMs: input.nowMs,
+    });
+    if (
+      !delivery ||
+      !(yield* delivery.kind === "push_notification"
+        ? permitted(
+            input.target.user_id,
+            delivery.kind,
+            undefined,
+            delivery.notification.environmentId,
+          )
+        : aggregatePermitted(input.target.user_id, delivery.kind, delivery.aggregate))
+    ) {
+      yield* persistNotifiedPushEvents(input.target, decision.notified);
+      return null;
+    }
+    if (delivery.kind === "push_notification") {
       const result = yield* deliveryQueue.enqueuePushNotification({
         userId: input.target.user_id,
         deviceId: input.target.device_id,
-        token,
+        token: delivery.token,
+        bundleId: input.target.bundle_id,
+        apsEnvironment: input.target.aps_environment,
+        notification: delivery.notification,
+      });
+      yield* persistNotifiedPushEvents(input.target, decision.notifiedIfQueued);
+      return result;
+    }
+    // The end event doubles as the "task finished" moment. When a companion
+    // push notification is about to ring the device (below) or already rang
+    // for this event, the activity end stays silent; otherwise the end itself
+    // carries the alert so LA-only users still get the buzz.
+    const endRow = delivery.aggregate?.activities[0];
+    const pushOwnsEndAlert =
+      input.target.push_token !== null &&
+      (notification !== null ||
+        (endRow !== undefined && isNotifiedPushEvent(decision.notified, endRow)));
+    const endAlertsAllowed =
+      delivery.kind !== "live_activity_end" ||
+      (yield* cleanupAlertsPermitted(
+        input.target.user_id,
+        "liveActivities",
+        undefined,
+        delivery.aggregate?.activities[0]?.environmentId,
+      ));
+    const alert = !endAlertsAllowed
+      ? null
+      : delivery.kind === "live_activity_end"
+        ? pushOwnsEndAlert
+          ? null
+          : alertForTerminalAggregate({
+              aggregate: delivery.aggregate,
+              preferences: parsePreferences(input.target.preferences_json),
+            })
+        : delivery.alert;
+    const result = yield* deliveryQueue.enqueueLiveActivity({
+      userId: input.target.user_id,
+      deviceId: input.target.device_id,
+      kind: delivery.kind,
+      token: delivery.token,
+      bundleId: input.target.bundle_id,
+      apsEnvironment: input.target.aps_environment,
+      aggregate: delivery.aggregate,
+      alert,
+    });
+    if (
+      delivery.kind === "live_activity_end" &&
+      notification &&
+      input.target.push_token &&
+      (yield* cleanupAlertsPermitted(
+        input.target.user_id,
+        "pushNotifications",
+        undefined,
+        notification.environmentId,
+      ))
+    ) {
+      yield* deliveryQueue.enqueuePushNotification({
+        userId: input.target.user_id,
+        deviceId: input.target.device_id,
+        token: input.target.push_token,
         bundleId: input.target.bundle_id,
         apsEnvironment: input.target.aps_environment,
         notification,
       });
       yield* persistNotifiedPushEvents(input.target, decision.notifiedIfQueued);
-      return result;
-    }),
-    sendForTarget: Effect.fnUntraced(function* (input) {
-      const aggregate = yield* filterPermittedActivity(
-        managedAccess,
-        input.target.user_id,
-        input.aggregate,
-      );
-      input = { ...input, aggregate };
-      const decision = decidePushNotification(input);
-      const { notification } = decision;
-      const delivery = chooseDelivery({
-        target: input.target,
-        aggregate: input.aggregate,
-        notification,
-        nowMs: input.nowMs,
-      });
-      if (
-        !delivery ||
-        !(yield* delivery.kind === "push_notification"
-          ? permitted(
-              input.target.user_id,
-              delivery.kind,
-              undefined,
-              delivery.notification.environmentId,
-            )
-          : aggregatePermitted(input.target.user_id, delivery.kind, delivery.aggregate))
-      ) {
-        yield* persistNotifiedPushEvents(input.target, decision.notified);
-        return null;
-      }
-      if (delivery.kind === "push_notification") {
-        const result = yield* deliveryQueue.enqueuePushNotification({
-          userId: input.target.user_id,
-          deviceId: input.target.device_id,
-          token: delivery.token,
-          bundleId: input.target.bundle_id,
-          apsEnvironment: input.target.aps_environment,
-          notification: delivery.notification,
-        });
-        yield* persistNotifiedPushEvents(input.target, decision.notifiedIfQueued);
-        return result;
-      }
-      // The end event doubles as the "task finished" moment. When a companion
-      // push notification is about to ring the device (below) or already rang
-      // for this event, the activity end stays silent; otherwise the end itself
-      // carries the alert so LA-only users still get the buzz.
-      const endRow = delivery.aggregate?.activities[0];
-      const pushOwnsEndAlert =
-        input.target.push_token !== null &&
-        (notification !== null ||
-          (endRow !== undefined && isNotifiedPushEvent(decision.notified, endRow)));
-      const endAlertsAllowed =
-        delivery.kind !== "live_activity_end" ||
-        (yield* cleanupAlertsPermitted(
-          input.target.user_id,
-          "liveActivities",
-          undefined,
-          delivery.aggregate?.activities[0]?.environmentId,
-        ));
-      const alert = !endAlertsAllowed
-        ? null
-        : delivery.kind === "live_activity_end"
-          ? pushOwnsEndAlert
-            ? null
-            : alertForTerminalAggregate({
-                aggregate: delivery.aggregate,
-                preferences: parsePreferences(input.target.preferences_json),
-              })
-          : delivery.alert;
-      const result = yield* deliveryQueue.enqueueLiveActivity({
+    } else {
+      yield* persistNotifiedPushEvents(input.target, decision.notified);
+    }
+    if (delivery.kind === "live_activity_start") {
+      const now = yield* DateTime.now;
+      yield* liveActivities.markStartQueued({
         userId: input.target.user_id,
         deviceId: input.target.device_id,
-        kind: delivery.kind,
-        token: delivery.token,
-        bundleId: input.target.bundle_id,
-        apsEnvironment: input.target.aps_environment,
-        aggregate: delivery.aggregate,
-        alert,
+        queuedAt: DateTime.formatIso(now),
       });
-      if (
-        delivery.kind === "live_activity_end" &&
-        notification &&
-        input.target.push_token &&
-        (yield* cleanupAlertsPermitted(
-          input.target.user_id,
-          "pushNotifications",
-          undefined,
-          notification.environmentId,
-        ))
-      ) {
-        yield* deliveryQueue.enqueuePushNotification({
-          userId: input.target.user_id,
-          deviceId: input.target.device_id,
-          token: input.target.push_token,
-          bundleId: input.target.bundle_id,
-          apsEnvironment: input.target.aps_environment,
-          notification,
-        });
-        yield* persistNotifiedPushEvents(input.target, decision.notifiedIfQueued);
-      } else {
-        yield* persistNotifiedPushEvents(input.target, decision.notified);
-      }
-      if (delivery.kind === "live_activity_start") {
-        const now = yield* DateTime.now;
-        yield* liveActivities.markStartQueued({
-          userId: input.target.user_id,
-          deviceId: input.target.device_id,
-          queuedAt: DateTime.formatIso(now),
-        });
-      }
-      return result;
-    }),
+    }
+    return result;
+  });
+
+  return ApnsDeliveries.of({
+    sendLiveActivity,
+    sendPushNotification,
+    processSignedJob,
+    sendPushNotificationForTarget: (input) =>
+      liveActivities.withPushNotificationLock(input.target, (target) =>
+        sendPushNotificationForTarget({ ...input, target }),
+      ),
+    sendForTarget: (input) =>
+      liveActivities.withPushNotificationLock(input.target, (target) =>
+        sendForTarget({ ...input, target }),
+      ),
   });
 });
 

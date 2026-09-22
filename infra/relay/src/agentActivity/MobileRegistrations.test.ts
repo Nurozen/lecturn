@@ -63,6 +63,7 @@ function makeLiveActivities(
     register: () => Effect.void,
     listTargets: () => Effect.succeed([]),
     markDelivery: () => Effect.void,
+    withPushNotificationLock: (target, use) => use(target),
     markPushNotified: () => Effect.void,
     markStartQueued: () => Effect.void,
     clearStartQueued: () => Effect.void,

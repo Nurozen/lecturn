@@ -1,3 +1,4 @@
+import { statusForAgentActivity } from "./agentActivityPayloads.ts";
 import type {
   RelayAgentActivityAggregateState,
   RelayAgentActivityState,
@@ -209,27 +210,6 @@ export const make = Effect.gen(function* () {
   });
 });
 
-function statusForPhase(phase: RelayAgentActivityState["phase"]): string {
-  switch (phase) {
-    case "waiting_for_approval":
-      return "Approval";
-    case "waiting_for_input":
-      return "Input";
-    case "completed":
-      return "Done";
-    case "failed":
-      return "Failed";
-    case "starting":
-      // Matches the web sidebar's pill wording (Sidebar.logic.ts) so the same
-      // thread reads the same across surfaces.
-      return "Connecting";
-    case "running":
-      return "Working";
-    case "stale":
-      return "Waiting";
-  }
-}
-
 function aggregateRowForState(state: RelayAgentActivityState) {
   return {
     environmentId: state.environmentId,
@@ -238,13 +218,7 @@ function aggregateRowForState(state: RelayAgentActivityState) {
     threadTitle: state.threadTitle,
     modelTitle: state.modelTitle,
     phase: state.phase,
-    status: state.pullRequest
-      ? state.pullRequest.stale
-        ? "Stale"
-        : state.pullRequest.state !== "open"
-          ? state.pullRequest.state
-          : `CI ${state.pullRequest.checks}`
-      : statusForPhase(state.phase),
+    status: statusForAgentActivity(state),
     updatedAt: state.updatedAt,
     deepLink: state.deepLink,
     ...(state.pullRequest ? { pullRequest: state.pullRequest } : {}),

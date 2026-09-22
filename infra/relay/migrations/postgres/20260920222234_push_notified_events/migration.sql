@@ -1,1 +1,0 @@
-ALTER TABLE "relay_mobile_devices" ADD COLUMN "notified_push_events_json" jsonb;

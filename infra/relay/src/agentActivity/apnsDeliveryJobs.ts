@@ -47,6 +47,7 @@ export const ApnsNotificationPayload = Schema.Struct({
   // New jobs use these fields to avoid delivering a stale Done/attention
   // notification after the thread has moved to another phase.
   phase: Schema.optional(RelayAgentAwarenessPhase),
+  status: Schema.optional(Schema.String),
   updatedAt: Schema.optional(Schema.String),
 });
 export type ApnsNotificationPayload = typeof ApnsNotificationPayload.Type;
