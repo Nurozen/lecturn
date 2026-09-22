@@ -1,3 +1,4 @@
+import * as Schema from "effect/Schema";
 import type {
   RelayAgentActivityAggregateState,
   RelayLiveActivityRegistrationRequest,
@@ -11,6 +12,8 @@ import * as Layer from "effect/Layer";
 import * as RelayDb from "../db.ts";
 import { relayPushTokenOwners, relayLiveActivities } from "../persistence/schema.ts";
 import * as LiveActivities from "./LiveActivities.ts";
+
+const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 
 const aggregate: RelayAgentActivityAggregateState = {
   title: "Lecturn",
@@ -34,6 +37,65 @@ const aggregate: RelayAgentActivityAggregateState = {
 };
 
 describe("LiveActivities", () => {
+  it.effect("locks the recipient row and reloads its notification record before delivery", () => {
+    let transactionOpen = false;
+    let called = false;
+    const events = [
+      { environmentId: "env", threadId: "thread", phase: "completed", status: "Done" },
+    ];
+    const dialect = new PgDialect();
+    const fakeDb = {
+      $client: {
+        withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+          Effect.gen(function* () {
+            transactionOpen = true;
+            try {
+              return yield* effect;
+            } finally {
+              transactionOpen = false;
+            }
+          }),
+      },
+      select: () => ({
+        from: () => ({
+          where: (condition: SQL) => ({
+            for: (mode: string) =>
+              Effect.sync(() => {
+                expect(transactionOpen).toBe(true);
+                expect(mode).toBe("update");
+                expect(dialect.sqlToQuery(condition).params).toEqual(["account", "device"]);
+                return [{ events }];
+              }),
+          }),
+        }),
+      }),
+    } as unknown as RelayDb.RelayDb["Service"];
+    return Effect.gen(function* () {
+      const service = yield* LiveActivities.LiveActivities;
+      const result = yield* service.withPushNotificationLock(
+        {
+          user_id: "account",
+          device_id: "device",
+          notified_push_events_json: null,
+        } as LiveActivities.TargetRow,
+        (fresh) =>
+          Effect.gen(function* () {
+            called = true;
+            expect(transactionOpen).toBe(true);
+            expect(yield* decodeJson(fresh.notified_push_events_json)).toEqual(events);
+            return "queued";
+          }),
+      );
+      expect(result).toBe("queued");
+      expect(called).toBe(true);
+      expect(transactionOpen).toBe(false);
+    }).pipe(
+      Effect.provide(
+        LiveActivities.layer.pipe(Layer.provide(Layer.succeed(RelayDb.RelayDb, fakeDb))),
+      ),
+    );
+  });
+
   it.effect(
     "claims Live Activity push tokens globally before upserting the current user device",
     () => {

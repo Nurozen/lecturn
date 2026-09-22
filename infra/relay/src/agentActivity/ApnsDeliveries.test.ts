@@ -10,6 +10,7 @@ import { TestClock } from "effect/testing";
 import type { BillingAccount } from "../billing/BillingStore.ts";
 import * as NodeCrypto from "node:crypto";
 import * as Effect from "effect/Effect";
+import * as Semaphore from "effect/Semaphore";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Redacted from "effect/Redacted";
@@ -167,6 +168,7 @@ const target: LiveActivities.TargetRow = {
   push_token: null,
   push_to_start_token: "start-token",
   preferences_json: enabledPreferences,
+  notified_push_events_json: null,
   activity_push_token: "activity-token",
   remote_start_queued_at: null,
   remote_started_at: "1970-01-01T00:00:00.000Z",
@@ -194,6 +196,8 @@ function makeLayer(input: {
     Parameters<LiveActivities.LiveActivities["Service"]["invalidateDeliveryToken"]>[0]
   >;
   readonly currentTargets?: ReadonlyArray<LiveActivities.TargetRow>;
+  // Stands in for the device's Postgres row: outlives any one relay instance.
+  readonly deviceRow?: { notified_push_events_json: string | null; lock?: Semaphore.Semaphore };
   readonly config?: RelayConfiguration.RelayConfiguration["Service"];
   // Live agent-activity rows returned by delivery-time state rechecks.
   // Defaults to the fixture row so queued updates match unless a test is
@@ -207,6 +211,8 @@ function makeLayer(input: {
   ) => Effect.Effect<HttpClientResponse.HttpClientResponse>;
 }) {
   const completedJobs = new Set<string>();
+  const lock = input.deviceRow?.lock ?? Semaphore.makeUnsafe(1);
+  if (input.deviceRow) input.deviceRow.lock = lock;
   return ApnsDeliveries.layer.pipe(
     Layer.provide(ApnsClient.layer),
     Layer.provide(ApnsProviderTokens.layer),
@@ -289,6 +295,23 @@ function makeLayer(input: {
           markDelivery: (delivery) =>
             Effect.sync(() => {
               input.markedDeliveries?.push(delivery);
+            }),
+          withPushNotificationLock: (target, use) =>
+            lock.withPermit(
+              Effect.suspend(() =>
+                use({
+                  ...target,
+                  notified_push_events_json: input.deviceRow
+                    ? input.deviceRow.notified_push_events_json
+                    : target.notified_push_events_json,
+                }),
+              ),
+            ),
+          markPushNotified: ({ events }) =>
+            Effect.sync(() => {
+              if (input.deviceRow) {
+                input.deviceRow.notified_push_events_json = stableStringify(events);
+              }
             }),
           invalidateDeliveryToken: (invalidated) =>
             Effect.sync(() => {
@@ -1699,6 +1722,353 @@ describe("ApnsDeliveries", () => {
   });
 });
 
+describe("once-per-event push notifications", () => {
+  type DeviceRow = { notified_push_events_json: string | null };
+  type AggregateRow = RelayAgentActivityAggregateState["activities"][number];
+
+  const inputRow: AggregateRow = {
+    ...aggregate.activities[0]!,
+    phase: "waiting_for_input",
+    status: "Input",
+  };
+  const workingRow: AggregateRow = aggregate.activities[0]!;
+  const pullRequest: NonNullable<AggregateRow["pullRequest"]> = {
+    watchId: "watch-78",
+    projectId: "project",
+    number: 78,
+    repository: "acme/hl-jira",
+    state: "open",
+    checks: "failing",
+    requiredChecks: "failing",
+    watching: true,
+    manager: "monitoring",
+    authorization: "none",
+    stale: false,
+  };
+  const ciFailingRow: AggregateRow = {
+    ...inputRow,
+    threadId: "pr-watch:78" as AggregateRow["threadId"],
+    threadTitle: "#78 hiddenlayer-dev 2.13.0",
+    projectTitle: "hl-jira",
+    status: "CI failing",
+    pullRequest,
+  };
+  const stalePullRequestRow: AggregateRow = {
+    ...ciFailingRow,
+    status: "Stale",
+    pullRequest: { ...pullRequest, stale: true },
+  };
+
+  // Each publish reads the device row the way the publisher does (listTargets)
+  // and runs against a brand-new ApnsDeliveries instance, so nothing but the
+  // persisted record can carry "already notified" between publishes.
+  const publish = (input: {
+    readonly deviceRow: DeviceRow;
+    readonly queuedJobs: Array<SignedApnsDeliveryJob>;
+    readonly rows: ReadonlyArray<AggregateRow>;
+    readonly updatedAt?: string;
+    readonly preferences?: string;
+    readonly staleSnapshot?: true;
+  }) =>
+    Effect.gen(function* () {
+      const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+      const updatedAt = input.updatedAt ?? state.updatedAt;
+      return yield* deliveries.sendPushNotificationForTarget({
+        target: {
+          ...target,
+          push_token: "apns-device-token",
+          push_to_start_token: null,
+          activity_push_token: null,
+          remote_started_at: null,
+          preferences_json: input.preferences ?? disabledPreferences,
+          notified_push_events_json: input.staleSnapshot
+            ? null
+            : input.deviceRow.notified_push_events_json,
+        },
+        aggregate: {
+          ...aggregate,
+          updatedAt,
+          activities: input.rows.map((row) => ({ ...row, updatedAt })),
+        },
+      });
+    }).pipe(
+      Effect.provide(
+        makeLayer({ attempts: [], queuedJobs: input.queuedJobs, deviceRow: input.deviceRow }),
+      ),
+    );
+
+  const queuedBodies = (queuedJobs: ReadonlyArray<SignedApnsDeliveryJob>) =>
+    queuedJobs.map((job) => job.payload.notification?.body);
+
+  it.effect("serializes concurrent identical publishes from the same device snapshot", () => {
+    const deviceRow: DeviceRow = { notified_push_events_json: null };
+    const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+    return Effect.gen(function* () {
+      yield* Effect.all(
+        [
+          publish({ deviceRow, queuedJobs, rows: [inputRow], staleSnapshot: true }),
+          publish({ deviceRow, queuedJobs, rows: [inputRow], staleSnapshot: true }),
+        ],
+        { concurrency: 2 },
+      );
+      expect(queuedBodies(queuedJobs)).toEqual(["Input: Project"]);
+    });
+  });
+
+  it.effect(
+    "preserves concurrent events in different environments without replaying either",
+    () => {
+      const deviceRow: DeviceRow = { notified_push_events_json: null };
+      const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+      const otherRow = { ...inputRow, environmentId: "other-env" as AggregateRow["environmentId"] };
+      return Effect.gen(function* () {
+        yield* Effect.all(
+          [
+            publish({ deviceRow, queuedJobs, rows: [inputRow], staleSnapshot: true }),
+            publish({ deviceRow, queuedJobs, rows: [otherRow], staleSnapshot: true }),
+          ],
+          { concurrency: 2 },
+        );
+        yield* publish({ deviceRow, queuedJobs, rows: [inputRow] });
+        yield* publish({ deviceRow, queuedJobs, rows: [otherRow] });
+        expect(queuedJobs).toHaveLength(2);
+        expect(queuedJobs.map((job) => job.payload.notification?.environmentId).sort()).toEqual(
+          [inputRow.environmentId, "other-env"].sort(),
+        );
+      });
+    },
+  );
+
+  for (const change of ["stale", "status"] as const) {
+    it.effect(`drops a queued PR alert after its ${change} changes within the same phase`, () => {
+      let sends = 0;
+      const signed = signApnsDeliveryJob({
+        secret: config.apnsDeliveryJobSigningSecret,
+        payload: makeApnsDeliveryJobPayload({
+          kind: "push_notification",
+          userId: target.user_id,
+          deviceId: target.device_id,
+          token: "apns-device-token",
+          aggregate: null,
+          notification: {
+            title: "PR",
+            body: "CI failing: Project",
+            environmentId: "env",
+            threadId: "thread",
+            deepLink: "/",
+            phase: "waiting_for_input",
+            status: "CI failing",
+            updatedAt: "1970-01-01T00:00:01.000Z",
+          },
+          createdAt: "1970-01-01T00:00:01.000Z",
+          expiresAt: "1970-01-01T00:10:00.000Z",
+          jobId: `job-pr-${change}`,
+        }),
+      });
+      return Effect.gen(function* () {
+        const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+        const result = yield* deliveries.processSignedJob(signed);
+        expect(result.apnsReason).toContain("Stale");
+        expect(sends).toBe(0);
+      }).pipe(
+        Effect.provide(
+          makeLayer({
+            attempts: [],
+            config: signingConfig,
+            currentTargets: [{ ...target, push_token: "apns-device-token" }],
+            currentActivityStates: [
+              {
+                ...state,
+                phase: "waiting_for_input",
+                updatedAt: "1970-01-01T00:00:03.000Z",
+                pullRequest: {
+                  ...pullRequest,
+                  stale: change === "stale",
+                  checks: change === "status" ? "passing" : "failing",
+                },
+              },
+            ],
+            execute: (request) =>
+              Effect.sync(() => {
+                sends++;
+                return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+              }),
+          }),
+        ),
+      );
+    });
+  }
+
+  it.effect("rings once when an unchanged state is republished on the heartbeat", () => {
+    const deviceRow: DeviceRow = { notified_push_events_json: null };
+    const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+    return Effect.gen(function* () {
+      yield* publish({ deviceRow, queuedJobs, rows: [ciFailingRow] });
+      yield* publish({
+        deviceRow,
+        queuedJobs,
+        rows: [ciFailingRow],
+        updatedAt: "1970-01-01T00:05:00.000Z",
+      });
+      yield* publish({
+        deviceRow,
+        queuedJobs,
+        rows: [ciFailingRow],
+        updatedAt: "1970-01-01T00:10:00.000Z",
+      });
+
+      expect(queuedBodies(queuedJobs)).toEqual(["CI failing: hl-jira"]);
+    });
+  });
+
+  it.effect("stays silent after a restart replays a state that already rang", () => {
+    const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+    const beforeRestart: DeviceRow = { notified_push_events_json: null };
+    return Effect.gen(function* () {
+      yield* publish({ deviceRow: beforeRestart, queuedJobs, rows: [inputRow] });
+      // Only the persisted column survives; every in-memory object is new.
+      const afterRestart: DeviceRow = {
+        notified_push_events_json: beforeRestart.notified_push_events_json,
+      };
+      yield* publish({ deviceRow: afterRestart, queuedJobs, rows: [inputRow] });
+
+      expect(queuedBodies(queuedJobs)).toEqual(["Input: Project"]);
+    });
+  });
+
+  it.effect("never rings for a stale pull request watch", () => {
+    const deviceRow: DeviceRow = { notified_push_events_json: null };
+    const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+    return Effect.gen(function* () {
+      const result = yield* publish({ deviceRow, queuedJobs, rows: [stalePullRequestRow] });
+
+      expect(result).toBeNull();
+      expect(queuedJobs).toEqual([]);
+    });
+  });
+
+  it.effect("rings when a stale pull request watch resolves to failing CI", () => {
+    const deviceRow: DeviceRow = { notified_push_events_json: null };
+    const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+    return Effect.gen(function* () {
+      yield* publish({ deviceRow, queuedJobs, rows: [stalePullRequestRow] });
+      yield* publish({ deviceRow, queuedJobs, rows: [ciFailingRow] });
+
+      expect(queuedBodies(queuedJobs)).toEqual(["CI failing: hl-jira"]);
+    });
+  });
+
+  it.effect("rings again when a thread returns to a state it had left", () => {
+    const deviceRow: DeviceRow = { notified_push_events_json: null };
+    const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+    return Effect.gen(function* () {
+      yield* publish({ deviceRow, queuedJobs, rows: [inputRow] });
+      yield* publish({ deviceRow, queuedJobs, rows: [workingRow] });
+      yield* publish({ deviceRow, queuedJobs, rows: [inputRow] });
+      yield* publish({ deviceRow, queuedJobs, rows: [inputRow] });
+
+      expect(queuedBodies(queuedJobs)).toEqual(["Input: Project", "Input: Project"]);
+    });
+  });
+
+  it.effect("keeps another thread's event while an unrelated thread publishes", () => {
+    const deviceRow: DeviceRow = { notified_push_events_json: null };
+    const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+    return Effect.gen(function* () {
+      yield* publish({ deviceRow, queuedJobs, rows: [ciFailingRow] });
+      // Notification-only publishes carry just the published thread.
+      yield* publish({ deviceRow, queuedJobs, rows: [workingRow] });
+      yield* publish({ deviceRow, queuedJobs, rows: [ciFailingRow] });
+
+      expect(queuedBodies(queuedJobs)).toEqual(["CI failing: hl-jira"]);
+    });
+  });
+
+  it.effect("lets an event ring later when it was skipped by a preference", () => {
+    const deviceRow: DeviceRow = { notified_push_events_json: null };
+    const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+    return Effect.gen(function* () {
+      yield* publish({
+        deviceRow,
+        queuedJobs,
+        rows: [inputRow],
+        preferences: notificationsDisabledPreferences,
+      });
+      expect(queuedJobs).toEqual([]);
+
+      yield* publish({ deviceRow, queuedJobs, rows: [inputRow] });
+      expect(queuedBodies(queuedJobs)).toEqual(["Input: Project"]);
+    });
+  });
+
+  it.effect("rings for a new event behind rows that already rang or are stale", () => {
+    const deviceRow: DeviceRow = { notified_push_events_json: null };
+    const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+    return Effect.gen(function* () {
+      yield* publish({ deviceRow, queuedJobs, rows: [inputRow] });
+      yield* publish({
+        deviceRow,
+        queuedJobs,
+        rows: [stalePullRequestRow, inputRow, ciFailingRow],
+      });
+
+      expect(queuedBodies(queuedJobs)).toEqual(["Input: Project", "CI failing: hl-jira"]);
+    });
+  });
+
+  it.effect("delivers the one queued push after a same-event republish moved updatedAt", () => {
+    const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
+    let executeCount = 0;
+    const signed = signApnsDeliveryJob({
+      secret: config.apnsDeliveryJobSigningSecret,
+      payload: makeApnsDeliveryJobPayload({
+        kind: "push_notification",
+        userId: target.user_id,
+        deviceId: target.device_id,
+        token: "apns-device-token",
+        aggregate: null,
+        notification: {
+          title: "Thread",
+          body: "Input: Project",
+          environmentId: "env",
+          threadId: "thread",
+          deepLink: "/",
+          phase: "waiting_for_input",
+          status: "Input",
+          updatedAt: "1970-01-01T00:00:01.000Z",
+        },
+        createdAt: "1970-01-01T00:00:01.000Z",
+        expiresAt: "1970-01-01T00:10:00.000Z",
+        jobId: "job-push-republished-same-event",
+      }),
+    });
+
+    return Effect.gen(function* () {
+      const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+      const result = yield* deliveries.processSignedJob(signed);
+
+      expect(result).toMatchObject({ kind: "push_notification", ok: true, apnsStatus: 200 });
+      expect(executeCount).toBe(1);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          attempts,
+          currentTargets: [{ ...target, push_token: "apns-device-token" }],
+          currentActivityStates: [
+            { ...state, phase: "waiting_for_input", updatedAt: "1970-01-01T00:00:03.000Z" },
+          ],
+          config: signingConfig,
+          execute: (request) =>
+            Effect.sync(() => {
+              executeCount += 1;
+              return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+            }),
+        }),
+      ),
+    );
+  });
+});
+
 describe("live activity alert decisions", () => {
   const preferences = {
     liveActivitiesEnabled: true,
@@ -1728,6 +2098,49 @@ describe("live activity alert decisions", () => {
       preferences,
     });
     expect(alert).toEqual({ title: "Blocked thread", body: "Approval: Project" });
+  });
+
+  it("never alerts for a stale pull request watch, but alerts once it resolves", () => {
+    const pullRequest = {
+      watchId: "watch-78",
+      projectId: "project",
+      number: 78,
+      repository: "acme/hl-jira",
+      state: "open" as const,
+      checks: "failing" as const,
+      requiredChecks: "failing" as const,
+      watching: true,
+      manager: "monitoring" as const,
+      authorization: "none" as const,
+      stale: false,
+    };
+    const ciFailingRow = {
+      ...attentionRow,
+      phase: "waiting_for_input" as const,
+      status: "CI failing",
+      pullRequest,
+    };
+    const staleRow = {
+      ...ciFailingRow,
+      status: "Stale",
+      pullRequest: { ...pullRequest, stale: true },
+    };
+    const staleAggregate = { ...aggregate, activities: [aggregate.activities[0]!, staleRow] };
+
+    expect(
+      ApnsDeliveries.alertForAttentionTransition({
+        previousAggregate: aggregate,
+        nextAggregate: staleAggregate,
+        preferences,
+      }),
+    ).toBeNull();
+    expect(
+      ApnsDeliveries.alertForAttentionTransition({
+        previousAggregate: staleAggregate,
+        nextAggregate: { ...aggregate, activities: [aggregate.activities[0]!, ciFailingRow] },
+        preferences,
+      }),
+    ).toEqual({ title: "Blocked thread", body: "CI failing: Project" });
   });
 
   it("stays silent when the attention phase was already delivered", () => {

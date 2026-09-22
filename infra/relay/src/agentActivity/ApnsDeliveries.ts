@@ -23,6 +23,7 @@ import {
   isTerminalPhase,
   sanitizeAgentActivityAggregateState,
   sanitizeApnsNotificationPayload,
+  statusForAgentActivity,
 } from "./agentActivityPayloads.ts";
 import * as Apns from "./ApnsClient.ts";
 import {
@@ -43,6 +44,7 @@ import * as RelayConfiguration from "../Config.ts";
 import * as ApnsDeliveryQueue from "./ApnsDeliveryQueue.ts";
 import { ManagedAccess, type ManagedAccessUnavailable } from "../billing/ManagedAccess.ts";
 import { withSpanAttributes } from "../observability.ts";
+import type { NotifiedPushEvent } from "../persistence/schema.ts";
 
 const MIN_LIVE_ACTIVITY_UPDATE_INTERVAL_MS = 15_000;
 // How long a just-armed card may sit with an empty aggregate before an end is
@@ -149,8 +151,21 @@ function aggregateNeedsAttention(aggregate: RelayAgentActivityAggregateState): b
   );
 }
 
+type AggregateRow = RelayAgentActivityAggregateState["activities"][number];
+
 function isAttentionPhase(phase: string): boolean {
   return phase === "waiting_for_approval" || phase === "waiting_for_input";
+}
+
+// A stale PR watch means Lecturn cannot read the PR's status. That is not a
+// user action, so the row keeps rendering ("Stale") but never rings: no push,
+// no Live Activity alert, and no "was already in attention" baseline either.
+function isStalePullRequestRow(row: AggregateRow): boolean {
+  return row.pullRequest?.stale === true;
+}
+
+function rowRingsForAttention(row: AggregateRow): boolean {
+  return isAttentionPhase(row.phase) && !isStalePullRequestRow(row);
 }
 
 // Honors the same per-event notification switches the push channel uses; a
@@ -190,13 +205,11 @@ export function alertForAttentionTransition(input: {
     return null;
   }
   const previouslyAttention = new Set(
-    input.previousAggregate.activities
-      .filter((row) => isAttentionPhase(row.phase))
-      .map((row) => row.threadId),
+    input.previousAggregate.activities.filter(rowRingsForAttention).map((row) => row.threadId),
   );
   const newlyAttention = input.nextAggregate.activities.filter(
     (row) =>
-      isAttentionPhase(row.phase) &&
+      rowRingsForAttention(row) &&
       !previouslyAttention.has(row.threadId) &&
       alertAllowedForPhase(input.preferences, row.phase),
   );
@@ -333,47 +346,136 @@ function shouldUpdateLiveActivity(input: {
 // recently-finished thread) must not ring the device again.
 const TERMINAL_NOTIFICATION_FRESHNESS_MS = 2 * 60 * 1_000;
 
-function notificationForAggregate(input: {
+// Bounds the per-device record. Entries normally leave when their thread moves
+// on; the cap only evicts threads that vanished while still notified, and an
+// evicted event can at worst ring once more.
+const MAX_NOTIFIED_PUSH_EVENTS = 64;
+
+const decodeNotifiedPushEventsJson = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Array(
+      Schema.Struct({
+        environmentId: Schema.String,
+        threadId: Schema.String,
+        phase: Schema.String,
+        status: Schema.String,
+      }),
+    ),
+  ),
+);
+
+function parseNotifiedPushEvents(value: string | null): ReadonlyArray<NotifiedPushEvent> {
+  return value === null ? [] : Option.getOrElse(decodeNotifiedPushEventsJson(value), () => []);
+}
+
+function isSameThread(event: NotifiedPushEvent, row: AggregateRow): boolean {
+  return event.environmentId === row.environmentId && event.threadId === row.threadId;
+}
+
+// Event identity is thread + phase + status, never a timestamp: the
+// environment republishes unchanged state on a heartbeat with a new updatedAt.
+function isNotifiedPushEvent(notified: ReadonlyArray<NotifiedPushEvent>, row: AggregateRow) {
+  return notified.some(
+    (event) => isSameThread(event, row) && event.phase === row.phase && event.status === row.status,
+  );
+}
+
+function isSameNotifiedRecord(
+  left: ReadonlyArray<NotifiedPushEvent>,
+  right: ReadonlyArray<NotifiedPushEvent>,
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((event, index) => {
+      const other = right[index];
+      return (
+        other !== undefined &&
+        event.environmentId === other.environmentId &&
+        event.threadId === other.threadId &&
+        event.phase === other.phase &&
+        event.status === other.status
+      );
+    })
+  );
+}
+
+function isPushEventRow(row: AggregateRow): boolean {
+  return (
+    (isAttentionPhase(row.phase) || row.phase === "completed" || row.phase === "failed") &&
+    !isStalePullRequestRow(row)
+  );
+}
+
+export interface PushNotificationDecision {
+  readonly notification: ApnsNotificationPayload | null;
+  // The record to persist when no push ends up queued (nothing to send, or a
+  // later skip such as billing): pruned, but never claiming the new event.
+  readonly notified: ReadonlyArray<NotifiedPushEvent>;
+  // The record to persist once `notification` is queued.
+  readonly notifiedIfQueued: ReadonlyArray<NotifiedPushEvent>;
+}
+
+// The single decision point for the alert-push channel: which event (if any)
+// rings, and what the device's already-notified record becomes. An event rings
+// once; it may ring again only after its thread was seen in another state
+// (Input -> Working -> Input), which is what prunes it from the record here.
+// Threads absent from the aggregate are left alone because notification-only
+// publishes carry just the published thread. Any reason to stay silent must
+// return `notification: null` so the event stays unrecorded and can ring later.
+export function decidePushNotification(input: {
   readonly target: LiveActivities.TargetRow;
   readonly aggregate: RelayAgentActivityAggregateState | null;
   readonly nowMs: number;
-}): ApnsNotificationPayload | null {
-  if (!input.target.push_token || input.aggregate === null) {
-    return null;
-  }
+}): PushNotificationDecision {
+  const rows = input.aggregate?.activities ?? [];
+  const notified = parseNotifiedPushEvents(input.target.notified_push_events_json).filter(
+    (event) => {
+      const row = rows.find((candidate) => isSameThread(event, candidate));
+      return (
+        row === undefined ||
+        (isPushEventRow(row) && event.phase === row.phase && event.status === row.status)
+      );
+    },
+  );
+  const silent = { notification: null, notified, notifiedIfQueued: notified };
   const preferences = parsePreferences(input.target.preferences_json);
-  if (!preferences?.notificationsEnabled) {
-    return null;
+  if (!input.target.push_token || !preferences?.notificationsEnabled) {
+    return silent;
   }
-  const activity = input.aggregate.activities[0];
+  // Not just activities[0]: with per-row identity the first row is often an
+  // already-rung or stale one, and must not mask a new event further down.
+  const activity = rows.find(
+    (row) =>
+      isPushEventRow(row) &&
+      alertAllowedForPhase(preferences, row.phase) &&
+      // Completions replayed long after the fact must not ring.
+      (isAttentionPhase(row.phase) || isFreshTerminalRow(row, input.nowMs)) &&
+      !isNotifiedPushEvent(notified, row),
+  );
   if (!activity) {
-    return null;
-  }
-  if (activity.phase === "completed" || activity.phase === "failed") {
-    const updatedAtMs = Option.match(DateTime.make(activity.updatedAt), {
-      onNone: () => null,
-      onSome: (dt) => dt.epochMilliseconds,
-    });
-    if (updatedAtMs === null || input.nowMs - updatedAtMs > TERMINAL_NOTIFICATION_FRESHNESS_MS) {
-      return null;
-    }
-  }
-  const enabled =
-    (activity.phase === "waiting_for_approval" && preferences.notifyOnApproval) ||
-    (activity.phase === "waiting_for_input" && preferences.notifyOnInput) ||
-    (activity.phase === "completed" && preferences.notifyOnCompletion) ||
-    (activity.phase === "failed" && preferences.notifyOnFailure);
-  if (!enabled) {
-    return null;
+    return silent;
   }
   return {
-    title: activity.threadTitle,
-    body: `${activity.status}: ${activity.projectTitle}`,
-    environmentId: activity.environmentId,
-    threadId: activity.threadId,
-    deepLink: activity.deepLink,
-    phase: activity.phase,
-    updatedAt: activity.updatedAt,
+    notification: {
+      title: activity.threadTitle,
+      body: `${activity.status}: ${activity.projectTitle}`,
+      environmentId: activity.environmentId,
+      threadId: activity.threadId,
+      deepLink: activity.deepLink,
+      phase: activity.phase,
+      status: activity.status,
+      updatedAt: activity.updatedAt,
+    },
+    notified,
+    notifiedIfQueued: [
+      ...notified,
+      {
+        environmentId: activity.environmentId,
+        threadId: activity.threadId,
+        phase: activity.phase,
+        status: activity.status,
+      },
+    ].slice(-MAX_NOTIFIED_PUSH_EVENTS),
   };
 }
 
@@ -461,6 +563,7 @@ function chooseLiveActivityDelivery(input: {
 function chooseDelivery(input: {
   readonly target: LiveActivities.TargetRow;
   readonly aggregate: RelayAgentActivityAggregateState | null;
+  readonly notification: ApnsNotificationPayload | null;
   readonly nowMs: number;
 }): ChosenDelivery | null {
   const liveActivityDelivery = chooseLiveActivityDelivery(input);
@@ -470,7 +573,7 @@ function chooseDelivery(input: {
   if (liveActivityDelivery) {
     return liveActivityDelivery;
   }
-  const notification = notificationForAggregate(input);
+  const notification = input.notification;
   return notification && input.target.push_token
     ? {
         kind: "push_notification",
@@ -818,7 +921,7 @@ export const make = Effect.gen(function* () {
     readonly environmentId: string;
     readonly threadId: string;
     readonly phase: RelayAgentActivityAggregateState["activities"][number]["phase"];
-    readonly updatedAt: string;
+    readonly status?: string;
   }) {
     return yield* activityRows
       .getForUserThread({
@@ -827,11 +930,14 @@ export const make = Effect.gen(function* () {
         threadId: input.threadId,
       })
       .pipe(
+        // Heartbeats may change updatedAt without changing the event. A stale
+        // PR or changed semantic status must still invalidate its queued alert.
         Effect.map(
           (current) =>
             current !== null &&
             current.phase === input.phase &&
-            current.updatedAt === input.updatedAt,
+            current.pullRequest?.stale !== true &&
+            (input.status === undefined || statusForAgentActivity(current) === input.status),
         ),
         // A transient persistence failure must not permanently discard a
         // legitimate alert. Fail open and let the signed job's retry/dedupe
@@ -882,7 +988,7 @@ export const make = Effect.gen(function* () {
   }) {
     // Jobs from older relay versions do not carry a state identity. Preserve
     // backwards compatibility and only revalidate newly queued jobs.
-    if (input.notification.phase === undefined || input.notification.updatedAt === undefined) {
+    if (input.notification.phase === undefined) {
       return true;
     }
     return yield* stateIdentityIsCurrent({
@@ -890,7 +996,7 @@ export const make = Effect.gen(function* () {
       environmentId: input.notification.environmentId,
       threadId: input.notification.threadId,
       phase: input.notification.phase,
-      updatedAt: input.notification.updatedAt,
+      ...(input.notification.status !== undefined ? { status: input.notification.status } : {}),
     });
   });
 
@@ -908,6 +1014,22 @@ export const make = Effect.gen(function* () {
         );
       }),
     );
+  });
+
+  // Writes the already-notified record only when it changed, so heartbeat
+  // republishes of an unchanged state cost no write.
+  const persistNotifiedPushEvents = Effect.fnUntraced(function* (
+    target: LiveActivities.TargetRow,
+    events: ReadonlyArray<NotifiedPushEvent>,
+  ) {
+    if (isSameNotifiedRecord(parseNotifiedPushEvents(target.notified_push_events_json), events)) {
+      return;
+    }
+    yield* liveActivities.markPushNotified({
+      userId: target.user_id,
+      deviceId: target.device_id,
+      events,
+    });
   });
 
   const sendLiveActivity: ApnsDeliveries["Service"]["sendLiveActivity"] = Effect.fn(
@@ -1395,143 +1517,167 @@ export const make = Effect.gen(function* () {
     }).pipe(withSpanAttributes({ "user.id": payload.target.userId }));
   });
 
+  const sendPushNotificationForTarget = Effect.fnUntraced(function* (
+    input: Parameters<ApnsDeliveries["Service"]["sendPushNotificationForTarget"]>[0],
+  ) {
+    const now = yield* DateTime.now;
+    const decision = decidePushNotification({
+      target: input.target,
+      aggregate: input.aggregate,
+      nowMs: now.epochMilliseconds,
+    });
+    const { notification } = decision;
+    const token = input.target.push_token;
+    if (
+      !notification ||
+      !token ||
+      !(yield* permitted(
+        input.target.user_id,
+        "push_notification",
+        undefined,
+        notification.environmentId,
+      ))
+    ) {
+      yield* persistNotifiedPushEvents(input.target, decision.notified);
+      return null;
+    }
+    const result = yield* deliveryQueue.enqueuePushNotification({
+      userId: input.target.user_id,
+      deviceId: input.target.device_id,
+      token,
+      bundleId: input.target.bundle_id,
+      apsEnvironment: input.target.aps_environment,
+      notification,
+    });
+    yield* persistNotifiedPushEvents(input.target, decision.notifiedIfQueued);
+    return result;
+  });
+  const sendForTarget = Effect.fnUntraced(function* (
+    input: Parameters<ApnsDeliveries["Service"]["sendForTarget"]>[0],
+  ) {
+    const aggregate = yield* filterPermittedActivity(
+      managedAccess,
+      input.target.user_id,
+      input.aggregate,
+    );
+    input = { ...input, aggregate };
+    const decision = decidePushNotification(input);
+    const { notification } = decision;
+    const delivery = chooseDelivery({
+      target: input.target,
+      aggregate: input.aggregate,
+      notification,
+      nowMs: input.nowMs,
+    });
+    if (
+      !delivery ||
+      !(yield* delivery.kind === "push_notification"
+        ? permitted(
+            input.target.user_id,
+            delivery.kind,
+            undefined,
+            delivery.notification.environmentId,
+          )
+        : aggregatePermitted(input.target.user_id, delivery.kind, delivery.aggregate))
+    ) {
+      yield* persistNotifiedPushEvents(input.target, decision.notified);
+      return null;
+    }
+    if (delivery.kind === "push_notification") {
+      const result = yield* deliveryQueue.enqueuePushNotification({
+        userId: input.target.user_id,
+        deviceId: input.target.device_id,
+        token: delivery.token,
+        bundleId: input.target.bundle_id,
+        apsEnvironment: input.target.aps_environment,
+        notification: delivery.notification,
+      });
+      yield* persistNotifiedPushEvents(input.target, decision.notifiedIfQueued);
+      return result;
+    }
+    // The end event doubles as the "task finished" moment. When a companion
+    // push notification is about to ring the device (below) or already rang
+    // for this event, the activity end stays silent; otherwise the end itself
+    // carries the alert so LA-only users still get the buzz.
+    const endRow = delivery.aggregate?.activities[0];
+    const pushOwnsEndAlert =
+      input.target.push_token !== null &&
+      (notification !== null ||
+        (endRow !== undefined && isNotifiedPushEvent(decision.notified, endRow)));
+    const endAlertsAllowed =
+      delivery.kind !== "live_activity_end" ||
+      (yield* cleanupAlertsPermitted(
+        input.target.user_id,
+        "liveActivities",
+        undefined,
+        delivery.aggregate?.activities[0]?.environmentId,
+      ));
+    const alert = !endAlertsAllowed
+      ? null
+      : delivery.kind === "live_activity_end"
+        ? pushOwnsEndAlert
+          ? null
+          : alertForTerminalAggregate({
+              aggregate: delivery.aggregate,
+              preferences: parsePreferences(input.target.preferences_json),
+            })
+        : delivery.alert;
+    const result = yield* deliveryQueue.enqueueLiveActivity({
+      userId: input.target.user_id,
+      deviceId: input.target.device_id,
+      kind: delivery.kind,
+      token: delivery.token,
+      bundleId: input.target.bundle_id,
+      apsEnvironment: input.target.aps_environment,
+      aggregate: delivery.aggregate,
+      alert,
+    });
+    if (
+      delivery.kind === "live_activity_end" &&
+      notification &&
+      input.target.push_token &&
+      (yield* cleanupAlertsPermitted(
+        input.target.user_id,
+        "pushNotifications",
+        undefined,
+        notification.environmentId,
+      ))
+    ) {
+      yield* deliveryQueue.enqueuePushNotification({
+        userId: input.target.user_id,
+        deviceId: input.target.device_id,
+        token: input.target.push_token,
+        bundleId: input.target.bundle_id,
+        apsEnvironment: input.target.aps_environment,
+        notification,
+      });
+      yield* persistNotifiedPushEvents(input.target, decision.notifiedIfQueued);
+    } else {
+      yield* persistNotifiedPushEvents(input.target, decision.notified);
+    }
+    if (delivery.kind === "live_activity_start") {
+      const now = yield* DateTime.now;
+      yield* liveActivities.markStartQueued({
+        userId: input.target.user_id,
+        deviceId: input.target.device_id,
+        queuedAt: DateTime.formatIso(now),
+      });
+    }
+    return result;
+  });
+
   return ApnsDeliveries.of({
     sendLiveActivity,
     sendPushNotification,
     processSignedJob,
-    sendPushNotificationForTarget: Effect.fnUntraced(function* (input) {
-      const now = yield* DateTime.now;
-      const notification = notificationForAggregate({
-        target: input.target,
-        aggregate: input.aggregate,
-        nowMs: now.epochMilliseconds,
-      });
-      const token = input.target.push_token;
-      if (
-        notification &&
-        token &&
-        !(yield* permitted(
-          input.target.user_id,
-          "push_notification",
-          undefined,
-          notification.environmentId,
-        ))
-      )
-        return null;
-      return yield* notification && token
-        ? deliveryQueue.enqueuePushNotification({
-            userId: input.target.user_id,
-            deviceId: input.target.device_id,
-            token,
-            bundleId: input.target.bundle_id,
-            apsEnvironment: input.target.aps_environment,
-            notification,
-          })
-        : Effect.succeed(null);
-    }),
-    sendForTarget: Effect.fnUntraced(function* (input) {
-      const aggregate = yield* filterPermittedActivity(
-        managedAccess,
-        input.target.user_id,
-        input.aggregate,
-      );
-      input = { ...input, aggregate };
-      const delivery = chooseDelivery({
-        target: input.target,
-        aggregate: input.aggregate,
-        nowMs: input.nowMs,
-      });
-      if (
-        !delivery ||
-        !(yield* delivery.kind === "push_notification"
-          ? permitted(
-              input.target.user_id,
-              delivery.kind,
-              undefined,
-              delivery.notification.environmentId,
-            )
-          : aggregatePermitted(input.target.user_id, delivery.kind, delivery.aggregate))
-      ) {
-        return null;
-      }
-      if (delivery.kind === "push_notification") {
-        const result = yield* deliveryQueue.enqueuePushNotification({
-          userId: input.target.user_id,
-          deviceId: input.target.device_id,
-          token: delivery.token,
-          bundleId: input.target.bundle_id,
-          apsEnvironment: input.target.aps_environment,
-          notification: delivery.notification,
-        });
-        return result;
-      }
-      const notification = notificationForAggregate({
-        target: input.target,
-        aggregate: input.aggregate,
-        nowMs: input.nowMs,
-      });
-      // The end event doubles as the "task finished" moment. When a companion
-      // push notification is about to ring the device (below), the activity end
-      // stays silent; otherwise the end itself carries the alert so LA-only
-      // users still get the buzz.
-      const endAlertsAllowed =
-        delivery.kind !== "live_activity_end" ||
-        (yield* cleanupAlertsPermitted(
-          input.target.user_id,
-          "liveActivities",
-          undefined,
-          delivery.aggregate?.activities[0]?.environmentId,
-        ));
-      const alert = !endAlertsAllowed
-        ? null
-        : delivery.kind === "live_activity_end"
-          ? notification && input.target.push_token
-            ? null
-            : alertForTerminalAggregate({
-                aggregate: delivery.aggregate,
-                preferences: parsePreferences(input.target.preferences_json),
-              })
-          : delivery.alert;
-      const result = yield* deliveryQueue.enqueueLiveActivity({
-        userId: input.target.user_id,
-        deviceId: input.target.device_id,
-        kind: delivery.kind,
-        token: delivery.token,
-        bundleId: input.target.bundle_id,
-        apsEnvironment: input.target.aps_environment,
-        aggregate: delivery.aggregate,
-        alert,
-      });
-      if (
-        delivery.kind === "live_activity_end" &&
-        notification &&
-        input.target.push_token &&
-        (yield* cleanupAlertsPermitted(
-          input.target.user_id,
-          "pushNotifications",
-          undefined,
-          notification.environmentId,
-        ))
-      ) {
-        yield* deliveryQueue.enqueuePushNotification({
-          userId: input.target.user_id,
-          deviceId: input.target.device_id,
-          token: input.target.push_token,
-          bundleId: input.target.bundle_id,
-          apsEnvironment: input.target.aps_environment,
-          notification,
-        });
-      }
-      if (delivery.kind === "live_activity_start") {
-        const now = yield* DateTime.now;
-        yield* liveActivities.markStartQueued({
-          userId: input.target.user_id,
-          deviceId: input.target.device_id,
-          queuedAt: DateTime.formatIso(now),
-        });
-      }
-      return result;
-    }),
+    sendPushNotificationForTarget: (input) =>
+      liveActivities.withPushNotificationLock(input.target, (target) =>
+        sendPushNotificationForTarget({ ...input, target }),
+      ),
+    sendForTarget: (input) =>
+      liveActivities.withPushNotificationLock(input.target, (target) =>
+        sendForTarget({ ...input, target }),
+      ),
   });
 });
 
