@@ -423,6 +423,7 @@ export const makeOrchestrationIntegrationHarness = (
         Layer.succeed(AgentAwarenessRelay.AgentAwarenessRelay, {
           publishThread: () => Effect.void,
           start: () => Effect.void,
+          drain: Effect.void,
         }),
       ),
     );

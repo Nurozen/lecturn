@@ -108,6 +108,7 @@ const BackgroundPolicyAlwaysRunLayer = Layer.mock(BackgroundPolicy.BackgroundPol
   hasDemand: () => Effect.succeed(true),
   shouldRunScopeWork: () => Effect.succeed(true),
   shouldRunOpportunisticWork: Effect.succeed(true),
+  isUserPresent: Effect.succeed(false),
 });
 
 function selectDescriptor(

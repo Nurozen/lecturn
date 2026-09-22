@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { BrowserWindow, screen, type IpcMainInvokeEvent } from "electron";
 import { installDesktopActivity } from "./DesktopActivity.ts";
 import * as Channels from "./channels.ts";
@@ -19,6 +19,7 @@ const state = vi.hoisted(() => ({
   enabled: true,
   reducedMotion: false,
   trayDestroyed: false,
+  idleSeconds: 0,
 }));
 vi.mock("electron-store", () => ({
   default: class {
@@ -124,6 +125,7 @@ vi.mock("electron", async () => {
       getAnimationSettings: () => ({ prefersReducedMotion: state.reducedMotion }),
     },
     nativeImage: { createFromBuffer: () => ({ setTemplateImage() {} }) },
+    powerMonitor: { getSystemIdleTime: () => state.idleSeconds },
     screen: Object.assign(new EventEmitter(), {
       getCursorScreenPoint: () => state.cursor,
       getAllDisplays: () => [display],
@@ -141,6 +143,12 @@ const eventFor = (window: BrowserWindow) =>
 const invoke = (channel: string, event: IpcMainInvokeEvent, value?: unknown) =>
   state.handlers.get(channel)!(event, value);
 
+const offer = (event: IpcMainInvokeEvent, change: unknown) =>
+  invoke(Channels.ACTIVITY_ANNOUNCE, event, {
+    change,
+    revision: (invoke(Channels.ACTIVITY_READ, event) as { revision: number }).revision,
+  });
+
 beforeEach(() => {
   state.windows.length = 0;
   state.handlers.clear();
@@ -148,6 +156,222 @@ beforeEach(() => {
   state.enabled = true;
   state.reducedMotion = false;
   state.trayDestroyed = false;
+  state.idleSeconds = 0;
+});
+describe("Mac activity alerts while the user is present", () => {
+  const blocked = {
+    id: "thread",
+    environmentId: "e",
+    projectId: "p",
+    threadId: "t",
+    title: "Thread",
+    subtitle: "Project",
+    status: "Needs input",
+    actions: [],
+  };
+  const change = { rowId: "thread", state: "attention", label: "Thread · Needs attention" };
+  const setup = () => {
+    const main = new BrowserWindow();
+    const dispose = installDesktopActivity(main, options);
+    const panel = state.windows[1]!;
+    panel.emit("ready-to-show");
+    const mainWindow = state.windows[0]!;
+    mainWindow.visible = true;
+    mainWindow.focused = true;
+    invoke(Channels.ACTIVITY_PUBLISH, eventFor(main), { summary: "1 thread", rows: [blocked] });
+    const announced = () =>
+      panel.webContents.send.mock.calls.filter(
+        ([channel]) => channel === Channels.ACTIVITY_ANNOUNCE,
+      );
+    return { main, mainWindow, panel, dispose, announced, event: eventFor(panel as never) };
+  };
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("holds the alert while Lecturn is in use and fires it once on blur", () => {
+    const { mainWindow, panel, dispose, announced, event } = setup();
+    expect(offer(event, change)).toBe(false);
+    expect(panel.bounds.height).toBe(38);
+    mainWindow.focused = false;
+    mainWindow.emit("blur");
+    expect(announced()).toEqual([
+      [Channels.ACTIVITY_ANNOUNCE, expect.objectContaining({ change })],
+    ]);
+    mainWindow.emit("blur");
+    mainWindow.emit("hide");
+    expect(announced()).toHaveLength(1);
+    dispose();
+  });
+
+  it.each([false, true])(
+    "holds a passed PR job independently of its running siblings (job restarted: %s)",
+    (restarted) => {
+      const { main, mainWindow, dispose, event, announced } = setup();
+      const watched = {
+        ...blocked,
+        watchId: "watch",
+        status: "Running checks",
+        visualState: "active",
+        checks: [
+          { name: "Web", status: "success" },
+          { name: "Server", status: "pending" },
+        ],
+      };
+      invoke(Channels.ACTIVITY_PUBLISH, eventFor(main), { summary: "PR", rows: [watched] });
+      const jobChange = {
+        rowId: blocked.id,
+        state: "complete",
+        label: "Web passed",
+        check: { name: "Web", status: "success" },
+      };
+      expect(offer(event, jobChange)).toBe(false);
+      // Subsequent snapshots and another job starting must not erase this held completion.
+      invoke(Channels.ACTIVITY_PUBLISH, eventFor(main), {
+        summary: "PR",
+        rows: [
+          {
+            ...watched,
+            checks: [
+              { name: "Web", status: restarted ? "pending" : "success" },
+              { name: "Server", status: "pending" },
+            ],
+          },
+        ],
+      });
+      offer(event, {
+        rowId: blocked.id,
+        state: "active",
+        label: "Server started",
+        check: { name: "Server", status: "pending" },
+      });
+      mainWindow.focused = false;
+      mainWindow.emit("blur");
+      expect(announced()).toEqual(
+        restarted
+          ? []
+          : [[Channels.ACTIVITY_ANNOUNCE, expect.objectContaining({ change: jobChange })]],
+      );
+      dispose();
+    },
+  );
+
+  it("leaves hover and click expansion alone while the user is present", () => {
+    const { panel, dispose, event } = setup();
+    invoke(Channels.ACTIVITY_MODE, event, "hover-enter");
+    expect(panel.bounds.height).toBeGreaterThan(38);
+    invoke(Channels.ACTIVITY_MODE, event, "expand");
+    expect(panel.bounds.height).toBe(588);
+    dispose();
+  });
+
+  it("fires immediately when Lecturn is in the background or the user is idle", () => {
+    const { mainWindow, dispose, event } = setup();
+    state.idleSeconds = 45;
+    expect(offer(event, change)).toBe(true);
+    state.idleSeconds = 0;
+    mainWindow.focused = false;
+    expect(offer(event, change)).toBe(true);
+    dispose();
+  });
+
+  it("fires a held alert once the user goes idle, then stops polling", () => {
+    vi.useFakeTimers();
+    const { dispose, announced, event } = setup();
+    expect(vi.getTimerCount()).toBe(0);
+    offer(event, change);
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(10_000);
+    expect(announced()).toHaveLength(0);
+    state.idleSeconds = 45;
+    vi.advanceTimersByTime(5_000);
+    expect(announced()).toEqual([
+      [Channels.ACTIVITY_ANNOUNCE, expect.objectContaining({ change })],
+    ]);
+    expect(vi.getTimerCount()).toBe(0);
+    dispose();
+  });
+
+  it("skips a held alert the user resolved before looking away", () => {
+    const { main, mainWindow, dispose, announced, event } = setup();
+    offer(event, change);
+    invoke(Channels.ACTIVITY_PUBLISH, eventFor(main), {
+      summary: "1 thread",
+      rows: [{ ...blocked, status: "Working" }],
+    });
+    mainWindow.focused = false;
+    mainWindow.emit("blur");
+    expect(announced()).toHaveLength(0);
+    dispose();
+  });
+
+  it("does not fire on blur for a held thread the user opened in Lecturn first", () => {
+    const { main, mainWindow, dispose, announced, event } = setup();
+    offer(event, change);
+    invoke(Channels.ACTIVITY_PUBLISH, eventFor(main), {
+      summary: "1 thread",
+      rows: [blocked],
+      viewedThread: { environmentId: "e", threadId: "t" },
+    });
+    mainWindow.focused = false;
+    mainWindow.emit("blur");
+    expect(announced()).toHaveLength(0);
+    dispose();
+  });
+
+  it("stops holding and polling when the window is disposed", () => {
+    vi.useFakeTimers();
+    const { panel, dispose, event } = setup();
+    offer(event, change);
+    const send = panel.webContents.send;
+    dispose();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(send).not.toHaveBeenCalledWith(Channels.ACTIVITY_ANNOUNCE, expect.anything());
+  });
+
+  it("rejects an announcement queued before its thread was opened", () => {
+    vi.useFakeTimers();
+    const { main, mainWindow, dispose, event, announced } = setup();
+    const { revision } = invoke(Channels.ACTIVITY_READ, event) as { revision: number };
+    invoke(Channels.ACTIVITY_PUBLISH, eventFor(main), {
+      summary: "1 thread",
+      rows: [blocked],
+      viewedThread: { environmentId: "e", threadId: "t" },
+    });
+    expect(invoke(Channels.ACTIVITY_ANNOUNCE, event, { change, revision })).toBe(false);
+    expect(offer(event, change)).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+    invoke(Channels.ACTIVITY_PUBLISH, eventFor(main), { summary: "1 thread", rows: [blocked] });
+    mainWindow.focused = false;
+    mainWindow.emit("blur");
+    expect(announced()).toHaveLength(0);
+    dispose();
+  });
+
+  it.each(["removed", "not-ready", "reload", "crash"])(
+    "forgets held alerts and stops polling on %s, even if cached rows return",
+    (reason) => {
+      vi.useFakeTimers();
+      const { main, mainWindow, dispose, event, announced } = setup();
+      offer(event, change);
+      expect(vi.getTimerCount()).toBe(1);
+      if (reason === "reload" || reason === "crash") {
+        main.webContents.emit(reason === "reload" ? "did-start-loading" : "render-process-gone");
+      } else {
+        invoke(Channels.ACTIVITY_PUBLISH, eventFor(main), {
+          summary: "Reconnecting",
+          rows: reason === "removed" ? [] : [blocked],
+          readyEnvironmentIds: [],
+        });
+      }
+      expect(vi.getTimerCount()).toBe(0);
+      invoke(Channels.ACTIVITY_PUBLISH, eventFor(main), { summary: "1 thread", rows: [blocked] });
+      mainWindow.focused = false;
+      mainWindow.emit("blur");
+      expect(announced()).toHaveLength(0);
+      dispose();
+    },
+  );
 });
 describe("Mac activity lifecycle", () => {
   it("animates visible mode changes while respecting reduced motion and immediate startup", () => {
@@ -486,6 +710,7 @@ describe("foreground chat previews", () => {
     expect(panel.webContents.send).toHaveBeenLastCalledWith(Channels.ACTIVITY_SNAPSHOT, {
       summary: "Activity",
       rows: [],
+      revision: expect.any(Number),
     });
     main.show();
     main.focus();
@@ -499,6 +724,7 @@ describe("foreground chat previews", () => {
     expect(panel.webContents.send).toHaveBeenLastCalledWith(Channels.ACTIVITY_SNAPSHOT, {
       summary: "Activity",
       rows: [],
+      revision: expect.any(Number),
     });
     main.focus();
     main.hide();
@@ -506,6 +732,7 @@ describe("foreground chat previews", () => {
     expect(panel.webContents.send).toHaveBeenLastCalledWith(Channels.ACTIVITY_SNAPSHOT, {
       summary: "Activity",
       rows: [],
+      revision: expect.any(Number),
     });
     dispose();
     expect(main.listenerCount("focus")).toBe(0);

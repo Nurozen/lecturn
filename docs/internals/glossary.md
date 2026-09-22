@@ -121,6 +121,14 @@ A typed signal emitted when an async milestone completes, such as `checkpoint.ba
 
 "Quiesced" means a turn has gone quiet and stable: follow-up work such as [CheckpointReactor.ts][6] has settled. It appears in [the receipt schema][13], so in practice it is something tests wait on rather than a production signal.
 
+#### User present
+
+The strict presence signal that silences notification rings: some client lease is active, visible, focused, and recently interacted with (`isUserPresentLease` in `apps/server/src/background/BackgroundPolicy.ts`). It is stricter than a foreground lease, which only schedules background work. The server sends it to the relay as `userPresent` on each activity publish. The desktop notch applies the same rule locally. See [pull-request-watches.md][31].
+
+#### Notified-event record
+
+The per-device list of events the relay already rang, stored in `relay_mobile_devices.notified_push_events_json`. Identity is environment + thread + phase + status. Entries marked `deferred` are Live Activity rings still owed because the user was present or a shared card observed another environment’s transition before its own publish. See [pull-request-watches.md][31].
+
 ### Provider runtime
 
 The live backend agent implementation and its event stream. The main service is [ProviderService.ts][14], the adapter contract is [ProviderAdapter.ts][15], and the overview is in [providers.md][16].
@@ -276,3 +284,4 @@ See [Lecturn Connect](lecturn-connect.md#multiple-signed-in-accounts) for the me
 [28]: ./stave-integration.md
 [29]: ../../packages/contracts/src/externalSessions.ts
 [30]: ./thread-forking.md#importing-external-sessions
+[31]: ./pull-request-watches.md#notification-rings

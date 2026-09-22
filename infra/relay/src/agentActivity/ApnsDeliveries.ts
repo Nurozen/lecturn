@@ -1,3 +1,4 @@
+import { makeAggregateState } from "./AgentActivityAggregate.ts";
 import { filterPermittedActivity } from "../teams/TeamNotifications.ts";
 import type {
   RelayAgentActivityAggregateState,
@@ -31,6 +32,7 @@ import {
   ApnsDeliveryJobPushNotificationMissing,
   ApnsDeliveryJobQueuePayloadInvalid,
   type ApnsLiveActivityAlert,
+  type ApnsAlertEvent,
   type ApnsNotificationPayload,
   SignedApnsDeliveryJob,
   isApnsDeliveryJobVerificationError,
@@ -68,6 +70,9 @@ type ChosenLiveActivityDelivery =
       readonly token: string;
       readonly aggregate: RelayAgentActivityAggregateState;
       readonly alert: ApnsLiveActivityAlert | null;
+      // Rows withheld for presence or awaiting their own environment's publish.
+      readonly deferredRows: ReadonlyArray<AggregateRow>;
+      readonly alertRows: ReadonlyArray<AggregateRow>;
     }
   | {
       readonly kind: "live_activity_end";
@@ -85,6 +90,7 @@ type ChosenPushNotificationDelivery = {
 type ChosenDelivery = ChosenLiveActivityDelivery | ChosenPushNotificationDelivery;
 
 export type ApnsDeliveryError =
+  | AgentActivityRows.AgentActivityRowListPersistenceError
   | ManagedAccessUnavailable
   | ApnsDeliveryQueue.ApnsDeliveryQueueError
   | ApnsDeliveryJobVerificationError
@@ -152,6 +158,7 @@ function aggregateNeedsAttention(aggregate: RelayAgentActivityAggregateState): b
 }
 
 type AggregateRow = RelayAgentActivityAggregateState["activities"][number];
+const aggregateThreadKey = (row: AggregateRow) => JSON.stringify([row.environmentId, row.threadId]);
 
 function isAttentionPhase(phase: string): boolean {
   return phase === "waiting_for_approval" || phase === "waiting_for_input";
@@ -196,34 +203,48 @@ function alertAllowedForPhase(
 // attention phase in the previously delivered aggregate. A null previous
 // aggregate means there is no known baseline (fresh registration, replay after
 // data loss) — alerting there would buzz on reconnect, not on a transition.
+function newlyAttentionRows(input: {
+  readonly previousAggregate: RelayAgentActivityAggregateState | null;
+  readonly nextAggregate: RelayAgentActivityAggregateState;
+  readonly preferences: RelayAgentAwarenessPreferences | null;
+}): ReadonlyArray<AggregateRow> {
+  if (input.previousAggregate === null) {
+    return [];
+  }
+  const previouslyAttention = new Set(
+    input.previousAggregate.activities.filter(rowRingsForAttention).map(aggregateThreadKey),
+  );
+  return input.nextAggregate.activities.filter(
+    (row) =>
+      rowRingsForAttention(row) &&
+      !previouslyAttention.has(aggregateThreadKey(row)) &&
+      alertAllowedForPhase(input.preferences, row.phase),
+  );
+}
+
+function alertForRows(
+  rows: ReadonlyArray<AggregateRow>,
+  summary: string,
+): ApnsLiveActivityAlert | null {
+  const first = rows[0];
+  if (!first) {
+    return null;
+  }
+  if (rows.length === 1) {
+    return { title: first.threadTitle, body: `${first.status}: ${first.projectTitle}` };
+  }
+  return {
+    title: `${rows.length} ${summary}`,
+    body: rows.map((row) => row.threadTitle).join(", "),
+  };
+}
+
 export function alertForAttentionTransition(input: {
   readonly previousAggregate: RelayAgentActivityAggregateState | null;
   readonly nextAggregate: RelayAgentActivityAggregateState;
   readonly preferences: RelayAgentAwarenessPreferences | null;
 }): ApnsLiveActivityAlert | null {
-  if (input.previousAggregate === null) {
-    return null;
-  }
-  const previouslyAttention = new Set(
-    input.previousAggregate.activities.filter(rowRingsForAttention).map((row) => row.threadId),
-  );
-  const newlyAttention = input.nextAggregate.activities.filter(
-    (row) =>
-      rowRingsForAttention(row) &&
-      !previouslyAttention.has(row.threadId) &&
-      alertAllowedForPhase(input.preferences, row.phase),
-  );
-  const first = newlyAttention[0];
-  if (!first) {
-    return null;
-  }
-  if (newlyAttention.length === 1) {
-    return { title: first.threadTitle, body: `${first.status}: ${first.projectTitle}` };
-  }
-  return {
-    title: `${newlyAttention.length} agents need attention`,
-    body: newlyAttention.map((row) => row.threadTitle).join(", "),
-  };
+  return alertForRows(newlyAttentionRows(input), "agents need attention");
 }
 
 // Alert copy for an update whose aggregate contains threads that finished
@@ -239,13 +260,13 @@ function newlyTerminalRows(
     return [];
   }
   const previousPhases = new Map(
-    previousAggregate.activities.map((row) => [row.threadId, row.phase]),
+    previousAggregate.activities.map((row) => [aggregateThreadKey(row), row.phase]),
   );
   return nextAggregate.activities.filter((row) => {
     if (row.phase !== "completed" && row.phase !== "failed") {
       return false;
     }
-    const previousPhase = previousPhases.get(row.threadId);
+    const previousPhase = previousPhases.get(aggregateThreadKey(row));
     return (
       previousPhase !== undefined && previousPhase !== "completed" && previousPhase !== "failed"
     );
@@ -263,30 +284,28 @@ function isFreshTerminalRow(
   return updatedAtMs !== null && nowMs - updatedAtMs <= TERMINAL_NOTIFICATION_FRESHNESS_MS;
 }
 
-export function alertForNewlyTerminal(input: {
+function freshNewlyTerminalRows(input: {
   readonly previousAggregate: RelayAgentActivityAggregateState | null;
   readonly nextAggregate: RelayAgentActivityAggregateState;
   readonly preferences: RelayAgentAwarenessPreferences | null;
   readonly nowMs: number;
-}): ApnsLiveActivityAlert | null {
-  const newlyTerminal = newlyTerminalRows(input.previousAggregate, input.nextAggregate).filter(
+}): ReadonlyArray<AggregateRow> {
+  return newlyTerminalRows(input.previousAggregate, input.nextAggregate).filter(
     (row) =>
       alertAllowedForPhase(input.preferences, row.phase) &&
       // Replays of old aggregates (server restarts, redeliveries) repaint
       // state without ringing; only fresh completions buzz.
       isFreshTerminalRow(row, input.nowMs),
   );
-  const first = newlyTerminal[0];
-  if (!first) {
-    return null;
-  }
-  if (newlyTerminal.length === 1) {
-    return { title: first.threadTitle, body: `${first.status}: ${first.projectTitle}` };
-  }
-  return {
-    title: `${newlyTerminal.length} agents finished`,
-    body: newlyTerminal.map((row) => row.threadTitle).join(", "),
-  };
+}
+
+export function alertForNewlyTerminal(input: {
+  readonly previousAggregate: RelayAgentActivityAggregateState | null;
+  readonly nextAggregate: RelayAgentActivityAggregateState;
+  readonly preferences: RelayAgentAwarenessPreferences | null;
+  readonly nowMs: number;
+}): ApnsLiveActivityAlert | null {
+  return alertForRows(freshNewlyTerminalRows(input), "agents finished");
 }
 
 // Alert copy for an end event carrying a terminal (Done/Failed) aggregate.
@@ -359,6 +378,7 @@ const decodeNotifiedPushEventsJson = Schema.decodeUnknownOption(
         threadId: Schema.String,
         phase: Schema.String,
         status: Schema.String,
+        deferred: Schema.optionalKey(Schema.Literal(true)),
       }),
     ),
   ),
@@ -374,10 +394,13 @@ function isSameThread(event: NotifiedPushEvent, row: AggregateRow): boolean {
 
 // Event identity is thread + phase + status, never a timestamp: the
 // environment republishes unchanged state on a heartbeat with a new updatedAt.
+function isSameEvent(event: NotifiedPushEvent, row: AggregateRow): boolean {
+  return isSameThread(event, row) && event.phase === row.phase && event.status === row.status;
+}
+
+// A deferred entry has not rung yet, so it never counts as notified.
 function isNotifiedPushEvent(notified: ReadonlyArray<NotifiedPushEvent>, row: AggregateRow) {
-  return notified.some(
-    (event) => isSameThread(event, row) && event.phase === row.phase && event.status === row.status,
-  );
+  return notified.some((event) => event.deferred !== true && isSameEvent(event, row));
 }
 
 function isSameNotifiedRecord(
@@ -393,7 +416,8 @@ function isSameNotifiedRecord(
         event.environmentId === other.environmentId &&
         event.threadId === other.threadId &&
         event.phase === other.phase &&
-        event.status === other.status
+        event.status === other.status &&
+        event.deferred === other.deferred
       );
     })
   );
@@ -421,25 +445,36 @@ export interface PushNotificationDecision {
 // (Input -> Working -> Input), which is what prunes it from the record here.
 // Threads absent from the aggregate are left alone because notification-only
 // publishes carry just the published thread. Any reason to stay silent must
-// return `notification: null` so the event stays unrecorded and can ring later.
+// return `notification: null` so the event stays unrecorded and can ring later;
+// that includes `userPresent`, a publish made while the user is at a client.
 export function decidePushNotification(input: {
   readonly target: LiveActivities.TargetRow;
   readonly aggregate: RelayAgentActivityAggregateState | null;
   readonly nowMs: number;
+  readonly userPresent?: boolean;
+  readonly publishingEnvironmentId: string | null;
 }): PushNotificationDecision {
-  const rows = input.aggregate?.activities ?? [];
+  const rows = (input.aggregate?.activities ?? []).filter(
+    (row) => row.environmentId === input.publishingEnvironmentId,
+  );
   const notified = parseNotifiedPushEvents(input.target.notified_push_events_json).filter(
     (event) => {
       const row = rows.find((candidate) => isSameThread(event, candidate));
       return (
         row === undefined ||
-        (isPushEventRow(row) && event.phase === row.phase && event.status === row.status)
+        (isPushEventRow(row) &&
+          event.phase === row.phase &&
+          event.status === row.status &&
+          // A deferred completion only rings while fresh; after that it never can.
+          (event.deferred !== true ||
+            isAttentionPhase(row.phase) ||
+            isFreshTerminalRow(row, input.nowMs)))
       );
     },
   );
   const silent = { notification: null, notified, notifiedIfQueued: notified };
   const preferences = parsePreferences(input.target.preferences_json);
-  if (!input.target.push_token || !preferences?.notificationsEnabled) {
+  if (input.userPresent || !input.target.push_token || !preferences?.notificationsEnabled) {
     return silent;
   }
   // Not just activities[0]: with per-row identity the first row is often an
@@ -467,8 +502,9 @@ export function decidePushNotification(input: {
       updatedAt: activity.updatedAt,
     },
     notified,
+    // Ringing here also settles a ring the Live Activity deferred for this event.
     notifiedIfQueued: [
-      ...notified,
+      ...notified.filter((event) => !isSameEvent(event, activity)),
       {
         environmentId: activity.environmentId,
         threadId: activity.threadId,
@@ -479,12 +515,55 @@ export function decidePushNotification(input: {
   };
 }
 
+// Silent content updates consume the shared Live Activity baseline. Retain the
+// alert event until its own environment publishes without presence; this also
+// covers foreign events first observed in another environment's full card.
+// Entries leave the way rung ones do: when their owner sees another state.
+function deferLiveActivityRings(
+  notified: ReadonlyArray<NotifiedPushEvent>,
+  rows: ReadonlyArray<AggregateRow>,
+): ReadonlyArray<NotifiedPushEvent> {
+  return [
+    ...notified,
+    ...rows
+      .filter((row) => !notified.some((event) => isSameEvent(event, row)))
+      .map((row) => ({
+        environmentId: row.environmentId,
+        threadId: row.threadId,
+        phase: row.phase,
+        status: row.status,
+        deferred: true as const,
+      })),
+  ].slice(-MAX_NOTIFIED_PUSH_EVENTS);
+}
+
+// One audible alert settles the publishing environment's deferred rows. Other
+// environments retain their pending rings even though the shared card updates.
+function settleLiveActivityRings(
+  notified: ReadonlyArray<NotifiedPushEvent>,
+  rows: ReadonlyArray<AggregateRow>,
+): ReadonlyArray<NotifiedPushEvent> {
+  return notified.map((event) =>
+    event.deferred === true && rows.some((row) => isSameThread(event, row))
+      ? {
+          environmentId: event.environmentId,
+          threadId: event.threadId,
+          phase: event.phase,
+          status: event.status,
+        }
+      : event,
+  );
+}
+
 // "suppressed" means a Live Activity owns this state but no update is due
 // (unchanged or throttled); callers must not fall back to an alert push, or
 // every republish of a waiting aggregate would ring the device.
 function chooseLiveActivityDelivery(input: {
   readonly target: LiveActivities.TargetRow;
   readonly aggregate: RelayAgentActivityAggregateState | null;
+  readonly notified: ReadonlyArray<NotifiedPushEvent>;
+  readonly userPresent: boolean;
+  readonly publishingEnvironmentId: string | null;
   readonly nowMs: number;
 }): ChosenLiveActivityDelivery | "suppressed" | null {
   const preferences = parsePreferences(input.target.preferences_json);
@@ -534,36 +613,90 @@ function chooseLiveActivityDelivery(input: {
   }
   const nextAggregate = input.aggregate;
   const previousAggregate = parseAggregate(input.target.last_aggregate_json);
-  return shouldUpdateLiveActivity({
-    previousAggregate,
-    nextAggregate,
-    lastDeliveryAt: input.target.last_live_activity_delivery_at,
-    nowMs: input.nowMs,
-  })
-    ? {
-        kind: "live_activity_update",
-        token: input.target.activity_push_token,
-        aggregate: nextAggregate,
-        alert:
-          alertForAttentionTransition({
-            previousAggregate,
-            nextAggregate,
-            preferences,
-          }) ??
-          alertForNewlyTerminal({
-            previousAggregate,
-            nextAggregate,
-            preferences,
-            nowMs: input.nowMs,
-          }),
-      }
-    : "suppressed";
+  // Card content includes every environment, but this publish only owns alerts
+  // for its authenticated origin. Registration replay has no alert origin.
+  const alertAggregate = {
+    ...nextAggregate,
+    activities: nextAggregate.activities.filter(
+      (row) => row.environmentId === input.publishingEnvironmentId,
+    ),
+  };
+  // Rings deferred while the user was present, still owed now that they left.
+  // Without a delivered baseline (registration replay) nothing rings, so they
+  // stay deferred for the next real publish.
+  const owedRows =
+    input.userPresent || previousAggregate === null
+      ? []
+      : alertAggregate.activities.filter(
+          (row) =>
+            input.notified.some((event) => event.deferred === true && isSameEvent(event, row)) &&
+            isPushEventRow(row) &&
+            alertAllowedForPhase(preferences, row.phase) &&
+            (isAttentionPhase(row.phase) || isFreshTerminalRow(row, input.nowMs)),
+        );
+  if (
+    owedRows.length === 0 &&
+    !shouldUpdateLiveActivity({
+      previousAggregate,
+      nextAggregate,
+      lastDeliveryAt: input.target.last_live_activity_delivery_at,
+      nowMs: input.nowMs,
+    })
+  ) {
+    return "suppressed";
+  }
+  const withOwed = (rows: ReadonlyArray<AggregateRow>, attention: boolean) => [
+    ...rows,
+    ...owedRows.filter((row) => isAttentionPhase(row.phase) === attention && !rows.includes(row)),
+  ];
+  const attentionRows = withOwed(
+    newlyAttentionRows({ previousAggregate, nextAggregate: alertAggregate, preferences }),
+    true,
+  );
+  const terminalRows = withOwed(
+    freshNewlyTerminalRows({
+      previousAggregate,
+      nextAggregate: alertAggregate,
+      preferences,
+      nowMs: input.nowMs,
+    }),
+    false,
+  );
+  // Delivering this full card advances the shared content baseline, including
+  // other environments. Remember their newly observed events without ringing;
+  // only their own next publish may decide whether the user is present there.
+  const foreignRows = [
+    ...newlyAttentionRows({ previousAggregate, nextAggregate, preferences }),
+    ...freshNewlyTerminalRows({
+      previousAggregate,
+      nextAggregate,
+      preferences,
+      nowMs: input.nowMs,
+    }),
+  ].filter((row) => row.environmentId !== input.publishingEnvironmentId);
+  const alert =
+    alertForRows(attentionRows, "agents need attention") ??
+    alertForRows(terminalRows, "agents finished");
+  return {
+    kind: "live_activity_update",
+    token: input.target.activity_push_token,
+    aggregate: nextAggregate,
+    alert: input.userPresent ? null : alert,
+    alertRows: input.userPresent ? [] : attentionRows.length > 0 ? attentionRows : terminalRows,
+    deferredRows: [
+      ...foreignRows,
+      ...(input.userPresent ? [...attentionRows, ...terminalRows] : []),
+    ],
+  };
 }
 
 function chooseDelivery(input: {
   readonly target: LiveActivities.TargetRow;
   readonly aggregate: RelayAgentActivityAggregateState | null;
   readonly notification: ApnsNotificationPayload | null;
+  readonly notified: ReadonlyArray<NotifiedPushEvent>;
+  readonly userPresent: boolean;
+  readonly publishingEnvironmentId: string | null;
   readonly nowMs: number;
 }): ChosenDelivery | null {
   const liveActivityDelivery = chooseLiveActivityDelivery(input);
@@ -719,6 +852,7 @@ function expectedCurrentToken(input: {
 }
 
 interface SendLiveActivityDeliveryInputBase {
+  readonly alertEvents?: ReadonlyArray<ApnsAlertEvent>;
   readonly target: LiveActivityDeliveryTarget;
   readonly token: string;
   readonly sourceJobId?: string | null;
@@ -787,14 +921,22 @@ function makeLiveActivityDeliveryRequest(
 export class ApnsDeliveries extends Context.Service<
   ApnsDeliveries,
   {
+    // `userPresent` marks a publish made while the user is at a Lecturn client:
+    // content still updates, but nothing rings, and the event stays owed so a
+    // later publish without it rings once. Absent means not present.
     readonly sendForTarget: (input: {
       readonly target: LiveActivities.TargetRow;
       readonly aggregate: RelayAgentActivityAggregateState | null;
       readonly nowMs: number;
+      readonly userPresent?: boolean;
+      /** Authenticated publisher origin, or null for a silent registration replay. */
+      readonly publishingEnvironmentId: string | null;
     }) => Effect.Effect<RelayDeliveryResult | null, ApnsDeliveryError>;
     readonly sendPushNotificationForTarget: (input: {
       readonly target: LiveActivities.TargetRow;
       readonly aggregate: RelayAgentActivityAggregateState | null;
+      readonly userPresent?: boolean;
+      readonly publishingEnvironmentId: string | null;
     }) => Effect.Effect<RelayDeliveryResult | null, ApnsDeliveryError>;
     readonly sendLiveActivity: (
       input: SendLiveActivityDeliveryInput,
@@ -1069,7 +1211,7 @@ export const make = Effect.gen(function* () {
       input = {
         ...input,
         aggregate: permittedAggregate,
-        alert: null,
+        alert: input.alertEvents === undefined ? null : input.alert,
       } as SendLiveActivityDeliveryInput;
     // Check before claiming too: a provider/database outage must leave the queued job retryable.
     if (
@@ -1089,25 +1231,11 @@ export const make = Effect.gen(function* () {
       return staleJobResult({ deviceId: input.target.device_id, kind: input.kind });
     }
     const now = yield* DateTime.now;
-    const aggregate =
+    let aggregate =
       input.aggregate === null ? null : sanitizeAgentActivityAggregateState(input.aggregate);
     const registeredTarget = (yield* liveActivities.listTargets({
       userId: input.target.user_id,
     })).find((row) => row.device_id === input.target.device_id);
-    const { epochSeconds, iso, request } = makeLiveActivityDeliveryRequest(
-      apns,
-      {
-        ...input,
-        target: {
-          ...input.target,
-          account_label: registeredTarget?.account_label,
-          account_color: registeredTarget?.account_color,
-          ios_major_version: registeredTarget?.ios_major_version,
-        },
-        aggregate,
-      } as SendLiveActivityDeliveryInput,
-      now,
-    );
     const recoverTransportError = (cause: Apns.ApnsError) =>
       recoverApnsDeliveryTransportError(
         {
@@ -1145,13 +1273,72 @@ export const make = Effect.gen(function* () {
         });
         return staleJobResult({ deviceId: input.target.device_id, kind: input.kind });
       }
-      if (
+      if (input.kind === "live_activity_update" && input.alertEvents !== undefined) {
+        // The card may contain progress from other environments by delivery time.
+        // Rebuild its content, while keeping alert eligibility tied to the signed
+        // events rather than the queued card's timestamps or unrelated rows.
+        const currentStates = yield* activityRows.listForUser({ userId: input.target.user_id });
+        aggregate = yield* filterPermittedActivity(
+          managedAccess,
+          input.target.user_id,
+          makeAggregateState({
+            activeStates: currentStates,
+            terminalState: null,
+            nowMs: now.epochMilliseconds,
+          }),
+          input.originCreatedAtSeconds,
+        );
+        if (aggregate === null) {
+          yield* attempts.completeSourceJob({
+            sourceJobId: input.sourceJobId,
+            apnsReason: "Stale agent activity state skipped.",
+          });
+          return staleJobResult({ deviceId: input.target.device_id, kind: input.kind });
+        }
+        // Alert candidates are independent of the card's display slots. Fresh
+        // progress elsewhere may push the intended event off the five-row card.
+        const intendedAggregate = yield* filterPermittedActivity(
+          managedAccess,
+          input.target.user_id,
+          makeAggregateState({
+            activeStates: currentStates.filter((current) =>
+              input.alertEvents!.some(
+                (event) =>
+                  event.environmentId === current.environmentId &&
+                  event.threadId === current.threadId,
+              ),
+            ),
+            terminalState: null,
+            nowMs: now.epochMilliseconds,
+          }),
+          input.originCreatedAtSeconds,
+        );
+        const eligibleRows = (intendedAggregate?.activities ?? []).filter(
+          (row) =>
+            input.alertEvents!.some((event) => isSameEvent(event, row)) &&
+            isPushEventRow(row) &&
+            alertAllowedForPhase(
+              parsePreferences(registeredTarget?.preferences_json ?? ""),
+              row.phase,
+            ) &&
+            (isAttentionPhase(row.phase) || isFreshTerminalRow(row, now.epochMilliseconds)),
+        );
+        const attention = eligibleRows.filter((row) => isAttentionPhase(row.phase));
+        input = {
+          ...input,
+          aggregate,
+          alert:
+            input.alert === null
+              ? null
+              : alertForRows(
+                  attention.length > 0 ? attention : eligibleRows,
+                  attention.length > 0 ? "agents need attention" : "agents finished",
+                ),
+        };
+      } else if (
         input.kind !== "live_activity_start" &&
         aggregate !== null &&
-        !(yield* aggregateRowsAreCurrent({
-          userId: input.target.user_id,
-          aggregate,
-        }))
+        !(yield* aggregateRowsAreCurrent({ userId: input.target.user_id, aggregate }))
       ) {
         yield* attempts.completeSourceJob({
           sourceJobId: input.sourceJobId,
@@ -1196,6 +1383,20 @@ export const make = Effect.gen(function* () {
         });
       return staleJobResult({ deviceId: input.target.device_id, kind: input.kind });
     }
+    const { epochSeconds, iso, request } = makeLiveActivityDeliveryRequest(
+      apns,
+      {
+        ...input,
+        target: {
+          ...input.target,
+          account_label: registeredTarget?.account_label,
+          account_color: registeredTarget?.account_color,
+          ios_major_version: registeredTarget?.ios_major_version,
+        },
+        aggregate,
+      } as SendLiveActivityDeliveryInput,
+      now,
+    );
     const finalRequest =
       input.kind === "live_activity_end" &&
       !(yield* cleanupAlertsPermitted(
@@ -1475,6 +1676,7 @@ export const make = Effect.gen(function* () {
             kind: payload.kind,
             aggregate: payload.aggregate,
             alert: payload.alert ?? null,
+            ...(payload.alertEvents !== undefined ? { alertEvents: payload.alertEvents } : {}),
           });
         case "live_activity_end":
           return sendLiveActivity({
@@ -1490,6 +1692,7 @@ export const make = Effect.gen(function* () {
             kind: payload.kind,
             aggregate: payload.aggregate,
             alert: payload.alert ?? null,
+            ...(payload.alertEvents !== undefined ? { alertEvents: payload.alertEvents } : {}),
           });
         case "push_notification":
           if (payload.notification === null) {
@@ -1525,6 +1728,8 @@ export const make = Effect.gen(function* () {
       target: input.target,
       aggregate: input.aggregate,
       nowMs: now.epochMilliseconds,
+      userPresent: input.userPresent === true,
+      publishingEnvironmentId: input.publishingEnvironmentId,
     });
     const { notification } = decision;
     const token = input.target.push_token;
@@ -1560,13 +1765,17 @@ export const make = Effect.gen(function* () {
       input.target.user_id,
       input.aggregate,
     );
-    input = { ...input, aggregate };
+    const userPresent = input.userPresent === true;
+    input = { ...input, aggregate, userPresent };
     const decision = decidePushNotification(input);
     const { notification } = decision;
     const delivery = chooseDelivery({
       target: input.target,
       aggregate: input.aggregate,
       notification,
+      notified: decision.notified,
+      userPresent,
+      publishingEnvironmentId: input.publishingEnvironmentId,
       nowMs: input.nowMs,
     });
     if (
@@ -1612,16 +1821,25 @@ export const make = Effect.gen(function* () {
         undefined,
         delivery.aggregate?.activities[0]?.environmentId,
       ));
-    const alert = !endAlertsAllowed
-      ? null
-      : delivery.kind === "live_activity_end"
-        ? pushOwnsEndAlert
-          ? null
-          : alertForTerminalAggregate({
-              aggregate: delivery.aggregate,
-              preferences: parsePreferences(input.target.preferences_json),
-            })
-        : delivery.alert;
+    const alert =
+      !endAlertsAllowed || userPresent || input.publishingEnvironmentId === null
+        ? null
+        : delivery.kind === "live_activity_end"
+          ? pushOwnsEndAlert
+            ? null
+            : alertForTerminalAggregate({
+                aggregate:
+                  delivery.aggregate === null
+                    ? null
+                    : {
+                        ...delivery.aggregate,
+                        activities: delivery.aggregate.activities.filter(
+                          (row) => row.environmentId === input.publishingEnvironmentId,
+                        ),
+                      },
+                preferences: parsePreferences(input.target.preferences_json),
+              })
+          : delivery.alert;
     const result = yield* deliveryQueue.enqueueLiveActivity({
       userId: input.target.user_id,
       deviceId: input.target.device_id,
@@ -1631,6 +1849,16 @@ export const make = Effect.gen(function* () {
       apsEnvironment: input.target.aps_environment,
       aggregate: delivery.aggregate,
       alert,
+      ...(delivery.kind === "live_activity_update" && alert !== null
+        ? {
+            alertEvents: delivery.alertRows.map(({ environmentId, threadId, phase, status }) => ({
+              environmentId,
+              threadId,
+              phase,
+              status,
+            })),
+          }
+        : {}),
     });
     if (
       delivery.kind === "live_activity_end" &&
@@ -1652,8 +1880,21 @@ export const make = Effect.gen(function* () {
         notification,
       });
       yield* persistNotifiedPushEvents(input.target, decision.notifiedIfQueued);
-    } else {
+    } else if (delivery.kind === "live_activity_end") {
       yield* persistNotifiedPushEvents(input.target, decision.notified);
+    } else {
+      const deferred = deferLiveActivityRings(decision.notified, delivery.deferredRows);
+      yield* persistNotifiedPushEvents(
+        input.target,
+        alert === null
+          ? deferred
+          : settleLiveActivityRings(
+              deferred,
+              delivery.aggregate.activities.filter(
+                (row) => row.environmentId === input.publishingEnvironmentId,
+              ),
+            ),
+      );
     }
     if (delivery.kind === "live_activity_start") {
       const now = yield* DateTime.now;

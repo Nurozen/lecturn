@@ -28,12 +28,21 @@ The banner prioritizes work that needs attention and displays up to five activit
 
 Lecturn's Live Activities use navy, warm text, gold accents, and distinct status colors. They can also appear through supported Apple mirroring surfaces. Apple controls availability, surrounding system chrome, and transitions; ordinary notification banners retain the system appearance. The gold accent is static.
 
+## When notifications ring
+
+A notification rings once per event. An event is a conversation or watched PR entering a state: Approval, Input, Done, Failed, or a PR or CI status. It rings again only if the item leaves that state and later returns to it. An unchanged state does not ring again, including after the Lecturn server restarts.
+
+While you are actively using a connected environment in Lecturn, its phone notifications and Live Activity alerts stay silent on your devices. Other environments keep their own alert state. Active use means a Lecturn window is visible and focused and you interacted with it in the last 45 seconds or so, or the phone app is open in the foreground. The Live Activity keeps updating silently.
+
+If an item still needs approval or input when you stop using Lecturn, it rings once then, normally within about 30 seconds. Done and Failed ring only if you leave within about two minutes of the completion. An item you already handled does not ring.
+
 ## If updates do not appear
 
 - Confirm the account has active Connect access and the host is online with **Publish agent activity** enabled.
 - Check both **Device Notifications** and **Live Activity Updates**. Allowing notification permission does not by itself finish Connect registration.
 - If delivery setup is pending, restore connectivity and reopen Lecturn Settings to retry registration.
 - Check iOS notification, Focus, and Live Activity settings when an expected alert or activity is hidden.
+- Alerts for an environment stay silent while you are actively using it from any device, and a state that already rang does not ring again. See [When notifications ring](#when-notifications-ring).
 - Start a new task to check current delivery. A completed activity is not evidence that the host is still connected.
 
 Push delivery and the interactive connection use different paths. Notifications may arrive while the app is reconnecting to the computer. If that happens, check the environment connection in the app and the host's network; receiving a notification does not establish that chat is connected.
@@ -52,7 +61,7 @@ The control shows the receiving conversation. If no manager is assigned and exac
 
 An automatic merge authorization created by an earlier version remains visible. Revoke it before handing the PR to an agent so both paths cannot act at once. Stopping a watch revokes that older authorization; it does not cancel instructions already sent to an agent.
 
-CI facts can be stale while the host is offline or the Git provider is unavailable. Open the CI disclosure for individual jobs and the information control for observation details.
+CI facts can be stale while the host is offline or the Git provider is unavailable. Open the CI disclosure for individual jobs and the information control for observation details. A watch whose status cannot be read shows as **Stale** in the Live Activity and the Mac panel. Stale is not something you need to act on, so it does not send a notification or a Live Activity alert.
 
 Settling a conversation removes its thread activity from Live Activities and the Mac panel. An ordinary completed turn still reports that the agent finished. Watched PRs remain available independently of whether their managing conversation is settled.
 
@@ -77,6 +86,8 @@ Activity states share the same visual cues across the Mac panel, web, and phone:
 Opening a conversation from the notch closes the panel. The Lecturn logo brings the main app forward without switching conversations or expanding the panel. Expanded cards keep their steering field visible.
 
 A meaningful activity or CI state change briefly bounces and colors the count, then shows a single-item preview when the panel is closed. The preview closes after five seconds unless you interact; leaving it or sending steering dismisses it. Text streaming alone does not trigger alerts, and new alerts do not replace a card you are already using. Reduced motion keeps the color cue without the bounce. Failed steering delivery restores your draft and surfaces an error.
+
+The notch stays quiet while you are actively using Lecturn: the main window is visible and focused and you used the Mac in the last 45 seconds or so. The count does not flash and no preview opens, but the pill and its rows keep updating. When you switch away or go idle, the notch alerts once for the most urgent item that still needs attention, failed, or completed. Items that moved on in the meantime do not alert.
 
 Submitting a prompt, steering, settling, or stopping work does not pop the notch open to report your own action. Later agent results, attention requests and CI changes remain eligible for alerts.
 
