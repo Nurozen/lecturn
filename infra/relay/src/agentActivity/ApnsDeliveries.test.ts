@@ -2171,9 +2171,20 @@ describe("Live Activity alerts while the user is present", () => {
       ),
     );
 
-  for (const change of ["heartbeat", "other-environment", "resolved", "deleted"] as const) {
+  for (const change of [
+    "heartbeat",
+    "other-environment",
+    "resolved",
+    "deleted",
+    "crowded",
+    "crowded-denied",
+  ] as const) {
     it.effect(`delivers owed alert against fresh content after ${change}`, () => {
       const device = armedDevice();
+      const crowded = change === "crowded" || change === "crowded-denied";
+      const eventRow: AggregateRow = crowded
+        ? { ...inputRow, phase: "completed", status: "Done" }
+        : inputRow;
       const queuedJobs: Array<SignedApnsDeliveryJob> = [];
       const otherWorking: AggregateRow = {
         ...workingRow,
@@ -2193,25 +2204,27 @@ describe("Live Activity alerts while the user is present", () => {
         yield* publish({
           device,
           queuedJobs,
-          row: inputRow,
-          rows: [inputRow, otherWorking],
+          row: eventRow,
+          rows: [eventRow, otherWorking],
           userPresent: true,
         });
         yield* publish({
           device,
           queuedJobs,
-          row: inputRow,
-          rows: [inputRow, otherWorking],
+          row: eventRow,
+          rows: [eventRow, otherWorking],
           userPresent: false,
         });
         const job = queuedJobs.at(-1)!;
-        expect(job.payload.alert).toEqual(inputAlert);
+        expect(job.payload.alert).toEqual(
+          crowded ? { title: "Thread", body: "Done: Project" } : inputAlert,
+        );
         expect(job.payload.alertEvents).toEqual([
           {
-            environmentId: inputRow.environmentId,
-            threadId: inputRow.threadId,
-            phase: inputRow.phase,
-            status: inputRow.status,
+            environmentId: eventRow.environmentId,
+            threadId: eventRow.threadId,
+            phase: eventRow.phase,
+            status: eventRow.status,
           },
         ]);
         const current: RelayAgentActivityState[] = [
@@ -2220,8 +2233,7 @@ describe("Live Activity alerts while the user is present", () => {
             : [
                 {
                   ...state,
-                  phase:
-                    change === "resolved" ? ("running" as const) : ("waiting_for_input" as const),
+                  phase: change === "resolved" ? ("running" as const) : eventRow.phase,
                   updatedAt: "1970-01-01T00:00:03.000Z",
                 },
               ]),
@@ -2235,6 +2247,17 @@ describe("Live Activity alerts while the user is present", () => {
             updatedAt: "1970-01-01T00:00:04.000Z",
           },
         ];
+        if (crowded)
+          current.unshift(
+            ...Array.from({ length: 6 }, (_, index) => ({
+              ...state,
+              environmentId: "other-env" as typeof state.environmentId,
+              threadId: `crowd-${index}` as typeof state.threadId,
+              threadTitle: `Active ${index}`,
+              phase: "running" as const,
+              updatedAt: "1970-01-01T00:00:04.000Z",
+            })),
+          );
         const result = yield* Effect.gen(function* () {
           const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
           return yield* deliveries.processSignedJob(job);
@@ -2244,6 +2267,21 @@ describe("Live Activity alerts while the user is present", () => {
               attempts: [],
               config: signingConfig,
               activityStates: current,
+              ...(change === "crowded-denied"
+                ? {
+                    managedAccess: {
+                      check: (
+                        _user: string,
+                        _feature: unknown,
+                        _origin: unknown,
+                        environmentId: string | undefined,
+                      ) =>
+                        environmentId === state.environmentId
+                          ? Effect.fail(new ManagedAccessRequired({ message: "Access revoked" }))
+                          : Effect.void,
+                    },
+                  }
+                : {}),
               currentTargets: [
                 {
                   ...target,
@@ -2262,10 +2300,18 @@ describe("Live Activity alerts while the user is present", () => {
           ),
         );
         expect(result.apnsStatus).toBe(200);
-        if (change === "resolved" || change === "deleted") expect(body).not.toContain('"alert"');
+        if (change === "resolved" || change === "deleted" || change === "crowded-denied")
+          expect(body).not.toContain('"alert"');
         else expect(body).toContain('"alert"');
         const latest = markedDeliveries.at(-1)?.aggregate;
         expect(latest?.updatedAt).toBe("1970-01-01T00:00:04.000Z");
+        if (crowded) {
+          expect(latest?.activities).toHaveLength(5);
+          expect(latest?.activities.some((row) => row.environmentId === state.environmentId)).toBe(
+            false,
+          );
+          if (change === "crowded") expect(body).toContain("Done: Project");
+        }
         if (change === "other-environment") {
           expect(body).toContain("Other progressed");
           expect(body).not.toContain("Old other title");

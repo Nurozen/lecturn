@@ -1295,7 +1295,25 @@ export const make = Effect.gen(function* () {
           });
           return staleJobResult({ deviceId: input.target.device_id, kind: input.kind });
         }
-        const eligibleRows = aggregate.activities.filter(
+        // Alert candidates are independent of the card's display slots. Fresh
+        // progress elsewhere may push the intended event off the five-row card.
+        const intendedAggregate = yield* filterPermittedActivity(
+          managedAccess,
+          input.target.user_id,
+          makeAggregateState({
+            activeStates: currentStates.filter((current) =>
+              input.alertEvents!.some(
+                (event) =>
+                  event.environmentId === current.environmentId &&
+                  event.threadId === current.threadId,
+              ),
+            ),
+            terminalState: null,
+            nowMs: now.epochMilliseconds,
+          }),
+          input.originCreatedAtSeconds,
+        );
+        const eligibleRows = (intendedAggregate?.activities ?? []).filter(
           (row) =>
             input.alertEvents!.some((event) => isSameEvent(event, row)) &&
             isPushEventRow(row) &&
