@@ -2,9 +2,7 @@
   "version": "8",
   "dialect": "postgres",
   "id": "9932f4e1-fe4d-413f-8096-608ac63efb0a",
-  "prevIds": [
-    "7a39df90-0ac6-4775-974e-4b7eab0e8345"
-  ],
+  "prevIds": ["7a39df90-0ac6-4775-974e-4b7eab0e8345"],
   "ddl": [
     {
       "isRlsEnabled": false,
@@ -3480,14 +3478,10 @@
     },
     {
       "nameExplicit": false,
-      "columns": [
-        "user_id"
-      ],
+      "columns": ["user_id"],
       "schemaTo": "public",
       "tableTo": "relay_billing_accounts",
-      "columnsTo": [
-        "user_id"
-      ],
+      "columnsTo": ["user_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "name": "relay_billing_identity_checks_uNGd2oiQUC7F_fkey",
@@ -3497,14 +3491,10 @@
     },
     {
       "nameExplicit": false,
-      "columns": [
-        "user_id"
-      ],
+      "columns": ["user_id"],
       "schemaTo": "public",
       "tableTo": "relay_managed_gateway_accounts",
-      "columnsTo": [
-        "user_id"
-      ],
+      "columnsTo": ["user_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "name": "relay_managed_gateway_environments_5Esr7ODOLAQD_fkey",
@@ -3514,14 +3504,10 @@
     },
     {
       "nameExplicit": false,
-      "columns": [
-        "organization_id"
-      ],
+      "columns": ["organization_id"],
       "schemaTo": "public",
       "tableTo": "relay_team_accounts",
-      "columnsTo": [
-        "organization_id"
-      ],
+      "columnsTo": ["organization_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "name": "relay_team_audit_09t9gB7dqgLW_fkey",
@@ -3531,14 +3517,10 @@
     },
     {
       "nameExplicit": false,
-      "columns": [
-        "organization_id"
-      ],
+      "columns": ["organization_id"],
       "schemaTo": "public",
       "tableTo": "relay_team_accounts",
-      "columnsTo": [
-        "organization_id"
-      ],
+      "columnsTo": ["organization_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "name": "relay_team_environment_funding_7Vc5YwcqekeA_fkey",
@@ -3548,14 +3530,10 @@
     },
     {
       "nameExplicit": false,
-      "columns": [
-        "organization_id"
-      ],
+      "columns": ["organization_id"],
       "schemaTo": "public",
       "tableTo": "relay_team_accounts",
-      "columnsTo": [
-        "organization_id"
-      ],
+      "columnsTo": ["organization_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "name": "relay_team_seats_4mdRYpMKoliZ_fkey",
@@ -3564,11 +3542,7 @@
       "table": "relay_team_seats"
     },
     {
-      "columns": [
-        "environment_id",
-        "environment_public_key",
-        "thread_id"
-      ],
+      "columns": ["environment_id", "environment_public_key", "thread_id"],
       "nameExplicit": false,
       "name": "relay_agent_activity_rows_pkey",
       "entityType": "pks",
@@ -3576,10 +3550,7 @@
       "table": "relay_agent_activity_rows"
     },
     {
-      "columns": [
-        "thumbprint",
-        "jti"
-      ],
+      "columns": ["thumbprint", "jti"],
       "nameExplicit": false,
       "name": "relay_dpop_proofs_pkey",
       "entityType": "pks",
@@ -3587,10 +3558,7 @@
       "table": "relay_dpop_proofs"
     },
     {
-      "columns": [
-        "user_id",
-        "environment_id"
-      ],
+      "columns": ["user_id", "environment_id"],
       "nameExplicit": false,
       "name": "relay_environment_link_cleanup_pkey",
       "entityType": "pks",
@@ -3598,10 +3566,7 @@
       "table": "relay_environment_link_cleanup"
     },
     {
-      "columns": [
-        "user_id",
-        "environment_id"
-      ],
+      "columns": ["user_id", "environment_id"],
       "nameExplicit": false,
       "name": "relay_environment_links_pkey",
       "entityType": "pks",
@@ -3609,10 +3574,7 @@
       "table": "relay_environment_links"
     },
     {
-      "columns": [
-        "user_id",
-        "device_id"
-      ],
+      "columns": ["user_id", "device_id"],
       "nameExplicit": false,
       "name": "relay_live_activities_pkey",
       "entityType": "pks",
@@ -3620,10 +3582,7 @@
       "table": "relay_live_activities"
     },
     {
-      "columns": [
-        "user_id",
-        "environment_id"
-      ],
+      "columns": ["user_id", "environment_id"],
       "nameExplicit": false,
       "name": "relay_managed_endpoint_allocations_pkey",
       "entityType": "pks",
@@ -3631,10 +3590,7 @@
       "table": "relay_managed_endpoint_allocations"
     },
     {
-      "columns": [
-        "user_id",
-        "environment_id"
-      ],
+      "columns": ["user_id", "environment_id"],
       "nameExplicit": false,
       "name": "relay_managed_gateway_environments_pkey",
       "entityType": "pks",
@@ -3642,10 +3598,7 @@
       "table": "relay_managed_gateway_environments"
     },
     {
-      "columns": [
-        "user_id",
-        "environment_id"
-      ],
+      "columns": ["user_id", "environment_id"],
       "nameExplicit": false,
       "name": "relay_managed_reservations_pkey",
       "entityType": "pks",
@@ -3653,10 +3606,7 @@
       "table": "relay_managed_reservations"
     },
     {
-      "columns": [
-        "user_id",
-        "device_id"
-      ],
+      "columns": ["user_id", "device_id"],
       "nameExplicit": false,
       "name": "relay_mobile_devices_pkey",
       "entityType": "pks",
@@ -3664,10 +3614,7 @@
       "table": "relay_mobile_devices"
     },
     {
-      "columns": [
-        "kind",
-        "token"
-      ],
+      "columns": ["kind", "token"],
       "nameExplicit": false,
       "name": "relay_push_token_owners_pkey",
       "entityType": "pks",
@@ -3675,10 +3622,7 @@
       "table": "relay_push_token_owners"
     },
     {
-      "columns": [
-        "user_id",
-        "environment_id"
-      ],
+      "columns": ["user_id", "environment_id"],
       "nameExplicit": false,
       "name": "relay_team_environment_funding_pkey",
       "entityType": "pks",
@@ -3686,10 +3630,7 @@
       "table": "relay_team_environment_funding"
     },
     {
-      "columns": [
-        "organization_id",
-        "user_id"
-      ],
+      "columns": ["organization_id", "user_id"],
       "nameExplicit": false,
       "name": "relay_team_seats_pkey",
       "entityType": "pks",
@@ -3697,9 +3638,7 @@
       "table": "relay_team_seats"
     },
     {
-      "columns": [
-        "user_id"
-      ],
+      "columns": ["user_id"],
       "nameExplicit": false,
       "name": "relay_billing_accounts_pkey",
       "schema": "public",
@@ -3707,9 +3646,7 @@
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "relay_billing_enforcement_control_pkey",
       "schema": "public",
@@ -3717,9 +3654,7 @@
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "relay_billing_grant_audit_pkey",
       "schema": "public",
@@ -3727,9 +3662,7 @@
       "entityType": "pks"
     },
     {
-      "columns": [
-        "user_id"
-      ],
+      "columns": ["user_id"],
       "nameExplicit": false,
       "name": "relay_billing_identity_checks_pkey",
       "schema": "public",
@@ -3737,9 +3670,7 @@
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "relay_billing_inbox_pkey",
       "schema": "public",
@@ -3747,9 +3678,7 @@
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "relay_billing_operator_audit_pkey",
       "schema": "public",
@@ -3757,9 +3686,7 @@
       "entityType": "pks"
     },
     {
-      "columns": [
-        "invoice_id"
-      ],
+      "columns": ["invoice_id"],
       "nameExplicit": false,
       "name": "relay_billing_payment_reviews_pkey",
       "schema": "public",
@@ -3767,9 +3694,7 @@
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "relay_delivery_attempts_pkey",
       "schema": "public",
@@ -3777,9 +3702,7 @@
       "entityType": "pks"
     },
     {
-      "columns": [
-        "credential_id"
-      ],
+      "columns": ["credential_id"],
       "nameExplicit": false,
       "name": "relay_environment_credentials_pkey",
       "schema": "public",
@@ -3787,9 +3710,7 @@
       "entityType": "pks"
     },
     {
-      "columns": [
-        "environment_id"
-      ],
+      "columns": ["environment_id"],
       "nameExplicit": false,
       "name": "relay_environment_link_owners_pkey",
       "schema": "public",
@@ -3797,9 +3718,7 @@
       "entityType": "pks"
     },
     {
-      "columns": [
-        "user_id"
-      ],
+      "columns": ["user_id"],
       "nameExplicit": false,
       "name": "relay_managed_gateway_accounts_pkey",
       "schema": "public",
@@ -3807,9 +3726,7 @@
       "entityType": "pks"
     },
     {
-      "columns": [
-        "tunnel_id"
-      ],
+      "columns": ["tunnel_id"],
       "nameExplicit": false,
       "name": "relay_managed_suspensions_pkey",
       "schema": "public",
@@ -3817,9 +3734,7 @@
       "entityType": "pks"
     },
     {
-      "columns": [
-        "user_id"
-      ],
+      "columns": ["user_id"],
       "nameExplicit": false,
       "name": "relay_managed_tunnel_limits_pkey",
       "schema": "public",
@@ -3827,9 +3742,7 @@
       "entityType": "pks"
     },
     {
-      "columns": [
-        "organization_id"
-      ],
+      "columns": ["organization_id"],
       "nameExplicit": false,
       "name": "relay_team_accounts_pkey",
       "schema": "public",
@@ -3837,9 +3750,7 @@
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "relay_team_audit_pkey",
       "schema": "public",
@@ -3847,9 +3758,7 @@
       "entityType": "pks"
     },
     {
-      "columns": [
-        "user_id"
-      ],
+      "columns": ["user_id"],
       "nameExplicit": false,
       "name": "relay_team_deleted_users_pkey",
       "schema": "public",
@@ -3858,9 +3767,7 @@
     },
     {
       "nameExplicit": false,
-      "columns": [
-        "customer_id"
-      ],
+      "columns": ["customer_id"],
       "nullsNotDistinct": false,
       "name": "relay_billing_accounts_customer_id_key",
       "schema": "public",
@@ -3869,9 +3776,7 @@
     },
     {
       "nameExplicit": false,
-      "columns": [
-        "customer_id"
-      ],
+      "columns": ["customer_id"],
       "nullsNotDistinct": false,
       "name": "relay_team_accounts_customer_id_key",
       "schema": "public",
@@ -3880,9 +3785,7 @@
     },
     {
       "nameExplicit": false,
-      "columns": [
-        "subscription_id"
-      ],
+      "columns": ["subscription_id"],
       "nullsNotDistinct": false,
       "name": "relay_team_accounts_subscription_id_key",
       "schema": "public",
