@@ -1,3 +1,4 @@
+import { useSettingsAccountGlass } from "../settings/useSettingsAccountGlass";
 import { useStaveStatus } from "../../state/stave";
 import { staveOperationUnavailableReason } from "./staveCompatibility.logic";
 import type {
@@ -132,7 +133,10 @@ export function StaveSagaActions({
         const space = resolveSagaMemberSpace(spaces.data ?? [], member.id);
         const stamp = space?.manifestCreatedAt;
         return (
-          <div key={member.id} className="flex flex-col gap-2 rounded-lg border p-3 text-xs">
+          <div
+            key={member.id}
+            className="flex flex-col gap-2 lecturn-glass-panel rounded-xl border border-border/40 p-4 text-xs"
+          >
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono">{member.id}</span>
               {staveSagaMemberBadges(member).map((badge) => (
@@ -248,6 +252,7 @@ export function StaveSagaActions({
       ) : null}
       {editor ? (
         <SagaMemberEditor
+          environmentId={environmentId}
           spaces={spaces.data ?? []}
           editor={editor}
           sagaId={stave.spaceId}
@@ -284,18 +289,21 @@ export function StaveSagaActions({
 }
 
 function SagaMemberEditor({
+  environmentId,
   spaces,
   editor,
   sagaId,
   onClose,
   onReview,
 }: {
+  environmentId: EnvironmentId;
   spaces: readonly StaveSpaceListRow[];
   editor: { member?: StaveSpaceListRow; after: readonly string[] };
   sagaId: string;
   onClose: () => void;
   onReview: (member: StaveSpaceListRow, after: readonly string[], clearAfter: boolean) => void;
 }) {
+  const glass = useSettingsAccountGlass(environmentId);
   const [path, setPath] = useState(editor.member?.path ?? "");
   const [selected, setSelected] = useState(editor.member);
   const [afterText, setAfterText] = useState(editor.after.join(", "));
@@ -320,7 +328,10 @@ function SagaMemberEditor({
         if (!open) onClose();
       }}
     >
-      <DialogPopup className="max-w-md">
+      <DialogPopup
+        {...glass}
+        className="lecturn-account-surface lecturn-project-settings-dialog max-w-md"
+      >
         <DialogHeader>
           <DialogTitle>{editor.member ? "Edit dependencies" : "Adopt existing space"}</DialogTitle>
         </DialogHeader>

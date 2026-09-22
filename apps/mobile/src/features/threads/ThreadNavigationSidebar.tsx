@@ -1,3 +1,7 @@
+import { HierarchyRow } from "../home/HierarchyRow";
+import { accountSectionFrames } from "../home/accountSectionFrames";
+import { HIERARCHY_LAYOUT_TRANSITION } from "../home/hierarchyMotion";
+import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import { AccountSurfaceColorContext } from "../../lib/accountTintContext";
 import { useAccountRowColors } from "../home/useAccountRowColors";
 import {
@@ -9,7 +13,6 @@ import { useAccountSections, useAccountAttention } from "../home/useAccountSecti
 import { AccountSectionHeader } from "../home/AccountSectionHeader";
 import { GlassCard } from "../../components/GlassCard";
 import { buildSidebarHierarchy } from "./sidebar-hierarchy";
-import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { useMobileSagaIndex, useSidebarNestSagas } from "../../state/stave";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import type {
@@ -20,13 +23,11 @@ import {
   threadSearchMatchKey,
   type EnvironmentThreadSearchMatch,
 } from "@lecturn/client-runtime/state/thread-search";
-import { LegendList } from "@legendapp/list/react-native";
 import type { MenuAction } from "@react-native-menu/menu";
 import { useAtomValue } from "@effect/atom-react";
 import { type EnvironmentId, resolveEnvironmentMachineKind } from "@lecturn/contracts";
 import { sortPinnedThreadsByOrderKey } from "@lecturn/client-runtime/state/thread-sort";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LayoutChangeEvent } from "react-native";
 import { Platform, Pressable, StyleSheet, TextInput, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -105,40 +106,6 @@ import {
   type ThreadListV2ListItem,
 } from "./threadListV2";
 
-/** A static metallic glint leaves the darker rail readable on cream surfaces. */
-function LightHierarchySheen({
-  copper,
-  horizontal = false,
-}: {
-  readonly copper: boolean;
-  readonly horizontal?: boolean;
-}) {
-  const gradientId = `hierarchy-sheen-${useId().replaceAll(":", "")}`;
-  const base = copper ? "#ad3c2f" : "#82472c";
-  const metal = copper ? "#e67c47" : "#bc7642";
-  const glint = copper ? "#ffd097" : "#ffe1b1";
-  return (
-    <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
-      <Defs>
-        <LinearGradient
-          id={gradientId}
-          x1="0%"
-          y1="0%"
-          x2={horizontal ? "100%" : "0%"}
-          y2={horizontal ? "0%" : "100%"}
-        >
-          <Stop offset="0%" stopColor={base} />
-          <Stop offset="35%" stopColor={metal} />
-          <Stop offset="48%" stopColor={glint} />
-          <Stop offset="56%" stopColor={metal} />
-          <Stop offset="100%" stopColor={base} />
-        </LinearGradient>
-      </Defs>
-      <Rect width="100%" height="100%" fill={`url(#${gradientId})`} />
-    </Svg>
-  );
-}
-
 /** The sidebar list serves both lists: v1 grouped items or, when the Thread
     List v2 beta is on, flat v2 rows with queued tasks spliced in, and a settled
     "Show more" pager. */
@@ -200,8 +167,6 @@ function ThreadNavigationSidebarPane(
 ) {
   const accountSections = useAccountSections();
   const attention = useAccountAttention(accountSections);
-  const { themeAppearance } = useAppearancePreferences();
-  const light = themeAppearance === "light";
   const insets = useSafeAreaInsets();
   const projects = useProjects();
   const threads = useThreadShells();
@@ -1306,111 +1271,25 @@ function ThreadNavigationSidebarPane(
   // Snoozed threads need no special case: the shelf header is a list row
   // even while collapsed.
   const accountRowColors = useAccountRowColors(listItems);
+  const sectionFrames = useMemo(() => accountSectionFrames(listItems), [listItems]);
   const renderListItem = useCallback(
     (props: { readonly item: SidebarListItem }) => (
-      <View style={{ paddingLeft: (props.item.depth ?? 0) * 18 }}>
-        {hierarchyGuides.get(props.item.key)?.map(({ level, continues }) => (
-          <View
-            key={level}
-            pointerEvents="none"
-            accessible={false}
-            style={{
-              position: "absolute",
-              top: 0,
-              bottom: continues ? 0 : "50%",
-              left: level * 18 + 16,
-              width:
-                (props.item.type === "thread" || props.item.type === "v2-thread") &&
-                "settledBranch" in props.item &&
-                props.item.settledBranch &&
-                level === (props.item.depth ?? 0) - 1
-                  ? 2
-                  : 1,
-              backgroundColor:
-                (props.item.type === "thread" || props.item.type === "v2-thread") &&
-                "settledBranch" in props.item &&
-                props.item.settledBranch &&
-                level === (props.item.depth ?? 0) - 1
-                  ? light
-                    ? "#ad3c2f"
-                    : "#ff866f"
-                  : (accountRowColors.get(props.item.key) ?? (light ? "#82472c" : "#ffe1a0")),
-              borderRadius: 2,
-              opacity: 0.72,
-              boxShadow: light
-                ? "0 0 3px #bc764233"
-                : (props.item.type === "thread" || props.item.type === "v2-thread") &&
-                    "settledBranch" in props.item &&
-                    props.item.settledBranch &&
-                    level === (props.item.depth ?? 0) - 1
-                  ? "0 0 6px 1px #e64d3d88"
-                  : `0 0 4px ${accountRowColors.get(props.item.key) ?? "#dca64e"}44`,
-            }}
-          >
-            {light && !accountRowColors.has(props.item.key) ? (
-              <LightHierarchySheen
-                copper={Boolean(
-                  (props.item.type === "thread" || props.item.type === "v2-thread") &&
-                  "settledBranch" in props.item &&
-                  props.item.settledBranch &&
-                  level === (props.item.depth ?? 0) - 1,
-                )}
-              />
-            ) : null}
-          </View>
-        ))}
-        {(props.item.depth ?? 0) > 0 ? (
-          <View
-            pointerEvents="none"
-            accessible={false}
-            style={{
-              position: "absolute",
-              top: "50%",
-              left: ((props.item.depth ?? 0) - 1) * 18 + 16,
-              width: 12,
-              height:
-                (props.item.type === "thread" || props.item.type === "v2-thread") &&
-                "settledBranch" in props.item &&
-                props.item.settledBranch
-                  ? 2
-                  : 1,
-              backgroundColor:
-                (props.item.type === "thread" || props.item.type === "v2-thread") &&
-                "settledBranch" in props.item &&
-                props.item.settledBranch
-                  ? light
-                    ? "#ad3c2f"
-                    : "#ff866f"
-                  : (accountRowColors.get(props.item.key) ?? (light ? "#82472c" : "#ffe1a0")),
-              borderRadius: 2,
-              opacity: 0.72,
-              boxShadow: light
-                ? "0 0 3px #bc764233"
-                : (props.item.type === "thread" || props.item.type === "v2-thread") &&
-                    "settledBranch" in props.item &&
-                    props.item.settledBranch
-                  ? "0 0 6px 1px #e64d3d88"
-                  : `0 0 4px ${accountRowColors.get(props.item.key) ?? "#dca64e"}44`,
-            }}
-          >
-            {light && !accountRowColors.has(props.item.key) ? (
-              <LightHierarchySheen
-                horizontal
-                copper={Boolean(
-                  (props.item.type === "thread" || props.item.type === "v2-thread") &&
-                  "settledBranch" in props.item &&
-                  props.item.settledBranch,
-                )}
-              />
-            ) : null}
-          </View>
-        ) : null}
-        <AccountSurfaceColorContext.Provider value={accountRowColors.get(props.item.key)}>
+      <AccountSurfaceColorContext.Provider value={accountRowColors.get(props.item.key)}>
+        <HierarchyRow
+          depth={props.item.depth ?? 0}
+          settled={
+            "settledBranch" in props.item &&
+            props.item.type !== "v2-settled-shelf" &&
+            Boolean(props.item.settledBranch)
+          }
+          frame={sectionFrames.get(props.item.key)}
+          guides={hierarchyGuides.get(props.item.key)}
+        >
           {renderListRow(props)}
-        </AccountSurfaceColorContext.Provider>
-      </View>
+        </HierarchyRow>
+      </AccountSurfaceColorContext.Provider>
     ),
-    [hierarchyGuides, light, renderListRow, accountRowColors],
+    [hierarchyGuides, renderListRow, accountRowColors, sectionFrames],
   );
 
   const listEmpty = (
@@ -1466,7 +1345,8 @@ function ThreadNavigationSidebarPane(
           <ArcaneBackdrop emphasis="sidebar" />
           <SwipeableScrollGateProvider enabled={swipeEnabled}>
             <GestureDetector gesture={sidebarScrollGesture}>
-              <LegendList
+              <AnimatedLegendList
+                itemLayoutAnimation={HIERARCHY_LAYOUT_TRANSITION}
                 viewabilityConfig={THREAD_ACTIVITY_VIEWABILITY_CONFIG}
                 data={listItems}
                 drawDistance={500}
@@ -1513,7 +1393,8 @@ function ThreadNavigationSidebarPane(
       <View className="flex-1" style={{ paddingBottom: insets.bottom }}>
         <SwipeableScrollGateProvider enabled={swipeEnabled}>
           <GestureDetector gesture={sidebarScrollGesture}>
-            <LegendList
+            <AnimatedLegendList
+              itemLayoutAnimation={HIERARCHY_LAYOUT_TRANSITION}
               viewabilityConfig={THREAD_ACTIVITY_VIEWABILITY_CONFIG}
               data={listItems}
               drawDistance={500}

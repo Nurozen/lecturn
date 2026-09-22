@@ -1,3 +1,4 @@
+import { GlassCard } from "../../components/GlassCard";
 import { SymbolView } from "../../components/AppSymbol";
 import {
   connectionStatusText,
@@ -149,7 +150,7 @@ function CloudEnvironmentRowsContent(
       ) : null}
 
       {hasCloudRows ? (
-        <View collapsable={false} className="overflow-hidden rounded-[24px] bg-card">
+        <GlassCard collapsable={false} radius={24}>
           {(props.accountId
             ? [props.accountId]
             : [...accounts.map((account) => account.accountId), null]
@@ -209,20 +210,20 @@ function CloudEnvironmentRowsContent(
               </View>
             );
           })}
-        </View>
+        </GlassCard>
       ) : controller.relayDiscovery.isRefreshing ? (
-        <View collapsable={false} className="items-center gap-3 rounded-[24px] bg-card p-6">
+        <GlassCard collapsable={false} radius={24} className="items-center gap-3 p-6">
           <ActivityIndicator colorClassName={"accent-icon"} />
           <Text className="text-center text-sm leading-normal text-foreground-muted">
             Loading linked cloud environments.
           </Text>
-        </View>
+        </GlassCard>
       ) : controller.relayDiscovery.error ? null : (
-        <View collapsable={false} className="rounded-[24px] bg-card p-5">
+        <GlassCard collapsable={false} radius={24} className="p-5">
           <Text className="text-sm leading-normal text-foreground-muted">
             No additional linked cloud environments.
           </Text>
-        </View>
+        </GlassCard>
       )}
 
       {/* Rendered alongside any connected rows — a failed discovery must not
@@ -230,7 +231,7 @@ function CloudEnvironmentRowsContent(
       {discoveryAvailable &&
       controller.relayDiscovery.error &&
       !controller.relayDiscovery.isRefreshing ? (
-        <View collapsable={false} className="gap-3 rounded-[24px] bg-card p-5">
+        <GlassCard collapsable={false} radius={24} className="gap-3 p-5">
           <Text className="text-base font-lecturn-bold text-foreground">
             Could not load Lecturn Connect environments
           </Text>
@@ -247,7 +248,7 @@ function CloudEnvironmentRowsContent(
           >
             <Text className="text-xs font-lecturn-bold text-foreground">Try again</Text>
           </Pressable>
-        </View>
+        </GlassCard>
       ) : null}
     </View>
   );
@@ -398,7 +399,7 @@ function CloudEnvironmentRowShell(props: {
     <View
       collapsable={false}
       className={cn(
-        "flex-row items-center gap-3 bg-card px-4 py-3.5",
+        "flex-row items-center gap-3 px-4 py-3.5",
         props.borderTop && "border-t border-border",
       )}
     >

@@ -1,3 +1,6 @@
+import { AccountSurface } from "../AccountSurface";
+import { accountByEnvironmentIdAtom } from "../../cloud/connectAccounts";
+import "./project-settings-glass.css";
 import { StaveLifecycleNotice } from "../stave/StaveLifecycleNotice";
 import { prepareStaveProjectDeletion } from "../../lib/staveProjectDeletion";
 import { useAtomValue } from "@effect/atom-react";
@@ -176,6 +179,16 @@ function memberKey(member: { environmentId: string; id: string }): string {
 }
 
 export function ProjectSettingsPage({ projectKey }: { projectKey: string }) {
+  const groups = useSettingsProjectGroups(projectKey);
+  const owners = useAtomValue(accountByEnvironmentIdAtom);
+  const selected = groups.find((group) => group.projectKey === projectKey);
+  const selectedOwners = new Set(
+    selected?.memberProjects.map((member) => owners.get(member.environmentId)),
+  );
+  // A combined group can span accounts. It remains neutral until an operation
+  // targets a physical checkout; individual Stave editors carry that owner.
+  const environmentId = selectedOwners.size === 1 ? selected?.environmentId : undefined;
+
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
   const navigateBackWithinApp = useCallback(() => {
@@ -203,12 +216,15 @@ export function ProjectSettingsPage({ projectKey }: { projectKey: string }) {
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
+      <AccountSurface
+        environmentId={environmentId ?? null}
+        className="lecturn-settings-surface lecturn-project-settings flex min-h-0 min-w-0 flex-1 flex-col text-foreground"
+      >
         <WorkspacePageHeader electron={isElectron}>
           <ProjectSettingsBreadcrumb projectKey={projectKey} />
         </WorkspacePageHeader>
         <ProjectSettingsPanel projectKey={projectKey} />
-      </div>
+      </AccountSurface>
     </SidebarInset>
   );
 }

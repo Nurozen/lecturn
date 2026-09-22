@@ -10,12 +10,9 @@ import {
 } from "react-native";
 import { withUniwind } from "uniwind";
 
-import { useAccountSurfaceColor } from "../lib/accountTintContext";
+import { useGlassPalette } from "../lib/useGlassPalette";
 import { cn } from "../lib/cn";
-import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
-import { useUniwindTheme } from "../lib/useUniwindTheme";
 import { themeColorWithAlpha } from "../lib/mobileTheme";
-import { useGlassAccessibility } from "../lib/useGlassAccessibility";
 
 // Explicit mappings keep the native glassEffectStyle enum out of style-array conversion.
 const ThemedGlassView = withUniwind(GlassView, {
@@ -49,15 +46,10 @@ export function GlassSurface({
   style,
   ...props
 }: GlassSurfaceProps) {
-  const { themeAppearance } = useAppearancePreferences();
-  const isDarkMode = themeAppearance === "dark";
-  const opaque = useGlassAccessibility();
-  const theme = useUniwindTheme();
-  const accountColor = useAccountSurfaceColor();
-  const accent = accountColor ?? theme["--color-primary"];
+  const { accent, edge, dark: isDarkMode, opaque } = useGlassPalette();
   const accountTint =
-    !opaque && tintColor === undefined && tintColorClassName === undefined && accountColor
-      ? themeColorWithAlpha(accountColor, isDarkMode ? 0.13 : 0.06)
+    !opaque && tintColor === undefined && tintColorClassName === undefined && chrome !== "none"
+      ? themeColorWithAlpha(accent, isDarkMode ? 0.09 : 0.04)
       : undefined;
   const supportsGlass = Platform.OS === "ios" && isGlassEffectAPIAvailable() && !opaque;
   const surfaceStyle: ViewStyle = {
@@ -82,10 +74,7 @@ export function GlassSurface({
       ? {}
       : {
           borderWidth: 0.5,
-          borderColor:
-            accountColor && !opaque
-              ? themeColorWithAlpha(accountColor, isDarkMode ? 0.42 : 0.3)
-              : theme["--color-border"],
+          borderColor: edge,
         }),
   };
 

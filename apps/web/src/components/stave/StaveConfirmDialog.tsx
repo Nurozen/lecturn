@@ -1,3 +1,4 @@
+import { useSettingsAccountGlass } from "../settings/useSettingsAccountGlass";
 import { useAtomValue } from "@effect/atom-react";
 import { staveRpcErrorMessage } from "@lecturn/client-runtime/errors";
 import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
@@ -62,6 +63,7 @@ export function StaveConfirmDialog({
   membershipWorkspaceRoot?: string | undefined;
   lifecycleIsSaga?: boolean | undefined;
 }) {
+  const glass = useSettingsAccountGlass(environmentId);
   const [forced, setForced] = useState("force" in initial && initial.force);
   const [sagaConfirmed, setSagaConfirmed] = useState(false);
   const [membership, setMembership] = useState<StaveSagaMembership | null>(null);
@@ -209,7 +211,10 @@ export function StaveConfirmDialog({
         if (!open && !busy) onClose();
       }}
     >
-      <AlertDialogPopup className="max-w-xl">
+      <AlertDialogPopup
+        {...glass}
+        className="lecturn-account-surface lecturn-project-settings-dialog max-w-xl"
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{staveOperationLossCopy(operation)}</AlertDialogDescription>

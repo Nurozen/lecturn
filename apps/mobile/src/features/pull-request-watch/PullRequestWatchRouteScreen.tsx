@@ -1,3 +1,4 @@
+import { AccountTintScope } from "../../lib/AccountTintScope";
 import { PullRequestWatchAccountGuard } from "./PullRequestWatchAccountGuard";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { GlassCard } from "../../components/GlassCard";
@@ -189,7 +190,9 @@ export function PullRequestWatchRouteScreen({
       environmentId={route.params.environmentId}
       accountId={route.params.accountId}
     >
-      {content}
+      <AccountTintScope environmentId={EnvironmentId.make(route.params.environmentId)}>
+        {content}
+      </AccountTintScope>
     </PullRequestWatchAccountGuard>
   );
 }

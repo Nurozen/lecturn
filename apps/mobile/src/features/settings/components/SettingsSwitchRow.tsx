@@ -32,10 +32,10 @@ export function SettingsSwitchRow(props: {
           weight="regular"
         />
       </View>
-      <View className="min-w-0 flex-1">
+      <View className="min-w-0 flex-1 gap-1">
         <Text className="text-base text-foreground">{props.label}</Text>
         {props.subtitle ? (
-          <Text className="text-sm text-foreground-muted">{props.subtitle}</Text>
+          <Text className="text-sm leading-normal text-foreground-muted">{props.subtitle}</Text>
         ) : null}
       </View>
       <ThemedSwitch

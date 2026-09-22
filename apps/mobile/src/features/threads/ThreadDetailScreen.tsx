@@ -801,7 +801,7 @@ const ThreadDetailScreenContent = memo(function ThreadDetailScreenContent(
 
   return (
     <View className="flex-1">
-      <ArcaneBackdrop />
+      <ArcaneBackdrop transitionKey={`${props.environmentId}:${props.selectedThread.projectId}`} />
       {showContent ? (
         <View
           className="flex-1"
