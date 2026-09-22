@@ -49,7 +49,7 @@ export function BillingSettingsDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPopup
-        className="lecturn-settings-surface h-[min(760px,85dvh)] max-w-4xl overflow-hidden bg-background"
+        className="lecturn-settings-surface lecturn-glass-panel h-[min(760px,85dvh)] max-w-4xl overflow-hidden bg-background"
         bottomStickOnMobile={false}
       >
         <DialogTitle className="sr-only">Account settings</DialogTitle>

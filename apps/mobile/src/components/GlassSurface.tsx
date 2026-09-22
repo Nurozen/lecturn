@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { withUniwind } from "uniwind";
 
+import { useAccountSurfaceColor } from "../lib/accountTintContext";
 import { cn } from "../lib/cn";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 import { useUniwindTheme } from "../lib/useUniwindTheme";
@@ -52,6 +53,12 @@ export function GlassSurface({
   const isDarkMode = themeAppearance === "dark";
   const opaque = useGlassAccessibility();
   const theme = useUniwindTheme();
+  const accountColor = useAccountSurfaceColor();
+  const accent = accountColor ?? theme["--color-primary"];
+  const accountTint =
+    !opaque && tintColor === undefined && tintColorClassName === undefined && accountColor
+      ? themeColorWithAlpha(accountColor, isDarkMode ? 0.13 : 0.06)
+      : undefined;
   const supportsGlass = Platform.OS === "ios" && isGlassEffectAPIAvailable() && !opaque;
   const surfaceStyle: ViewStyle = {
     borderRadius: 28,
@@ -75,7 +82,10 @@ export function GlassSurface({
       ? {}
       : {
           borderWidth: 0.5,
-          borderColor: theme["--color-border"],
+          borderColor:
+            accountColor && !opaque
+              ? themeColorWithAlpha(accountColor, isDarkMode ? 0.42 : 0.3)
+              : theme["--color-border"],
         }),
   };
 
@@ -91,9 +101,10 @@ export function GlassSurface({
           className,
         )}
         glassEffectStyle={glassEffectStyle}
-        tintColor={tintColor === undefined ? undefined : String(tintColor)}
+        tintColor={tintColor === undefined ? accountTint : String(tintColor)}
         tintColorClassName={
-          tintColorClassName ?? (tintColor === undefined ? "accent-glass-tint" : undefined)
+          tintColorClassName ??
+          (tintColor === undefined && accountTint === undefined ? "accent-glass-tint" : undefined)
         }
         colorScheme={isDarkMode ? "dark" : "light"}
         style={[surfaceStyle, style]}
@@ -123,8 +134,8 @@ export function GlassSurface({
           ? undefined
           : {
               experimental_backgroundImage: isDarkMode
-                ? `linear-gradient(150deg, ${themeColorWithAlpha(theme["--color-primary"], 0.09)} 0%, #ffffff00 42%, #00000018 100%)`
-                : `linear-gradient(150deg, #ffffff9c 0%, #ffffff00 42%, ${themeColorWithAlpha(theme["--color-primary"], 0.06)} 100%)`,
+                ? `linear-gradient(150deg, ${themeColorWithAlpha(accent, 0.16)} 0%, #ffffff08 12%, #ffffff00 45%, #00000018 100%)`
+                : `linear-gradient(150deg, #ffffff9c 0%, #ffffff00 42%, ${themeColorWithAlpha(accent, 0.08)} 100%)`,
             },
       ]}
     >

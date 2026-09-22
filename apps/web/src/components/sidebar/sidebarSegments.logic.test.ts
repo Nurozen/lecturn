@@ -523,14 +523,14 @@ describe("layoutSegmentBars", () => {
     ]);
     expect(layout.map((entry) => entry.top)).toEqual([
       "0rem",
-      "1.75rem",
-      "3.5rem",
-      "5.25rem",
-      "7rem",
+      "2.25rem",
+      "4.5rem",
+      "6.75rem",
+      "9rem",
     ]);
     expect(layout.map((entry) => entry.bottom)).toEqual([
       undefined,
-      "1.75rem",
+      "2.25rem",
       undefined,
       "0rem",
       undefined,
@@ -540,10 +540,10 @@ describe("layoutSegmentBars", () => {
   it("clears a row of the bars that can cover it, per side", () => {
     const layout = layoutSegmentBars([bar("a"), bar("b", pill("Working")), bar("c"), bar(null)]);
     expect(layout.map((entry) => [entry.coveredTop, entry.coveredBottom])).toEqual([
-      ["1.75rem", "1.75rem"],
-      ["3.5rem", "0rem"],
-      ["5.25rem", "0rem"],
-      ["5.75rem", "0rem"],
+      ["2.25rem", "2.25rem"],
+      ["4.5rem", "0rem"],
+      ["6.75rem", "0rem"],
+      ["7.25rem", "0rem"],
     ]);
   });
 });

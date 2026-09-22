@@ -1,3 +1,4 @@
+import { useAccountSurfaceColor } from "../lib/accountTintContext";
 import type { ReactNode, Ref } from "react";
 import { StyleSheet, View, type ViewProps } from "react-native";
 
@@ -29,11 +30,13 @@ export function GlassCard({
   className,
   ...props
 }: GlassCardProps) {
+  const accountColor = useAccountSurfaceColor();
   const { themeAppearance } = useAppearancePreferences();
   const light = themeAppearance === "light";
   const theme = useUniwindTheme();
   const accessibleOpaque = useGlassAccessibility();
   const opaque = forceOpaque || accessibleOpaque;
+  const accent = accountColor ?? theme["--color-primary"];
   return (
     <View
       {...props}
@@ -46,10 +49,18 @@ export function GlassCard({
           borderWidth: tone === "accent" ? 1.5 : StyleSheet.hairlineWidth,
           borderColor:
             tone === "accent"
-              ? theme["--color-primary"]
+              ? accent
               : tone === "settled"
                 ? theme["--color-danger-foreground"]
-                : theme["--color-border"],
+                : accountColor && !opaque && sheen !== "subtle"
+                  ? themeColorWithAlpha(accountColor, light ? 0.28 : 0.36)
+                  : theme["--color-border"],
+          ...(tone === "accent" && !opaque
+            ? {
+                borderLeftColor: accent,
+                borderTopColor: themeColorWithAlpha(accent, light ? 0.5 : 0.65),
+              }
+            : {}),
         },
         style,
       ]}
@@ -68,8 +79,8 @@ export function GlassCard({
                 sheen === "subtle"
                   ? "linear-gradient(150deg, #ffffff0a 0%, #ffffff00 42%, #00000008 100%)"
                   : light
-                    ? `linear-gradient(150deg, #ffffff9c 0%, #ffffff00 42%, ${themeColorWithAlpha(theme["--color-primary"], 0.06)} 100%)`
-                    : `linear-gradient(150deg, ${themeColorWithAlpha(theme["--color-primary"], 0.09)} 0%, #ffffff00 42%, #00000018 100%)`,
+                    ? `linear-gradient(150deg, #ffffff9c 0%, #ffffff00 42%, ${themeColorWithAlpha(accent, 0.08)} 100%)`
+                    : `linear-gradient(150deg, ${themeColorWithAlpha(accent, tone === "accent" ? 0.26 : 0.12)} 0%, #ffffff08 12%, #ffffff00 45%, #00000018 100%)`,
             },
           ]}
         />

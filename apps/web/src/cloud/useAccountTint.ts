@@ -1,41 +1,23 @@
 import type { EnvironmentId } from "@lecturn/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { tintThemeColors } from "@lecturn/shared/accountTint";
-import { THEME_COLOR_ROLES, type ThemeColors } from "@lecturn/shared/themePalettes";
-import { useMemo, useSyncExternalStore, type CSSProperties } from "react";
-import {
-  getAppliedThemeColors,
-  getThemeColorVariable,
-  subscribeToAppliedThemeColors,
-  toCanonicalThemeColor,
-} from "../themePalette";
+import { accountTintColor } from "@lecturn/shared/accountTint";
+import type { CSSProperties } from "react";
 import { accountByEnvironmentIdAtom, connectAccountProfilesAtom } from "./connectAccounts";
 
-/** Subscribes to the actual applied palette so previews and same-id refreshes also recompute the tint. */
+/** Ownership colors decorate surfaces; theme text, actions and status colors stay stable. */
 export function useAccountTint(environmentId: EnvironmentId | null | undefined): {
   readonly "data-account-tint"?: string;
+  readonly "data-account-id"?: string;
   readonly style?: CSSProperties;
 } {
   const owners = useAtomValue(accountByEnvironmentIdAtom);
   const profiles = useAtomValue(connectAccountProfilesAtom);
-  const colors = useSyncExternalStore(
-    subscribeToAppliedThemeColors,
-    getAppliedThemeColors,
-    () => null,
-  );
   const accountId = environmentId ? owners.get(environmentId) : undefined;
-  const preset = accountId ? (profiles.get(accountId)?.preset ?? "jade") : null;
-  return useMemo(() => {
-    if (!accountId || !preset || !colors) return {};
-    const canonical = Object.fromEntries(
-      THEME_COLOR_ROLES.map((role) => [role, toCanonicalThemeColor(colors[role]) ?? colors[role]]),
-    ) as unknown as ThemeColors;
-    const tinted = tintThemeColors(canonical, preset);
-    return {
-      "data-account-tint": preset,
-      style: Object.fromEntries(
-        THEME_COLOR_ROLES.map((role) => [getThemeColorVariable(role), tinted[role]]),
-      ) as CSSProperties,
-    };
-  }, [accountId, colors, preset]);
+  if (!accountId) return {};
+  const preset = profiles.get(accountId)?.preset ?? "jade";
+  return {
+    "data-account-tint": preset,
+    "data-account-id": accountId,
+    style: { "--account-tint": accountTintColor(preset) } as CSSProperties,
+  };
 }

@@ -1,3 +1,6 @@
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
+import { useGlassAccessibility } from "../../lib/useGlassAccessibility";
+import { themeColorWithAlpha } from "../../lib/mobileTheme";
 import { Pressable, View } from "react-native";
 import { accountTintColor } from "@lecturn/shared/accountTint";
 import { AppText } from "../../components/AppText";
@@ -10,6 +13,10 @@ export function AccountSectionHeader({
   readonly item: HomeAccountHeaderListItem;
   readonly onToggle: () => void;
 }) {
+  const { themeAppearance } = useAppearancePreferences();
+  const opaque = useGlassAccessibility();
+  const dark = themeAppearance === "dark";
+  const color = item.account ? accountTintColor(item.account.preset) : undefined;
   const label = item.account?.label ?? "Direct connections";
   return (
     <Pressable
@@ -17,19 +24,23 @@ export function AccountSectionHeader({
       accessibilityRole="button"
       accessibilityLabel={`${label}${item.attention ? `, ${item.attention}` : ""}`}
       accessibilityState={{ expanded: !item.collapsed }}
-      className="mx-3 mt-4 mb-1 rounded-xl border border-border bg-card px-3 py-3"
+      style={
+        color
+          ? {
+              borderColor: themeColorWithAlpha(color, dark ? 0.42 : 0.3),
+              borderLeftColor: color,
+              borderLeftWidth: 2,
+              ...(!opaque
+                ? {
+                    experimental_backgroundImage: `linear-gradient(110deg, ${themeColorWithAlpha(color, dark ? 0.16 : 0.08)} 0%, #ffffff00 74%)`,
+                  }
+                : {}),
+            }
+          : undefined
+      }
+      className={`mx-3 mt-4 mb-1 rounded-xl border border-border ${opaque ? "bg-card" : "bg-glass-surface"} px-3 py-3`}
     >
       <View className="flex-row items-center gap-2">
-        {item.account ? (
-          <View
-            style={{
-              backgroundColor: accountTintColor(item.account.preset),
-              width: 8,
-              height: 8,
-              borderRadius: 4,
-            }}
-          />
-        ) : null}
         <AppText className="flex-1 font-lecturn-semibold text-sm text-foreground" numberOfLines={1}>
           {label}
         </AppText>

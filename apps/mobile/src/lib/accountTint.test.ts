@@ -1,37 +1,26 @@
 import { describe, expect, it } from "vite-plus/test";
-import { mobileAccountTintVariables } from "./accountTint";
-import { MOBILE_THEME_IDS } from "./mobileTheme";
-import { getMobileThemeRuntimeVariables } from "./mobileThemeVariables";
-import {
-  accountTintContrast,
-  parseAccountTintColor,
-  ACCOUNT_TINT_PRESETS,
-} from "@lecturn/shared/accountTint";
-import { glassAccessibilityVariables } from "./glassTheme";
-describe("mobile account tint", () => {
-  it("keeps readable foregrounds for every shipped palette and preset", () => {
-    for (const theme of MOBILE_THEME_IDS)
-      for (const appearance of ["light", "dark"] as const)
-        for (const preset of ACCOUNT_TINT_PRESETS) {
-          const tinted = mobileAccountTintVariables(theme, appearance, preset.id);
-          expect(
-            accountTintContrast(tinted["--color-foreground"]!, tinted["--color-screen"]!),
-          ).toBeGreaterThanOrEqual(4.49);
-          const base = getMobileThemeRuntimeVariables(theme, appearance);
-          expect(parseAccountTintColor(tinted["--color-glass-tint"]!)?.alpha).toBe(
-            parseAccountTintColor(base["--color-glass-tint"]!)?.alpha,
-          );
-          expect(tinted["--color-header"]).toBeUndefined();
-          expect(tinted["--color-danger"]).toBeUndefined();
-          expect(Object.values(tinted).some((color) => color.startsWith("oklch("))).toBe(false);
-        }
+import { accountTintColor } from "@lecturn/shared/accountTint";
+import { mobileAccountSurfaceColor } from "./accountTint";
+
+describe("mobile account decoration", () => {
+  const accounts = [
+    { accountId: "work", preset: "jade" },
+    { accountId: "personal", preset: "violet" },
+  ];
+  it("follows the environment owner, independently of account ordering", () => {
+    expect(mobileAccountSurfaceColor("personal", accounts)).toBe(accountTintColor("violet"));
+    expect(mobileAccountSurfaceColor("work", [...accounts].reverse())).toBe(
+      accountTintColor("jade"),
+    );
   });
-  it("applies opaque glass after the account palette", () => {
-    const base = getMobileThemeRuntimeVariables("lecturn", "dark");
-    const tint = mobileAccountTintVariables("lecturn", "dark", "cyan");
-    const combined = { ...base, ...tint };
-    expect(glassAccessibilityVariables(combined, true)["--color-glass-surface"]).toBe(
-      tint["--color-card"],
+  it("does not assign another signed-in account to local or unknown-owner surfaces", () => {
+    expect(mobileAccountSurfaceColor(undefined, accounts)).toBeUndefined();
+    expect(mobileAccountSurfaceColor("removed", accounts)).toBeUndefined();
+    expect(mobileAccountSurfaceColor("work", [])).toBeUndefined();
+  });
+  it("updates decorative color with the owner's appearance", () => {
+    expect(mobileAccountSurfaceColor("work", [{ accountId: "work", preset: "cyan" }])).toBe(
+      accountTintColor("cyan"),
     );
   });
 });

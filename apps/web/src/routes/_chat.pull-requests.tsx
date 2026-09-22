@@ -1,3 +1,4 @@
+import { AccountSurface } from "../components/AccountSurface";
 import { useSagaRepositoryIndex } from "../state/stave";
 import { scopedPullRequestProjectIds } from "../components/pullRequest/desktopActivity.logic";
 import { selectProjectGroupingSettings } from "../logicalProject";
@@ -2328,9 +2329,7 @@ function PullRequestsColumn({
   }, [condensed]);
 
   return (
-    // Painted flat like the chat column: the inset underneath carries the chrome grain, and a
-    // content surface that lets it show reads as a different background than every thread.
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background lecturn-page-surface">
+    <AccountSurface className="flex min-h-0 min-w-0 flex-1 flex-col lecturn-page-surface">
       {/* A closed right panel leaves this column full-width, so the shared header
           reserves native window controls and hosts the controls strip itself: on
           desktop the header is a drag-region, and only a no-drag descendant wins
@@ -2426,7 +2425,7 @@ function PullRequestsColumn({
           {listBody}
         </WorkspacePageContainer>
       </div>
-    </div>
+    </AccountSurface>
   );
 }
 

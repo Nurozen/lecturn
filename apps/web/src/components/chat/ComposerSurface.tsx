@@ -11,6 +11,7 @@ function Shell({
   return (
     <div
       data-slot="composer-shell"
+      data-composer-glass-drawer={contextStrip || undefined}
       data-with-context={contextStrip || undefined}
       className={cn(
         "@container/composer-surface group/composer-surface relative isolate mx-auto w-full max-w-3xl",
