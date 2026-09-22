@@ -14,6 +14,8 @@ export interface ActivityChange {
   rowId: string;
   state: ActivityVisualState;
   label: string;
+  /** A job change may differ from the PR's aggregate visual state. */
+  check?: { name: string; status: string };
 }
 
 const priority: Record<ActivityVisualState, number> = {
@@ -71,8 +73,9 @@ export function activityChanges(
     state: ActivityVisualState,
     label: string,
     rank = priority[state],
+    check?: ActivityChange["check"],
   ) => {
-    candidates.push({ rowId: row.id, state, label, priority: rank });
+    candidates.push({ rowId: row.id, state, label, priority: rank, ...(check ? { check } : {}) });
   };
   for (const row of nextRows) {
     const prior = previous.get(identity(row));
@@ -112,7 +115,7 @@ export function activityChanges(
         const rank = ["cancelled", "skipped", "neutral"].includes(status)
           ? priority.complete
           : priority[event.state];
-        add(row, event.state, `${compact(name)} ${event.label}`, rank);
+        add(row, event.state, `${compact(name)} ${event.label}`, rank, { name, status });
       }
     }
   }
@@ -123,7 +126,12 @@ export function activityChanges(
       left.label.localeCompare(right.label),
   )[0];
   return selected
-    ? { rowId: selected.rowId, state: selected.state, label: selected.label }
+    ? {
+        rowId: selected.rowId,
+        state: selected.state,
+        label: selected.label,
+        ...(selected.check ? { check: selected.check } : {}),
+      }
     : undefined;
 }
 

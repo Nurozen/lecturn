@@ -1041,6 +1041,7 @@ export const serverApi = HttpApiBuilder.group(
               environmentPublicKey: principal.environmentPublicKey,
               threadId: params.threadId,
               state: payload.state,
+              userPresent: payload.userPresent === true,
             });
           },
           mapErrorTags({

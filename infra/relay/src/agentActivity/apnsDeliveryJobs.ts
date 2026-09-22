@@ -61,6 +61,15 @@ export const ApnsLiveActivityAlert = Schema.Struct({
 });
 export type ApnsLiveActivityAlert = typeof ApnsLiveActivityAlert.Type;
 
+// Identity of the events an alert was queued for, independent of heartbeat timestamps.
+export const ApnsAlertEvent = Schema.Struct({
+  environmentId: Schema.String,
+  threadId: Schema.String,
+  phase: RelayAgentAwarenessPhase,
+  status: Schema.String,
+});
+export type ApnsAlertEvent = typeof ApnsAlertEvent.Type;
+
 export const ApnsDeliveryJobPayload = Schema.Struct({
   version: Schema.Literal(1),
   jobId: Schema.String,
@@ -78,6 +87,7 @@ export const ApnsDeliveryJobPayload = Schema.Struct({
   notification: Schema.NullOr(ApnsNotificationPayload),
   // Optional so jobs queued by older relay builds still decode.
   alert: Schema.optional(Schema.NullOr(ApnsLiveActivityAlert)),
+  alertEvents: Schema.optional(Schema.Array(ApnsAlertEvent)),
   createdAt: Schema.String,
   expiresAt: Schema.String,
 });
@@ -255,6 +265,7 @@ export function makeApnsDeliveryJobPayload(input: {
   readonly aggregate: ApnsDeliveryJobPayload["aggregate"];
   readonly notification?: ApnsNotificationPayload | null;
   readonly alert?: ApnsLiveActivityAlert | null | undefined;
+  readonly alertEvents?: ReadonlyArray<ApnsAlertEvent> | undefined;
   readonly createdAt: string;
   readonly expiresAt: string;
   readonly jobId: string;
@@ -275,6 +286,7 @@ export function makeApnsDeliveryJobPayload(input: {
     // Omitted (not null) when absent so signatures stay identical to jobs from
     // relay builds that predate the field.
     ...(input.alert ? { alert: input.alert } : {}),
+    ...(input.alertEvents !== undefined ? { alertEvents: input.alertEvents } : {}),
     createdAt: input.createdAt,
     expiresAt: input.expiresAt,
   };

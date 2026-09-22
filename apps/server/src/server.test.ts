@@ -1235,6 +1235,7 @@ const buildAppUnderTest = (options?: {
             hasDemand: () => Effect.succeed(false),
             shouldRunScopeWork: () => Effect.succeed(false),
             shouldRunOpportunisticWork: Effect.succeed(false),
+            isUserPresent: Effect.succeed(false),
           }),
         ),
         Layer.provide(

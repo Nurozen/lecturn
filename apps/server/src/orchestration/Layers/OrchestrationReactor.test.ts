@@ -102,6 +102,7 @@ describe("OrchestrationReactor", () => {
               started.push("agent-awareness-relay");
               return Effect.void;
             },
+            drain: Effect.void,
           }),
         ),
       ),

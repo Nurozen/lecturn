@@ -26,6 +26,10 @@ export interface NotifiedPushEvent {
   readonly threadId: string;
   readonly phase: string;
   readonly status: string;
+  // The ring is still owed: a Live Activity update showed this event silently
+  // because the user was present at a client, which consumed the transition a
+  // later alert would have keyed on. Absent on events that already rang.
+  readonly deferred?: true;
 }
 
 export const relayMobileDevices = pgTable(
@@ -45,7 +49,8 @@ export const relayMobileDevices = pgTable(
     pushToStartToken: text("push_to_start_token"),
     preferencesJson: jsonb("preferences_json").notNull().$type<RelayAgentAwarenessPreferences>(),
     // Push-notification events already rung on this device, so republishes of
-    // an unchanged state stay silent. Null until the first push is queued.
+    // an unchanged state stay silent, plus Live Activity rings deferred while
+    // the user was present. Null until the first entry is written.
     notifiedPushEventsJson: jsonb("notified_push_events_json").$type<
       ReadonlyArray<NotifiedPushEvent>
     >(),

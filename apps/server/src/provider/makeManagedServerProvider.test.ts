@@ -127,6 +127,7 @@ function makeBackgroundPolicyLayer(shouldRunScopeWork: boolean) {
     hasDemand: () => Effect.succeed(shouldRunScopeWork),
     shouldRunScopeWork: () => Effect.succeed(shouldRunScopeWork),
     shouldRunOpportunisticWork: Effect.succeed(shouldRunScopeWork),
+    isUserPresent: Effect.succeed(false),
   });
 }
 

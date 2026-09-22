@@ -13,3 +13,6 @@ export const ACTIVITY_CAMERA_HEIGHT = "activity:camera-height";
 export const ACTIVITY_PEEK_COUNT = "activity:peek-count";
 
 export const ACTIVITY_OPEN_APP = "activity:open-app";
+
+/** Panel asks whether a change may alert now; main later pushes the alerts it held back. */
+export const ACTIVITY_ANNOUNCE = "activity:announce";

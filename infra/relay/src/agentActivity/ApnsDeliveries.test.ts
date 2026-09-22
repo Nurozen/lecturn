@@ -338,6 +338,7 @@ describe("ApnsDeliveries", () => {
     return Effect.gen(function* () {
       const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
       const result = yield* deliveries.sendForTarget({
+        publishingEnvironmentId: state.environmentId,
         target: {
           ...target,
           activity_push_token: null,
@@ -368,6 +369,7 @@ describe("ApnsDeliveries", () => {
       // Within the freshly-armed grace window an empty aggregate delivers
       // nothing: the environment's first publish may still be in flight.
       const graced = yield* deliveries.sendForTarget({
+        publishingEnvironmentId: state.environmentId,
         target,
         aggregate: null,
         nowMs: 5_000,
@@ -375,6 +377,7 @@ describe("ApnsDeliveries", () => {
       expect(graced).toBeNull();
 
       const result = yield* deliveries.sendForTarget({
+        publishingEnvironmentId: state.environmentId,
         target,
         aggregate: null,
         nowMs: 5_000 + 3 * 60 * 1_000,
@@ -406,6 +409,7 @@ describe("ApnsDeliveries", () => {
     return Effect.gen(function* () {
       const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
       const result = yield* deliveries.sendForTarget({
+        publishingEnvironmentId: state.environmentId,
         target: {
           ...target,
           activity_push_token: null,
@@ -430,6 +434,7 @@ describe("ApnsDeliveries", () => {
     return Effect.gen(function* () {
       const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
       const result = yield* deliveries.sendForTarget({
+        publishingEnvironmentId: state.environmentId,
         target: {
           ...target,
           activity_push_token: null,
@@ -470,6 +475,7 @@ describe("ApnsDeliveries", () => {
     return Effect.gen(function* () {
       const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
       yield* deliveries.sendForTarget({
+        publishingEnvironmentId: state.environmentId,
         target,
         aggregate: inputAggregate,
         nowMs: 10_000,
@@ -497,6 +503,7 @@ describe("ApnsDeliveries", () => {
     return Effect.gen(function* () {
       const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
       yield* deliveries.sendForTarget({
+        publishingEnvironmentId: state.environmentId,
         target: {
           ...target,
           bundle_id: "com.cloudgatherer.lecturn.preview",
@@ -604,6 +611,7 @@ describe("ApnsDeliveries", () => {
       return Effect.gen(function* () {
         const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
         const result = yield* deliveries.sendForTarget({
+          publishingEnvironmentId: state.environmentId,
           target: {
             ...target,
             // A registered alert token must not turn the suppressed Live
@@ -643,6 +651,7 @@ describe("ApnsDeliveries", () => {
       return Effect.gen(function* () {
         const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
         const result = yield* deliveries.sendForTarget({
+          publishingEnvironmentId: state.environmentId,
           target: {
             ...target,
             last_aggregate_json: previousAggregateJson,
@@ -681,6 +690,7 @@ describe("ApnsDeliveries", () => {
       return Effect.gen(function* () {
         const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
         const result = yield* deliveries.sendForTarget({
+          publishingEnvironmentId: state.environmentId,
           target: {
             ...target,
             last_aggregate_json: previousAggregateJson,
@@ -703,6 +713,7 @@ describe("ApnsDeliveries", () => {
     return Effect.gen(function* () {
       const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
       const result = yield* deliveries.sendForTarget({
+        publishingEnvironmentId: state.environmentId,
         target: {
           ...target,
           preferences_json: disabledPreferences,
@@ -745,6 +756,7 @@ describe("ApnsDeliveries", () => {
       return Effect.gen(function* () {
         const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
         const result = yield* deliveries.sendForTarget({
+          publishingEnvironmentId: state.environmentId,
           target: {
             ...target,
             push_token: "apns-device-token",
@@ -804,6 +816,7 @@ describe("ApnsDeliveries", () => {
     return Effect.gen(function* () {
       const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
       const result = yield* deliveries.sendForTarget({
+        publishingEnvironmentId: state.environmentId,
         target: {
           ...target,
           push_token: "apns-device-token",
@@ -847,6 +860,7 @@ describe("ApnsDeliveries", () => {
       return Effect.gen(function* () {
         const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
         const result = yield* deliveries.sendForTarget({
+          publishingEnvironmentId: state.environmentId,
           target: {
             ...target,
             push_token: "apns-device-token",
@@ -889,6 +903,7 @@ describe("ApnsDeliveries", () => {
     return Effect.gen(function* () {
       const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
       const result = yield* deliveries.sendForTarget({
+        publishingEnvironmentId: state.environmentId,
         target: {
           ...target,
           push_token: "apns-device-token",
@@ -927,6 +942,7 @@ describe("ApnsDeliveries", () => {
     return Effect.gen(function* () {
       const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
       yield* deliveries.sendForTarget({
+        publishingEnvironmentId: state.environmentId,
         target: {
           ...target,
           push_token: "apns-device-token",
@@ -1769,11 +1785,14 @@ describe("once-per-event push notifications", () => {
     readonly updatedAt?: string;
     readonly preferences?: string;
     readonly staleSnapshot?: true;
+    readonly userPresent?: boolean;
   }) =>
     Effect.gen(function* () {
       const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
       const updatedAt = input.updatedAt ?? state.updatedAt;
       return yield* deliveries.sendPushNotificationForTarget({
+        publishingEnvironmentId: input.rows[0]?.environmentId ?? state.environmentId,
+        ...(input.userPresent === undefined ? {} : { userPresent: input.userPresent }),
         target: {
           ...target,
           push_token: "apns-device-token",
@@ -2001,6 +2020,24 @@ describe("once-per-event push notifications", () => {
     });
   });
 
+  it.effect("stays silent while the user is present, then rings once after they leave", () => {
+    const deviceRow: DeviceRow = { notified_push_events_json: null };
+    const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+    return Effect.gen(function* () {
+      const result = yield* publish({ deviceRow, queuedJobs, rows: [inputRow], userPresent: true });
+      expect(result).toBeNull();
+      expect(queuedJobs).toEqual([]);
+      expect(deviceRow.notified_push_events_json).toBeNull();
+
+      yield* publish({ deviceRow, queuedJobs, rows: [inputRow], userPresent: false });
+      expect(queuedBodies(queuedJobs)).toEqual(["Input: Project"]);
+
+      yield* publish({ deviceRow, queuedJobs, rows: [inputRow], userPresent: false });
+      yield* publish({ deviceRow, queuedJobs, rows: [inputRow] });
+      expect(queuedBodies(queuedJobs)).toEqual(["Input: Project"]);
+    });
+  });
+
   it.effect("rings for a new event behind rows that already rang or are stale", () => {
     const deviceRow: DeviceRow = { notified_push_events_json: null };
     const queuedJobs: Array<SignedApnsDeliveryJob> = [];
@@ -2066,6 +2103,494 @@ describe("once-per-event push notifications", () => {
         }),
       ),
     );
+  });
+});
+
+describe("Live Activity alerts while the user is present", () => {
+  type AggregateRow = RelayAgentActivityAggregateState["activities"][number];
+  type DeviceState = {
+    notified_push_events_json: string | null;
+    last_aggregate_json: string | null;
+    activity_push_token: string | null;
+  };
+
+  const workingRow: AggregateRow = aggregate.activities[0]!;
+  const inputRow: AggregateRow = { ...workingRow, phase: "waiting_for_input", status: "Input" };
+  const inputAlert = { title: "Thread", body: "Input: Project" };
+
+  const armedDevice = (): DeviceState => ({
+    notified_push_events_json: null,
+    last_aggregate_json: JSON.stringify(aggregate),
+    activity_push_token: "activity-token",
+  });
+
+  // Runs one publish against the persisted device state, then applies what a
+  // delivered update does: markDelivery overwrites the alert baseline.
+  const publish = (input: {
+    readonly device: DeviceState;
+    readonly queuedJobs: Array<SignedApnsDeliveryJob>;
+    readonly row: AggregateRow;
+    readonly rows?: ReadonlyArray<AggregateRow>;
+    readonly publishingEnvironmentId?: string | null;
+    readonly updatedAt?: string;
+    readonly userPresent?: boolean;
+    readonly nowMs?: number;
+  }) =>
+    Effect.gen(function* () {
+      const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+      const updatedAt = input.updatedAt ?? state.updatedAt;
+      const queuedBefore = input.queuedJobs.length;
+      yield* deliveries.sendForTarget({
+        publishingEnvironmentId:
+          input.publishingEnvironmentId === undefined
+            ? state.environmentId
+            : input.publishingEnvironmentId,
+        ...(input.userPresent === undefined ? {} : { userPresent: input.userPresent }),
+        target: {
+          ...target,
+          push_token: "apns-device-token",
+          notified_push_events_json: input.device.notified_push_events_json,
+          last_aggregate_json: input.device.last_aggregate_json,
+          activity_push_token: input.device.activity_push_token,
+        },
+        aggregate: {
+          ...aggregate,
+          updatedAt,
+          activities: input.rows ?? [{ ...input.row, updatedAt }],
+        },
+        nowMs: input.nowMs ?? 1_000,
+      });
+      for (const job of input.queuedJobs.slice(queuedBefore)) {
+        if (job.payload.kind === "live_activity_update") {
+          input.device.last_aggregate_json = stableStringify(job.payload.aggregate);
+        }
+      }
+    }).pipe(
+      Effect.provide(
+        makeLayer({ attempts: [], queuedJobs: input.queuedJobs, deviceRow: input.device }),
+      ),
+    );
+
+  for (const change of ["heartbeat", "other-environment", "resolved", "deleted"] as const) {
+    it.effect(`delivers owed alert against fresh content after ${change}`, () => {
+      const device = armedDevice();
+      const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+      const otherWorking: AggregateRow = {
+        ...workingRow,
+        environmentId: "other-env" as AggregateRow["environmentId"],
+        threadId: "other-thread" as AggregateRow["threadId"],
+        threadTitle: "Old other title",
+      };
+      device.last_aggregate_json = stableStringify({
+        ...aggregate,
+        activities: [workingRow, otherWorking],
+      });
+      let body = "";
+      const markedDeliveries: Array<
+        Parameters<LiveActivities.LiveActivities["Service"]["markDelivery"]>[0]
+      > = [];
+      return Effect.gen(function* () {
+        yield* publish({
+          device,
+          queuedJobs,
+          row: inputRow,
+          rows: [inputRow, otherWorking],
+          userPresent: true,
+        });
+        yield* publish({
+          device,
+          queuedJobs,
+          row: inputRow,
+          rows: [inputRow, otherWorking],
+          userPresent: false,
+        });
+        const job = queuedJobs.at(-1)!;
+        expect(job.payload.alert).toEqual(inputAlert);
+        expect(job.payload.alertEvents).toEqual([
+          {
+            environmentId: inputRow.environmentId,
+            threadId: inputRow.threadId,
+            phase: inputRow.phase,
+            status: inputRow.status,
+          },
+        ]);
+        const current: RelayAgentActivityState[] = [
+          ...(change === "deleted"
+            ? []
+            : [
+                {
+                  ...state,
+                  phase:
+                    change === "resolved" ? ("running" as const) : ("waiting_for_input" as const),
+                  updatedAt: "1970-01-01T00:00:03.000Z",
+                },
+              ]),
+          {
+            ...state,
+            environmentId: otherWorking.environmentId,
+            threadId: otherWorking.threadId,
+            threadTitle:
+              change === "other-environment" ? "Other progressed" : otherWorking.threadTitle,
+            phase: change === "other-environment" ? "completed" : "running",
+            updatedAt: "1970-01-01T00:00:04.000Z",
+          },
+        ];
+        const result = yield* Effect.gen(function* () {
+          const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+          return yield* deliveries.processSignedJob(job);
+        }).pipe(
+          Effect.provide(
+            makeLayer({
+              attempts: [],
+              config: signingConfig,
+              activityStates: current,
+              currentTargets: [
+                {
+                  ...target,
+                  push_token: "apns-device-token",
+                  activity_push_token: "activity-token",
+                },
+              ],
+              markedDeliveries,
+              execute: (request) =>
+                Effect.sync(() => {
+                  if (request.body._tag === "Uint8Array")
+                    body = new TextDecoder().decode(request.body.body);
+                  return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+                }),
+            }),
+          ),
+        );
+        expect(result.apnsStatus).toBe(200);
+        if (change === "resolved" || change === "deleted") expect(body).not.toContain('"alert"');
+        else expect(body).toContain('"alert"');
+        const latest = markedDeliveries.at(-1)?.aggregate;
+        expect(latest?.updatedAt).toBe("1970-01-01T00:00:04.000Z");
+        if (change === "other-environment") {
+          expect(body).toContain("Other progressed");
+          expect(body).not.toContain("Old other title");
+          expect(latest?.activities.find((row) => row.environmentId === "other-env")?.phase).toBe(
+            "completed",
+          );
+        }
+      });
+    });
+  }
+
+  const queuedRings = (queuedJobs: ReadonlyArray<SignedApnsDeliveryJob>) =>
+    queuedJobs.map((job) => [
+      job.payload.kind,
+      job.payload.alert ?? job.payload.notification?.body ?? null,
+    ]);
+
+  it.effect.each([false, true])(
+    "keeps presence and release owned by the publishing environment (Live Activity: %s)",
+    (armed) => {
+      const device = { ...armedDevice(), activity_push_token: armed ? "activity-token" : null };
+      const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+      const otherWorking: AggregateRow = {
+        ...workingRow,
+        environmentId: "other-env" as AggregateRow["environmentId"],
+        threadId: workingRow.threadId,
+        threadTitle: "Other thread",
+      };
+      const otherInput: AggregateRow = {
+        ...otherWorking,
+        phase: "waiting_for_input",
+        status: "Input",
+      };
+      device.last_aggregate_json = JSON.stringify({
+        ...aggregate,
+        activities: [workingRow, otherWorking],
+      });
+      return Effect.gen(function* () {
+        yield* publish({
+          device,
+          queuedJobs,
+          row: inputRow,
+          rows: [inputRow, otherWorking],
+          userPresent: true,
+        });
+        yield* publish({
+          device,
+          queuedJobs,
+          row: inputRow,
+          rows: [inputRow, otherInput],
+          publishingEnvironmentId: "other-env",
+          userPresent: false,
+        });
+        const rings = () =>
+          queuedJobs.flatMap((job) =>
+            job.payload.alert
+              ? [job.payload.alert.title]
+              : job.payload.notification
+                ? [job.payload.notification.title]
+                : [],
+          );
+        expect(rings()).toEqual(["Other thread"]);
+        // A's active presence cannot erase or repeat B's event. A's held event
+        // must survive both B's publish and a registration replay without origin.
+        yield* publish({
+          device,
+          queuedJobs,
+          row: inputRow,
+          rows: [inputRow, otherInput],
+          userPresent: true,
+        });
+        yield* publish({
+          device,
+          queuedJobs,
+          row: inputRow,
+          rows: [inputRow, otherInput],
+          publishingEnvironmentId: null,
+        });
+        yield* publish({
+          device,
+          queuedJobs,
+          row: inputRow,
+          rows: [inputRow, otherInput],
+          publishingEnvironmentId: "other-env",
+          userPresent: false,
+        });
+        expect(rings()).toEqual(["Other thread"]);
+        yield* publish({
+          device,
+          queuedJobs,
+          row: inputRow,
+          rows: [inputRow, otherInput],
+          userPresent: false,
+        });
+        yield* publish({
+          device,
+          queuedJobs,
+          row: inputRow,
+          rows: [inputRow, otherInput],
+          userPresent: false,
+        });
+        expect(rings()).toEqual(["Other thread", "Thread"]);
+        if (armed) {
+          for (const job of queuedJobs) {
+            expect(job.payload.aggregate?.activities).toHaveLength(2);
+          }
+          expect(device.notified_push_events_json).not.toContain('"deferred":true');
+        }
+      });
+    },
+  );
+
+  it.effect(
+    "preserves another environment's transition when full-card content arrives before its own publish",
+    () => {
+      const device = armedDevice();
+      const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+      const otherWorking: AggregateRow = {
+        ...workingRow,
+        environmentId: "other-env" as AggregateRow["environmentId"],
+        threadId: workingRow.threadId,
+        threadTitle: "Other thread",
+      };
+      const otherInput: AggregateRow = {
+        ...otherWorking,
+        phase: "waiting_for_input",
+        status: "Input",
+      };
+      device.last_aggregate_json = JSON.stringify({
+        ...aggregate,
+        activities: [workingRow, otherWorking],
+      });
+      return Effect.gen(function* () {
+        // B's newly persisted event is already in A's content aggregate. A may
+        // ring its own event, but cannot decide B's presence or consume B's ring.
+        yield* publish({
+          device,
+          queuedJobs,
+          row: inputRow,
+          rows: [inputRow, otherInput],
+          userPresent: false,
+        });
+        expect(queuedJobs[0]?.payload.alert?.title).toBe("Thread");
+        expect(device.notified_push_events_json).toContain('"deferred":true');
+        yield* publish({
+          device,
+          queuedJobs,
+          row: inputRow,
+          rows: [inputRow, otherInput],
+          userPresent: true,
+        });
+        yield* publish({
+          device,
+          queuedJobs,
+          row: inputRow,
+          rows: [inputRow, otherInput],
+          publishingEnvironmentId: null,
+        });
+        yield* publish({
+          device,
+          queuedJobs,
+          row: inputRow,
+          rows: [inputRow, otherInput],
+          publishingEnvironmentId: "other-env",
+          userPresent: true,
+        });
+        expect(
+          queuedJobs.flatMap((job) => (job.payload.alert ? [job.payload.alert.title] : [])),
+        ).toEqual(["Thread"]);
+        yield* publish({
+          device,
+          queuedJobs,
+          row: inputRow,
+          rows: [inputRow, otherInput],
+          publishingEnvironmentId: "other-env",
+          userPresent: false,
+        });
+        yield* publish({
+          device,
+          queuedJobs,
+          row: inputRow,
+          rows: [inputRow, otherInput],
+          publishingEnvironmentId: "other-env",
+          userPresent: false,
+        });
+        expect(
+          queuedJobs.flatMap((job) => (job.payload.alert ? [job.payload.alert.title] : [])),
+        ).toEqual(["Thread", "Other thread"]);
+        expect(device.notified_push_events_json).not.toContain('"deferred":true');
+      });
+    },
+  );
+
+  it.effect("updates the card silently, then alerts once after the user leaves", () => {
+    const device = armedDevice();
+    const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+    return Effect.gen(function* () {
+      yield* publish({ device, queuedJobs, row: inputRow, userPresent: true });
+      expect(queuedRings(queuedJobs)).toEqual([["live_activity_update", null]]);
+      expect(queuedJobs[0]?.payload.aggregate?.activities[0]?.status).toBe("Input");
+
+      // Still present: the heartbeat keeps the card fresh without ringing.
+      yield* publish({
+        device,
+        queuedJobs,
+        row: inputRow,
+        updatedAt: "1970-01-01T00:00:00.500Z",
+        userPresent: true,
+      });
+      // Unchanged content would normally be throttled away; the owed ring is not.
+      yield* publish({
+        device,
+        queuedJobs,
+        row: inputRow,
+        updatedAt: "1970-01-01T00:00:00.500Z",
+        userPresent: false,
+      });
+      yield* publish({ device, queuedJobs, row: inputRow, updatedAt: "1970-01-01T00:00:00.900Z" });
+      yield* publish({ device, queuedJobs, row: inputRow, updatedAt: "1970-01-01T00:00:00.900Z" });
+
+      expect(queuedRings(queuedJobs)).toEqual([
+        ["live_activity_update", null],
+        ["live_activity_update", null],
+        ["live_activity_update", inputAlert],
+        ["live_activity_update", null],
+      ]);
+    });
+  });
+
+  it.effect("keeps the ring owed through a registration replay that has no baseline", () => {
+    const device = armedDevice();
+    const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+    return Effect.gen(function* () {
+      yield* publish({ device, queuedJobs, row: inputRow, userPresent: true });
+      const deferredRecord = device.notified_push_events_json;
+      expect(deferredRecord).toContain('"deferred":true');
+
+      // The user opens the mobile app, which re-arms the card and replays state.
+      device.last_aggregate_json = null;
+      yield* publish({ device, queuedJobs, row: inputRow });
+      expect(queuedRings(queuedJobs)).toEqual([
+        ["live_activity_update", null],
+        ["live_activity_update", null],
+      ]);
+      expect(device.notified_push_events_json).toBe(deferredRecord);
+
+      yield* publish({ device, queuedJobs, row: inputRow });
+      yield* publish({ device, queuedJobs, row: inputRow });
+      expect(queuedRings(queuedJobs).slice(2)).toEqual([["live_activity_update", inputAlert]]);
+    });
+  });
+
+  it.effect("does not ring again as a push when the card goes away after the alert", () => {
+    const device = armedDevice();
+    const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+    return Effect.gen(function* () {
+      yield* publish({ device, queuedJobs, row: inputRow, userPresent: true });
+      yield* publish({ device, queuedJobs, row: inputRow });
+      device.activity_push_token = null;
+      yield* publish({ device, queuedJobs, row: inputRow });
+
+      expect(queuedRings(queuedJobs)).toEqual([
+        ["live_activity_update", null],
+        ["live_activity_update", inputAlert],
+      ]);
+    });
+  });
+
+  it.effect("drops a deferred completion once it is too old to ring", () => {
+    const device = armedDevice();
+    const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+    const doneRow: AggregateRow = { ...workingRow, phase: "completed", status: "Done" };
+    return Effect.gen(function* () {
+      yield* publish({ device, queuedJobs, row: doneRow, userPresent: true });
+      expect(device.notified_push_events_json).toContain('"deferred":true');
+
+      yield* publish({ device, queuedJobs, row: doneRow, nowMs: 10 * 60 * 1_000 });
+      expect(queuedRings(queuedJobs)).toEqual([["live_activity_update", null]]);
+      expect(device.notified_push_events_json).toBe("[]");
+    });
+  });
+
+  it.effect("alerts at once when the environment does not report presence", () => {
+    const device = armedDevice();
+    const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+    return Effect.gen(function* () {
+      yield* publish({ device, queuedJobs, row: inputRow });
+
+      expect(queuedRings(queuedJobs)).toEqual([["live_activity_update", inputAlert]]);
+      expect(device.notified_push_events_json).toBeNull();
+    });
+  });
+
+  it.effect("owes no alert for an event the user handled while present", () => {
+    const device = armedDevice();
+    const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+    return Effect.gen(function* () {
+      yield* publish({ device, queuedJobs, row: inputRow, userPresent: true });
+      yield* publish({ device, queuedJobs, row: workingRow, userPresent: true });
+      yield* publish({
+        device,
+        queuedJobs,
+        row: workingRow,
+        updatedAt: "1970-01-01T00:00:00.500Z",
+      });
+
+      expect(queuedRings(queuedJobs).map(([, ring]) => ring)).toEqual([null, null, null]);
+      expect(device.notified_push_events_json).toBe("[]");
+    });
+  });
+
+  it.effect("rings the owed alert as a push once the card is gone", () => {
+    const device = armedDevice();
+    const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+    return Effect.gen(function* () {
+      yield* publish({ device, queuedJobs, row: inputRow, userPresent: true });
+      device.activity_push_token = null;
+      yield* publish({ device, queuedJobs, row: inputRow });
+      yield* publish({ device, queuedJobs, row: inputRow });
+
+      expect(queuedRings(queuedJobs)).toEqual([
+        ["live_activity_update", null],
+        ["push_notification", "Input: Project"],
+      ]);
+    });
   });
 });
 
@@ -2289,8 +2814,14 @@ describe("paid recipient delivery", () => {
       const calls: string[] = [];
       return Effect.gen(function* () {
         const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
-        const unpaid = yield* deliveries.sendForTarget({ target, aggregate, nowMs: 0 });
+        const unpaid = yield* deliveries.sendForTarget({
+          publishingEnvironmentId: state.environmentId,
+          target,
+          aggregate,
+          nowMs: 0,
+        });
         const paid = yield* deliveries.sendForTarget({
+          publishingEnvironmentId: state.environmentId,
           target: { ...target, user_id: "paid-user" },
           aggregate,
           nowMs: 0,
@@ -2321,7 +2852,12 @@ describe("paid recipient delivery", () => {
     let sends = 0;
     return Effect.gen(function* () {
       const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
-      yield* deliveries.sendForTarget({ target, aggregate, nowMs: 0 });
+      yield* deliveries.sendForTarget({
+        publishingEnvironmentId: state.environmentId,
+        target,
+        aggregate,
+        nowMs: 0,
+      });
       paid = false;
       const result = yield* deliveries.processSignedJob(queuedJobs[0]!);
       expect(result.ok).toBe(true);
@@ -2348,7 +2884,12 @@ describe("paid recipient delivery", () => {
     let unavailable = false;
     return Effect.gen(function* () {
       const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
-      yield* deliveries.sendForTarget({ target, aggregate, nowMs: 0 });
+      yield* deliveries.sendForTarget({
+        publishingEnvironmentId: state.environmentId,
+        target,
+        aggregate,
+        nowMs: 0,
+      });
       unavailable = true;
       const result = yield* deliveries.processSignedJob(queuedJobs[0]!).pipe(Effect.flip);
       expect(result._tag).toBe("ManagedAccessUnavailable");
@@ -2374,6 +2915,7 @@ describe("paid recipient delivery", () => {
     return Effect.gen(function* () {
       const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
       yield* deliveries.sendForTarget({
+        publishingEnvironmentId: state.environmentId,
         target: { ...target, preferences_json: disabledPreferences, push_token: "push-token" },
         aggregate: {
           ...aggregate,
@@ -2789,7 +3331,14 @@ describe("company notification authorization", () => {
     const queuedJobs: SignedApnsDeliveryJob[] = [];
     return Effect.gen(function* () {
       const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
-      expect(yield* deliveries.sendForTarget({ target, aggregate, nowMs: 0 })).not.toBeNull();
+      expect(
+        yield* deliveries.sendForTarget({
+          publishingEnvironmentId: state.environmentId,
+          target,
+          aggregate,
+          nowMs: 0,
+        }),
+      ).not.toBeNull();
       expect(queuedJobs).toHaveLength(1);
     }).pipe(
       Effect.provide(
@@ -2825,7 +3374,12 @@ describe("company notification authorization", () => {
     let body = "";
     return Effect.gen(function* () {
       const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
-      yield* deliveries.sendForTarget({ target, aggregate: mixed, nowMs: 0 });
+      yield* deliveries.sendForTarget({
+        publishingEnvironmentId: state.environmentId,
+        target,
+        aggregate: mixed,
+        nowMs: 0,
+      });
       companyAccess = false;
       yield* deliveries.processSignedJob(queuedJobs[0]!);
       expect(body).not.toContain("Company secret");
