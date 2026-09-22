@@ -775,6 +775,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           ref={setTimelineViewportElement}
           className="lecturn-timeline-reveal relative h-full min-h-0"
           data-timeline-ready={hasRevealed || undefined}
+          inert={!hasRevealed || undefined}
+          aria-hidden={!hasRevealed || undefined}
           data-assistant-citation-viewport="true"
         >
           {onCiteAssistantText && citationThreadRef ? (

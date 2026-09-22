@@ -19,8 +19,12 @@ describe("mobile account decoration", () => {
     expect(mobileAccountSurfaceColor("work", [])).toBeUndefined();
   });
   it("updates decorative color with the owner's appearance", () => {
-    expect(mobileAccountSurfaceColor("work", [{ accountId: "work", preset: "cyan" }])).toBe(
-      accountTintColor("cyan"),
-    );
+    expect(
+      mobileAccountSurfaceColor("work", [{ accountId: "work", preset: "cyan" }, accounts[1]!]),
+    ).toBe(accountTintColor("cyan"));
+  });
+  it("keeps the original theme with zero or one connected account", () => {
+    expect(mobileAccountSurfaceColor("work", [])).toBeUndefined();
+    expect(mobileAccountSurfaceColor("work", [accounts[0]!])).toBeUndefined();
   });
 });

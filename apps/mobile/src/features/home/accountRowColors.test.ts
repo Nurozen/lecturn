@@ -3,7 +3,7 @@ import { accountRowColors } from "./accountRowColors";
 
 describe("native hierarchy account ownership", () => {
   const owner = (id: string) => ({ a: "#14b8a6", b: "#a78bfa" })[id];
-  it("colors single-account thread and queued rows without requiring account sections", () => {
+  it("colors owned thread and queued rows without requiring visible account sections", () => {
     const colors = accountRowColors(
       [
         { key: "thread", type: "thread", thread: { environmentId: "a" } },
@@ -16,6 +16,19 @@ describe("native hierarchy account ownership", () => {
       ["thread", "#14b8a6"],
       ["queued", "#a78bfa"],
     ]);
+  });
+  it("keeps headers, hierarchy and cards neutral when account colors are disabled", () => {
+    const colors = accountRowColors(
+      [
+        { key: "account", type: "account-header", account: { preset: "jade" } },
+        { key: "group", type: "header", group: { projects: [{ environmentId: "a" }] } },
+        { key: "thread", type: "thread", thread: { environmentId: "a" } },
+        { key: "shelf", type: "v2-settled-shelf" },
+      ],
+      owner,
+      false,
+    );
+    expect(colors.size).toBe(0);
   });
   it("keeps aggregate groups neutral and clears inherited tint for direct connections", () => {
     const colors = accountRowColors(

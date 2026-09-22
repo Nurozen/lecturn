@@ -2,7 +2,7 @@ import { useAppearancePreferences } from "../settings/appearance/AppearancePrefe
 import { useGlassAccessibility } from "../../lib/useGlassAccessibility";
 import { themeColorWithAlpha } from "../../lib/mobileTheme";
 import { Pressable, View } from "react-native";
-import { accountTintColor } from "@lecturn/shared/accountTint";
+import { useAccountSurfaceColor } from "../../lib/accountTintContext";
 import { AppText } from "../../components/AppText";
 import type { HomeAccountHeaderListItem } from "./homeListItems";
 
@@ -16,7 +16,7 @@ export function AccountSectionHeader({
   const { themeAppearance } = useAppearancePreferences();
   const opaque = useGlassAccessibility();
   const dark = themeAppearance === "dark";
-  const color = item.account ? accountTintColor(item.account.preset) : undefined;
+  const color = useAccountSurfaceColor();
   const label = item.account?.label ?? "Direct connections";
   return (
     <Pressable

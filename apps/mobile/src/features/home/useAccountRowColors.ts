@@ -16,10 +16,14 @@ export function useAccountRowColors(items: ReadonlyArray<AccountRow>) {
         entry.target,
       ]),
     );
-    return accountRowColors(items, (id) => {
-      const target = targets.get(id);
-      if (target?._tag !== "RelayConnectionTarget") return undefined;
-      return mobileAccountSurfaceColor(target.accountId, accounts);
-    });
+    return accountRowColors(
+      items,
+      (id) => {
+        const target = targets.get(id);
+        if (target?._tag !== "RelayConnectionTarget") return undefined;
+        return mobileAccountSurfaceColor(target.accountId, accounts);
+      },
+      accounts.length > 1,
+    );
   }, [items, catalog, accounts]);
 }

@@ -14,8 +14,10 @@ export interface AccountRow {
 export function accountRowColors(
   items: ReadonlyArray<AccountRow>,
   colorForEnvironment: (id: string) => string | undefined,
+  accountColorsEnabled = true,
 ): ReadonlyMap<string, string> {
   const result = new Map<string, string>();
+  if (!accountColorsEnabled) return result;
   let inherited: string | undefined;
   for (const item of items) {
     if (item.type === "account-header") {
