@@ -1,3 +1,4 @@
+import { GlassCard } from "../../components/GlassCard";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import { useNavigation } from "@react-navigation/native";
@@ -125,7 +126,7 @@ export function SettingsEnvironmentsRouteScreen() {
         }}
       >
         {hasLocalEnvironments ? (
-          <View collapsable={false} className="overflow-hidden rounded-[24px] bg-card/55">
+          <GlassCard collapsable={false} radius={24}>
             {localEnvironments.map((environment, index) => (
               <View
                 key={environment.environmentId}
@@ -148,12 +149,9 @@ export function SettingsEnvironmentsRouteScreen() {
                 />
               </View>
             ))}
-          </View>
+          </GlassCard>
         ) : (
-          <View
-            collapsable={false}
-            className="items-center gap-3 rounded-[24px] bg-card/55 px-6 py-8"
-          >
+          <GlassCard collapsable={false} radius={24} className="items-center gap-3 px-6 py-8">
             <View className="h-12 w-12 items-center justify-center rounded-[16px] bg-subtle">
               <SymbolView
                 name="point.3.connected.trianglepath.dotted"
@@ -166,7 +164,7 @@ export function SettingsEnvironmentsRouteScreen() {
               No environments connected yet.{"\n"}Tap{" "}
               <Text className="font-lecturn-bold text-foreground">+</Text> to add one.
             </Text>
-          </View>
+          </GlassCard>
         )}
 
         {/* Always mounted: already-connected relay environments must stay

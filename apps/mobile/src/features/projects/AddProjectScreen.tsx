@@ -1,3 +1,5 @@
+import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
+import { GlassCard } from "../../components/GlassCard";
 import {
   addProjectRemoteSourceLabel,
   addProjectRemoteSourcePathHint,
@@ -136,6 +138,7 @@ function AddProjectShell(props: { readonly children: ReactNode }) {
     // "header" sibling, coercing the ScrollView to zero height (blank sheet
     // as soon as the sheet re-lays-out, e.g. when the keyboard opens).
     <View collapsable={false} className="flex-1 bg-sheet">
+      <ArcaneBackdrop emphasis="sidebar" />
       <ScrollView
         keyboardShouldPersistTaps="handled"
         contentInsetAdjustmentBehavior="automatic"
@@ -153,7 +156,7 @@ function AddProjectShell(props: { readonly children: ReactNode }) {
 }
 
 function ListSection(props: { readonly children: ReactNode }) {
-  return <View className="overflow-hidden rounded-[24px] bg-card">{props.children}</View>;
+  return <GlassCard radius={24}>{props.children}</GlassCard>;
 }
 
 function ListRow(props: {
@@ -171,7 +174,7 @@ function ListRow(props: {
       disabled={props.disabled}
       onPress={props.onPress}
       className={cn(
-        "bg-card px-3.5 py-2.5 active:opacity-70",
+        "px-3.5 py-2.5 active:opacity-70",
         !props.isFirst && "border-t border-border-subtle",
         props.disabled && "opacity-[0.45]",
       )}
@@ -400,7 +403,7 @@ function EmptyEnvironmentState() {
   const navigation = useNavigation();
 
   return (
-    <View className="items-center gap-3 rounded-2xl bg-card px-5 py-8">
+    <GlassCard radius={20} className="items-center gap-3 px-5 py-8">
       <Text className="text-center text-lg font-lecturn-bold">Environment unavailable</Text>
       <Text className="text-center text-sm leading-normal text-foreground-muted">
         Start or reconnect an environment before adding a project.
@@ -411,7 +414,7 @@ function EmptyEnvironmentState() {
       >
         <Text className="text-sm font-lecturn-bold text-primary-foreground">Add environment</Text>
       </Pressable>
-    </View>
+    </GlassCard>
   );
 }
 
@@ -967,12 +970,12 @@ export function AddProjectDestinationScreen(props: {
     <AddProjectShell>
       {error ? <ErrorBanner message={error} /> : null}
       {repositoryTitle ? (
-        <View className="rounded-[24px] bg-card px-4 py-3">
+        <GlassCard radius={24} className="px-4 py-3">
           <Text className="text-base font-lecturn-bold">{repositoryTitle}</Text>
           <Text className="mt-0.5 text-xs text-foreground-muted" numberOfLines={2}>
             {remoteUrl}
           </Text>
-        </View>
+        </GlassCard>
       ) : null}
       {environment ? (
         <>

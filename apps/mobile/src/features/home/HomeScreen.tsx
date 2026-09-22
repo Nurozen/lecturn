@@ -1,3 +1,9 @@
+import { HierarchyRow } from "./HierarchyRow";
+import { accountSectionFrames } from "./accountSectionFrames";
+import { buildSidebarHierarchy } from "../threads/sidebar-hierarchy";
+import { HIERARCHY_LAYOUT_TRANSITION } from "./hierarchyMotion";
+import { AnimatedLegendList } from "@legendapp/list/reanimated";
+import Animated from "react-native-reanimated";
 import { AccountSurfaceColorContext } from "../../lib/accountTintContext";
 import { useAccountRowColors } from "./useAccountRowColors";
 import {
@@ -10,11 +16,7 @@ import { useAccountSections } from "./useAccountSections";
 import { AccountSectionHeader } from "./AccountSectionHeader";
 import { useMobileSagaIndex, useSidebarNestSagas } from "../../state/stave";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
-import {
-  LegendList,
-  type LegendListRef,
-  type LegendListRenderItemProps,
-} from "@legendapp/list/react-native";
+import { type LegendListRef, type LegendListRenderItemProps } from "@legendapp/list/react-native";
 import {
   type EnvironmentProject,
   type EnvironmentThreadShell,
@@ -34,7 +36,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Platform, Pressable, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, View } from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -993,47 +995,33 @@ export function HomeScreen(props: HomeScreenProps) {
   const accountRowColors = useAccountRowColors(
     threadListV2Enabled ? threadListV2Items : listLayout.items,
   );
+  const visibleHierarchyItems = threadListV2Enabled ? threadListV2Items : listLayout.items;
+  const hierarchyGuides = useMemo(
+    () => buildSidebarHierarchy(visibleHierarchyItems),
+    [visibleHierarchyItems],
+  );
+  const sectionFrames = useMemo(
+    () => accountSectionFrames(visibleHierarchyItems),
+    [visibleHierarchyItems],
+  );
   const renderV2Item = useCallback(
     (props: { readonly item: HomeHierarchyV2Item; readonly index: number }) => (
-      <View
-        style={{ paddingLeft: props.item.type === "header" ? 0 : (props.item.depth ?? 0) * 18 }}
-      >
-        {props.item.type !== "header"
-          ? Array.from({ length: props.item.depth ?? 0 }, (_, level) => (
-              <View
-                key={level}
-                pointerEvents="none"
-                accessible={false}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  bottom: 0,
-                  left: level * 18 + 8,
-                  width:
-                    "settledBranch" in props.item &&
-                    props.item.type !== "v2-settled-shelf" &&
-                    props.item.settledBranch &&
-                    level === (props.item.depth ?? 0) - 1
-                      ? 2
-                      : 1,
-                  backgroundColor:
-                    "settledBranch" in props.item &&
-                    props.item.type !== "v2-settled-shelf" &&
-                    props.item.settledBranch &&
-                    level === (props.item.depth ?? 0) - 1
-                      ? "#ff866f"
-                      : (accountRowColors.get(props.item.key) ?? "#b9893f") + "aa",
-                  borderRadius: 2,
-                }}
-              />
-            ))
-          : null}
-        <AccountSurfaceColorContext.Provider value={accountRowColors.get(props.item.key)}>
+      <AccountSurfaceColorContext.Provider value={accountRowColors.get(props.item.key)}>
+        <HierarchyRow
+          depth={props.item.depth ?? 0}
+          settled={
+            "settledBranch" in props.item &&
+            props.item.type !== "v2-settled-shelf" &&
+            Boolean(props.item.settledBranch)
+          }
+          frame={sectionFrames.get(props.item.key)}
+          guides={hierarchyGuides.get(props.item.key)}
+        >
           {renderV2Row(props)}
-        </AccountSurfaceColorContext.Provider>
-      </View>
+        </HierarchyRow>
+      </AccountSurfaceColorContext.Provider>
     ),
-    [renderV2Row, accountRowColors],
+    [renderV2Row, accountRowColors, hierarchyGuides, sectionFrames],
   );
   const v2KeyExtractor = useCallback((item: HomeHierarchyV2Item) => item.key, []);
 
@@ -1220,45 +1208,22 @@ export function HomeScreen(props: HomeScreenProps) {
 
   const renderItem = useCallback(
     (props: LegendListRenderItemProps<HomeListItem>) => (
-      <View
-        style={{ paddingLeft: props.item.type === "header" ? 0 : (props.item.depth ?? 0) * 18 }}
-      >
-        {props.item.type !== "header"
-          ? Array.from({ length: props.item.depth ?? 0 }, (_, level) => (
-              <View
-                key={level}
-                pointerEvents="none"
-                accessible={false}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  bottom: 0,
-                  left: level * 18 + 8,
-                  width:
-                    "settledBranch" in props.item &&
-                    props.item.type !== "v2-settled-shelf" &&
-                    props.item.settledBranch &&
-                    level === (props.item.depth ?? 0) - 1
-                      ? 2
-                      : 1,
-                  backgroundColor:
-                    "settledBranch" in props.item &&
-                    props.item.type !== "v2-settled-shelf" &&
-                    props.item.settledBranch &&
-                    level === (props.item.depth ?? 0) - 1
-                      ? "#ff866f"
-                      : (accountRowColors.get(props.item.key) ?? "#b9893f") + "aa",
-                  borderRadius: 2,
-                }}
-              />
-            ))
-          : null}
-        <AccountSurfaceColorContext.Provider value={accountRowColors.get(props.item.key)}>
+      <AccountSurfaceColorContext.Provider value={accountRowColors.get(props.item.key)}>
+        <HierarchyRow
+          depth={props.item.depth ?? 0}
+          settled={
+            "settledBranch" in props.item &&
+            props.item.type !== "v2-settled-shelf" &&
+            Boolean(props.item.settledBranch)
+          }
+          frame={sectionFrames.get(props.item.key)}
+          guides={hierarchyGuides.get(props.item.key)}
+        >
           {renderRow(props)}
-        </AccountSurfaceColorContext.Provider>
-      </View>
+        </HierarchyRow>
+      </AccountSurfaceColorContext.Provider>
     ),
-    [renderRow, accountRowColors],
+    [renderRow, accountRowColors, hierarchyGuides, sectionFrames],
   );
 
   const keyExtractor = useCallback((item: HomeListItem) => item.key, []);
@@ -1356,7 +1321,8 @@ export function HomeScreen(props: HomeScreenProps) {
       <View className="flex-1 bg-screen">
         <ArcaneBackdrop emphasis="sidebar" />
         <SwipeableScrollGateProvider enabled={swipeEnabled}>
-          <FlatList
+          <Animated.FlatList
+            itemLayoutAnimation={HIERARCHY_LAYOUT_TRANSITION}
             data={threadListV2Items}
             renderItem={renderV2Item}
             keyExtractor={v2KeyExtractor}
@@ -1408,7 +1374,8 @@ export function HomeScreen(props: HomeScreenProps) {
           collapse/expand data changes. The flattened layout still exposes
           `stickyHeaderIndices` if this gets revisited. */}
       <SwipeableScrollGateProvider enabled={swipeEnabled}>
-        <LegendList
+        <AnimatedLegendList
+          itemLayoutAnimation={HIERARCHY_LAYOUT_TRANSITION}
           viewabilityConfig={THREAD_ACTIVITY_VIEWABILITY_CONFIG}
           ref={listRef}
           data={listLayout.items}

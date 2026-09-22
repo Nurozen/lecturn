@@ -67,7 +67,7 @@ export function ConnectionEnvironmentRow(props: {
   }, [label, url, props]);
 
   return (
-    <Animated.View className="bg-card" layout={LinearTransition.duration(250)}>
+    <Animated.View layout={LinearTransition.duration(360)}>
       <Pressable
         className="flex-row items-center gap-3 px-4 py-3.5 active:opacity-70"
         onPress={props.onToggle}
@@ -141,8 +141,8 @@ export function ConnectionEnvironmentRow(props: {
 
       {props.expanded ? (
         <Animated.View
-          entering={FadeIn.duration(200)}
-          exiting={FadeOut.duration(150)}
+          entering={FadeIn.duration(220)}
+          exiting={FadeOut.duration(180)}
           className="gap-3 px-4 pb-4"
         >
           {props.environment.isRelayManaged ? (

@@ -1,9 +1,7 @@
-import { useAccountSurfaceColor } from "../lib/accountTintContext";
+import { useGlassPalette } from "../lib/useGlassPalette";
 import type { ReactNode, Ref } from "react";
 import { StyleSheet, View, type ViewProps } from "react-native";
 
-import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
-import { useGlassAccessibility } from "../lib/useGlassAccessibility";
 import { cn } from "../lib/cn";
 import { useUniwindTheme } from "../lib/useUniwindTheme";
 import { themeColorWithAlpha } from "../lib/mobileTheme";
@@ -30,13 +28,11 @@ export function GlassCard({
   className,
   ...props
 }: GlassCardProps) {
-  const accountColor = useAccountSurfaceColor();
-  const { themeAppearance } = useAppearancePreferences();
-  const light = themeAppearance === "light";
+  const palette = useGlassPalette();
+  const light = !palette.dark;
   const theme = useUniwindTheme();
-  const accessibleOpaque = useGlassAccessibility();
-  const opaque = forceOpaque || accessibleOpaque;
-  const accent = accountColor ?? theme["--color-primary"];
+  const opaque = forceOpaque || palette.opaque;
+  const accent = palette.accent;
   return (
     <View
       {...props}
@@ -46,18 +42,18 @@ export function GlassCard({
           borderRadius: radius,
           borderCurve: "continuous",
           overflow: "hidden",
-          borderWidth: tone === "accent" ? 1.5 : StyleSheet.hairlineWidth,
+          borderWidth: tone === "accent" ? 1 : StyleSheet.hairlineWidth,
           borderColor:
             tone === "accent"
-              ? accent
+              ? themeColorWithAlpha(palette.light, light ? 0.65 : 0.7)
               : tone === "settled"
                 ? theme["--color-danger-foreground"]
-                : accountColor && !opaque && sheen !== "subtle"
-                  ? themeColorWithAlpha(accountColor, light ? 0.28 : 0.36)
+                : !opaque
+                  ? palette.edge
                   : theme["--color-border"],
           ...(tone === "accent" && !opaque
             ? {
-                borderLeftColor: accent,
+                borderLeftColor: themeColorWithAlpha(palette.light, 0.65),
                 borderTopColor: themeColorWithAlpha(accent, light ? 0.5 : 0.65),
               }
             : {}),
@@ -80,7 +76,7 @@ export function GlassCard({
                   ? "linear-gradient(150deg, #ffffff0a 0%, #ffffff00 42%, #00000008 100%)"
                   : light
                     ? `linear-gradient(150deg, #ffffff9c 0%, #ffffff00 42%, ${themeColorWithAlpha(accent, 0.08)} 100%)`
-                    : `linear-gradient(150deg, ${themeColorWithAlpha(accent, tone === "accent" ? 0.26 : 0.12)} 0%, #ffffff08 12%, #ffffff00 45%, #00000018 100%)`,
+                    : `linear-gradient(150deg, ${themeColorWithAlpha(accent, tone === "accent" ? 0.15 : 0.075)} 0%, #ffffff08 12%, #ffffff00 45%, #00000018 100%)`,
             },
           ]}
         />

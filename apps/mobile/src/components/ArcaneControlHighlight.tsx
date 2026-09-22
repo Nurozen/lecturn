@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { useGlassPalette } from "../lib/useGlassPalette";
+import { themeColorWithAlpha } from "../lib/mobileTheme";
 import { Animated, StyleSheet } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 
@@ -11,6 +13,7 @@ export function ArcaneControlHighlight({
   readonly radius?: number;
 }) {
   const reduceMotion = useReducedMotion();
+  const { accent, edge, opaque } = useGlassPalette();
   const [opacity] = useState(() => new Animated.Value(0));
   useEffect(() => {
     const animation = Animated.timing(opacity, {
@@ -26,8 +29,17 @@ export function ArcaneControlHighlight({
     <Animated.View
       pointerEvents="none"
       accessible={false}
-      className="border-primary bg-primary/7 shadow-primary"
-      style={[StyleSheet.absoluteFill, styles.thread, { opacity, borderRadius: radius }]}
+      style={[
+        StyleSheet.absoluteFill,
+        styles.thread,
+        {
+          opacity,
+          borderRadius: radius,
+          borderColor: edge,
+          backgroundColor: themeColorWithAlpha(accent, opaque ? 0.14 : 0.07),
+          shadowColor: opaque ? "transparent" : accent,
+        },
+      ]}
     />
   );
 }

@@ -4,7 +4,7 @@ import type { EnvironmentId } from "@lecturn/contracts";
 import { environmentCatalog } from "../connection/catalog";
 import { useConnectAccounts } from "../features/cloud/knownAccounts";
 import { mobileAccountSurfaceColor } from "./accountTint";
-import { AccountSurfaceColorContext } from "./accountTintContext";
+import { AccountSurfaceColorContext, AccountSurfaceKeyContext } from "./accountTintContext";
 
 export function AccountTintScope({
   environmentId,
@@ -18,8 +18,10 @@ export function AccountTintScope({
   const target = catalog.entries.get(environmentId)?.target;
   const id = target?._tag === "RelayConnectionTarget" ? target.accountId : undefined;
   return (
-    <AccountSurfaceColorContext.Provider value={mobileAccountSurfaceColor(id, accounts)}>
-      {children}
-    </AccountSurfaceColorContext.Provider>
+    <AccountSurfaceKeyContext.Provider value={accounts.length > 1 ? id : undefined}>
+      <AccountSurfaceColorContext.Provider value={mobileAccountSurfaceColor(id, accounts)}>
+        {children}
+      </AccountSurfaceColorContext.Provider>
+    </AccountSurfaceKeyContext.Provider>
   );
 }
