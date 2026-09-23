@@ -2682,3 +2682,12 @@ body,
     animation: none;
   }
 }
+
+::highlight(lecturn-thread-note) {
+  background-color: color-mix(in oklab, var(--primary) 20%, transparent);
+  text-decoration: underline dotted color-mix(in oklab, var(--primary) 65%, transparent);
+}
+::highlight(lecturn-thread-note-active) {
+  background-color: color-mix(in oklab, var(--primary) 38%, transparent);
+  text-decoration: underline;
+}

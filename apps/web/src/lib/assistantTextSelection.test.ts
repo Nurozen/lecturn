@@ -15,6 +15,8 @@ import {
   captureAssistantTextSelection,
   createAssistantTextSelector,
   findAssistantCitationText,
+  resolveAssistantCitationRange,
+  resolveAssistantCitationRanges,
 } from "./assistantTextSelection";
 
 function selector(
@@ -52,6 +54,10 @@ class SelectionNode {
     readonly data = "",
     readonly attributes: Record<string, string> = {},
   ) {}
+
+  get ownerDocument() {
+    return { createRange: () => nativeSelection([this, 0], [this, 0]).getRangeAt(0) };
+  }
 
   get nodeType() {
     return this.tagName === "#text" ? 3 : 1;
@@ -193,6 +199,39 @@ function capture(viewport: SelectionNode, selection: Selection) {
 }
 
 describe("captureAssistantTextSelection", () => {
+  it("captures user-message body text without adjacent attachments or its collapse control", () => {
+    const quote = textNode("My saved idea 😀.");
+    const source = new SelectionNode("DIV", "", {
+      "data-assistant-citation-source": "user-message",
+      "data-citation-source-role": "user",
+    }).append(new SelectionNode("P").append(quote));
+    const bubble = new SelectionNode("ARTICLE").append(
+      new SelectionNode("DIV").append(textNode("attachment.png")),
+      source,
+      new SelectionNode("BUTTON").append(textNode("Show full message")),
+    );
+    const viewport = new SelectionNode("MAIN").append(bubble);
+    const captured = capture(viewport, nativeSelection([quote, 0], [quote, quote.length]));
+    expect(captured?.source).toBe(source);
+    expect(captured?.selector).toEqual(selector(quote.data));
+    expect(
+      resolveAssistantCitationRange(source as unknown as HTMLElement, captured!.selector)
+        ?.endOffset,
+    ).toBe(quote.length);
+  });
+
+  it("rejects user-note selections with an endpoint inside an embedded non-editable quote chip", () => {
+    const quote = textNode("My response.");
+    const chipText = textNode("Assistant quote");
+    const source = new SelectionNode("DIV", "", {
+      "data-assistant-citation-source": "user-message",
+      "data-citation-source-role": "user",
+    }).append(quote, new SelectionNode("SPAN", "", { contenteditable: "false" }).append(chipText));
+    expect(capture(source, nativeSelection([quote, 0], [chipText, 5]))).toBeNull();
+    expect(capture(source, nativeSelection([chipText, 1], [quote, quote.length], true))).toBeNull();
+    expect(capture(source, nativeSelection([chipText, 0], [chipText, chipText.length]))).toBeNull();
+  });
+
   it.each([
     { boundary: "next text", backwards: false },
     { boundary: "next block", backwards: false },
@@ -559,5 +598,55 @@ describe("findAssistantCitationText", () => {
       start: 2,
       end: 7,
     });
+  });
+});
+
+describe("resolveAssistantCitationRanges", () => {
+  it("walks once for fifty selectors and preserves single-range resolution across markup", () => {
+    const first = textNode("Alpha   beta");
+    const last = textNode("gamma 😀");
+    const source = assistantSource(
+      new SelectionNode("P").append(first),
+      new SelectionNode("BUTTON").append(textNode("excluded")),
+      new SelectionNode("P").append(new SelectionNode("CODE").append(last)),
+    ) as unknown as HTMLElement;
+    const selectors = Array.from({ length: 50 }, (_, index) =>
+      selector(index % 2 ? "beta gamma" : "gamma 😀"),
+    );
+    let walks = 0;
+    const ranges = resolveAssistantCitationRanges(source, selectors, { onWalk: () => walks++ });
+    expect(walks).toBe(1);
+    for (const [index, range] of ranges.entries()) {
+      const single = resolveAssistantCitationRange(source, selectors[index]!);
+      expect(range).not.toBeNull();
+      expect([
+        range?.startContainer,
+        range?.startOffset,
+        range?.endContainer,
+        range?.endOffset,
+      ]).toEqual([
+        single?.startContainer,
+        single?.startOffset,
+        single?.endContainer,
+        single?.endOffset,
+      ]);
+    }
+  });
+
+  it("rejects ambiguous quotes and hidden sources without walking empty batches", () => {
+    const source = assistantSource(textNode("same same")) as unknown as HTMLElement;
+    let walks = 0;
+    expect(resolveAssistantCitationRanges(source, [], { onWalk: () => walks++ })).toEqual([]);
+    expect(walks).toBe(0);
+    expect(resolveAssistantCitationRanges(source, [selector("same")])).toEqual([null]);
+    const hidden = new SelectionNode("DIV", "", { hidden: "" }).append(
+      source as unknown as SelectionNode,
+    );
+    expect(
+      resolveAssistantCitationRanges(hidden as unknown as HTMLElement, [selector("same")], {
+        onWalk: () => walks++,
+      }),
+    ).toEqual([null]);
+    expect(walks).toBe(0);
   });
 });

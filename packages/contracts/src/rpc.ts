@@ -1,3 +1,4 @@
+import * as ThreadNotes from "./threadNotes.ts";
 import * as PullRequestWatch from "./pullRequestWatch.ts";
 import * as SagaWorkbench from "./sagaWorkbench.ts";
 import * as Schema from "effect/Schema";
@@ -377,6 +378,10 @@ export const WS_METHODS = {
   staveRunOperation: "stave.runOperation",
   staveObserveOperation: "stave.observeOperation",
 
+  threadNotesList: "threadNotes.list",
+  threadNotesCreate: "threadNotes.create",
+  threadNotesUpdate: "threadNotes.update",
+  threadNotesDelete: "threadNotes.delete",
   pullRequestWatchList: "pullRequestWatch.list",
   pullRequestWatchTrack: "pullRequestWatch.track",
   pullRequestWatchCommand: "pullRequestWatch.command",
@@ -782,6 +787,27 @@ export const WsPullRequestsListStatsRpc = Rpc.make(WS_METHODS.pullRequestsListSt
   payload: PullRequestListStatsInput,
   success: PullRequestListStatsResult,
   error: PullRequestRpcError,
+});
+
+export const WsThreadNotesListRpc = Rpc.make(WS_METHODS.threadNotesList, {
+  payload: ThreadNotes.ThreadNoteListInput,
+  success: ThreadNotes.ThreadNoteListResult,
+  error: Schema.Union([ThreadNotes.ThreadNoteError, EnvironmentAuthorizationError]),
+});
+export const WsThreadNotesCreateRpc = Rpc.make(WS_METHODS.threadNotesCreate, {
+  payload: ThreadNotes.ThreadNoteCreateInput,
+  success: ThreadNotes.ThreadNote,
+  error: Schema.Union([ThreadNotes.ThreadNoteError, EnvironmentAuthorizationError]),
+});
+export const WsThreadNotesUpdateRpc = Rpc.make(WS_METHODS.threadNotesUpdate, {
+  payload: ThreadNotes.ThreadNoteUpdateInput,
+  success: ThreadNotes.ThreadNote,
+  error: Schema.Union([ThreadNotes.ThreadNoteError, EnvironmentAuthorizationError]),
+});
+export const WsThreadNotesDeleteRpc = Rpc.make(WS_METHODS.threadNotesDelete, {
+  payload: ThreadNotes.ThreadNoteDeleteInput,
+  success: Schema.Void,
+  error: Schema.Union([ThreadNotes.ThreadNoteError, EnvironmentAuthorizationError]),
 });
 
 export const WsPullRequestWatchListRpc = Rpc.make(WS_METHODS.pullRequestWatchList, {
@@ -1470,6 +1496,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsCloudInstallRelayClientRpc,
   WsPullRequestsListRpc,
   WsPullRequestsListStatsRpc,
+  WsThreadNotesListRpc,
+  WsThreadNotesCreateRpc,
+  WsThreadNotesUpdateRpc,
+  WsThreadNotesDeleteRpc,
   WsPullRequestWatchListRpc,
   WsPullRequestWatchTrackRpc,
   WsPullRequestWatchCommandRpc,

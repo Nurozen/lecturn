@@ -5,6 +5,10 @@ import {
   resolveAssistantCitationRange,
   type AssistantCitationSourceAnchor,
 } from "~/lib/assistantTextSelection";
+import {
+  getThreadNoteHighlightRegistry,
+  type ThreadNoteHighlightSelector,
+} from "~/lib/threadNoteHighlights";
 import { toastManager } from "../ui/toast";
 
 const CITATION_PULSE_DURATION_MS = 650;
@@ -78,6 +82,7 @@ export function observeAssistantCitationCommentSource({
   if (typeof Highlight !== "undefined" && registry) {
     const existing = registry.get(COMMENT_HIGHLIGHT_NAME);
     highlight = existing ?? new Highlight();
+    highlight.priority = 2;
     highlight.add(range);
     if (!existing) registry.set(COMMENT_HIGHLIGHT_NAME, highlight);
   }
@@ -198,8 +203,8 @@ export function observeAssistantCitationSource({
             request.onComplete();
             toastManager.add({
               type: "warning",
-              title: "Could not open the cited response",
-              description: "Click the citation to try again.",
+              title: "Could not open the selected message",
+              description: "Click the saved selection to try again.",
             });
           },
         );
@@ -223,6 +228,7 @@ export function observeAssistantCitationSource({
     }
     if (typeof Highlight !== "undefined" && typeof CSS !== "undefined" && CSS.highlights) {
       highlighted = new Highlight(range);
+      highlighted.priority = 3;
       CSS.highlights.set("lecturn-assistant-citation", highlighted);
       ownedRange = range;
       root.dataset.citationHighlighted = "true";
@@ -348,6 +354,9 @@ export function AssistantCitationSource({
   itemKey,
   request,
   listRef,
+  role = "assistant",
+  notes,
+  viewport,
   children,
 }: {
   messageId: MessageId;
@@ -355,6 +364,9 @@ export function AssistantCitationSource({
   itemKey: string;
   request: AssistantCitationTarget | null;
   listRef: RefObject<LegendListRef | null>;
+  role?: "user" | "assistant";
+  notes?: readonly ThreadNoteHighlightSelector[] | undefined;
+  viewport?: HTMLElement | null | undefined;
   children: ReactNode;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -365,9 +377,16 @@ export function AssistantCitationSource({
     return observeAssistantCitationSource({ root, itemKey, request, list });
   }, [itemKey, listRef, messageId, request]);
 
+  useEffect(() => {
+    const source = rootRef.current;
+    if (!source || !viewport || !notes?.length) return;
+    return getThreadNoteHighlightRegistry().register(viewport, source, notes);
+  }, [notes, viewport]);
+
   return (
     <div
       ref={rootRef}
+      data-citation-source-role={role}
       data-assistant-citation-source={messageId}
       data-assistant-citation-environment={threadRef?.environmentId}
       data-assistant-citation-thread={threadRef?.threadId}

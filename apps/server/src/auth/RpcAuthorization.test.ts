@@ -11,6 +11,16 @@ import { describe, expect, it } from "@effect/vitest";
 import { RPC_REQUIRED_SCOPES, requiredScopeForRpcMethod } from "./RpcAuthorization.ts";
 
 describe("RPC authorization scopes", () => {
+  it("allows notes reads while reserving mutations for operators", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.threadNotesList)).toBe(AuthOrchestrationReadScope);
+    for (const method of [
+      WS_METHODS.threadNotesCreate,
+      WS_METHODS.threadNotesUpdate,
+      WS_METHODS.threadNotesDelete,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    }
+  });
   it("declares exactly one scope for every RPC in the server group", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
   });

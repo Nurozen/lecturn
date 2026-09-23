@@ -1,3 +1,4 @@
+import { ThreadNoteService } from "./threadNotes/ThreadNoteService.ts";
 import { PullRequestWatchService } from "./pullRequest/PullRequestWatchService.ts";
 import { SagaWorkbenchService } from "./stave/SagaWorkbenchService.ts";
 // @effect-diagnostics nodeBuiltinImport:off - assembleThreadFork mints ids through a synchronous callback, which the Effect Crypto service cannot satisfy
@@ -669,6 +670,7 @@ const makeWsRpcLayer = (
       const sourceControlRepositories =
         yield* SourceControlRepositoryService.SourceControlRepositoryService;
       const pullRequests = yield* PullRequestService.PullRequestService;
+      const threadNotes = yield* ThreadNoteService;
       const pullRequestWatches = yield* PullRequestWatchService;
       const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
       const sessions = yield* SessionStore.SessionStore;
@@ -1876,6 +1878,14 @@ const makeWsRpcLayer = (
 
       return WsRpcGroup.of({
         ...staveRpcHandlers,
+        [WS_METHODS.threadNotesList]: (input) =>
+          observeRpcEffect(WS_METHODS.threadNotesList, threadNotes.list(input)),
+        [WS_METHODS.threadNotesCreate]: (input) =>
+          observeRpcEffect(WS_METHODS.threadNotesCreate, threadNotes.create(input)),
+        [WS_METHODS.threadNotesUpdate]: (input) =>
+          observeRpcEffect(WS_METHODS.threadNotesUpdate, threadNotes.update(input)),
+        [WS_METHODS.threadNotesDelete]: (input) =>
+          observeRpcEffect(WS_METHODS.threadNotesDelete, threadNotes.delete(input)),
         [WS_METHODS.pullRequestWatchList]: (input) =>
           observeRpcEffect(WS_METHODS.pullRequestWatchList, pullRequestWatches.list(input)),
         [WS_METHODS.pullRequestWatchTrack]: (input) =>
@@ -3559,6 +3569,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         ),
     });
     const pullRequests = yield* PullRequestService.PullRequestService;
+    const threadNotes = yield* ThreadNoteService;
     const pullRequestWatches = yield* PullRequestWatchService;
     const staveOperations = yield* StaveOperations.StaveOperations;
     const sagaWorkbench = yield* SagaWorkbenchService;
@@ -3602,6 +3613,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
               Layer.provide(Layer.succeed(PullRequestWatchService, pullRequestWatches)),
+              Layer.provide(Layer.succeed(ThreadNoteService, threadNotes)),
               // Stave operations outlive the socket that started them, so every
               // connection attaches to the one server-lifetime registry.
               Layer.provide(Layer.succeed(StaveOperations.StaveOperations, staveOperations)),

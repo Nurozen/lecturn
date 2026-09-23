@@ -1111,6 +1111,7 @@ export interface ChatComposerHandle {
   restoreAfterTimelineReachedEnd: () => void;
   addDroppedFiles: (files: File[]) => void;
   insertTextAtEnd: (text: string, options?: { ensureLeadingBoundary?: boolean }) => boolean;
+  insertCitation: (citation: AssistantCitation) => boolean;
   citeAssistantText: (
     citation: AssistantCitation,
     sourceAnchor: AssistantCitationSourceAnchor,
@@ -2930,7 +2931,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setComposerDraftPrompt,
     submitComposer,
   ]);
-  const expandMobileComposer = useCallback(() => {
+  const expandMobileComposer = useCallback((options?: { focusEditor?: boolean }) => {
     if (composerBlurFrameRef.current !== null) {
       window.cancelAnimationFrame(composerBlurFrameRef.current);
       composerBlurFrameRef.current = null;
@@ -2945,7 +2946,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setIsComposerFocused(true);
     mobileComposerExpandFrameRef.current = window.requestAnimationFrame(() => {
       mobileComposerExpandFrameRef.current = null;
-      composerEditorRef.current?.focusAtEnd();
+      if (options?.focusEditor !== false) composerEditorRef.current?.focusAtEnd();
       mobileComposerExpandReleaseFrameRef.current = window.requestAnimationFrame(() => {
         mobileComposerExpandReleaseFrameRef.current = null;
         mobileComposerExpandInFlightRef.current = false;
@@ -4230,6 +4231,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       options?: {
         ensureLeadingBoundary?: boolean;
         citationCommentAnchor?: AssistantCitationSourceAnchor;
+        focusEditorAfterReplace?: boolean;
       },
     ): boolean => {
       if (
@@ -4261,7 +4263,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               },
               focusEditorAfterReplace: false,
             }
-          : undefined,
+          : { focusEditorAfterReplace: options?.focusEditorAfterReplace !== false },
       );
     },
     [
@@ -4507,6 +4509,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         focusComposer();
       },
       insertTextAtEnd: insertComposerTextAtEnd,
+      insertCitation: (citation) => {
+        const inserted = insertComposerText(
+          formatAssistantCitationForComposer(citation, citation.comment),
+          "end",
+          { ensureLeadingBoundary: true, focusEditorAfterReplace: false },
+        );
+        if (inserted && isComposerCollapsedMobile) expandMobileComposer({ focusEditor: false });
+        return inserted;
+      },
       citeAssistantText: (citation, sourceAnchor) =>
         insertComposerText(
           formatAssistantCitationForComposer(citation, citation.comment),
@@ -4850,7 +4861,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                 !activePendingProgress?.activeQuestion?.multiSelect && "px-3 py-2",
                               )}
                               onPointerDown={(event) => event.preventDefault()}
-                              onClick={expandMobileComposer}
+                              onClick={() => expandMobileComposer()}
                               aria-label="Write custom answer"
                             >
                               {activePendingProgress?.customAnswer || "Write custom answer"}
@@ -4965,7 +4976,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       : "text-placeholder",
                   )}
                   onPointerDown={(event) => event.preventDefault()}
-                  onClick={isChoiceOnlyPendingQuestion ? undefined : expandMobileComposer}
+                  onClick={isChoiceOnlyPendingQuestion ? undefined : () => expandMobileComposer()}
                   disabled={isChoiceOnlyPendingQuestion}
                   aria-label="Expand composer"
                 >

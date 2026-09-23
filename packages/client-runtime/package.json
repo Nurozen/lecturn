@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./state/threadNotes": {
+      "types": "./src/state/threadNotes.ts",
+      "default": "./src/state/threadNotes.ts"
+    },
     "./state/activityContext": {
       "types": "./src/state/activityContext.ts",
       "default": "./src/state/activityContext.ts"

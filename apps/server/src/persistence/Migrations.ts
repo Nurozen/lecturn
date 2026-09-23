@@ -1,3 +1,4 @@
+import Migration0054 from "./Migrations/054_ThreadNotes.ts";
 /**
  * Migration runner with an inline loader.
  *
@@ -130,6 +131,7 @@ export const migrationEntries = [
   [51, "SagaWorkbench", Migration0051],
   [52, "PullRequestWatches", Migration0052],
   [53, "ProjectionThreadImportOrigin", Migration0053],
+  [54, "ThreadNotes", Migration0054],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
