@@ -8,6 +8,7 @@ This is a living glossary for Lecturn. It explains what common terms mean in thi
 
 - [Project and workspace](#project-and-workspace)
 - [Thread timeline](#thread-timeline)
+- [Thread notes](#thread-notes)
 - [Orchestration](#orchestration)
 - [Provider runtime](#provider-runtime)
 - [Checkpointing](#checkpointing)
@@ -285,3 +286,7 @@ See [Lecturn Connect](lecturn-connect.md#multiple-signed-in-accounts) for the me
 [29]: ../../packages/contracts/src/externalSessions.ts
 [30]: ./thread-forking.md#importing-external-sessions
 [31]: ./pull-request-watches.md#notification-rings
+
+### Thread notes
+
+A **thread note** is a project-scoped quote and optional comment saved independently of the chat draft. Its **note anchor** records the message identity, role, normalized rendered-text offsets, quote, and nearby context. Anchors share citation matching and navigation; they never index raw stored message text. See [Thread notes](./thread-notes.md).

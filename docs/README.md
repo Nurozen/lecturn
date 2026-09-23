@@ -5,6 +5,7 @@
 - [Install and first run](./user/install.md)
 - [Permission modes](./user/permission-modes.md)
 - [Keyboard shortcuts](./user/keybindings.md)
+- [Thread notes](./user/thread-notes.md)
 - [Organizing threads](./user/thread-sidebar.md)
 - [Forking threads](./user/forking-threads.md)
 - [Review usage](./user/usage.md)
@@ -35,6 +36,7 @@ policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../A
 - [Connection runtime](./internals/connection-runtime.md)
 - [Voice input](./internals/voice-input.md)
 - [Providers](./internals/providers.md)
+- [Thread notes](./internals/thread-notes.md)
 - [Thread forking](./internals/thread-forking.md)
 - [Remote environments](./internals/remote.md)
 - [Server updates](./internals/server-updates.md)
@@ -46,6 +48,7 @@ policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../A
 - [Teams architecture](./internals/teams.md)
 - [CI gates](./internals/ci.md)
 - [Engineering work artifacts](./internals/work-artifacts.md)
+- [Architecture decision records](./adr/README.md)
 
 ### Runbooks
 

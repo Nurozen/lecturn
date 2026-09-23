@@ -322,6 +322,17 @@ afterEach(() => {
 });
 
 describe("assistant citation source lifecycle", () => {
+  it("keeps comment and navigation priority above persistent note highlights", async () => {
+    const source = createSource();
+    source.mountComment();
+    source.mount();
+    source.flushFrame();
+    await source.finishScroll();
+    expect(source.commentHighlight()).toHaveProperty("priority", 2);
+    expect(source.highlights.get("lecturn-assistant-citation")).toHaveProperty("priority", 3);
+    source.cleanup();
+  });
+
   it("waits for a mounted measurement and rechecks geometry after the list settles", async () => {
     const source = createSource();
     source.setMeasured(false);

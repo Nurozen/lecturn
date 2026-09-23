@@ -1,3 +1,4 @@
+import * as ThreadNoteService from "./threadNotes/ThreadNoteService.ts";
 import * as PullRequestWatchDiscovery from "./pullRequest/PullRequestWatchDiscovery.ts";
 import * as PullRequestWatchService from "./pullRequest/PullRequestWatchService.ts";
 import * as PullRequestWatchProvider from "./pullRequest/PullRequestWatchProvider.ts";
@@ -468,6 +469,8 @@ const StaveRpcRuntimeLayerLive = StaveRpcHandlers.runtimeLayer.pipe(
     ),
   ),
 );
+const ThreadNoteLayerLive = ThreadNoteService.layer.pipe(Layer.provide(PersistenceLayerLive));
+
 const PullRequestWatchLayerLive = PullRequestWatchService.layer.pipe(
   Layer.provide(StaveRpcRuntimeLayerLive),
   Layer.provide(PersistenceLayerLive),
@@ -599,6 +602,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(SagaWorkbenchLayerLive),
   Layer.provideMerge(PullRequestWatchDiscoveryLayerLive),
   Layer.provideMerge(PullRequestWatchLayerLive),
+  Layer.provideMerge(ThreadNoteLayerLive),
   Layer.provideMerge(ProviderAuthServiceLive),
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),
@@ -703,6 +707,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   // Reusing the exact layer object shares the runtime instance by memoization;
   // isolated route harnesses can also supply its dependencies directly.
   Layer.provide(SagaWorkbenchLayerLive),
+  Layer.provide(ThreadNoteLayerLive),
   Layer.provide(PullRequestWatchLayerLive),
   Layer.provide(PullRequestServiceLive),
   // One registry per server: a Stave operation started over one socket keeps

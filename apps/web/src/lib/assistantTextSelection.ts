@@ -33,7 +33,7 @@ export function findAssistantCitationSourceAnchor(
   return range ? { source, range, viewport } : null;
 }
 
-const CONTROL_SELECTOR = "button, input, textarea, select, [role=button], [contenteditable]";
+export const CONTROL_SELECTOR = "button, input, textarea, select, [role=button], [contenteditable]";
 const EXCLUDED_SELECTOR = `${CONTROL_SELECTOR}, [hidden], [aria-hidden=true], script, style, template, noscript, svg`;
 const BLOCK_SELECTOR =
   "address, article, aside, blockquote, dd, div, dl, dt, figcaption, figure, footer, h1, h2, h3, h4, h5, h6, header, hr, li, main, nav, ol, p, pre, section, table, td, th, tr, ul";
@@ -90,7 +90,13 @@ export function findAssistantCitationText(
   text: string,
   selector: AssistantTextSelector,
 ): { start: number; end: number } | null {
-  const normalized = normalizeWhitespace(text);
+  return findNormalizedCitationText(normalizeWhitespace(text), selector);
+}
+
+function findNormalizedCitationText(
+  normalized: string,
+  selector: AssistantTextSelector,
+): { start: number; end: number } | null {
   const quote = normalizeWhitespace(selector.text);
   if (quote.trim().length === 0) return null;
 
@@ -279,4 +285,40 @@ export function resolveAssistantCitationRange(
   range.setStart(first.node, Math.max(0, start - first.start));
   range.setEnd(last.node, Math.min(last.node.length, end - last.start));
   return isUsableRange(root, range) ? range : null;
+}
+
+/** Resolves all selectors with one DOM walk and one normalized offset map. */
+export function resolveAssistantCitationRanges(
+  root: HTMLElement,
+  selectors: readonly AssistantTextSelector[],
+  diagnostics?: { onWalk: () => void },
+): (Range | null)[] {
+  if (selectors.length === 0) return [];
+  if (excludedAncestor(root) !== null) return selectors.map(() => null);
+  diagnostics?.onWalk();
+  const stream = readAssistantText(root);
+  const normalized = normalizeWhitespace(stream.text);
+  const offsets = [0];
+  for (const match of stream.text.matchAll(/\s+|\S+/g)) {
+    if (/\s/.test(match[0][0]!)) {
+      offsets.push(match.index + match[0].length);
+    } else {
+      for (let index = 1; index <= match[0].length; index++) {
+        offsets.push(match.index + index);
+      }
+    }
+  }
+  return selectors.map((selector) => {
+    const match = findNormalizedCitationText(normalized, selector);
+    if (!match) return null;
+    const start = offsets[match.start]!;
+    const end = offsets[match.end]!;
+    const first = stream.chunks.find((chunk) => chunk.end > start);
+    const last = stream.chunks.findLast((chunk) => chunk.start < end);
+    if (!first || !last) return null;
+    const range = root.ownerDocument.createRange();
+    range.setStart(first.node, Math.max(0, start - first.start));
+    range.setEnd(last.node, Math.min(last.node.length, end - last.start));
+    return isUsableRange(root, range) ? range : null;
+  });
 }
