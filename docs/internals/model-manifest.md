@@ -11,10 +11,20 @@ The top-level provider catalog is generic: models contain presentation metadata,
 an optional badge, and a reusable capability profile. The profile and model `adapter` fields are
 opaque until the owning provider validates them with its own allowlisted schema.
 
-Claude Code uses the manifest as its complete built-in model catalog. To add a Claude model that
-uses an existing profile, add one object to `providers.claudeAgent.models`. Do not add a test or
-change application code. Add or change a profile in the same JSON file only when the model exposes
-a capability combination that does not already exist.
+Claude Code discovers models through the Agent SDK initialization response, using the configured
+CLI and account without submitting a prompt. Runtime model IDs, aliases, and reported capabilities
+take precedence over matching manifest metadata. New runtime models appear without a catalog patch.
+The manifest supplements capabilities the runtime does not report and preserves older model IDs;
+it also supplies a fallback when model discovery is unavailable or an older CLI omits the list.
+
+Discovery is cached per provider instance and installed CLI version. Explicit model refresh clears
+the probe cache. A failed or empty probe preserves that instance's last successful model list for
+the same CLI version; changing versions discards it. Snapshots, chat dispatch, and text generation
+use the same merged catalog, while custom model identifiers remain opaque.
+
+For supplemental Claude metadata, add an object to `providers.claudeAgent.models` using an existing
+profile where possible. Add or change a profile only when the required capability combination does
+not already exist. Ordinary model-data changes do not require tests or application code changes.
 
 `currentModels.claudeAgent` is retained as a frozen compatibility field for releases that predate
 catalog discovery. New Claude models do not need to be added there. All `currentModels` lists are compatibility
@@ -23,7 +33,7 @@ metadata for older clients; new clients do not interpret absence from a list as 
 Runtime-discovered models remain visible by default. Only a matching entry in
 `providers.<driver>.models` with `status: "legacy"` moves a model into Legacy. A `current`
 entry or an unknown model clears stale legacy flags; custom models remain untouched.
-Codex and Antigravity discover availability from their runtimes, so new models do not need
+Claude, Codex, and Antigravity discover availability from their runtimes, so new models do not need
 a manifest update to appear. Older clients retain their previous classification behavior
 until updated.
 
