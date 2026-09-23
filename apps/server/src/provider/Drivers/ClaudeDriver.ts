@@ -7,14 +7,12 @@
  *
  * Unlike Codex, the Claude snapshot probe may invoke a secondary probe
  * (`probeClaudeCapabilities`) to read Anthropic account + slash-command
- * metadata. That probe is per-instance and keyed by binary + resolved HOME so
- * two concurrent Claude instances don't cross-contaminate account metadata.
+ * metadata. That probe is cached per instance and installed CLI version so accounts
+ * remain isolated and provider upgrades discover their new models.
  *
  * @module provider/Drivers/ClaudeDriver
  */
 import { ClaudeSettings, ProviderDriverKind } from "@lecturn/contracts";
-import * as Cache from "effect/Cache";
-import * as Duration from "effect/Duration";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -36,7 +34,10 @@ import {
   probeClaudeCapabilities,
 } from "../Layers/ClaudeProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
-import { resolveClaudeModelCatalog } from "../ClaudeModelCatalog.ts";
+import {
+  mergeClaudeRuntimeModelCatalog,
+  resolveClaudeModelCatalog,
+} from "../ClaudeModelCatalog.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import * as ModelManifest from "../ModelManifest.ts";
 import {
@@ -63,16 +64,12 @@ import {
   claudeExternalSessionsConfigDir,
   makeClaudeExternalSessionsLister,
 } from "./ClaudeExternalSessions.ts";
-import {
-  makeClaudeCapabilitiesCacheKey,
-  makeClaudeContinuationGroupKey,
-  makeClaudeEnvironment,
-} from "./ClaudeHome.ts";
+import { makeClaudeContinuationGroupKey, makeClaudeEnvironment } from "./ClaudeHome.ts";
 import { discoverClaudeSkills } from "./ClaudeSkills.ts";
+import { makeClaudeCapabilitiesCache } from "./ClaudeCapabilitiesCache.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
-const CAPABILITIES_PROBE_TTL = Duration.minutes(5);
 
 function isClaudeNativeCommandPath(commandPath: string): boolean {
   const normalized = normalizeCommandPath(commandPath);
@@ -125,13 +122,26 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
       const modelManifest = yield* ModelManifest.ModelManifest;
-      const modelCatalog = modelManifest.current.pipe(Effect.map(resolveClaudeModelCatalog));
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const fallbackContinuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,
       });
       const effectiveConfig = { ...config, enabled } satisfies ClaudeSettings;
+      const capabilitiesCache = yield* makeClaudeCapabilitiesCache(
+        probeClaudeCapabilities(effectiveConfig, processEnv, cwd).pipe(
+          Effect.provideService(Path.Path, path),
+        ),
+      );
+      // Snapshots and dispatch resolve the same per-instance runtime metadata.
+      const modelCatalog = modelManifest.current.pipe(
+        Effect.map((manifest) =>
+          mergeClaudeRuntimeModelCatalog(
+            resolveClaudeModelCatalog(manifest),
+            capabilitiesCache.currentModels,
+          ),
+        ),
+      );
       const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
@@ -171,18 +181,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         modelCatalog,
       );
 
-      // Per-instance capabilities cache: keyed on binary + resolved HOME so
-      // account-specific probes never share auth metadata across instances.
-      const capabilitiesProbeCache = yield* Cache.make({
-        capacity: 1,
-        timeToLive: CAPABILITIES_PROBE_TTL,
-        lookup: () =>
-          probeClaudeCapabilities(effectiveConfig, processEnv, cwd).pipe(
-            Effect.provideService(Path.Path, path),
-          ),
-      });
-      const capabilitiesCacheKey = yield* makeClaudeCapabilitiesCacheKey(effectiveConfig, cwd);
-
       // Start the TTL-gated refresh without delaying provider readiness. The
       // next check observes a remote manifest after the background fetch lands.
       const checkProvider = modelManifest.refreshInBackground.pipe(
@@ -191,11 +189,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
             Effect.flatMap((manifest) =>
               checkClaudeProviderStatus(
                 effectiveConfig,
-                () => Cache.get(capabilitiesProbeCache, capabilitiesCacheKey),
+                (_settings, version) => capabilitiesCache.get(version ?? null),
                 processEnv,
                 cwd,
                 resolveClaudeModelCatalog(manifest),
                 scopedLimitNames,
+                () => capabilitiesCache.currentModels,
               ),
             ),
             Effect.map(stampIdentity),
@@ -267,6 +266,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         enabled,
         snapshot,
         snapshotForCwd,
+        refreshModels: () => capabilitiesCache.invalidate,
         ...(externalSessionsConfigDir === undefined
           ? {}
           : {
