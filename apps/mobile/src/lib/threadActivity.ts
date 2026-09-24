@@ -1,6 +1,8 @@
 import {
   ApprovalRequestId,
+  isImportedHistoryRow,
   isToolLifecycleItemType,
+  PROVIDER_DISPLAY_NAMES,
   ProviderApprovalOption,
   ProviderRequestKind,
 } from "@lecturn/contracts";
@@ -8,6 +10,8 @@ import type {
   OrchestrationLatestTurn,
   OrchestrationThread,
   OrchestrationThreadActivity,
+  ProviderDriverKind,
+  ThreadImportOrigin,
   ToolLifecycleItemType,
   TurnId,
   UserInputQuestion,
@@ -166,9 +170,18 @@ export type ThreadFeedEntry =
       readonly type: "turn-fold";
       readonly id: string;
       readonly createdAt: string;
-      readonly turnId: TurnId;
+      /** Identity of the folded group: its turn, or a run of imported history. */
+      readonly foldKey: string;
+      readonly turnId: TurnId | null;
       readonly label: string;
       readonly expanded: boolean;
+    }
+  | {
+      /** Where an imported session's history ends and work done here begins. */
+      readonly type: "import-divider";
+      readonly id: string;
+      readonly createdAt: string;
+      readonly label: string;
     };
 
 export type ThreadFeedLatestTurn = Pick<
@@ -194,6 +207,7 @@ const presentedActivityGroupsCache = new WeakMap<
     readonly unsettledTurnId: TurnId | null;
     readonly isWorking: boolean;
     readonly activeTail: boolean;
+    readonly importedFrom: ThreadImportOrigin | null;
     readonly rows: ReadonlyArray<ThreadFeedEntry>;
   }
 >();
@@ -1371,73 +1385,139 @@ function deriveUnsettledTurnId(latestTurn: ThreadFeedLatestTurn | null): TurnId 
   return settled ? null : latestTurn.turnId;
 }
 
+/**
+ * Whether a row belongs to the turn that is still running. Imported history is
+ * the one kind of turnless row that never does: a session can keep working
+ * between turns, and its out-of-turn rows have to stay live because the
+ * running turn's id is itself null once every turn has settled.
+ */
+function isLiveTurnRow(
+  row: { readonly turnId: TurnId | null; readonly createdAt: string },
+  unsettledTurnId: TurnId | null,
+  importedFrom: ThreadImportOrigin | null,
+): boolean {
+  return row.turnId === unsettledTurnId && !isImportedHistoryRow({ importedFrom }, row);
+}
+
 interface ThreadFeedTurnFold {
-  readonly turnId: TurnId;
+  readonly foldKey: string;
+  readonly turnId: TurnId | null;
   readonly createdAt: string;
   readonly hiddenEntryIds: ReadonlySet<string>;
   readonly label: string;
 }
 
-function deriveThreadFeedTurnFolds(
-  feed: ReadonlyArray<ThreadFeedEntry>,
-  latestTurn: ThreadFeedLatestTurn | null,
-): ReadonlyMap<string, ThreadFeedTurnFold> {
-  const firstAssistantMessageIdByTurn = new Map<TurnId, string>();
-  const terminalAssistantMessageIdByTurn = new Map<TurnId, string>();
-  for (const entry of feed) {
-    if (entry.type === "message" && entry.message.role === "assistant" && entry.message.turnId) {
-      if (!firstAssistantMessageIdByTurn.has(entry.message.turnId)) {
-        firstAssistantMessageIdByTurn.set(entry.message.turnId, entry.id);
-      }
-      terminalAssistantMessageIdByTurn.set(entry.message.turnId, entry.id);
-    }
-  }
+interface ThreadFeedTurnGroup {
+  readonly foldKey: string;
+  readonly turnId: TurnId | null;
+  readonly entries: ThreadFeedEntry[];
+  readonly startBoundary: string | null;
+  firstAssistantEntryId: string | null;
+  terminalAssistantEntryId: string | null;
+}
 
-  interface TurnGroup {
-    readonly entries: ThreadFeedEntry[];
-    readonly startBoundary: string | null;
+/** The turn whose work an entry renders; null for rows outside any turn. */
+function foldableEntryTurnId(entry: ThreadFeedEntry): TurnId | null {
+  if (entry.type === "message") {
+    return entry.message.role === "assistant" ? entry.message.turnId : null;
   }
-  const groupsByTurnId = new Map<TurnId, TurnGroup>();
+  return entry.type === "activity-group" ? entry.turnId : null;
+}
+
+/**
+ * The feed's foldable groups in order: one per turn, plus one per run of
+ * imported history. Imported rows belong to no turn, so the user message that
+ * opened the exchange is their only boundary; every other turnless row (such
+ * as worktree setup) stays outside the folds, as it always has.
+ */
+function collectThreadFeedTurnGroups(
+  feed: ReadonlyArray<ThreadFeedEntry>,
+  importedFrom: ThreadImportOrigin | null,
+): ReadonlyArray<ThreadFeedTurnGroup> {
+  const groupsByFoldKey = new Map<string, ThreadFeedTurnGroup>();
   let pendingUserBoundary: string | null = null;
+  let boundaryUserEntryId: string | null = null;
+  let importedRunKey: string | null = null;
   for (const entry of feed) {
     if (entry.type === "message" && entry.message.role === "user") {
       pendingUserBoundary = entry.message.createdAt;
+      boundaryUserEntryId = entry.id;
+      importedRunKey = null;
       continue;
     }
-    const turnId =
-      entry.type === "message" && entry.message.role === "assistant"
-        ? entry.message.turnId
-        : entry.type === "activity-group"
-          ? entry.turnId
-          : null;
-    if (!turnId) {
+    if (entry.type !== "message" && entry.type !== "activity-group") {
       continue;
     }
-    let group = groupsByTurnId.get(turnId);
+    const turnId = foldableEntryTurnId(entry);
+    let foldKey: string;
+    if (turnId !== null) {
+      foldKey = turnId;
+    } else if (isImportedFeedEntry(entry, importedFrom)) {
+      // Key the run by the user message that opened it. The run's own first
+      // row moves when an older page prepends into it, which would strand the
+      // user's expansion under a key nothing renders any more.
+      importedRunKey ??= `imported:${boundaryUserEntryId ?? entry.id}`;
+      foldKey = importedRunKey;
+    } else {
+      continue;
+    }
+    let group = groupsByFoldKey.get(foldKey);
     if (!group) {
       group = {
+        foldKey,
+        turnId,
         entries: [],
         startBoundary: pendingUserBoundary,
+        firstAssistantEntryId: null,
+        terminalAssistantEntryId: null,
       };
       pendingUserBoundary = null;
-      groupsByTurnId.set(turnId, group);
+      groupsByFoldKey.set(foldKey, group);
     }
     group.entries.push(entry);
+    if (entry.type === "message" && entry.message.role === "assistant") {
+      group.firstAssistantEntryId ??= entry.id;
+      group.terminalAssistantEntryId = entry.id;
+    }
   }
+  return [...groupsByFoldKey.values()];
+}
 
+/**
+ * The assistant message that ends each turn, and each run of imported history:
+ * the rows that carry a response's end-of-turn affordances.
+ */
+export function deriveTerminalAssistantMessageIds(
+  feed: ReadonlyArray<ThreadFeedEntry>,
+  importedFrom: ThreadImportOrigin | null = null,
+): ReadonlySet<string> {
+  const terminalIds = new Set<string>();
+  for (const group of collectThreadFeedTurnGroups(feed, importedFrom)) {
+    if (group.terminalAssistantEntryId !== null) {
+      terminalIds.add(group.terminalAssistantEntryId);
+    }
+  }
+  return terminalIds;
+}
+
+function deriveThreadFeedTurnFolds(
+  feed: ReadonlyArray<ThreadFeedEntry>,
+  latestTurn: ThreadFeedLatestTurn | null,
+  importedFrom: ThreadImportOrigin | null,
+): ReadonlyMap<string, ThreadFeedTurnFold> {
   const unsettledTurnId = deriveUnsettledTurnId(latestTurn);
   const foldsByAnchorId = new Map<string, ThreadFeedTurnFold>();
-  for (const [turnId, group] of groupsByTurnId) {
-    const { entries } = group;
-    if (turnId === unsettledTurnId) {
+  for (const group of collectThreadFeedTurnGroups(feed, importedFrom)) {
+    const { entries, turnId } = group;
+    if (isLiveTurnRow(threadFeedEntryRow(entries[0]!), unsettledTurnId, importedFrom)) {
       continue;
     }
     if (entries.some((entry) => entry.type === "message" && entry.message.streaming)) {
       continue;
     }
 
-    const firstAssistantMessageId = firstAssistantMessageIdByTurn.get(turnId);
-    const terminalAssistantMessageId = terminalAssistantMessageIdByTurn.get(turnId);
+    const firstAssistantMessageId = group.firstAssistantEntryId;
+    const terminalAssistantMessageId = group.terminalAssistantEntryId;
     const hiddenEntryIds = new Set(
       entries
         .filter(
@@ -1469,19 +1549,23 @@ function deriveThreadFeedTurnFolds(
     const terminalEntry = terminalAssistantMessageId
       ? entries.find((entry) => entry.id === terminalAssistantMessageId)
       : null;
-    const latestTurnMatches = latestTurn?.turnId === turnId;
+    const latestTurnMatches = turnId !== null && latestTurn?.turnId === turnId;
     const lastEntryEnd =
       lastEntry.type === "message" ? lastEntry.message.updatedAt : lastEntry.createdAt;
+    // An import rewrites its rows' timestamps to keep them ordered, so imported
+    // history never claims a duration it cannot know.
     const elapsedMs =
-      latestTurnMatches && latestTurn.startedAt && latestTurn.completedAt
-        ? computeElapsedMs(latestTurn.startedAt, latestTurn.completedAt)
-        : computeElapsedMs(
-            group.startBoundary ?? firstEntry.createdAt,
-            maxIsoTimestamp(
-              terminalEntry?.type === "message" ? terminalEntry.message.updatedAt : null,
-              lastEntryEnd,
-            ) ?? lastEntryEnd,
-          );
+      turnId === null
+        ? null
+        : latestTurnMatches && latestTurn.startedAt && latestTurn.completedAt
+          ? computeElapsedMs(latestTurn.startedAt, latestTurn.completedAt)
+          : computeElapsedMs(
+              group.startBoundary ?? firstEntry.createdAt,
+              maxIsoTimestamp(
+                terminalEntry?.type === "message" ? terminalEntry.message.updatedAt : null,
+                lastEntryEnd,
+              ) ?? lastEntryEnd,
+            );
     const duration = elapsedMs === null ? null : formatDuration(elapsedMs);
     const interrupted = latestTurnMatches && latestTurn.state === "interrupted";
     const label = interrupted
@@ -1493,6 +1577,7 @@ function deriveThreadFeedTurnFolds(
         : "Worked";
 
     foldsByAnchorId.set(firstHiddenEntry.id, {
+      foldKey: group.foldKey,
       turnId,
       createdAt: firstHiddenEntry.createdAt,
       hiddenEntryIds,
@@ -1502,55 +1587,163 @@ function deriveThreadFeedTurnFolds(
   return foldsByAnchorId;
 }
 
+/** The product an imported session was made in, as users know it. */
+export function importSourceLabel(driverKind: ProviderDriverKind): string {
+  return driverKind === "claudeAgent"
+    ? "Claude Code"
+    : (PROVIDER_DISPLAY_NAMES[driverKind] ?? driverKind);
+}
+
+/** Thread-header lineage line for an imported thread. */
+export function buildThreadImportLabel(importedFrom: ThreadImportOrigin): string {
+  return `Imported from ${importSourceLabel(importedFrom.driverKind)}`;
+}
+
+/**
+ * Whether to tell the user the import left earlier history out. Waits for the
+ * oldest page so the note always sits above the first message shown.
+ */
+export function shouldShowImportTruncatedNote(input: {
+  readonly importedFrom: ThreadImportOrigin | null | undefined;
+  readonly hasOlderTurns: boolean;
+  readonly firstMessage: { readonly turnId: TurnId | null; readonly createdAt: string } | undefined;
+}): boolean {
+  return (
+    input.importedFrom?.historyTruncated === true &&
+    !input.hasOlderTurns &&
+    input.firstMessage !== undefined &&
+    isImportedHistoryRow(input, input.firstMessage)
+  );
+}
+
+const IMPORT_DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
+
+function formatImportDate(isoDate: string): string {
+  const timestamp = Date.parse(isoDate);
+  return Number.isFinite(timestamp) ? IMPORT_DATE_FORMATTER.format(timestamp) : "";
+}
+
+/** The turn and time an import predicate reads an entry by. */
+function threadFeedEntryRow(entry: ThreadFeedEntry): {
+  readonly turnId: TurnId | null;
+  readonly createdAt: string;
+} {
+  if (entry.type === "message") {
+    return { turnId: entry.message.turnId, createdAt: entry.message.createdAt };
+  }
+  if (entry.type === "import-divider") {
+    return { turnId: null, createdAt: entry.createdAt };
+  }
+  return { turnId: entry.turnId, createdAt: entry.createdAt };
+}
+
+function isImportedFeedEntry(
+  entry: ThreadFeedEntry,
+  importedFrom: ThreadImportOrigin | null,
+): boolean {
+  return importedFrom !== null && isImportedHistoryRow({ importedFrom }, threadFeedEntryRow(entry));
+}
+
+// Keyed by the origin it is built from, so the list keeps one row identity for
+// as long as the thread's import origin holds still.
+const importDividerRowsCache = new WeakMap<
+  ThreadImportOrigin,
+  Extract<ThreadFeedEntry, { readonly type: "import-divider" }>
+>();
+
+/**
+ * Where an imported session's history ends: above the first row done in
+ * Lecturn, or after the last row until one exists. A fork of an import can
+ * keep `importedFrom` past the window that holds any imported row; then there
+ * is nothing to mark.
+ */
+function resolveImportDivider(
+  feed: ReadonlyArray<ThreadFeedEntry>,
+  importedFrom: ThreadImportOrigin | null,
+): {
+  readonly row: Extract<ThreadFeedEntry, { readonly type: "import-divider" }>;
+  readonly beforeEntryId: string | null;
+} | null {
+  const firstEntry = feed[0];
+  if (importedFrom === null || !firstEntry || !isImportedFeedEntry(firstEntry, importedFrom)) {
+    return null;
+  }
+  let row = importDividerRowsCache.get(importedFrom);
+  if (!row) {
+    const importedOn = formatImportDate(importedFrom.importedAt);
+    row = {
+      type: "import-divider",
+      id: "import-divider",
+      createdAt: importedFrom.importedAt,
+      label: [buildThreadImportLabel(importedFrom), importedOn].filter(Boolean).join(" · "),
+    };
+    importDividerRowsCache.set(importedFrom, row);
+  }
+  return {
+    row,
+    beforeEntryId: feed.find((entry) => !isImportedFeedEntry(entry, importedFrom))?.id ?? null,
+  };
+}
+
 export function deriveThreadFeedPresentation(
   feed: ReadonlyArray<ThreadFeedEntry>,
   latestTurn: ThreadFeedLatestTurn | null,
-  expandedTurnIds: ReadonlySet<TurnId>,
+  expandedFoldKeys: ReadonlySet<string>,
   expandedWorkGroupIds: ReadonlySet<string> = new Set(),
   activeWorkStartedAt: string | null = null,
+  importedFrom: ThreadImportOrigin | null = null,
 ): ThreadFeedEntry[] {
   const sourceFeed = feed.filter(
-    (entry) => entry.type !== "turn-fold" && entry.type !== "work-toggle",
+    (entry) =>
+      entry.type !== "turn-fold" && entry.type !== "work-toggle" && entry.type !== "import-divider",
   );
   const activeTailGroup = sourceFeed.findLast(
     (entry) => entry.type !== "message" || !isEmptyMessage(entry),
   );
-  const foldsByAnchorId = deriveThreadFeedTurnFolds(sourceFeed, latestTurn);
+  const foldsByAnchorId = deriveThreadFeedTurnFolds(sourceFeed, latestTurn, importedFrom);
   const unsettledTurnId = deriveUnsettledTurnId(latestTurn);
   const isWorking = activeWorkStartedAt !== null;
   const collapsedEntryIds = new Set<string>();
   for (const fold of foldsByAnchorId.values()) {
-    if (!expandedTurnIds.has(fold.turnId)) {
+    if (!expandedFoldKeys.has(fold.foldKey)) {
       for (const entryId of fold.hiddenEntryIds) {
         collapsedEntryIds.add(entryId);
       }
     }
   }
+  const importDivider = resolveImportDivider(sourceFeed, importedFrom);
 
   const result: ThreadFeedEntry[] = [];
   for (const entry of sourceFeed) {
+    if (importDivider?.beforeEntryId === entry.id) {
+      result.push(importDivider.row);
+    }
     const isActiveTailGroup =
       isWorking &&
-      unsettledTurnId !== null &&
       entry.type === "activity-group" &&
       activeTailGroup?.type === "activity-group" &&
       activeTailGroup.id === entry.id &&
-      entry.turnId === unsettledTurnId;
+      isLiveTurnRow(entry, unsettledTurnId, importedFrom);
     const fold = foldsByAnchorId.get(entry.id);
     if (fold) {
-      const expanded = expandedTurnIds.has(fold.turnId);
+      const expanded = expandedFoldKeys.has(fold.foldKey);
       let row = turnFoldRowsCache.get(entry);
       if (
         !row ||
-        row.turnId !== fold.turnId ||
+        row.foldKey !== fold.foldKey ||
         row.createdAt !== fold.createdAt ||
         row.label !== fold.label ||
         row.expanded !== expanded
       ) {
         row = {
           type: "turn-fold",
-          id: `turn-fold:${fold.turnId}`,
+          id: `turn-fold:${fold.foldKey}`,
           createdAt: fold.createdAt,
+          foldKey: fold.foldKey,
           turnId: fold.turnId,
           label: fold.label,
           expanded,
@@ -1567,8 +1760,12 @@ export function deriveThreadFeedPresentation(
         unsettledTurnId,
         isWorking,
         isActiveTailGroup,
+        importedFrom,
       );
     }
+  }
+  if (importDivider !== null && importDivider.beforeEntryId === null) {
+    result.push(importDivider.row);
   }
   return result;
 }
@@ -1580,6 +1777,7 @@ function appendPresentedFeedEntry(
   unsettledTurnId: TurnId | null,
   isWorking: boolean,
   activeTail: boolean,
+  importedFrom: ThreadImportOrigin | null,
 ): void {
   if (entry.type !== "activity-group") {
     result.push(entry);
@@ -1596,6 +1794,7 @@ function appendPresentedFeedEntry(
     cached.unsettledTurnId !== unsettledTurnId ||
     cached.isWorking !== isWorking ||
     cached.activeTail !== activeTail ||
+    cached.importedFrom !== importedFrom ||
     cached.rows.some(
       (row) => row.type === "work-toggle" && expandedWorkGroupIds.has(row.groupId) !== row.expanded,
     )
@@ -1608,8 +1807,9 @@ function appendPresentedFeedEntry(
       unsettledTurnId,
       isWorking,
       activeTail,
+      importedFrom,
     );
-    cached = { unsettledTurnId, isWorking, activeTail, rows };
+    cached = { unsettledTurnId, isWorking, activeTail, importedFrom, rows };
     presentedActivityGroupsCache.set(entry, cached);
   }
   for (const row of cached.rows) {
@@ -1624,6 +1824,7 @@ function appendActivityGroupRows(
   unsettledTurnId: TurnId | null,
   isWorking: boolean,
   activeTail: boolean,
+  importedFrom: ThreadImportOrigin | null,
 ): void {
   const activities = omitSupersededLifecycleMarkers(
     entry.activities.filter(
@@ -1631,7 +1832,7 @@ function appendActivityGroupRows(
         !(activity.toolLike && activity.status === "neutral") ||
         (isWorking &&
           activity.lifecycleStatus === "inProgress" &&
-          activity.turnId === unsettledTurnId),
+          isLiveTurnRow(activity, unsettledTurnId, importedFrom)),
     ),
     (activity) => activity.workEntry,
   );
@@ -1649,6 +1850,7 @@ function appendActivityGroupRows(
       unsettledTurnId,
       isWorking,
       activeTail && isTrailingRun,
+      importedFrom,
     );
     groupableRun = [];
   };
@@ -1677,6 +1879,7 @@ function appendToolGroupRows(
   unsettledTurnId: TurnId | null,
   isWorking: boolean,
   activeTail: boolean,
+  importedFrom: ThreadImportOrigin | null,
 ): void {
   const firstEntry = activities[0]!.workEntry;
   const identity = firstEntry.toolCallId
@@ -1687,7 +1890,7 @@ function appendToolGroupRows(
   const latestActiveActivity = activities.findLast(
     (activity) =>
       isWorking &&
-      activity.turnId === unsettledTurnId &&
+      isLiveTurnRow(activity, unsettledTurnId, importedFrom) &&
       (activity.lifecycleStatus === "inProgress" ||
         (activeTail &&
           activity.lifecycleStatus === undefined &&
@@ -1768,7 +1971,7 @@ function appendToolGroupRows(
         isWorking &&
         activity.id === latestActivity.id &&
         activity.lifecycleStatus === "inProgress" &&
-        activity.turnId === unsettledTurnId,
+        isLiveTurnRow(activity, unsettledTurnId, importedFrom),
     })),
   });
 }

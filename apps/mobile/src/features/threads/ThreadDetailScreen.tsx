@@ -721,7 +721,10 @@ const ThreadDetailScreenContent = memo(function ThreadDetailScreenContent(
       resolveThreadFeedSubmissionAnchor({
         currentAnchorMessageId: anchorMessageId,
         submittedMessageId: messageId,
-        hasStartedTurn: props.selectedThread.latestTurn !== null,
+        // An imported thread opens with history and no turn of its own, so it
+        // is never the empty thread the anchor is for.
+        hasStartedTurn:
+          props.selectedThread.latestTurn !== null || props.selectedThread.importedFrom != null,
         hasUserMessage,
         queuedMessageCount: props.selectedThreadQueueCount,
       }),
@@ -732,6 +735,7 @@ const ThreadDetailScreenContent = memo(function ThreadDetailScreenContent(
     anchorMessageId,
     props.onSendMessage,
     settled,
+    props.selectedThread.importedFrom,
     props.selectedThread.latestTurn,
     props.selectedThreadQueueCount,
     selectedThreadFeed,
@@ -819,6 +823,7 @@ const ThreadDetailScreenContent = memo(function ThreadDetailScreenContent(
             contentPresentation={props.contentPresentation}
             agentLabel={agentLabel}
             latestTurn={props.selectedThread.latestTurn}
+            importedFrom={props.selectedThread.importedFrom ?? null}
             activeWorkStartedAt={props.activeWorkStartedAt}
             listRef={listRef}
             freeze={freeze}

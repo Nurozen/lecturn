@@ -725,7 +725,9 @@ export function useThreadOutboxDrain(): void {
       // A forked thread keeps its minted "<parent> (fork)" title until its
       // first turn; sending that title as the seed lets the server swap in a
       // generated title once the turn completes, while a user rename (which
-      // drops the suffix) keeps the title untouched.
+      // drops the suffix) keeps the title untouched. An imported thread sends
+      // no seed: its title comes from the external session, and the server's
+      // retitle gate replaces a title only when a seed matches it.
       const targetThread = findThread(
         appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
         queuedMessage,

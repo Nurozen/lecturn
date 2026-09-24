@@ -39,6 +39,7 @@ import { AddProjectDestinationRoute } from "./features/projects/AddProjectDestin
 import { AddProjectLocalRoute } from "./features/projects/AddProjectLocalRoute";
 import { AddProjectRepositoryRoute } from "./features/projects/AddProjectRepositoryRoute";
 import { AddProjectSourceRoute } from "./features/projects/AddProjectSourceRoute";
+import { ImportSessionPickerRouteScreen } from "./features/threads/ImportSessionPickerScreen";
 import { NewTaskDraftRouteScreen } from "./features/threads/NewTaskDraftRouteScreen";
 import {
   NewTaskBranchPickerRouteScreen,
@@ -293,6 +294,13 @@ const NewTaskSheetStack = createNativeStackNavigator({
       linking: "draft/branch",
       options: {
         title: "Branch",
+      },
+    }),
+    NewTaskImportSession: createNativeStackScreen({
+      screen: ImportSessionPickerRouteScreen,
+      linking: "draft/import-session",
+      options: {
+        title: "Import session",
       },
     }),
     ThreadSettings: createNativeStackScreen({

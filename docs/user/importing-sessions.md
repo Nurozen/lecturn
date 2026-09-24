@@ -10,18 +10,20 @@ the original wherever you started it, and deleting the imported thread leaves it
 
 ## Where to import
 
-Open the command palette and choose **Import session…**. The list shows the sessions that ran in
-the current project's folder, and **Show sessions from all folders** widens it to every session on
-that machine. Pick a session from the list to import it.
+On web and desktop, open the command palette and choose **Import session…**. On mobile, start a
+new task, choose the project, then tap **Import** below the prompt. Either way the list shows the
+sessions that ran in that project's folder, and **Show sessions from all folders** widens it to
+every session on that machine. Pick a session from the list to import it.
 
 A session imports only into a project whose folder matches the folder the session ran in. A
 session that ran in one of the project's worktrees imports when a thread in that project already
 uses that worktree, and the imported thread works there too. Sessions from any other folder are
 listed with their folder but cannot be imported until you add that folder as a project.
 
-An imported thread keeps the [permission mode](./permission-modes.md) of the thread you have open
-when you import, the same way a new thread does. Importing while you work in a restricted thread
-never gives you a **Full access** one.
+An imported thread starts in the same [permission mode](./permission-modes.md) and **Plan** or
+**Build** mode a new thread would. On web and desktop those come from the thread you have open; on
+mobile they come from the new task's controls. Either way, importing while you work in a restricted
+mode never gives you a **Full access** thread.
 
 Importing works over remote connections too. Sessions are read on the machine running Lecturn, so
 the list shows the sessions on that machine, not the ones on the device in your hand.
