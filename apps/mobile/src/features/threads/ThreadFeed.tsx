@@ -8,6 +8,7 @@ import type {
   EnvironmentId,
   MessageId,
   ThreadId,
+  ThreadImportOrigin,
   TurnId,
 } from "@lecturn/contracts";
 import { renderAssistantCitationsAsText } from "@lecturn/shared/assistantCitations";
@@ -147,8 +148,10 @@ import {
   resolveMarkdownLinkPresentation,
 } from "@lecturn/mobile-markdown-text/links";
 import {
+  deriveTerminalAssistantMessageIds,
   deriveThreadFeedPresentation,
   isContextCompactionActivityGroup,
+  shouldShowImportTruncatedNote,
   type ThreadFeedEntry,
   type ThreadFeedLatestTurn,
 } from "../../lib/threadActivity";
@@ -212,6 +215,10 @@ function formatMessageTime(input: string): string {
 // Fixed heights mirror renderFeedEntry's classNames and are only used while
 // text fits at the current font settings. Larger accessibility text is measured.
 const TURN_FOLD_HEIGHT = 42; // min-h-11 (38.5) + mb-1 (3.5), with the mobile 14px rem
+// text-xs line box (17) + py-1 (7) + mb-3 (10.5), with the mobile 14px rem.
+// One divider exists per thread, so LegendList never forms a running average
+// for its item type and would otherwise carry the list estimate for it.
+const IMPORT_DIVIDER_HEIGHT = 34.5;
 const THREAD_FEED_LAYOUT_TRANSITION = LinearTransition.duration(THREAD_DISCLOSURE_TRANSITION_MS);
 // Let neighboring rows move out of the new rows' space before showing their text.
 const THREAD_FEED_DISCLOSURE_ENTER_TRANSITION = FadeIn.delay(
@@ -235,6 +242,8 @@ export interface ThreadFeedProps {
   readonly contentPresentation: ThreadContentPresentation;
   readonly agentLabel: string;
   readonly latestTurn: ThreadFeedLatestTurn | null;
+  /** Set when the thread was created from a session made outside Lecturn. */
+  readonly importedFrom?: ThreadImportOrigin | null;
   readonly activeWorkStartedAt: string | null;
   readonly listRef: RefObject<LegendListRef | null>;
   readonly freeze: SharedValue<boolean>;
@@ -1322,7 +1331,7 @@ function renderFeedEntry(
     readonly onCopyWorkRow: (rowId: string, value: string) => void;
     readonly onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
     readonly onToggleWorkRow: (rowId: string, anchorKey: string) => void;
-    readonly onToggleTurnFold: (turnId: TurnId) => void;
+    readonly onToggleTurnFold: (foldKey: string) => void;
     readonly onPressPreview: (source: FilePreviewSource) => void;
     readonly onPressVideo: (attachment: ChatFileAttachment, sourceIdentifier: string) => void;
     readonly markdownLinkHandlers: MarkdownLinkHandlers;
@@ -1340,12 +1349,28 @@ function renderFeedEntry(
   const entry = info.item;
   const { markdownStyles, iconSubtleColor, userBubbleColor } = props;
 
+  if (entry.type === "import-divider") {
+    return (
+      <View
+        accessible
+        accessibilityLabel={entry.label}
+        className="mb-3 flex-row items-center gap-3 px-1 py-1"
+      >
+        <View className="h-px flex-1 bg-adaptive-neutral-200-a80-white-a8" />
+        <Text className="shrink-0 font-lecturn-medium text-xs text-foreground-muted">
+          {entry.label}
+        </Text>
+        <View className="h-px flex-1 bg-adaptive-neutral-200-a80-white-a8" />
+      </View>
+    );
+  }
+
   if (entry.type === "turn-fold") {
     return (
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded: entry.expanded }}
-        onPress={() => props.onToggleTurnFold(entry.turnId)}
+        onPress={() => props.onToggleTurnFold(entry.foldKey)}
         hitSlop={4}
         className="mb-1 min-h-11 flex-row items-center gap-2 border-b border-adaptive-neutral-200-a80-white-a8 px-2"
         style={{
@@ -1940,14 +1965,14 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     readonly copiedRowId: string | null;
     readonly expandedWorkGroups: Record<string, boolean>;
     readonly expandedWorkRows: Record<string, boolean>;
-    readonly expandedTurnIds: ReadonlySet<TurnId>;
+    readonly expandedFoldKeys: ReadonlySet<string>;
   }>({
     copiedRowId: null,
     expandedWorkGroups: {},
     expandedWorkRows: {},
-    expandedTurnIds: new Set(),
+    expandedFoldKeys: new Set(),
   });
-  const { copiedRowId, expandedWorkGroups, expandedWorkRows, expandedTurnIds } = interactionState;
+  const { copiedRowId, expandedWorkGroups, expandedWorkRows, expandedFoldKeys } = interactionState;
   const [expandedFile, setExpandedFile] = useState<FilePreviewSource | null>(null);
   const [expandedVideo, setExpandedVideo] = useState<VideoPreviewSource | null>(null);
   useEffect(() => {
@@ -2353,15 +2378,17 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       deriveThreadFeedPresentation(
         props.feed,
         props.latestTurn,
-        expandedTurnIds,
+        expandedFoldKeys,
         expandedWorkGroupIds,
         props.activeWorkStartedAt,
+        props.importedFrom ?? null,
       ),
     [
-      expandedTurnIds,
+      expandedFoldKeys,
       expandedWorkGroupIds,
       props.activeWorkStartedAt,
       props.feed,
+      props.importedFrom,
       props.latestTurn,
     ],
   );
@@ -2407,15 +2434,21 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       ),
     [presentedFeed, props.anchorMessageId, anchorTopInset],
   );
-  const terminalAssistantMessageIds = useMemo(() => {
-    const terminalIdsByTurn = new Map<TurnId, string>();
-    for (const entry of props.feed) {
-      if (entry.type === "message" && entry.message.role === "assistant" && entry.message.turnId) {
-        terminalIdsByTurn.set(entry.message.turnId, entry.message.id);
-      }
-    }
-    return new Set(terminalIdsByTurn.values());
-  }, [props.feed]);
+  const terminalAssistantMessageIds = useMemo(
+    () => deriveTerminalAssistantMessageIds(props.feed, props.importedFrom ?? null),
+    [props.feed, props.importedFrom],
+  );
+  // Shares the header slot with "Load earlier turns", so the note only appears
+  // once the oldest page is loaded and never adds a row to the list.
+  const showImportTruncatedNote = useMemo(
+    () =>
+      shouldShowImportTruncatedNote({
+        importedFrom: props.importedFrom ?? null,
+        hasOlderTurns: props.loadEarlier != null,
+        firstMessage: props.feed.find((entry) => entry.type === "message")?.message,
+      }),
+    [props.feed, props.importedFrom, props.loadEarlier],
+  );
   const unsettledTurnId =
     props.latestTurn &&
     (props.latestTurn.completedAt === null || props.latestTurn.state === "running")
@@ -2433,18 +2466,18 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         const interruptedTurnId = props.latestTurn.turnId;
         setInteractionState((current) => ({
           ...current,
-          expandedTurnIds: new Set(current.expandedTurnIds).add(interruptedTurnId),
+          expandedFoldKeys: new Set(current.expandedFoldKeys).add(interruptedTurnId),
         }));
       }
       return;
     }
     setInteractionState((current) => {
-      if (!current.expandedTurnIds.has(previous.turnId)) {
+      if (!current.expandedFoldKeys.has(previous.turnId)) {
         return current;
       }
-      const next = new Set(current.expandedTurnIds);
+      const next = new Set(current.expandedFoldKeys);
       next.delete(previous.turnId);
-      return { ...current, expandedTurnIds: next };
+      return { ...current, expandedFoldKeys: next };
     });
   }, [props.latestTurn]);
 
@@ -2501,7 +2534,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     if (disclosureAnchorKeyRef.current !== null) {
       settleDisclosureAfterLayout();
     }
-  }, [expandedTurnIds, expandedWorkGroups, expandedWorkRows, settleDisclosureAfterLayout]);
+  }, [expandedFoldKeys, expandedWorkGroups, expandedWorkRows, settleDisclosureAfterLayout]);
 
   const handleItemSizeChanged = useCallback(() => {
     if (disclosureAnchorKeyRef.current !== null) {
@@ -2569,16 +2602,16 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   );
 
   const onToggleTurnFold = useCallback(
-    (turnId: TurnId) => {
-      suspendEndScrollMaintenanceForDisclosure(`turn-fold:${turnId}`);
+    (foldKey: string) => {
+      suspendEndScrollMaintenanceForDisclosure(`turn-fold:${foldKey}`);
       setInteractionState((current) => {
-        const next = new Set(current.expandedTurnIds);
-        if (next.has(turnId)) {
-          next.delete(turnId);
+        const next = new Set(current.expandedFoldKeys);
+        if (next.has(foldKey)) {
+          next.delete(foldKey);
         } else {
-          next.add(turnId);
+          next.add(foldKey);
         }
-        return { ...current, expandedTurnIds: next };
+        return { ...current, expandedFoldKeys: next };
       });
     },
     [suspendEndScrollMaintenanceForDisclosure],
@@ -2612,6 +2645,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       switch (entry.type) {
         case "turn-fold":
           return TURN_FOLD_HEIGHT;
+        case "import-divider":
+          return IMPORT_DIVIDER_HEIGHT;
         case "work-toggle":
           return WORK_GROUP_TOGGLE_HEIGHT;
         case "activity-group":
@@ -2856,6 +2891,12 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
                       {props.loadEarlier.loading ? "Loading earlier turns…" : "Load earlier turns"}
                     </Text>
                   </Pressable>
+                ) : null}
+                {showImportTruncatedNote ? (
+                  <Text className="px-4 py-2 text-center text-xs text-foreground-secondary">
+                    Earlier messages from this session aren&apos;t shown. The model still has the
+                    full session.
+                  </Text>
                 ) : null}
               </>
             }

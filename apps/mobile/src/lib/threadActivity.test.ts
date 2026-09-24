@@ -5,21 +5,26 @@ import {
   EventId,
   MessageId,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
   TurnId,
   type OrchestrationThread,
   type OrchestrationThreadActivity,
+  type ThreadImportOrigin,
 } from "@lecturn/contracts";
 
 import {
   buildPendingUserInputAnswers,
   buildThreadFeed,
+  buildThreadImportLabel,
   derivePendingApprovals,
   derivePendingUserInputs,
+  deriveTerminalAssistantMessageIds,
   deriveThreadFeedPresentation,
   isPendingUserInputOptionSelected,
   setPendingUserInputCustomAnswer,
+  shouldShowImportTruncatedNote,
   togglePendingUserInputOptionSelection,
   type ThreadFeedActivity,
   type ThreadFeedEntry,
@@ -2651,5 +2656,424 @@ describe("quiet timeline: nested agents", () => {
     expect(deriveThreadFeedPresentation(feed, null, new Set())).toMatchObject([
       { type: "activity-group", id: "nested-done" },
     ]);
+  });
+});
+
+describe("imported thread history", () => {
+  const importedAt = "2026-04-01T00:00:10.000Z";
+  const claudeImport: ThreadImportOrigin = {
+    providerInstanceId: ProviderInstanceId.make("claude"),
+    driverKind: ProviderDriverKind.make("claudeAgent"),
+    sessionId: "session-1",
+    cwd: "/repo",
+    title: "Ship the importer",
+    importedAt,
+    historyTruncated: false,
+  };
+  const turnId = TurnId.make("turn-1");
+
+  function makeImportedThread(): OrchestrationThread {
+    return makeThread({
+      id: ThreadId.make("imported-thread"),
+      projectId: ProjectId.make("project-1"),
+      title: "Ship the importer",
+      createdAt: importedAt,
+      latestTurn: {
+        turnId,
+        state: "completed",
+        requestedAt: "2026-04-01T00:01:00.000Z",
+        startedAt: "2026-04-01T00:01:01.000Z",
+        completedAt: "2026-04-01T00:01:09.000Z",
+        assistantMessageId: MessageId.make("new-assistant"),
+      },
+      messages: [
+        {
+          id: MessageId.make("imported-user"),
+          role: "user",
+          text: "Where did we land?",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-04-01T00:00:01.000Z",
+          updatedAt: "2026-04-01T00:00:01.000Z",
+        },
+        {
+          id: MessageId.make("imported-assistant-first"),
+          role: "assistant",
+          text: "Looking at the repo.",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-04-01T00:00:03.000Z",
+          updatedAt: "2026-04-01T00:00:03.000Z",
+        },
+        {
+          id: MessageId.make("imported-assistant-last"),
+          role: "assistant",
+          text: "We landed the adapter.",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-04-01T00:00:04.000Z",
+          updatedAt: "2026-04-01T00:00:04.000Z",
+        },
+        {
+          id: MessageId.make("new-user"),
+          role: "user",
+          text: "Keep going.",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-04-01T00:01:00.000Z",
+          updatedAt: "2026-04-01T00:01:00.000Z",
+        },
+        {
+          id: MessageId.make("new-assistant"),
+          role: "assistant",
+          text: "Done.",
+          turnId,
+          streaming: false,
+          createdAt: "2026-04-01T00:01:08.000Z",
+          updatedAt: "2026-04-01T00:01:09.000Z",
+        },
+      ],
+      activities: [
+        makeActivity({
+          id: EventId.make("imported-tool"),
+          kind: "tool.completed",
+          tone: "tool",
+          summary: "Read files",
+          createdAt: "2026-04-01T00:00:02.000Z",
+          payload: { title: "Read files", itemType: "file_read", status: "completed" },
+        }),
+        makeActivity({
+          id: EventId.make("new-tool"),
+          kind: "tool.completed",
+          tone: "tool",
+          summary: "Edited files",
+          createdAt: "2026-04-01T00:01:05.000Z",
+          turnId,
+          payload: { title: "Edited files", itemType: "file_change", status: "completed" },
+        }),
+      ],
+    });
+  }
+
+  it("folds an imported exchange like a turn and divides it from new work", () => {
+    const thread = makeImportedThread();
+    const feed = buildThreadFeed(thread);
+
+    const collapsed = deriveThreadFeedPresentation(
+      feed,
+      thread.latestTurn,
+      new Set(),
+      new Set(),
+      null,
+      claudeImport,
+    );
+    expect(collapsed.map((entry) => entry.id)).toEqual([
+      "imported-user",
+      "turn-fold:imported:imported-user",
+      "imported-assistant-first",
+      "imported-assistant-last",
+      "import-divider",
+      "new-user",
+      "turn-fold:turn-1",
+      "new-assistant",
+    ]);
+    // Imported timestamps are rewritten by the import, so the fold claims no duration.
+    expect(collapsed[1]).toMatchObject({ type: "turn-fold", label: "Worked", expanded: false });
+    expect(collapsed[4]).toMatchObject({
+      type: "import-divider",
+      label: expect.stringContaining("Imported from Claude Code · "),
+    });
+
+    const expanded = deriveThreadFeedPresentation(
+      feed,
+      thread.latestTurn,
+      new Set(["imported:imported-user"]),
+      new Set(),
+      null,
+      claudeImport,
+    );
+    expect(expanded.map((entry) => entry.id)).toContain("work-toggle:work-group:imported-tool");
+    expect(expanded[1]).toMatchObject({ type: "turn-fold", expanded: true });
+  });
+
+  it("keeps an imported fold's key when an older page prepends into its run", () => {
+    const thread = makeImportedThread();
+    const withOlderPage = {
+      ...thread,
+      activities: [
+        makeActivity({
+          id: EventId.make("imported-tool-older"),
+          kind: "tool.completed",
+          tone: "tool",
+          summary: "Listed files",
+          createdAt: "2026-04-01T00:00:01.500Z",
+          payload: { title: "Listed files", itemType: "file_read", status: "completed" },
+        }),
+        ...thread.activities,
+      ],
+    };
+    const foldKeys = (input: typeof thread) =>
+      deriveThreadFeedPresentation(
+        buildThreadFeed(input),
+        input.latestTurn,
+        new Set(),
+        new Set(),
+        null,
+        claudeImport,
+      ).flatMap((entry) => (entry.type === "turn-fold" ? [entry.foldKey] : []));
+
+    const firstImportedRowId = (input: typeof thread) =>
+      buildThreadFeed(input).find((entry) => entry.type === "activity-group")?.id;
+    expect(firstImportedRowId(thread)).toBe("imported-tool");
+    expect(firstImportedRowId(withOlderPage)).toBe("imported-tool-older");
+    // The run's first row moved; the user message that opened it did not, so
+    // the expansion key holds.
+    expect(foldKeys(thread)).toEqual(["imported:imported-user", turnId]);
+    expect(foldKeys(withOlderPage)).toEqual(["imported:imported-user", turnId]);
+  });
+
+  it("leaves a thread without an import origin ungrouped and undivided", () => {
+    const thread = makeImportedThread();
+    const rows = deriveThreadFeedPresentation(
+      buildThreadFeed(thread),
+      thread.latestTurn,
+      new Set(),
+    );
+    expect(rows.map((entry) => entry.id)).toEqual([
+      "imported-user",
+      "work-toggle:work-group:imported-tool",
+      "imported-assistant-first",
+      "imported-assistant-last",
+      "new-user",
+      "turn-fold:turn-1",
+      "new-assistant",
+    ]);
+  });
+
+  it("ends an imported run and every turn with a terminal assistant message", () => {
+    const feed = buildThreadFeed(makeImportedThread());
+    expect([...deriveTerminalAssistantMessageIds(feed, claudeImport)]).toEqual([
+      "imported-assistant-last",
+      "new-assistant",
+    ]);
+    // Without the origin the imported rows belong to no turn and carry no
+    // end-of-turn affordances.
+    expect([...deriveTerminalAssistantMessageIds(feed)]).toEqual(["new-assistant"]);
+  });
+
+  it("marks the end of imported history when no new work exists yet", () => {
+    const thread = makeThread({
+      id: ThreadId.make("unsent-import"),
+      projectId: ProjectId.make("project-1"),
+      title: "Ship the importer",
+      createdAt: importedAt,
+      messages: [
+        {
+          id: MessageId.make("imported-user"),
+          role: "user",
+          text: "Where did we land?",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-04-01T00:00:01.000Z",
+          updatedAt: "2026-04-01T00:00:01.000Z",
+        },
+        {
+          id: MessageId.make("imported-assistant"),
+          role: "assistant",
+          text: "We landed the adapter.",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-04-01T00:00:04.000Z",
+          updatedAt: "2026-04-01T00:00:04.000Z",
+        },
+      ],
+    });
+    const rows = deriveThreadFeedPresentation(
+      buildThreadFeed(thread),
+      null,
+      new Set(),
+      new Set(),
+      null,
+      claudeImport,
+    );
+    expect(rows.map((entry) => entry.id)).toEqual([
+      "imported-user",
+      "imported-assistant",
+      "import-divider",
+    ]);
+  });
+
+  it("draws no divider for a fork that kept the origin but none of its rows", () => {
+    const forkTurnId = TurnId.make("fork-turn");
+    const thread = makeThread({
+      id: ThreadId.make("fork-of-import"),
+      projectId: ProjectId.make("project-1"),
+      title: "Ship the importer (fork)",
+      createdAt: "2026-04-01T00:02:00.000Z",
+      messages: [
+        {
+          id: MessageId.make("fork-user"),
+          role: "user",
+          text: "Carry on.",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-04-01T00:02:01.000Z",
+          updatedAt: "2026-04-01T00:02:01.000Z",
+        },
+        {
+          id: MessageId.make("fork-assistant"),
+          role: "assistant",
+          text: "Carrying on.",
+          turnId: forkTurnId,
+          streaming: false,
+          createdAt: "2026-04-01T00:02:02.000Z",
+          updatedAt: "2026-04-01T00:02:02.000Z",
+        },
+      ],
+    });
+    const rows = deriveThreadFeedPresentation(
+      buildThreadFeed(thread),
+      null,
+      new Set(),
+      new Set(),
+      null,
+      claudeImport,
+    );
+    expect(rows.map((entry) => entry.id)).toEqual(["fork-user", "fork-assistant"]);
+  });
+
+  it("presents an ordinary thread's out-of-turn row as live work", () => {
+    // A provider omits the turn id for work it starts between turns, so an
+    // ordinary thread can hold a running tool while the latest turn is settled.
+    const thread = makeThread({
+      id: ThreadId.make("out-of-turn-live"),
+      projectId: ProjectId.make("project-1"),
+      title: "Out of turn",
+      activities: [
+        makeActivity({
+          id: EventId.make("out-of-turn-tool"),
+          kind: "tool.updated",
+          tone: "tool",
+          summary: "Running tests",
+          createdAt: "2026-04-01T00:00:05.000Z",
+          payload: { title: "Running tests", itemType: "command_execution", status: "running" },
+        }),
+      ],
+    });
+    const rows = deriveThreadFeedPresentation(
+      buildThreadFeed(thread),
+      {
+        turnId: TurnId.make("turn-settled"),
+        state: "completed",
+        startedAt: "2026-04-01T00:00:01.000Z",
+        completedAt: "2026-04-01T00:00:04.000Z",
+      },
+      new Set(),
+      new Set(),
+      "2026-04-01T00:00:01.000Z",
+    );
+    expect(rows).toMatchObject([{ type: "work-toggle", live: true, shimmer: true }]);
+  });
+
+  it("never presents an imported row as live work", () => {
+    const runningTurnId = TurnId.make("turn-running");
+    const inProgressActivity = makeActivity({
+      id: EventId.make("in-progress"),
+      kind: "tool.updated",
+      tone: "tool",
+      summary: "Running tests",
+      createdAt: "2026-04-01T00:00:05.000Z",
+      payload: { title: "Running tests", itemType: "command_execution", status: "running" },
+    });
+    const settledTurn = {
+      turnId: runningTurnId,
+      state: "completed" as const,
+      requestedAt: "2026-04-01T00:00:00.000Z",
+      startedAt: "2026-04-01T00:00:01.000Z",
+      completedAt: "2026-04-01T00:00:09.000Z",
+      assistantMessageId: null,
+    };
+    const turnless = makeThread({
+      id: ThreadId.make("turnless-live"),
+      projectId: ProjectId.make("project-1"),
+      title: "Turnless",
+      createdAt: importedAt,
+      activities: [inProgressActivity],
+    });
+
+    // The session keeps running after the turn settles, so work is active
+    // while no turn is: history the import copied in is still not that work.
+    const rows = deriveThreadFeedPresentation(
+      buildThreadFeed(turnless),
+      settledTurn,
+      new Set(),
+      new Set(),
+      "2026-04-01T00:00:01.000Z",
+      claudeImport,
+    );
+    expect(rows.some((row) => row.type === "work-toggle" && (row.live || row.shimmer))).toBe(false);
+
+    const running = makeThread({
+      id: ThreadId.make("turn-live"),
+      projectId: ProjectId.make("project-1"),
+      title: "Live turn",
+      activities: [{ ...inProgressActivity, turnId: runningTurnId }],
+    });
+    const liveRows = deriveThreadFeedPresentation(
+      buildThreadFeed(running),
+      { ...settledTurn, state: "running", completedAt: null },
+      new Set(),
+      new Set(),
+      "2026-04-01T00:00:01.000Z",
+    );
+    expect(liveRows.some((row) => row.type === "work-toggle" && row.live)).toBe(true);
+  });
+
+  it("names the product an import came from", () => {
+    expect(buildThreadImportLabel(claudeImport)).toBe("Imported from Claude Code");
+    expect(
+      buildThreadImportLabel({ ...claudeImport, driverKind: ProviderDriverKind.make("codex") }),
+    ).toBe("Imported from Codex");
+  });
+
+  it("notes truncated history only above the oldest imported message", () => {
+    const truncated = { ...claudeImport, historyTruncated: true };
+    const importedMessage = { turnId: null, createdAt: "2026-04-01T00:00:01.000Z" };
+    expect(
+      shouldShowImportTruncatedNote({
+        importedFrom: truncated,
+        hasOlderTurns: false,
+        firstMessage: importedMessage,
+      }),
+    ).toBe(true);
+    // Older pages are still unloaded, so the first message shown is not the oldest.
+    expect(
+      shouldShowImportTruncatedNote({
+        importedFrom: truncated,
+        hasOlderTurns: true,
+        firstMessage: importedMessage,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowImportTruncatedNote({
+        importedFrom: claudeImport,
+        hasOlderTurns: false,
+        firstMessage: importedMessage,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowImportTruncatedNote({
+        importedFrom: truncated,
+        hasOlderTurns: false,
+        firstMessage: { turnId: null, createdAt: "2026-04-01T00:02:00.000Z" },
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowImportTruncatedNote({
+        importedFrom: null,
+        hasOlderTurns: false,
+        firstMessage: importedMessage,
+      }),
+    ).toBe(false);
   });
 });
