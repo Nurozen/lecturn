@@ -47,23 +47,63 @@ export class ClipboardReadError extends Schema.TaggedErrorClass<ClipboardReadErr
   }
 }
 
-export async function writeTextToClipboard(value: string, target = "text") {
+/** Electron's app scheme can reject async clipboard writes despite a user click. */
+function writeThroughDesktopSelection(value: string): boolean {
   if (
-    typeof window === "undefined" ||
-    typeof navigator === "undefined" ||
-    !navigator.clipboard?.writeText
-  ) {
+    !window.desktopBridge ||
+    typeof document === "undefined" ||
+    typeof document.execCommand !== "function"
+  )
+    return false;
+  const active = document.activeElement;
+  const selection = document.getSelection();
+  const ranges = selection
+    ? Array.from({ length: selection.rangeCount }, (_, index) =>
+        selection.getRangeAt(index).cloneRange(),
+      )
+    : [];
+  const input = document.createElement("textarea");
+  input.value = value;
+  input.readOnly = true;
+  input.setAttribute("aria-hidden", "true");
+  input.style.cssText = "position:fixed;top:0;left:0;opacity:0;pointer-events:none";
+  document.body.appendChild(input);
+  try {
+    input.select();
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    input.remove();
+    // The clicked control/selection may have disappeared during the async API.
+    try {
+      if (active instanceof HTMLElement) active.focus({ preventScroll: true });
+      selection?.removeAllRanges();
+      for (const range of ranges) selection?.addRange(range);
+    } catch {
+      // Clipboard success is independent of restoring a detached selection.
+    }
+  }
+}
+
+export async function writeTextToClipboard(value: string, target = "text") {
+  if (typeof window === "undefined" || typeof navigator === "undefined") {
     throw new ClipboardApiUnavailableError({
       target,
     });
   }
 
+  if (!navigator.clipboard?.writeText) {
+    if (value && writeThroughDesktopSelection(value)) return true;
+    throw new ClipboardApiUnavailableError({ target });
+  }
   if (!value) return false;
 
   try {
     await navigator.clipboard.writeText(value);
     return true;
   } catch (cause) {
+    if (writeThroughDesktopSelection(value)) return true;
     throw new ClipboardWriteError({
       target,
       cause,

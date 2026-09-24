@@ -1,3 +1,4 @@
+import { DecisionsService } from "../decisions/DecisionsService.ts";
 import { EnvironmentRelinkError } from "../environments/EnvironmentRelinks.ts";
 import { TeamRuntime } from "../teams/TeamRuntime.ts";
 import { isBillingAppOrigin } from "../billing/BillingConfig.ts";
@@ -143,11 +144,13 @@ export const makeRelayCors = (
       >,
     ) {
       const request = yield* HttpServerRequest.HttpServerRequest;
-      const billingRequest = request.url.startsWith("/v1/billing/");
+      const billingRequest =
+        request.url.startsWith("/v1/billing/") || request.url.startsWith("/v1/decisions/");
       if (billingRequest) {
         const desktopStatus =
           request.headers.origin === "lecturn://app" &&
-          request.url.split("?")[0] === "/v1/billing/status" &&
+          (request.url.split("?")[0] === "/v1/billing/status" ||
+            request.url.startsWith("/v1/decisions/")) &&
           (request.method === "GET" ||
             (request.method === "OPTIONS" &&
               request.headers["access-control-request-method"] === "GET"));
@@ -477,6 +480,20 @@ export const revokeEnvironmentLinkRecord = Effect.fn(
         environmentId: input.environmentId,
       });
       if (revoked) {
+        const decisions = yield* Effect.serviceOption(DecisionsService);
+        if (Option.isSome(decisions))
+          yield* decisions.value.funding
+            .revokeEnvironment(input.environmentId, input.environmentPublicKey)
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new EnvironmentLinks.EnvironmentLinkRevokePersistenceError({
+                    userId: input.userId,
+                    environmentId: input.environmentId,
+                    cause,
+                  }),
+              ),
+            );
         yield* credentials.revokeForEnvironmentPublicKey({
           environmentId: input.environmentId,
           environmentPublicKey: input.environmentPublicKey,

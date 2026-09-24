@@ -235,6 +235,8 @@ export const make = Effect.gen(function* () {
       // Config-driven kill switch: clients hide every fork entry point when
       // the capability is absent, and the ws dispatcher enforces it besides.
       threadNotes: true,
+      threadDecisions: true,
+      manualCloudLink: true,
       ...(serverConfig.threadForkingEnabled ? { threadForking: true } : {}),
       ...(serverConfig.staveEnabled ? { stave: { protocolVersion: STAVE_PROTOCOL_VERSION } } : {}),
       environmentIcon: true,

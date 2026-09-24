@@ -1,6 +1,10 @@
+import { Cause } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const mocks = vi.hoisted(() => ({
+  supportsDecisions: false,
+  fundingState: "active",
+  queryFunding: vi.fn(),
   selectedTeam: null as string | null,
   teamList: vi.fn(async () => ({
     organizations: [
@@ -23,8 +27,22 @@ const mocks = vi.hoisted(() => ({
   },
   link: vi.fn(async () => ({ _tag: "Success" })),
   unlink: vi.fn(async () => ({ _tag: "Success" })),
+  funding: vi.fn(async (): Promise<{ _tag: string; cause?: unknown }> => ({ _tag: "Success" })),
   preferences: vi.fn(async () => ({ _tag: "Success" })),
   refresh: vi.fn(async () => ({ _tag: "Success" })),
+}));
+vi.mock("../rpc/atomRegistry", () => ({
+  appAtomRegistry: {
+    get: () => ({ environment: { capabilities: { threadDecisions: mocks.supportsDecisions } } }),
+  },
+}));
+vi.mock("../state/server", () => ({ serverEnvironment: { configValueAtom: () => "config" } }));
+vi.mock("../state/threadDecisions", () => ({
+  threadDecisionEnvironment: { fundingStatus: () => "funding-status", funding: "funding" },
+}));
+vi.mock("@lecturn/client-runtime/state/runtime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lecturn/client-runtime/state/runtime")>()),
+  executeAtomQuery: () => mocks.queryFunding(),
 }));
 vi.mock("@clerk/react", () => ({
   useAuth: () => ({ isSignedIn: mocks.isSignedIn, userId: mocks.userId }),
@@ -54,7 +72,7 @@ vi.mock("@lecturn/client-runtime/relay", () => ({
 vi.mock("../components/ui/toast", () => ({ toastManager: { add: vi.fn() } }));
 vi.mock("../state/relay", () => ({ relayEnvironmentDiscovery: { refresh: "refresh" } }));
 vi.mock("../state/use-atom-command", () => ({
-  useAtomCommand: (key: "link" | "unlink" | "preferences" | "refresh") => mocks[key],
+  useAtomCommand: (key: "link" | "unlink" | "preferences" | "refresh" | "funding") => mocks[key],
 }));
 vi.mock("./linkEnvironmentAtoms", () => ({
   linkPrimaryEnvironment: "link",
@@ -79,6 +97,9 @@ import { useCloudLinkController } from "./useCloudLinkController";
 describe("Connect account ownership during reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.supportsDecisions = false;
+    mocks.funding.mockResolvedValue({ _tag: "Success" });
+    mocks.queryFunding.mockResolvedValue({ _tag: "Success", value: { state: "active" } });
     mocks.selectedTeam = null;
     mocks.state.organizationId = null;
     mocks.state.deviceRelayConflict = null;
@@ -91,6 +112,102 @@ describe("Connect account ownership during reconciliation", () => {
     mocks.state.publishAgentActivity = true;
     mocks.known = { accountIds: [], needsSignIn: [], synced: true };
     vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("creates a funding-only personal link without enabling publishing or a tunnel", async () => {
+    mocks.userId = "account-a";
+    mocks.state.linked = false;
+    mocks.selectedTeam = "org_test";
+    expect(
+      await useCloudLinkController().reconcileCloudState({
+        managedTunnel: false,
+        publish: false,
+        decisions: true,
+      }),
+    ).toBe(true);
+    expect(mocks.link).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "decisions", publishAgentActivity: false }),
+    );
+    expect(mocks.link).not.toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "org_test" }),
+    );
+    expect(mocks.teamList).not.toHaveBeenCalled();
+    expect(mocks.billingStatus).not.toHaveBeenCalled();
+  });
+  it("preserves active or pending funding when tunnel and publishing are switched off", async () => {
+    mocks.userId = "account-a";
+    mocks.supportsDecisions = true;
+    for (const state of ["active", "pending"]) {
+      mocks.queryFunding.mockResolvedValue({ _tag: "Success", value: { state } });
+      expect(
+        await useCloudLinkController().reconcileCloudState({
+          managedTunnel: false,
+          publish: false,
+        }),
+      ).toBe(true);
+    }
+    expect(mocks.unlink).not.toHaveBeenCalled();
+    expect(mocks.link).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "decisions", publishAgentActivity: false }),
+    );
+  });
+  it("fails closed on an unavailable funding check instead of destroying the link", async () => {
+    mocks.userId = "account-a";
+    mocks.supportsDecisions = true;
+    mocks.queryFunding.mockResolvedValue({ _tag: "Success", value: { state: "unavailable" } });
+    expect(
+      await useCloudLinkController().reconcileCloudState({ managedTunnel: false, publish: false }),
+    ).toBe(false);
+    expect(mocks.unlink).not.toHaveBeenCalled();
+  });
+  it("explicit unlink revokes funding before clearing the cloud link, even when cloud status is unavailable", async () => {
+    mocks.userId = "account-a";
+    mocks.supportsDecisions = true;
+    mocks.queryFunding.mockResolvedValue({
+      _tag: "Success",
+      value: { state: "unavailable", generation: 4 },
+    });
+    expect(
+      await useCloudLinkController().reconcileCloudState({
+        managedTunnel: false,
+        publish: false,
+        unlink: true,
+      }),
+    ).toBe(true);
+    expect(mocks.funding).toHaveBeenCalledWith({
+      environmentId: "desktop",
+      input: { operation: "revoke", expectedGeneration: 4 },
+    });
+    expect(mocks.funding.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.unlink.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.unlink).toHaveBeenCalledOnce();
+  });
+  it("does not report an unlink when the host funding revoke failed", async () => {
+    mocks.userId = "account-a";
+    mocks.supportsDecisions = true;
+    mocks.queryFunding.mockResolvedValue({
+      _tag: "Success",
+      value: { state: "active", generation: 2 },
+    });
+    mocks.funding.mockResolvedValue({ _tag: "Failure", cause: Cause.fail(new Error("offline")) });
+    expect(
+      await useCloudLinkController().reconcileCloudState({
+        managedTunnel: false,
+        publish: false,
+        unlink: true,
+      }),
+    ).toBe(false);
+    expect(mocks.unlink).not.toHaveBeenCalled();
+  });
+  it("allows unlink after funding is explicitly revoked", async () => {
+    mocks.userId = "account-a";
+    mocks.supportsDecisions = true;
+    mocks.queryFunding.mockResolvedValue({ _tag: "Success", value: { state: "revoked" } });
+    expect(
+      await useCloudLinkController().reconcileCloudState({ managedTunnel: false, publish: false }),
+    ).toBe(true);
+    expect(mocks.unlink).toHaveBeenCalledOnce();
   });
 
   it("reacquires a conflicted managed relay without changing its mode or publishing preference", async () => {
@@ -278,6 +395,9 @@ describe("Connect account ownership during reconciliation", () => {
 describe("Connect subscription preflight", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.supportsDecisions = false;
+    mocks.funding.mockResolvedValue({ _tag: "Success" });
+    mocks.queryFunding.mockResolvedValue({ _tag: "Success", value: { state: "active" } });
     mocks.selectedTeam = null;
     mocks.state.organizationId = null;
     mocks.state.deviceRelayConflict = null;
@@ -319,6 +439,9 @@ describe("Connect subscription preflight", () => {
 describe("company funding", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.supportsDecisions = false;
+    mocks.funding.mockResolvedValue({ _tag: "Success" });
+    mocks.queryFunding.mockResolvedValue({ _tag: "Success", value: { state: "active" } });
     mocks.userId = "account-a";
     mocks.isSignedIn = true;
     mocks.state.linked = false;

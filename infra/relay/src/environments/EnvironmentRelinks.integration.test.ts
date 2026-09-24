@@ -1,3 +1,4 @@
+import { DecisionsService } from "../decisions/DecisionsService.ts";
 import * as NodeCrypto from "node:crypto";
 import { describe, expect, it } from "@effect/vitest";
 import * as PgClient from "@effect/sql-pg/PgClient";
@@ -27,11 +28,20 @@ function fixture() {
   const environmentId = `relink-test-${NodeCrypto.randomUUID()}`;
   const users = [`${environmentId}-A`, `${environmentId}-B`];
   const events: string[] = [];
+  const decisionRevocations: string[] = [];
   let failCleanup = false;
   const services = Layer.mergeAll(relinkLayer, linksLayer).pipe(
     Layer.provideMerge(database),
     Layer.provide(
       Layer.mergeAll(
+        Layer.succeed(DecisionsService, {
+          funding: {
+            revokeEnvironment: (id: string) =>
+              Effect.sync(() => {
+                decisionRevocations.push(id);
+              }),
+          },
+        } as unknown as DecisionsService["Service"]),
         Layer.succeed(ManagedEndpointProvider, {
           prepareDeprovision: () => Effect.succeed({ allocation: null, reservationGeneration: 7 }),
           deprovision: () =>
@@ -79,6 +89,7 @@ function fixture() {
     environmentId,
     users,
     events,
+    decisionRevocations,
     services,
     insert,
     cleanup,
@@ -147,6 +158,7 @@ describe.skipIf(!url)("PostgreSQL relink ownership", () => {
         f.fail(false);
         yield* relinks.drain(f.environmentId);
         expect(f.events).toEqual(["credential", "endpoint", "team"]);
+        expect(f.decisionRevocations).toContain(f.environmentId);
         expect(
           yield* sql`SELECT 1 FROM relay_environment_link_cleanup WHERE environment_id=${f.environmentId}`,
         ).toEqual([]);

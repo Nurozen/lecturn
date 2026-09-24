@@ -1,0 +1,1 @@
+ALTER TABLE "relay_billing_accounts" ADD COLUMN "decisions_account_label" text;

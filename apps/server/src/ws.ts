@@ -1,3 +1,5 @@
+import { createManualCloudLinkProof, applyManualCloudRelayConfig } from "./cloud/http.ts";
+import { DecisionService } from "./threadDecisions/DecisionService.ts";
 import { ThreadNoteService } from "./threadNotes/ThreadNoteService.ts";
 import { PullRequestWatchService } from "./pullRequest/PullRequestWatchService.ts";
 import { SagaWorkbenchService } from "./stave/SagaWorkbenchService.ts";
@@ -671,6 +673,7 @@ const makeWsRpcLayer = (
         yield* SourceControlRepositoryService.SourceControlRepositoryService;
       const pullRequests = yield* PullRequestService.PullRequestService;
       const threadNotes = yield* ThreadNoteService;
+      const threadDecisions = yield* DecisionService;
       const pullRequestWatches = yield* PullRequestWatchService;
       const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
       const sessions = yield* SessionStore.SessionStore;
@@ -1878,6 +1881,31 @@ const makeWsRpcLayer = (
 
       return WsRpcGroup.of({
         ...staveRpcHandlers,
+        [WS_METHODS.threadDecisionsFundingStatus]: () =>
+          observeRpcEffect(WS_METHODS.threadDecisionsFundingStatus, threadDecisions.fundingStatus),
+        [WS_METHODS.threadDecisionsFunding]: (input) =>
+          observeRpcEffect(WS_METHODS.threadDecisionsFunding, threadDecisions.funding(input)),
+        [WS_METHODS.threadDecisionsList]: (input) =>
+          observeRpcEffect(WS_METHODS.threadDecisionsList, threadDecisions.list(input)),
+        [WS_METHODS.threadDecisionsGet]: (input) =>
+          observeRpcEffect(WS_METHODS.threadDecisionsGet, threadDecisions.get(input)),
+        [WS_METHODS.threadDecisionsMutate]: (input) =>
+          observeRpcEffect(WS_METHODS.threadDecisionsMutate, threadDecisions.mutate(input)),
+        [WS_METHODS.threadDecisionsSettings]: (input) =>
+          observeRpcEffect(WS_METHODS.threadDecisionsSettings, threadDecisions.settings(input)),
+        [WS_METHODS.threadDecisionsStatus]: (input) =>
+          observeRpcEffect(WS_METHODS.threadDecisionsStatus, threadDecisions.status(input)),
+        [WS_METHODS.threadDecisionsSourceWindow]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.threadDecisionsSourceWindow,
+            threadDecisions.sourceWindow(input),
+          ),
+        [WS_METHODS.threadDecisionsScan]: (input) =>
+          observeRpcEffect(WS_METHODS.threadDecisionsScan, threadDecisions.scan(input)),
+        [WS_METHODS.threadDecisionsExport]: (input) =>
+          observeRpcEffect(WS_METHODS.threadDecisionsExport, threadDecisions.export(input)),
+        [WS_METHODS.threadDecisionsSubscribe]: () =>
+          observeRpcStream(WS_METHODS.threadDecisionsSubscribe, threadDecisions.changes),
         [WS_METHODS.threadNotesList]: (input) =>
           observeRpcEffect(WS_METHODS.threadNotesList, threadNotes.list(input)),
         [WS_METHODS.threadNotesCreate]: (input) =>
@@ -2734,6 +2762,18 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverGetBackgroundPolicy, backgroundPolicy.snapshot, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.cloudCreateManualLinkProof]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cloudCreateManualLinkProof,
+            createManualCloudLinkProof(input),
+            { "rpc.aggregate": "cloud" },
+          ),
+        [WS_METHODS.cloudApplyManualRelayConfig]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cloudApplyManualRelayConfig,
+            applyManualCloudRelayConfig(input),
+            { "rpc.aggregate": "cloud" },
+          ),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) =>
           observeRpcEffect(WS_METHODS.cloudGetRelayClientStatus, relayClient.resolve, {
             "rpc.aggregate": "cloud",
@@ -3570,6 +3610,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
     });
     const pullRequests = yield* PullRequestService.PullRequestService;
     const threadNotes = yield* ThreadNoteService;
+    const threadDecisions = yield* DecisionService;
     const pullRequestWatches = yield* PullRequestWatchService;
     const staveOperations = yield* StaveOperations.StaveOperations;
     const sagaWorkbench = yield* SagaWorkbenchService;
@@ -3614,6 +3655,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
               Layer.provide(Layer.succeed(PullRequestWatchService, pullRequestWatches)),
               Layer.provide(Layer.succeed(ThreadNoteService, threadNotes)),
+              Layer.provide(Layer.succeed(DecisionService, threadDecisions)),
               // Stave operations outlive the socket that started them, so every
               // connection attaches to the one server-lifetime registry.
               Layer.provide(Layer.succeed(StaveOperations.StaveOperations, staveOperations)),

@@ -396,6 +396,69 @@ describe("web cloud link environment client", () => {
     }),
   );
 
+  it.effect(
+    "links Decisions without notifications, live activities, tunnel, or relay installation",
+    () =>
+      Effect.gen(function* () {
+        const fetchMock = vi
+          .fn()
+          .mockResolvedValueOnce(
+            Response.json({
+              challenge: "challenge",
+              expiresAt: "2026-06-06T00:05:00.000Z",
+            }),
+          )
+          .mockResolvedValueOnce(Response.json("signed-proof"))
+          .mockResolvedValueOnce(
+            Response.json({
+              ok: true,
+              environmentId: TARGET.environmentId,
+              endpoint: {
+                httpBaseUrl: TARGET.httpBaseUrl,
+                wsBaseUrl: TARGET.wsBaseUrl,
+                providerKind: "manual",
+              },
+              endpointRuntime: null,
+              relayIssuer: "https://relay.example.test",
+              cloudUserId: "user-1",
+              environmentCredential: "environment-credential",
+              cloudMintPublicKey: "public-key",
+            }),
+          )
+          .mockResolvedValueOnce(
+            Response.json({ ok: true, endpointRuntimeStatus: { status: "disabled" } }),
+          );
+        vi.stubGlobal("fetch", fetchMock);
+
+        yield* withServices(
+          linkPrimaryEnvironmentToCloud({
+            target: TARGET,
+            clerkToken: "clerk-token",
+            mode: "decisions",
+            publishAgentActivity: true,
+          }),
+        );
+
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        expect(JSON.parse(bodyText(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+          managedTunnelsEnabled: false,
+          notificationsEnabled: false,
+          liveActivitiesEnabled: false,
+        });
+        expect(relayClientInstallDialog.requestConfirmation).not.toHaveBeenCalled();
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        expect(JSON.parse(bodyText(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({
+          managedTunnelsEnabled: false,
+          notificationsEnabled: false,
+          liveActivitiesEnabled: false,
+        });
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        expect(JSON.parse(bodyText(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+          endpoint: { providerKind: "manual" },
+        });
+      }),
+  );
+
   it.effect("installs a missing relay client before linking", () =>
     Effect.gen(function* () {
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ malformed: true })));

@@ -11,6 +11,47 @@ export const operationId = Effect.all(
 ).pipe(Effect.map((parts) => parts.map((n) => n.toString(16).padStart(8, "0")).join("")));
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
+/** Independently reconciled personal payments. Connect's trial/grace/grants never populate this. */
+export interface PersonalPaidFacts {
+  readonly source: "stripe_personal_subscription";
+  readonly subscriptionId: string;
+  readonly invoiceId: string;
+  readonly interval: "month" | "year";
+  readonly paidPeriodStart: number;
+  readonly paidPeriodEnd: number;
+  /** Stripe's billing-cycle anchor, retained for monthly allowance anniversaries on annual plans. */
+  readonly subscriptionAnniversary: number;
+  readonly reconciledAt: number;
+}
+
+/** Freshness is independent from account.updated_at, which also advances on non-billing writes. */
+export function currentPersonalPaidFacts(
+  account: BillingAccount | undefined,
+  now: number,
+  maxAgeSeconds: number,
+): PersonalPaidFacts | null {
+  const facts = account?.paid_facts;
+  if (
+    !facts ||
+    account?.deleted_at != null ||
+    facts.source !== "stripe_personal_subscription" ||
+    !Number.isSafeInteger(now) ||
+    !Number.isSafeInteger(maxAgeSeconds) ||
+    maxAgeSeconds <= 0 ||
+    !Number.isSafeInteger(facts.reconciledAt) ||
+    facts.reconciledAt > now ||
+    now - facts.reconciledAt >= maxAgeSeconds ||
+    !Number.isSafeInteger(facts.paidPeriodStart) ||
+    !Number.isSafeInteger(facts.paidPeriodEnd) ||
+    !Number.isSafeInteger(facts.subscriptionAnniversary) ||
+    facts.subscriptionAnniversary <= 0 ||
+    facts.paidPeriodStart > now ||
+    now >= facts.paidPeriodEnd
+  )
+    return null;
+  return facts;
+}
+
 export interface BillingState {
   trialConsumed?: boolean;
   status?: string;
@@ -43,6 +84,7 @@ export interface BillingAccount {
   updated_at: number;
   lease_token: string | null;
   state: BillingState;
+  paid_facts?: PersonalPaidFacts | null;
 }
 export interface BillingEvent {
   id: string;
@@ -84,7 +126,7 @@ export const makeBillingStore = Effect.gen(function* () {
   });
   const save = Effect.fn("BillingStore.save")(function* (account: BillingAccount, now: number) {
     const rows = yield* query(
-      sql`UPDATE relay_billing_accounts SET customer_id=${account.customer_id},state=${encodeJson(account.state)}::jsonb,updated_at=${now} WHERE user_id=${account.user_id} AND generation=${account.generation} AND lease_token=${account.lease_token} AND lease_until > ${now} RETURNING user_id`,
+      sql`UPDATE relay_billing_accounts SET customer_id=${account.customer_id},state=${encodeJson(account.state)}::jsonb,paid_facts=${account.paid_facts ? encodeJson(account.paid_facts) : null}::jsonb,updated_at=${now} WHERE user_id=${account.user_id} AND generation=${account.generation} AND lease_token=${account.lease_token} AND lease_until > ${now} RETURNING user_id`,
     );
     if (!rows.length)
       return yield* new BillingError({
@@ -104,7 +146,10 @@ export const makeBillingStore = Effect.gen(function* () {
     query(
       sql.withTransaction(
         Effect.gen(function* () {
-          yield* sql`INSERT INTO relay_billing_accounts(user_id,deleted_at,updated_at) VALUES (${userId},${now},${now}) ON CONFLICT(user_id) DO UPDATE SET deleted_at=COALESCE(relay_billing_accounts.deleted_at,${now}),generation=relay_billing_accounts.generation+1,lease_until=0,lease_token=NULL`;
+          yield* sql`INSERT INTO relay_billing_accounts(user_id,deleted_at,updated_at) VALUES (${userId},${now},${now}) ON CONFLICT(user_id) DO UPDATE SET deleted_at=COALESCE(relay_billing_accounts.deleted_at,${now}),paid_facts=NULL,decisions_account_label=NULL,generation=relay_billing_accounts.generation+1,lease_until=0,lease_token=NULL`;
+          yield* sql`UPDATE relay_decision_funding SET generation=generation+1,payer_id=NULL,state='revoked' WHERE payer_id=${userId}`;
+          yield* sql`UPDATE relay_decision_funding_challenges SET revoked=true WHERE payer_id=${userId}`;
+          yield* sql`UPDATE relay_decision_grants SET revoked_at=${now} WHERE user_id=${userId} AND revoked_at IS NULL`;
           yield* receipt(
             { id: eventId, user_id: userId, customer_id: null, kind: "user.deleted" },
             now,

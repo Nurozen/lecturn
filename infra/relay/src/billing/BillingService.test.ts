@@ -6,7 +6,12 @@ import type { PaymentReviewRecorder } from "./PaymentReviews.ts";
 import { TestClock } from "effect/testing";
 import { makeBillingService } from "./BillingService.ts";
 import { parseBillingConfig } from "./BillingConfig.ts";
-import { BillingError, type BillingAccount, type BillingStore } from "./BillingStore.ts";
+import {
+  BillingError,
+  currentPersonalPaidFacts,
+  type BillingAccount,
+  type BillingStore,
+} from "./BillingStore.ts";
 import type { StripeClient } from "./StripeClient.ts";
 
 const config = parseBillingConfig({
@@ -30,6 +35,8 @@ const session = (overrides: Partial<Stripe.Checkout.Session> = {}) =>
 const subscription = (overrides: Partial<Stripe.Subscription> = {}) =>
   ({
     id: "sub_test",
+    customer: "cus_test",
+    billing_cycle_anchor: 1,
     status: "trialing",
     created: 1,
     trial_start: 1,
@@ -918,3 +925,183 @@ it.live("stalled event accounts leave independent sweep slots and untouched queu
     expect(deferred).toHaveBeenCalledTimes(4);
   }),
 );
+
+describe("personal paid facts for metered Decisions", () => {
+  it.live("persists owned monthly payment provenance independently from Connect access", () =>
+    Effect.gen(function* () {
+      const time = Math.floor((yield* Clock.currentTimeMillis) / 1000);
+      const h = paidHarness([paidInvoice("in_current", time - 100, time + 100)]);
+      yield* h.service.processPending();
+      expect(currentPersonalPaidFacts(h.account(), time, 300)).toEqual({
+        source: "stripe_personal_subscription",
+        subscriptionId: "sub_test",
+        invoiceId: "in_current",
+        interval: "month",
+        paidPeriodStart: time - 100,
+        paidPeriodEnd: time + 100,
+        subscriptionAnniversary: 1,
+        reconciledAt: expect.any(Number),
+      });
+      expect((yield* h.service.status("user_test")).hasAccess).toBe(true);
+    }),
+  );
+  it.live("retains the original annual anniversary and paid expiry after cancellation", () =>
+    Effect.gen(function* () {
+      const time = Math.floor((yield* Clock.currentTimeMillis) / 1000);
+      const invoice = paidInvoice("in_annual", time - 100, time + 86400 * 300);
+      invoice.lines.data[0]!.pricing!.price_details!.price = "price_year";
+      const annual = subscription({
+        status: "canceled",
+        ended_at: time - 1,
+        trial_start: null,
+        trial_end: null,
+        billing_cycle_anchor: time - 86400 * 400,
+      });
+      annual.items.data[0]!.price.id = "price_year";
+      const h = paidHarness([invoice], {
+        listSubscriptions: async () => [annual],
+        retrieveSubscription: async () => annual,
+      });
+      yield* h.service.processPending();
+      expect(currentPersonalPaidFacts(h.account(), time, 300)).toMatchObject({
+        interval: "year",
+        subscriptionAnniversary: annual.billing_cycle_anchor,
+        paidPeriodEnd: invoice.lines.data[0]!.period.end,
+      });
+      // Existing Connect cancellation policy is intentionally unchanged.
+      expect((yield* h.service.status("user_test")).hasAccess).toBe(false);
+    }),
+  );
+  it.live("never derives paid facts from trial, grace, or complimentary Connect access", () =>
+    Effect.gen(function* () {
+      const time = Math.floor((yield* Clock.currentTimeMillis) / 1000);
+      const trial = subscription();
+      const trialHarness = harness(
+        { customer_id: "cus_test" },
+        {
+          listSubscriptions: async () => [trial],
+          retrieveSubscription: async () => trial,
+        },
+      );
+      yield* trialHarness.service.processPending();
+      expect((yield* trialHarness.service.status("user_test")).hasAccess).toBe(true);
+      expect(trialHarness.account().paid_facts).toBeNull();
+      const overdue = subscription({ status: "past_due", trial_start: null, trial_end: null });
+      const grace = paidHarness([paidInvoice("in_previous", time - 100, time - 1)], {
+        listSubscriptions: async () => [overdue],
+        retrieveSubscription: async () => overdue,
+      });
+      const graceService = makeBillingService(
+        { ...config, renewalGraceSeconds: 3600 },
+        grace.store,
+        grace.stripe,
+        grace.recordPaymentReview,
+      );
+      yield* graceService.processPending();
+      expect((yield* graceService.status("user_test")).hasAccess).toBe(true);
+      expect(grace.account().paid_facts).toBeNull();
+      const grant = harness({
+        state: {
+          grant: {
+            id: "connect-only",
+            start: time - 1,
+            end: time + 100,
+            limit: 3,
+            reason: "Connect grant",
+            operator: "test",
+          },
+        },
+      });
+      yield* grant.service.processPending();
+      expect((yield* grant.service.status("user_test")).hasAccess).toBe(true);
+      expect(grant.account().paid_facts).toBeNull();
+    }),
+  );
+  it.live(
+    "rejects partial refunds for Decisions while preserving Connect and revokes full refunds",
+    () =>
+      Effect.gen(function* () {
+        const time = Math.floor((yield* Clock.currentTimeMillis) / 1000);
+        for (const amount of [500, 1000]) {
+          const h = paidHarness([paidInvoice("in_current", time - 100, time + 100)], {
+            retrieveCharge: async (id) =>
+              ({
+                id,
+                customer: "cus_test",
+                currency: "usd",
+                paid: true,
+                status: "succeeded",
+                amount: 1000,
+                amount_refunded: amount,
+                refunded: amount === 1000,
+              }) as Stripe.Charge,
+          });
+          yield* h.service.processPending();
+          expect(h.account().paid_facts).toBeNull();
+          expect((yield* h.service.status("user_test")).hasAccess).toBe(amount < 1000);
+        }
+      }),
+  );
+  it.live("clears existing facts before failed reconciliation or a new dispute", () =>
+    Effect.gen(function* () {
+      const time = Math.floor((yield* Clock.currentTimeMillis) / 1000);
+      let fails = false;
+      let dispute = false;
+      const h = paidHarness([paidInvoice("in_current", time - 100, time + 100)], {
+        listDisputes: async (charge) => {
+          if (fails) throw new Error("unavailable");
+          return dispute ? [{ charge, status: "under_review" } as Stripe.Dispute] : [];
+        },
+      });
+      yield* h.service.processPending();
+      expect(h.account().paid_facts).not.toBeNull();
+      fails = true;
+      yield* h.service.processPending();
+      expect(h.account().paid_facts).toBeNull();
+      fails = false;
+      yield* h.service.processPending();
+      expect(h.account().paid_facts).not.toBeNull();
+      dispute = true;
+      yield* h.service.processPending();
+      expect(h.account().paid_facts).toBeNull();
+    }),
+  );
+  it.live(
+    "refuses missing provenance and does not refresh payment age on other account writes",
+    () =>
+      Effect.gen(function* () {
+        const time = Math.floor((yield* Clock.currentTimeMillis) / 1000);
+        for (const invalid of ["owner", "anniversary", "team"] as const) {
+          const invoice = paidInvoice("in_current", time - 100, time + 100);
+          if (invalid === "owner") invoice.customer = "cus_unrelated";
+          const active = subscription({
+            status: "active",
+            trial_start: null,
+            trial_end: null,
+            ...(invalid === "anniversary" ? { billing_cycle_anchor: 0 } : {}),
+          });
+          if (invalid === "team") active.items.data[0]!.price.id = "price_team";
+          const h = paidHarness([invoice], {
+            listSubscriptions: async () => [active],
+            retrieveSubscription: async () => active,
+          });
+          yield* h.service.processPending();
+          expect(currentPersonalPaidFacts(h.account(), time, 300)).toBeNull();
+        }
+        const h = paidHarness([paidInvoice("in_current", time - 100, time + 1000)]);
+        yield* h.service.processPending();
+        const account = h.account();
+        const checkedAt = account.paid_facts!.reconciledAt;
+        expect(
+          currentPersonalPaidFacts(
+            { ...account, updated_at: checkedAt + 300 },
+            checkedAt + 300,
+            300,
+          ),
+        ).toBeNull();
+        expect(currentPersonalPaidFacts({ ...account, deleted_at: time }, time, 300)).toBeNull();
+        expect(currentPersonalPaidFacts(account, checkedAt - 1, 300)).toBeNull();
+        expect(currentPersonalPaidFacts(account, time + 1000, 2000)).toBeNull();
+      }),
+  );
+});

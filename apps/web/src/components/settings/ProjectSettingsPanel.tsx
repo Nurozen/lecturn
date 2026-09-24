@@ -860,6 +860,29 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
     <>
       <SettingsPageContainer width="wide" className="gap-8">
         <SettingsSection title="Project">
+          {selectedServerConfig?.environment.capabilities.threadDecisions === true ? (
+            <SettingsRow
+              title="Decisions"
+              description={`Review decisions and configure tracking in ${selectedCheckoutLabel}.`}
+              control={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    void navigate({
+                      to: "/decisions/$environmentId/$projectId",
+                      params: {
+                        environmentId: selectedCheckout.environmentId,
+                        projectId: selectedCheckout.id,
+                      },
+                    })
+                  }
+                >
+                  Open decisions
+                </Button>
+              }
+            />
+          ) : null}
           <SettingsRow
             title="Name"
             description="The shared name for this project group in the sidebar and thread lists."

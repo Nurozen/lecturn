@@ -10,6 +10,7 @@ import { Button } from "../ui/button";
 import type { PickedConnectAccount } from "../clerk/ConnectAccountPicker";
 import { useConnectSignOut } from "../clerk/useConnectSignOut";
 import { useLecturnConnectAuthPrompt } from "../clerk/useLecturnConnectAuthPrompt";
+import { DecisionFundingAccounts } from "./DecisionFundingAccounts";
 import { createBillingStatusLoader } from "./billingStatusLoader";
 
 /**
@@ -175,6 +176,7 @@ function SignedBillingAccount({
       ) : (
         <>
           {picker}
+          {userId && <DecisionFundingAccounts accountId={userId} />}
           <p className="text-sm">
             Signed in as{" "}
             {(picker ? email : user?.primaryEmailAddress?.emailAddress) ?? "your Lecturn account"}

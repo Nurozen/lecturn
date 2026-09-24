@@ -1,3 +1,4 @@
+import { linkPreparedEnvironmentForDecisions } from "./manualDecisionLink";
 import {
   createAtomCommandScheduler,
   createRuntimeCommand,
@@ -57,4 +58,14 @@ export const unpublishBeforeSignOut = createRuntimeCommand(connectionAtomRuntime
     readonly clerkToken: string | null;
     readonly userId: string;
   }) => unpublishPrimaryEnvironmentBeforeSignOut(input),
+});
+
+export const linkRemoteDecisionEnvironment = createRuntimeCommand(connectionAtomRuntime, {
+  label: "web:cloud:link-remote-decisions",
+  scheduler: cloudLinkScheduler,
+  concurrency: {
+    mode: "serial",
+    key: (input: Parameters<typeof linkPreparedEnvironmentForDecisions>[0]) => input.environmentId,
+  },
+  execute: linkPreparedEnvironmentForDecisions,
 });

@@ -258,6 +258,10 @@
     "./state/pullRequestHandoff": {
       "types": "./src/state/pullRequestHandoff.ts",
       "default": "./src/state/pullRequestHandoff.ts"
+    },
+    "./state/threadDecisions": {
+      "types": "./src/state/threadDecisions.ts",
+      "default": "./src/state/threadDecisions.ts"
     }
   },
   "scripts": {

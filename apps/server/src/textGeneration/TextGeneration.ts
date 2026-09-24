@@ -6,6 +6,8 @@ import type {
   ModelSelection,
   ProviderInstanceId,
   SagaWorkbenchInferenceResult,
+  DecisionWriterInput,
+  DecisionWriterOutput,
 } from "@lecturn/contracts";
 import { TextGenerationError } from "@lecturn/contracts";
 
@@ -82,6 +84,19 @@ export interface WorkflowSummaryGenerationInput {
 
 export type WorkflowSummaryGenerationResult = SagaWorkbenchInferenceResult;
 
+export type DecisionNotesGenerationInput = DecisionWriterInput & {
+  readonly cwd: string;
+  readonly repairFeedback?: string;
+};
+export interface DecisionWriterCheckInput {
+  readonly cwd: string;
+  readonly modelSelection: ModelSelection;
+}
+export interface DecisionWriterCapability {
+  readonly supported: boolean;
+  readonly reason: string | null;
+}
+
 export interface ThreadTitleGenerationResult {
   title: string;
 }
@@ -92,6 +107,14 @@ export interface ThreadTitleGenerationResult {
 export class TextGeneration extends Context.Service<
   TextGeneration,
   {
+    /** Optional: absence means the provider cannot guarantee isolated background writing. */
+    readonly generateDecisionNotes?: (
+      input: DecisionNotesGenerationInput,
+    ) => Effect.Effect<DecisionWriterOutput, TextGenerationError>;
+    /** Read-only preflight before paid detection and again before writer dispatch. */
+    readonly checkDecisionWriter?: (
+      input: DecisionWriterCheckInput,
+    ) => Effect.Effect<DecisionWriterCapability, TextGenerationError>;
     /**
      * Generate a commit message from staged change context.
      */
@@ -130,7 +153,9 @@ type TextGenerationOp =
   | "generatePrContent"
   | "generateBranchName"
   | "generateThreadTitle"
-  | "generateWorkflowSummary";
+  | "generateWorkflowSummary"
+  | "generateDecisionNotes"
+  | "checkDecisionWriter";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -139,42 +164,68 @@ const resolveInstance = (
 ): Effect.Effect<ProviderInstance["textGeneration"], TextGenerationError> =>
   registry.getInstance(instanceId).pipe(
     Effect.flatMap((instance) =>
-      instance
+      instance?.enabled
         ? Effect.succeed(instance.textGeneration)
         : Effect.fail(
             new TextGenerationError({
               operation,
-              detail: `No provider instance registered for id '${instanceId}'.`,
+              detail: `No enabled provider instance registered for id '${instanceId}'.`,
             }),
           ),
     ),
   );
 
+export type RoutedTextGeneration = TextGeneration["Service"] &
+  Required<Pick<TextGeneration["Service"], "checkDecisionWriter" | "generateDecisionNotes">>;
+
 export const makeTextGenerationFromRegistry = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
-): TextGeneration["Service"] =>
-  TextGeneration.of({
-    generateCommitMessage: (input) =>
-      resolveInstance(registry, "generateCommitMessage", input.modelSelection.instanceId).pipe(
-        Effect.flatMap((textGeneration) => textGeneration.generateCommitMessage(input)),
+): RoutedTextGeneration => ({
+  checkDecisionWriter: (input) =>
+    resolveInstance(registry, "checkDecisionWriter", input.modelSelection.instanceId).pipe(
+      Effect.flatMap(
+        (textGeneration) =>
+          textGeneration.checkDecisionWriter?.(input) ??
+          Effect.succeed({
+            supported: false,
+            reason: "This provider does not support isolated Decisions writing.",
+          }),
       ),
-    generatePrContent: (input) =>
-      resolveInstance(registry, "generatePrContent", input.modelSelection.instanceId).pipe(
-        Effect.flatMap((textGeneration) => textGeneration.generatePrContent(input)),
+    ),
+  generateDecisionNotes: (input) =>
+    resolveInstance(registry, "generateDecisionNotes", input.modelSelection.instanceId).pipe(
+      Effect.flatMap(
+        (textGeneration) =>
+          textGeneration.generateDecisionNotes?.(input) ??
+          Effect.fail(
+            new TextGenerationError({
+              operation: "generateDecisionNotes",
+              detail: "This provider does not support isolated Decisions writing.",
+            }),
+          ),
       ),
-    generateBranchName: (input) =>
-      resolveInstance(registry, "generateBranchName", input.modelSelection.instanceId).pipe(
-        Effect.flatMap((textGeneration) => textGeneration.generateBranchName(input)),
-      ),
-    generateWorkflowSummary: (input) =>
-      resolveInstance(registry, "generateWorkflowSummary", input.modelSelection.instanceId).pipe(
-        Effect.flatMap((textGeneration) => textGeneration.generateWorkflowSummary(input)),
-      ),
-    generateThreadTitle: (input) =>
-      resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
-        Effect.flatMap((textGeneration) => textGeneration.generateThreadTitle(input)),
-      ),
-  });
+    ),
+  generateCommitMessage: (input) =>
+    resolveInstance(registry, "generateCommitMessage", input.modelSelection.instanceId).pipe(
+      Effect.flatMap((textGeneration) => textGeneration.generateCommitMessage(input)),
+    ),
+  generatePrContent: (input) =>
+    resolveInstance(registry, "generatePrContent", input.modelSelection.instanceId).pipe(
+      Effect.flatMap((textGeneration) => textGeneration.generatePrContent(input)),
+    ),
+  generateBranchName: (input) =>
+    resolveInstance(registry, "generateBranchName", input.modelSelection.instanceId).pipe(
+      Effect.flatMap((textGeneration) => textGeneration.generateBranchName(input)),
+    ),
+  generateWorkflowSummary: (input) =>
+    resolveInstance(registry, "generateWorkflowSummary", input.modelSelection.instanceId).pipe(
+      Effect.flatMap((textGeneration) => textGeneration.generateWorkflowSummary(input)),
+    ),
+  generateThreadTitle: (input) =>
+    resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
+      Effect.flatMap((textGeneration) => textGeneration.generateThreadTitle(input)),
+    ),
+});
 
 export const make = Effect.gen(function* () {
   const registry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;

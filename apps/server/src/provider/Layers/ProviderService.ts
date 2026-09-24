@@ -1,3 +1,4 @@
+import { ProviderWorkAdmission } from "../ProviderWorkAdmission.ts";
 /**
  * ProviderServiceLive - Cross-provider orchestration layer.
  *
@@ -257,6 +258,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   // no-op.
   const canonicalEventLogger = options?.canonicalEventLogger ?? eventLoggers.canonical;
 
+  const workAdmission = yield* Effect.serviceOption(ProviderWorkAdmission);
   const registry = yield* ProviderAdapterRegistry.ProviderAdapterRegistry;
   const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
@@ -327,6 +329,14 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
   const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
     Effect.succeed(event).pipe(
+      Effect.tap((event) =>
+        Option.isSome(workAdmission) &&
+        (event.type === "turn.completed" ||
+          event.type === "turn.aborted" ||
+          event.type === "runtime.error")
+          ? workAdmission.value.finishForeground(event.threadId, event.turnId)
+          : Effect.void,
+      ),
       Effect.tap((canonicalEvent) =>
         canonicalEventLogger
           ? canonicalEventLogger.write(canonicalEvent, canonicalEvent.threadId)
@@ -1004,7 +1014,25 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       // rather than issuing a new one: sessions that go a long time between
       // browser tool calls used to lose the toolkit outright.
       yield* McpSessionRegistry.touchActiveMcpThread(input.threadId);
-      const turn = yield* routed.adapter.sendTurn(input);
+      const foregroundToken = Option.isSome(workAdmission)
+        ? yield* workAdmission.value.beginForeground(routed.instanceId, input.threadId)
+        : undefined;
+      const turn = yield* routed.adapter
+        .sendTurn(input)
+        .pipe(
+          Effect.onError(() =>
+            Option.isSome(workAdmission)
+              ? workAdmission.value.abandonForeground(input.threadId, foregroundToken)
+              : Effect.void,
+          ),
+        );
+      if (Option.isSome(workAdmission) && foregroundToken !== undefined) {
+        yield* workAdmission.value.acknowledgeForeground(
+          input.threadId,
+          foregroundToken,
+          turn.turnId,
+        );
+      }
       yield* directory.upsert({
         threadId: input.threadId,
         provider: routed.adapter.provider,
@@ -1307,6 +1335,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         if (pendingCompaction !== undefined) {
           yield* settleCompaction(input.threadId, pendingCompaction, "turn.aborted");
         }
+        if (Option.isSome(workAdmission))
+          yield* workAdmission.value.abandonForeground(input.threadId);
         timedOutNativeCompactions.delete(input.threadId);
         yield* clearMcpSession(input.threadId);
         yield* directory.upsert({
@@ -1557,6 +1587,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       ),
     ).pipe(Effect.asVoid);
     yield* Effect.forEach(currentAdapters, ([, adapter]) => adapter.stopAll()).pipe(Effect.asVoid);
+    if (Option.isSome(workAdmission))
+      yield* Effect.forEach(threadIds, (threadId) =>
+        workAdmission.value.abandonForeground(threadId),
+      );
     yield* McpSessionRegistry.revokeAllActiveMcpCredentials();
     McpProviderSession.clearAllMcpProviderSessions();
     const bindings = yield* directory.listBindings().pipe(Effect.orElseSucceed(() => []));

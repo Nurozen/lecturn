@@ -19,7 +19,11 @@ import {
   type HttpClientRequest,
 } from "effect/unstable/http";
 
-import { EnvironmentId } from "@lecturn/contracts";
+import {
+  EnvironmentId,
+  type ExecutionEnvironmentDescriptor,
+  type ManualCloudLinkProofInput,
+} from "@lecturn/contracts";
 import { RelayClientTracer } from "@lecturn/shared/relayTracing";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -40,10 +44,14 @@ import {
 } from "@lecturn/contracts/relay";
 import {
   CLOUD_ENDPOINT_RUNTIME_CONFIG,
+  CLOUD_LINKED_USER_ID,
   RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
   RELAY_URL_SECRET,
 } from "./config.ts";
 import {
+  createManualCloudLinkProof,
+  applyManualCloudRelayConfig,
+  validateManualCloudLinkEndpoint,
   consumeCloudReplayGuards,
   isSupportedLinkProviderKind,
   linkProofScopes,
@@ -264,7 +272,11 @@ function makeMemorySecretStore(initial: Iterable<readonly [string, string]> = []
       Effect.sync(() => {
         values.set(name, value);
       }),
-    create: unusedSecretStoreOperation,
+    create: (name, value) =>
+      Effect.sync(() => {
+        if (values.has(name)) throw new Error("Secret already exists");
+        values.set(name, value);
+      }),
     getOrCreateRandom: unusedSecretStoreOperation,
     remove: (name) =>
       Effect.sync(() => {
@@ -279,6 +291,7 @@ interface ReleaseHarness {
   readonly applyConfigCalls: Array<unknown>;
   readonly requests: Array<HttpClientRequest.HttpClientRequest>;
   readonly respond?: () => Response;
+  readonly descriptor?: ExecutionEnvironmentDescriptor;
 }
 
 const provideReleaseHarness =
@@ -290,7 +303,9 @@ const provideReleaseHarness =
         ServerEnvironment.ServerEnvironment,
         ServerEnvironment.ServerEnvironment.of({
           getEnvironmentId: Effect.succeed(EnvironmentId.make("env_123")),
-          getDescriptor: Effect.die("unused"),
+          getDescriptor: harness.descriptor
+            ? Effect.succeed(harness.descriptor)
+            : Effect.die("unused"),
         }),
       ),
       Effect.provideService(
@@ -764,4 +779,123 @@ it.effect("a losing installation cannot repoint or delete the winning relay", ()
     expect(requests).toHaveLength(0);
     expect(applyConfigCalls).toHaveLength(0);
   }).pipe(provideReleaseHarness({ store, requests, applyConfigCalls }));
+});
+
+const manualInput: ManualCloudLinkProofInput = {
+  environmentId: EnvironmentId.make("env_123"),
+  challenge: "challenge",
+  relayIssuer: "https://relay.example.test",
+  endpoint: {
+    httpBaseUrl: "https://remote.example.test",
+    wsBaseUrl: "wss://remote.example.test/ws",
+    providerKind: "manual",
+  },
+};
+const manualDescriptor: ExecutionEnvironmentDescriptor = {
+  environmentId: EnvironmentId.make("env_123"),
+  label: "Remote host",
+  platform: { os: "linux", arch: "x64" },
+  serverVersion: "test",
+  capabilities: { repositoryIdentity: false },
+};
+const decodeSignedManualProof = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      environmentId: Schema.String,
+      origin: Schema.Struct({ localHttpHost: Schema.String, localHttpPort: Schema.Number }),
+      endpoint: Schema.Struct({ providerKind: Schema.String, httpBaseUrl: Schema.String }),
+    }),
+  ),
+);
+describe("authenticated manual socket cloud linking", () => {
+  it("rejects cross-origin endpoints, embedded credentials, tickets, invalid relays and managed tunnels", () => {
+    expect(validateManualCloudLinkEndpoint(manualInput)).toBe(true);
+    for (const endpoint of [
+      { ...manualInput.endpoint, wsBaseUrl: "wss://other.test/ws" },
+      { ...manualInput.endpoint, httpBaseUrl: "https://user:secret@remote.example.test" },
+      { ...manualInput.endpoint, wsBaseUrl: "wss://remote.example.test/ws?ticket=secret" },
+      { ...manualInput.endpoint, httpBaseUrl: "file:///tmp/host" },
+    ])
+      expect(validateManualCloudLinkEndpoint({ ...manualInput, endpoint })).toBe(false);
+    expect(
+      validateManualCloudLinkEndpoint({
+        ...manualInput,
+        relayIssuer: "http://public.example.test",
+      }),
+    ).toBe(false);
+  });
+  it.effect("signs only the actual selected host and ignores spoofed forwarded headers", () => {
+    const { store } = makeMemorySecretStore();
+    return Effect.gen(function* () {
+      const config = yield* ServerConfigModule.ServerConfig;
+      const result = yield* createManualCloudLinkProof(manualInput).pipe(
+        Effect.provideService(ServerConfigModule.ServerConfig, { ...config, port: 3774 }),
+        Effect.provideService(
+          HttpServerRequest.HttpServerRequest,
+          HttpServerRequest.fromWeb(
+            new Request("https://attacker.example.test/api", {
+              headers: {
+                "x-forwarded-host": "attacker.example.test",
+                "x-forwarded-proto": "https",
+              },
+            }),
+          ),
+        ),
+      );
+      expect(result.environmentId).toBe("env_123");
+      expect(result.proof).not.toBeNull();
+      const payload = decodeSignedManualProof(
+        Buffer.from(result.proof!.split(".")[1]!, "base64url").toString("utf8"),
+      );
+      expect(payload.environmentId).toBe("env_123");
+      expect(payload.origin).toEqual({ localHttpHost: "127.0.0.1", localHttpPort: 3774 });
+      expect(payload.endpoint).toMatchObject({
+        providerKind: "manual",
+        httpBaseUrl: manualInput.endpoint.httpBaseUrl,
+      });
+      expect(
+        yield* Effect.flip(
+          createManualCloudLinkProof({
+            ...manualInput,
+            environmentId: EnvironmentId.make("other"),
+          }),
+        ),
+      ).toHaveProperty("_tag", "ManualCloudLinkError");
+    }).pipe(
+      provideReleaseHarness({
+        store,
+        applyConfigCalls: [],
+        requests: [],
+        descriptor: manualDescriptor,
+      }),
+    );
+  });
+  it.effect("does not replace an already linked host or apply credentials to another host", () => {
+    const { store, values } = makeMemorySecretStore([[CLOUD_LINKED_USER_ID, "owner"]]);
+    return Effect.gen(function* () {
+      const before = new Map(values);
+      const result = yield* createManualCloudLinkProof(manualInput);
+      expect(result.proof).toBeNull();
+      const error = yield* Effect.flip(
+        applyManualCloudRelayConfig({
+          environmentId: EnvironmentId.make("other"),
+          relayUrl: "https://relay.example.test",
+          cloudUserId: "owner",
+          environmentCredential: "sentinel-secret",
+          cloudMintPublicKey: "bad",
+          endpointRuntime: null,
+        }),
+      );
+      expect(error._tag).toBe("ManualCloudLinkError");
+      expect(values).toEqual(before);
+      expect(error.message).not.toContain("sentinel-secret");
+    }).pipe(
+      provideReleaseHarness({
+        store,
+        applyConfigCalls: [],
+        requests: [],
+        descriptor: manualDescriptor,
+      }),
+    );
+  });
 });

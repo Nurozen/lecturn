@@ -29,6 +29,8 @@ import { Route as ProjectsProjectKeyRouteImport } from './routes/projects.$proje
 import { Route as ConnectCallbackRouteImport } from './routes/connect_.callback'
 import { Route as AccountBillingRouteImport } from './routes/account.billing'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
+import { Route as DecisionsFundingApproveRouteImport } from './routes/decisions.funding.approve'
+import { Route as DecisionsEnvironmentIdProjectIdRouteImport } from './routes/decisions.$environmentId.$projectId'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
 import { Route as ChatSagasEnvironmentIdProjectIdRouteImport } from './routes/_chat.sagas.$environmentId.$projectId'
@@ -132,6 +134,17 @@ const ChatPullRequestsRoute = ChatPullRequestsRouteImport.update({
   path: '/pull-requests',
   getParentRoute: () => ChatRoute,
 } as any)
+const DecisionsFundingApproveRoute = DecisionsFundingApproveRouteImport.update({
+  id: '/decisions/funding/approve',
+  path: '/decisions/funding/approve',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DecisionsEnvironmentIdProjectIdRoute =
+  DecisionsEnvironmentIdProjectIdRouteImport.update({
+    id: '/decisions/$environmentId/$projectId',
+    path: '/decisions/$environmentId/$projectId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ChatDraftDraftIdRoute = ChatDraftDraftIdRouteImport.update({
   id: '/draft/$draftId',
   path: '/draft/$draftId',
@@ -172,6 +185,8 @@ export interface FileRoutesByFullPath {
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/decisions/$environmentId/$projectId': typeof DecisionsEnvironmentIdProjectIdRoute
+  '/decisions/funding/approve': typeof DecisionsFundingApproveRoute
   '/sagas/$environmentId/$projectId': typeof ChatSagasEnvironmentIdProjectIdRoute
 }
 export interface FileRoutesByTo {
@@ -196,6 +211,8 @@ export interface FileRoutesByTo {
   '/': typeof ChatIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/decisions/$environmentId/$projectId': typeof DecisionsEnvironmentIdProjectIdRoute
+  '/decisions/funding/approve': typeof DecisionsFundingApproveRoute
   '/sagas/$environmentId/$projectId': typeof ChatSagasEnvironmentIdProjectIdRoute
 }
 export interface FileRoutesById {
@@ -222,6 +239,8 @@ export interface FileRoutesById {
   '/_chat/': typeof ChatIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/decisions/$environmentId/$projectId': typeof DecisionsEnvironmentIdProjectIdRoute
+  '/decisions/funding/approve': typeof DecisionsFundingApproveRoute
   '/_chat/sagas/$environmentId/$projectId': typeof ChatSagasEnvironmentIdProjectIdRoute
 }
 export interface FileRouteTypes {
@@ -248,6 +267,8 @@ export interface FileRouteTypes {
     | '/settings/source-control'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/decisions/$environmentId/$projectId'
+    | '/decisions/funding/approve'
     | '/sagas/$environmentId/$projectId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -272,6 +293,8 @@ export interface FileRouteTypes {
     | '/'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/decisions/$environmentId/$projectId'
+    | '/decisions/funding/approve'
     | '/sagas/$environmentId/$projectId'
   id:
     | '__root__'
@@ -297,6 +320,8 @@ export interface FileRouteTypes {
     | '/_chat/'
     | '/_chat/$environmentId/$threadId'
     | '/_chat/draft/$draftId'
+    | '/decisions/$environmentId/$projectId'
+    | '/decisions/funding/approve'
     | '/_chat/sagas/$environmentId/$projectId'
   fileRoutesById: FileRoutesById
 }
@@ -309,6 +334,8 @@ export interface RootRouteChildren {
   AccountBillingRoute: typeof AccountBillingRoute
   ConnectCallbackRoute: typeof ConnectCallbackRoute
   ProjectsProjectKeyRoute: typeof ProjectsProjectKeyRoute
+  DecisionsEnvironmentIdProjectIdRoute: typeof DecisionsEnvironmentIdProjectIdRoute
+  DecisionsFundingApproveRoute: typeof DecisionsFundingApproveRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -453,6 +480,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatPullRequestsRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/decisions/funding/approve': {
+      id: '/decisions/funding/approve'
+      path: '/decisions/funding/approve'
+      fullPath: '/decisions/funding/approve'
+      preLoaderRoute: typeof DecisionsFundingApproveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/decisions/$environmentId/$projectId': {
+      id: '/decisions/$environmentId/$projectId'
+      path: '/decisions/$environmentId/$projectId'
+      fullPath: '/decisions/$environmentId/$projectId'
+      preLoaderRoute: typeof DecisionsEnvironmentIdProjectIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_chat/draft/$draftId': {
       id: '/_chat/draft/$draftId'
       path: '/draft/$draftId'
@@ -534,6 +575,8 @@ const rootRouteChildren: RootRouteChildren = {
   AccountBillingRoute: AccountBillingRoute,
   ConnectCallbackRoute: ConnectCallbackRoute,
   ProjectsProjectKeyRoute: ProjectsProjectKeyRoute,
+  DecisionsEnvironmentIdProjectIdRoute: DecisionsEnvironmentIdProjectIdRoute,
+  DecisionsFundingApproveRoute: DecisionsFundingApproveRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

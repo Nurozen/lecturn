@@ -13,8 +13,13 @@ import { CodexSettings, ProviderInstanceId, TextGenerationError } from "@lecturn
 
 import * as ServerConfig from "../config.ts";
 import * as TextGeneration from "./TextGeneration.ts";
+import {
+  decisionWriterInputFixture,
+  decisionWriterOutputFixture,
+} from "./decisionWriterTestFixtures.ts";
 import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
+const encodeTestJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const DEFAULT_TEST_MODEL_SELECTION = createModelSelection(
   ProviderInstanceId.make("codex"),
@@ -40,6 +45,8 @@ function makeFakeCodexBinary(
     stdinMustContain?: string;
     stdinMustNotContain?: string;
     requireAccountRouting?: boolean;
+    configSnapshot?: object;
+    codexVersion?: string;
   },
 ) {
   return Effect.gen(function* () {
@@ -53,6 +60,11 @@ function makeFakeCodexBinary(
       codexPath,
       [
         "#!/bin/sh",
+        'case " $* " in *" app-server "*)',
+        `  exec '${process.execPath}' -e 'require("node:readline").createInterface({input:process.stdin}).on("line", line => { const m=JSON.parse(line); const result=m.method==="initialize" ? {userAgent:"lecturn-inference-config/${input.codexVersion ?? "0.155.1"} (test)",codexHome:"/test",platformFamily:"unix",platformOs:"macos"} : ${encodeTestJson(input.configSnapshot ?? { config: { mcp_servers: { sentinel: { enabled: true } } }, layers: [] })}; process.stdout.write(JSON.stringify({id:m.id,result})+"\\n"); });'`,
+        ";; esac",
+        'case " $* " in *" debug models "*)',
+        `  printf '%s\\n' '${encodeTestJson({ models: ["gpt-5.4-mini", "gpt-5.4", "gpt-6-sol"].map((slug) => ({ slug, shell_type: "unified_exec", apply_patch_tool_type: "freeform" })) })}'; exit 0;; esac`,
         'original_args="$*"',
         'output_path=""',
         'seen_image="0"',
@@ -97,6 +109,7 @@ function makeFakeCodexBinary(
         "  shift",
         "done",
         'case " $original_args " in *" --ignore-rules "*)',
+        `  case " $original_args " in *'mcp_servers.sentinel.enabled=false'*) ;; *) echo "MCP not disabled" >&2; exit 23;; esac`,
         '  case "$PWD" in *lecturn-workflow-inference-*) ;; *) echo "workflow cwd not isolated" >&2; exit 14;; esac',
         '  case " $original_args " in *" project_doc_max_bytes=0 "*) ;; *) echo "workspace docs enabled" >&2; exit 15;; esac',
         '  case " $original_args " in *" features.memories=false "*) ;; *) echo "memory enabled" >&2; exit 16;; esac',
@@ -216,6 +229,8 @@ function withFakeCodexEnv<A, E, R>(
     launchArgs?: string;
     homePath?: string;
     requireAccountRouting?: boolean;
+    configSnapshot?: object;
+    codexVersion?: string;
     environment?: NodeJS.ProcessEnv;
   },
   effectFn: (textGeneration: TextGeneration.TextGeneration["Service"]) => Effect.Effect<A, E, R>,
@@ -235,6 +250,101 @@ function withFakeCodexEnv<A, E, R>(
 }
 
 it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
+  for (const [version, supported] of [
+    ["0.156.1", true],
+    ["0.157.0", false],
+  ] as const) {
+    it.effect(`isolated writer capability for Codex ${version}`, () =>
+      withFakeCodexEnv({ output: "must not be parsed", codexVersion: version }, (service) =>
+        Effect.gen(function* () {
+          const result = yield* service.checkDecisionWriter!({
+            cwd: process.cwd(),
+            modelSelection: decisionWriterInputFixture.modelSelection,
+          });
+          expect(result.supported).toBe(supported);
+          if (!supported) expect(result.reason).toContain("requires verification");
+        }),
+      ),
+    );
+  }
+  it.effect("preflights Decisions without generating text", () =>
+    withFakeCodexEnv({ output: "must not be parsed" }, (service) =>
+      Effect.gen(function* () {
+        expect(
+          yield* service.checkDecisionWriter!({
+            cwd: process.cwd(),
+            modelSelection: decisionWriterInputFixture.modelSelection,
+          }),
+        ).toEqual({ supported: true, reason: null });
+      }),
+    ),
+  );
+  it.effect(
+    "writes Decisions with the exact selected model options and isolated configuration",
+    () =>
+      withFakeCodexEnv(
+        {
+          output: encodeTestJson(decisionWriterOutputFixture),
+          requireArg: "gpt-6-sol",
+          requireReasoningEffort: "high",
+          requireServiceTier: "priority",
+          stdinMustContain: "BEGIN DECISION DATA",
+        },
+        (service) =>
+          Effect.gen(function* () {
+            expect(
+              yield* service.generateDecisionNotes!({
+                ...decisionWriterInputFixture,
+                cwd: process.cwd(),
+              }),
+            ).toEqual(decisionWriterOutputFixture);
+          }),
+      ),
+  );
+  it.effect("does not substitute an effort setting when a decision binding omits it", () =>
+    withFakeCodexEnv(
+      { output: encodeTestJson(decisionWriterOutputFixture), forbidReasoningEffort: true },
+      (service) =>
+        service.generateDecisionNotes!({
+          ...decisionWriterInputFixture,
+          cwd: process.cwd(),
+          modelSelection: createModelSelection(
+            decisionWriterInputFixture.modelSelection.instanceId,
+            decisionWriterInputFixture.modelSelection.model,
+          ),
+        }),
+    ),
+  );
+  for (const [label, output] of [
+    [
+      "too many notes",
+      {
+        ...decisionWriterOutputFixture,
+        actions: Array.from({ length: 9 }, () => decisionWriterOutputFixture.actions[0]),
+      },
+    ],
+    [
+      "inconsistent completion",
+      { ...decisionWriterOutputFixture, unresolvedCandidateIds: ["candidate-1"] },
+    ],
+    [
+      "unsolicited review authorization",
+      { ...decisionWriterOutputFixture, reviewState: "confirmed" },
+    ],
+  ]) {
+    it.effect(`rejects Decisions output with ${label}`, () =>
+      withFakeCodexEnv({ output: encodeTestJson(output) }, (service) =>
+        Effect.gen(function* () {
+          const failure = yield* service.generateDecisionNotes!({
+            ...decisionWriterInputFixture,
+            cwd: process.cwd(),
+          }).pipe(Effect.flip);
+          expect(failure.detail).toBe("Codex returned invalid structured output.");
+          expect(failure.cause).toBeUndefined();
+        }),
+      ),
+    );
+  }
   for (const [label, output] of [
     ["malformed JSON", "not JSON"],
     ["missing stage", JSON.stringify({ summary: "Working", confidence: 0.8 })],
@@ -261,6 +371,63 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
             })
             .pipe(Effect.flip);
           expect(failure.operation).toBe("generateWorkflowSummary");
+        }),
+      ),
+    );
+  }
+  for (const [label, configSnapshot] of [
+    ["unreadable effective configuration", { unexpected: true }],
+    [
+      "managed config without file fingerprints",
+      { config: {}, layers: [{ name: { type: "mdm" } }] },
+    ],
+    ["unrepresentable MCP key", { config: { mcp_servers: { "nested.name": {} } }, layers: [] }],
+  ] as const) {
+    it.effect(`fails closed for ${label}`, () =>
+      withFakeCodexEnv({ output: "{}", configSnapshot }, (textGeneration) =>
+        Effect.gen(function* () {
+          const failure = yield* textGeneration
+            .generateWorkflowSummary({
+              cwd: process.cwd(),
+              message: '{"priorSummary":null,"turns":[{"question":"Work","response":"Done"}]}',
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            })
+            .pipe(Effect.flip);
+          expect(failure.operation).toBe("generateWorkflowSummary");
+          expect(failure.detail).toMatch(/isolat/);
+          expect(failure.cause).toBeUndefined();
+        }),
+      ),
+    );
+  }
+  for (const [label, fixture] of [
+    ["provider stderr", { output: "", exitCode: 1, stderr: "PRIVATE_CONVERSATION_SENTINEL" }],
+    [
+      "invalid structured response",
+      {
+        output: JSON.stringify({
+          summary: "PRIVATE_CONVERSATION_SENTINEL",
+          stage: "build",
+          confidence: 5,
+        }),
+      },
+    ],
+  ] as const) {
+    it.effect(`redacts ${label} before the auxiliary failure escapes`, () =>
+      withFakeCodexEnv(fixture, (textGeneration) =>
+        Effect.gen(function* () {
+          const failure = yield* textGeneration
+            .generateWorkflowSummary({
+              cwd: process.cwd(),
+              message: encodeTestJson({
+                priorSummary: null,
+                turns: [{ question: "PRIVATE_CONVERSATION_SENTINEL", response: "Working" }],
+              }),
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            })
+            .pipe(Effect.flip);
+          expect(encodeTestJson(failure)).not.toContain("PRIVATE_CONVERSATION_SENTINEL");
+          expect(failure.cause).toBeUndefined();
         }),
       ),
     );

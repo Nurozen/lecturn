@@ -1,5 +1,8 @@
 import * as NodeCrypto from "node:crypto";
 import {
+  ManualCloudLinkError,
+  type ManualCloudLinkProofInput,
+  type ManualCloudRelayConfigInput,
   AuthRelayReadScope,
   AuthRelayWriteScope,
   AuthStandardClientScopes,
@@ -54,7 +57,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as HttpEffect from "effect/unstable/http/HttpEffect";
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
@@ -407,7 +410,6 @@ const makeCloudLinkProof = Effect.fn("environment.cloud.makeLinkProof")(function
   request: RelayLinkProofRequest,
   requestUrl: string,
 ) {
-  const keyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(dependencies.secrets);
   if (
     !isSupportedLinkProviderKind(request) ||
     !isAllowedEndpointOrigin({
@@ -419,6 +421,14 @@ const makeCloudLinkProof = Effect.fn("environment.cloud.makeLinkProof")(function
       message: "Invalid managed endpoint origin.",
     });
   }
+  return yield* signCloudLinkProof(dependencies, request);
+});
+
+const signCloudLinkProof = Effect.fn("environment.cloud.signLinkProof")(function* (
+  dependencies: CloudHttpDependencies,
+  request: RelayLinkProofRequest,
+) {
+  const keyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(dependencies.secrets);
   const now = yield* DateTime.now;
   const expiresAt = DateTime.add(now, { minutes: 5 });
   const nowSeconds = Math.floor(now.epochMilliseconds / 1_000);
@@ -583,6 +593,82 @@ export const applyCloudRelayConfig = Effect.fn("environment.cloud.applyRelayConf
     return { ok, endpointRuntimeStatus } satisfies EnvironmentCloudRelayConfigResult;
   },
   (effect, dependencies) => withCloudLinkMutation(dependencies.secrets, effect),
+);
+
+/** No request/forwarded authority is trusted here: RPC auth fixes the host identity. */
+export function validateManualCloudLinkEndpoint(input: ManualCloudLinkProofInput): boolean {
+  try {
+    const http = new URL(input.endpoint.httpBaseUrl),
+      ws = new URL(input.endpoint.wsBaseUrl);
+    return (
+      input.endpoint.providerKind === "manual" &&
+      ["http:", "https:"].includes(http.protocol) &&
+      ws.protocol === (http.protocol === "https:" ? "wss:" : "ws:") &&
+      http.host === ws.host &&
+      !http.username &&
+      !http.password &&
+      !ws.username &&
+      !ws.password &&
+      !http.search &&
+      !http.hash &&
+      !ws.search &&
+      !ws.hash &&
+      isSecureRelayUrl(input.relayIssuer)
+    );
+  } catch {
+    return false;
+  }
+}
+export const createManualCloudLinkProof = Effect.fn("environment.cloud.createManualLinkProof")(
+  function* (input: ManualCloudLinkProofInput) {
+    const dependencies = yield* cloudHttpDependencies;
+    const descriptor = yield* dependencies.environment.getDescriptor;
+    if (input.environmentId !== descriptor.environmentId || !validateManualCloudLinkEndpoint(input))
+      return yield* new ManualCloudLinkError({
+        message: "The selected environment or manual endpoint does not match this link request.",
+      });
+    if ((yield* readCloudLinkState(dependencies)).linked)
+      return { environmentId: descriptor.environmentId, proof: null };
+    const config = yield* ServerConfig.ServerConfig;
+    const server = yield* Effect.serviceOption(HttpServer.HttpServer);
+    const address = Option.isSome(server) ? server.value.address : null;
+    const port =
+      address && typeof address !== "string" && "port" in address ? address.port : config.port;
+    if (port < 1)
+      return yield* new ManualCloudLinkError({
+        message: "The environment listener is not ready for cloud registration.",
+      });
+    const proof = yield* signCloudLinkProof(dependencies, {
+      challenge: input.challenge,
+      relayIssuer: input.relayIssuer,
+      endpoint: input.endpoint,
+      origin: { localHttpHost: "127.0.0.1", localHttpPort: port },
+    });
+    return { environmentId: descriptor.environmentId, proof };
+  },
+  Effect.mapError(
+    () =>
+      new ManualCloudLinkError({
+        message: "Could not prepare this environment’s manual cloud link.",
+      }),
+  ),
+);
+export const applyManualCloudRelayConfig = Effect.fn("environment.cloud.applyManualRelayConfig")(
+  function* (input: ManualCloudRelayConfigInput) {
+    const dependencies = yield* cloudHttpDependencies;
+    const descriptor = yield* dependencies.environment.getDescriptor;
+    if (input.environmentId !== descriptor.environmentId || input.endpointRuntime !== null)
+      return yield* new ManualCloudLinkError({
+        message: "The cloud configuration does not match this manual environment link.",
+      });
+    return yield* applyCloudRelayConfig(dependencies, input);
+  },
+  Effect.mapError(
+    () =>
+      new ManualCloudLinkError({
+        message: "Could not configure this environment’s manual cloud link.",
+      }),
+  ),
 );
 
 const cloudRelayConfigHandler = Effect.fn("environment.cloud.relayConfig")(

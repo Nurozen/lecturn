@@ -797,7 +797,7 @@ function ThreadRouteContent(
   }, [forkThread, navigation, selectedThread]);
   const threadActionsHeaderItem = useMemo(
     () =>
-      forkSupported
+      forkSupported || serverConfig?.environment.capabilities.threadDecisions === true
         ? {
             accessibilityLabel: "Thread actions",
             icon: { name: "ellipsis.circle", type: "sfSymbol" as const },
@@ -805,14 +805,33 @@ function ThreadRouteContent(
             label: "Thread",
             menu: {
               items: [
-                {
-                  description: "Start a new thread with this history",
-                  disabled: !forkAvailable,
-                  icon: { name: "arrow.triangle.branch", type: "sfSymbol" as const },
-                  label: "Fork thread",
-                  onPress: () => void handleForkCurrentThread(),
-                  type: "action" as const,
-                },
+                ...(serverConfig?.environment.capabilities.threadDecisions === true &&
+                selectedThread
+                  ? [
+                      {
+                        label: "Decisions",
+                        type: "action" as const,
+                        onPress: () =>
+                          navigation.navigate("Decisions", {
+                            environmentId: selectedThread.environmentId,
+                            projectId: selectedThread.projectId,
+                            threadId: selectedThread.id,
+                          }),
+                      },
+                    ]
+                  : []),
+                ...(forkSupported
+                  ? [
+                      {
+                        description: "Start a new thread with this history",
+                        disabled: !forkAvailable,
+                        icon: { name: "arrow.triangle.branch", type: "sfSymbol" as const },
+                        label: "Fork thread",
+                        onPress: () => void handleForkCurrentThread(),
+                        type: "action" as const,
+                      },
+                    ]
+                  : []),
               ],
               title: "Thread",
             },
@@ -821,7 +840,14 @@ function ThreadRouteContent(
             variant: "plain" as const,
           }
         : null,
-    [forkAvailable, forkSupported, handleForkCurrentThread],
+    [
+      forkAvailable,
+      forkSupported,
+      handleForkCurrentThread,
+      serverConfig,
+      selectedThread,
+      navigation,
+    ],
   );
   const splitRightHeaderItems = useMemo<NativeHeaderItems>(
     () =>

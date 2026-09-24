@@ -1,3 +1,12 @@
+import * as DecisionWorker from "./threadDecisions/DecisionWorker.ts";
+import * as DecisionIngestion from "./threadDecisions/DecisionIngestion.ts";
+import * as DecisionCloudClient from "./threadDecisions/DecisionCloudClient.ts";
+import * as DecisionService from "./threadDecisions/DecisionService.ts";
+import * as DecisionRepository from "./threadDecisions/DecisionRepository.ts";
+import * as DecisionSettingsRepository from "./threadDecisions/DecisionSettingsRepository.ts";
+import * as DecisionJobRepository from "./threadDecisions/DecisionJobRepository.ts";
+import * as DecisionWriterBinding from "./threadDecisions/DecisionWriterBinding.ts";
+import * as ProviderWorkAdmission from "./provider/ProviderWorkAdmission.ts";
 import * as ThreadNoteService from "./threadNotes/ThreadNoteService.ts";
 import * as PullRequestWatchDiscovery from "./pullRequest/PullRequestWatchDiscovery.ts";
 import * as PullRequestWatchService from "./pullRequest/PullRequestWatchService.ts";
@@ -325,6 +334,7 @@ const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
 // NDJSON writers and is provided at the outer runtime layer so both
 // `ProviderService` and the per-instance drivers read the same logger pair.
 const ProviderLayerLive = ProviderServiceLive.pipe(
+  Layer.provideMerge(ProviderWorkAdmission.layer),
   Layer.provide(ProviderAdapterRegistryLive),
   Layer.provideMerge(ProviderSessionDirectoryLayerLive),
 );
@@ -470,6 +480,53 @@ const StaveRpcRuntimeLayerLive = StaveRpcHandlers.runtimeLayer.pipe(
   ),
 );
 const ThreadNoteLayerLive = ThreadNoteService.layer.pipe(Layer.provide(PersistenceLayerLive));
+const DecisionSettingsLayerLive = DecisionSettingsRepository.layer.pipe(
+  Layer.provide(PersistenceLayerLive),
+);
+const DecisionJobsLayerLive = DecisionJobRepository.layer.pipe(
+  Layer.provide(DecisionSettingsLayerLive),
+  Layer.provide(PersistenceLayerLive),
+);
+const DecisionWriterLayerLive = DecisionWriterBinding.layer.pipe(
+  Layer.provide(ProviderWorkAdmission.layer),
+  Layer.provide(PersistenceLayerLive),
+);
+const DecisionCloudLayerLive = DecisionCloudClient.layer.pipe(
+  Layer.provide(ServerEnvironment.identityLayer),
+  Layer.provide(ServerSecretStore.layer),
+);
+const DecisionIngestionLayerLive = DecisionIngestion.layer.pipe(
+  Layer.provide(DecisionJobsLayerLive),
+);
+const DecisionWorkerLayerLive = DecisionWorker.layer.pipe(
+  Layer.provide(DecisionJobsLayerLive),
+  Layer.provide(DecisionSettingsLayerLive),
+  Layer.provide(
+    DecisionRepository.layer.pipe(
+      Layer.provide(PersistenceLayerLive),
+      Layer.provide(ServerEnvironment.identityLayer),
+    ),
+  ),
+  Layer.provide(DecisionWriterLayerLive),
+  Layer.provide(DecisionCloudLayerLive),
+  Layer.provide(ProviderWorkAdmission.layer),
+  Layer.provide(PersistenceLayerLive),
+);
+const DecisionLayerLive = DecisionService.layer.pipe(
+  Layer.provide(DecisionCloudLayerLive),
+  Layer.provide(
+    DecisionRepository.layer.pipe(
+      Layer.provide(PersistenceLayerLive),
+      Layer.provide(ServerEnvironment.identityLayer),
+    ),
+  ),
+  Layer.provide(DecisionJobsLayerLive),
+  Layer.provide(DecisionSettingsLayerLive),
+  Layer.provide(
+    DecisionWriterBinding.availabilityLayer.pipe(Layer.provide(DecisionWriterLayerLive)),
+  ),
+  Layer.provide(PersistenceLayerLive),
+);
 
 const PullRequestWatchLayerLive = PullRequestWatchService.layer.pipe(
   Layer.provide(StaveRpcRuntimeLayerLive),
@@ -598,11 +655,15 @@ const AntigravityInstallationRefreshLive = Layer.effectDiscard(
 );
 
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+  Layer.provideMerge(
+    Layer.mergeAll(DecisionIngestionLayerLive, DecisionWorkerLayerLive, DecisionCloudLayerLive),
+  ),
   Layer.provideMerge(AntigravityInstallationRefreshLive),
   Layer.provideMerge(SagaWorkbenchLayerLive),
   Layer.provideMerge(PullRequestWatchDiscoveryLayerLive),
   Layer.provideMerge(PullRequestWatchLayerLive),
   Layer.provideMerge(ThreadNoteLayerLive),
+  Layer.provideMerge(DecisionLayerLive),
   Layer.provideMerge(ProviderAuthServiceLive),
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),
@@ -708,6 +769,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   // isolated route harnesses can also supply its dependencies directly.
   Layer.provide(SagaWorkbenchLayerLive),
   Layer.provide(ThreadNoteLayerLive),
+  Layer.provide(DecisionLayerLive),
   Layer.provide(PullRequestWatchLayerLive),
   Layer.provide(PullRequestServiceLive),
   // One registry per server: a Stave operation started over one socket keeps

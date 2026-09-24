@@ -1,3 +1,6 @@
+import { parseDecisionsConfig } from "./decisions/DecisionsConfig.ts";
+import { DecisionsService, decisionsLayer } from "./decisions/DecisionsService.ts";
+import { decisionsRoutes } from "./http/DecisionsApi.ts";
 import * as EnvironmentRelinks from "./environments/EnvironmentRelinks.ts";
 import { TeamStore, makeTeamStore, TeamError } from "./teams/TeamStore.ts";
 import { TeamDirectory, makeTeamDirectory } from "./teams/TeamDirectory.ts";
@@ -263,6 +266,35 @@ export const ApiLive = Api.make(
         STRIPE_PORTAL_CONFIGURATION_ID: portalConfiguration,
       }),
     ).pipe(Effect.orDie);
+    const typesafeKey = yield* Config.redacted("TYPESAFE_API_KEY").pipe(
+      Config.withDefault(Redacted.make("")),
+    );
+    const decisionsSettings = yield* Effect.all(
+      Object.fromEntries(
+        [
+          "DECISIONS_ENABLED",
+          "DECISIONS_COHORT",
+          "DECISIONS_BILLING_MAX_AGE_SECONDS",
+          "DECISIONS_MONTHLY_INPUT_TOKENS",
+          "DECISIONS_ATTEMPT_HOLD_NANO_USD",
+          "DECISIONS_RUN_BUDGET_NANO_USD",
+          "DECISIONS_MAX_ATTEMPTS_PER_RUN",
+          "DECISIONS_MAX_ATTEMPTS_PER_REQUEST",
+          "DECISIONS_ACCOUNT_CONCURRENCY",
+          "DECISIONS_ENVIRONMENT_CONCURRENCY",
+          "DECISIONS_REQUESTS_PER_MINUTE",
+          "DECISIONS_ACCOUNT_EXPOSURE_NANO_USD",
+          "DECISIONS_GLOBAL_EXPOSURE_NANO_USD",
+          "DECISIONS_UNKNOWN_HOLD_SECONDS",
+          "DECISIONS_RESULT_RETENTION_SECONDS",
+          "DECISIONS_REQUEST_TIMEOUT_MS",
+        ].map((key) => [key, Config.string(key).pipe(Config.withDefault(""))]),
+      ),
+    );
+    const decisionsConfig = parseDecisionsConfig({
+      ...Object.fromEntries(Object.entries(decisionsSettings).filter(([, value]) => value !== "")),
+      TYPESAFE_API_KEY: Redacted.value(typesafeKey),
+    });
     const teamsEnabled = yield* Config.boolean("TEAMS_ENABLED").pipe(Config.withDefault(false));
     const teamMonthlyPrice = yield* Config.string("STRIPE_TEAM_MONTHLY_PRICE_ID").pipe(
       Config.withDefault(""),
@@ -609,7 +641,9 @@ export const ApiLive = Api.make(
             }),
           ),
         ),
-        Layer.provideMerge(teamLayer),
+        Layer.provideMerge(
+          Layer.merge(teamLayer, decisionsLayer(decisionsConfig, billingConfig.appOrigin)),
+        ),
         Layer.provideMerge(LiveActivities.layer),
         Layer.provideMerge(DeliveryAttempts.layer),
         Layer.provideMerge(RelayTokens.layer),
@@ -734,6 +768,27 @@ export const ApiLive = Api.make(
       );
     }
 
+    // Admission may be disabled while dispatched attempts still need durable reconciliation.
+    yield* Cloudflare.Workers.cron("* * * * *", () =>
+      DecisionsService.pipe(
+        Effect.flatMap((service) =>
+          service.usage.reconcile().pipe(
+            Effect.andThen(service.usage.health),
+            Effect.flatMap((health) =>
+              health.anomaly ||
+              health.overdueAttempts > 0 ||
+              health.exposureNanoUsd >= decisionsConfig.globalExposureNanoUsd
+                ? Effect.logWarning("Decisions operational alert", health)
+                : Effect.logInfo("Decisions operational health", health),
+            ),
+          ),
+        ),
+        Effect.timeout("45 seconds"),
+        Effect.catchCause(() => Effect.logWarning("Decisions reconciliation deferred")),
+        Effect.provide(runtimeLayer),
+      ),
+    );
+
     // Always reconcile existing objects, including after billing/enrollment is disabled.
     yield* Cloudflare.Workers.cron("* * * * *", () =>
       Effect.gen(function* () {
@@ -772,6 +827,10 @@ export const ApiLive = Api.make(
               }).pipe(Layer.provide(runtimeLayer)),
             ]
           : []),
+        decisionsRoutes({
+          appOrigin: billingConfig.appOrigin,
+          additionalAppOrigins: billingConfig.additionalAppOrigins ?? [],
+        }).pipe(Layer.provide(runtimeLayer)),
         billingRoutes(billingConfig, Redacted.value(clerkBillingWebhook)).pipe(
           Layer.provide(runtimeLayer),
         ),

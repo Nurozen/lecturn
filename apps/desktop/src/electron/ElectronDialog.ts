@@ -66,7 +66,13 @@ export class ElectronDialogShowErrorBoxError extends Schema.TaggedErrorClass<Ele
   }
 }
 
+export class ElectronDialogSaveFileError extends Schema.TaggedErrorClass<ElectronDialogSaveFileError>()(
+  "ElectronDialogSaveFileError",
+  { message: Schema.String },
+) {}
+
 export const ElectronDialogError = Schema.Union([
+  ElectronDialogSaveFileError,
   ElectronDialogPickFolderError,
   ElectronDialogPickFilesError,
   ElectronDialogShowMessageBoxError,
@@ -87,9 +93,18 @@ export interface ElectronDialogPickFilesInput {
   readonly multiple: boolean;
 }
 
+export interface ElectronDialogSaveFileInput {
+  readonly owner: Option.Option<Electron.BrowserWindow>;
+  readonly defaultPath: string;
+  readonly filters: readonly Electron.FileFilter[];
+}
+
 export class ElectronDialog extends Context.Service<
   ElectronDialog,
   {
+    readonly saveFile: (
+      input: ElectronDialogSaveFileInput,
+    ) => Effect.Effect<Option.Option<string>, ElectronDialogSaveFileError>;
     readonly pickFolder: (
       input: ElectronDialogPickFolderInput,
     ) => Effect.Effect<Option.Option<string>, ElectronDialogPickFolderError>;
@@ -104,6 +119,24 @@ export class ElectronDialog extends Context.Service<
 >()("@lecturn/desktop/electron/ElectronDialog") {}
 
 export const make = ElectronDialog.of({
+  saveFile: Effect.fn("desktop.electron.dialog.saveFile")(function* (input) {
+    const options: Electron.SaveDialogOptions = {
+      title: "Export decisions",
+      buttonLabel: "Save",
+      defaultPath: input.defaultPath,
+      filters: [...input.filters],
+      properties: ["createDirectory", "showOverwriteConfirmation"],
+    };
+    const result = yield* Effect.tryPromise({
+      try: () =>
+        Option.match(input.owner, {
+          onNone: () => Electron.dialog.showSaveDialog(options),
+          onSome: (owner) => Electron.dialog.showSaveDialog(owner, options),
+        }),
+      catch: () => new ElectronDialogSaveFileError({ message: "Could not open the Save dialog." }),
+    });
+    return result.canceled || !result.filePath ? Option.none() : Option.some(result.filePath);
+  }),
   pickFolder: Effect.fn("desktop.electron.dialog.pickFolder")(function* (input) {
     const ownerWindowId = Option.match(input.owner, {
       onNone: () => null,

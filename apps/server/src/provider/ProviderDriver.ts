@@ -147,6 +147,8 @@ export interface ImportedExternalSession {
  */
 export interface ProviderInstance {
   readonly instanceId: ProviderInstanceId;
+  /** Registry-captured effective configuration identity, stable across restarts. */
+  readonly configurationFingerprint?: string;
   readonly driverKind: ProviderDriverKind;
   readonly continuationIdentity: ProviderContinuationIdentity;
   readonly displayName: string | undefined;

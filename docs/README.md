@@ -6,6 +6,7 @@
 - [Permission modes](./user/permission-modes.md)
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Thread notes](./user/thread-notes.md)
+- [Decisions](./user/decisions.md)
 - [Organizing threads](./user/thread-sidebar.md)
 - [Forking threads](./user/forking-threads.md)
 - [Review usage](./user/usage.md)
@@ -57,3 +58,7 @@ policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../A
 - [Relay observability](./operations/relay-observability.md)
 - [Teams operations](./operations/teams.md)
 - [Mobile app store screenshots](./operations/mobile-app-store-screenshots.md)
+
+- [Decisions operations](./operations/decisions.md)
+
+- [Thread Decisions architecture](internals/thread-decisions.md)

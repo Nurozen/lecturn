@@ -153,3 +153,7 @@ A green client build does not prove that the independently deployed relay accept
 5. For a coordinated protocol replacement, verify obsolete JWT types and environment issuers are rejected. Explicitly identify the desktop and mobile versions users must install and whether they must sign in again. Remove the isolated test environment after validation.
 
 The current wire contract uses `lecturn-env-link+jwt`, the `lecturn-env:` issuer/audience namespace, `lecturn-cloud-health+jwt` and `lecturn-cloud-mint+jwt`, and `/api/lecturn-connect/health` and `/api/lecturn-connect/mint-credential`. These are protocol identifiers, not display branding.
+
+## Decisions allowance
+
+Decisions uses a separate funding approval and input-token ledger. It requires authoritative settled personal paid facts or a Decisions-specific grant; Connect trials, team access and general bypasses do not grant it. Annual personal subscriptions still receive monthly anniversary allowance windows. Existing Connect admission and quotas remain independent. See [Decisions operations](decisions.md) for the additional migrations, secret, limits and rollout gates.

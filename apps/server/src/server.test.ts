@@ -3070,6 +3070,66 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("manual cloud socket bootstrap is host-bound and requires relay write scope", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const input = {
+        environmentId: testEnvironmentDescriptor.environmentId,
+        challenge: "synthetic-challenge",
+        relayIssuer: "https://relay.example.test",
+        endpoint: {
+          httpBaseUrl: "https://remote.example.test/",
+          wsBaseUrl: "wss://remote.example.test/ws",
+          providerKind: "manual" as const,
+        },
+      };
+      const token = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+        scope: "orchestration:read relay:read",
+      });
+      const ticketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
+        headers: { authorization: `Bearer ${token.body.access_token ?? ""}` },
+      });
+      const { ticket } = yield* responseJsonEffect<{ readonly ticket: string }>(ticketResponse);
+      const readUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(ticket)}`;
+      yield* Effect.scoped(
+        withWsRpcClient(readUrl, (client) =>
+          Effect.gen(function* () {
+            const proofError = yield* client[WS_METHODS.cloudCreateManualLinkProof](input).pipe(
+              Effect.flip,
+            );
+            assert.equal(proofError._tag, "EnvironmentAuthorizationError");
+            if (proofError._tag === "EnvironmentAuthorizationError")
+              assert.equal(proofError.requiredScope, "relay:write");
+            const configError = yield* client[WS_METHODS.cloudApplyManualRelayConfig]({
+              environmentId: input.environmentId,
+              relayUrl: input.relayIssuer,
+              cloudUserId: "user",
+              environmentCredential: "synthetic",
+              cloudMintPublicKey: "synthetic",
+              endpointRuntime: null,
+            }).pipe(Effect.flip);
+            assert.equal(configError._tag, "EnvironmentAuthorizationError");
+          }),
+        ),
+      );
+      const adminUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(adminUrl, (client) =>
+          Effect.gen(function* () {
+            const proof = yield* client[WS_METHODS.cloudCreateManualLinkProof](input);
+            assert.equal(proof.environmentId, input.environmentId);
+            assert.isString(proof.proof);
+            const error = yield* client[WS_METHODS.cloudCreateManualLinkProof]({
+              ...input,
+              environmentId: EnvironmentId.make("wrong-host"),
+            }).pipe(Effect.flip);
+            assert.equal(error._tag, "ManualCloudLinkError");
+          }),
+        ),
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("requires relay write scope to update agent activity publication", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();

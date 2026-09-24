@@ -15,3 +15,7 @@ In the note list, use the arrow keys, Home, and End to move between quotes, Ente
 If a message or thread has been removed, its saved note remains visible with an explanation. Archived threads can still be visited. Notes do not copy when you fork a thread.
 
 Other clients receive changes when they refresh or return to the app. Notes requires an environment version that supports this feature. Native mobile capture and listing are not available yet.
+
+## Decisions
+
+The **Decisions** tab captures agreed choices with evidence when you enable it for a project. It uses a funded detection allowance and your thread’s connected agent. Your manually saved notes remain in **Saved**. See [Decisions](decisions.md) for setup, review and mobile behavior.

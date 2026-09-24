@@ -144,6 +144,9 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Server understands the thread.fork command. Absent on pre-fork servers,
       so clients hide the action instead of sending it. */
   threadNotes: Schema.optionalKey(Schema.Boolean),
+  /** Missing on pre-Decisions servers; clients must not probe their Decisions RPCs. */
+  threadDecisions: Schema.optionalKey(Schema.Boolean),
+  manualCloudLink: Schema.optionalKey(Schema.Boolean),
   threadForking: Schema.optionalKey(Schema.Boolean),
   /** This server build ships the Stave integration and speaks the given
       Stave CLI protocol version. A static build fact: whether a binary is

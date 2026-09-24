@@ -278,6 +278,10 @@
     "./providerEmblems": {
       "types": "./src/providerEmblems.ts",
       "import": "./src/providerEmblems.ts"
+    },
+    "./decisionEvidence": {
+      "types": "./src/decisionEvidence.ts",
+      "import": "./src/decisionEvidence.ts"
     }
   },
   "scripts": {

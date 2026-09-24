@@ -1,5 +1,6 @@
 import { TextGenerationError } from "@lecturn/contracts";
 import * as Schema from "effect/Schema";
+import * as Predicate from "effect/Predicate";
 
 const isTextGenerationError = Schema.is(TextGenerationError);
 
@@ -10,6 +11,68 @@ export function toJsonSchemaObject(schema: Schema.Top): unknown {
     return { ...document.schema, $defs: document.definitions };
   }
   return document.schema;
+}
+
+/** Codex accepts a subset of JSON Schema; application decoding remains authoritative. */
+export function toCodexJsonSchemaObject(schema: Schema.Top): unknown {
+  const convert = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(convert);
+    if (!Predicate.isObject(value)) return value;
+    // Effect represents non-finite numbers as strings in its JSON encoding. They
+    // are never useful model output and finite-number schemas reject them locally.
+    const variants = value.anyOf;
+    if (Array.isArray(variants) && variants.length === 2) {
+      const nonFinite = variants.find(
+        (variant) =>
+          Predicate.isObject(variant) &&
+          variant.type === "string" &&
+          Array.isArray(variant.enum) &&
+          variant.enum.length === 3 &&
+          variant.enum.every((item) => ["Infinity", "-Infinity", "NaN"].includes(item)),
+      );
+      if (nonFinite) return convert(variants.find((variant) => variant !== nonFinite));
+    }
+    // Refinements can introduce allOf (for example Number.between). These remain
+    // enforced by the original Effect schema after receiving the final output.
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(
+          ([key]) =>
+            ![
+              "allOf",
+              "not",
+              "if",
+              "then",
+              "else",
+              "dependentRequired",
+              "dependentSchemas",
+            ].includes(key),
+        )
+        .map(([key, item]) => {
+          if (
+            ["properties", "$defs", "definitions", "patternProperties"].includes(key) &&
+            Predicate.isObject(item)
+          ) {
+            return [
+              key,
+              Object.fromEntries(
+                Object.entries(item).map(([name, child]) => [name, convert(child)]),
+              ),
+            ];
+          }
+          if (["anyOf", "oneOf", "items", "prefixItems", "additionalProperties"].includes(key)) {
+            return [key, convert(item)];
+          }
+          return [key, item];
+        }),
+    );
+  };
+  return convert(toJsonSchemaObject(schema));
+}
+
+/** Auxiliary inference errors must never retain process output, prompts or nested causes. */
+export function privateTextGenerationError(operation: string, detail: string): TextGenerationError {
+  return new TextGenerationError({ operation, detail });
 }
 
 /** Truncate a text section to `maxChars`, appending a `[truncated]` marker when needed. */
@@ -80,6 +143,9 @@ export function normalizeCliError(
   error: unknown,
   fallback: string,
 ): TextGenerationError {
+  if (operation === "generateWorkflowSummary" || operation === "generateDecisionNotes") {
+    return privateTextGenerationError(operation, fallback);
+  }
   if (isTextGenerationError(error)) {
     return error;
   }

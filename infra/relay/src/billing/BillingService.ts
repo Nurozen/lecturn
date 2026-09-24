@@ -9,6 +9,7 @@ import {
   type BillingAccount,
   type BillingEvent,
   type BillingStore,
+  type PersonalPaidFacts,
 } from "./BillingStore.ts";
 import { createStripeClient, type StripeClient } from "./StripeClient.ts";
 import {
@@ -105,6 +106,13 @@ export function makeBillingService(
     a: BillingAccount,
     disputeChargeIds: readonly string[] = [],
   ) {
+    // Fail closed for metered features if any canonical fetch below fails. Connect keeps its
+    // existing availability policy; its access fields are deliberately untouched here.
+    if (a.paid_facts) {
+      a.paid_facts = null;
+      yield* save(a);
+    }
+    a.paid_facts = null;
     if (!a.customer_id && a.deleted_at && a.state.operation) yield* ensureCustomer(a);
     if (!a.customer_id) {
       yield* save(a);
@@ -207,6 +215,8 @@ export function makeBillingService(
     let suspended = false;
     let currentTermDisputeReceipt = false;
     let refundedCurrentTerm: string | undefined;
+    const paidCandidates: PersonalPaidFacts[] = [];
+    let paidFactsRevoked = false;
     for (const invoice of invoices) {
       if (invoice.status !== "paid" || invoice.amount_paid <= 0) continue;
       if (invoice.lines.has_more)
@@ -224,6 +234,7 @@ export function makeBillingService(
       let captured = 0;
       let refunded = 0;
       let disputed = false;
+      let anyRefund = false;
       const seenCharges = new Set<string>();
       for (const payment of payments) {
         if (referenceId(payment.invoice) !== invoice.id || payment.status !== "paid")
@@ -251,6 +262,7 @@ export function makeBillingService(
           );
         if (!charge.paid || charge.status !== "succeeded") continue;
         captured += Math.min(payment.amount_paid ?? 0, charge.amount);
+        anyRefund ||= charge.amount_refunded > 0 || charge.refunded;
         // Only a completely refunded charge removes its allocation. Partial refunds keep service.
         if (charge.refunded && charge.amount_refunded >= charge.amount)
           refunded += Math.min(payment.amount_paid ?? 0, charge.amount);
@@ -265,6 +277,7 @@ export function makeBillingService(
         return yield* error("recovery_required", "Invoice settlement requires support review");
       const fullyRefunded = captured > 0 && refunded >= captured;
       const currentTerm = terms.some((line) => line.period.start <= time && time < line.period.end);
+      if (currentTerm && (anyRefund || disputed)) paidFactsRevoked = true;
       if (currentTerm && fullyRefunded) refundedCurrentTerm = invoice.id;
       if (currentTerm && disputed) suspended = true;
       if (fullyRefunded || disputed) continue;
@@ -272,6 +285,33 @@ export function makeBillingService(
       if (paidAt === null)
         return yield* error("recovery_required", "Invoice settlement time is missing");
       settled.push(...terms.map((line) => ({ ...line.period, settledAt: paidAt })));
+      // Personal paid provenance is stricter than Connect: no trial, partial refund, inferred
+      // owner, or missing anniversary. Cancellation retains already purchased service.
+      if (
+        !anyRefund &&
+        sub.status !== "trialing" &&
+        sub.status !== "incomplete_expired" &&
+        referenceId(sub.customer) === a.customer_id &&
+        referenceId(invoice.customer) === a.customer_id &&
+        referenceId(invoice.parent?.subscription_details?.subscription ?? null) === sub.id &&
+        Number.isSafeInteger(sub.billing_cycle_anchor) &&
+        sub.billing_cycle_anchor > 0 &&
+        paidAt <= time
+      ) {
+        for (const term of terms) {
+          if (term.period.end <= time || term.period.start >= term.period.end) continue;
+          paidCandidates.push({
+            source: "stripe_personal_subscription",
+            subscriptionId: sub.id,
+            invoiceId: invoice.id,
+            interval: sub.items.data[0]!.price.id === config.monthlyPriceId ? "month" : "year",
+            paidPeriodStart: Math.max(term.period.start, paidAt),
+            paidPeriodEnd: term.period.end,
+            subscriptionAnniversary: sub.billing_cycle_anchor,
+            reconciledAt: time,
+          });
+        }
+      }
     }
     const paidThrough =
       Math.max(
@@ -339,6 +379,10 @@ export function makeBillingService(
         : null;
     a.state.accessUntil =
       access.allowed && a.state.accessWindowStart !== null ? access.validUntil : null;
+    a.paid_facts = paidFactsRevoked
+      ? null
+      : (paidCandidates.toSorted((left, right) => right.paidPeriodEnd - left.paidPeriodEnd)[0] ??
+        null);
     yield* save(a);
   });
   const createSession = Effect.fn("Billing.createSession")(function* (a: BillingAccount) {

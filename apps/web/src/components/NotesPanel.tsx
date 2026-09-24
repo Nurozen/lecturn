@@ -18,7 +18,7 @@ import { useComposerHandleContext } from "../composerHandleContext";
 import { assistantCitationNavigation } from "../lib/assistantCitationNavigation";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { useRightPanelStore } from "../rightPanelStore";
-import { useThreadDetail } from "../state/entities";
+import { useServerConfigs, useThreadShell, useThreadDetail } from "../state/entities";
 import {
   setActiveThreadNote,
   threadNoteScopeKey,
@@ -38,10 +38,86 @@ import {
   noteUnavailableReason,
 } from "./NotesPanel.logic";
 
+import { DecisionsPanel } from "./DecisionsPanel";
+
 export function NotesPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
+  const shell = useThreadShell(threadRef);
+  const available =
+    useServerConfigs().get(threadRef.environmentId)?.environment.capabilities.threadDecisions ===
+    true;
+  const [tab, setTab] = useState<"saved" | "decisions">("saved");
+  const [scope, setScope] = useState<"project" | "thread">("project");
+  return (
+    <section className="flex min-h-0 flex-1 flex-col" aria-label="Notes">
+      <div className="space-y-2 border-b border-border/50 p-3">
+        {available ? (
+          <div role="tablist" aria-label="Note type" className="flex gap-1">
+            {(["saved", "decisions"] as const).map((value) => (
+              <Button
+                key={value}
+                id={`notes-tab-${value}`}
+                role="tab"
+                aria-selected={tab === value}
+                aria-controls={`notes-panel-${value}`}
+                size="sm"
+                variant={tab === value ? "glass" : "ghost"}
+                onClick={() => setTab(value)}
+              >
+                {value === "saved" ? "Saved" : "Decisions"}
+              </Button>
+            ))}
+          </div>
+        ) : null}
+        <div className="flex gap-1" aria-label="Notes scope">
+          {(["project", "thread"] as const).map((value) => (
+            <Button
+              key={value}
+              size="xs"
+              variant={scope === value ? "glass" : "ghost"}
+              aria-pressed={scope === value}
+              onClick={() => setScope(value)}
+            >
+              {value === "project" ? "Project" : "This thread"}
+            </Button>
+          ))}
+        </div>
+      </div>
+      <div
+        id="notes-panel-saved"
+        role={available ? "tabpanel" : undefined}
+        aria-labelledby={available ? "notes-tab-saved" : undefined}
+        hidden={available && tab !== "saved"}
+        className={available && tab !== "saved" ? "hidden" : "flex min-h-0 flex-1 flex-col"}
+      >
+        <SavedNotesPanel threadRef={threadRef} scope={scope} />
+      </div>
+      {available && shell ? (
+        <div
+          id="notes-panel-decisions"
+          role="tabpanel"
+          aria-labelledby="notes-tab-decisions"
+          hidden={tab !== "decisions"}
+          className={tab !== "decisions" ? "hidden" : "flex min-h-0 flex-1 flex-col"}
+        >
+          <DecisionsPanel
+            environmentId={threadRef.environmentId}
+            projectId={shell.projectId}
+            {...(scope === "thread" ? { threadId: threadRef.threadId } : {})}
+          />
+        </div>
+      ) : null}
+    </section>
+  );
+}
+function SavedNotesPanel({
+  threadRef,
+  scope,
+}: {
+  threadRef: ScopedThreadRef;
+  scope: "project" | "thread";
+}) {
   const data = useThreadNotes(threadRef);
   const detail = useThreadDetail(threadRef);
-  const [scope, setScope] = useState<"project" | "thread">("project");
   const [filter, setFilter] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [focused, setFocused] = useState(0);
@@ -119,22 +195,6 @@ export function NotesPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
               Refresh
             </Button>
           </div>
-        </div>
-        <div className="flex gap-1" aria-label="Notes scope">
-          {(["project", "thread"] as const).map((value) => (
-            <Button
-              key={value}
-              size="xs"
-              variant={scope === value ? "glass" : "ghost"}
-              aria-pressed={scope === value}
-              onClick={() => {
-                setScope(value);
-                setFocused(0);
-              }}
-            >
-              {value === "project" ? "Project" : "This thread"}
-            </Button>
-          ))}
         </div>
         <label className="lecturn-panel-tile flex items-center gap-2 px-3 py-2">
           <SearchIcon className="size-3.5 text-muted-foreground" />

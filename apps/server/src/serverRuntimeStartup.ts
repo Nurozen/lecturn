@@ -1,3 +1,7 @@
+import { DecisionCloudClient } from "./threadDecisions/DecisionCloudClient.ts";
+import * as Schedule from "effect/Schedule";
+import { DecisionIngestion } from "./threadDecisions/DecisionIngestion.ts";
+import { DecisionWorker } from "./threadDecisions/DecisionWorker.ts";
 import { PullRequestWatchDiscovery } from "./pullRequest/PullRequestWatchDiscovery.ts";
 import { PullRequestWatchService } from "./pullRequest/PullRequestWatchService.ts";
 import {
@@ -768,6 +772,24 @@ export const make = (options?: StartupOptions) =>
         Effect.gen(function* () {
           yield* orchestrationReactor.start().pipe(Scope.provide(reactorScope));
           yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope));
+          const decisionCloud = yield* Effect.serviceOption(DecisionCloudClient);
+          if (Option.isSome(decisionCloud))
+            yield* forkParked(
+              decisionCloud.value.refreshFunding.pipe(Effect.repeat(Schedule.spaced("1 minute"))),
+            ).pipe(Scope.provide(reactorScope));
+          const decisionIngestion = yield* Effect.serviceOption(DecisionIngestion);
+          const decisionWorker = yield* Effect.serviceOption(DecisionWorker);
+          if (Option.isSome(decisionIngestion) && Option.isSome(decisionWorker))
+            yield* forkParked(
+              decisionIngestion.value.start.pipe(
+                Effect.catch(() =>
+                  Effect.logError(
+                    "Decision history recovery is waiting; saved decisions remain available.",
+                  ),
+                ),
+                Effect.andThen(decisionWorker.value.start),
+              ),
+            ).pipe(Scope.provide(reactorScope));
           const watches = yield* Effect.serviceOption(PullRequestWatchService);
           if (Option.isSome(watches)) yield* watches.value.start.pipe(Scope.provide(reactorScope));
           const discovery = yield* Effect.serviceOption(PullRequestWatchDiscovery);

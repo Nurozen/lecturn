@@ -452,6 +452,15 @@ describe("createAssistantTextSelector", () => {
 });
 
 describe("findAssistantCitationText", () => {
+  it("never interprets raw Markdown positions as rendered text coordinates", () => {
+    const raw = { ...selector("SQLite"), coordinateSpace: "raw-message" as const };
+    const source = assistantSource(textNode("SQLite")) as unknown as HTMLElement;
+    expect(findAssistantCitationText("SQLite", raw)).toBeNull();
+    expect(resolveAssistantCitationRange(source, raw)).toBeNull();
+    expect(resolveAssistantCitationRanges(source, [raw])).toEqual([null]);
+    expect(findAssistantCitationText("SQLite", selector("SQLite"))).toEqual({ start: 0, end: 6 });
+  });
+
   it("resolves an exact selection with its saved position and context", () => {
     expect(
       findAssistantCitationText(

@@ -1,7 +1,12 @@
+import { EnvironmentId } from "@lecturn/contracts";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { serverEnvironment } from "../state/server";
+import { threadDecisionEnvironment } from "../state/threadDecisions";
 import { useAuth } from "@clerk/react";
 import { useAtomValue } from "@effect/atom-react";
 import { findErrorTraceId } from "@lecturn/client-runtime/errors";
 import {
+  executeAtomQuery,
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
@@ -28,6 +33,8 @@ import { usePrimaryCloudLinkState } from "./primaryCloudLinkState";
 export interface CloudLinkDesiredState {
   readonly managedTunnel: boolean;
   readonly publish: boolean;
+  readonly decisions?: boolean;
+  readonly unlink?: boolean;
 }
 
 /**
@@ -65,6 +72,9 @@ export function useCloudLinkController(
     reportFailure: false,
   });
   const unlinkPrimaryEnvironment = useAtomCommand(unlinkPrimaryEnvironmentAtom, {
+    reportFailure: false,
+  });
+  const updateDecisionFunding = useAtomCommand(threadDecisionEnvironment.funding, {
     reportFailure: false,
   });
   const updatePrimaryEnvironmentPreferences = useAtomCommand(
@@ -189,7 +199,38 @@ export function useCloudLinkController(
       reportUpdateFailure(new Error("Local environment is not ready yet."));
       return false;
     }
-    const wantsLink = desired.managedTunnel || desired.publish;
+    let keepDecisionFunding = desired.decisions === true && desired.unlink !== true;
+    let revokeFundingGeneration: number | null = null;
+    const environmentId = EnvironmentId.make(target.environmentId);
+    if (
+      linked &&
+      !desired.managedTunnel &&
+      !desired.publish &&
+      !keepDecisionFunding &&
+      appAtomRegistry.get(serverEnvironment.configValueAtom(environmentId))?.environment
+        .capabilities.threadDecisions === true
+    ) {
+      const funding = await executeAtomQuery(
+        appAtomRegistry,
+        threadDecisionEnvironment.fundingStatus({ environmentId, input: {} }),
+        { refresh: true, reportFailure: false },
+      );
+      if (
+        funding._tag === "Failure" ||
+        (funding.value.state === "unavailable" && !desired.unlink)
+      ) {
+        reportUpdateFailure(
+          new Error(
+            "Could not verify decision funding. Retry before removing this environment’s cloud link.",
+          ),
+        );
+        return false;
+      }
+      if (desired.unlink) revokeFundingGeneration = funding.value.generation;
+      else
+        keepDecisionFunding = funding.value.state === "active" || funding.value.state === "pending";
+    }
+    const wantsLink = desired.managedTunnel || desired.publish || keepDecisionFunding;
     // Another account's link can only be removed, and only when it is one of
     // this client's own accounts.
     if (accountMismatchMessage && (wantsLink || !publishAccount.unlink.allowed)) {
@@ -205,6 +246,16 @@ export function useCloudLinkController(
     // success or failure — refreshes the rendered state to whatever the server
     // actually holds now.
     if (!wantsLink) {
+      if (revokeFundingGeneration !== null) {
+        const revoked = await updateDecisionFunding({
+          environmentId,
+          input: { operation: "revoke", expectedGeneration: revokeFundingGeneration },
+        });
+        if (revoked._tag === "Failure") {
+          reportUpdateFailure(squashAtomCommandFailure(revoked));
+          return false;
+        }
+      }
       // Unlink works without a relay token — a failed token read must not
       // leave the user unable to turn Lecturn Connect off.
       const unlinkResult = await unlinkPrimaryEnvironment({
@@ -229,7 +280,7 @@ export function useCloudLinkController(
         return false;
       }
       if (
-        !(await checkSubscription(clerkToken)) ||
+        ((desired.managedTunnel || desired.publish) && !(await checkSubscription(clerkToken))) ||
         (!linked && selectedTeam(userId) !== organizationId)
       )
         return false;
@@ -241,9 +292,11 @@ export function useCloudLinkController(
         const linkResult = await linkPrimaryEnvironment({
           target,
           clerkToken,
-          mode: desired.managedTunnel ? "managed" : "publish_only",
+          mode: desired.managedTunnel ? "managed" : desired.publish ? "publish_only" : "decisions",
           publishAgentActivity: desired.publish && companyPublishingAllowed.current,
-          ...(organizationId ? { organizationId } : {}),
+          ...(organizationId && (desired.managedTunnel || desired.publish)
+            ? { organizationId }
+            : {}),
         });
         if (linkResult._tag === "Failure") {
           if (!isAtomCommandInterrupted(linkResult)) {
