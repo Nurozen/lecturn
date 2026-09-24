@@ -131,6 +131,18 @@ const numericDateWithYearFormatter = new Intl.DateTimeFormat(timestampLocale, {
   year: "numeric",
 });
 
+const calendarDateFormatter = new Intl.DateTimeFormat(timestampLocale, {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
+
+/** A day without a time, e.g. `Aug 13, 2026`, for labels that date an event. */
+export function formatCalendarDate(isoDate: string): string {
+  const date = parseTimestampDate(isoDate);
+  return date ? calendarDateFormatter.format(date) : "";
+}
+
 /**
  * Chat timestamp that adds the date once the message is no longer from today:
  * today `12:34 PM`, yesterday `yesterday at 12:34 PM`, older `8/13 12:34 PM`

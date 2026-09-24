@@ -202,6 +202,7 @@ import {
 } from "./ui/sidebar";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { openCommandPalette } from "../commandPaletteBus";
+import { readCanImportSessions } from "./ImportSessionPalette";
 import {
   archiveSelectedThreadEntries,
   buildMultiSelectThreadContextMenuItems,
@@ -1776,7 +1777,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
         const actionHandlers = new Map<string, () => Promise<void> | void>();
         const makeLeaf = (
-          action: "rename" | "grouping" | "copy-path" | "delete",
+          action: "import-session" | "rename" | "grouping" | "copy-path" | "delete",
           member: SidebarProjectGroupMember,
           options?: {
             destructive?: boolean;
@@ -1786,6 +1787,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           const id = `${action}:${member.physicalProjectKey}`;
           actionHandlers.set(id, () => {
             switch (action) {
+              case "import-session":
+                openCommandPalette({
+                  open: "import-session",
+                  projectRef: scopeProjectRef(member.environmentId, member.id),
+                });
+                return;
               case "rename":
                 openProjectRenameDialog(member);
                 return;
@@ -1809,7 +1816,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         };
 
         const buildTargetedItem = (
-          action: "rename" | "grouping" | "copy-path" | "delete",
+          action: "import-session" | "rename" | "grouping" | "copy-path" | "delete",
           label: string,
           options?: {
             destructive?: boolean;
@@ -1894,6 +1901,16 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         const clicked = await api.contextMenu.show(
           [
             ...sagaItems,
+            ...(project.memberProjects.some((member) => readCanImportSessions(member.environmentId))
+              ? [
+                  buildTargetedItem("import-session", "Import session…", {
+                    // Same rule as New thread: an archived Stave space starts no threads.
+                    isDisabled: (member) =>
+                      member.stave?.state === "archived" ||
+                      !readCanImportSessions(member.environmentId),
+                  }),
+                ]
+              : []),
             buildTargetedItem("rename", "Rename"),
             buildTargetedItem("grouping", "Group into..."),
             buildTargetedItem("copy-path", "Copy Path"),

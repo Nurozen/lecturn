@@ -1,6 +1,7 @@
 import {
   type FilesystemBrowseEntry,
   type KeybindingCommand,
+  type ScopedProjectRef,
   THREAD_JUMP_KEYBINDING_COMMANDS,
 } from "@lecturn/contracts";
 import {
@@ -46,9 +47,9 @@ export function browseInputEndPaddingClass(input: {
  */
 export type SearchOverlayMode = "command" | "files" | "content";
 
-export interface CommandPaletteOpenIntent {
-  readonly kind: "add-project" | "new-thread-in";
-}
+export type CommandPaletteOpenIntent =
+  | { readonly kind: "add-project" | "new-thread-in" }
+  | { readonly kind: "import-session"; readonly projectRef: ScopedProjectRef };
 
 export interface CommandPaletteUiState {
   readonly open: boolean;
@@ -61,6 +62,7 @@ export type CommandPaletteUiAction =
   | { readonly _tag: "ToggleMode"; readonly mode: SearchOverlayMode }
   | { readonly _tag: "OpenAddProject" }
   | { readonly _tag: "OpenNewThreadIn" }
+  | { readonly _tag: "OpenImportSession"; readonly projectRef: ScopedProjectRef }
   | { readonly _tag: "ClearOpenIntent" };
 
 export function reduceCommandPaletteUiState(
@@ -80,6 +82,12 @@ export function reduceCommandPaletteUiState(
       return { open: true, mode: "command", openIntent: { kind: "add-project" } };
     case "OpenNewThreadIn":
       return { open: true, mode: "command", openIntent: { kind: "new-thread-in" } };
+    case "OpenImportSession":
+      return {
+        open: true,
+        mode: "command",
+        openIntent: { kind: "import-session", projectRef: action.projectRef },
+      };
     case "ClearOpenIntent":
       return state.openIntent ? { ...state, openIntent: null } : state;
   }

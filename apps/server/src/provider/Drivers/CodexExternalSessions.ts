@@ -118,7 +118,8 @@ export function selectCodexExternalSessions(
 /**
  * Pages `thread/list`, newest first, until `limit + 1` importable threads are
  * in hand or Codex runs out. `truncated` also covers stopping at the scan cap
- * while Codex still had more.
+ * while Codex still had more. Codex can repeat a thread within one page, so
+ * ids already collected are skipped.
  */
 export const listCodexExternalThreads = Effect.fn("listCodexExternalThreads")(function* (
   client: CodexThreadListClient,
@@ -130,6 +131,7 @@ export const listCodexExternalThreads = Effect.fn("listCodexExternalThreads")(fu
   },
 ) {
   const sessions: ExternalSessionListing[] = [];
+  const seenIds = new Set<string>();
   let cursor: string | undefined;
   let scanned = 0;
   while (scanned < MAX_THREADS_SCANNED) {
@@ -143,7 +145,11 @@ export const listCodexExternalThreads = Effect.fn("listCodexExternalThreads")(fu
         sortDirection: "desc",
       })
       .pipe(Effect.flatMap(decodeCodexThreadListPage));
-    sessions.push(...selectCodexExternalSessions(response.data, input.knownThreadIds));
+    for (const listing of selectCodexExternalSessions(response.data, input.knownThreadIds)) {
+      if (seenIds.has(listing.sessionId)) continue;
+      seenIds.add(listing.sessionId);
+      sessions.push(listing);
+    }
     scanned += response.data.length;
     cursor = response.nextCursor ?? undefined;
     // An empty page with a cursor would never reach the scan cap.

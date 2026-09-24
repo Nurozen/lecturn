@@ -8,6 +8,7 @@
 - [Thread notes](./user/thread-notes.md)
 - [Organizing threads](./user/thread-sidebar.md)
 - [Forking threads](./user/forking-threads.md)
+- [Importing sessions](./user/importing-sessions.md)
 - [Review usage](./user/usage.md)
 - [Customize a project icon](./user/project-settings.md)
 - [Mobile appearance](./user/mobile-appearance.md)

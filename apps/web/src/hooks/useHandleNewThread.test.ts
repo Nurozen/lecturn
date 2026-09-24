@@ -91,6 +91,7 @@ vi.mock("../composerDraftStore", () => {
 });
 vi.mock("../lib/chatThreadActions", () => ({
   hasExplicitComposerModelSelection: () => false,
+  resolveCarriedThreadModes: () => ({ runtimeMode: null, interactionMode: null }),
   resolveNewDraftStartFromOrigin: () => false,
   resolveNewThreadEnvModeSources: () => ({
     forcedMode: null,

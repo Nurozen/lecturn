@@ -129,6 +129,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
    */
   lockedProvider: ProviderDriverKind | null;
   lockedContinuationGroupKey?: string | null;
+  /** Narrows the lock to this one instance (an imported thread's first send). */
+  lockedInstanceId?: ProviderInstanceId | null;
   /**
    * All configured provider instances in display order. Used to render
    * the sidebar (one button per instance) and to resolve display names
@@ -270,13 +272,16 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     [instanceEntries],
   );
   const matchesLockedProvider = useCallback(
-    (entry: Pick<ProviderInstanceEntry, "driverKind" | "continuationGroupKey">): boolean => {
+    (
+      entry: Pick<ProviderInstanceEntry, "instanceId" | "driverKind" | "continuationGroupKey">,
+    ): boolean => {
       if (props.lockedProvider === null) return true;
       if (entry.driverKind !== props.lockedProvider) return false;
+      if (props.lockedInstanceId != null) return entry.instanceId === props.lockedInstanceId;
       if (!props.lockedContinuationGroupKey) return true;
       return entry.continuationGroupKey === props.lockedContinuationGroupKey;
     },
-    [props.lockedContinuationGroupKey, props.lockedProvider],
+    [props.lockedContinuationGroupKey, props.lockedInstanceId, props.lockedProvider],
   );
 
   const selectableUnavailableInstanceIds = useMemo(() => {
