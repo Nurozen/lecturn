@@ -1752,7 +1752,7 @@ describe("once-per-event push notifications", () => {
     watchId: "watch-78",
     projectId: "project",
     number: 78,
-    repository: "acme/hl-jira",
+    repository: "acme/widget-tracker",
     state: "open",
     checks: "failing",
     requiredChecks: "failing",
@@ -1764,8 +1764,8 @@ describe("once-per-event push notifications", () => {
   const ciFailingRow: AggregateRow = {
     ...inputRow,
     threadId: "pr-watch:78" as AggregateRow["threadId"],
-    threadTitle: "#78 hiddenlayer-dev 2.13.0",
-    projectTitle: "hl-jira",
+    threadTitle: "#78 example-dev 2.13.0",
+    projectTitle: "widget-tracker",
     status: "CI failing",
     pullRequest,
   };
@@ -1936,7 +1936,7 @@ describe("once-per-event push notifications", () => {
         updatedAt: "1970-01-01T00:10:00.000Z",
       });
 
-      expect(queuedBodies(queuedJobs)).toEqual(["CI failing: hl-jira"]);
+      expect(queuedBodies(queuedJobs)).toEqual(["CI failing: widget-tracker"]);
     });
   });
 
@@ -1973,7 +1973,7 @@ describe("once-per-event push notifications", () => {
       yield* publish({ deviceRow, queuedJobs, rows: [stalePullRequestRow] });
       yield* publish({ deviceRow, queuedJobs, rows: [ciFailingRow] });
 
-      expect(queuedBodies(queuedJobs)).toEqual(["CI failing: hl-jira"]);
+      expect(queuedBodies(queuedJobs)).toEqual(["CI failing: widget-tracker"]);
     });
   });
 
@@ -1999,7 +1999,7 @@ describe("once-per-event push notifications", () => {
       yield* publish({ deviceRow, queuedJobs, rows: [workingRow] });
       yield* publish({ deviceRow, queuedJobs, rows: [ciFailingRow] });
 
-      expect(queuedBodies(queuedJobs)).toEqual(["CI failing: hl-jira"]);
+      expect(queuedBodies(queuedJobs)).toEqual(["CI failing: widget-tracker"]);
     });
   });
 
@@ -2049,7 +2049,7 @@ describe("once-per-event push notifications", () => {
         rows: [stalePullRequestRow, inputRow, ciFailingRow],
       });
 
-      expect(queuedBodies(queuedJobs)).toEqual(["Input: Project", "CI failing: hl-jira"]);
+      expect(queuedBodies(queuedJobs)).toEqual(["Input: Project", "CI failing: widget-tracker"]);
     });
   });
 
@@ -2676,7 +2676,7 @@ describe("live activity alert decisions", () => {
       watchId: "watch-78",
       projectId: "project",
       number: 78,
-      repository: "acme/hl-jira",
+      repository: "acme/widget-tracker",
       state: "open" as const,
       checks: "failing" as const,
       requiredChecks: "failing" as const,
