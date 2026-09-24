@@ -1,3 +1,4 @@
+import { useSettingsAccountGlass } from "../settings/useSettingsAccountGlass";
 import type {
   EnvironmentId,
   StaveOperation,
@@ -271,6 +272,7 @@ function SpaceEditDialog({
   onClose: () => void;
   onReview: (operation: StaveOperation, title: string) => void;
 }) {
+  const glass = useSettingsAccountGlass(environmentId);
   const repos = useEnvironmentQuery(
     editor.kind === "add" ? staveRepos({ environmentId, input: {} }) : null,
   );
@@ -303,7 +305,10 @@ function SpaceEditDialog({
         if (!open) onClose();
       }}
     >
-      <DialogPopup className="max-w-md">
+      <DialogPopup
+        {...glass}
+        className="lecturn-account-surface lecturn-project-settings-dialog max-w-md"
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>

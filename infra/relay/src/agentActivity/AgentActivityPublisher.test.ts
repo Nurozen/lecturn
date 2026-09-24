@@ -35,6 +35,7 @@ function target(deviceId: string): LiveActivities.TargetRow {
     push_token: null,
     push_to_start_token: "start-token",
     preferences_json: "{}",
+    notified_push_events_json: null,
     activity_push_token: null,
     remote_start_queued_at: null,
     remote_started_at: null,
@@ -51,6 +52,8 @@ function makeLiveActivities(
     register: () => Effect.void,
     listTargets: () => Effect.succeed([]),
     markDelivery: () => Effect.void,
+    withPushNotificationLock: (target, use) => use(target),
+    markPushNotified: () => Effect.void,
     markStartQueued: () => Effect.void,
     clearStartQueued: () => Effect.void,
     invalidateDeliveryToken: () => Effect.void,
@@ -189,6 +192,7 @@ describe("AgentActivityPublisher", () => {
       expect(result).toEqual(deliveryResult);
       expect(sent).toHaveLength(1);
       expect(sent[0]?.target.device_id).toBe("device-1");
+      expect(sent[0]?.publishingEnvironmentId).toBeNull();
       expect(sent[0]?.aggregate).toMatchObject({
         activeCount: 1,
         activities: [
@@ -406,6 +410,81 @@ describe("AgentActivityPublisher", () => {
         ],
       });
     });
+  });
+
+  it.effect("tells both delivery paths whether the publishing user is present", () => {
+    const presence: Array<readonly [string, boolean | undefined, string | null]> = [];
+    const publish = (userPresent?: boolean) =>
+      Effect.gen(function* () {
+        const publisher = yield* AgentActivityPublisher.AgentActivityPublisher;
+        return yield* publisher.publish({
+          environmentId: "env",
+          environmentPublicKey: "environment-public-key",
+          threadId: "thread",
+          state: { ...state, phase: "waiting_for_input", headline: "Needs input" },
+          ...(userPresent === undefined ? {} : { userPresent }),
+        });
+      });
+
+    return Effect.gen(function* () {
+      yield* publish(true);
+      yield* publish(false);
+      // Older environments omit the flag and keep ringing as before.
+      yield* publish();
+
+      expect(presence).toEqual([
+        ["live", true, "env"],
+        ["push", true, "env"],
+        ["live", false, "env"],
+        ["push", false, "env"],
+        ["live", false, "env"],
+        ["push", false, "env"],
+      ]);
+    }).pipe(
+      Effect.provide(
+        AgentActivityPublisher.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
+              Layer.succeed(
+                EnvironmentLinks.EnvironmentLinks,
+                makeEnvironmentLinks({
+                  listDeliveryUsersForEnvironment: () =>
+                    Effect.succeed([
+                      {
+                        userId: "dev:julius",
+                        notificationsEnabled: true,
+                        liveActivitiesEnabled: false,
+                      },
+                    ]),
+                }),
+              ),
+              Layer.succeed(
+                LiveActivities.LiveActivities,
+                makeLiveActivities({
+                  listTargets: () => Effect.succeed([target("device-1")]),
+                }),
+              ),
+              Layer.succeed(
+                ApnsDeliveries.ApnsDeliveries,
+                makeApnsDeliveries({
+                  sendForTarget: (input) =>
+                    Effect.sync(() => {
+                      presence.push(["live", input.userPresent, input.publishingEnvironmentId]);
+                      return null;
+                    }),
+                  sendPushNotificationForTarget: (input) =>
+                    Effect.sync(() => {
+                      presence.push(["push", input.userPresent, input.publishingEnvironmentId]);
+                      return null;
+                    }),
+                }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   });
 
   it.effect("queues push notifications for notification-only environment links", () => {

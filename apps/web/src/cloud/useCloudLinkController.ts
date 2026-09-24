@@ -1,4 +1,5 @@
 import { useAuth } from "@clerk/react";
+import { useAtomValue } from "@effect/atom-react";
 import { findErrorTraceId } from "@lecturn/client-runtime/errors";
 import {
   isAtomCommandInterrupted,
@@ -6,11 +7,12 @@ import {
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
 import { useEffect, useRef, useState } from "react";
-import {
-  createBillingClient,
-  createTeamsClient,
-  selectedTeam,
-} from "@lecturn/client-runtime/relay";
+import { selectedTeam } from "@lecturn/client-runtime/relay";
+import { createAccountBillingClient, createAccountTeamsClient } from "./accountRelayClients";
+import { readToken } from "./accountTokens";
+import { describePublishAccount } from "./cloudLinkAccount";
+import { connectAccountProfilesAtom } from "./connectAccounts";
+import { knownConnectAccountsAtom } from "./knownAccounts";
 import { isConnectSubscriptionRequired } from "./connectSubscriptionGate";
 
 import { toastManager } from "../components/ui/toast";
@@ -22,7 +24,6 @@ import {
   updatePrimaryEnvironmentPreferences as updatePrimaryEnvironmentPreferencesAtom,
 } from "./linkEnvironmentAtoms";
 import { usePrimaryCloudLinkState } from "./primaryCloudLinkState";
-import { resolveCloudPublicConfig, resolveRelayClerkTokenOptions } from "./publicConfig";
 
 export interface CloudLinkDesiredState {
   readonly managedTunnel: boolean;
@@ -37,9 +38,26 @@ export interface CloudLinkDesiredState {
  * (re)link with the mode the managed-tunnel bit implies and set the publish
  * preference. Re-linking only happens when the managed-tunnel mode actually
  * changes, so flipping publish alone is cheap.
+ *
+ * It acts as `accountId`, with that account's own token, and as Clerk's active
+ * account when none is given. `onSelectAccount` is the surface's picker.
  */
-export function useCloudLinkController() {
-  const { getToken, isSignedIn, userId } = useAuth();
+export function useCloudLinkController(
+  options: {
+    readonly accountId?: string | null | undefined;
+    readonly onSelectAccount?: (accountId: string) => void;
+  } = {},
+) {
+  const auth = useAuth();
+  const known = useAtomValue(knownConnectAccountsAtom);
+  const profiles = useAtomValue(connectAccountProfilesAtom);
+  const userId = options.accountId === undefined ? auth.userId : options.accountId;
+  const isSignedIn =
+    userId === auth.userId
+      ? auth.isSignedIn
+      : Boolean(userId) && !known.needsSignIn.includes(userId ?? "");
+  const readAccountToken = (accountId: string | null | undefined) =>
+    accountId ? readToken(accountId) : Promise.resolve(null);
   const refreshRelayEnvironments = useAtomCommand(relayEnvironmentDiscovery.refresh, {
     reportFailure: false,
   });
@@ -103,11 +121,23 @@ export function useCloudLinkController() {
   const publishAgentActivity = primaryCloudLinkState.data?.publishAgentActivity ?? false;
   const linked = primaryCloudLinkState.data?.linked ?? false;
 
-  const accountMismatch =
-    linked && isSignedIn && Boolean(userId) && primaryCloudLinkState.data?.cloudUserId !== userId;
-  const accountMismatchMessage = accountMismatch
-    ? "This environment is still published to a different Lecturn account. Sign out to stop its local relay, then sign in to the account you want to use. The previous owner can remove the offline environment from their account."
-    : null;
+  const { onSelectAccount } = options;
+  const publishAccount = describePublishAccount({
+    linked,
+    accountId: userId,
+    accountSignedIn: Boolean(isSignedIn),
+    publisherId: primaryCloudLinkState.data?.cloudUserId,
+    knownAccountIds: known.accountIds,
+    needsSignIn: known.needsSignIn,
+    profiles,
+    canChoose: onSelectAccount !== undefined,
+  });
+  const accountMismatchMessage = publishAccount.message;
+  const { actAs } = publishAccount;
+  const accountMismatchAction =
+    actAs && onSelectAccount
+      ? { label: actAs.label, run: () => onSelectAccount(actAs.accountId) }
+      : null;
 
   const checkSubscription = async (clerkToken?: string): Promise<boolean> => {
     const account = userId;
@@ -117,11 +147,7 @@ export function useCloudLinkController() {
     try {
       companyPublishingAllowed.current = true;
       if (organizationId) {
-        const result = await createTeamsClient({
-          relayUrl: resolveCloudPublicConfig().relayUrl ?? "",
-          getToken: () =>
-            clerkToken ? Promise.resolve(clerkToken) : getToken(resolveRelayClerkTokenOptions()),
-        }).list();
+        const result = await createAccountTeamsClient(account, clerkToken || undefined).list();
         if (accountRef.current !== account || (!linked && selectedTeam(account) !== organizationId))
           return false;
         const organization = result.organizations.find(
@@ -138,11 +164,7 @@ export function useCloudLinkController() {
         setOperationError(null);
         return true;
       }
-      const status = await createBillingClient({
-        relayUrl: resolveCloudPublicConfig().relayUrl ?? "",
-        getToken: () =>
-          clerkToken ? Promise.resolve(clerkToken) : getToken(resolveRelayClerkTokenOptions()),
-      }).getStatus();
+      const status = await createAccountBillingClient(account, clerkToken || undefined).getStatus();
       if (!account || accountRef.current !== account) return false;
       if (status.state === "unavailable")
         throw new Error("Your subscription could not be checked. Refresh to try again.");
@@ -167,12 +189,16 @@ export function useCloudLinkController() {
       reportUpdateFailure(new Error("Local environment is not ready yet."));
       return false;
     }
-    if (accountMismatchMessage) {
+    const wantsLink = desired.managedTunnel || desired.publish;
+    // Another account's link can only be removed, and only when it is one of
+    // this client's own accounts.
+    if (accountMismatchMessage && (wantsLink || !publishAccount.unlink.allowed)) {
       reportUpdateFailure(new Error(accountMismatchMessage));
       return false;
     }
-    const tokenResult = await settlePromise(() => getToken(resolveRelayClerkTokenOptions()));
-    const wantsLink = desired.managedTunnel || desired.publish;
+    const tokenAccountId =
+      !wantsLink && publishAccount.unlink.allowed ? publishAccount.unlink.tokenAccountId : userId;
+    const tokenResult = await settlePromise(() => readAccountToken(tokenAccountId));
 
     // A failure after this point may follow a partially applied mutation (e.g.
     // the link succeeded but the preference update did not), so every exit —
@@ -207,7 +233,11 @@ export function useCloudLinkController() {
         (!linked && selectedTeam(userId) !== organizationId)
       )
         return false;
-      if (!linked || managedTunnelActive !== desired.managedTunnel) {
+      if (
+        !linked ||
+        managedTunnelActive !== desired.managedTunnel ||
+        primaryCloudLinkState.data?.deviceRelayConflict
+      ) {
         const linkResult = await linkPrimaryEnvironment({
           target,
           clerkToken,
@@ -255,6 +285,8 @@ export function useCloudLinkController() {
     subscriptionRequired,
     checkSubscription,
     accountMismatchMessage,
+    accountMismatchAction,
+    unlinkBlocked: publishAccount.mismatch && !publishAccount.unlink.allowed,
     reconcileCloudState,
   };
 }

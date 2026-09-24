@@ -1,3 +1,4 @@
+import * as ThreadNoteService from "./threadNotes/ThreadNoteService.ts";
 import * as PullRequestWatchDiscovery from "./pullRequest/PullRequestWatchDiscovery.ts";
 import * as PullRequestWatchService from "./pullRequest/PullRequestWatchService.ts";
 import * as PullRequestWatchProvider from "./pullRequest/PullRequestWatchProvider.ts";
@@ -133,6 +134,7 @@ import {
 } from "./cloud/http.ts";
 import { serverRelayBrokerTracingLayer } from "./cloud/relayTracing.ts";
 import { shouldRetryCloudLink } from "./cloud/relayResponse.ts";
+import * as DeviceRelayReservation from "./cloud/DeviceRelayReservation.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
 import * as CloudCliState from "./cloud/CliState.ts";
@@ -467,6 +469,8 @@ const StaveRpcRuntimeLayerLive = StaveRpcHandlers.runtimeLayer.pipe(
     ),
   ),
 );
+const ThreadNoteLayerLive = ThreadNoteService.layer.pipe(Layer.provide(PersistenceLayerLive));
+
 const PullRequestWatchLayerLive = PullRequestWatchService.layer.pipe(
   Layer.provide(StaveRpcRuntimeLayerLive),
   Layer.provide(PersistenceLayerLive),
@@ -542,6 +546,7 @@ const AuthLayerLive = EnvironmentAuth.layer.pipe(
 const CloudManagedEndpointRuntimeLive = Layer.mergeAll(
   RelayClientLive,
   CloudManagedEndpointRuntime.layer.pipe(
+    Layer.provide(DeviceRelayReservation.layer.pipe(Layer.provide(ServerEnvironmentLayerLive))),
     Layer.provide(ServerSecretStore.layer),
     Layer.provide(RelayClientLive),
   ),
@@ -597,6 +602,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(SagaWorkbenchLayerLive),
   Layer.provideMerge(PullRequestWatchDiscoveryLayerLive),
   Layer.provideMerge(PullRequestWatchLayerLive),
+  Layer.provideMerge(ThreadNoteLayerLive),
   Layer.provideMerge(ProviderAuthServiceLive),
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),
@@ -701,6 +707,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   // Reusing the exact layer object shares the runtime instance by memoization;
   // isolated route harnesses can also supply its dependencies directly.
   Layer.provide(SagaWorkbenchLayerLive),
+  Layer.provide(ThreadNoteLayerLive),
   Layer.provide(PullRequestWatchLayerLive),
   Layer.provide(PullRequestServiceLive),
   // One registry per server: a Stave operation started over one socket keeps

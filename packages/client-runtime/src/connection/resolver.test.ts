@@ -85,13 +85,16 @@ function relayClient(
     unregisterDevice: () => unsupported("unregisterDevice"),
     registerLiveActivity: () => unsupported("registerLiveActivity"),
     getAgentActivitySnapshot: () => unsupported("getAgentActivitySnapshot"),
-    resetTokenCache: Effect.void,
+    resetTokenCache: () => Effect.void,
   });
 }
 
 const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((options?: {
   readonly profiles?: ReadonlyArray<ConnectionProfile>;
   readonly credentials?: ReadonlyArray<readonly [string, ConnectionCredential]>;
+  readonly accountIds?: ReadonlyArray<string>;
+  readonly knownAccountIds?: ReadonlyArray<string>;
+  readonly accountsSynced?: boolean;
   readonly connectEnvironment?: ManagedRelay.ManagedRelayClient["Service"]["connectEnvironment"];
   readonly authorizeBearer?: RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization["Service"]["authorizeBearer"];
   readonly authorizeDpop?: RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization["Service"]["authorizeDpop"];
@@ -167,7 +170,16 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
     Layer.succeed(ConnectionCredentialStore.ConnectionCredentialStore, credentialStore),
     Layer.succeed(
       ClientCapabilities.CloudSession,
-      ClientCapabilities.CloudSession.of({ clerkToken: Effect.succeed("clerk-session") }),
+      ClientCapabilities.CloudSession.of({
+        accountIds: Effect.succeed(options?.accountIds ?? ["account-1"]),
+        ...(options?.knownAccountIds === undefined
+          ? {}
+          : { knownAccountIds: Effect.succeed(options.knownAccountIds) }),
+        ...(options?.accountsSynced === undefined
+          ? {}
+          : { accountsSynced: Effect.succeed(options.accountsSynced) }),
+        clerkToken: (accountId) => Effect.succeed(`clerk-session:${accountId}`),
+      }),
     ),
     Layer.succeed(
       ClientCapabilities.PrimaryEnvironmentAuth,
@@ -368,12 +380,251 @@ describe("ConnectionResolver", () => {
       expect((yield* broker.prepare(catalogEntry(target))).socketUrl).toContain("wsTicket=dpop");
       expect(yield* Ref.get(relayInputs)).toEqual([
         {
-          clerkToken: "clerk-session",
+          clerkToken: "clerk-session:account-1",
           scopes: [RelayEnvironmentConnectScope],
           deviceId: "device-1",
         },
       ]);
       expect(yield* Ref.get(bootstrapCredentials)).toEqual(["relay-bootstrap"]);
+    }),
+  );
+
+  const prepareRelayAs = Effect.fn("test.prepareRelayAs")(function* (input: {
+    readonly accountIds: ReadonlyArray<string>;
+    readonly knownAccountIds?: ReadonlyArray<string>;
+    readonly accountsSynced?: boolean;
+    readonly targetAccountId?: string;
+    /** Whether the authorization service already holds a usable access token. */
+    readonly cachedToken?: boolean;
+  }) {
+    const clerkTokens = yield* Ref.make<ReadonlyArray<string>>([]);
+    const owners = yield* Ref.make<
+      ReadonlyArray<{
+        readonly accountId?: string;
+        readonly acceptUnstampedToken: boolean | undefined;
+      }>
+    >([]);
+    const brokerLayer = yield* makeDependencies({
+      accountIds: input.accountIds,
+      ...(input.knownAccountIds === undefined ? {} : { knownAccountIds: input.knownAccountIds }),
+      ...(input.accountsSynced === undefined ? {} : { accountsSynced: input.accountsSynced }),
+      connectEnvironment: (request) =>
+        Ref.update(clerkTokens, (values) => [...values, request.clerkToken]).pipe(
+          Effect.as({
+            environmentId: request.environmentId,
+            endpoint: ENDPOINT,
+            credential: "relay-bootstrap",
+            expiresAt: "2026-06-06T00:00:00.000Z",
+          }),
+        ),
+      authorizeDpop: ({
+        accountId,
+        acceptUnstampedToken,
+        expectedEnvironmentId,
+        obtainBootstrap,
+      }) =>
+        Ref.update(owners, (values) => [
+          ...values,
+          { ...(accountId === undefined ? {} : { accountId }), acceptUnstampedToken },
+        ]).pipe(
+          Effect.andThen(input.cachedToken === true ? Effect.void : obtainBootstrap),
+          Effect.as({
+            environmentId: expectedEnvironmentId,
+            label: "Cloud",
+            httpBaseUrl: ENDPOINT.httpBaseUrl,
+            socketUrl: "wss://environment.example.test/ws?wsTicket=dpop",
+            httpAuthorization: {
+              _tag: "Dpop" as const,
+              accessToken: "dpop-access-token",
+              expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+            },
+          }),
+        ),
+    });
+    const broker = yield* ConnectionResolver.ConnectionResolver.pipe(Effect.provide(brokerLayer));
+    const target = new RelayConnectionTarget({
+      environmentId: ENVIRONMENT_ID,
+      label: "Cloud",
+      ...(input.targetAccountId === undefined ? {} : { accountId: input.targetAccountId }),
+    });
+    const result = yield* Effect.result(broker.prepare(catalogEntry(target)));
+    return { result, clerkTokens: yield* Ref.get(clerkTokens), owners: yield* Ref.get(owners) };
+  });
+
+  it.effect("connects a tagged relay target as its owning account", () =>
+    Effect.gen(function* () {
+      const prepared = yield* prepareRelayAs({
+        accountIds: ["account-a", "account-b"],
+        targetAccountId: "account-b",
+      });
+
+      expect(prepared.result._tag).toBe("Success");
+      expect(prepared.clerkTokens).toEqual(["clerk-session:account-b"]);
+      expect(prepared.owners).toEqual([{ accountId: "account-b", acceptUnstampedToken: false }]);
+    }),
+  );
+
+  it.effect("connects an untagged relay target as the only signed-in account", () =>
+    Effect.gen(function* () {
+      const prepared = yield* prepareRelayAs({ accountIds: ["account-a"] });
+
+      expect(prepared.result._tag).toBe("Success");
+      expect(prepared.clerkTokens).toEqual(["clerk-session:account-a"]);
+      expect(prepared.owners).toEqual([{ accountId: "account-a", acceptUnstampedToken: true }]);
+    }),
+  );
+
+  it.effect("blocks an untagged relay target with two accounts instead of trying each", () =>
+    Effect.gen(function* () {
+      const prepared = yield* prepareRelayAs({ accountIds: ["account-a", "account-b"] });
+
+      expect(prepared.clerkTokens).toEqual([]);
+      expect(prepared.owners).toEqual([]);
+      expect(prepared.result).toMatchObject({
+        _tag: "Failure",
+        failure: { _tag: "ConnectionBlockedError", reason: "authentication" },
+      });
+    }),
+  );
+
+  it.effect("does not guess the signed-in account while a known account needs sign-in", () =>
+    Effect.gen(function* () {
+      const prepared = yield* prepareRelayAs({
+        accountIds: ["account-b"],
+        knownAccountIds: ["account-expired", "account-b"],
+        cachedToken: true,
+      });
+
+      expect(prepared.clerkTokens).toEqual([]);
+      expect(prepared.owners).toEqual([]);
+      expect(prepared.result).toMatchObject({
+        _tag: "Failure",
+        failure: { _tag: "ConnectionBlockedError", reason: "authentication" },
+      });
+    }),
+  );
+
+  it.effect("connects from a cached token while no account is signed in", () =>
+    Effect.gen(function* () {
+      const prepared = yield* prepareRelayAs({ accountIds: [], cachedToken: true });
+
+      expect(prepared.result._tag).toBe("Success");
+      expect(prepared.clerkTokens).toEqual([]);
+      expect(prepared.owners).toEqual([{ acceptUnstampedToken: true }]);
+    }),
+  );
+
+  it.effect("asks for sign-in when no account is signed in and nothing is cached", () =>
+    Effect.gen(function* () {
+      const prepared = yield* prepareRelayAs({ accountIds: [] });
+
+      expect(prepared.clerkTokens).toEqual([]);
+      expect(prepared.result).toMatchObject({
+        _tag: "Failure",
+        failure: {
+          _tag: "ConnectionBlockedError",
+          reason: "authentication",
+          detail: "Sign in to Lecturn Connect to connect this environment.",
+        },
+      });
+    }),
+  );
+
+  it.effect("lets a tagged target use an unstamped token before any account has loaded", () =>
+    Effect.gen(function* () {
+      const prepared = yield* prepareRelayAs({
+        accountIds: [],
+        targetAccountId: "account-a",
+        cachedToken: true,
+      });
+
+      expect(prepared.result._tag).toBe("Success");
+      expect(prepared.owners).toEqual([{ accountId: "account-a", acceptUnstampedToken: true }]);
+    }),
+  );
+
+  it.effect(
+    "blocks a signed-out owner's target before the token cache once accounts are synced",
+    () =>
+      Effect.gen(function* () {
+        const prepared = yield* prepareRelayAs({
+          accountIds: ["account-b"],
+          knownAccountIds: ["account-a", "account-b"],
+          accountsSynced: true,
+          targetAccountId: "account-a",
+          cachedToken: true,
+        });
+
+        // authorizeDpop owns the cache, and is never reached.
+        expect(prepared.owners).toEqual([]);
+        expect(prepared.clerkTokens).toEqual([]);
+        expect(prepared.result).toMatchObject({
+          _tag: "Failure",
+          failure: {
+            _tag: "ConnectionBlockedError",
+            reason: "authentication",
+            detail: "Sign in to Lecturn Connect to connect this environment.",
+          },
+        });
+      }),
+  );
+
+  it.effect("blocks the only known account's untagged target once it is synced as signed out", () =>
+    Effect.gen(function* () {
+      const prepared = yield* prepareRelayAs({
+        accountIds: [],
+        knownAccountIds: ["account-a"],
+        accountsSynced: true,
+        cachedToken: true,
+      });
+
+      expect(prepared.owners).toEqual([]);
+      expect(prepared.result).toMatchObject({
+        _tag: "Failure",
+        failure: { _tag: "ConnectionBlockedError", reason: "authentication" },
+      });
+    }),
+  );
+
+  it.effect("connects a signed-out owner's target from cache until accounts are synced", () =>
+    Effect.gen(function* () {
+      const prepared = yield* prepareRelayAs({
+        accountIds: [],
+        knownAccountIds: ["account-a"],
+        accountsSynced: false,
+        targetAccountId: "account-a",
+        cachedToken: true,
+      });
+
+      expect(prepared.result._tag).toBe("Success");
+      expect(prepared.owners).toEqual([{ accountId: "account-a", acceptUnstampedToken: true }]);
+    }),
+  );
+
+  it.effect("connects a signed-in owner's target once accounts are synced", () =>
+    Effect.gen(function* () {
+      const prepared = yield* prepareRelayAs({
+        accountIds: ["account-a"],
+        knownAccountIds: ["account-a"],
+        accountsSynced: true,
+        targetAccountId: "account-a",
+      });
+
+      expect(prepared.result._tag).toBe("Success");
+      expect(prepared.clerkTokens).toEqual(["clerk-session:account-a"]);
+    }),
+  );
+
+  it.effect("leaves a session without a known list or synced flag as it was, as on mobile", () =>
+    Effect.gen(function* () {
+      const prepared = yield* prepareRelayAs({
+        accountIds: ["account-b"],
+        targetAccountId: "account-a",
+        cachedToken: true,
+      });
+
+      expect(prepared.result._tag).toBe("Success");
+      expect(prepared.owners).toEqual([{ accountId: "account-a", acceptUnstampedToken: false }]);
     }),
   );
 

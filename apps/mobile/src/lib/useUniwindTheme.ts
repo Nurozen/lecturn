@@ -18,7 +18,9 @@ export function useUniwindTheme(): MobileThemeVariables {
   const { themeAppearance, themeId } = useAppearancePreferences();
   const opaqueGlass = useGlassAccessibility();
   return useMemo(() => {
-    const variables = getMobileThemeRuntimeVariables(themeId, themeAppearance);
+    const variables = {
+      ...getMobileThemeRuntimeVariables(themeId, themeAppearance),
+    };
     return { ...variables, ...glassAccessibilityVariables(variables, opaqueGlass) };
   }, [themeAppearance, themeId, opaqueGlass]);
 }

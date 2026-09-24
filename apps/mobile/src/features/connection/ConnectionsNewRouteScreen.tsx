@@ -1,3 +1,4 @@
+import { GlassCard } from "../../components/GlassCard";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
@@ -247,7 +248,7 @@ export function ConnectionsNewRouteScreen({
                 />
               </View>
             ) : (
-              <View className="items-center gap-3 rounded-[24px] border-continuous bg-card px-5 py-8">
+              <GlassCard radius={24} className="items-center gap-3 px-5 py-8">
                 <Text className="text-center text-sm leading-normal text-foreground-muted">
                   Camera permission is required to scan a QR code.
                 </Text>
@@ -260,10 +261,10 @@ export function ConnectionsNewRouteScreen({
                     void openScanner();
                   }}
                 />
-              </View>
+              </GlassCard>
             )
           ) : (
-            <View collapsable={false} className="gap-4 rounded-[24px] bg-card p-4">
+            <GlassCard collapsable={false} radius={24} className="gap-4 p-4">
               <View collapsable={false} className="gap-1.5">
                 <Text className="text-2xs font-lecturn-bold tracking-[0.8px] uppercase text-foreground-muted">
                   Host
@@ -304,7 +305,7 @@ export function ConnectionsNewRouteScreen({
                   void handleSubmit();
                 }}
               />
-            </View>
+            </GlassCard>
           )}
         </View>
       </ScrollView>

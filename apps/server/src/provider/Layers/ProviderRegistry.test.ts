@@ -22,7 +22,6 @@ import {
   ProviderInstanceId,
   ServerSettings,
   type ServerProvider,
-  type ServerProviderSlashCommand,
   type ServerSettings as ContractServerSettings,
 } from "@lecturn/contracts";
 import * as PlatformError from "effect/PlatformError";
@@ -33,7 +32,7 @@ import { createModelCapabilities } from "@lecturn/shared/model";
 import { applyServerSettingsPatch } from "@lecturn/shared/serverSettings";
 
 import { checkCodexProviderStatus, type CodexAppServerProviderSnapshot } from "./CodexProvider.ts";
-import { checkClaudeProviderStatus } from "./ClaudeProvider.ts";
+import { checkClaudeProviderStatus, type ClaudeCapabilitiesProbe } from "./ClaudeProvider.ts";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { AntigravityInstallation } from "../AntigravityInstallation.ts";
 import * as ModelManifest from "../ModelManifest.ts";
@@ -108,6 +107,7 @@ const BackgroundPolicyAlwaysRunLayer = Layer.mock(BackgroundPolicy.BackgroundPol
   hasDemand: () => Effect.succeed(true),
   shouldRunScopeWork: () => Effect.succeed(true),
   shouldRunOpportunisticWork: Effect.succeed(true),
+  isUserPresent: Effect.succeed(false),
 });
 
 function selectDescriptor(
@@ -134,13 +134,7 @@ function booleanDescriptor(id: string, label: string) {
   };
 }
 
-type TestClaudeCapabilities = {
-  readonly email: string | undefined;
-  readonly subscriptionType: string | undefined;
-  readonly tokenSource: string | undefined;
-  readonly apiProvider: string | undefined;
-  readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>;
-};
+type TestClaudeCapabilities = ClaudeCapabilitiesProbe;
 
 function claudeCapabilities(overrides: Partial<TestClaudeCapabilities> = {}) {
   return () =>
@@ -2368,6 +2362,60 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
     // ── checkClaudeProviderStatus tests ──────────────────────────
 
     describe("checkClaudeProviderStatus", () => {
+      it.effect("lists future runtime models and their options without a manifest entry", () =>
+        Effect.gen(function* () {
+          let probedVersion: string | undefined;
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            (_settings, version) => {
+              probedVersion = version;
+              return claudeCapabilities({
+                tokenSource: "oauth",
+                subscriptionType: "max",
+                models: [
+                  {
+                    value: "future",
+                    resolvedModel: "claude-test-next[1m]",
+                    displayName: "Future model",
+                    description: "Discovered from the installed CLI",
+                    supportsEffort: true,
+                    supportedEffortLevels: ["low", "high"],
+                    supportsFastMode: true,
+                  },
+                ],
+              })();
+            },
+          );
+          assert.equal(probedVersion, "2.9.0");
+          const model = status.models.find((model) => model.slug === "claude-test-next[1m]");
+          assert.ok(model);
+          assert.equal(model.isCustom, false);
+          assert.equal(model.isLegacy, undefined);
+          const effort = model.capabilities?.optionDescriptors?.find(
+            (option) => option.id === "effort",
+          );
+          assert.equal(effort?.type, "select");
+          if (effort?.type === "select") {
+            assert.deepEqual(
+              effort.options.map((option) => option.id),
+              ["low", "high"],
+            );
+          }
+          assert.ok(
+            model.capabilities?.optionDescriptors?.some((option) => option.id === "fastMode"),
+          );
+          assert.equal(status.auth.status, "authenticated");
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              if (args.join(" ") === "--version")
+                return { stdout: "2.9.0 (Claude Code)\n", stderr: "", code: 0 };
+              throw new Error(`Unexpected args: ${args.join(" ")}`);
+            }),
+          ),
+        ),
+      );
+
       it.effect("returns ready when claude is installed and authenticated", () =>
         Effect.gen(function* () {
           const status = yield* checkClaudeProviderStatus(

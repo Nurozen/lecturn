@@ -1,6 +1,7 @@
 import { act, useEffect, useLayoutEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { bindAccountTokenClerk } from "../../cloud/accountTokenReaders";
 import { useConnectBillingStatus } from "./useConnectBillingStatus";
 
 const mocks = vi.hoisted(() => ({
@@ -13,18 +14,6 @@ const mocks = vi.hoisted(() => ({
   listeners: new Set<(state: string) => void>(),
 }));
 vi.mock("@clerk/expo", () => ({
-  useSession: () => ({
-    session: mocks.userId
-      ? {
-          id: `session-${mocks.userId}`,
-          user: { id: mocks.userId },
-          getToken: () => {
-            mocks.getToken(mocks.token);
-            return Promise.resolve(mocks.token);
-          },
-        }
-      : null,
-  }),
   useAuth: () => ({
     sessionId: mocks.userId ? `session-${mocks.userId}` : null,
     userId: mocks.userId,
@@ -94,6 +83,24 @@ beforeEach(() => {
   mocks.requests.length = 0;
   mocks.listeners.clear();
   mocks.getToken.mockClear();
+  bindAccountTokenClerk({
+    client: {
+      get signedInSessions() {
+        return mocks.userId
+          ? [
+              {
+                user: { id: mocks.userId },
+                getToken: async () => {
+                  mocks.getToken(mocks.token);
+                  return `header.${btoa(JSON.stringify({ sub: mocks.userId, token: mocks.token }))}.signature`;
+                },
+              },
+            ]
+          : [];
+      },
+    },
+  });
+
   const document = { nodeType: 9, addEventListener() {}, removeEventListener() {} };
   const container = {
     nodeType: 1,
@@ -110,6 +117,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await act(() => root.unmount());
+  bindAccountTokenClerk(null);
   vi.unstubAllGlobals();
 });
 describe("mobile Connect access refresh", () => {

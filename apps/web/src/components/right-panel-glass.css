@@ -1,0 +1,126 @@
+/* Right-panel chrome shares the account glass palette. Its static sky is painted
+   behind content; no animated texture or extra composited layer is needed. */
+[data-preview-panel-mode]:has(.lecturn-panel-tabbar) {
+  --panel-glass-accent: var(--glass-accent, var(--account-tint, #d5af63));
+  --panel-glass-light: var(--glass-light, #ead9b5);
+  --panel-celestial-veil: color-mix(in srgb, var(--background) 84%, transparent);
+  background-color: var(--background);
+  background-image:
+    linear-gradient(var(--panel-celestial-veil), var(--panel-celestial-veil)),
+    url("../assets/lecturn-night-sky.webp");
+  background-size:
+    auto,
+    900px 300px;
+  background-position:
+    center,
+    right top;
+  border-color: color-mix(in srgb, var(--panel-glass-light) 25%, var(--border));
+  box-shadow: inset 1px 0 color-mix(in srgb, var(--panel-glass-light) 12%, transparent);
+}
+
+.lecturn-panel-tabbar {
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-glass-light) 14%, transparent);
+  background: color-mix(in srgb, var(--background) 65%, transparent);
+}
+.lecturn-panel-tab {
+  border: 1px solid transparent;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+.lecturn-panel-tab[data-active-tab="true"] {
+  border-color: color-mix(in srgb, var(--panel-glass-light) 35%, var(--border));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--panel-glass-accent) 12%, var(--card)),
+    color-mix(in srgb, var(--card) 70%, transparent)
+  );
+  box-shadow: inset 0 1px color-mix(in srgb, white 12%, transparent);
+}
+
+.lecturn-panel-tile,
+.lecturn-panel-note {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  border-color: color-mix(
+    in srgb,
+    var(--panel-glass-light, var(--glass-light, #ead9b5)) 25%,
+    var(--border)
+  );
+  background:
+    linear-gradient(140deg, #ffffff0c, transparent 45%),
+    color-mix(in srgb, var(--card) 68%, transparent);
+  box-shadow:
+    inset 0 1px #ffffff15,
+    0 5px 20px #0000000c;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+button.lecturn-panel-tile:hover,
+button.lecturn-panel-tile:focus-visible,
+.lecturn-panel-tile-highlighted,
+.lecturn-panel-note[data-active="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--panel-glass-light, var(--glass-light, #ead9b5)) 58%,
+    var(--border)
+  );
+  background-color: color-mix(
+    in srgb,
+    var(--panel-glass-accent, var(--glass-accent, #d5af63)) 9%,
+    transparent
+  );
+  box-shadow:
+    inset 0 1px #ffffff21,
+    0 0 14px
+      color-mix(in srgb, var(--panel-glass-accent, var(--glass-accent, #d5af63)) 9%, transparent);
+}
+button.lecturn-panel-tile:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+.lecturn-panel-launcher [data-slot="kbd"] {
+  background: color-mix(in srgb, var(--background) 45%, transparent);
+  border-color: color-mix(in srgb, var(--panel-glass-light) 18%, transparent);
+}
+.lecturn-panel-menu {
+  border-color: color-mix(in srgb, var(--glass-light, #ead9b5) 30%, var(--border));
+  border-radius: 12px;
+  box-shadow:
+    inset 0 1px #ffffff1c,
+    0 12px 32px #00000024;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lecturn-panel-tab,
+  .lecturn-panel-tile,
+  .lecturn-panel-note {
+    transition: none;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .lecturn-panel-tile,
+  .lecturn-panel-note,
+  .lecturn-panel-tab[data-active-tab="true"],
+  .lecturn-panel-tabbar {
+    background: var(--card);
+  }
+}
+@media (forced-colors: active) {
+  [data-preview-panel-mode]:has(.lecturn-panel-tabbar),
+  .lecturn-panel-tile,
+  .lecturn-panel-note,
+  .lecturn-panel-tab,
+  .lecturn-panel-menu {
+    background: Canvas;
+    border-color: CanvasText;
+    box-shadow: none;
+  }
+  .lecturn-panel-tab[data-active-tab="true"],
+  .lecturn-panel-tile-highlighted,
+  .lecturn-panel-note[data-active="true"] {
+    border-color: Highlight;
+  }
+}

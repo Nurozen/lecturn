@@ -1,12 +1,13 @@
 import { useClerk } from "@clerk/react";
 
+import { openConnectSignIn } from "../../cloud/connectAuthCompatibility";
 import { isElectron } from "../../env";
 import { resolveClerkSignInProps } from "./authRedirect";
 
 export function useLecturnConnectAuthPrompt() {
   const clerk = useClerk();
   const openAuthPrompt = () => {
-    clerk.openSignIn(resolveClerkSignInProps(window.location.href, isElectron));
+    openConnectSignIn(clerk, resolveClerkSignInProps(window.location.href, isElectron));
   };
   return { authPrompt: null, openAuthPrompt };
 }

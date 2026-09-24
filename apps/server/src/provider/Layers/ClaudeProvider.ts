@@ -44,6 +44,8 @@ import {
 import {
   BUNDLED_CLAUDE_MODEL_CATALOG,
   type ClaudeModelCatalog,
+  type ClaudeRuntimeModelInfo,
+  mergeClaudeRuntimeModelCatalog,
   formatClaudeVersionUpgradeMessage,
   resolveClaudeModelsForVersion,
 } from "../ClaudeModelCatalog.ts";
@@ -227,7 +229,8 @@ function nonEmptyProbeString(value: string): string | undefined {
   return candidate ? candidate : undefined;
 }
 
-type ClaudeCapabilitiesProbe = {
+export type ClaudeCapabilitiesProbe = {
+  readonly models?: ReadonlyArray<ClaudeRuntimeModelInfo>;
   readonly email: string | undefined;
   readonly subscriptionType: string | undefined;
   readonly tokenSource: string | undefined;
@@ -336,8 +339,8 @@ const probeClaudeCapabilities = (
   environment?: NodeJS.ProcessEnv,
   cwd?: string,
 ) => {
-  const abort = new AbortController();
   return Effect.gen(function* () {
+    const abort = new AbortController();
     const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
     const executablePath = yield* resolveClaudeSdkExecutablePath(
       claudeSettings.binaryPath,
@@ -377,6 +380,7 @@ const probeClaudeCapabilities = (
           }
         | undefined;
       return {
+        models: init.models,
         email: account?.email,
         subscriptionType: account?.subscriptionType,
         tokenSource: account?.tokenSource,
@@ -384,13 +388,14 @@ const probeClaudeCapabilities = (
         slashCommands: parseClaudeInitializationCommands(init.commands),
         ...(usage ? { usage } : {}),
       } satisfies ClaudeCapabilitiesProbe;
-    });
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          if (!abort.signal.aborted) abort.abort();
+        }),
+      ),
+    );
   }).pipe(
-    Effect.ensuring(
-      Effect.sync(() => {
-        if (!abort.signal.aborted) abort.abort();
-      }),
-    ),
     Effect.timeoutOption(CAPABILITIES_PROBE_TIMEOUT_MS),
     Effect.result,
     Effect.map((result) => {
@@ -469,12 +474,14 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   claudeSettings: ClaudeSettings,
   resolveCapabilities?: (
     claudeSettings: ClaudeSettings,
+    version?: string,
   ) => Effect.Effect<ClaudeCapabilitiesProbe | undefined>,
   environment?: NodeJS.ProcessEnv,
   cwd?: string,
   modelCatalog: ClaudeModelCatalog = BUNDLED_CLAUDE_MODEL_CATALOG,
   /** Shared with the adapter so turn events reuse the scoped-bucket names this probe saw. */
   scopedLimitNames?: Ref.Ref<ClaudeScopedLimitNames>,
+  lastRuntimeModels?: () => ReadonlyArray<ClaudeRuntimeModelInfo> | undefined,
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
@@ -572,16 +579,21 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
+  const capabilities = resolveCapabilities
+    ? yield* resolveCapabilities(claudeSettings, parsedVersion ?? undefined).pipe(
+        Effect.orElseSucceed(() => undefined),
+      )
+    : undefined;
+  const discoveredCatalog = mergeClaudeRuntimeModelCatalog(
+    modelCatalog,
+    capabilities?.models?.length ? capabilities.models : lastRuntimeModels?.(),
+  );
   const models = providerModelsFromSettings(
-    resolveClaudeModelsForVersion(modelCatalog, parsedVersion),
+    resolveClaudeModelsForVersion(discoveredCatalog, parsedVersion),
     claudeSettings.customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
   );
-  const versionUpgradeMessage = formatClaudeVersionUpgradeMessage(modelCatalog, parsedVersion);
-
-  const capabilities = resolveCapabilities
-    ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))
-    : undefined;
+  const versionUpgradeMessage = formatClaudeVersionUpgradeMessage(discoveredCatalog, parsedVersion);
   const skills = yield* discoverClaudeSkills(claudeSettings, cwd, resolvedEnvironment);
   const slashCommands = [COMPACT_SLASH_COMMAND, ...(capabilities?.slashCommands ?? [])];
   const dedupedSlashCommands = dedupeSlashCommands(slashCommands);

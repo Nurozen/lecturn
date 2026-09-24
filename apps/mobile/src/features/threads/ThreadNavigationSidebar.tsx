@@ -1,6 +1,18 @@
+import { HierarchyRow } from "../home/HierarchyRow";
+import { accountSectionFrames } from "../home/accountSectionFrames";
+import { HIERARCHY_LAYOUT_TRANSITION } from "../home/hierarchyMotion";
+import { AnimatedLegendList } from "@legendapp/list/reanimated";
+import { AccountSurfaceColorContext } from "../../lib/accountTintContext";
+import { useAccountRowColors } from "../home/useAccountRowColors";
+import {
+  useAccountSectionDisplayStates,
+  toggleMobileAccountSection,
+  isAccountSectionKey,
+} from "../home/accountSectionExpansion";
+import { useAccountSections, useAccountAttention } from "../home/useAccountSections";
+import { AccountSectionHeader } from "../home/AccountSectionHeader";
 import { GlassCard } from "../../components/GlassCard";
 import { buildSidebarHierarchy } from "./sidebar-hierarchy";
-import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { useMobileSagaIndex, useSidebarNestSagas } from "../../state/stave";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import type {
@@ -11,13 +23,11 @@ import {
   threadSearchMatchKey,
   type EnvironmentThreadSearchMatch,
 } from "@lecturn/client-runtime/state/thread-search";
-import { LegendList } from "@legendapp/list/react-native";
 import type { MenuAction } from "@react-native-menu/menu";
 import { useAtomValue } from "@effect/atom-react";
 import { type EnvironmentId, resolveEnvironmentMachineKind } from "@lecturn/contracts";
 import { sortPinnedThreadsByOrderKey } from "@lecturn/client-runtime/state/thread-sort";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LayoutChangeEvent } from "react-native";
 import { Platform, Pressable, StyleSheet, TextInput, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -47,7 +57,10 @@ import {
   THREAD_SORT_OPTIONS,
   useHomeListOptions,
 } from "../home/home-list-options";
-import { buildHomeListFilterMenu } from "../home/home-list-filter-menu";
+import {
+  buildHomeListFilterMenu,
+  groupAccountFilterEnvironments,
+} from "../home/home-list-filter-menu";
 import {
   buildHomeListLayout,
   buildHomeHierarchyV2Items,
@@ -92,40 +105,6 @@ import {
   THREAD_LIST_V2_SETTLED_PAGE_COUNT,
   type ThreadListV2ListItem,
 } from "./threadListV2";
-
-/** A static metallic glint leaves the darker rail readable on cream surfaces. */
-function LightHierarchySheen({
-  copper,
-  horizontal = false,
-}: {
-  readonly copper: boolean;
-  readonly horizontal?: boolean;
-}) {
-  const gradientId = `hierarchy-sheen-${useId().replaceAll(":", "")}`;
-  const base = copper ? "#ad3c2f" : "#82472c";
-  const metal = copper ? "#e67c47" : "#bc7642";
-  const glint = copper ? "#ffd097" : "#ffe1b1";
-  return (
-    <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
-      <Defs>
-        <LinearGradient
-          id={gradientId}
-          x1="0%"
-          y1="0%"
-          x2={horizontal ? "100%" : "0%"}
-          y2={horizontal ? "0%" : "100%"}
-        >
-          <Stop offset="0%" stopColor={base} />
-          <Stop offset="35%" stopColor={metal} />
-          <Stop offset="48%" stopColor={glint} />
-          <Stop offset="56%" stopColor={metal} />
-          <Stop offset="100%" stopColor={base} />
-        </LinearGradient>
-      </Defs>
-      <Rect width="100%" height="100%" fill={`url(#${gradientId})`} />
-    </Svg>
-  );
-}
 
 /** The sidebar list serves both lists: v1 grouped items or, when the Thread
     List v2 beta is on, flat v2 rows with queued tasks spliced in, and a settled
@@ -186,8 +165,8 @@ function NativeSidebarContainer(props: ThreadNavigationSidebarProps) {
 function ThreadNavigationSidebarPane(
   props: ThreadNavigationSidebarProps & { readonly nativeChrome: boolean },
 ) {
-  const { themeAppearance } = useAppearancePreferences();
-  const light = themeAppearance === "light";
+  const accountSections = useAccountSections();
+  const attention = useAccountAttention(accountSections);
   const insets = useSafeAreaInsets();
   const projects = useProjects();
   const threads = useThreadShells();
@@ -263,11 +242,12 @@ function ThreadNavigationSidebarPane(
   const projectScopes = useMemo(
     () =>
       buildHomeProjectScopes({
+        accountSections,
         projects,
         environmentId: options.selectedEnvironmentId,
         projectGroupingMode: options.projectGroupingMode,
       }),
-    [options.projectGroupingMode, options.selectedEnvironmentId, projects],
+    [accountSections, options.projectGroupingMode, options.selectedEnvironmentId, projects],
   );
   const projectFilterOptions = useMemo(
     () =>
@@ -351,6 +331,7 @@ function ThreadNavigationSidebarPane(
   const groups = useMemo(
     () =>
       buildHomeThreadGroups({
+        accountSections,
         includeStaveProjects: nestSagas,
         sagaIndex,
         projects: scopedProjects,
@@ -364,6 +345,7 @@ function ThreadNavigationSidebarPane(
         projectGroupingMode: options.projectGroupingMode,
       }),
     [
+      accountSections,
       nestSagas,
       sagaIndex,
       matchedThreadKeys,
@@ -378,6 +360,10 @@ function ThreadNavigationSidebarPane(
     ReadonlyMap<string, HomeGroupDisplayState>
   >(() => new Map());
   const updateGroupDisplay = useCallback((key: string, action: HomeGroupDisplayAction) => {
+    if (isAccountSectionKey(key) && action === "toggle-collapsed") {
+      toggleMobileAccountSection(key);
+      return;
+    }
     setGroupDisplayStates((previous) => {
       const next = new Map(previous);
       next.set(
@@ -394,17 +380,19 @@ function ThreadNavigationSidebarPane(
     });
   }, []);
   const hasSearchQuery = props.searchQuery.trim().length > 0;
+  const accountDisplayStates = useAccountSectionDisplayStates(groupDisplayStates);
   const listLayout = useMemo(
     () =>
       threadListV2Enabled
         ? EMPTY_HOME_LIST_LAYOUT
         : buildHomeListLayout({
+            accountSections,
             groups,
-            displayStates: groupDisplayStates,
+            displayStates: accountDisplayStates,
             showAllThreads: hasSearchQuery,
             sagaIndex,
           }),
-    [threadListV2Enabled, groups, groupDisplayStates, hasSearchQuery, sagaIndex],
+    [accountSections, threadListV2Enabled, groups, accountDisplayStates, hasSearchQuery, sagaIndex],
   );
   const projectCwdByKey = useMemo(() => {
     const map = new Map<string, string>();
@@ -624,10 +612,11 @@ function ThreadNavigationSidebarPane(
       snoozeLabelNow: `${nowMinute}:00.000Z`,
     });
     const items: SidebarListItem[] = buildHomeHierarchyV2Items({
+      accountSections,
       groups,
       items: flatItems,
       sagaIndex,
-      displayStates: groupDisplayStates,
+      displayStates: accountDisplayStates,
       searching: hasSearchQuery,
       selectedThreadKey: props.selectedThreadKey,
     });
@@ -640,10 +629,12 @@ function ThreadNavigationSidebarPane(
     }
     return items;
   }, [
+    accountSections,
     listLayout.items,
     groups,
     sagaIndex,
     groupDisplayStates,
+    accountDisplayStates,
     hasSearchQuery,
     props.selectedThreadKey,
     nowMinute,
@@ -669,14 +660,29 @@ function ThreadNavigationSidebarPane(
             subtitle: "Show threads from every environment",
             state: options.selectedEnvironmentId === null ? "on" : "off",
           },
-          ...environments.map((environment) => ({
-            id: `environment:${environment.environmentId}`,
-            title: environment.label,
-            state:
-              options.selectedEnvironmentId === environment.environmentId
-                ? ("on" as const)
-                : ("off" as const),
-          })),
+          ...(accountSections
+            ? groupAccountFilterEnvironments(environments, accountSections, attention).map(
+                (group) => ({
+                  id: `account:${group.id}`,
+                  title: group.label,
+                  subactions: group.environments.map((environment) => ({
+                    id: `environment:${environment.environmentId}`,
+                    title: environment.label,
+                    state:
+                      options.selectedEnvironmentId === environment.environmentId
+                        ? ("on" as const)
+                        : ("off" as const),
+                  })),
+                }),
+              )
+            : environments.map((environment) => ({
+                id: `environment:${environment.environmentId}`,
+                title: environment.label,
+                state:
+                  options.selectedEnvironmentId === environment.environmentId
+                    ? ("on" as const)
+                    : ("off" as const),
+              }))),
         ],
       },
       ...(projectFilterOptions.length === 0
@@ -726,7 +732,15 @@ function ThreadNavigationSidebarPane(
             },
           ] satisfies MenuAction[])),
     ],
-    [environments, options, projectFilterOptions, selectedProjectKey, threadListV2Enabled],
+    [
+      accountSections,
+      attention,
+      environments,
+      options,
+      projectFilterOptions,
+      selectedProjectKey,
+      threadListV2Enabled,
+    ],
   );
   const handleListMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {
@@ -917,6 +931,13 @@ function ThreadNavigationSidebarPane(
   const renderListRow = useCallback(
     ({ item }: { readonly item: SidebarListItem }) => {
       switch (item.type) {
+        case "account-header":
+          return (
+            <AccountSectionHeader
+              item={item}
+              onToggle={() => updateGroupDisplay(item.key, "toggle-collapsed")}
+            />
+          );
         case "v2-pending": {
           const pendingScopeKey = scopedProjectKey(
             item.pendingTask.message.environmentId,
@@ -1211,6 +1232,8 @@ function ThreadNavigationSidebarPane(
   const filterMenu = useMemo(
     () =>
       buildHomeListFilterMenu({
+        accountSections,
+        accountAttention: attention,
         environments,
         projects: projectFilterOptions,
         selectedEnvironmentId: options.selectedEnvironmentId,
@@ -1224,6 +1247,8 @@ function ThreadNavigationSidebarPane(
         listOrganization: !threadListV2Enabled,
       }),
     [
+      accountSections,
+      attention,
       environments,
       options,
       projectFilterOptions,
@@ -1245,109 +1270,26 @@ function ThreadNavigationSidebarPane(
   );
   // Snoozed threads need no special case: the shelf header is a list row
   // even while collapsed.
+  const accountRowColors = useAccountRowColors(listItems);
+  const sectionFrames = useMemo(() => accountSectionFrames(listItems), [listItems]);
   const renderListItem = useCallback(
     (props: { readonly item: SidebarListItem }) => (
-      <View style={{ paddingLeft: (props.item.depth ?? 0) * 18 }}>
-        {hierarchyGuides.get(props.item.key)?.map(({ level, continues }) => (
-          <View
-            key={level}
-            pointerEvents="none"
-            accessible={false}
-            style={{
-              position: "absolute",
-              top: 0,
-              bottom: continues ? 0 : "50%",
-              left: level * 18 + 16,
-              width:
-                (props.item.type === "thread" || props.item.type === "v2-thread") &&
-                "settledBranch" in props.item &&
-                props.item.settledBranch &&
-                level === (props.item.depth ?? 0) - 1
-                  ? 2
-                  : 1,
-              backgroundColor:
-                (props.item.type === "thread" || props.item.type === "v2-thread") &&
-                "settledBranch" in props.item &&
-                props.item.settledBranch &&
-                level === (props.item.depth ?? 0) - 1
-                  ? light
-                    ? "#ad3c2f"
-                    : "#ff866f"
-                  : light
-                    ? "#82472c"
-                    : "#ffe1a0",
-              boxShadow: light
-                ? "0 0 3px #bc764233"
-                : (props.item.type === "thread" || props.item.type === "v2-thread") &&
-                    "settledBranch" in props.item &&
-                    props.item.settledBranch &&
-                    level === (props.item.depth ?? 0) - 1
-                  ? "0 0 6px 1px #e64d3d88"
-                  : "0 0 5px 1px #dca64e55",
-            }}
-          >
-            {light ? (
-              <LightHierarchySheen
-                copper={Boolean(
-                  (props.item.type === "thread" || props.item.type === "v2-thread") &&
-                  "settledBranch" in props.item &&
-                  props.item.settledBranch &&
-                  level === (props.item.depth ?? 0) - 1,
-                )}
-              />
-            ) : null}
-          </View>
-        ))}
-        {(props.item.depth ?? 0) > 0 ? (
-          <View
-            pointerEvents="none"
-            accessible={false}
-            style={{
-              position: "absolute",
-              top: "50%",
-              left: ((props.item.depth ?? 0) - 1) * 18 + 16,
-              width: 12,
-              height:
-                (props.item.type === "thread" || props.item.type === "v2-thread") &&
-                "settledBranch" in props.item &&
-                props.item.settledBranch
-                  ? 2
-                  : 1,
-              backgroundColor:
-                (props.item.type === "thread" || props.item.type === "v2-thread") &&
-                "settledBranch" in props.item &&
-                props.item.settledBranch
-                  ? light
-                    ? "#ad3c2f"
-                    : "#ff866f"
-                  : light
-                    ? "#82472c"
-                    : "#ffe1a0",
-              boxShadow: light
-                ? "0 0 3px #bc764233"
-                : (props.item.type === "thread" || props.item.type === "v2-thread") &&
-                    "settledBranch" in props.item &&
-                    props.item.settledBranch
-                  ? "0 0 6px 1px #e64d3d88"
-                  : "0 0 5px 1px #dca64e55",
-            }}
-          >
-            {light ? (
-              <LightHierarchySheen
-                horizontal
-                copper={Boolean(
-                  (props.item.type === "thread" || props.item.type === "v2-thread") &&
-                  "settledBranch" in props.item &&
-                  props.item.settledBranch,
-                )}
-              />
-            ) : null}
-          </View>
-        ) : null}
-        {renderListRow(props)}
-      </View>
+      <AccountSurfaceColorContext.Provider value={accountRowColors.get(props.item.key)}>
+        <HierarchyRow
+          depth={props.item.depth ?? 0}
+          settled={
+            "settledBranch" in props.item &&
+            props.item.type !== "v2-settled-shelf" &&
+            Boolean(props.item.settledBranch)
+          }
+          frame={sectionFrames.get(props.item.key)}
+          guides={hierarchyGuides.get(props.item.key)}
+        >
+          {renderListRow(props)}
+        </HierarchyRow>
+      </AccountSurfaceColorContext.Provider>
     ),
-    [hierarchyGuides, light, renderListRow],
+    [hierarchyGuides, renderListRow, accountRowColors, sectionFrames],
   );
 
   const listEmpty = (
@@ -1403,7 +1345,8 @@ function ThreadNavigationSidebarPane(
           <ArcaneBackdrop emphasis="sidebar" />
           <SwipeableScrollGateProvider enabled={swipeEnabled}>
             <GestureDetector gesture={sidebarScrollGesture}>
-              <LegendList
+              <AnimatedLegendList
+                itemLayoutAnimation={HIERARCHY_LAYOUT_TRANSITION}
                 viewabilityConfig={THREAD_ACTIVITY_VIEWABILITY_CONFIG}
                 data={listItems}
                 drawDistance={500}
@@ -1450,7 +1393,8 @@ function ThreadNavigationSidebarPane(
       <View className="flex-1" style={{ paddingBottom: insets.bottom }}>
         <SwipeableScrollGateProvider enabled={swipeEnabled}>
           <GestureDetector gesture={sidebarScrollGesture}>
-            <LegendList
+            <AnimatedLegendList
+              itemLayoutAnimation={HIERARCHY_LAYOUT_TRANSITION}
               viewabilityConfig={THREAD_ACTIVITY_VIEWABILITY_CONFIG}
               data={listItems}
               drawDistance={500}

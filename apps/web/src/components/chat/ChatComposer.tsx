@@ -1,3 +1,4 @@
+import "./composer-glass.css";
 import { providerDetectionSendBlock } from "../providerDetection";
 import type {
   ApprovalRequestId,
@@ -783,6 +784,7 @@ import {
   CircleAlertIcon,
   FileIcon,
   PaperclipIcon,
+  SendIcon,
   PencilRulerIcon,
   PlayIcon,
   type LucideIcon,
@@ -1110,6 +1112,7 @@ export interface ChatComposerHandle {
   restoreAfterTimelineReachedEnd: () => void;
   addDroppedFiles: (files: File[]) => void;
   insertTextAtEnd: (text: string, options?: { ensureLeadingBoundary?: boolean }) => boolean;
+  insertCitation: (citation: AssistantCitation) => boolean;
   citeAssistantText: (
     citation: AssistantCitation,
     sourceAnchor: AssistantCitationSourceAnchor,
@@ -2934,7 +2937,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setComposerDraftPrompt,
     submitComposer,
   ]);
-  const expandMobileComposer = useCallback(() => {
+  const expandMobileComposer = useCallback((options?: { focusEditor?: boolean }) => {
     if (composerBlurFrameRef.current !== null) {
       window.cancelAnimationFrame(composerBlurFrameRef.current);
       composerBlurFrameRef.current = null;
@@ -2949,7 +2952,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setIsComposerFocused(true);
     mobileComposerExpandFrameRef.current = window.requestAnimationFrame(() => {
       mobileComposerExpandFrameRef.current = null;
-      composerEditorRef.current?.focusAtEnd();
+      if (options?.focusEditor !== false) composerEditorRef.current?.focusAtEnd();
       mobileComposerExpandReleaseFrameRef.current = window.requestAnimationFrame(() => {
         mobileComposerExpandReleaseFrameRef.current = null;
         mobileComposerExpandInFlightRef.current = false;
@@ -4235,6 +4238,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       options?: {
         ensureLeadingBoundary?: boolean;
         citationCommentAnchor?: AssistantCitationSourceAnchor;
+        focusEditorAfterReplace?: boolean;
       },
     ): boolean => {
       if (
@@ -4266,7 +4270,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               },
               focusEditorAfterReplace: false,
             }
-          : undefined,
+          : { focusEditorAfterReplace: options?.focusEditorAfterReplace !== false },
       );
     },
     [
@@ -4512,6 +4516,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         focusComposer();
       },
       insertTextAtEnd: insertComposerTextAtEnd,
+      insertCitation: (citation) => {
+        const inserted = insertComposerText(
+          formatAssistantCitationForComposer(citation, citation.comment),
+          "end",
+          { ensureLeadingBoundary: true, focusEditorAfterReplace: false },
+        );
+        if (inserted && isComposerCollapsedMobile) expandMobileComposer({ focusEditor: false });
+        return inserted;
+      },
       citeAssistantText: (citation, sourceAnchor) =>
         insertComposerText(
           formatAssistantCitationForComposer(citation, citation.comment),
@@ -4652,6 +4665,30 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       compactThreadContext,
     ],
   );
+
+  const composerAttachAction = showComposerAttachAction ? (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="lecturn-composer-attach shrink-0"
+            data-chat-composer-collapsed-controls={
+              isComposerResting || isComposerCollapsedMobile ? "true" : undefined
+            }
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => attachmentInputRef.current?.click()}
+            aria-label="Attach files"
+          />
+        }
+      >
+        <PaperclipIcon />
+      </TooltipTrigger>
+      <TooltipPopup>Attach files</TooltipPopup>
+    </Tooltip>
+  ) : null;
 
   // Render
   // ------------------------------------------------------------------
@@ -4831,7 +4868,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                 !activePendingProgress?.activeQuestion?.multiSelect && "px-3 py-2",
                               )}
                               onPointerDown={(event) => event.preventDefault()}
-                              onClick={expandMobileComposer}
+                              onClick={() => expandMobileComposer()}
                               aria-label="Write custom answer"
                             >
                               {activePendingProgress?.customAnswer || "Write custom answer"}
@@ -4911,6 +4948,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             ref={composerSurfaceRef}
             data-chat-composer-surface="true"
             data-chat-composer-mobile-collapsed={isComposerCollapsedMobile ? "true" : "false"}
+            data-chat-composer-resting={isComposerResting || undefined}
             className={cn(
               "rounded-[20px] transition-[background-color] duration-200",
               isDragOverComposer ? "bg-accent/45 ring-1 ring-primary/70" : null,
@@ -4918,8 +4956,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               composerProviderState.composerSurfaceClassName,
             )}
           >
+            {showComposerAttachAction ? (
+              <input
+                ref={attachmentInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(event) => {
+                  const files = Array.from(event.currentTarget.files ?? []);
+                  event.currentTarget.value = "";
+                  void addComposerAttachments(files);
+                  focusComposer();
+                }}
+              />
+            ) : null}
             {showCollapsedMobilePromptRow ? (
               <div className="flex items-center justify-between gap-2 px-3 py-2">
+                {composerAttachAction}
                 <button
                   type="button"
                   data-chat-composer-transition-prompt="true"
@@ -4930,7 +4983,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       : "text-placeholder",
                   )}
                   onPointerDown={(event) => event.preventDefault()}
-                  onClick={isChoiceOnlyPendingQuestion ? undefined : expandMobileComposer}
+                  onClick={isChoiceOnlyPendingQuestion ? undefined : () => expandMobileComposer()}
                   disabled={isChoiceOnlyPendingQuestion}
                   aria-label="Expand composer"
                 >
@@ -4946,7 +4999,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 <button
                   type="button"
                   data-chat-composer-transition-actions="true"
-                  className="flex size-8 shrink-0 items-center justify-center rounded-full bg-message-action text-message-action-foreground hover:bg-message-action-hover disabled:opacity-30"
+                  className="lecturn-composer-send flex size-8 shrink-0 items-center justify-center rounded-full disabled:opacity-50"
                   disabled={collapsedComposerPrimaryActionDisabled}
                   aria-label={collapsedComposerPrimaryActionLabel}
                   onPointerDown={(event) => event.preventDefault()}
@@ -4955,15 +5008,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     submitComposer();
                   }}
                 >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path
-                      d="M8 3L8 13M8 3L4 7M8 3L12 7"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
+                  <SendIcon aria-hidden className="size-[18px]" strokeWidth={1.5} />
                 </button>
               </div>
             ) : null}
@@ -5337,13 +5382,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   "relative",
                   isComposerResting && "flex min-w-0 items-center gap-1",
                   isComposerResting &&
-                    (settings.contextWindowMeterEnabled && activeContextWindow
-                      ? "pr-28"
-                      : showComposerAttachAction
-                        ? "pr-20"
-                        : "pr-12"),
+                    (settings.contextWindowMeterEnabled && activeContextWindow ? "pr-28" : "pr-12"),
                 )}
               >
+                {isComposerResting ? composerAttachAction : null}
                 <ComposerPromptEditor
                   editorRef={composerEditorRef}
                   value={
@@ -5367,6 +5409,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       "max-h-8 min-h-8 overflow-hidden whitespace-nowrap! leading-8",
                   )}
                   placeholderClassName={cn(
+                    "lecturn-composer-placeholder",
                     isComposerResting &&
                       "flex items-center overflow-hidden whitespace-nowrap leading-8",
                   )}
@@ -5395,7 +5438,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               ? "Enable a provider in Settings to send a message"
                               : phase === "disconnected"
                                 ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                                : isComposerResting
+                                  ? showComposerAttachAction
+                                    ? "Ask for changes, send follow-ups, or attach files"
+                                    : "Ask for changes or send a follow-up"
+                                  : "Ask anything, @tag files/folders, $use skills, or / for commands"
                   }
                   disabled={
                     isConnecting ||
@@ -5475,39 +5522,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
-                  {showComposerAttachAction ? (
-                    <>
-                      <input
-                        ref={attachmentInputRef}
-                        type="file"
-                        multiple
-                        className="hidden"
-                        onChange={(event) => {
-                          const files = Array.from(event.currentTarget.files ?? []);
-                          event.currentTarget.value = "";
-                          void addComposerAttachments(files);
-                          focusComposer();
-                        }}
-                      />
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              onPointerDown={(event) => event.preventDefault()}
-                              onClick={() => attachmentInputRef.current?.click()}
-                              aria-label="Attach files"
-                            />
-                          }
-                        >
-                          <PaperclipIcon />
-                        </TooltipTrigger>
-                        <TooltipPopup>Attach files</TooltipPopup>
-                      </Tooltip>
-                    </>
-                  ) : null}
+                  {!isComposerResting ? composerAttachAction : null}
                   <ComposerFooterPrimaryActions
                     compact={isComposerResting || isComposerPrimaryActionsCompact}
                     activeContextWindow={

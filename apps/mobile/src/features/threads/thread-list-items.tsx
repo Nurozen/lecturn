@@ -1,4 +1,5 @@
 import { GlassCard } from "../../components/GlassCard";
+import { useGlassPalette } from "../../lib/useGlassPalette";
 import { StaveIcon } from "./StaveIcon";
 import {
   selectThreadPullRequestWatches,
@@ -18,8 +19,16 @@ import type { EnvironmentThreadSearchMatch } from "@lecturn/client-runtime/state
 import type { EnvironmentMachineKind } from "@lecturn/contracts";
 import type { MenuAction } from "@react-native-menu/menu";
 import { SymbolView } from "../../components/AppSymbol";
-import { memo, useCallback, useMemo, type ComponentProps } from "react";
-import { Pressable, useWindowDimensions, View } from "react-native";
+import { memo, useCallback, useEffect, useMemo, type ComponentProps } from "react";
+import Animated, {
+  Easing,
+  ReduceMotion,
+  cancelAnimation,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
+import { Pressable, useWindowDimensions, View, type ColorValue } from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import Svg, { Circle, Path } from "react-native-svg";
@@ -55,6 +64,44 @@ export type ThreadListVariant = "compact" | "sidebar";
 export const THREAD_LIST_COMPACT_INSET = HOME_HORIZONTAL_INSET;
 const SIDEBAR_ROW_RADIUS = 22;
 export const THREAD_ACTIVITY_VIEWABILITY_CONFIG = { itemVisiblePercentThreshold: 0 };
+
+/** A stable native glyph rotates instead of swapping on each disclosure toggle. */
+export function ThreadHierarchyChevron({
+  expanded,
+  direction = "right",
+  size = 12,
+  tintColor,
+}: {
+  readonly expanded: boolean;
+  readonly direction?: "right" | "down";
+  readonly size?: number;
+  readonly tintColor?: ColorValue;
+}) {
+  const target = expanded ? (direction === "right" ? 90 : 180) : 0;
+  const angle = useSharedValue(target);
+  useEffect(() => {
+    angle.set(
+      withTiming(target, {
+        duration: 420,
+        easing: Easing.out(Easing.cubic),
+        reduceMotion: ReduceMotion.System,
+      }),
+    );
+    return () => cancelAnimation(angle);
+  }, [angle, target]);
+  const rotation = useAnimatedStyle(() => ({ transform: [{ rotate: `${angle.value}deg` }] }));
+  return (
+    <Animated.View pointerEvents="none" accessible={false} style={rotation}>
+      <SymbolView
+        name={direction === "right" ? "chevron.right" : "chevron.down"}
+        size={size}
+        type="monochrome"
+        tintColor={tintColor}
+        tintColorClassName={tintColor === undefined ? "accent-foreground-muted" : undefined}
+      />
+    </Animated.View>
+  );
+}
 
 function pullRequestTintColor(
   pr: Pick<ThreadPrPresentation, "state" | "isDraft">,
@@ -114,7 +161,6 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
   readonly onNewThread?: (project: EnvironmentProject) => void;
 }) {
   const { groupKey, onGroupAction, onNewThread } = props;
-  const theme = useUniwindTheme();
   const newThreadTarget = props.newThreadTarget ?? null;
   const compact = props.variant === "compact";
   const handleToggle = useCallback(
@@ -127,6 +173,7 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
     }
   }, [newThreadTarget, onNewThread]);
   const showNewThreadButton = onNewThread !== undefined && newThreadTarget !== null;
+  const glass = useGlassPalette();
 
   // Separate 44pt controls keep collapse, open, and new-thread actions reachable
   // to touch users and VoiceOver/TalkBack without overlapping hit areas.
@@ -160,7 +207,7 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
               bottom: 0,
               left: level * 18 + 8,
               width: 1,
-              backgroundColor: theme["--color-primary"],
+              backgroundColor: glass.edge,
             }}
           />
         ))}
@@ -172,7 +219,7 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
           style={{ minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }}
           onPress={handleToggle}
         >
-          <Text className="text-foreground-muted">{props.collapsed ? "▸" : "▾"}</Text>
+          <ThreadHierarchyChevron expanded={!props.collapsed} />
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -522,10 +569,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   useViewabilityAmount(useCallback((token) => setVisible(token.sizeVisible > 0), [setVisible]));
 
   const theme = useUniwindTheme();
-  const screenColor = theme["--color-screen"];
-  const drawerColor = theme["--color-drawer"];
-  const pressedBackgroundColor = theme["--color-subtle"];
-  const selectedBackgroundColor = theme["--color-card"];
+  const glass = useGlassPalette();
   const selectedForegroundColor = theme["--color-foreground"];
 
   const {
@@ -582,10 +626,9 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
     thread.branch,
   ].filter((part): part is string => Boolean(part));
 
-  const backgroundColor = compact ? screenColor : drawerColor;
-  const effectivePressedBackground = selected
-    ? themeColorWithAlpha(String(selectedForegroundColor), 0.16)
-    : pressedBackgroundColor;
+  const effectivePressedBackground = glass.opaque
+    ? theme["--color-subtle"]
+    : themeColorWithAlpha(glass.accent, 0.12);
   const effectiveStatus =
     selected && status
       ? {
@@ -732,8 +775,11 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
         accessibilityHint="Swipe left for archive and delete actions"
         accessibilityLabel={threadAccessibilityLabel}
         accessibilityRole="button"
-        className="active:opacity-70"
-        style={{ backgroundColor: screenColor, borderRadius: SIDEBAR_ROW_RADIUS }}
+        className="active:opacity-90"
+        style={({ pressed }) => ({
+          backgroundColor: pressed ? effectivePressedBackground : "transparent",
+          borderRadius: SIDEBAR_ROW_RADIUS,
+        })}
         onPress={() => {
           close();
           onSelectThread(thread);
@@ -746,13 +792,6 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
           <View className="px-4 py-3">
             <View className="gap-1">
               <View className="flex-row items-center justify-between gap-2">
-                {selected ? (
-                  <View
-                    accessible={false}
-                    pointerEvents="none"
-                    className="h-6 w-1 rounded-full bg-primary"
-                  />
-                ) : null}
                 <Text
                   className="flex-1 text-lg font-lecturn-bold text-foreground"
                   numberOfLines={1}
@@ -802,11 +841,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
           onSelectThread(thread);
         }}
         style={({ pressed }) => ({
-          backgroundColor: selected
-            ? selectedBackgroundColor
-            : pressed || hovered
-              ? effectivePressedBackground
-              : backgroundColor,
+          backgroundColor: pressed || hovered ? effectivePressedBackground : "transparent",
           borderRadius: SIDEBAR_ROW_RADIUS,
           cursor: "pointer",
           minHeight: 64,
@@ -819,13 +854,6 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
           ) : null}
           <View className="gap-1 px-3 py-3">
             <View className="flex-row items-center justify-between gap-2">
-              {selected ? (
-                <View
-                  accessible={false}
-                  pointerEvents="none"
-                  className="h-6 w-1 rounded-full bg-primary"
-                />
-              ) : null}
               <Text
                 className="flex-1 text-base font-lecturn-medium text-foreground"
                 numberOfLines={1}

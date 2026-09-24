@@ -8,6 +8,7 @@ This is a living glossary for Lecturn. It explains what common terms mean in thi
 
 - [Project and workspace](#project-and-workspace)
 - [Thread timeline](#thread-timeline)
+- [Thread notes](#thread-notes)
 - [Orchestration](#orchestration)
 - [Provider runtime](#provider-runtime)
 - [Checkpointing](#checkpointing)
@@ -121,6 +122,14 @@ A typed signal emitted when an async milestone completes, such as `checkpoint.ba
 
 "Quiesced" means a turn has gone quiet and stable: follow-up work such as [CheckpointReactor.ts][6] has settled. It appears in [the receipt schema][13], so in practice it is something tests wait on rather than a production signal.
 
+#### User present
+
+The strict presence signal that silences notification rings: some client lease is active, visible, focused, and recently interacted with (`isUserPresentLease` in `apps/server/src/background/BackgroundPolicy.ts`). It is stricter than a foreground lease, which only schedules background work. The server sends it to the relay as `userPresent` on each activity publish. The desktop notch applies the same rule locally. See [pull-request-watches.md][31].
+
+#### Notified-event record
+
+The per-device list of events the relay already rang, stored in `relay_mobile_devices.notified_push_events_json`. Identity is environment + thread + phase + status. Entries marked `deferred` are Live Activity rings still owed because the user was present or a shared card observed another environment’s transition before its own publish. See [pull-request-watches.md][31].
+
 ### Provider runtime
 
 The live backend agent implementation and its event stream. The main service is [ProviderService.ts][14], the adapter contract is [ProviderAdapter.ts][15], and the overview is in [providers.md][16].
@@ -230,6 +239,22 @@ ships Lecturn already matching it.
 
 See [Teams architecture](teams.md) for enforcement boundaries.
 
+## Connect account terminology
+
+- **Connect account**: a Clerk user ID signed in to Lecturn Connect. Web and desktop can hold up to five at once.
+- **Active account**: the account of Clerk's active session. Publish, billing, teams, and CLI authorize act on it.
+- **Known account**: an account this client holds data for, from its first sign-in until a sign-out started in Lecturn. The list is kept per origin.
+- **Needs sign-in**: a known account without a signed-in session. Its environments stay in the catalog, disconnected, and its data is kept.
+- **Owning account**: the account a relay environment is tagged with (`accountId` on its catalog target). Direct, Tailscale, and SSH environments have none.
+- **Account mark**: the short text, taken from the owner's email, shown on rows once two accounts are known.
+- **Segment**: one account's part of the thread sidebar, shown once two accounts are known: a sticky account bar, then the usual composition over that account's environments. Environments without an owning account form one last segment without a bar. Collapsing a segment hides its rows and changes nothing about the connection. See [sidebarSegments.logic.ts](../../apps/web/src/components/sidebar/sidebarSegments.logic.ts).
+- **Account-scoped key**: a project group key with its owning account appended. Project groups are built once per account so a repository under two accounts stays two groups, and the scope keeps their keys apart. `parseAccountScopedKey` reads the account back, and only from a well-formed scope at the end of the key. The project page uses it to act on that account's members alone.
+- **Unlisted environment**: a relay environment no signed-in account lists. It is disconnected and kept, and the user can remove it.
+- **Account admission**: the checks for Clerk multi-session support, account limits, environment ownership, and mobile relay capability before adding an account.
+- **Stand-down marker**: the shared-storage timestamp a multi-account build writes so a single-account tab on the same origin asks for a reload instead of signing out the extra account.
+
+See [Lecturn Connect](lecturn-connect.md#multiple-signed-in-accounts) for the mechanics.
+
 [1]: ../../packages/contracts/src/orchestration.ts
 [2]: ./workspace-layout.md
 [3]: ../../apps/server/src/vcs/GitVcsDriverCore.ts
@@ -260,3 +285,8 @@ See [Teams architecture](teams.md) for enforcement boundaries.
 [28]: ./stave-integration.md
 [29]: ../../packages/contracts/src/externalSessions.ts
 [30]: ./thread-forking.md#importing-external-sessions
+[31]: ./pull-request-watches.md#notification-rings
+
+### Thread notes
+
+A **thread note** is a project-scoped quote and optional comment saved independently of the chat draft. Its **note anchor** records the message identity, role, normalized rendered-text offsets, quote, and nearby context. Anchors share citation matching and navigation; they never index raw stored message text. See [Thread notes](./thread-notes.md).

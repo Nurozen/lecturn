@@ -23,7 +23,11 @@ import {
 } from "@lecturn/client-runtime/connection";
 import { bootstrapRemoteBearerSession } from "@lecturn/client-runtime/authorization";
 import { fetchRemoteEnvironmentDescriptor } from "@lecturn/client-runtime/environment";
-import { managedRelayAccountChanges, managedRelaySessionAtom } from "@lecturn/client-runtime/relay";
+import {
+  managedRelayAccountChanges,
+  managedRelayAccountIds,
+  managedRelaySessionsAtom,
+} from "@lecturn/client-runtime/relay";
 import { EnvironmentRpcRequestObserver } from "@lecturn/client-runtime/rpc";
 import {
   AuthStandardClientScopes,
@@ -40,6 +44,7 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
+import { AtomRegistry } from "effect/unstable/reactivity";
 import { FetchHttpClient } from "effect/unstable/http";
 
 import { APP_VERSION } from "../branding";
@@ -49,6 +54,7 @@ import {
   readPrimaryEnvironmentTarget,
   type PrimaryEnvironmentTarget,
 } from "../environments/primary/target";
+import { knownConnectAccountsAtom } from "../cloud/knownAccounts";
 import { clearComposerDraftsEnvironment } from "../composerDraftStore";
 import { isHostedStaticApp } from "../hostedPairing";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -90,6 +96,61 @@ const connectivityLayer = Connectivity.layer({
   ),
 });
 
+/**
+ * A relay target can connect from cache before sign-in state has loaded. Once an
+ * account turns out to need sign-in, its targets are prepared again, and the
+ * broker blocks them.
+ */
+export function accountsNeedingSignIn(registry: AtomRegistry.AtomRegistry) {
+  return AtomRegistry.toStream(registry, knownConnectAccountsAtom).pipe(
+    Stream.map((known) => known.needsSignIn),
+    Stream.zipWithPrevious,
+    Stream.map(([previous, needsSignIn]) =>
+      Wakeups.accountCredentialsChanged({
+        added: new Set(
+          needsSignIn.filter(
+            (accountId) => !Option.getOrElse(previous, () => needsSignIn).includes(accountId),
+          ),
+        ),
+        removed: new Set(),
+      }),
+    ),
+    Stream.filter((change) => change.accountIds.size > 0),
+  );
+}
+
+/** Connect accounts as the connection runtime sees them. */
+export const webCloudSession = CloudSession.of({
+  accountIds: Effect.sync(() => managedRelayAccountIds(appAtomRegistry)),
+  knownAccountIds: Effect.sync(() => appAtomRegistry.get(knownConnectAccountsAtom).accountIds),
+  accountsSynced: Effect.sync(() => appAtomRegistry.get(knownConnectAccountsAtom).synced),
+  clerkToken: Effect.fnUntraced(function* (accountId: string) {
+    const session = appAtomRegistry.get(managedRelaySessionsAtom).get(accountId);
+    if (session === undefined) {
+      return yield* new ConnectionBlockedError({
+        reason: "authentication",
+        detail: "Sign in to Lecturn Connect to connect this environment.",
+      });
+    }
+    const token = yield* session.readClerkToken().pipe(
+      Effect.mapError(
+        (error) =>
+          new ConnectionTransientError({
+            reason: "network",
+            detail: error.message,
+          }),
+      ),
+    );
+    if (token === null) {
+      return yield* new ConnectionBlockedError({
+        reason: "authentication",
+        detail: "The Lecturn Connect session is unavailable.",
+      });
+    }
+    return token;
+  }),
+});
+
 const wakeupsLayer = Wakeups.layer({
   changes: Stream.merge(
     Stream.callback<"application-active">((queue) =>
@@ -109,8 +170,11 @@ const wakeupsLayer = Wakeups.layer({
           }),
       ).pipe(Effect.asVoid),
     ),
-    managedRelayAccountChanges(appAtomRegistry).pipe(
-      Stream.map(() => "credentials-changed" as const),
+    Stream.merge(
+      managedRelayAccountChanges(appAtomRegistry).pipe(
+        Stream.map(Wakeups.accountCredentialsChanged),
+      ),
+      accountsNeedingSignIn(appAtomRegistry),
     ),
   ),
 });
@@ -180,33 +244,6 @@ const capabilitiesLayer = Layer.effectContext(
     const presentation = ClientPresentation.of({
       metadata: clientMetadata(),
       scopes: AuthStandardClientScopes,
-    });
-    const cloudSession = CloudSession.of({
-      clerkToken: Effect.gen(function* () {
-        const session = appAtomRegistry.get(managedRelaySessionAtom);
-        if (session === null) {
-          return yield* new ConnectionBlockedError({
-            reason: "authentication",
-            detail: "Sign in to Lecturn Connect to connect this environment.",
-          });
-        }
-        const token = yield* session.readClerkToken().pipe(
-          Effect.mapError(
-            (error) =>
-              new ConnectionTransientError({
-                reason: "network",
-                detail: error.message,
-              }),
-          ),
-        );
-        if (token === null) {
-          return yield* new ConnectionBlockedError({
-            reason: "authentication",
-            detail: "The Lecturn Connect session is unavailable.",
-          });
-        }
-        return token;
-      }),
     });
     const identity = RelayDeviceIdentity.of({
       deviceId: Effect.succeed(Option.none()),
@@ -279,7 +316,7 @@ const capabilitiesLayer = Layer.effectContext(
       }),
     });
 
-    return Context.make(CloudSession, cloudSession).pipe(
+    return Context.make(CloudSession, webCloudSession).pipe(
       Context.add(PrimaryEnvironmentAuth, primaryAuth),
       Context.add(RelayDeviceIdentity, identity),
       Context.add(ClientPresentation, presentation),
@@ -578,7 +615,7 @@ const platformConnectionSourceLayer = Layer.effect(
   }),
 );
 
-const environmentOwnedDataCleanupLayer = Layer.succeed(
+export const environmentOwnedDataCleanupLayer = Layer.succeed(
   EnvironmentOwnedDataCleanup,
   EnvironmentOwnedDataCleanup.of({
     clear: (environmentId) =>

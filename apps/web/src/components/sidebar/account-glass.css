@@ -1,0 +1,240 @@
+/* The enclosure names ownership; local projects use a neutral glass edge. */
+.lecturn-sidebar-tree {
+  --sidebar-neutral-tint: #d5af63;
+  --sidebar-neutral-light: #ead9b5;
+  --sidebar-tree-connector: var(--sidebar-neutral-light);
+  --sidebar-tree-edge: var(--sidebar-neutral-light);
+  --account-tint: var(--sidebar-neutral-tint);
+  --sidebar-tree-tint: var(--account-tint);
+}
+.lecturn-sidebar-tree .lecturn-account-section {
+  --sidebar-tree-tint: var(--account-tint);
+}
+.lecturn-sidebar-tree .lecturn-account-header {
+  border: 1px solid color-mix(in srgb, var(--account-tint) 32%, transparent);
+  border-bottom: 0;
+  border-radius: 12px 10px 0 0;
+  /* Sticky labels need an opaque backing as the list passes underneath. */
+  background: var(--sidebar);
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--account-tint) 9%, transparent),
+    transparent 75%
+  );
+  padding-inline-start: 10px;
+  box-shadow: inset 0 1px color-mix(in srgb, white 10%, transparent);
+}
+.lecturn-sidebar-tree .lecturn-account-header button {
+  color: oklch(from var(--account-tint) 0.43 calc(c * 0.85) h);
+  font-size: 14px;
+  font-weight: 500;
+  gap: 6px;
+}
+.lecturn-sidebar-tree .lecturn-account-section .lecturn-account-collapse {
+  border-inline: 1px solid color-mix(in srgb, var(--account-tint) 25%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--account-tint) 32%, transparent);
+  border-radius: 0 0 12px 12px;
+  background: linear-gradient(
+    105deg,
+    color-mix(in srgb, var(--account-tint) 4%, transparent),
+    transparent 55%
+  );
+  margin-bottom: 9px;
+}
+.lecturn-sidebar-tree .lecturn-account-section[data-account-collapsed] > .lecturn-account-header {
+  border-bottom: 1px solid color-mix(in srgb, var(--account-tint) 32%, transparent);
+  border-radius: 12px;
+  margin-bottom: 9px;
+}
+/* A rounded border segment wraps the corner; rounding a 2px-wide bar cannot.
+   Header and body own their ends so the curve follows sticky headers too. */
+.lecturn-sidebar-tree .lecturn-account-section > .lecturn-account-header::before,
+.lecturn-sidebar-tree .lecturn-account-section .lecturn-account-collapse::before {
+  inset-inline-start: -1px;
+  width: 28px;
+  box-sizing: border-box;
+  border: 0 solid color-mix(in srgb, white 65%, var(--account-tint));
+  border-inline-start-width: 2px;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--account-tint) 75%, transparent))
+    drop-shadow(2px 0 9px color-mix(in srgb, var(--account-tint) 35%, transparent));
+  mask-image: linear-gradient(to right, #000 12px, transparent 28px);
+}
+.lecturn-sidebar-tree .lecturn-account-section > .lecturn-account-header::before {
+  inset-block-start: -1px;
+  border-block-start-width: 2px;
+  border-start-start-radius: 12px;
+}
+.lecturn-sidebar-tree .lecturn-account-section .lecturn-account-collapse::before {
+  z-index: 1;
+  inset-block-end: -1px;
+  border-block-end-width: 2px;
+  border-end-start-radius: 12px;
+}
+/* Occlude the scrolling body rail outside the sticky header's rounded corner.
+   The header's own curved stroke remains above this tiny corner cutout. */
+.lecturn-sidebar-tree .lecturn-account-section > .lecturn-account-header::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+  inset-block-start: -1px;
+  inset-inline-start: -1px;
+  width: 12px;
+  height: 12px;
+  background: var(--sidebar);
+  mask-image: radial-gradient(circle at bottom right, transparent 10px, #000 12px);
+}
+.lecturn-sidebar-tree
+  .lecturn-account-section[data-account-collapsed]
+  > .lecturn-account-header::before {
+  inset-block-end: -1px;
+  border-block-end-width: 2px;
+  border-end-start-radius: 12px;
+}
+.lecturn-local-enclosure {
+  position: relative;
+  border: 1px solid color-mix(in srgb, var(--sidebar-neutral-tint) 23%, transparent);
+  border-left-color: var(--sidebar-neutral-light);
+  border-radius: 12px;
+  background: linear-gradient(
+    105deg,
+    color-mix(in srgb, var(--sidebar-neutral-tint) 4%, transparent),
+    transparent 60%
+  );
+  box-shadow:
+    -2px 0 9px color-mix(in srgb, var(--sidebar-neutral-tint) 17%, transparent),
+    inset 1px 0 color-mix(in srgb, white 26%, transparent);
+  padding: 5px !important;
+  margin-inline: 2px;
+}
+.lecturn-sidebar-tree .lecturn-account-list {
+  padding: 3px 6px 7px;
+}
+/* Keep the snoozed control if present, without repeating the account heading. */
+.lecturn-sidebar-tree .lecturn-account-section .lecturn-projects-heading > span:first-child {
+  display: none;
+}
+.lecturn-sidebar-tree .lecturn-account-section .lecturn-projects-heading:not(:has(button)) {
+  display: none;
+}
+.lecturn-sidebar-tree .lecturn-hierarchy-branch::before,
+.lecturn-sidebar-tree .lecturn-hierarchy-branch::after,
+.lecturn-sidebar-tree .lecturn-hierarchy-conversations > ul > li::before,
+.lecturn-sidebar-tree .lecturn-hierarchy-conversations > ul > li::after {
+  --connector-color: var(--sidebar-tree-connector);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--connector-color) 86%, transparent);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--connector-color) 26%, transparent);
+}
+/* The last descendant turns the thin rail into an elbow. */
+.lecturn-sidebar-tree .lecturn-hierarchy-conversations:last-child > ul > li:last-child::before {
+  border-end-start-radius: 4px;
+}
+.lecturn-sidebar-tree .lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::before,
+.lecturn-sidebar-tree .lecturn-hierarchy-settled .lecturn-hierarchy-conversations > ul > li::after {
+  --connector-color: var(--lecturn-copper-bright);
+}
+.lecturn-sidebar-tree [data-lecturn-thread-surface][data-account-selected] {
+  background: linear-gradient(
+    105deg,
+    color-mix(in srgb, var(--sidebar-tree-tint) 20%, transparent),
+    color-mix(in srgb, var(--sidebar-tree-tint) 8%, transparent)
+  );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--sidebar-tree-edge) 78%, transparent),
+    inset 1px 0 color-mix(in srgb, var(--sidebar-tree-edge) 70%, transparent),
+    inset 0 1px color-mix(in srgb, white 16%, transparent),
+    0 0 7px color-mix(in srgb, var(--sidebar-tree-tint) 12%, transparent);
+}
+/* Paint the gleam inside the selected row, so narrow scrollports cannot clip it. */
+.dark .lecturn-sidebar-tree [data-lecturn-thread-surface][data-account-selected] {
+  background:
+    radial-gradient(
+      ellipse 42px 30px at -8px 50%,
+      color-mix(in srgb, var(--sidebar-tree-tint) 18%, transparent),
+      color-mix(in srgb, var(--sidebar-tree-tint) 8%, transparent) 44%,
+      transparent 100%
+    ),
+    linear-gradient(
+      105deg,
+      color-mix(in srgb, var(--sidebar-tree-tint) 22%, transparent),
+      color-mix(in srgb, var(--sidebar-tree-tint) 12%, transparent) 50%,
+      color-mix(in srgb, var(--sidebar-tree-tint) 12%, transparent)
+    );
+}
+/* Projects share the cards' quiet glass material without changing their row layout. */
+.lecturn-sidebar-tree .lecturn-project-header {
+  border-radius: 6px;
+  background: linear-gradient(
+    105deg,
+    color-mix(in srgb, var(--sidebar-tree-tint) 4%, transparent),
+    color-mix(in srgb, var(--sidebar-tree-tint) 1%, transparent)
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sidebar-tree-edge) 10%, transparent);
+}
+.lecturn-sidebar-tree .lecturn-project-header:focus-within {
+  background-color: color-mix(in srgb, var(--sidebar-tree-tint) 7%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sidebar-tree-edge) 25%, transparent);
+}
+@media (hover: hover) and (pointer: fine) {
+  .lecturn-sidebar-tree .lecturn-project-header:hover {
+    background-color: color-mix(in srgb, var(--sidebar-tree-tint) 7%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sidebar-tree-edge) 25%, transparent);
+  }
+  .lecturn-sidebar-tree [data-lecturn-thread-surface]:not([data-account-selected]):hover {
+    background-image: linear-gradient(
+      color-mix(in srgb, var(--sidebar-tree-tint) 11%, transparent),
+      color-mix(in srgb, var(--sidebar-tree-tint) 6%, transparent)
+    );
+  }
+}
+@media (forced-colors: active) {
+  .lecturn-sidebar-tree .lecturn-hierarchy-branch::before,
+  .lecturn-sidebar-tree .lecturn-hierarchy-branch::after,
+  .lecturn-sidebar-tree .lecturn-hierarchy-conversations > ul > li::before,
+  .lecturn-sidebar-tree .lecturn-hierarchy-conversations > ul > li::after {
+    background: CanvasText;
+    box-shadow: none;
+  }
+  .lecturn-sidebar-tree .lecturn-account-section > .lecturn-account-header::before,
+  .lecturn-sidebar-tree .lecturn-account-section .lecturn-account-collapse::before {
+    border-color: CanvasText;
+    background: none;
+    box-shadow: none;
+    filter: none;
+    mask-image: none;
+  }
+  .lecturn-sidebar-tree [data-account-selected] {
+    outline: 1px solid Highlight;
+  }
+  .lecturn-sidebar-tree .lecturn-account-header button {
+    color: ButtonText;
+  }
+}
+
+.lecturn-sidebar-tree .lecturn-account-header .lecturn-hierarchy-chevron {
+  width: 14px;
+  height: 14px;
+}
+
+.lecturn-sidebar-tree[data-sidebar-segments] {
+  margin-inline: 16px 4px;
+}
+.lecturn-sidebar-tree.lecturn-local-enclosure {
+  margin-inline: 16px 4px;
+}
+.lecturn-sidebar-tree .lecturn-account-header button {
+  line-height: 20px;
+}
+.dark .lecturn-sidebar-tree .lecturn-account-header button {
+  color: oklch(from var(--account-tint) 0.84 calc(c * 1.2) h);
+}
+@media (forced-colors: active) {
+  .lecturn-sidebar-tree .lecturn-account-header button,
+  .dark .lecturn-sidebar-tree .lecturn-account-header button {
+    color: ButtonText;
+  }
+}

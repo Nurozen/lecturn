@@ -2553,3 +2553,141 @@ body,
     display: none !important;
   }
 }
+
+/* One continuous glass edge per account. The contents wrapper preserves the
+   existing viewport-wide sticky headers; header and fold share the same tint. */
+.lecturn-account-section > [data-sidebar-account-bar]::before,
+.lecturn-account-section .lecturn-account-collapse::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  z-index: 11;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 4px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--account-tint) 65%, transparent),
+    color-mix(in srgb, var(--account-tint) 18%, transparent)
+  );
+  box-shadow:
+    inset 1px 0 0 color-mix(in srgb, white 45%, transparent),
+    1px 0 5px color-mix(in srgb, var(--account-tint) 20%, transparent);
+}
+
+/* Round only the outer ends so the expanded section reads as one rail. */
+.lecturn-account-section > [data-sidebar-account-bar]::before {
+  border-start-start-radius: 999px;
+  border-start-end-radius: 999px;
+}
+.lecturn-account-section[data-account-collapsed] > [data-sidebar-account-bar]::before,
+.lecturn-account-section .lecturn-account-collapse::before {
+  border-end-start-radius: 999px;
+  border-end-end-radius: 999px;
+}
+@media (hover: hover) {
+  .lecturn-account-section [data-lecturn-thread-surface]:hover {
+    background-image: linear-gradient(
+      color-mix(in srgb, var(--account-tint) 7%, transparent),
+      color-mix(in srgb, var(--account-tint) 7%, transparent)
+    );
+  }
+}
+
+/* Only the moving fold gets a glass rim; nothing repaints after the transition. */
+.lecturn-hierarchy-panel {
+  position: relative;
+}
+
+.lecturn-hierarchy-panel::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  z-index: 12;
+  inset-inline: 2px;
+  bottom: 0;
+  height: 9px;
+  border-radius: 0 0 8px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--account-tint, var(--primary)) 55%, transparent);
+  background: linear-gradient(
+    transparent,
+    color-mix(in srgb, var(--account-tint, var(--primary)) 18%, transparent)
+  );
+  box-shadow: inset 0 -1px 1px color-mix(in srgb, white 35%, transparent);
+  opacity: 0;
+  transition: opacity 400ms ease-out;
+}
+
+.lecturn-hierarchy-panel:is([data-starting-style], [data-ending-style])::after {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lecturn-hierarchy-panel::after {
+    display: none;
+  }
+}
+
+/* Match account, project, and thread-shelf folds without affecting other UI panels. */
+.lecturn-hierarchy-panel {
+  transition-duration: 400ms;
+  transition-timing-function: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.lecturn-hierarchy-chevron {
+  transition: transform 400ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .lecturn-hierarchy-panel,
+  .lecturn-hierarchy-chevron {
+    transition: none;
+  }
+}
+
+/* A short pulse signals a fresh health state without continuous GPU work. */
+.lecturn-relay-status-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  color: var(--muted-foreground);
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
+  animation: lecturn-relay-status-pulse 1.4s ease-in-out 3;
+}
+.lecturn-relay-status-dot[data-status="online"] {
+  color: #10b981;
+}
+.lecturn-relay-status-dot[data-status="checking"] {
+  color: #f59e0b;
+}
+.lecturn-relay-status-dot[data-status="offline"],
+.lecturn-relay-status-dot[data-status="error"] {
+  color: var(--destructive);
+}
+.lecturn-relay-status-dot[data-status="inactive"] {
+  animation: none;
+}
+@keyframes lecturn-relay-status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.8);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lecturn-relay-status-dot {
+    animation: none;
+  }
+}
+
+::highlight(lecturn-thread-note) {
+  background-color: color-mix(in oklab, var(--primary) 20%, transparent);
+  text-decoration: underline dotted color-mix(in oklab, var(--primary) 65%, transparent);
+}
+::highlight(lecturn-thread-note-active) {
+  background-color: color-mix(in oklab, var(--primary) 38%, transparent);
+  text-decoration: underline;
+}

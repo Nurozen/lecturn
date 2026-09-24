@@ -1,6 +1,7 @@
 import {
   type ModelCapabilities,
   type ModelSelection,
+  type ProviderOptionDescriptor,
   ProviderDriverKind,
   type ServerProviderModel,
 } from "@lecturn/contracts";
@@ -69,6 +70,197 @@ export function resolveClaudeModelCatalog(manifest: ModelManifestData): ClaudeMo
 }
 
 export const BUNDLED_CLAUDE_MODEL_CATALOG = resolveClaudeModelCatalog(BUNDLED_MODEL_MANIFEST);
+
+/** Initialization metadata from Claude Code; optional fields vary with the installed CLI. */
+export interface ClaudeRuntimeModelInfo {
+  readonly value: string;
+  readonly resolvedModel?: string;
+  readonly displayName: string;
+  readonly description: string;
+  readonly supportsEffort?: boolean;
+  readonly supportedEffortLevels?: ReadonlyArray<string>;
+  readonly supportsAdaptiveThinking?: boolean;
+  readonly supportsFastMode?: boolean;
+}
+
+function runtimeCapabilities(
+  info: ClaudeRuntimeModelInfo,
+  known: ClaudeCatalogModel | undefined,
+  hasContextSuffix: boolean,
+): ModelCapabilities {
+  const descriptors: Array<ProviderOptionDescriptor> = [
+    ...(known?.model.capabilities?.optionDescriptors ?? []),
+  ].filter(
+    (descriptor) =>
+      !(descriptor.id === "contextWindow" && hasContextSuffix) &&
+      !(
+        descriptor.id === "effort" &&
+        (info.supportsEffort === false || info.supportedEffortLevels !== undefined)
+      ) &&
+      !(descriptor.id === "fastMode" && info.supportsFastMode !== undefined),
+  );
+  const levels = [
+    ...new Set(info.supportedEffortLevels?.map((level) => level.trim()).filter(Boolean)),
+  ];
+  if (info.supportsEffort !== false && levels.length > 0) {
+    const previous = known?.model.capabilities?.optionDescriptors?.find(
+      (descriptor) => descriptor.id === "effort" && descriptor.type === "select",
+    );
+    const extensions =
+      previous?.type === "select"
+        ? previous.options.filter((option) => {
+            if (levels.includes(option.id)) return false;
+            const mapped = known?.runtime.effortMap?.[option.id];
+            return (
+              previous.promptInjectedValues?.includes(option.id) ||
+              (typeof mapped === "string" && levels.includes(mapped))
+            );
+          })
+        : [];
+    const defaultLevel = levels.includes("high") ? "high" : levels[0];
+    descriptors.push({
+      id: "effort",
+      label: "Reasoning",
+      type: "select",
+      options: [
+        ...levels.map((level) => ({
+          id: level,
+          label: level === "xhigh" ? "Extra High" : level.charAt(0).toUpperCase() + level.slice(1),
+          ...(level === defaultLevel ? { isDefault: true } : {}),
+        })),
+        ...extensions.map((option) => ({ ...option, isDefault: false })),
+      ],
+      ...(previous?.type === "select" && previous.promptInjectedValues
+        ? {
+            promptInjectedValues: previous.promptInjectedValues.filter((id) =>
+              extensions.some((option) => option.id === id),
+            ),
+          }
+        : {}),
+    });
+  }
+  if (info.supportsFastMode === true) {
+    descriptors.push({ id: "fastMode", label: "Fast Mode", type: "boolean" });
+  }
+  return { optionDescriptors: descriptors };
+}
+
+/** Runtime availability and capabilities win; the manifest supplies legacy models and extras. */
+export function mergeClaudeRuntimeModelCatalog(
+  catalog: ClaudeModelCatalog,
+  runtimeModels?: ReadonlyArray<ClaudeRuntimeModelInfo> | null,
+): ClaudeModelCatalog {
+  const discovered = new Map<string, ClaudeCatalogModel>();
+  const supplemented = new Set<string>();
+  const runtimeAliases = new Map<string, string>();
+  for (const info of runtimeModels ?? []) {
+    const alias = info.value.trim();
+    const slug = info.resolvedModel?.trim() || alias;
+    if (!slug || !alias) continue;
+    runtimeAliases.set(alias.toLowerCase(), slug);
+    const suffix = /\[([^\]]+)\]$/.exec(slug);
+    const baseSlug = suffix ? slug.slice(0, suffix.index) : slug;
+    const aliasBase = alias.replace(/\[[^\]]+\]$/, "");
+    if (aliasBase !== alias) runtimeAliases.set(aliasBase.toLowerCase(), slug);
+    // An unresolved moving alias must never inherit an older model's canonical ID.
+    const known =
+      catalog.models.find((entry) => entry.model.slug === slug) ??
+      catalog.models.find((entry) => entry.model.slug === baseSlug) ??
+      (info.resolvedModel?.trim()
+        ? catalog.models.find((entry) =>
+            entry.model.aliases?.some((candidate) => candidate === slug || candidate === baseSlug),
+          )
+        : undefined);
+    if (known) supplemented.add(known.model.slug);
+    const existing = discovered.get(slug);
+    const aliases = [
+      ...new Set([
+        ...(existing?.model.aliases ?? []),
+        ...(known?.model.aliases ?? []),
+        ...(known && known.model.slug !== slug ? [known.model.slug] : []),
+        ...(baseSlug !== slug ? [baseSlug] : []),
+        ...(alias !== slug ? [alias] : []),
+        ...(aliasBase !== alias ? [aliasBase] : []),
+      ]),
+    ];
+    const contextSize = suffix ? /^(\d+(?:\.\d+)?)([km])$/i.exec(suffix[1]!) : null;
+    const fixedTokens = contextSize
+      ? Number(contextSize[1]) * (contextSize[2]!.toLowerCase() === "m" ? 1_000_000 : 1_000)
+      : undefined;
+    const previousRuntime = existing?.runtime ?? known?.runtime ?? {};
+    const runtime = {
+      ...previousRuntime,
+      ...(previousRuntime.effortMap && info.supportedEffortLevels
+        ? {
+            effortMap: Object.fromEntries(
+              Object.entries(previousRuntime.effortMap).filter(
+                ([level]) => !info.supportedEffortLevels?.includes(level),
+              ),
+            ),
+          }
+        : {}),
+    };
+    discovered.set(slug, {
+      model: {
+        ...known?.model,
+        slug,
+        name:
+          alias === "default" && existing ? existing.model.name : info.displayName.trim() || slug,
+        aliases,
+        isCustom: false,
+        ...(alias === "default" || existing?.model.isDefault ? { isDefault: true } : {}),
+        capabilities: runtimeCapabilities(info, existing ?? known, suffix !== null),
+      },
+      runtime: suffix
+        ? {
+            ...(runtime.effortMap ? { effortMap: runtime.effortMap } : {}),
+            ...(fixedTokens ? { fixedContextWindowTokens: fixedTokens } : {}),
+          }
+        : runtime,
+      // The running CLI has already confirmed availability, regardless of an old version gate.
+      compatibility: {},
+    });
+  }
+  if (discovered.size === 0) return catalog;
+  const claimedAliases = new Set(
+    [...discovered.values()]
+      .flatMap((entry) => [entry.model.slug, ...(entry.model.aliases ?? [])])
+      .map((alias) => alias.toLowerCase()),
+  );
+  return {
+    models: [
+      ...[...discovered.values()].map((entry) => ({
+        ...entry,
+        model: {
+          ...entry.model,
+          ...(runtimeAliases.has("default")
+            ? { isDefault: runtimeAliases.get("default") === entry.model.slug }
+            : {}),
+          aliases: (entry.model.aliases ?? []).filter((alias) => {
+            const owner = runtimeAliases.get(alias.toLowerCase());
+            return owner === undefined || owner === entry.model.slug;
+          }),
+        },
+      })),
+      ...catalog.models
+        .filter((entry) => !supplemented.has(entry.model.slug))
+        .map((entry) => ({
+          ...entry,
+          model: {
+            ...entry.model,
+            ...(runtimeAliases.has("default") ? { isDefault: false } : {}),
+            ...(entry.model.aliases
+              ? {
+                  aliases: entry.model.aliases.filter(
+                    (alias) => !claimedAliases.has(alias.toLowerCase()),
+                  ),
+                }
+              : {}),
+          },
+        })),
+    ],
+  };
+}
 
 /** Keeps custom model aliases opaque while preserving canonical built-in models and capabilities. */
 export function scopeClaudeModelCatalog(

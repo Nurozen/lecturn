@@ -1,10 +1,22 @@
+import { HierarchyRow } from "./HierarchyRow";
+import { accountSectionFrames } from "./accountSectionFrames";
+import { buildSidebarHierarchy } from "../threads/sidebar-hierarchy";
+import { HIERARCHY_LAYOUT_TRANSITION } from "./hierarchyMotion";
+import { AnimatedLegendList } from "@legendapp/list/reanimated";
+import Animated from "react-native-reanimated";
+import { AccountSurfaceColorContext } from "../../lib/accountTintContext";
+import { useAccountRowColors } from "./useAccountRowColors";
+import {
+  useAccountSectionDisplayStates,
+  toggleMobileAccountSection,
+  isAccountSectionKey,
+  setMobileProjectGroupCollapsed,
+} from "./accountSectionExpansion";
+import { useAccountSections } from "./useAccountSections";
+import { AccountSectionHeader } from "./AccountSectionHeader";
 import { useMobileSagaIndex, useSidebarNestSagas } from "../../state/stave";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
-import {
-  LegendList,
-  type LegendListRef,
-  type LegendListRenderItemProps,
-} from "@legendapp/list/react-native";
+import { type LegendListRef, type LegendListRenderItemProps } from "@legendapp/list/react-native";
 import {
   type EnvironmentProject,
   type EnvironmentThreadShell,
@@ -20,11 +32,11 @@ import {
   type SidebarProjectGroupingMode,
   type SidebarThreadSortOrder,
 } from "@lecturn/contracts";
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Platform, Pressable, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, View } from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -34,7 +46,7 @@ import type { WorkspaceEnvironment, WorkspaceState } from "../../state/workspace
 import type { SavedRemoteConnection } from "../../lib/connection";
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
-import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { mobilePreferencesAtom } from "../../state/preferences";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2Enabled } from "../threads/use-thread-list-v2-enabled";
 import { environmentServerConfigsAtom } from "../../state/server";
@@ -212,13 +224,13 @@ function HomeTopContentSpacer() {
 /* ─── Main screen ────────────────────────────────────────────────────── */
 
 export function HomeScreen(props: HomeScreenProps) {
+  const accountSections = useAccountSections();
   const [groupDisplayStates, setGroupDisplayStates] = useState<
     ReadonlyMap<string, HomeGroupDisplayState>
   >(() => new Map());
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
   const threadListV2Enabled = useThreadListV2Enabled();
   const nestSagas = useSidebarNestSagas();
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const listRef = useRef<LegendListRef | null>(null);
   const insets = useSafeAreaInsets();
@@ -272,33 +284,28 @@ export function HomeScreen(props: HomeScreenProps) {
   const effectiveGroupDisplayStatesRef = useRef(effectiveGroupDisplayStates);
   effectiveGroupDisplayStatesRef.current = effectiveGroupDisplayStates;
 
-  const updateGroupDisplay = useCallback(
-    (key: string, action: HomeGroupDisplayAction) => {
-      const next = new Map(effectiveGroupDisplayStatesRef.current);
-      next.set(
-        key,
-        nextGroupDisplayState(
-          next.get(key) ?? {
-            ...DEFAULT_GROUP_DISPLAY_STATE,
-            collapsed: key.startsWith("settled:"),
-          },
-          action,
-        ),
-      );
-      effectiveGroupDisplayStatesRef.current = next;
-      setGroupDisplayStates(next);
-      if (action === "toggle-collapsed") {
-        const collapsedProjectGroups: string[] = [];
-        for (const [groupKey, state] of next) {
-          if (state.collapsed) {
-            collapsedProjectGroups.push(groupKey);
-          }
-        }
-        savePreferences({ collapsedProjectGroups });
-      }
-    },
-    [savePreferences],
-  );
+  const updateGroupDisplay = useCallback((key: string, action: HomeGroupDisplayAction) => {
+    if (isAccountSectionKey(key) && action === "toggle-collapsed") {
+      toggleMobileAccountSection(key);
+      return;
+    }
+    const next = new Map(effectiveGroupDisplayStatesRef.current);
+    next.set(
+      key,
+      nextGroupDisplayState(
+        next.get(key) ?? {
+          ...DEFAULT_GROUP_DISPLAY_STATE,
+          collapsed: key.startsWith("settled:"),
+        },
+        action,
+      ),
+    );
+    effectiveGroupDisplayStatesRef.current = next;
+    setGroupDisplayStates(next);
+    if (action === "toggle-collapsed") {
+      setMobileProjectGroupCollapsed(key, next.get(key)?.collapsed === true);
+    }
+  }, []);
 
   const handleSwipeableWillOpen = useCallback((methods: SwipeableMethods) => {
     if (openSwipeableRef.current !== methods) {
@@ -323,11 +330,12 @@ export function HomeScreen(props: HomeScreenProps) {
   const projectScopes = useMemo(
     () =>
       buildHomeProjectScopes({
+        accountSections,
         projects: props.projects,
         environmentId: props.selectedEnvironmentId,
         projectGroupingMode: props.projectGroupingMode,
       }),
-    [props.projectGroupingMode, props.projects, props.selectedEnvironmentId],
+    [accountSections, props.projectGroupingMode, props.projects, props.selectedEnvironmentId],
   );
   const selectedProjectScope = useMemo(
     () =>
@@ -389,6 +397,7 @@ export function HomeScreen(props: HomeScreenProps) {
   const projectGroups = useMemo(
     () =>
       buildHomeThreadGroups({
+        accountSections,
         includeStaveProjects: nestSagas,
         sagaIndex,
         projects: scopedProjects,
@@ -402,6 +411,7 @@ export function HomeScreen(props: HomeScreenProps) {
         projectGroupingMode: props.projectGroupingMode,
       }),
     [
+      accountSections,
       nestSagas,
       sagaIndex,
       props.projectGroupingMode,
@@ -417,17 +427,27 @@ export function HomeScreen(props: HomeScreenProps) {
   );
 
   const hasSearchQuery = props.searchQuery.trim().length > 0;
+  const accountDisplayStates = useAccountSectionDisplayStates(effectiveGroupDisplayStates);
   const listLayout = useMemo(
     () =>
       threadListV2Enabled
         ? EMPTY_HOME_LIST_LAYOUT
         : buildHomeListLayout({
+            accountSections,
             groups: projectGroups,
-            displayStates: effectiveGroupDisplayStates,
+            displayStates: accountDisplayStates,
             showAllThreads: hasSearchQuery,
             sagaIndex,
           }),
-    [threadListV2Enabled, projectGroups, effectiveGroupDisplayStates, hasSearchQuery, sagaIndex],
+    [
+      accountSections,
+      threadListV2Enabled,
+      projectGroups,
+      effectiveGroupDisplayStates,
+      accountDisplayStates,
+      hasSearchQuery,
+      sagaIndex,
+    ],
   );
 
   const projectCwdByKey = useMemo(() => {
@@ -768,17 +788,33 @@ export function HomeScreen(props: HomeScreenProps) {
   const threadListV2Items = useMemo(
     () =>
       buildHomeHierarchyV2Items({
+        accountSections,
         groups: projectGroups,
         items: flatThreadListV2Items,
         sagaIndex,
-        displayStates: effectiveGroupDisplayStates,
+        displayStates: accountDisplayStates,
         searching: hasSearchQuery,
       }),
-    [projectGroups, flatThreadListV2Items, sagaIndex, effectiveGroupDisplayStates, hasSearchQuery],
+    [
+      accountSections,
+      projectGroups,
+      flatThreadListV2Items,
+      sagaIndex,
+      effectiveGroupDisplayStates,
+      accountDisplayStates,
+      hasSearchQuery,
+    ],
   );
 
   const renderV2Row = useCallback(
     ({ item }: { readonly item: HomeHierarchyV2Item; readonly index: number }) => {
+      if (item.type === "account-header")
+        return (
+          <AccountSectionHeader
+            item={item}
+            onToggle={() => updateGroupDisplay(item.key, "toggle-collapsed")}
+          />
+        );
       if (item.type === "header")
         return (
           <ThreadListGroupHeader
@@ -956,44 +992,36 @@ export function HomeScreen(props: HomeScreenProps) {
       nowMinute,
     ],
   );
+  const accountRowColors = useAccountRowColors(
+    threadListV2Enabled ? threadListV2Items : listLayout.items,
+  );
+  const visibleHierarchyItems = threadListV2Enabled ? threadListV2Items : listLayout.items;
+  const hierarchyGuides = useMemo(
+    () => buildSidebarHierarchy(visibleHierarchyItems),
+    [visibleHierarchyItems],
+  );
+  const sectionFrames = useMemo(
+    () => accountSectionFrames(visibleHierarchyItems),
+    [visibleHierarchyItems],
+  );
   const renderV2Item = useCallback(
     (props: { readonly item: HomeHierarchyV2Item; readonly index: number }) => (
-      <View
-        style={{ paddingLeft: props.item.type === "header" ? 0 : (props.item.depth ?? 0) * 18 }}
-      >
-        {props.item.type !== "header"
-          ? Array.from({ length: props.item.depth ?? 0 }, (_, level) => (
-              <View
-                key={level}
-                pointerEvents="none"
-                accessible={false}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  bottom: 0,
-                  left: level * 18 + 8,
-                  width:
-                    "settledBranch" in props.item &&
-                    props.item.type !== "v2-settled-shelf" &&
-                    props.item.settledBranch &&
-                    level === (props.item.depth ?? 0) - 1
-                      ? 2
-                      : 1,
-                  backgroundColor:
-                    "settledBranch" in props.item &&
-                    props.item.type !== "v2-settled-shelf" &&
-                    props.item.settledBranch &&
-                    level === (props.item.depth ?? 0) - 1
-                      ? "#ff866f"
-                      : "#b9893f",
-                }}
-              />
-            ))
-          : null}
-        {renderV2Row(props)}
-      </View>
+      <AccountSurfaceColorContext.Provider value={accountRowColors.get(props.item.key)}>
+        <HierarchyRow
+          depth={props.item.depth ?? 0}
+          settled={
+            "settledBranch" in props.item &&
+            props.item.type !== "v2-settled-shelf" &&
+            Boolean(props.item.settledBranch)
+          }
+          frame={sectionFrames.get(props.item.key)}
+          guides={hierarchyGuides.get(props.item.key)}
+        >
+          {renderV2Row(props)}
+        </HierarchyRow>
+      </AccountSurfaceColorContext.Provider>
     ),
-    [renderV2Row],
+    [renderV2Row, accountRowColors, hierarchyGuides, sectionFrames],
   );
   const v2KeyExtractor = useCallback((item: HomeHierarchyV2Item) => item.key, []);
 
@@ -1043,6 +1071,13 @@ export function HomeScreen(props: HomeScreenProps) {
   const renderRow = useCallback(
     ({ item }: LegendListRenderItemProps<HomeListItem>) => {
       switch (item.type) {
+        case "account-header":
+          return (
+            <AccountSectionHeader
+              item={item}
+              onToggle={() => updateGroupDisplay(item.key, "toggle-collapsed")}
+            />
+          );
         case "v2-settled-shelf":
           return (
             <ThreadListV2SettledShelfHeader
@@ -1173,42 +1208,22 @@ export function HomeScreen(props: HomeScreenProps) {
 
   const renderItem = useCallback(
     (props: LegendListRenderItemProps<HomeListItem>) => (
-      <View
-        style={{ paddingLeft: props.item.type === "header" ? 0 : (props.item.depth ?? 0) * 18 }}
-      >
-        {props.item.type !== "header"
-          ? Array.from({ length: props.item.depth ?? 0 }, (_, level) => (
-              <View
-                key={level}
-                pointerEvents="none"
-                accessible={false}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  bottom: 0,
-                  left: level * 18 + 8,
-                  width:
-                    "settledBranch" in props.item &&
-                    props.item.type !== "v2-settled-shelf" &&
-                    props.item.settledBranch &&
-                    level === (props.item.depth ?? 0) - 1
-                      ? 2
-                      : 1,
-                  backgroundColor:
-                    "settledBranch" in props.item &&
-                    props.item.type !== "v2-settled-shelf" &&
-                    props.item.settledBranch &&
-                    level === (props.item.depth ?? 0) - 1
-                      ? "#ff866f"
-                      : "#b9893f",
-                }}
-              />
-            ))
-          : null}
-        {renderRow(props)}
-      </View>
+      <AccountSurfaceColorContext.Provider value={accountRowColors.get(props.item.key)}>
+        <HierarchyRow
+          depth={props.item.depth ?? 0}
+          settled={
+            "settledBranch" in props.item &&
+            props.item.type !== "v2-settled-shelf" &&
+            Boolean(props.item.settledBranch)
+          }
+          frame={sectionFrames.get(props.item.key)}
+          guides={hierarchyGuides.get(props.item.key)}
+        >
+          {renderRow(props)}
+        </HierarchyRow>
+      </AccountSurfaceColorContext.Provider>
     ),
-    [renderRow],
+    [renderRow, accountRowColors, hierarchyGuides, sectionFrames],
   );
 
   const keyExtractor = useCallback((item: HomeListItem) => item.key, []);
@@ -1306,7 +1321,8 @@ export function HomeScreen(props: HomeScreenProps) {
       <View className="flex-1 bg-screen">
         <ArcaneBackdrop emphasis="sidebar" />
         <SwipeableScrollGateProvider enabled={swipeEnabled}>
-          <FlatList
+          <Animated.FlatList
+            itemLayoutAnimation={HIERARCHY_LAYOUT_TRANSITION}
             data={threadListV2Items}
             renderItem={renderV2Item}
             keyExtractor={v2KeyExtractor}
@@ -1358,7 +1374,8 @@ export function HomeScreen(props: HomeScreenProps) {
           collapse/expand data changes. The flattened layout still exposes
           `stickyHeaderIndices` if this gets revisited. */}
       <SwipeableScrollGateProvider enabled={swipeEnabled}>
-        <LegendList
+        <AnimatedLegendList
+          itemLayoutAnimation={HIERARCHY_LAYOUT_TRANSITION}
           viewabilityConfig={THREAD_ACTIVITY_VIEWABILITY_CONFIG}
           ref={listRef}
           data={listLayout.items}

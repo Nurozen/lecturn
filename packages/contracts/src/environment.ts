@@ -143,6 +143,7 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   desktopAppUpdate: Schema.optionalKey(Schema.Boolean),
   /** Server understands the thread.fork command. Absent on pre-fork servers,
       so clients hide the action instead of sending it. */
+  threadNotes: Schema.optionalKey(Schema.Boolean),
   threadForking: Schema.optionalKey(Schema.Boolean),
   /** This server build ships the Stave integration and speaks the given
       Stave CLI protocol version. A static build fact: whether a binary is

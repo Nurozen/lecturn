@@ -1,0 +1,121 @@
+--- a/ios/Widgets/WidgetLiveActivity.swift
++++ b/ios/Widgets/WidgetLiveActivity.swift
+@@ -7,14 +7,16 @@
+   // The deep link URL passed to start(). Stored in the static attributes so it is
+   // scoped to this activity and survives content updates, unlike ContentState.
+   var url: String?
++  var accountId: String?
+ 
+   public struct ContentState: Codable, Hashable {
+     var name: String
+     var props: String
+   }
+ 
+-  init(url: String? = nil) {
++  init(url: String? = nil, accountId: String? = nil) {
+     self.url = url
++    self.accountId = accountId
+   }
+ }
+ 
+--- a/ios/LiveActivityFactory.swift
++++ b/ios/LiveActivityFactory.swift
+@@ -21,9 +21,10 @@
+     }
+ 
+     do {
++      let accountId = (try? JSONSerialization.jsonObject(with: Data(props.utf8))) as? [String: Any]
+       let initialState = LiveActivityAttributes.ContentState(name: name, props: props)
+       let activity = try Activity.request(
+-        attributes: LiveActivityAttributes(url: url?.absoluteString),
++        attributes: LiveActivityAttributes(url: url?.absoluteString, accountId: accountId?["accountId"] as? String),
+         content: .init(state: initialState, staleDate: staleDate),
+         pushType: LiveActivityFactory.pushNotificationsEnabled ? .token : nil
+       )
+--- a/ios/LiveActivity.swift
++++ b/ios/LiveActivity.swift
+@@ -10,6 +10,11 @@
+     self.id = id
+     self.name = name
+     super.init()
++  }
++
++  func getAccountId() throws -> String? {
++    guard #available(iOS 16.1, *) else { return nil }
++    return Activity<LiveActivityAttributes>.activities.first(where: { $0.id == id })?.attributes.accountId
+   }
+ 
+   func update(props: String, staleDate: Date?) async throws {
+--- a/ios/WidgetsModule.swift
++++ b/ios/WidgetsModule.swift
+@@ -96,6 +96,10 @@
+     }
+ 
+     Class("LiveActivity", LiveActivity.self) {
++      Function("getAccountId") { (instance: LiveActivity) in
++        try instance.getAccountId()
++      }
++
+       Function("getId") { (instance: LiveActivity) in
+         instance.id
+       }
+--- a/src/Widgets.ts
++++ b/src/Widgets.ts
+@@ -81,6 +81,10 @@
+   /**
+    * Returns the stable ActivityKit identifier for this Live Activity.
+    */
++  getAccountId(): string | null {
++    return this.nativeLiveActivity.getAccountId?.() ?? null;
++  }
++
+   getId(): string {
+     return this.nativeLiveActivity.getId();
+   }
+--- a/build/Widgets.js
++++ b/build/Widgets.js
+@@ -50,6 +50,10 @@
+     /**
+      * Returns the stable ActivityKit identifier for this Live Activity.
+      */
++    getAccountId() {
++        return this.nativeLiveActivity.getAccountId?.() ?? null;
++    }
++
+     getId() {
+         return this.nativeLiveActivity.getId();
+     }
+--- a/src/Widgets.types.ts
++++ b/src/Widgets.types.ts
+@@ -295,6 +295,7 @@
+ }
+ 
+ export declare class NativeLiveActivity extends SharedObject<LiveActivityEvents> {
++  getAccountId(): string | null;
+   getId(): string;
+   update(props: string, staleDate?: number): Promise<void>;
+   end(
+--- a/build/Widgets.types.d.ts
++++ b/build/Widgets.types.d.ts
+@@ -265,7 +265,8 @@
+     getInstances(): NativeLiveActivity[];
+ }
+ export declare class NativeLiveActivity extends SharedObject<LiveActivityEvents> {
+-    getId(): string;
++    getAccountId(): string | null;
++  getId(): string;
+     update(props: string, staleDate?: number): Promise<void>;
+     end(dismissalPolicy?: string, afterDate?: number, state?: string, contentDate?: number): Promise<void>;
+     getPushToken(): Promise<string | null>;
+--- a/build/Widgets.d.ts
++++ b/build/Widgets.d.ts
+@@ -36,7 +36,8 @@
+     /**
+      * Returns the stable ActivityKit identifier for this Live Activity.
+      */
+-    getId(): string;
++    getAccountId(): string | null;
++  getId(): string;
+     /**
+      * Updates the Live Activity's content. The UI reflects the new properties immediately.
+      * @param props The updated content properties.

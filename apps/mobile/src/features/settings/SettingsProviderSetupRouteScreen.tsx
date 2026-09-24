@@ -1,3 +1,4 @@
+import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import type { AtomCommandResult } from "@lecturn/client-runtime/state/runtime";
@@ -81,7 +82,8 @@ export function SettingsProviderSetupRouteScreen({
     !isProviderInstanceId(route.params?.instanceId)
   ) {
     return (
-      <View className="flex-1 bg-background p-5">
+      <View className="flex-1 bg-sheet p-5">
+        <ArcaneBackdrop emphasis="sidebar" />
         <Text className="text-base text-foreground">This provider link is not valid.</Text>
       </View>
     );
@@ -209,7 +211,8 @@ function ProviderSetupScreen({ environmentId, instanceId }: ProviderSetupRoutePa
 
   const title = provider?.displayName ?? "Antigravity";
   return (
-    <View className="flex-1 bg-background">
+    <View className="flex-1 bg-sheet">
+      <ArcaneBackdrop emphasis="sidebar" />
       <NativeStackScreenOptions
         options={{
           title,

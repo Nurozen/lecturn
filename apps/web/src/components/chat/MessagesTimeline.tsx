@@ -1,3 +1,7 @@
+import "./message-glass.css";
+import "./timeline-reveal.css";
+import { fadeOutTimeline, revealTimeline } from "./timelineExit";
+
 import {
   type AssistantCitation,
   type EnvironmentId,
@@ -113,7 +117,22 @@ import { shouldAutoExpandChangedFiles } from "./changedFilesPresentation";
 import { CHAT_TIMELINE_ANCHOR_OFFSET } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { PierreEntryIcon } from "./PierreEntryIcon";
-import { AssistantSelectionToolbar } from "./AssistantSelectionToolbar";
+import {
+  AssistantSelectionToolbar,
+  ThreadNoteSelectionEditor,
+  type ThreadNoteSelection,
+} from "./AssistantSelectionToolbar";
+import {
+  useThreadNotes,
+  useThreadNoteUI,
+  threadNoteScopeKey,
+  setActiveThreadNote,
+} from "~/state/threadNotes";
+import {
+  getThreadNoteHighlightRegistry,
+  type ThreadNoteHighlightSelector,
+} from "~/lib/threadNoteHighlights";
+import { useRightPanelStore } from "~/rightPanelStore";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 import {
   AssistantCitationSource,
@@ -187,6 +206,10 @@ import {
 
 interface TimelineRowSharedState {
   citationRequest: AssistantCitationTarget | null;
+  noteHighlights: ReadonlyMap<string, readonly ThreadNoteHighlightSelector[]>;
+  notesViewport: HTMLElement | null;
+  expandedUserMessages: ReadonlySet<MessageId>;
+  onToggleUserMessage: (messageId: MessageId) => void;
   listRef: React.RefObject<LegendListRef | null>;
   timestampFormat: TimestampFormat;
   routeThreadKey: string;
@@ -416,6 +439,162 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const citationThreadRef = useMemo(() => parseScopedThreadKey(routeThreadKey), [routeThreadKey]);
+  const threadNotes = useThreadNotes(citationThreadRef);
+  const showNoteHighlights = useThreadNoteUI((state) => state.highlights);
+  const activeNote = useThreadNoteUI((state) => state.active);
+  const [noteSelection, setNoteSelection] = useState<ThreadNoteSelection | null>(null);
+  const cancelNoteSelection = useCallback(() => setNoteSelection(null), []);
+  const beginNoteSelection = useCallback(
+    (selection: ThreadNoteSelection) => setNoteSelection(selection),
+    [],
+  );
+  const [expandedUserMessages, setExpandedUserMessages] = useState<ReadonlySet<MessageId>>(
+    new Set(),
+  );
+  const expandUserMessage = useCallback((messageId: MessageId) => {
+    setExpandedUserMessages((current) =>
+      current.has(messageId) ? current : new Set([...current, messageId]),
+    );
+  }, []);
+  const toggleUserMessage = useCallback((messageId: MessageId) => {
+    setExpandedUserMessages((current) => {
+      const next = new Set(current);
+      if (next.has(messageId)) next.delete(messageId);
+      else next.add(messageId);
+      return next;
+    });
+  }, []);
+  const [noteIndex, setNoteIndex] = useState<{
+    input: typeof threadNotes.notes | null;
+    enabled: boolean;
+    threadKey: string;
+    value: ReadonlyMap<string, readonly ThreadNoteHighlightSelector[]>;
+  }>({ input: null, enabled: false, threadKey: routeThreadKey, value: new Map() });
+  const notesEnabled = threadNotes.available && showNoteHighlights;
+  let noteHighlights = noteIndex.value;
+  if (
+    noteIndex.input !== threadNotes.notes ||
+    noteIndex.enabled !== notesEnabled ||
+    noteIndex.threadKey !== routeThreadKey
+  ) {
+    const grouped = new Map<string, ThreadNoteHighlightSelector[]>();
+    if (notesEnabled) {
+      for (const note of threadNotes.notes) {
+        if (
+          note.threadId !== citationThreadRef?.threadId ||
+          note.anchorState === "message-missing" ||
+          note.anchorState === "thread-deleted"
+        )
+          continue;
+        const list = grouped.get(note.messageId) ?? [];
+        list.push({
+          id: note.id,
+          text: note.text,
+          start: note.start,
+          end: note.end,
+          prefix: note.prefix,
+          suffix: note.suffix,
+        });
+        grouped.set(note.messageId, list);
+      }
+    }
+    const next = new Map<string, readonly ThreadNoteHighlightSelector[]>();
+    for (const [id, selectors] of grouped) {
+      const previous = noteIndex.value.get(id);
+      next.set(
+        id,
+        previous && JSON.stringify(previous) === JSON.stringify(selectors) ? previous : selectors,
+      );
+    }
+    noteHighlights = next;
+    setNoteIndex({
+      input: threadNotes.notes,
+      enabled: notesEnabled,
+      threadKey: routeThreadKey,
+      value: next,
+    });
+  }
+  const lastNoteCitationRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!citationThreadRef || !threadNotes.available) return;
+    const key = citationRequest?.key ?? null;
+    if (lastNoteCitationRef.current === key) return;
+    if (!citationRequest) {
+      lastNoteCitationRef.current = null;
+      setActiveThreadNote(citationThreadRef, null);
+      return;
+    }
+    const anchor = citationRequest.citation;
+    const note = threadNotes.notes.find(
+      (item) =>
+        item.threadId === anchor.threadId &&
+        item.messageId === anchor.messageId &&
+        item.start === anchor.start &&
+        item.end === anchor.end &&
+        item.text === anchor.text,
+    );
+    if (!note) return;
+    lastNoteCitationRef.current = key;
+    setActiveThreadNote(citationThreadRef, note.id);
+  }, [citationRequest, citationThreadRef, threadNotes.available, threadNotes.notes]);
+  useEffect(() => {
+    const registry = getThreadNoteHighlightRegistry();
+    registry.setEnabled(notesEnabled);
+    registry.setActive(
+      showNoteHighlights &&
+        citationThreadRef &&
+        activeNote?.key === threadNoteScopeKey(citationThreadRef)
+        ? activeNote.id
+        : null,
+    );
+  }, [activeNote, citationThreadRef, showNoteHighlights, notesEnabled]);
+  useEffect(() => {
+    if (!citationThreadRef) return;
+    const clear = () => {
+      if (useThreadNoteUI.getState().active?.key === threadNoteScopeKey(citationThreadRef))
+        setActiveThreadNote(citationThreadRef, null);
+    };
+    const escape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") clear();
+    };
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("keydown", escape);
+      clear();
+    };
+  }, [citationThreadRef]);
+  const saveNoteSelection = (comment: string) => {
+    if (!noteSelection || !threadNotes.available) return;
+    const { citation, sourceAnchor, role } = noteSelection;
+    const id = threadNotes.newId();
+    const release = showNoteHighlights
+      ? getThreadNoteHighlightRegistry().hold(
+          sourceAnchor.viewport,
+          sourceAnchor.source,
+          id,
+          sourceAnchor.range,
+          citation,
+        )
+      : undefined;
+    // Ownership transfers to the mutation before closing the editor. Source
+    // virtualization or a thread switch cannot cancel an in-flight save.
+    setNoteSelection(null);
+    void threadNotes.createNote(
+      {
+        id,
+        threadId: citation.threadId,
+        messageId: citation.messageId,
+        messageRole: role,
+        text: citation.text,
+        start: citation.start,
+        end: citation.end,
+        prefix: citation.prefix,
+        suffix: citation.suffix,
+        comment: comment.trim() || null,
+      },
+      release,
+    );
+  };
   const expandCitedTurn = useCallback((turnId: TurnId) => {
     setExpandedTurnIds((current) =>
       current.has(turnId) ? current : new Set([...current, turnId]),
@@ -572,6 +751,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const [timelineViewportElement, setTimelineViewportElement] = useState<HTMLDivElement | null>(
     null,
   );
+  useLayoutEffect(() => {
+    if (!timelineViewportElement) return;
+    // Cleanup runs before React removes this keyed thread's DOM.
+    return () => fadeOutTimeline(timelineViewportElement);
+  }, [timelineViewportElement]);
   const {
     target: readyCitationRequest,
     positioning: citationPositioning,
@@ -586,8 +770,28 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     historyLoading: citationHistoryLoading,
     loadEarlier,
     onExpandTurn: expandCitedTurn,
+    expandedUserMessages,
+    onExpandUserMessage: expandUserMessage,
     onManualNavigation,
   });
+  // LegendList measures and restores its initial scroll while hidden. Reveal the
+  // whole timeline once, after that work, instead of flashing measured rows on.
+  const [initialLayoutReady, setInitialLayoutReady] = useState(false);
+  const [hasRevealed, setHasRevealed] = useState(false);
+  useEffect(() => {
+    if (hasRevealed || !initialLayoutReady || citationHistoryLoading) return;
+    // The load callback can precede the container's visibility commit. Give it
+    // a frame, and wait for cold-thread details rather than showing shell rows.
+    const frame = requestAnimationFrame(() => setHasRevealed(true));
+    return () => cancelAnimationFrame(frame);
+  }, [initialLayoutReady, citationHistoryLoading, hasRevealed]);
+  useLayoutEffect(() => {
+    if (hasRevealed && timelineViewportElement) revealTimeline(timelineViewportElement);
+  }, [hasRevealed, timelineViewportElement]);
+  const handleInitialListLoad = useCallback(() => {
+    onCitationListLoad();
+    setInitialLayoutReady(true);
+  }, [onCitationListLoad]);
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
   const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0);
   const handleAnchorReady = useCallback(
@@ -675,6 +879,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
       citationRequest: readyCitationRequest,
+      noteHighlights,
+      notesViewport: timelineViewportElement,
+      expandedUserMessages,
+      onToggleUserMessage: toggleUserMessage,
       listRef,
       timestampFormat,
       routeThreadKey,
@@ -703,6 +911,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     }),
     [
       readyCitationRequest,
+      noteHighlights,
+      timelineViewportElement,
+      expandedUserMessages,
+      toggleUserMessage,
       listRef,
       timestampFormat,
       routeThreadKey,
@@ -767,14 +979,38 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       <TimelineRowActivityCtx value={activityState}>
         <div
           ref={setTimelineViewportElement}
-          className="relative h-full min-h-0"
+          className="lecturn-timeline-reveal relative h-full min-h-0"
+          data-timeline-ready={hasRevealed || undefined}
+          inert={!hasRevealed || undefined}
+          aria-hidden={!hasRevealed || undefined}
           data-assistant-citation-viewport="true"
+          onClick={(event) => {
+            if (
+              !threadNotes.available ||
+              !showNoteHighlights ||
+              !citationThreadRef ||
+              !timelineViewportElement
+            )
+              return;
+            const id = getThreadNoteHighlightRegistry().hitTest(timelineViewportElement, event);
+            if (!id) return;
+            setActiveThreadNote(citationThreadRef, id);
+            useRightPanelStore.getState().open(citationThreadRef, "notes");
+          }}
         >
-          {onCiteAssistantText && citationThreadRef ? (
+          {(onCiteAssistantText || threadNotes.available) && citationThreadRef ? (
             <AssistantSelectionToolbar
               viewport={timelineViewportElement}
               threadRef={citationThreadRef}
               onCite={onCiteAssistantText}
+              onSaveNote={threadNotes.available ? beginNoteSelection : undefined}
+            />
+          ) : null}
+          {noteSelection && threadNotes.available ? (
+            <ThreadNoteSelectionEditor
+              selection={noteSelection}
+              onSave={saveNoteSelection}
+              onCancel={cancelNoteSelection}
             />
           ) : null}
           <LegendList<MessagesTimelineRow>
@@ -789,7 +1025,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             // Legend needs a data refresh to mount new pins without a scroll event.
             {...(readyCitationRequest ? { dataVersion: readyCitationRequest.key } : {})}
             {...(citationAlwaysRender ? { alwaysRender: citationAlwaysRender } : {})}
-            onLoad={onCitationListLoad}
+            onLoad={handleInitialListLoad}
             {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
             contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
             maintainScrollAtEnd={
@@ -1289,7 +1525,10 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
+      <div
+        data-chat-user-message-bubble="true"
+        className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground"
+      >
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
             {regularImages.map((image) => (
@@ -1430,6 +1669,11 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           </div>
         ) : null}
         <CollapsibleUserMessageBody
+          messageId={row.message.id}
+          itemKey={row.id}
+          context={ctx}
+          expanded={ctx.expandedUserMessages.has(row.message.id)}
+          onToggle={() => ctx.onToggleUserMessage(row.message.id)}
           text={elementContextState.promptText}
           terminalContexts={terminalContexts}
           skills={ctx.skills}
@@ -1565,6 +1809,8 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           itemKey={row.id}
           request={ctx.citationRequest}
           listRef={ctx.listRef}
+          notes={ctx.noteHighlights.get(row.message.id)}
+          viewport={ctx.notesViewport}
         >
           <ChatMarkdown
             text={messageText}
@@ -2371,13 +2617,18 @@ function shouldCollapseUserMessage(text: string): boolean {
 }
 
 const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(props: {
+  messageId: MessageId;
+  itemKey: string;
+  context: TimelineRowSharedState;
+  expanded: boolean;
+  onToggle: () => void;
   text: string;
   terminalContexts: ParsedTerminalContextEntry[];
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   markdownCwd: string | undefined;
   footer?: ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const { expanded } = props;
   const hasVisibleBody = props.text.trim().length > 0 || props.terminalContexts.length > 0;
   const canCollapse = hasVisibleBody && shouldCollapseUserMessage(props.text);
   const isCollapsed = canCollapse && !expanded;
@@ -2400,12 +2651,23 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
               : undefined
           }
         >
-          <UserMessageBody
-            text={props.text}
-            terminalContexts={props.terminalContexts}
-            skills={props.skills}
-            markdownCwd={props.markdownCwd}
-          />
+          <AssistantCitationSource
+            messageId={props.messageId}
+            {...(props.context.threadRef ? { threadRef: props.context.threadRef } : {})}
+            itemKey={props.itemKey}
+            request={props.context.citationRequest}
+            listRef={props.context.listRef}
+            role="user"
+            notes={props.context.noteHighlights.get(props.messageId)}
+            viewport={props.context.notesViewport}
+          >
+            <UserMessageBody
+              text={props.text}
+              terminalContexts={props.terminalContexts}
+              skills={props.skills}
+              markdownCwd={props.markdownCwd}
+            />
+          </AssistantCitationSource>
         </div>
       ) : null}
       {canCollapse || props.footer ? (
@@ -2423,7 +2685,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
               variant="ghost"
               aria-expanded={expanded}
               data-scroll-anchor-ignore
-              onClick={() => setExpanded((value) => !value)}
+              onClick={props.onToggle}
               className="-ml-1 h-6 rounded-md px-1.5 text-secondary-label text-xs hover:bg-muted/55 hover:text-message-foreground"
             >
               {expanded ? "Show less" : "Show full message"}

@@ -48,3 +48,5 @@ export * from "./pullRequestWatch.ts";
 
 export { RelayPullRequestActivity } from "./relay.ts";
 export * from "./relayTeams.ts";
+
+export * from "./threadNotes.ts";

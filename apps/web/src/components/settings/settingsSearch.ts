@@ -8,6 +8,7 @@ export type SettingsPath =
   | "/settings/providers"
   | "/settings/integrations"
   | "/settings/source-control"
+  | "/settings/relay"
   | "/settings/connections"
   | "/settings/archived";
 
@@ -26,6 +27,9 @@ export interface SettingsSearchItem {
   // not expose a result that points to a missing anchor.
   readonly windowsOnly?: boolean;
   readonly cloudOnly?: boolean;
+  // Its action lives in the Connect account menu, which only exists in a
+  // multi-account build with at least one known account.
+  readonly connectAccountMenuOnly?: boolean;
   readonly primaryOnly?: boolean;
   readonly providerSettingsOnly?: boolean;
   readonly localBackendManagementOnly?: boolean;
@@ -46,6 +50,7 @@ export interface SettingsSearchAvailability {
   readonly isWslSettingsRowVisible: boolean;
   readonly hasThreadAutoSettlement: boolean;
   readonly hasStave: boolean;
+  readonly hasConnectAccountMenu?: boolean;
   readonly hasStaveLifecycle?: boolean;
   readonly hasStaveGrace?: boolean;
   readonly hasStaveDestroy?: boolean;
@@ -63,6 +68,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/integrations": "Integrations",
   "/settings/source-control": "Source Control",
   "/settings/connections": "Connections",
+  "/settings/relay": "Relay",
   "/settings/archived": "Archive",
 };
 
@@ -72,6 +78,14 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
  * that may not be mounted point at their nearest stable section instead.
  */
 export const SETTINGS_SEARCH_ITEMS = [
+  {
+    id: "relay-health",
+    title: "Relay health and account",
+    to: "/settings/relay",
+    targetId: "relay-health",
+    searchTerms: ["connect tunnel status online offline publishing account unlink health"],
+    cloudOnly: true,
+  },
   {
     id: "color-scheme",
     title: "Color scheme",
@@ -566,19 +580,37 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "lecturn-connect",
     title: "Lecturn Connect",
-    to: "/settings/connections",
-    targetId: "connections-environment",
+    to: "/settings/relay",
+    targetId: "relay-publishing",
     searchTerms: ["managed tunnel cloud other devices remote"],
-    desktopOnly: true,
     cloudOnly: true,
   },
   {
     id: "publish-agent-activity",
     title: "Publish agent activity",
-    to: "/settings/connections",
-    targetId: "connections-environment",
+    to: "/settings/relay",
+    targetId: "relay-publishing",
     searchTerms: ["mobile push notifications live activities cloud tunnel"],
     cloudOnly: true,
+  },
+  {
+    id: "connect-add-account",
+    title: "Add a Lecturn Connect account",
+    to: "/settings/connections",
+    // The account menu in the sidebar footer opens on this hash.
+    targetId: "connect-accounts",
+    searchTerms: ["multiple accounts second sign in another work personal switch"],
+    cloudOnly: true,
+    connectAccountMenuOnly: true,
+  },
+  {
+    id: "connect-sign-out-account",
+    title: "Sign out of a Lecturn Connect account",
+    to: "/settings/connections",
+    targetId: "connect-accounts",
+    searchTerms: ["sign out one account all accounts log out remove sign in again"],
+    cloudOnly: true,
+    connectAccountMenuOnly: true,
   },
   {
     id: "connections-environment",
@@ -626,6 +658,7 @@ export function filterAvailableSettingsSearchItems(
   return items.filter(
     (item) =>
       (!item.cloudOnly || availability.hasCloudPublicConfig) &&
+      (!item.connectAccountMenuOnly || availability.hasConnectAccountMenu === true) &&
       (!item.primaryOnly || availability.hasPrimaryEnvironment) &&
       (!item.providerSettingsOnly || availability.hasProviderSettingsEnvironment) &&
       (!item.localBackendManagementOnly || availability.canManageLocalBackend) &&

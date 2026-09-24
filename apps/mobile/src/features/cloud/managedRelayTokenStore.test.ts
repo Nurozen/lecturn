@@ -46,6 +46,30 @@ it.effect("round-trips and clears persisted managed relay access tokens", () =>
   }),
 );
 
+it.effect("keeps the surviving account's tokens when another account's are dropped", () =>
+  Effect.gen(function* () {
+    secureStore.clear();
+    vi.mocked(SecureStore.deleteItemAsync).mockClear();
+    const entryFor = (accountId: string) =>
+      ({
+        accountId,
+        clientId: "lecturn-mobile",
+        relayUrl: "https://relay.example.test",
+        thumbprint: "thumbprint",
+        scopes: ["environment:connect"],
+        accessToken: `access-token:${accountId}`,
+        expiresAtMillis: 1_800_000,
+      }) as const;
+
+    yield* managedRelayAccessTokenStore.save([entryFor("account-a"), entryFor("account-b")]);
+    // A scoped reset writes the survivors back instead of clearing the whole entry.
+    yield* managedRelayAccessTokenStore.save([entryFor("account-a")]);
+
+    expect(yield* managedRelayAccessTokenStore.load).toEqual([entryFor("account-a")]);
+    expect(SecureStore.deleteItemAsync).not.toHaveBeenCalled();
+  }),
+);
+
 it.effect("falls back to an empty cache when persisted data is invalid", () =>
   Effect.gen(function* () {
     secureStore.clear();

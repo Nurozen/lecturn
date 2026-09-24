@@ -148,6 +148,7 @@ import {
   reduceCommandPaletteUiState,
   type SearchOverlayMode,
 } from "./CommandPalette.logic";
+import { useConnectAccountPaletteItems } from "./clerk/useConnectAccountPaletteItems";
 import { orderItemsByPreferredIds, sortLogicalProjectsForSidebar } from "./Sidebar.logic";
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { CommandPaletteContent } from "./CommandPaletteContent";
@@ -1667,6 +1668,7 @@ function OpenCommandPaletteDialog(props: {
     openImportSessionView(openIntent.projectRef);
   }, [clearOpenIntent, openImportSessionView, openIntent]);
 
+  const connectAccountItems = useConnectAccountPaletteItems();
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
   if (projects.length > 0) {
@@ -1912,6 +1914,8 @@ function OpenCommandPaletteDialog(props: {
       },
     });
   }
+
+  actionItems.push(...connectAccountItems);
 
   const rootGroups = buildRootGroups({ actionItems, recentThreadItems });
   const settingsSearchItems: CommandPaletteActionItem[] = searchSettings(

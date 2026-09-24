@@ -26,6 +26,8 @@ squashfs-root/
 .vercel
 .gstack/
 .plans/
+# Session-local working docs (specs, plans, research). Durable facts go in docs/, decisions in docs/adr/.
+artifacts/
 dist-electron/
 .electron-runtime/
 .showcase/

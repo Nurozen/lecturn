@@ -43,8 +43,13 @@ export type RelayAgentAwarenessPreferences = typeof RelayAgentAwarenessPreferenc
 export const RelayApnsEnvironment = Schema.Literals(["sandbox", "production"]);
 export type RelayApnsEnvironment = typeof RelayApnsEnvironment.Type;
 
+const RelayDeviceAccountIds = Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(5));
+
 export const RelayDeviceRegistrationRequest = Schema.Struct({
   deviceId: TrimmedNonEmptyString,
+  deviceAccountIds: Schema.optional(RelayDeviceAccountIds),
+  accountLabel: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(80))),
+  accountColor: Schema.optional(Schema.String.check(Schema.isPattern(/^#[0-9a-fA-F]{6}$/))),
   label: TrimmedNonEmptyString,
   platform: RelayAgentAwarenessPlatform,
   iosMajorVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(18)),
@@ -87,6 +92,7 @@ export const RelayListDevicesResponse = Schema.Struct({
 export type RelayListDevicesResponse = typeof RelayListDevicesResponse.Type;
 
 export const RelayLiveActivityRegistrationRequest = Schema.Struct({
+  deviceAccountIds: Schema.optional(RelayDeviceAccountIds),
   deviceId: TrimmedNonEmptyString,
   activityPushToken: TrimmedNonEmptyString,
 });
@@ -150,6 +156,10 @@ export const RelayAgentActivityAggregateRow = Schema.Struct({
 export type RelayAgentActivityAggregateRow = typeof RelayAgentActivityAggregateRow.Type;
 
 export const RelayAgentActivityAggregateState = Schema.Struct({
+  accountId: Schema.optional(TrimmedNonEmptyString),
+  accountLabel: Schema.optional(TrimmedNonEmptyString),
+  accountColor: Schema.optional(Schema.String),
+  iosMajorVersion: Schema.optional(Schema.Int),
   title: TrimmedNonEmptyString,
   subtitle: TrimmedNonEmptyString,
   activeCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -233,6 +243,10 @@ export const RelayAgentActivityPublishRequest = Schema.Struct({
   }),
   proof: TrimmedNonEmptyString.annotate({
     description: "Environment-signed JWT covering this published activity state.",
+  }),
+  userPresent: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "True while the user is focused on and actively using a client of this environment. The relay updates state silently instead of ringing devices.",
   }),
 }).annotate({ description: "Publishes a signed agent-awareness update from an environment." });
 export type RelayAgentActivityPublishRequest = typeof RelayAgentActivityPublishRequest.Type;
@@ -774,6 +788,7 @@ export const RelayAuthorizationServerMetadata = Schema.Struct({
 });
 
 export const RelayProtectedResourceMetadata = Schema.Struct({
+  capabilities: Schema.optional(Schema.Struct({ multiAccountPush: Schema.Boolean })),
   resource: TrimmedNonEmptyString,
   authorization_servers: Schema.Array(TrimmedNonEmptyString),
   scopes_supported: Schema.Array(RelayDpopAccessTokenScope),

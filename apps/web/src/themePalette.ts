@@ -1864,6 +1864,26 @@ export function getThemeColorVariable(role: ThemeColorRole): string {
   return APP_THEME_VARIABLES[role];
 }
 
+let appliedThemeColors: ThemeColors | null = null;
+const appliedThemeListeners = new Set<() => void>();
+/** The resolved palette, including live editor previews and published-theme refreshes. */
+export const getAppliedThemeColors = () => appliedThemeColors;
+export function subscribeToAppliedThemeColors(listener: () => void): () => void {
+  appliedThemeListeners.add(listener);
+  return () => {
+    appliedThemeListeners.delete(listener);
+  };
+}
+function publishAppliedThemeColors(colors: ThemeColors): void {
+  if (
+    appliedThemeColors &&
+    THEME_COLOR_ROLES.every((role) => appliedThemeColors?.[role] === colors[role])
+  )
+    return;
+  appliedThemeColors = colors;
+  for (const listener of appliedThemeListeners) listener();
+}
+
 /** Marks the document as wearing an unsaved draft rather than a stored theme. */
 export const THEME_PREVIEW_ID = "__preview";
 
@@ -1886,6 +1906,16 @@ export function applyThemeColorPreview(colors: ThemeColors, appearance: ThemeApp
     // A half-typed hex keeps the last good value instead of blanking the role.
     if (isThemeColor(value)) root.style.setProperty(APP_THEME_VARIABLES[role], value);
   }
+  publishAppliedThemeColors(
+    Object.fromEntries(
+      THEME_COLOR_ROLES.map((role) => [
+        role,
+        isThemeColor(colors[role])
+          ? colors[role]
+          : (appliedThemeColors?.[role] ?? getStandardThemeColors(appearance)[role]),
+      ]),
+    ) as unknown as ThemeColors,
+  );
 }
 
 export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppearance): void {
@@ -1904,6 +1934,7 @@ export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppe
     for (const [role, value] of Object.entries(colors) as Array<[ThemeColorRole, string]>) {
       root.style.setProperty(APP_THEME_VARIABLES[role], value);
     }
+    publishAppliedThemeColors(colors);
     return;
   }
 
@@ -1911,6 +1942,9 @@ export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppe
   for (const variable of Object.values(APP_THEME_VARIABLES)) {
     root.style.removeProperty(variable);
   }
+  publishAppliedThemeColors(
+    getStandardThemeColors(appearance ?? (root.classList.contains("dark") ? "dark" : "light")),
+  );
 }
 
 export function resolveThemeAppearance(

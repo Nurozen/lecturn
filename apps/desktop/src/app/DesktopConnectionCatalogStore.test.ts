@@ -21,6 +21,7 @@ const textEncoder = new TextEncoder();
 const decodeConnectionCatalog = Schema.decodeEffect(
   Schema.fromJsonString(ConnectionCatalogDocument),
 );
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 function makeSafeStorageLayer(available: boolean, failDecrypt: Ref.Ref<boolean> | null = null) {
   return Layer.succeed(ElectronSafeStorage.ElectronSafeStorage, {
     isEncryptionAvailable: Effect.succeed(available),
@@ -105,6 +106,49 @@ describe("DesktopConnectionCatalogStore", () => {
 
         yield* store.clear;
         assert.deepStrictEqual(yield* store.get, Option.none());
+      }),
+    ),
+  );
+
+  it.effect("round-trips a relay target and token tagged with an accountId", () =>
+    withStore(
+      Effect.gen(function* () {
+        const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
+        const tagged = encodeJson({
+          schemaVersion: 1,
+          targets: [
+            {
+              _tag: "RelayConnectionTarget",
+              environmentId: "relay-environment",
+              label: "Relay",
+              accountId: "user_a",
+            },
+          ],
+          profiles: [],
+          credentials: [],
+          remoteDpopTokens: [
+            {
+              environmentId: "relay-environment",
+              label: "Relay",
+              endpoint: {
+                httpBaseUrl: "https://relay.example.com",
+                wsBaseUrl: "wss://relay.example.com",
+                providerKind: "cloudflare_tunnel",
+              },
+              accessToken: "dpop-token",
+              expiresAtEpochMs: 1_000_000,
+              dpopThumbprint: "thumbprint",
+              accountId: "user_a",
+            },
+          ],
+        });
+
+        assert.isTrue(yield* store.set(tagged));
+        const stored = yield* store.get;
+        assert.deepStrictEqual(stored, Option.some(tagged));
+        const catalog = yield* decodeConnectionCatalog(Option.getOrThrow(stored));
+        assert.deepInclude(catalog.targets[0], { accountId: "user_a" });
+        assert.equal(catalog.remoteDpopTokens[0]?.accountId, "user_a");
       }),
     ),
   );

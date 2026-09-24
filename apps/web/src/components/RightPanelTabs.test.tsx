@@ -4,11 +4,35 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   RightPanelTabs,
+  notesSurfaceAction,
   shouldOpenDefaultBrowserProfileFromMenuClick,
   surfaceShortcutActionForKey,
   surfaceShortcutTargetsTypingContext,
   tabMuteMenuItem,
 } from "./RightPanelTabs";
+
+describe("Notes surface capability", () => {
+  it("does not offer an action or claim N without server support and a thread callback", () => {
+    expect(notesSurfaceAction(undefined, () => undefined)).toBeNull();
+    expect(notesSurfaceAction(false, () => undefined)).toBeNull();
+    expect(notesSurfaceAction(true, undefined)).toBeNull();
+  });
+
+  it("opens notes with N only when available and outside modified or composing shortcuts", () => {
+    let opened = 0;
+    const action = notesSurfaceAction(true, () => {
+      opened += 1;
+    });
+    expect(action).not.toBeNull();
+    if (!action) return;
+    surfaceShortcutActionForKey([action], shortcutEvent("n"))?.onClick();
+    expect(opened).toBe(1);
+    expect(surfaceShortcutActionForKey([action], shortcutEvent("n", { metaKey: true }))).toBeNull();
+    expect(
+      surfaceShortcutActionForKey([action], shortcutEvent("n", { isComposing: true })),
+    ).toBeNull();
+  });
+});
 
 describe("browser profile submenu", () => {
   it("reserves touch clicks for opening the choices while mouse clicks use the default", () => {

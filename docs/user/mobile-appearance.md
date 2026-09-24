@@ -19,8 +19,9 @@ medium, and bold weights. Android retains DM Sans. The default mobile palette de
 neutral light text over midnight glass and stronger surface borders; the web and desktop palettes
 retain their existing typography and text colors. Other selected themes keep their own accent hues.
 
-Model, reasoning, and access details remain visible above the conversation composer; tap the strip
-to change settings. Pull requests with a managing agent keep their steering field visible. Files,
+Model, reasoning, and access details remain visible in an inset glass drawer below the conversation
+composer; tap the strip to change settings. The drawer keeps its outline when the editor gains or
+loses focus. Conversations fade in briefly once their messages are ready. Pull requests with a managing agent keep their steering field visible. Files,
 terminal, review, Git, approvals, and thread actions remain available through their existing controls.
 
 To change themes:
@@ -35,3 +36,16 @@ preview circle inside a card to change only that appearance.
 
 **System** follows the device appearance automatically. Theme, text, code, and terminal appearance
 preferences are stored on the device.
+
+## Account colors
+
+When multiple Connect accounts are available, a rounded glass rail wraps each account’s thread
+section. Project connectors and selected cards share that account’s color, while settled branches
+retain red. Compact account headings and animated chevrons keep the hierarchy easy to scan. With
+one account, or without signing in, the Lecturn theme uses soft gold accents.
+
+An account’s conversation, composer, and pull requests use its selected tint over your current
+theme. Direct connections and native navigation headers keep the base theme. Phone navigation
+keeps its native gestures; layouts that switch conversations in place can show a brief glass sweep
+when the account or project changes. Reduce Motion disables decorative transitions. Reduce
+Transparency and increased contrast take precedence over translucent surfaces.

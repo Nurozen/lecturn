@@ -13,7 +13,10 @@ import {
   Connectivity,
   Wakeups,
 } from "@lecturn/client-runtime/connection";
-import { managedRelayAccountChanges, managedRelaySessionAtom } from "@lecturn/client-runtime/relay";
+import {
+  managedRelayAccountChanges,
+  managedRelaySessionsAtom,
+} from "@lecturn/client-runtime/relay";
 import { AuthStandardClientScopes } from "@lecturn/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -25,6 +28,7 @@ import Constants from "expo-constants";
 import * as Network from "expo-network";
 import { AppState } from "react-native";
 
+import { knownConnectAccountsAtom } from "../features/cloud/knownAccounts";
 import { authClientMetadata } from "../lib/authClientMetadata";
 import * as Runtime from "../lib/runtime";
 import * as MobileStorage from "../persistence/mobile-storage";
@@ -106,9 +110,7 @@ const wakeupsLayer = Wakeups.layer({
         (subscription) => Effect.sync(() => subscription.remove()),
       ).pipe(Effect.asVoid),
     ),
-    managedRelayAccountChanges(appAtomRegistry).pipe(
-      Stream.map(() => "credentials-changed" as const),
-    ),
+    managedRelayAccountChanges(appAtomRegistry).pipe(Stream.map(Wakeups.accountCredentialsChanged)),
   ),
 });
 
@@ -118,9 +120,12 @@ const capabilitiesLayer = Layer.effectContext(
     return Context.make(
       CloudSession,
       CloudSession.of({
-        clerkToken: Effect.gen(function* () {
-          const session = appAtomRegistry.get(managedRelaySessionAtom);
-          if (session === null) {
+        accountIds: Effect.sync(() =>
+          appAtomRegistry.get(knownConnectAccountsAtom).map((account) => account.accountId),
+        ),
+        clerkToken: Effect.fnUntraced(function* (accountId: string) {
+          const session = appAtomRegistry.get(managedRelaySessionsAtom).get(accountId);
+          if (session === undefined) {
             return yield* new ConnectionBlockedError({
               reason: "authentication",
               detail: "Sign in to Lecturn Connect to connect this environment.",

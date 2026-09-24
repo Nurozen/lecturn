@@ -1,3 +1,7 @@
+import {
+  setDeviceRelayConflict,
+  setDeviceRelayPublicationActive,
+} from "./DeviceRelayReservation.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -739,4 +743,25 @@ describe("link proof provider kinds", () => {
     ]);
     expect(linkProofScopes(proofRequest("manual"))).toEqual(["agent_activity_notifications"]);
   });
+});
+
+it.effect("a losing installation cannot repoint or delete the winning relay", () => {
+  const { store } = makeMemorySecretStore([
+    [CLOUD_ENDPOINT_RUNTIME_CONFIG, "runtime-config"],
+    [RELAY_URL_SECRET, "https://relay.example.test"],
+    [CLOUD_CLI_DESIRED_LINK_SECRET, "managed"],
+    [RELAY_ENVIRONMENT_CREDENTIAL_SECRET, "credential"],
+  ]);
+  const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+  const applyConfigCalls: Array<unknown> = [];
+  setDeviceRelayPublicationActive(store, false);
+  setDeviceRelayConflict(store, "Other installation owns this device");
+  return Effect.gen(function* () {
+    expect(yield* syncManagedEndpointOrigin("http://127.0.0.1:3774")).toBe(false);
+    expect(yield* releaseManagedTunnelOnShutdown()).toBe(false);
+    const result = yield* Effect.result(reconcileDesiredCloudLink("http://127.0.0.1:3774"));
+    expect(result._tag).toBe("Failure");
+    expect(requests).toHaveLength(0);
+    expect(applyConfigCalls).toHaveLength(0);
+  }).pipe(provideReleaseHarness({ store, requests, applyConfigCalls }));
 });

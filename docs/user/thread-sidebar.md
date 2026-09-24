@@ -98,3 +98,9 @@ in Settings → Stave. See [Stave spaces](./stave.md#automatic-cleanup) for poli
 Settled conversations retain a read-only model, reasoning/options, and access-mode strip beneath Unsettle. Context usage remains visible when available.
 
 Stave spaces and sagas carry a staff icon in their parent heading. Nested conversation rows avoid repeating the workspace type; repository details remain available in the workspace controls and tooltips.
+
+## Connect account sections
+
+When multiple Connect accounts are available, each account has its own section. Projects from different accounts stay separate even when they use the same repository. Collapse a section to hide its conversations; its approval, input, and plan attention summary remains visible. Direct connections appear after the account sections.
+
+Use the account menu’s **Label and color** action to distinguish personal and work accounts. Labels and color choices follow the account across devices. The conversation and composer use that account’s tint; the sidebar keeps your chosen base theme.

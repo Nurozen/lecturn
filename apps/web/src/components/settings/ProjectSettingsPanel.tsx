@@ -1,3 +1,6 @@
+import { AccountSurface } from "../AccountSurface";
+import { accountByEnvironmentIdAtom } from "../../cloud/connectAccounts";
+import "./project-settings-glass.css";
 import { StaveLifecycleNotice } from "../stave/StaveLifecycleNotice";
 import { prepareStaveProjectDeletion } from "../../lib/staveProjectDeletion";
 import { useAtomValue } from "@effect/atom-react";
@@ -25,6 +28,7 @@ import type {
   ThreadEnvMode,
 } from "@lecturn/contracts";
 import { resolveEnvModeLabel } from "../BranchToolbar.logic";
+import { snapshotsOfAccountScope, useProjectAccountScope } from "../sidebar/accountProjectGroups";
 import { createModelSelection } from "@lecturn/shared/model";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@lecturn/shared/keybindings";
 import { useCanGoBack, useNavigate } from "@tanstack/react-router";
@@ -137,8 +141,13 @@ export const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, st
   separate: "Keep separate",
 };
 
-/** Logical project groups for the settings page, sorted by display name. */
-export function useSettingsProjectGroups(): SidebarProjectSnapshot[] {
+/**
+ * Logical project groups for the settings page, sorted by display name. An
+ * account-scoped `projectKey`, as a segmented sidebar links with, narrows them
+ * to that account's projects.
+ */
+export function useSettingsProjectGroups(projectKey = ""): SidebarProjectSnapshot[] {
+  const accountScope = useProjectAccountScope(projectKey);
   const projects = useProjects();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -152,13 +161,16 @@ export function useSettingsProjectGroups(): SidebarProjectSnapshot[] {
   );
   return useMemo(
     () =>
-      buildSidebarProjectSnapshots({
+      snapshotsOfAccountScope(
+        accountScope,
+        buildSidebarProjectSnapshots,
+      )({
         projects,
         settings: projectGroupingSettings,
         primaryEnvironmentId,
         resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
       }).sort((a, b) => a.displayName.localeCompare(b.displayName)),
-    [environmentLabelById, primaryEnvironmentId, projectGroupingSettings, projects],
+    [accountScope, environmentLabelById, primaryEnvironmentId, projectGroupingSettings, projects],
   );
 }
 
@@ -167,6 +179,16 @@ function memberKey(member: { environmentId: string; id: string }): string {
 }
 
 export function ProjectSettingsPage({ projectKey }: { projectKey: string }) {
+  const groups = useSettingsProjectGroups(projectKey);
+  const owners = useAtomValue(accountByEnvironmentIdAtom);
+  const selected = groups.find((group) => group.projectKey === projectKey);
+  const selectedOwners = new Set(
+    selected?.memberProjects.map((member) => owners.get(member.environmentId)),
+  );
+  // A combined group can span accounts. It remains neutral until an operation
+  // targets a physical checkout; individual Stave editors carry that owner.
+  const environmentId = selectedOwners.size === 1 ? selected?.environmentId : undefined;
+
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
   const navigateBackWithinApp = useCallback(() => {
@@ -194,18 +216,22 @@ export function ProjectSettingsPage({ projectKey }: { projectKey: string }) {
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
+      <AccountSurface
+        environmentId={environmentId ?? null}
+        className="lecturn-settings-surface lecturn-project-settings flex min-h-0 min-w-0 flex-1 flex-col text-foreground"
+      >
         <WorkspacePageHeader electron={isElectron}>
           <ProjectSettingsBreadcrumb projectKey={projectKey} />
         </WorkspacePageHeader>
         <ProjectSettingsPanel projectKey={projectKey} />
-      </div>
+      </AccountSurface>
     </SidebarInset>
   );
 }
 
 function ProjectSettingsBreadcrumb({ projectKey }: { projectKey: string }) {
-  const groups = useSettingsProjectGroups();
+  const groups = useSettingsProjectGroups(projectKey);
+  const accountEmail = useProjectAccountScope(projectKey)?.email;
   const navigate = useNavigate();
   const selected = groups.find((group) => group.projectKey === projectKey) ?? null;
   const openProjectMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -243,7 +269,10 @@ function ProjectSettingsBreadcrumb({ projectKey }: { projectKey: string }) {
             onClick={openProjectMenu}
             className="group/project-title inline-flex min-w-0 max-w-64 cursor-pointer items-center gap-1 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <span className="min-w-0 truncate">{selected.displayName}</span>
+            <span className="min-w-0 truncate">
+              {selected.displayName}
+              {accountEmail ? ` · ${accountEmail}` : null}
+            </span>
             <ChevronDownIcon
               aria-hidden
               className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/project-title:opacity-100 group-focus-visible/project-title:opacity-100"
@@ -258,7 +287,7 @@ function ProjectSettingsBreadcrumb({ projectKey }: { projectKey: string }) {
 }
 
 export function ProjectSettingsPanel({ projectKey }: { projectKey: string }) {
-  const groups = useSettingsProjectGroups();
+  const groups = useSettingsProjectGroups(projectKey);
   const navigate = useNavigate();
 
   const selected = groups.find((group) => group.projectKey === projectKey) ?? null;

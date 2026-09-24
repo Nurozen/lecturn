@@ -6,7 +6,11 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as RelayDb from "../db.ts";
-import { relayLiveActivities, relayMobileDevices } from "../persistence/schema.ts";
+import {
+  relayPushTokenOwners,
+  relayLiveActivities,
+  relayMobileDevices,
+} from "../persistence/schema.ts";
 import * as Devices from "./Devices.ts";
 
 const registration: RelayDeviceRegistrationRequest = {
@@ -38,7 +42,9 @@ describe("Devices", () => {
     const dialect = new PgDialect();
 
     const fakeDb = {
+      $client: { withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect },
       update: (table: unknown) => {
+        if (table === relayLiveActivities) return { set: () => ({ where: () => Effect.void }) };
         expect(table).toBe(relayMobileDevices);
         calls.push("update");
         return {
@@ -57,6 +63,8 @@ describe("Devices", () => {
         };
       },
       insert: (table: unknown) => {
+        if (table === relayPushTokenOwners)
+          return { values: () => ({ onConflictDoUpdate: () => Effect.void }) };
         expect(table).toBe(relayMobileDevices);
         calls.push("insert");
         return {
@@ -125,6 +133,7 @@ describe("Devices", () => {
     const dialect = new PgDialect();
 
     const fakeDb = {
+      $client: { withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect },
       delete: (table: unknown) => {
         calls.push(table === relayLiveActivities ? "delete.liveActivities" : "delete.devices");
         return {
@@ -171,6 +180,7 @@ describe("Devices", () => {
     const dialect = new PgDialect();
     let condition: SQL | null = null;
     const fakeDb = {
+      $client: { withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect },
       select: () => ({
         from: (table: unknown) => {
           expect(table).toBe(relayMobileDevices);
@@ -231,6 +241,8 @@ describe("Devices", () => {
   it.effect("identifies the failed device registration stage", () => {
     const cause = new Error("push-token claim failed");
     const fakeDb = {
+      $client: { withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect },
+      insert: () => ({ values: () => ({ onConflictDoUpdate: () => Effect.void }) }),
       update: () => ({
         set: (values: Record<string, unknown>) => ({
           where: () => ("pushToken" in values ? Effect.fail(cause) : Effect.void),
@@ -259,6 +271,7 @@ describe("Devices", () => {
   it.effect("identifies the failed device unregistration stage", () => {
     const cause = new Error("live activity delete failed");
     const fakeDb = {
+      $client: { withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect },
       delete: (table: unknown) => ({
         where: () => (table === relayLiveActivities ? Effect.fail(cause) : Effect.void),
       }),
@@ -287,6 +300,7 @@ describe("Devices", () => {
   it.effect("attaches the user to device list failures", () => {
     const cause = new Error("device list failed");
     const fakeDb = {
+      $client: { withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect },
       select: () => ({
         from: () => ({
           where: () => Effect.fail(cause),

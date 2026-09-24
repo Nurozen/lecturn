@@ -1,3 +1,4 @@
+import { AccountTintScope } from "../../lib/AccountTintScope";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { buildModelOptions } from "../../lib/modelOptions";
 import {
@@ -295,6 +296,15 @@ const USER_INPUT_TOGGLE_TIMING = {
 };
 
 export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: ThreadDetailScreenProps) {
+  return (
+    <AccountTintScope environmentId={props.environmentId}>
+      <ThreadDetailScreenContent {...props} />
+    </AccountTintScope>
+  );
+});
+const ThreadDetailScreenContent = memo(function ThreadDetailScreenContent(
+  props: ThreadDetailScreenProps,
+) {
   const insets = useSafeAreaInsets();
   const settled = props.selectedThread.settledOverride === "settled";
   const { unsettleThread } = useThreadListActions();
@@ -791,7 +801,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
 
   return (
     <View className="flex-1">
-      <ArcaneBackdrop />
+      <ArcaneBackdrop transitionKey={`${props.environmentId}:${props.selectedThread.projectId}`} />
       {showContent ? (
         <View
           className="flex-1"

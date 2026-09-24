@@ -91,16 +91,43 @@ export function routeAgentNotificationResponseOnce(input: {
   readonly handledResponseIds: Set<string>;
   readonly response: unknown;
   readonly navigate: (deepLink: string) => void;
-}): void {
+  readonly accountContext?: {
+    readonly signedInAccountIds: ReadonlyArray<string>;
+    readonly accountByEnvironmentId: ReadonlyMap<string, string>;
+    readonly requestSignIn: (accountId: string) => void;
+    readonly expandAccount?: (accountId: string) => void;
+  };
+}): "handled" | "deferred" {
   const responseId = identifierFromNotificationResponse(input.response);
   if (responseId && input.handledResponseIds.has(responseId)) {
-    return;
-  }
-  if (responseId) {
-    input.handledResponseIds.add(responseId);
+    return "handled";
   }
   const deepLink = extractAgentNotificationDeepLink(input.response);
   if (deepLink) {
+    if (input.accountContext) {
+      const environmentId = decodeURIComponent(deepLink.split("/")[2]!);
+      const rawAccountId = dataFromNotificationResponse(input.response)?.accountId;
+      const owner = input.accountContext.accountByEnvironmentId.get(environmentId);
+      const accountId =
+        typeof rawAccountId === "string" && rawAccountId.length > 0 ? rawAccountId : owner;
+      // Explicit ownership always wins over whichever account happens to be active.
+      if (!accountId) return "deferred";
+      if (!input.accountContext.signedInAccountIds.includes(accountId)) {
+        input.accountContext.requestSignIn(accountId);
+        return "deferred";
+      }
+      if (!owner) return "deferred";
+      if (owner !== accountId) {
+        if (responseId) input.handledResponseIds.add(responseId);
+        return "handled";
+      }
+      input.accountContext.expandAccount?.(accountId);
+      input.navigate(`${deepLink}?accountId=${encodeURIComponent(accountId)}`);
+      if (responseId) input.handledResponseIds.add(responseId);
+      return "handled";
+    }
     input.navigate(deepLink);
   }
+  if (responseId) input.handledResponseIds.add(responseId);
+  return "handled";
 }

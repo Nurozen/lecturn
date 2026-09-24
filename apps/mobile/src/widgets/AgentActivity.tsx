@@ -47,6 +47,10 @@ export interface AgentActivityRowProps {
 }
 
 export interface AgentActivityProps {
+  readonly accountId?: string;
+  readonly accountLabel?: string;
+  readonly accountColor?: string;
+  readonly iosMajorVersion?: number;
   readonly title: string;
   readonly subtitle: string;
   readonly activeCount: number;
@@ -65,10 +69,28 @@ export function AgentActivity(
 
   // Keep these literals inside the serialized widget function. Match Lecturn's
   // dark app chrome even when macOS mirrors the activity in a light appearance.
+  const glass = (props.iosMajorVersion ?? 18) >= 26;
   const navy = "#061522";
-  const primaryForeground = "#dfc7a4";
-  const secondaryForeground = "#a5957f";
+  const primaryForeground = glass ? "primary" : "#dfc7a4";
+  const secondaryForeground = glass ? "secondary" : "#a5957f";
   const gold = "#e6bc63";
+  const accountColor = /^#[0-9a-f]{6}$/i.test(props.accountColor ?? "")
+    ? props.accountColor
+    : undefined;
+  // Tint the system-owned glass, leaving the brand and status colors stable.
+  const glassBackground = accountColor ? `${accountColor}40` : "#00000000";
+  const darkBackground = accountColor
+    ? `#${[1, 3, 5]
+        .map((offset) =>
+          Math.round(
+            parseInt(navy.slice(offset, offset + 2), 16) * 0.75 +
+              parseInt(accountColor.slice(offset, offset + 2), 16) * 0.25,
+          )
+            .toString(16)
+            .padStart(2, "0"),
+        )
+        .join("")}`
+    : navy;
   const subdued = environment.isLuminanceReduced === true;
   // The compact/minimal host chrome remains system-owned (including on Mac).
   const systemGold = environment.colorScheme === "light" ? "#996918" : gold;
@@ -163,7 +185,7 @@ export function AgentActivity(
   const deepLinkRow = attentionRow ?? row0;
   const deepLink =
     deepLinkRow && deepLinkRow.deepLink.startsWith("/") && !deepLinkRow.deepLink.startsWith("//")
-      ? `lecturn://${deepLinkRow.deepLink.slice(1)}`
+      ? `lecturn://${deepLinkRow.deepLink.slice(1)}${props.accountId ? `?accountId=${encodeURIComponent(props.accountId)}` : ""}`
       : null;
 
   // A scannable status glyph per phase — reads faster than colored words and
@@ -284,7 +306,7 @@ export function AgentActivity(
     );
     const destination =
       row.deepLink.startsWith("/pr-watches/") && !/[?#]/.test(row.deepLink)
-        ? `lecturn://${row.deepLink.slice(1)}`
+        ? `lecturn://${row.deepLink.slice(1)}${props.accountId ? `?accountId=${encodeURIComponent(props.accountId)}` : ""}`
         : null;
     return destination ? <Link destination={destination}>{content}</Link> : content;
   };
@@ -320,8 +342,17 @@ export function AgentActivity(
   );
   // The image has lower layout priority so the content decides the widget's
   // height. It is a bundled original-color asset, never a remote image fetch.
-  const brandedSurface = (content: ReactNode, radius = 20) => (
-    <ZStack modifiers={[background(navy), clipShape("roundedRectangle", radius)]}>
+  const brandedSurface = (content: ReactNode, radius = 20, expanded = false) => (
+    <ZStack
+      modifiers={[
+        ...(glass
+          ? expanded && accountColor
+            ? [background(glassBackground)]
+            : []
+          : [background(darkBackground)]),
+        clipShape("roundedRectangle", radius),
+      ]}
+    >
       <HStack modifiers={[layoutPriority(-1), opacity(subdued ? 0.16 : 0.6)]}>
         <Image assetName="LecturnNightSky" modifiers={[resizable()]} />
       </HStack>
@@ -336,7 +367,10 @@ export function AgentActivity(
       cornerRadius: 20,
       shape: "roundedRectangle",
     }),
-    activityBackgroundTint(navy),
+    // iOS owns the Live Activity glass surface. Applying glassEffect to its
+    // content makes the native iOS 26 widget render an empty card, even though
+    // the serialized layout contains all of its text and rows.
+    activityBackgroundTint(glass ? glassBackground : darkBackground),
   ];
 
   return {
@@ -360,7 +394,7 @@ export function AgentActivity(
                 lineLimit(1),
               ]}
             >
-              {agentsLabel}
+              {props.accountLabel ? `${props.accountLabel} · ${agentsLabel}` : agentsLabel}
             </Text>
             {attentionSuffix ? (
               <Text
@@ -455,7 +489,7 @@ export function AgentActivity(
         alignment="center"
         modifiers={[
           padding({ horizontal: 8, vertical: 4 }),
-          background(navy),
+          background(glass && accountColor ? glassBackground : darkBackground),
           clipShape("roundedRectangle", 10),
         ]}
       >
@@ -497,6 +531,7 @@ export function AgentActivity(
         {!hasPullRequests && row2 ? renderCompactRow(row2) : null}
       </VStack>,
       10,
+      true,
     ),
   };
 }

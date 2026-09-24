@@ -1,3 +1,6 @@
+import { accountByEnvironmentIdAtom } from "../cloud/connectAccounts";
+import { useRevealActiveThread } from "./sidebar/useRevealActiveThread";
+import { useSidebarAccountStyle } from "./sidebar/useSidebarAccountStyle";
 import {
   selectThreadPullRequestWatches,
   threadPullRequestLinks,
@@ -9,7 +12,6 @@ import { StaveIcon } from "./StaveIcon";
 import { projectSettledPage } from "./sidebarSettledGroups";
 import { StaveLifecycleBadge } from "./stave/StaveLifecycleBadge";
 import { describeStaveWorkspace } from "./stave/staveWorkspaceContext.logic";
-import { autoAnimate } from "@formkit/auto-animate";
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
 import {
@@ -215,7 +217,13 @@ import {
 import { useSagaSidebarTree } from "./stave/useSagaSidebarTree";
 import { sagaSidebarThreadOrder } from "./stave/staveSaga.logic";
 import { SidebarContent, SidebarGroup, SidebarMenuButton, useSidebar } from "./ui/sidebar";
+import { snapshotsPerAccount, useSidebarSegmentation } from "./sidebar/accountProjectGroups";
+import { SidebarSegments, useSegmentOwnsEnvironment } from "./sidebar/SidebarSegments";
+import { flattenSegmentsForNavigation, nameGroupsByAccount } from "./sidebar/sidebarSegments.logic";
+import { pinnedReorderKeysWithinSegment, useSidebarSegments } from "./sidebar/useSidebarSegments";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import { SidebarHierarchyPanel } from "./sidebar/SidebarHierarchyPanel";
+import { partitionShelfRows } from "./sidebar/sidebarShelfRows";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import {
@@ -683,6 +691,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
   const draftThreadsByThreadKey = useComposerDraftStore((store) => store.draftThreadsByThreadKey);
   const draftsByThreadKey = useComposerDraftStore((store) => store.draftsByThreadKey);
   const clearDraftThread = useComposerDraftStore((store) => store.clearDraftThread);
+  const ownsEnvironment = useSegmentOwnsEnvironment();
   // The open draft's row is FROZEN at the moment the draft became the route:
   // it stays visible (like a thread row) but never repaints while the user
   // types. A draft that was never navigated away from has no snapshot to
@@ -713,7 +722,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
     // new-thread surfaces mint fresh drafts and leave invested ones behind
     // unmapped, so the mapping only knows about the latest per project.
     for (const [draftKey, session] of Object.entries(draftThreadsByThreadKey)) {
-      if (session.promotedTo != null) {
+      if (session.promotedTo != null || !ownsEnvironment(session.environmentId)) {
         continue;
       }
       if (
@@ -743,6 +752,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
     draftThreadsByThreadKey,
     draftsByThreadKey,
     frozenActive,
+    ownsEnvironment,
     props.routeDraftId,
     props.scopedProjectKeys,
   ]);
@@ -879,8 +889,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     [thread.environmentId, thread.id],
   );
   const threadKey = scopedThreadKey(threadRef);
+  const threadAccountId = useAtomValue(accountByEnvironmentIdAtom).get(thread.environmentId);
+  const sidebarAccountStyle = useSidebarAccountStyle();
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(props.isActive);
   const [borderRow, setBorderRow] = useState<HTMLElement | null>(null);
+  useRevealActiveThread(borderRow, props.isActive);
   const [borderVisible, setBorderVisible] = useState(false);
   const attachRow = useCallback(
     (node: HTMLElement | null) => {
@@ -1350,7 +1363,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   ) : (
     <span
       className={cn(
-        "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
+        "lecturn-thread-title min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
         shouldRecede ? "font-normal" : "font-medium",
         variant === "card"
           ? cn(
@@ -1480,6 +1493,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     return (
       <li
         data-thread-item
+        style={sidebarAccountStyle([thread.environmentId])}
         className="list-none [content-visibility:auto] [contain-intrinsic-size:auto_34px]"
       >
         <Tooltip>
@@ -1490,6 +1504,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 role="button"
                 tabIndex={0}
                 data-lecturn-thread-surface
+                data-thread-project={`${thread.environmentId}:${thread.projectId}`}
+                data-thread-account={threadAccountId}
+                data-thread-active={props.isActive || undefined}
+                data-account-selected={props.isActive || isSelected || undefined}
                 data-testid="sidebar-row-slim"
                 aria-busy={isRegeneratingTitle || undefined}
                 className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
@@ -1632,14 +1650,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     <li
       data-thread-item
       ref={sortable?.setNodeRef}
-      style={
-        sortable
+      style={{
+        ...sidebarAccountStyle([thread.environmentId]),
+        ...(sortable
           ? {
               transform: CSS.Translate.toString(sortable.transform),
               transition: sortable.transition,
             }
-          : undefined
-      }
+          : {}),
+      }}
       {...(sortable?.listeners ?? {})}
       className={cn(
         "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_96px]",
@@ -1654,6 +1673,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               role="button"
               tabIndex={0}
               data-lecturn-thread-surface
+              data-thread-project={`${thread.environmentId}:${thread.projectId}`}
+              data-thread-account={threadAccountId}
+              data-thread-active={props.isActive || undefined}
+              data-account-selected={props.isActive || isSelected || undefined}
               data-testid="sidebar-row-card"
               aria-busy={isRegeneratingTitle || status === "working" || undefined}
               aria-label={status === "working" ? `${thread.title} · Working` : undefined}
@@ -2070,6 +2093,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 });
 
 export default function Sidebar() {
+  const sidebarAccountStyle = useSidebarAccountStyle();
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
@@ -2223,9 +2247,13 @@ export default function Sidebar() {
       }),
     [projectOrder, projects],
   );
+  const sidebarSegmentation = useSidebarSegmentation();
   const unsortedProjectGroups = useMemo(
     () =>
-      buildSidebarProjectSnapshots({
+      snapshotsPerAccount(
+        sidebarSegmentation,
+        buildSidebarProjectSnapshots,
+      )({
         projects: sidebarProjectSortOrder === "manual" ? orderedProjects : projects,
         settings: projectGroupingSettings,
         primaryEnvironmentId,
@@ -2238,6 +2266,7 @@ export default function Sidebar() {
       projectGroupingSettings,
       projects,
       sidebarProjectSortOrder,
+      sidebarSegmentation,
     ],
   );
   const projectGroups = useMemo(
@@ -2336,12 +2365,12 @@ export default function Sidebar() {
   const projectScopeItems = useMemo(
     () => [
       { value: "all", label: "All projects" },
-      ...projectGroups.map((project) => ({
+      ...nameGroupsByAccount(sidebarSegmentation, projectGroups).map((project) => ({
         value: project.projectKey,
         label: project.displayName,
       })),
     ],
-    [projectGroups],
+    [projectGroups, sidebarSegmentation],
   );
   const projectGroupByScopeKey = useMemo(
     () => new Map(projectGroups.map((project) => [project.projectKey, project] as const)),
@@ -2693,7 +2722,33 @@ export default function Sidebar() {
     () => [...settledByProject.values()].flatMap((page) => page.visible),
     [settledByProject],
   );
+  const sidebarSegments = useSidebarSegments({
+    segmentation: sidebarSegmentation,
+    projects,
+    pinnedThreads,
+    activeThreads,
+    snoozedThreads,
+    visibleSnoozedThreads,
+    settledThreads,
+    renderedSettledThreads,
+    nestedSettledThreads,
+    scopedSagaTree,
+    scopedProjectKeys,
+    nestSagaProjects,
+    collapsedProjectKeys,
+    settledVisibleCount,
+    settledPageCount: SETTLED_TAIL_PAGE_COUNT,
+    snoozedShelfExpanded,
+    settledShelfExpanded,
+    toggleSnoozedShelf,
+    toggleSettledShelf,
+    showMoreSettled,
+    routeThreadKey,
+  });
   const orderedThreads = useMemo(() => {
+    if (sidebarSegments.segments !== null) {
+      return flattenSegmentsForNavigation(sidebarSegments.segments);
+    }
     const rows = [
       ...pinnedThreads,
       ...activeThreads,
@@ -2711,6 +2766,7 @@ export default function Sidebar() {
     nestSagaProjects,
     scopedSagaTree,
     collapsedProjectKeys,
+    sidebarSegments.segments,
   ]);
   const orderedThreadKeys = useMemo(
     () =>
@@ -3160,7 +3216,7 @@ export default function Sidebar() {
         reorderable.map((thread, index) => [keys[index]!, thread.pinOrderKey ?? null]),
       );
       const assignments = planPinnedReorder({
-        orderedIds: newOrder,
+        orderedIds: pinnedReorderKeysWithinSegment(sidebarSegments.segments, newOrder, activeKey),
         keysById: keysAtDrop,
         movedId: activeKey,
       });
@@ -3204,7 +3260,7 @@ export default function Sidebar() {
         }
       })();
     },
-    [orderedPinnedThreads, reorderPinnedThread, reorderablePinnedKeys],
+    [orderedPinnedThreads, reorderPinnedThread, reorderablePinnedKeys, sidebarSegments.segments],
   );
   // One snooze per thread at a time — same double-dispatch guard as settle.
   const snoozingThreadKeysRef = useRef(new Set<string>());
@@ -3832,11 +3888,6 @@ export default function Sidebar() {
     updateThreadJumpHintsVisibility(shouldShowJumpHintsNow);
   }, [shouldShowJumpHintsNow, updateThreadJumpHintsVisibility]);
 
-  const attachListAutoAnimateRef = useCallback((node: HTMLUListElement | null) => {
-    if (!node) return;
-    autoAnimate(node, { duration: 150, easing: "ease-out" });
-  }, []);
-
   // New thread defaults to the project you're in (active thread's project,
   // falling back to the top project) — same resolution the command palette
   // uses. The command palette already offers a "New thread in..." submenu
@@ -4224,8 +4275,20 @@ export default function Sidebar() {
               closeDelay={0}
               timeout={400}
             >
-              <ul ref={attachListAutoAnimateRef} role="list" className="flex flex-col gap-px">
-                {(() => {
+              <SidebarSegments
+                view={sidebarSegments}
+                orderedThreads={orderedThreads}
+                orderedPinnedThreads={orderedPinnedThreads}
+                ref={null}
+                role="list"
+                className="flex flex-col gap-px"
+              >
+                {(segment) => {
+                  const { pinnedThreads, orderedPinnedThreads, activeThreads } = segment;
+                  const { snoozedThreads, settledThreads } = segment;
+                  const { scopedSagaTree } = segment;
+                  const { scopedProjectKeys, snoozedShelfExpanded, settledShelfExpanded } = segment;
+                  const { toggleSnoozedShelf, toggleSettledShelf } = segment;
                   const renderThreadRow = (
                     thread: EnvironmentThreadShell,
                     section: "pinned" | "active" | "snoozed" | "settled",
@@ -4347,6 +4410,38 @@ export default function Sidebar() {
                       />
                     );
                   };
+                  const renderShelfRows = (
+                    rows: readonly EnvironmentThreadShell[],
+                    section: "snoozed" | "settled",
+                    expanded: boolean,
+                  ) => {
+                    const partition = partitionShelfRows(
+                      rows,
+                      (thread) =>
+                        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) ===
+                        routeThreadKey,
+                    );
+                    const renderGroup = (group: readonly EnvironmentThreadShell[], key: string) =>
+                      group.length ? (
+                        <li
+                          key={`${section}:${key}`}
+                          className="list-none [&:has(>[data-slot=collapsible]:empty)]:hidden"
+                        >
+                          <SidebarHierarchyPanel open={expanded}>
+                            <ul className="flex flex-col gap-px">
+                              {group.map((thread) => renderThreadRow(thread, section))}
+                            </ul>
+                          </SidebarHierarchyPanel>
+                        </li>
+                      ) : null;
+                    // Keep the selected row in its original position and mounted while
+                    // the portions on either side fold away.
+                    return [
+                      renderGroup(partition.before, "before"),
+                      partition.current ? renderThreadRow(partition.current, section) : null,
+                      renderGroup(partition.after, "after"),
+                    ];
+                  };
                   if (nestSagaProjects) {
                     const sectionFor = (thread: EnvironmentThreadShell) =>
                       thread.pinnedAt != null
@@ -4369,17 +4464,36 @@ export default function Sidebar() {
                             ref.environmentId === thread.environmentId &&
                             ref.projectId === thread.projectId,
                         );
-                      const rows = orderedThreads.filter(
-                        (thread) => matches(thread) && !settledThreads.includes(thread),
+                      const rows = [
+                        ...orderedPinnedThreads,
+                        ...activeThreads,
+                        ...snoozedThreads,
+                      ].filter(matches);
+                      const settledExpanded =
+                        settledByProject.get(node.group.key)?.expanded ?? false;
+                      const settledPage = projectSettledPage(
+                        settledThreads.filter(matches),
+                        {
+                          expanded: true,
+                          limit:
+                            projectSettledShelves[node.group.key]?.limit ??
+                            SETTLED_TAIL_INITIAL_COUNT,
+                        },
+                        routeThreadKey,
+                        SETTLED_TAIL_INITIAL_COUNT,
                       );
-                      const settledPage = settledByProject.get(node.group.key);
-                      const settledExpanded = settledPage?.expanded ?? false;
                       return (
                         <li
                           key={node.group.key}
+                          style={sidebarAccountStyle(
+                            project.memberProjects.map((member) => member.environmentId),
+                          )}
                           className={nested ? "lecturn-hierarchy-branch list-none" : "list-none"}
                         >
-                          <div data-thread-selection-safe className="flex items-center gap-1 pt-2">
+                          <div
+                            data-thread-selection-safe
+                            className="lecturn-project-header flex items-center gap-1 pt-2"
+                          >
                             <button
                               type="button"
                               data-lecturn-hover
@@ -4388,7 +4502,12 @@ export default function Sidebar() {
                               aria-expanded={!closed}
                               onClick={() => toggleProject(node.group.key)}
                             >
-                              <ChevronDownIcon className={cn("size-3.5", closed && "-rotate-90")} />
+                              <ChevronDownIcon
+                                className={cn(
+                                  "lecturn-hierarchy-chevron size-3.5",
+                                  closed && "-rotate-90",
+                                )}
+                              />
                             </button>
                             <Tooltip>
                               <TooltipTrigger
@@ -4518,10 +4637,16 @@ export default function Sidebar() {
                               </TooltipPopup>
                             </Tooltip>
                           </div>
-                          {!closed ? (
+                          <SidebarHierarchyPanel open={!closed}>
                             <ul className="lecturn-hierarchy-children flex flex-col">
                               {rows.length > 0 ? (
-                                <li className="lecturn-hierarchy-conversations list-none">
+                                <li
+                                  className={cn(
+                                    "lecturn-hierarchy-conversations list-none",
+                                    rows.every((thread) => sectionFor(thread) === "snoozed") &&
+                                      "[&:not(:has([data-slot=collapsible-panel]))]:hidden",
+                                  )}
+                                >
                                   <ul className="flex flex-col">
                                     {rows.map((thread) => {
                                       const key = scopedThreadKey(
@@ -4532,6 +4657,17 @@ export default function Sidebar() {
                                         <SortablePinnedThreadRow key={key} id={key}>
                                           {(bag) => renderThreadRow(thread, "pinned", bag)}
                                         </SortablePinnedThreadRow>
+                                      ) : sectionFor(thread) === "snoozed" ? (
+                                        <li
+                                          key={key}
+                                          className="list-none [&:has(>[data-slot=collapsible]:empty)]:hidden"
+                                        >
+                                          <SidebarHierarchyPanel
+                                            open={snoozedShelfExpanded || key === routeThreadKey}
+                                          >
+                                            <ul>{renderThreadRow(thread, "snoozed")}</ul>
+                                          </SidebarHierarchyPanel>
+                                        </li>
                                       ) : (
                                         renderThreadRow(thread, sectionFor(thread))
                                       );
@@ -4560,13 +4696,16 @@ export default function Sidebar() {
                                   >
                                     <ChevronDownIcon
                                       aria-hidden
-                                      className={cn("size-3.5", !settledExpanded && "-rotate-90")}
+                                      className={cn(
+                                        "lecturn-hierarchy-chevron size-3.5",
+                                        !settledExpanded && "-rotate-90",
+                                      )}
                                     />
                                     <CircleCheckIcon aria-hidden className="size-3.5" />
                                     Settled{" "}
                                     <span className="tabular-nums">({settledPage.total})</span>
                                   </button>
-                                  {settledExpanded ? (
+                                  <SidebarHierarchyPanel open={settledExpanded}>
                                     <ul className="lecturn-hierarchy-children flex flex-col">
                                       <li className="lecturn-hierarchy-conversations list-none">
                                         <ul className="flex flex-col">
@@ -4600,12 +4739,12 @@ export default function Sidebar() {
                                         </li>
                                       ) : null}
                                     </ul>
-                                  ) : null}
+                                  </SidebarHierarchyPanel>
                                 </li>
                               ) : null}
                               {node.children.map((child) => renderNode(child, true))}
                             </ul>
-                          ) : null}
+                          </SidebarHierarchyPanel>
                         </li>
                       );
                     };
@@ -4623,7 +4762,7 @@ export default function Sidebar() {
                         />
                         <li
                           data-thread-selection-safe
-                          className="flex list-none items-center gap-2 px-2 py-2 text-xs text-muted-foreground"
+                          className="lecturn-projects-heading flex list-none items-center gap-2 px-2 py-2 text-xs text-muted-foreground"
                         >
                           <span className="mr-auto font-medium">Projects</span>
                           {snoozedThreads.length ? (
@@ -4632,7 +4771,15 @@ export default function Sidebar() {
                               data-lecturn-hover
                               aria-expanded={snoozedShelfExpanded}
                               onClick={toggleSnoozedShelf}
+                              className="flex items-center gap-1"
                             >
+                              <ChevronDownIcon
+                                aria-hidden
+                                className={cn(
+                                  "lecturn-hierarchy-chevron size-3",
+                                  !snoozedShelfExpanded && "-rotate-90",
+                                )}
+                              />
                               Snoozed ({snoozedThreads.length})
                             </button>
                           ) : null}
@@ -4759,16 +4906,14 @@ export default function Sidebar() {
                           <ChevronDownIcon
                             aria-hidden
                             className={cn(
-                              "size-3 text-blue-600 transition-transform dark:text-blue-400",
+                              "lecturn-hierarchy-chevron size-3 text-blue-600 dark:text-blue-400",
                               snoozedShelfExpanded && "rotate-180",
                             )}
                           />
                         </button>
                       </li>,
                     );
-                    for (const thread of visibleSnoozedThreads) {
-                      items.push(renderThreadRow(thread, "snoozed"));
-                    }
+                    items.push(...renderShelfRows(snoozedThreads, "snoozed", snoozedShelfExpanded));
                   }
                   if (settledThreads.length > 0) {
                     items.push(
@@ -4793,7 +4938,7 @@ export default function Sidebar() {
                           <ChevronDownIcon
                             aria-hidden
                             className={cn(
-                              "size-3 text-muted-foreground/50 transition-transform",
+                              "lecturn-hierarchy-chevron size-3 text-muted-foreground/50",
                               settledShelfExpanded && "rotate-180",
                             )}
                           />
@@ -4801,11 +4946,25 @@ export default function Sidebar() {
                       </li>,
                     );
                   }
-                  for (const thread of renderedSettledThreads) {
-                    items.push(renderThreadRow(thread, "settled"));
-                  }
+                  const accountSegment = sidebarSegments.segments?.find(
+                    (candidate) => candidate.settledThreads === settledThreads,
+                  );
+                  const expandedSettledRows = accountSegment
+                    ? projectSettledPage(
+                        settledThreads,
+                        {
+                          expanded: true,
+                          limit: accountSegment.settledVisibleCount,
+                        },
+                        routeThreadKey,
+                        SETTLED_TAIL_INITIAL_COUNT,
+                      ).visible
+                    : visibleSettledThreads;
+                  items.push(
+                    ...renderShelfRows(expandedSettledRows, "settled", settledShelfExpanded),
+                  );
                   return items;
-                })()}
+                }}
                 {!nestSagaProjects && settledShelfExpanded && hiddenSettledCount > 0 ? (
                   <li className="list-none">
                     <button
@@ -4818,7 +4977,7 @@ export default function Sidebar() {
                     </button>
                   </li>
                 ) : null}
-              </ul>
+              </SidebarSegments>
             </TooltipProvider>
           ) : null}
           {!isSearchingThreads &&

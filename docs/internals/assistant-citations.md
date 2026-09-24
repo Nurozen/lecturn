@@ -133,3 +133,7 @@ encoded URI.
 [source]: ../../apps/web/src/components/chat/AssistantCitationSource.tsx
 [provider]: ../../apps/server/src/provider/Layers/ProviderService.ts
 [submission]: ../../apps/web/src/components/chat/composerSubmission.ts
+
+## Saved notes
+
+[Thread notes](./thread-notes.md) reuse source wrappers and navigation for both user and assistant message bodies. Cite and provider quote expansion remain assistant-only. Persistent notes use separate highlight registry names and lower priorities than comment editing and navigation pulses. User message bodies expand before a note navigation completes.

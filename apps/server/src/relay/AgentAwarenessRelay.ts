@@ -1,3 +1,4 @@
+import { deviceRelayPublicationBlocked } from "../cloud/DeviceRelayReservation.ts";
 import { ThreadId as ThreadIdSchema, type PullRequestWatch } from "@lecturn/contracts";
 import { PullRequestWatchService } from "../pullRequest/PullRequestWatchService.ts";
 import { TeamPolicy, TeamPolicyLive } from "../cloud/TeamPolicy.ts";
@@ -37,6 +38,7 @@ import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import { BackgroundPolicy } from "../background/BackgroundPolicy.ts";
 import {
   isAgentActivityPublishingEnabledValue,
   PUBLISH_AGENT_ACTIVITY_SECRET,
@@ -55,6 +57,8 @@ export class AgentAwarenessRelay extends Context.Service<
   {
     readonly publishThread: (threadId: ThreadId) => Effect.Effect<void>;
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
+    /** Resolves when every queued publish has finished. */
+    readonly drain: Effect.Effect<void>;
   }
 >()("lecturn/relay/AgentAwarenessRelay") {}
 
@@ -354,8 +358,22 @@ export function pullRequestActivityPublishKey(state: RelayAgentActivityState | n
   return `${agentAwarenessPublishIdentity(state)}:${heartbeat}`;
 }
 
+/** Phases the relay rings devices for, unless the publish says the user is present. */
+const RING_ELIGIBLE_PHASES: ReadonlySet<RelayAgentActivityState["phase"]> = new Set([
+  "waiting_for_approval",
+  "waiting_for_input",
+  "completed",
+  "failed",
+]);
+
+// Stands in for a published identity so the next publish of a thread cannot
+// dedupe. Unlike deleting the entry, the thread still counts as published, so
+// a completed state skips the first-state confirmation delay.
+const REDELIVER_PUBLISH_IDENTITY = "redeliver";
+
 export const make = Effect.gen(function* () {
   const teamPolicy = yield* TeamPolicy;
+  const backgroundPolicy = yield* BackgroundPolicy;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
   const snapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
@@ -365,6 +383,11 @@ export const make = Effect.gen(function* () {
   const cloudLinkKeyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(secrets);
   const activeSnapshotPublishedRef = yield* Ref.make(false);
   const publishedStateByThreadRef = yield* Ref.make(new Map<ThreadId, string>());
+  // Threads whose latest publish carried a ring-eligible phase while the user
+  // was present, so the relay stayed silent. Threads never republish an
+  // unchanged state on their own, so `redeliverSuppressedRings` does it once
+  // the user leaves. A thread that can no longer publish at all drops out.
+  const suppressedRingThreadIds = new Set<ThreadId>();
 
   const readSecretString = (name: string) =>
     secrets
@@ -376,6 +399,7 @@ export const make = Effect.gen(function* () {
       );
 
   const readRelayConfig = Effect.gen(function* () {
+    if (deviceRelayPublicationBlocked(secrets)) return null;
     const [url, issuer, environmentCredential] = yield* Effect.all([
       readSecretString(RELAY_URL_SECRET),
       readSecretString(RELAY_ISSUER_SECRET),
@@ -415,6 +439,7 @@ export const make = Effect.gen(function* () {
       yield* Effect.logDebug("agent activity publish skipped; publication disabled", {
         threadId,
       });
+      suppressedRingThreadIds.delete(threadId);
       return;
     }
     const relayConfig = yield* readRelayConfig.pipe(Effect.orElseSucceed(() => null));
@@ -422,12 +447,14 @@ export const make = Effect.gen(function* () {
       yield* Effect.logDebug("agent activity publish skipped; relay link credentials unavailable", {
         threadId,
       });
+      suppressedRingThreadIds.delete(threadId);
       return;
     }
     if (!(yield* teamPolicy.canPublishActivity.pipe(Effect.orElseSucceed(() => false)))) {
       yield* Effect.logDebug(
         "agent activity publish skipped; organization policy unavailable or disabled",
       );
+      suppressedRingThreadIds.delete(threadId);
       return;
     }
     const relayClient = yield* makeRelayClient(relayConfig);
@@ -439,6 +466,7 @@ export const make = Effect.gen(function* () {
       readonly reason: string;
     }) =>
       Effect.gen(function* () {
+        const userPresent = yield* backgroundPolicy.isUserPresent;
         const proof = yield* makePublishProof({
           privateKey: cloudLinkKeyPair.privateKey,
           relayIssuer: relayConfig.issuer,
@@ -455,6 +483,7 @@ export const make = Effect.gen(function* () {
           statePhase: input.state?.phase ?? null,
           hasState: input.state !== null,
           reason: input.reason,
+          userPresent,
         });
 
         const response = yield* relayClient.server.publishAgentActivity({
@@ -465,6 +494,7 @@ export const make = Effect.gen(function* () {
           payload: {
             state: input.state,
             proof,
+            userPresent,
           },
         });
 
@@ -474,6 +504,12 @@ export const make = Effect.gen(function* () {
           ok: response.ok,
           deliveries: deliveryStats(response.deliveries),
         });
+
+        if (userPresent && input.state !== null && RING_ELIGIBLE_PHASES.has(input.state.phase)) {
+          suppressedRingThreadIds.add(threadId);
+        } else {
+          suppressedRingThreadIds.delete(threadId);
+        }
       });
 
     const watchId = threadId.startsWith("pr-watch:") ? threadId.slice("pr-watch:".length) : null;
@@ -664,6 +700,19 @@ export const make = Effect.gen(function* () {
 
   const worker = yield* makeDrainableWorker(publishThread);
 
+  const redeliverSuppressedRings = Effect.gen(function* () {
+    if (suppressedRingThreadIds.size === 0 || (yield* backgroundPolicy.isUserPresent)) return;
+    // Ids stay in the set until a publish without the user present succeeds,
+    // so a failed redelivery retries on the next check.
+    const threadIds = [...suppressedRingThreadIds];
+    yield* Ref.update(publishedStateByThreadRef, (entries) => {
+      const next = new Map(entries);
+      for (const threadId of threadIds) next.set(threadId, REDELIVER_PUBLISH_IDENTITY);
+      return next;
+    });
+    yield* Effect.forEach(threadIds, worker.enqueue, { discard: true });
+  });
+
   schedulePublishConfirm = (threadId) =>
     Effect.forkDetach(
       Effect.sleep("5 seconds").pipe(
@@ -725,6 +774,11 @@ export const make = Effect.gen(function* () {
         );
       }
       yield* forkParked(
+        // Start on the first interval too: startup scheduling must not introduce an
+        // extra immediate retry alongside the first scheduled presence check.
+        Effect.sleep("30 seconds").pipe(Effect.andThen(redeliverSuppressedRings), Effect.forever),
+      );
+      yield* forkParked(
         Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
           const threadId = eventThreadId(event);
           if (threadId === null) {
@@ -753,6 +807,7 @@ export const make = Effect.gen(function* () {
   return AgentAwarenessRelay.of({
     publishThread,
     start,
+    drain: worker.drain,
   });
 });
 

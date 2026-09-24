@@ -1,9 +1,5 @@
 // @effect-diagnostics globalTimers:off -- This isolated Electron preload has no Effect runtime; the timeout bounds command feedback.
-import type {
-  DesktopActivityAction,
-  DesktopActivityRow,
-  DesktopActivitySnapshot,
-} from "@lecturn/contracts";
+import type { DesktopActivityAction, DesktopActivityRow } from "@lecturn/contracts";
 import {
   activityVisualState,
   activityVisualPresentation,
@@ -20,6 +16,18 @@ import * as Channels from "./activity/channels.ts";
 import { ActivitySnapshotChangeTracker } from "./activity/changes.ts";
 import { ActivityHoverIntent } from "./activity/hover.ts";
 import { activityStateColorVariable } from "./activity/theme.ts";
+import {
+  isCurrentActivityAnnouncement,
+  type ActivityAnnouncement,
+  type ActivityPanelSnapshot,
+} from "./activity/presence.ts";
+
+function applyAccountSurface(target: HTMLElement, row: DesktopActivityRow): void {
+  if (row.accountId && row.accountColor && /^#[0-9a-fA-F]{6}$/.test(row.accountColor)) {
+    target.style.setProperty("--activity-account-color", row.accountColor);
+    target.classList.add("account-surface");
+  }
+}
 
 window.addEventListener("DOMContentLoaded", () => {
   const pill = document.getElementById("pill")!;
@@ -70,7 +78,11 @@ window.addEventListener("DOMContentLoaded", () => {
       : snapshot.summary;
     pill.setAttribute("title", snapshot.summary);
   };
-  let snapshot: DesktopActivitySnapshot = { summary: "Connecting to Lecturn…", rows: [] };
+  let snapshot: ActivityPanelSnapshot = {
+    summary: "Connecting to Lecturn…",
+    rows: [],
+    revision: -1,
+  };
   const interact = (event: ActivityInteraction) => {
     void ipcRenderer.invoke(Channels.ACTIVITY_MODE, event);
   };
@@ -190,6 +202,17 @@ window.addEventListener("DOMContentLoaded", () => {
       icon.replaceChildren(image);
     }
     identity.append(icon, element("span", row.projectLabel ?? row.subtitle, "project-label"));
+    if (row.accountId && row.accountLabel) {
+      const account = element("span", row.accountLabel, "account-mark");
+      account.setAttribute("aria-label", `Connect account: ${row.accountLabel}`);
+      const dot = element("span", "", "account-dot");
+      dot.setAttribute("aria-hidden", "true");
+      if (row.accountColor && /^#[0-9a-fA-F]{6}$/.test(row.accountColor)) {
+        dot.style.backgroundColor = row.accountColor;
+      }
+      account.prepend(dot);
+      identity.append(account);
+    }
     return identity;
   };
   const checkMeter = (row: DesktopActivityRow) => {
@@ -303,6 +326,7 @@ window.addEventListener("DOMContentLoaded", () => {
       void ipcRenderer.invoke(Channels.ACTIVITY_PEEK_COUNT, rows.length);
       for (const row of rows) {
         const item = element("button", "", `peek-row activity-state ${stateFor(row)}`);
+        applyAccountSurface(item, row);
         resumeMotion(item, stateFor(row));
         item.dataset.focusKey = `${row.id}:peek`;
         item.setAttribute(
@@ -358,6 +382,7 @@ window.addEventListener("DOMContentLoaded", () => {
       if (group.title) cards.append(element("h2", group.title, "section-title"));
       for (const row of group.rows) {
         const card = document.createElement("article");
+        applyAccountSurface(card, row);
         const checksSummary = activityCheckSummary(row);
         const visualState = stateFor(row);
         const active = visualState === "active";
@@ -545,7 +570,33 @@ window.addEventListener("DOMContentLoaded", () => {
     cards.scrollTop = scrollTop;
     restoreFocus();
   };
-  const receiveSnapshot = (next: DesktopActivitySnapshot) => {
+  /** The notch's unprompted alert: flash the count and open the micro card for the row. */
+  const announce = (announcement: ActivityAnnouncement) => {
+    if (!isCurrentActivityAnnouncement(announcement, snapshot)) return;
+    const { change } = announcement;
+    const count = document.getElementById("summary")!;
+    clearTimeout(flashTimer);
+    count.classList.remove("state-change");
+    count.style.setProperty("--change-color", activityStateColorVariable(change.state));
+    void count.offsetWidth;
+    count.classList.add("state-change");
+    count.title = change.label;
+    flashTimer = setTimeout(() => count.classList.remove("state-change"), 1400);
+    if (mode !== "collapsed" && (mode !== "micro" || microInteracted)) return;
+    const changed = snapshot.rows.find((row) => row.id === change.rowId);
+    if (!changed || isViewedActivityThread(changed, snapshot.viewedThread)) return;
+    microRowId = change.rowId;
+    microLabel = change.label.startsWith(`${changed.title} · `)
+      ? change.label.slice(changed.title.length + 3)
+      : change.label;
+    microColor = activityStateColorVariable(change.state);
+    microInteracted = false;
+    clearTimeout(microTimer);
+    interact("micro-open");
+    microTimer = setTimeout(dismissMicro, 5000);
+    render();
+  };
+  const receiveSnapshot = (next: ActivityPanelSnapshot) => {
     const change = changes.update(next);
     clearTimeout(pendingTimeout);
     snapshot = next;
@@ -566,33 +617,21 @@ window.addEventListener("DOMContentLoaded", () => {
       )
     )
       dismissMicro();
+    // Main knows whether the user is already looking at Lecturn. It answers whether to
+    // alert now, and pushes the change back later if it held one that still matters.
     if (change) {
-      const count = document.getElementById("summary")!;
-      clearTimeout(flashTimer);
-      count.classList.remove("state-change");
-      count.style.setProperty("--change-color", activityStateColorVariable(change.state));
-      void count.offsetWidth;
-      count.classList.add("state-change");
-      count.title = change.label;
-      flashTimer = setTimeout(() => count.classList.remove("state-change"), 1400);
-      if (mode === "collapsed" || (mode === "micro" && !microInteracted)) {
-        microRowId = change.rowId;
-        const changed = next.rows.find((row) => row.id === change.rowId);
-        microLabel =
-          changed && change.label.startsWith(`${changed.title} · `)
-            ? change.label.slice(changed.title.length + 3)
-            : change.label;
-        microColor = activityStateColorVariable(change.state);
-        microInteracted = false;
-        clearTimeout(microTimer);
-        interact("micro-open");
-        microTimer = setTimeout(dismissMicro, 5000);
-      }
+      const announcement = { change, revision: next.revision };
+      void ipcRenderer
+        .invoke(Channels.ACTIVITY_ANNOUNCE, announcement)
+        .then((fire: unknown) => {
+          if (fire === true) announce(announcement);
+        })
+        .catch(() => {});
     }
     render();
   };
   let receivedPublication = false;
-  ipcRenderer.on(Channels.ACTIVITY_SNAPSHOT, (_event, next: DesktopActivitySnapshot) => {
+  ipcRenderer.on(Channels.ACTIVITY_SNAPSHOT, (_event, next: ActivityPanelSnapshot) => {
     receivedPublication = true;
     receiveSnapshot(next);
   });
@@ -607,7 +646,10 @@ window.addEventListener("DOMContentLoaded", () => {
     updateSummary();
   });
   ipcRenderer.on(Channels.ACTIVITY_MODE, (_event, next: ActivityMode) => setMode(next));
-  void ipcRenderer.invoke(Channels.ACTIVITY_READ).then((next: DesktopActivitySnapshot) => {
+  ipcRenderer.on(Channels.ACTIVITY_ANNOUNCE, (_event, announcement: ActivityAnnouncement) =>
+    announce(announcement),
+  );
+  void ipcRenderer.invoke(Channels.ACTIVITY_READ).then((next: ActivityPanelSnapshot) => {
     if (!receivedPublication) receiveSnapshot(next);
   });
 });

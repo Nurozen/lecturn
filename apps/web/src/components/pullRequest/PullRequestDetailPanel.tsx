@@ -1,3 +1,4 @@
+import { AccountSurface } from "../AccountSurface";
 import { isStaveProject, resolveProjectGitTargets } from "@lecturn/client-runtime/state/projectGit";
 import { scopedThreadKey, scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
@@ -1391,11 +1392,23 @@ export function PullRequestDetailPanel({
   // The list already has the pull request's identity and summary. Keep them on screen
   // and let the richer detail read replace the remaining placeholders in place.
   if (detailQuery.isPending && !detail) {
-    return <PullRequestDetailGhost seed={matchingListEntry} />;
+    return (
+      <AccountSurface
+        environmentId={environmentId}
+        seam={false}
+        className="flex h-full min-h-0 w-full flex-col lecturn-page-surface"
+      >
+        <PullRequestDetailGhost seed={matchingListEntry} />
+      </AccountSurface>
+    );
   }
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-background lecturn-page-surface">
+    <AccountSurface
+      environmentId={environmentId}
+      seam={false}
+      className="flex h-full min-h-0 w-full flex-col lecturn-page-surface"
+    >
       <div className="@container/pr-header grid min-w-0 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 border-b border-border/60">
         <div className="ml-4 grid h-7 min-w-0 items-center overflow-hidden">
           <div
@@ -2510,6 +2523,6 @@ export function PullRequestDetailPanel({
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
-    </div>
+    </AccountSurface>
   );
 }

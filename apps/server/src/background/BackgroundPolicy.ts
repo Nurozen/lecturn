@@ -52,6 +52,8 @@ export class BackgroundPolicy extends Context.Service<
     readonly hasDemand: (scope: BackgroundScope) => Effect.Effect<boolean>;
     readonly shouldRunScopeWork: (scope: BackgroundScope) => Effect.Effect<boolean>;
     readonly shouldRunOpportunisticWork: Effect.Effect<boolean>;
+    /** True while any client, on any device, holds a lease that passes `isUserPresentLease`. */
+    readonly isUserPresent: Effect.Effect<boolean>;
   }
 >()("lecturn/background/BackgroundPolicy") {}
 
@@ -127,6 +129,15 @@ export function upsertClientActivityLease(
 
 function isForegroundLease(lease: ClientActivityLease, now: DateTime.Utc): boolean {
   return isLeaseActive(lease, now) && lease.visible && (lease.focused || lease.recentlyInteracted);
+}
+
+/**
+ * Stricter than a foreground lease: the user is looking at this client and
+ * using it right now. Gates notification rings, which must stay silent only
+ * while the user would see the change in the client anyway.
+ */
+export function isUserPresentLease(lease: ClientActivityLease, now: DateTime.Utc): boolean {
+  return isLeaseActive(lease, now) && lease.visible && lease.focused && lease.recentlyInteracted;
 }
 
 function leaseHasScope(lease: ClientActivityLease, scope: BackgroundScope): boolean {
@@ -304,6 +315,15 @@ export const make = Effect.fn("background.policy.make")(function* () {
     (current) => current.shouldRunOpportunisticWork,
   );
 
+  // Reads the clock on every call: an expired lease emits no change event.
+  const isUserPresent = Effect.gen(function* () {
+    const [leases, now] = yield* Effect.all([Ref.get(leasesRef), DateTime.now]);
+    for (const lease of leases.values()) {
+      if (isUserPresentLease(lease, now)) return true;
+    }
+    return false;
+  });
+
   yield* Stream.runForEach(hostPowerMonitor.streamChanges, () => publishSnapshot).pipe(
     Effect.forkScoped,
   );
@@ -343,6 +363,7 @@ export const make = Effect.fn("background.policy.make")(function* () {
     hasDemand,
     shouldRunScopeWork,
     shouldRunOpportunisticWork,
+    isUserPresent,
   });
 });
 

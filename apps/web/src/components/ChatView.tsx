@@ -1,3 +1,5 @@
+import { NotesPanel } from "./NotesPanel";
+import { AccountSurface } from "./AccountSurface";
 import { RepositoryPullRequestOverview } from "./pullRequest/RepositoryPullRequestOverview";
 import { useStaveGitSelection } from "./stave/staveGitSelection";
 import {
@@ -1559,6 +1561,7 @@ function ChatViewContent(props: ChatViewProps) {
   const [restingComposerControlsVisible, setRestingComposerControlsVisible] = useState(false);
   const citeAssistantText = useCallback(
     (citation: AssistantCitation, sourceAnchor: AssistantCitationSourceAnchor) => {
+      if (sourceAnchor.source.dataset.citationSourceRole === "user") return false;
       const inserted = composerRef.current?.citeAssistantText(citation, sourceAnchor) ?? false;
       if (!inserted) {
         toastManager.add({
@@ -2276,6 +2279,8 @@ function ChatViewContent(props: ChatViewProps) {
     ? (activeEnvironment?.serverConfig ?? null)
     : (primaryEnvironment?.serverConfig ?? null);
   const pullRequestsCapabilityKnown = serverConfig !== null;
+  const notesAvailable =
+    isServerThread && serverConfig?.environment.capabilities.threadNotes === true;
   const supportsPullRequests = serverConfig?.environment.capabilities.pullRequests === true;
   const attachmentEnvironmentConfig = environmentById.get(environmentId)?.serverConfig ?? null;
   const attachmentUploadsCapabilityKnown = attachmentEnvironmentConfig !== null;
@@ -5014,13 +5019,21 @@ function ChatViewContent(props: ChatViewProps) {
 
   useEffect(() => {
     if (!activeThread?.id || terminalUiState.terminalOpen) return;
+    // Browsing existing conversations should retain the resting glass composer.
+    // Empty threads still focus immediately, and explicit focus shortcuts work as before.
+    if (settings.composerCollapseOnBlur && activeThread.messages.length > 0) return;
     const frame = window.requestAnimationFrame(() => {
       focusComposer();
     });
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [activeThread?.id, focusComposer, terminalUiState.terminalOpen]);
+  }, [
+    activeThread?.id,
+    focusComposer,
+    terminalUiState.terminalOpen,
+    settings.composerCollapseOnBlur,
+  ]);
 
   useEffect(() => {
     if (!activeThread?.id) return;
@@ -7889,6 +7902,14 @@ function ChatViewContent(props: ChatViewProps) {
           ? { onStateChange: handlePullRequestTabStatusChange }
           : {})}
       />
+    ) : renderedRightPanelSurface?.kind === "notes" ? (
+      notesAvailable ? (
+        <NotesPanel key={activeThreadKey} threadRef={activeThreadRef} />
+      ) : (
+        <div className="p-4 text-sm text-muted-foreground">
+          Notes require an updated environment.
+        </div>
+      )
     ) : renderedRightPanelSurface?.kind === "agents" ? (
       <AgentsPanel
         model={agentPanelModel}
@@ -7949,7 +7970,15 @@ function ChatViewContent(props: ChatViewProps) {
   });
 
   return (
-    <div className="lecturn-chat-surface relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+    <AccountSurface
+      environmentId={props.environmentId}
+      projectKey={
+        activeThread ? `${activeThread.environmentId}:${activeThread.projectId}` : undefined
+      }
+      animate
+      data-chat-has-messages={!isDraftHeroState || undefined}
+      className="lecturn-chat-surface relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+    >
       {rightPanelControlsAtRoot ? panelLayoutControls : null}
       <div
         className={cn(
@@ -8066,7 +8095,10 @@ function ChatViewContent(props: ChatViewProps) {
               />
             </div>
             {/* Messages Wrapper */}
-            <div className="relative flex min-h-0 flex-1 flex-col">
+            <div
+              className="relative flex min-h-0 flex-1 flex-col"
+              data-timeline-loading={threadDetailLoading || undefined}
+            >
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
                 citationRequest={citationRequest}
@@ -8074,7 +8106,7 @@ function ChatViewContent(props: ChatViewProps) {
                 onCiteAssistantText={citeAssistantText}
                 agentPanelModel={agentPanelModel}
                 onOpenAgents={addAgentsSurface}
-                key={activeThread.id}
+                key={activeThreadKey}
                 isWorking={isWorking}
                 isPreparingWorktree={isPreparingWorktree}
                 isCompacting={isCompacting}
@@ -8497,6 +8529,8 @@ function ChatViewContent(props: ChatViewProps) {
           onAddDiff={addDiffSurface}
           onAddFiles={addFilesSurface}
           onAddPullRequest={addPullRequestSurface}
+          onAddNotes={() => useRightPanelStore.getState().open(activeThreadRef, "notes")}
+          notesAvailable={notesAvailable}
           onAddAgents={addAgentsSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           terminalAvailable={activeProject !== null}
@@ -8547,6 +8581,8 @@ function ChatViewContent(props: ChatViewProps) {
             onAddDiff={addDiffSurface}
             onAddFiles={addFilesSurface}
             onAddPullRequest={addPullRequestSurface}
+            onAddNotes={() => useRightPanelStore.getState().open(activeThreadRef, "notes")}
+            notesAvailable={notesAvailable}
             onAddAgents={addAgentsSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             terminalAvailable={activeProject !== null}
@@ -8568,7 +8604,7 @@ function ChatViewContent(props: ChatViewProps) {
           onClose={closeExpandedImage}
         />
       )}
-    </div>
+    </AccountSurface>
   );
 }
 

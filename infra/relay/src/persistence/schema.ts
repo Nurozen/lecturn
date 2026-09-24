@@ -1,3 +1,4 @@
+import type { ManagedEndpointDeprovisionTarget } from "../environments/ManagedEndpointProvider.ts";
 import { sql } from "drizzle-orm";
 import type {
   RelayAgentActivityAggregateState,
@@ -18,12 +19,27 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 
+// Identity of one push-notification event: a thread in a given phase + status.
+// Deliberately timestamp-free so heartbeat republishes map to the same event.
+export interface NotifiedPushEvent {
+  readonly environmentId: string;
+  readonly threadId: string;
+  readonly phase: string;
+  readonly status: string;
+  // The ring is still owed: a Live Activity update showed this event silently
+  // because the user was present at a client, which consumed the transition a
+  // later alert would have keyed on. Absent on events that already rang.
+  readonly deferred?: true;
+}
+
 export const relayMobileDevices = pgTable(
   "relay_mobile_devices",
   {
     userId: varchar("user_id", { length: 255 }).notNull(),
     deviceId: varchar("device_id", { length: 255 }).notNull(),
     label: text("label").notNull().default("iOS device"),
+    accountLabel: text("account_label"),
+    accountColor: varchar("account_color", { length: 7 }),
     platform: varchar("platform", { length: 16 }).notNull().$type<"ios">(),
     iosMajorVersion: integer("ios_major_version").notNull(),
     appVersion: varchar("app_version", { length: 64 }),
@@ -32,13 +48,22 @@ export const relayMobileDevices = pgTable(
     pushToken: text("push_token"),
     pushToStartToken: text("push_to_start_token"),
     preferencesJson: jsonb("preferences_json").notNull().$type<RelayAgentAwarenessPreferences>(),
+    // Push-notification events already rung on this device, so republishes of
+    // an unchanged state stay silent, plus Live Activity rings deferred while
+    // the user was present. Null until the first entry is written.
+    notifiedPushEventsJson: jsonb("notified_push_events_json").$type<
+      ReadonlyArray<NotifiedPushEvent>
+    >(),
     createdAt: varchar("created_at", { length: 64 }).notNull(),
     updatedAt: varchar("updated_at", { length: 64 }).notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.userId, table.deviceId] }),
-    uniqueIndex("idx_relay_mobile_devices_push_token").on(table.pushToken),
-    uniqueIndex("idx_relay_mobile_devices_push_to_start_token").on(table.pushToStartToken),
+    uniqueIndex("idx_relay_mobile_devices_push_token").on(table.userId, table.pushToken),
+    uniqueIndex("idx_relay_mobile_devices_push_to_start_token").on(
+      table.userId,
+      table.pushToStartToken,
+    ),
   ],
 );
 
@@ -58,7 +83,10 @@ export const relayLiveActivities = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.userId, table.deviceId] }),
-    uniqueIndex("idx_relay_live_activities_activity_push_token").on(table.activityPushToken),
+    uniqueIndex("idx_relay_live_activities_activity_push_token").on(
+      table.userId,
+      table.activityPushToken,
+    ),
   ],
 );
 
@@ -436,3 +464,29 @@ export const relayTeamDeletedUsers = pgTable("relay_team_deleted_users", {
   userId: text("user_id").primaryKey(),
   deletedAt: bigint("deleted_at", { mode: "number" }).notNull(),
 });
+
+/** Serializes token claims across users, including concurrent first registration. */
+export const relayPushTokenOwners = pgTable(
+  "relay_push_token_owners",
+  {
+    kind: text("kind").notNull(),
+    token: text("token").notNull(),
+    deviceId: varchar("device_id", { length: 255 }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.kind, table.token] })],
+);
+
+export const relayEnvironmentLinkOwners = pgTable("relay_environment_link_owners", {
+  legacyCleanupPending: boolean("legacy_cleanup_pending").notNull().default(false),
+  environmentId: varchar("environment_id", { length: 191 }).primaryKey(),
+});
+export const relayEnvironmentLinkCleanup = pgTable(
+  "relay_environment_link_cleanup",
+  {
+    userId: varchar("user_id", { length: 191 }).notNull(),
+    environmentId: varchar("environment_id", { length: 191 }).notNull(),
+    target: jsonb("target").$type<ManagedEndpointDeprovisionTarget | null>(),
+    organizationId: text("organization_id"),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.environmentId] })],
+);

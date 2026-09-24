@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { ChevronsLeftRightEllipsisIcon, PlusIcon, QrCodeIcon, TerminalIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -127,6 +128,7 @@ import {
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { useCloudLinkController } from "~/cloud/useCloudLinkController";
 import { ConnectSubscriptionGate } from "../cloud/ConnectSubscriptionGate";
+import { useConnectAccountPicker } from "../clerk/ConnectAccountPicker";
 import { authEnvironment } from "~/state/auth";
 import { environmentCatalog } from "~/connection/catalog";
 import {
@@ -1632,6 +1634,7 @@ function CloudLinkSwitch({
 }
 
 function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: boolean }) {
+  const account = useConnectAccountPicker("publish", { label: "Publish as", labelHidden: true });
   const {
     isSignedIn,
     linkState: primaryCloudLinkState,
@@ -1640,10 +1643,12 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     operationError,
     linked,
     accountMismatchMessage,
+    accountMismatchAction,
+    unlinkBlocked,
     reconcileCloudState,
     subscriptionRequired,
     checkSubscription,
-  } = useCloudLinkController();
+  } = useCloudLinkController({ accountId: account.accountId, onSelectAccount: account.select });
   const [isUpdating, setIsUpdating] = useState(false);
   const [isUpdatingPreference, setIsUpdatingPreference] = useState(false);
   const [confirmUnlink, setConfirmUnlink] = useState(false);
@@ -1693,27 +1698,86 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     setIsUpdatingPreference(false);
   };
 
+  const unlinkButton = (
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={isBusy || unlinkBlocked}
+      onClick={() => setConfirmUnlink(true)}
+    >
+      Unlink environment
+    </Button>
+  );
+
   return (
     <>
       {subscriptionRequired ? (
-        <ConnectSubscriptionGate onRefresh={checkSubscription} preserveChoices={false} />
+        <ConnectSubscriptionGate
+          accountId={account.accountId}
+          onRefresh={checkSubscription}
+          preserveChoices={false}
+        />
       ) : null}
-      {window.desktopBridge ? (
+      {account.picker ? (
         <SettingsRow
-          title={searchableSetting("lecturn-connect").title}
-          description={
-            managedTunnelActive
-              ? "This environment is available to your other devices through Lecturn Connect."
-              : "Make this environment available to your other devices through Lecturn Connect."
-          }
-          status={operationError ?? accountMismatchMessage ?? primaryCloudLinkState.error}
+          title="Publish as"
+          description="Choose the account to publish to. To change an existing association, unlink first, then choose the new account and enable Connect."
+          control={account.picker}
+        />
+      ) : null}
+      <SettingsRow
+        title={searchableSetting("lecturn-connect").title}
+        description={
+          managedTunnelActive
+            ? "This environment is available to your other devices through Lecturn Connect."
+            : "Make this environment available to your other devices through Lecturn Connect."
+        }
+        status={
+          operationError ??
+          primaryCloudLinkState.data?.deviceRelayConflict ??
+          accountMismatchMessage ??
+          primaryCloudLinkState.error
+        }
+        control={
+          <CloudLinkSwitch
+            checked={managedTunnelActive}
+            disabled={!canManageRelay || !isSignedIn || primaryCloudLinkState.isPending || isBusy}
+            disabledReason={disabledReason}
+            onCheckedChange={(enabled) => void updateManagedTunnel(enabled)}
+          />
+        }
+      />
+      {linked &&
+      (managedTunnelActive || publishAgentActivity) &&
+      primaryCloudLinkState.data?.deviceRelayConflict ? (
+        <SettingsRow
+          title="Retry relay"
+          description="After stopping the relay in the other installation, retry to start this environment’s relay."
           control={
-            <CloudLinkSwitch
-              checked={managedTunnelActive}
-              disabled={!canManageRelay || !isSignedIn || primaryCloudLinkState.isPending || isBusy}
-              disabledReason={disabledReason}
-              onCheckedChange={(enabled) => void updateManagedTunnel(enabled)}
-            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={
+                !canManageRelay ||
+                !isSignedIn ||
+                primaryCloudLinkState.isPending ||
+                isBusy ||
+                Boolean(accountMismatchMessage)
+              }
+              onClick={async () => {
+                setIsUpdating(true);
+                try {
+                  await reconcileCloudState({
+                    managedTunnel: managedTunnelActive,
+                    publish: publishAgentActivity,
+                  });
+                } finally {
+                  setIsUpdating(false);
+                }
+              }}
+            >
+              {isUpdating ? "Retrying…" : "Retry relay"}
+            </Button>
           }
         />
       ) : null}
@@ -1725,14 +1789,16 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
             "Stop publishing this environment and agent activity to your Lecturn account. Local work stays on this device."
           }
           control={
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={isBusy || Boolean(accountMismatchMessage)}
-              onClick={() => setConfirmUnlink(true)}
-            >
-              Unlink environment
-            </Button>
+            accountMismatchAction ? (
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={accountMismatchAction.run}>
+                  <span className="max-w-56 truncate">{accountMismatchAction.label}</span>
+                </Button>
+                {unlinkButton}
+              </div>
+            ) : (
+              unlinkButton
+            )
           }
         />
       ) : null}
@@ -1780,7 +1846,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
   );
 }
 
-function CloudLinkRow({ canManageRelay }: { readonly canManageRelay: boolean }) {
+export function CloudLinkRow({ canManageRelay }: { readonly canManageRelay: boolean }) {
   return hasCloudPublicConfig() ? <ConfiguredCloudLinkRow canManageRelay={canManageRelay} /> : null;
 }
 
@@ -1946,7 +2012,6 @@ export function ConnectionsSettings() {
     (state) => state.setDefaultAdvertisedEndpointKey,
   );
   const canManageLocalBackend = currentSessionScopes?.includes(AuthAccessWriteScope) ?? false;
-  const canManageRelay = currentSessionScopes?.includes(AuthRelayWriteScope) ?? false;
   const authAccessChanges = useEnvironmentQuery(
     canManageLocalBackend && primaryEnvironmentId !== null
       ? authEnvironment.accessChanges({
@@ -3251,12 +3316,28 @@ export function ConnectionsSettings() {
                 {renderEndpointRows("endpoint-rail")}
                 {renderTailscaleRow()}
                 {renderWslRow()}
-                <CloudLinkRow canManageRelay={canManageRelay} />
+                <SettingsRow
+                  title="Relay"
+                  description="Manage Lecturn Connect, its publishing account, and relay health."
+                  control={
+                    <Button render={<Link to="/settings/relay" />} variant="outline" size="sm">
+                      Manage relay
+                    </Button>
+                  }
+                />
               </>
             ) : (
               <>
                 {renderDisabledNetworkAccessRow()}
-                <CloudLinkRow canManageRelay={canManageRelay} />
+                <SettingsRow
+                  title="Relay"
+                  description="Manage Lecturn Connect, its publishing account, and relay health."
+                  control={
+                    <Button render={<Link to="/settings/relay" />} variant="outline" size="sm">
+                      Manage relay
+                    </Button>
+                  }
+                />
               </>
             )}
           </SettingsSection>
@@ -3562,7 +3643,15 @@ export function ConnectionsSettings() {
             title="Administrative access"
             description="Pairing links and client-session management require the access:write scope for this backend."
           />
-          <CloudLinkRow canManageRelay={canManageRelay} />
+          <SettingsRow
+            title="Relay"
+            description="Manage Lecturn Connect, its publishing account, and relay health."
+            control={
+              <Button render={<Link to="/settings/relay" />} variant="outline" size="sm">
+                Manage relay
+              </Button>
+            }
+          />
         </SettingsSection>
       )}
 

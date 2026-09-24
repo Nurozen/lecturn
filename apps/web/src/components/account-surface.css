@@ -1,0 +1,171 @@
+/* Glass decorates the existing layout; it does not restyle message contents. */
+.lecturn-account-surface {
+  position: relative;
+  isolation: isolate;
+  --glass-accent: oklch(from var(--account-tint, #355675) 0.72 0.12 h);
+  --glass-light: color-mix(in srgb, var(--glass-accent) 64%, white);
+}
+.lecturn-account-surface[data-glass-neutral] {
+  --glass-accent: #d5af63;
+  --glass-light: #ead9b5;
+}
+.dark:not([data-theme-id]) .lecturn-account-surface:not([data-glass-neutral]) {
+  --background: color-mix(in oklab, var(--glass-accent) 6%, #00090b);
+}
+.lecturn-account-surface[data-glass-neutral] {
+  --background: var(--sidebar);
+}
+.lecturn-account-surface.lecturn-chat-surface,
+.lecturn-account-surface.lecturn-page-surface,
+.lecturn-account-surface.lecturn-settings-surface {
+  --celestial-veil: color-mix(in srgb, var(--background) 76%, transparent);
+  background-image:
+    linear-gradient(to bottom, var(--celestial-veil) 280px, var(--background) 512px),
+    url("../assets/lecturn-night-sky.webp");
+  background-size:
+    auto,
+    1536px 512px;
+  background-position:
+    center,
+    right top;
+  background-repeat: no-repeat;
+}
+.lecturn-account-surface::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+  background: radial-gradient(
+    ellipse at left center,
+    color-mix(in srgb, var(--glass-accent) 10%, transparent),
+    transparent 68%
+  );
+}
+/* A single luminous boundary. Glow fades naturally, without a second rectangular edge. */
+.lecturn-account-surface[data-glass-seam]::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 1px;
+  z-index: 2;
+  pointer-events: none;
+  background: var(--glass-light);
+  box-shadow:
+    0 0 7px 1px var(--glass-accent),
+    4px 0 24px 7px color-mix(in srgb, var(--glass-accent) 32%, transparent);
+}
+.lecturn-account-surface[data-account-transition]::after {
+  opacity: var(--account-wave-progress, 0);
+}
+.lecturn-account-wave {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+  overflow: hidden;
+}
+.lecturn-account-impact {
+  position: fixed;
+  z-index: 1001;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at right center,
+    var(--glass-light),
+    color-mix(in srgb, var(--glass-accent) 40%, transparent) 32%,
+    transparent 72%
+  );
+  transform-origin: right center;
+  opacity: 0;
+}
+/* A compact glint at the exact contact point, fading as the wave departs. */
+.lecturn-account-impact::before,
+.lecturn-account-impact::after {
+  content: "";
+  position: absolute;
+  right: -8px;
+  top: 50%;
+  width: 18px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--glass-light), transparent);
+  box-shadow: 0 0 5px var(--glass-accent);
+  transform: rotate(55deg);
+}
+.lecturn-account-impact::after {
+  transform: rotate(-55deg);
+}
+.lecturn-account-wave-edge {
+  fill: none;
+  stroke: var(--glass-light);
+  stroke-width: 1.8;
+  filter: drop-shadow(0 0 2px var(--glass-light));
+}
+.lecturn-account-wave-ribbon {
+  fill: none;
+  stroke: var(--glass-accent);
+  stroke-width: 18;
+  opacity: 0.28;
+  filter: blur(1px);
+}
+.lecturn-account-wave-glow {
+  fill: none;
+  stroke: var(--glass-accent);
+  stroke-width: 28;
+  filter: blur(13px);
+  opacity: 0.65;
+}
+.lecturn-account-surface [data-chat-header] {
+  background: color-mix(in srgb, var(--background) 32%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--glass-light) 12%, transparent);
+}
+.lecturn-account-surface [data-slot="composer-shell"] {
+  --chat-composer-glass-surface: color-mix(in srgb, var(--glass-accent) 7%, var(--background));
+  --chat-composer-outline: color-mix(in srgb, var(--glass-light) 55%, transparent);
+  --chat-composer-highlight: #ffffff24;
+  --glass-opacity: 55%;
+  max-width: 830px;
+}
+.lecturn-account-surface [data-chat-composer-body="true"] {
+  padding-block: 12px;
+}
+.lecturn-account-surface[data-chat-has-messages] [data-testid="composer-editor"] {
+  min-height: 40px;
+}
+.lecturn-glass-panel {
+  border-color: color-mix(in srgb, var(--glass-light, #6e91ac) 25%, var(--border));
+  box-shadow:
+    inset 0 1px 0 #ffffff12,
+    0 8px 28px #00000012;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lecturn-account-wave {
+    display: none;
+  }
+  .lecturn-account-surface[data-account-transition]::after {
+    opacity: 1;
+  }
+}
+@media (forced-colors: active) {
+  .lecturn-account-surface::before,
+  .lecturn-account-surface::after,
+  .lecturn-account-wave {
+    display: none;
+  }
+}
+
+.lecturn-account-old-pane {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
+  .lecturn-account-old-pane,
+  .lecturn-account-impact {
+    display: none;
+  }
+}

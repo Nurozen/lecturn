@@ -18,7 +18,7 @@ type DraftThreadRouteState = {
   promotedTo?: ScopedThreadRef | null;
 };
 
-export type ThreadRouteRenderState = "loading" | "ready" | "missing";
+export type ThreadRouteRenderState = "loading" | "ready" | "missing" | "account-gone";
 
 export function resolveThreadRouteRenderState(input: {
   bootstrapComplete: boolean;
@@ -26,7 +26,12 @@ export function resolveThreadRouteRenderState(input: {
   serverThreadDetailExists: boolean;
   serverThreadDetailDeleted: boolean;
   draftThreadExists: boolean;
+  /** The thread's environment left with a signed-out Connect account. Only set by a multi-account build. */
+  accountGone?: boolean;
 }): ThreadRouteRenderState {
+  if (input.accountGone) {
+    return "account-gone";
+  }
   if (!input.bootstrapComplete) {
     return "loading";
   }

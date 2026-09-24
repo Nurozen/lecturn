@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import {
   AuthSessionId,
   RpcClientId,
+  type ClientActivityLease,
   type HostPowerSnapshot,
   type ClientActivityReportInput,
 } from "@lecturn/contracts";
@@ -13,6 +14,7 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as BackgroundPolicy from "./BackgroundPolicy.ts";
@@ -382,5 +384,53 @@ describe("BackgroundPolicy", () => {
         ),
       ),
     ),
+  );
+
+  it("counts the user as present only while a live lease is visible, focused, and in use", () => {
+    const lease: ClientActivityLease = {
+      sessionId: AuthSessionId.make("session-1"),
+      rpcClientId: RpcClientId.make(1),
+      clientId: "client-1",
+      clientKind: "mobile",
+      visible: true,
+      focused: true,
+      recentlyInteracted: true,
+      scopes: [],
+      updatedAt: TEST_NOW,
+      expiresAt: DateTime.add(TEST_NOW, { seconds: 45 }),
+    };
+    const isPresent = (overrides: Partial<ClientActivityLease>, now = TEST_NOW) =>
+      BackgroundPolicy.isUserPresentLease({ ...lease, ...overrides }, now);
+
+    assert.equal(isPresent({}), true);
+    assert.equal(isPresent({ visible: false }), false);
+    assert.equal(isPresent({ focused: false }), false);
+    // Focused on a client but idle: the user may have walked away, so ring.
+    assert.equal(isPresent({ recentlyInteracted: false }), false);
+    assert.equal(isPresent({}, DateTime.add(TEST_NOW, { seconds: 45 })), false);
+  });
+
+  it.effect("stops reporting the user present once their lease expires, before any sweep", () =>
+    Effect.gen(function* () {
+      const policy = yield* BackgroundPolicy.BackgroundPolicy;
+      assert.equal(yield* policy.isUserPresent, false);
+
+      yield* policy.reportClientActivity(
+        AuthSessionId.make("session-1"),
+        RpcClientId.make(1),
+        makeReport({ clientId: "idle", recentlyInteracted: false }),
+      );
+      assert.equal(yield* policy.isUserPresent, false);
+
+      yield* policy.reportClientActivity(
+        AuthSessionId.make("session-2"),
+        RpcClientId.make(2),
+        makeReport({ clientId: "in-use", clientKind: "mobile", ttlMs: 1_000 }),
+      );
+      assert.equal(yield* policy.isUserPresent, true);
+
+      yield* TestClock.adjust("1 second");
+      assert.equal(yield* policy.isUserPresent, false);
+    }).pipe(Effect.provide(makeLayer(nominalHostPower))),
   );
 });

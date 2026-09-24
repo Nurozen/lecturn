@@ -1,39 +1,70 @@
 import { PROVIDER_CLIENT_DEFINITIONS } from "../settings/providerDriverMeta";
 import { useAuth } from "@clerk/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { selectTeam, type TeamDetail, type TeamSeatPreview } from "@lecturn/client-runtime/relay";
 import { configuredHostedAppUrl, isHostedStaticApp } from "../../hostedPairing";
 import { Button } from "../ui/button";
+import { hostedBillingUrl } from "../../cloud/accountPicker";
+import type { PickedConnectAccount } from "../clerk/ConnectAccountPicker";
 import { TeamSelector, useSelectedTeam, useTeamClient } from "./TeamSelector";
 
 const inputClass = "w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground";
-export function TeamsAccount() {
-  if (isHostedStaticApp()) return <HostedTeamsAccount />;
+/**
+ * `account` is the dialog's chosen account. Without a choice,
+ * teams follow Clerk's active account.
+ */
+export function TeamsAccount({ account }: { readonly account?: PickedConnectAccount }) {
+  const chosen = account?.visible ? account : null;
+  // Keyed by a chosen account, so one account's team is never shown under another's name.
+  const key = chosen ? (chosen.accountId ?? "signed-out") : undefined;
+  if (isHostedStaticApp())
+    return (
+      <HostedTeamsAccount key={key} accountId={chosen?.accountId} picker={chosen?.picker ?? null} />
+    );
   return (
     <section className="space-y-5 p-6">
       <h2 className="font-heading text-2xl">Lecturn Teams</h2>
-      <TeamSelector />
+      {chosen?.picker}
+      <TeamSelector key={key} accountId={chosen?.accountId} />
       <p className="text-sm text-muted-foreground">
         Choose company access here. Manage your company, members, seats and policies in the hosted
         Lecturn web app.
       </p>
       <a
         className="inline-flex rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-sm font-medium text-foreground"
-        href={new URL("/account/billing?tab=teams", configuredHostedAppUrl()).href}
+        href={hostedBillingUrl({
+          hostedAppUrl: configuredHostedAppUrl(),
+          tab: "teams",
+          accountId: chosen?.accountId,
+        })}
         target="_blank"
         rel="noopener noreferrer"
       >
         Manage Teams in browser
       </a>
-      <p className="text-sm text-muted-foreground">Use the same Lecturn account in your browser.</p>
+      <p className="text-sm text-muted-foreground">
+        {chosen?.email
+          ? `Use ${chosen.email} in your browser.`
+          : "Use the same Lecturn account in your browser."}
+      </p>
     </section>
   );
 }
 
-function HostedTeamsAccount() {
-  const { userId, isSignedIn } = useAuth();
-  const client = useTeamClient();
-  const organizationId = useSelectedTeam();
+function HostedTeamsAccount({
+  accountId,
+  picker,
+}: {
+  /** undefined follows Clerk's active account. */
+  readonly accountId: string | null | undefined;
+  readonly picker: ReactNode;
+}) {
+  const auth = useAuth();
+  const userId = accountId === undefined ? auth.userId : accountId;
+  const isSignedIn =
+    accountId === undefined || accountId === auth.userId ? auth.isSignedIn : accountId !== null;
+  const client = useTeamClient(accountId);
+  const organizationId = useSelectedTeam(accountId);
   const context = `${userId}:${organizationId}`;
   const currentContext = useRef(context);
   currentContext.current = context;
@@ -99,7 +130,8 @@ function HostedTeamsAccount() {
           credentials.
         </p>
       </header>
-      <TeamSelector key={`${userId}:${version}`} />
+      {picker}
+      <TeamSelector key={`${userId}:${version}`} accountId={accountId} />
       <Button variant="outline" disabled={busy} onClick={() => setVersion((value) => value + 1)}>
         Refresh team status
       </Button>

@@ -78,6 +78,10 @@ import Animated, {
   LinearTransition,
   ReduceMotion,
   type SharedValue,
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  cancelAnimation,
 } from "react-native-reanimated";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { IOS_NAV_BAR_HEIGHT } from "../../lib/layoutMetrics";
@@ -98,6 +102,8 @@ import {
 
 import { AppText as Text } from "../../components/AppText";
 import { GlassCard } from "../../components/GlassCard";
+import { useGlassAccessibility } from "../../lib/useGlassAccessibility";
+import { themeColorWithAlpha } from "../../lib/mobileTheme";
 import { VideoPreviewModal, type VideoPreviewSource } from "../../components/VideoPreviewModal";
 import { VideoAttachmentTile } from "../../components/VideoAttachmentTile";
 import { MediaVideoPlayer } from "../../components/MediaVideoPlayer";
@@ -1440,8 +1446,7 @@ function renderFeedEntry(
             : {})}
         >
           <GlassCard
-            tone="accent"
-            sheen="subtle"
+            sheen="regular"
             radius={22}
             className="min-w-0 gap-2 px-4 py-3"
             style={{
@@ -1982,7 +1987,10 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
 
   const theme = useUniwindTheme();
   const iconSubtleColor = theme["--color-icon-subtle"];
-  const userBubbleColor = theme["--color-user-bubble"];
+  const opaque = useGlassAccessibility();
+  const userBubbleColor = opaque
+    ? theme["--color-user-bubble"]
+    : themeColorWithAlpha(theme["--color-user-bubble"], 0.9);
   const onMarkdownLinkPress = useCallback(
     (href: string) => {
       const presentation = resolveMarkdownLinkPresentation(href);
@@ -2362,6 +2370,26 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   // current overlay height before the scroll integration's next reaction;
   // on Android the declarative contentInset floor covers this same window.
   const listMountKey = `${feedThreadKey}:${props.feed.length === 0 ? "empty" : "filled"}`;
+  const [loadedListKey, setLoadedListKey] = useState<string | null>(null);
+  const [hasRevealed, setHasRevealed] = useState(false);
+  const revealOpacity = useSharedValue(0);
+  const revealStyle = useAnimatedStyle(() => ({ opacity: revealOpacity.value }));
+  const handleInitialListLoad = useCallback(() => setLoadedListKey(listMountKey), [listMountKey]);
+  useEffect(() => {
+    if (
+      hasRevealed ||
+      props.contentPresentation.kind !== "ready" ||
+      loadedListKey !== listMountKey
+    ) {
+      return;
+    }
+    // A keyed thread reveals once, after data and the list's initial placement
+    // are ready. Streaming, pagination and reconnects never restart this fade.
+    setHasRevealed(true);
+    revealOpacity.set(withTiming(1, { duration: 140, reduceMotion: ReduceMotion.System }));
+  }, [hasRevealed, listMountKey, loadedListKey, props.contentPresentation.kind, revealOpacity]);
+  useEffect(() => () => cancelAnimation(revealOpacity), [revealOpacity]);
+
   useLayoutEffect(() => {
     const bottom = props.contentInsetEndAdjustment.value;
     if (bottom > 0) {
@@ -2686,8 +2714,15 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   return (
     <>
       <View className="flex-1" onLayout={handleViewportLayout}>
-        <View className="flex-1">
+        <Animated.View
+          className="flex-1"
+          style={revealStyle}
+          pointerEvents={hasRevealed ? "auto" : "none"}
+          accessibilityElementsHidden={!hasRevealed}
+          importantForAccessibility={hasRevealed ? "auto" : "no-hide-descendants"}
+        >
           <KeyboardAwareLegendList
+            onLoad={handleInitialListLoad}
             ref={props.listRef}
             // The empty↔filled key remounts the list when messages first
             // arrive. LegendList's maintainScrollAtEnd calls scrollToEnd(),
@@ -2829,7 +2864,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
               paddingHorizontal: contentHorizontalPadding,
             }}
           />
-        </View>
+        </Animated.View>
         {props.feed.length === 0 &&
         props.activeWorkStartedAt === null &&
         props.contentPresentation.kind === "ready" ? (

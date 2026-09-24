@@ -1,3 +1,4 @@
+import * as EnvironmentRelinks from "./EnvironmentRelinks.ts";
 import {
   RelayEnvironmentLinkProofPayload,
   RelayEnvironmentLinkProofInvalidReason,
@@ -66,6 +67,7 @@ export class EnvironmentLinkProofInvalid extends Schema.TaggedErrorClass<Environ
 }
 
 export type EnvironmentLinkError =
+  | EnvironmentRelinks.EnvironmentRelinkError
   | ManagedAccess.ManagedAccessRequired
   | ManagedAccess.ManagedAccessUnavailable
   | EnvironmentLinkProofExpired
@@ -144,6 +146,7 @@ const make = Effect.gen(function* () {
   const managedAccess = yield* ManagedAccess.ManagedAccess;
   const teams = yield* Effect.serviceOption(TeamRuntime);
   const links = yield* EnvironmentLinks.EnvironmentLinks;
+  const relinks = yield* EnvironmentRelinks.EnvironmentRelinks;
   const credentials = yield* EnvironmentCredentials.EnvironmentCredentials;
   const managedEndpointProvider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
   const proofReplay = yield* DpopProofs.DpopProofReplay;
@@ -298,93 +301,99 @@ const make = Effect.gen(function* () {
         return yield* new ManagedAccess.ManagedAccessRequired({
           message: "Update this Lecturn host before publishing it with a company seat.",
         });
-      if (Option.isSome(teams)) {
-        yield* teams.value
-          .prepareLink(input.userId, verified.environmentId, input.request)
-          .pipe(
-            Effect.mapError(
-              (error) => new ManagedAccess.ManagedAccessRequired({ message: error.message }),
-            ),
-          );
-      } else if (input.request.organizationId) {
-        return yield* new ManagedAccess.ManagedAccessRequired({
-          message: "Teams are not enabled on this relay.",
-        });
-      }
-      // Disabled in normal deployments; sandbox gates only requested hosted features.
-      if (input.request.managedTunnelsEnabled)
-        yield* managedAccess.check(
-          input.userId,
-          "managedConnect",
-          undefined,
-          verified.environmentId,
-        );
-      if (input.request.notificationsEnabled)
-        yield* managedAccess.check(
-          input.userId,
-          "pushNotifications",
-          undefined,
-          verified.environmentId,
-        );
-      if (input.request.liveActivitiesEnabled)
-        yield* managedAccess.check(
-          input.userId,
-          "liveActivities",
-          undefined,
-          verified.environmentId,
-        );
-      // Downgrading a managed link to publish-only must release the tunnel and
-      // DNS that were provisioned for it — nothing else cleans them up until a
-      // full unlink. Best effort: a cleanup failure must not block the link
-      // itself, and the provider treats an absent allocation as already
-      // deprovisioned, so retrying on every non-tunnel link is cheap.
-      if (!input.request.managedTunnelsEnabled) {
-        yield* managedEndpointProvider
-          .deprovision({
-            userId: input.userId,
-            environmentId: verified.environmentId,
-          })
-          .pipe(
-            Effect.tapError((error) =>
-              Effect.logWarning("managed endpoint deprovision on publish-only link failed", {
+      return yield* relinks.withLinkLock(
+        verified.environmentId,
+        Effect.gen(function* () {
+          if (Option.isSome(teams)) {
+            yield* teams.value
+              .prepareLink(input.userId, verified.environmentId, input.request)
+              .pipe(
+                Effect.mapError(
+                  (error) => new ManagedAccess.ManagedAccessRequired({ message: error.message }),
+                ),
+              );
+          } else if (input.request.organizationId) {
+            return yield* new ManagedAccess.ManagedAccessRequired({
+              message: "Teams are not enabled on this relay.",
+            });
+          }
+          // Disabled in normal deployments; sandbox gates only requested hosted features.
+          if (input.request.managedTunnelsEnabled)
+            yield* managedAccess.check(
+              input.userId,
+              "managedConnect",
+              undefined,
+              verified.environmentId,
+            );
+          if (input.request.notificationsEnabled)
+            yield* managedAccess.check(
+              input.userId,
+              "pushNotifications",
+              undefined,
+              verified.environmentId,
+            );
+          if (input.request.liveActivitiesEnabled)
+            yield* managedAccess.check(
+              input.userId,
+              "liveActivities",
+              undefined,
+              verified.environmentId,
+            );
+          // Downgrading a managed link to publish-only must release the tunnel and
+          // DNS that were provisioned for it — nothing else cleans them up until a
+          // full unlink. Best effort: a cleanup failure must not block the link
+          // itself, and the provider treats an absent allocation as already
+          // deprovisioned, so retrying on every non-tunnel link is cheap.
+          if (!input.request.managedTunnelsEnabled) {
+            yield* managedEndpointProvider
+              .deprovision({
+                userId: input.userId,
                 environmentId: verified.environmentId,
-                errorTag: error._tag,
-              }),
-            ),
-            Effect.ignore,
-          );
-      }
-      const provisioned = input.request.managedTunnelsEnabled
-        ? yield* managedEndpointProvider.provision({
-            userId: input.userId,
+              })
+              .pipe(
+                Effect.tapError((error) =>
+                  Effect.logWarning("managed endpoint deprovision on publish-only link failed", {
+                    environmentId: verified.environmentId,
+                    errorTag: error._tag,
+                  }),
+                ),
+                Effect.ignore,
+              );
+          }
+          const provisioned = input.request.managedTunnelsEnabled
+            ? yield* managedEndpointProvider.provision({
+                userId: input.userId,
+                environmentId: verified.environmentId,
+                origin: verified.origin,
+              })
+            : null;
+          const endpoint = provisioned?.endpoint ?? verified.endpoint;
+          // The secure-endpoint requirement only matters when the relay advertises
+          // this endpoint for other devices to reach (managed tunnel). Publish-only
+          // links are reached out of band (e.g. Tailscale) and their stored endpoint
+          // is never used for routing, so a nominal endpoint is acceptable.
+          if (input.request.managedTunnelsEnabled && !isSecureManagedEndpoint(endpoint)) {
+            return yield* new EnvironmentLinkProofInvalid({
+              userId: input.userId,
+              environmentId: verified.environmentId,
+              reason: "endpoint_not_secure",
+              stage: "validate_endpoint",
+            });
+          }
+          yield* relinks.displace({ userId: input.userId, environmentId: verified.environmentId });
+          yield* links.upsert({ ...input, proof: verified, endpoint });
+          const environmentCredential = yield* credentials.create({
             environmentId: verified.environmentId,
-            origin: verified.origin,
-          })
-        : null;
-      const endpoint = provisioned?.endpoint ?? verified.endpoint;
-      // The secure-endpoint requirement only matters when the relay advertises
-      // this endpoint for other devices to reach (managed tunnel). Publish-only
-      // links are reached out of band (e.g. Tailscale) and their stored endpoint
-      // is never used for routing, so a nominal endpoint is acceptable.
-      if (input.request.managedTunnelsEnabled && !isSecureManagedEndpoint(endpoint)) {
-        return yield* new EnvironmentLinkProofInvalid({
-          userId: input.userId,
-          environmentId: verified.environmentId,
-          reason: "endpoint_not_secure",
-          stage: "validate_endpoint",
-        });
-      }
-      yield* links.upsert({ ...input, proof: verified, endpoint });
-      const environmentCredential = yield* credentials.create({
-        environmentId: verified.environmentId,
-        environmentPublicKey: verified.environmentPublicKey,
-      });
-      return {
-        environmentId: verified.environmentId,
-        endpoint,
-        endpointRuntime: provisioned?.runtime ?? null,
-        environmentCredential,
-      };
+            environmentPublicKey: verified.environmentPublicKey,
+          });
+          return {
+            environmentId: verified.environmentId,
+            endpoint,
+            endpointRuntime: provisioned?.runtime ?? null,
+            environmentCredential,
+          };
+        }),
+      );
     }),
   });
 });

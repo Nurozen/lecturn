@@ -25,6 +25,8 @@ export const EMPTY_ENVIRONMENT_CATALOG_STATE: EnvironmentCatalogState = Object.f
   entries: new Map(),
 });
 
+const EMPTY_ENVIRONMENT_ID_SET: ReadonlySet<EnvironmentIdType> = new Set();
+
 export function createEnvironmentCatalogAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry.EnvironmentRegistry | R, E>,
 ) {
@@ -62,6 +64,23 @@ export function createEnvironmentCatalogAtoms<R, E>(
   const networkStatusValueAtom = Atom.make((get) =>
     Option.getOrElse(AsyncResult.value(get(networkStatusAtom)), () => "unknown" as const),
   ).pipe(Atom.withLabel("environment-network-status-value"));
+
+  const unlistedRelayEnvironmentIdsAtom = runtime.atom(
+    Stream.unwrap(
+      EnvironmentRegistry.EnvironmentRegistry.pipe(
+        Effect.map((registry) => SubscriptionRef.changes(registry.unlistedRelayEnvironmentIds)),
+      ),
+    ),
+    { initialValue: EMPTY_ENVIRONMENT_ID_SET },
+  );
+
+  /** Relay environments no signed-in account lists. In memory only. */
+  const unlistedRelayEnvironmentIdsValueAtom = Atom.make((get) =>
+    Option.getOrElse(
+      AsyncResult.value(get(unlistedRelayEnvironmentIdsAtom)),
+      () => EMPTY_ENVIRONMENT_ID_SET,
+    ),
+  ).pipe(Atom.withLabel("environment-unlisted-relay-ids-value"));
 
   const stateAtom = Atom.family((environmentId: EnvironmentIdType) =>
     runtime.atom(
@@ -101,9 +120,10 @@ export function createEnvironmentCatalogAtoms<R, E>(
     label: "environment-catalog:remove-relay-environments",
     scheduler: commandScheduler,
     concurrency: serial,
-    execute: (_input: void) =>
+    // No input removes every relay environment; an account removes only its own.
+    execute: (scope: { readonly accountId: string } | void) =>
       EnvironmentRegistry.EnvironmentRegistry.pipe(
-        Effect.flatMap((registry) => registry.removeRelayEnvironments()),
+        Effect.flatMap((registry) => registry.removeRelayEnvironments(scope ?? undefined)),
       ),
   });
   const retryNow = createRuntimeCommand(runtime, {
@@ -121,6 +141,7 @@ export function createEnvironmentCatalogAtoms<R, E>(
     catalogValueAtom,
     networkStatusAtom,
     networkStatusValueAtom,
+    unlistedRelayEnvironmentIdsValueAtom,
     stateAtom,
     register,
     remove,

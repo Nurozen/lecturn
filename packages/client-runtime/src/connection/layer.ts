@@ -23,7 +23,7 @@ export function layerWithOptions(options: RpcSession.RpcSessionOptions) {
   const onboardingLayer = ConnectionOnboarding.layer.pipe(Layer.provide(registryLayer));
   const connectionServicesLayer = Layer.mergeAll(
     registryLayer,
-    RelayEnvironmentDiscovery.layer,
+    RelayEnvironmentDiscovery.layer.pipe(Layer.provide(registryLayer)),
     onboardingLayer,
   );
   const connectionStartupLayer = Layer.effectDiscard(

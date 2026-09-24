@@ -27,9 +27,13 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import * as Tracer from "effect/Tracer";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import { BackgroundPolicy } from "../background/BackgroundPolicy.ts";
+import { ServerActivation } from "../serverActivation.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import {
   OrchestrationEngineService,
@@ -58,6 +62,9 @@ const state: RelayAgentActivityState = {
   updatedAt: "2026-05-25T00:00:00.000Z",
   deepLink: "/threads/env/thread",
 };
+
+const backgroundPolicyStub = (isUserPresent: Effect.Effect<boolean>) =>
+  ({ isUserPresent }) as unknown as BackgroundPolicy["Service"];
 
 const encodeSecret = (value: string): Uint8Array => new TextEncoder().encode(value);
 
@@ -553,6 +560,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
             getDescriptor: Effect.succeed(descriptor),
           }),
           Layer.succeed(OrchestrationEngineService, orchestrationEngine),
+          Layer.succeed(BackgroundPolicy, backgroundPolicyStub(Effect.succeed(false))),
           Layer.succeed(ProjectionSnapshotQuery, snapshotQuery),
         );
 
@@ -699,6 +707,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
 
         const layer = Layer.mergeAll(
           Layer.succeed(ServerSecretStore.ServerSecretStore, secrets.store),
+          Layer.succeed(BackgroundPolicy, backgroundPolicyStub(Effect.succeed(false))),
           Layer.succeed(ServerEnvironment.ServerEnvironment, {
             getEnvironmentId: Effect.succeed(environmentId),
             getDescriptor: Effect.succeed(descriptor),
@@ -782,6 +791,7 @@ it.effect(
             canPublishActivity: Effect.succeed(false),
           }),
           Effect.provideService(ServerSecretStore.ServerSecretStore, secrets.store),
+          Effect.provideService(BackgroundPolicy, backgroundPolicyStub(Effect.succeed(false))),
           Effect.provideService(ServerEnvironment.ServerEnvironment, {
             getEnvironmentId: Effect.succeed("env-policy" as EnvironmentId),
             getDescriptor: Effect.die("Should not read descriptor"),
@@ -806,3 +816,258 @@ it.effect(
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
 );
+
+describe.sequential("user presence", () => {
+  const now = "2026-05-25T00:00:00.000Z";
+  const projectId = "project-1" as ProjectId;
+  const project = {
+    id: projectId,
+    title: "Lecturn",
+    workspaceRoot: "/workspace",
+    repositoryIdentity: null,
+    defaultModelSelection: null,
+    scripts: [],
+    createdAt: now,
+    updatedAt: now,
+  } satisfies OrchestrationProjectShell;
+
+  const makeThread = (
+    id: string,
+    overrides: Partial<OrchestrationThreadShell> = {},
+  ): OrchestrationThreadShell => ({
+    id: id as ThreadId,
+    projectId,
+    title: "Run remote agent",
+    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+    latestTurn: null,
+    createdAt: now,
+    updatedAt: now,
+    archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
+    session: null,
+    latestUserMessageAt: now,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
+    ...overrides,
+  });
+
+  /**
+   * A started relay whose publishes land in `publishes` and whose presence is
+   * `presence.current`. The fetch stub is provided as a service because the
+   * client's default `globalThis.fetch` is resolved once per process.
+   */
+  const makeHarness = Effect.fn(function* (threads: ReadonlyArray<OrchestrationThreadShell>) {
+    const presence = { current: false, reads: 0 };
+    // Request bodies of each relay publish, in order.
+    const publishes = yield* Queue.unbounded<unknown>();
+    // Set `failNext` to make the relay reject one publish; it lands in `failures`.
+    const fetchState = { failNext: false };
+    const failures = yield* Queue.unbounded<void>();
+    const relayFetch = (async (...args: ConstructorParameters<typeof Request>) => {
+      if (fetchState.failNext) {
+        fetchState.failNext = false;
+        Queue.offerUnsafe(failures, undefined);
+        return Response.json({ error: "unavailable" }, { status: 503 });
+      }
+      Queue.offerUnsafe(publishes, await new Request(...args).json());
+      return Response.json({ ok: true, deliveries: [] });
+    }) as typeof fetch;
+
+    const secrets = makeMemorySecretStore();
+    yield* secrets.setString(RELAY_URL_SECRET, "https://relay.example.test");
+    yield* secrets.setString(RELAY_ENVIRONMENT_CREDENTIAL_SECRET, "relay-credential");
+    yield* secrets.setString(PUBLISH_AGENT_ACTIVITY_SECRET, "true");
+
+    const relay = yield* AgentAwarenessRelay.make.pipe(
+      Effect.provideService(TeamPolicy, {
+        checkProvider: () => Effect.void,
+        canPublishActivity: Effect.succeed(true),
+      }),
+      Effect.provideService(ServerSecretStore.ServerSecretStore, secrets.store),
+      Effect.provideService(
+        BackgroundPolicy,
+        backgroundPolicyStub(
+          Effect.sync(() => {
+            presence.reads += 1;
+            return presence.current;
+          }),
+        ),
+      ),
+      Effect.provideService(ServerEnvironment.ServerEnvironment, {
+        getEnvironmentId: Effect.succeed("env-1" as EnvironmentId),
+        getDescriptor: Effect.die("Should not read descriptor"),
+      }),
+      Effect.provideService(ProjectionSnapshotQuery, {
+        // Startup catch-up publishes outside the worker; keep it out of these tests.
+        getShellSnapshot: () =>
+          Effect.succeed({
+            snapshotSequence: 1,
+            projects: [project],
+            threads: [],
+            updatedAt: now,
+          } satisfies OrchestrationShellSnapshot),
+        getThreadShellById: (threadId: ThreadId) =>
+          Effect.succeed(Option.fromNullishOr(threads.find((thread) => thread.id === threadId))),
+        getProjectShellById: () => Effect.succeed(Option.some(project)),
+      } as unknown as ProjectionSnapshotQueryShape),
+      Effect.provideService(OrchestrationEngineService, {
+        readEvents: () => Stream.empty,
+        dispatch: () => Effect.succeed({ sequence: 1 }),
+        streamDomainEvents: Stream.empty,
+        subscribeDomainEvents: Effect.succeed(Stream.empty),
+        latestSequence: Effect.succeed(0),
+      }),
+      Effect.provideService(FetchHttpClient.Fetch, relayFetch),
+    );
+    yield* relay.start();
+    const publishThread = (threadId: ThreadId) =>
+      relay.publishThread(threadId).pipe(Effect.provideService(FetchHttpClient.Fetch, relayFetch));
+    return { relay, publishThread, presence, publishes, relayFetchState: fetchState, failures };
+  });
+
+  it.effect("tells the relay whether the user is present at publish time", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { publishThread, presence, publishes } = yield* makeHarness([
+          makeThread("thread-present", { hasPendingUserInput: true }),
+          makeThread("thread-away", { hasPendingUserInput: true }),
+        ]);
+
+        presence.current = true;
+        yield* publishThread("thread-present" as ThreadId);
+        expect(yield* Queue.take(publishes)).toMatchObject({ userPresent: true });
+
+        presence.current = false;
+        yield* publishThread("thread-away" as ThreadId);
+        expect(yield* Queue.take(publishes)).toMatchObject({ userPresent: false });
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "rings once after the user leaves when a thread needed input while they were present",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const threadId = "thread-1" as ThreadId;
+          const { relay, publishThread, presence, publishes } = yield* makeHarness([
+            makeThread(threadId, { hasPendingUserInput: true }),
+          ]);
+
+          presence.current = true;
+          yield* publishThread(threadId);
+          expect(yield* Queue.take(publishes)).toMatchObject({
+            state: { phase: "waiting_for_input" },
+            userPresent: true,
+          });
+
+          // The user is still present at the next check: nothing is redelivered.
+          const readsBeforeCheck = presence.reads;
+          yield* TestClock.adjust("30 seconds");
+          yield* relay.drain;
+          expect(presence.reads).toBe(readsBeforeCheck + 1);
+          expect(yield* Queue.size(publishes)).toBe(0);
+
+          presence.current = false;
+          yield* TestClock.adjust("30 seconds");
+          expect(yield* Queue.take(publishes)).toMatchObject({
+            state: { phase: "waiting_for_input" },
+            userPresent: false,
+          });
+          yield* relay.drain;
+
+          yield* TestClock.adjust("2 minutes");
+          yield* relay.drain;
+          expect(yield* Queue.size(publishes)).toBe(0);
+        }),
+      ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("retries a failed redelivery on the next check, then stops", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const threadId = "thread-1" as ThreadId;
+        const activation = yield* Deferred.make<void>();
+        const { relay, publishThread, presence, publishes, relayFetchState, failures } =
+          yield* makeHarness([makeThread(threadId, { hasPendingUserInput: true })]).pipe(
+            Effect.provideService(ServerActivation, Deferred.await(activation)),
+          );
+
+        presence.current = true;
+        yield* publishThread(threadId);
+        expect(yield* Queue.take(publishes)).toMatchObject({ userPresent: true });
+
+        presence.current = false;
+        relayFetchState.failNext = true;
+        // Let startup fibers run only after a suppressed event exists. There must
+        // still be a full interval before the first attempt, not an immediate retry.
+        yield* Deferred.succeed(activation, undefined);
+        yield* TestClock.adjust("29 seconds");
+        yield* relay.drain;
+        expect(yield* Queue.size(failures)).toBe(0);
+        expect(yield* Queue.size(publishes)).toBe(0);
+        yield* TestClock.adjust("1 second");
+        yield* Queue.take(failures);
+        yield* relay.drain;
+        expect(yield* Queue.size(publishes)).toBe(0);
+
+        yield* TestClock.adjust("30 seconds");
+        expect(yield* Queue.take(publishes)).toMatchObject({
+          state: { phase: "waiting_for_input" },
+          userPresent: false,
+        });
+        yield* relay.drain;
+
+        yield* TestClock.adjust("2 minutes");
+        yield* relay.drain;
+        expect(yield* Queue.size(publishes)).toBe(0);
+        expect(yield* Queue.size(failures)).toBe(0);
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("redelivers a suppressed completion without a second confirmation delay", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const threadId = "thread-1" as ThreadId;
+        const { relay, publishThread, presence, publishes } = yield* makeHarness([
+          makeThread(threadId, {
+            latestTurn: {
+              turnId: "turn-1" as TurnId,
+              state: "completed",
+              requestedAt: now,
+              startedAt: now,
+              completedAt: now,
+              assistantMessageId: null,
+            },
+          }),
+        ]);
+
+        // Completed as a first state is confirmed five seconds later.
+        presence.current = true;
+        yield* publishThread(threadId);
+        yield* TestClock.adjust("5 seconds");
+        expect(yield* Queue.take(publishes)).toMatchObject({
+          state: { phase: "completed" },
+          userPresent: true,
+        });
+        yield* relay.drain;
+
+        // The check at 30s republishes straight away; a second confirmation
+        // delay would need the clock to move again and this take would hang.
+        presence.current = false;
+        yield* TestClock.adjust("25 seconds");
+        expect(yield* Queue.take(publishes)).toMatchObject({
+          state: { phase: "completed" },
+          userPresent: false,
+        });
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+});

@@ -1,3 +1,4 @@
+import { useSettingsAccountGlass } from "./useSettingsAccountGlass";
 import { staveRpcErrorMessage } from "@lecturn/client-runtime/errors";
 import type { EnvironmentId, StaveProjectInfo, StaveSpaceStatus } from "@lecturn/contracts";
 import { RefreshCwIcon } from "lucide-react";
@@ -30,6 +31,7 @@ export function StaveProjectSection({
   environmentId: EnvironmentId;
   workspaceRoot: string;
 }) {
+  const glass = useSettingsAccountGlass(environmentId);
   const { available, status } = useStaveFeatureAvailable(environmentId);
   const live = useStaveSpaceStatus({
     environmentId,
@@ -47,16 +49,18 @@ export function StaveProjectSection({
   const showLive = available && live.data !== null;
   return (
     <SettingsSection
-      title="Stave space"
+      {...glass}
+      className="lecturn-account-surface lecturn-project-settings"
+      title={kind === "saga" ? "Stave saga" : "Stave space"}
       headerAction={available ? <LiveStatusAction live={live} /> : null}
     >
       {available && live.error !== null ? (
-        <p className="px-3 text-xs text-muted-foreground sm:px-4">
+        <p className="px-3 py-3 text-xs leading-relaxed text-muted-foreground sm:px-4">
           {staveRpcErrorMessage(live.error) ??
             (live.error instanceof Error ? live.error.message : "Live status unavailable.")}
         </p>
       ) : null}
-      <div className="px-3 sm:px-4">
+      <div className="px-3 py-3 sm:px-4">
         <StaveCompatibilityNotice status={status.data} />
       </div>
       <SettingsRow title="Space id" control={<ManifestValue>{stave.spaceId}</ManifestValue>} />
@@ -234,9 +238,9 @@ function ManifestTable({
 }) {
   const columns = `repeat(${header.length}, minmax(0, 1fr))`;
   return (
-    <div className="mb-2 mt-1 overflow-hidden rounded-lg border border-border/60 text-xs">
+    <div className="lecturn-glass-panel mb-3 mt-2 overflow-x-auto rounded-xl border border-border/40 text-xs">
       <div
-        className="grid gap-3 border-b border-border/60 bg-muted/40 px-3 py-1.5 font-medium text-muted-foreground"
+        className="grid gap-3 border-b border-border/60 bg-muted/40 px-3 py-2.5 font-medium text-muted-foreground"
         style={{ gridTemplateColumns: columns }}
       >
         {header.map((label) => (
@@ -246,7 +250,7 @@ function ManifestTable({
       {rows.map((row) => (
         <div
           key={row.map((cell) => cellText(cell) ?? "").join(" ")}
-          className="grid gap-3 px-3 py-1.5 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-border/40"
+          className="grid gap-3 px-3 py-2.5 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-border/40"
           style={{ gridTemplateColumns: columns }}
         >
           {row.map((cell, cellIndex) => (
