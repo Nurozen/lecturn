@@ -51,6 +51,7 @@ import {
 import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
 import {
   deriveComposerSendState,
+  deriveUnsentImportInstanceId,
   getAntigravitySendBlockReason,
   readFileAsDataUrl,
   resolveComposerInteractionMode,
@@ -1569,6 +1570,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [providerStatuses, settings],
   );
   const selectedProviderByThreadId = composerDraft.activeProvider ?? null;
+  const unsentImportInstanceId = deriveUnsentImportInstanceId(activeThread);
   const {
     selectedProviderEntry,
     requestedDriverKind,
@@ -1586,9 +1588,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ],
         lockedProvider,
         lockedInstanceId:
-          activeThread?.session?.providerInstanceId ?? activeThreadModelSelection?.instanceId,
+          unsentImportInstanceId ??
+          activeThread?.session?.providerInstanceId ??
+          activeThreadModelSelection?.instanceId,
+        requireExactInstance: unsentImportInstanceId !== null,
       }),
     [
+      unsentImportInstanceId,
       activeProjectDefaultModelSelection?.instanceId,
       activeThread?.session?.providerInstanceId,
       activeThreadModelSelection?.instanceId,
@@ -3853,6 +3859,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         model={selectedModelForPickerWithCustomFallback}
         lockedProvider={lockedProvider}
         lockedContinuationGroupKey={lockedContinuationGroupKey}
+        lockedInstanceId={unsentImportInstanceId}
         instanceEntries={providerInstanceEntries}
         keybindings={keybindings}
         modelOptionsByInstance={modelOptionsByInstance}

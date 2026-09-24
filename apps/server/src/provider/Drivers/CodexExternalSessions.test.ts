@@ -200,6 +200,17 @@ describe("listCodexExternalThreads", () => {
     }),
   );
 
+  it.effect("lists a thread once when Codex repeats it", () =>
+    Effect.gen(function* () {
+      // Codex 0.154 returns some threads twice in a single page.
+      const { client } = fakeClient([
+        { data: [thread({ id: "a" }), thread({ id: "a" }), thread({ id: "b" })] },
+      ]);
+      const result = yield* listCodexExternalThreads(client, { limit: 10, knownThreadIds: NONE });
+      expect(result.sessions.map((session) => session.sessionId)).toEqual(["a", "b"]);
+    }),
+  );
+
   it.effect("stops at the scan cap and reports truncation with a cursor remaining", () =>
     Effect.gen(function* () {
       const { client, payloads } = fakeClient(

@@ -1,6 +1,7 @@
 # Thread forking
 
-> For maintainers. Using Lecturn? See [Forking threads](../user/forking-threads.md).
+> For maintainers. Using Lecturn? See [Forking threads](../user/forking-threads.md) and
+> [Importing sessions](../user/importing-sessions.md).
 
 A fork is a new thread aggregate that carries a copy of its source thread's history through a
 fork point (a turn boundary, inclusive), plus lineage, and whose provider session is forked
@@ -196,6 +197,24 @@ Nameable failures travel as `threadImportFailure` on the dispatch error
 `forking-disabled`, `provider-unsupported`, `provider-unavailable`, `session-not-found`,
 `unreadable`, and `empty-session`. The other pre-fork rejections are plain dispatch errors.
 
+The web client derives an imported thread's look from `importedFrom` alone, in
+[`ChatView.logic.ts`][web-logic]. `resolveThreadHistoryDividers` draws the import divider above the
+first row that is not imported history, or at the end until one exists, so a fork of an import
+shows the import divider, the parent's turns, then the fork divider. `deriveUnsentImportInstanceId`
+pins the composer to `importedFrom.providerInstanceId` while the thread has no session and is not a
+fork, which is exactly the window in which the server rejects any other instance; models within
+that instance stay selectable. `buildRevertTurnCountByUserMessageId` skips imported rows, and the
+truncated-history note shares the timeline's "Load earlier turns" header slot, so it appears only
+once the oldest page is loaded.
+
+The picker is a command palette sub-page, opened by the palette's "Import session…" action (and the
+legacy sidebar's project menu, which opens the same page). A session is importable only when its
+cwd equals a project root or a known thread `worktreePath`; every other cwd, including a git
+worktree Lecturn does not manage, renders as a disabled row, so a thread's `worktreePath` never
+points at an unmanaged folder and never differs from the session's folder. The import carries
+runtime and interaction mode from the viewed thread through the same `resolveCarriedThreadModes`
+helper a new thread uses, falling back to the contract defaults only when nothing is being viewed.
+
 Known limits: a forked session is never cleaned up, so an orphan stays in the provider home when
 a Codex fork holds no messages (its turns cannot be read before forking) or the dispatch fails
 after the fork. The first-turn gate in
@@ -204,6 +223,7 @@ send generates no title; the title already comes from the external session. The 
 only what Lecturn shows: the first resumed turn makes the provider re-read the whole session.
 
 [contracts]: ../../packages/contracts/src/orchestration.ts
+[web-logic]: ../../apps/web/src/components/ChatView.logic.ts
 [normalizer]: ../../apps/server/src/orchestration/Normalizer.ts
 [ws]: ../../apps/server/src/ws.ts
 [threadfork]: ../../apps/server/src/orchestration/threadFork.ts

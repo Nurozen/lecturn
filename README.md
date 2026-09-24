@@ -146,6 +146,7 @@ Read [AGENTS.md](./AGENTS.md) and [CONTRIBUTING.md](./CONTRIBUTING.md) before ma
 - [PR tracking and agent handoff](./docs/user/notifications-and-live-activities.md#pull-request-activity)
 - [Mac activity panel](./docs/user/notifications-and-live-activities.md#mac-activity-panel)
 - [Forking conversations](./docs/user/forking-threads.md)
+- [Importing Claude Code and Codex sessions](./docs/user/importing-sessions.md)
 - [Connect access](./docs/user/connect-subscription.md)
 - [Notifications and Live Activities](./docs/user/notifications-and-live-activities.md)
 - [Permission modes](./docs/user/permission-modes.md)

@@ -32,6 +32,7 @@ import {
 } from "../../components/AndroidScreenHeader";
 import { LoadingScreen } from "../../components/LoadingScreen";
 import { scopedThreadKey } from "../../lib/scopedEntities";
+import { buildThreadImportLabel } from "../../lib/threadActivity";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { connectionTone } from "../connection/connectionTone";
 
@@ -366,10 +367,17 @@ function ThreadRouteContent(
     );
     return parent !== undefined ? `Forked from ${parent.title}` : "Forked from another thread";
   }, [selectedThread, threadShells]);
+  // A fork of an imported thread keeps both origins; the fork is the nearer
+  // one, so it is the one the subtitle names.
+  const originLabel =
+    forkedFromLabel ??
+    (selectedThread?.importedFrom != null
+      ? buildThreadImportLabel(selectedThread.importedFrom)
+      : null);
   const headerSubtitle = [
     selectedThreadProject?.title ?? null,
     selectedEnvironmentConnection?.environmentLabel ?? null,
-    forkedFromLabel,
+    originLabel,
   ]
     .filter(Boolean)
     .join(" · ");

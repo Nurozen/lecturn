@@ -33,13 +33,14 @@ import { resolveDefaultThreadEnvMode } from "@lecturn/shared/threadEnvMode";
 import { readProjects, readThreadShell, useProjects, useThread } from "../state/entities";
 import {
   hasExplicitComposerModelSelection,
+  resolveCarriedThreadModes,
   resolveNewDraftStartFromOrigin,
   resolveNewThreadEnvModeSources,
   resolveNewThreadModelSelectionOverride,
 } from "../lib/chatThreadActions";
 import { readLecturnProjectFileDefaultThreadEnvMode } from "../lib/lecturnProjectFileDefaults";
 import { primaryServerSettingsAtom } from "../state/server";
-import { resolveThreadRouteTarget } from "../threadRoutes";
+import { resolveThreadRouteTarget, type ThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
 
@@ -59,6 +60,24 @@ function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undef
     ...(options?.worktreePath !== undefined ? { worktreePath: options.worktreePath } : {}),
     ...(options?.envMode !== undefined ? { envMode: options.envMode } : {}),
     ...(options?.startFromOrigin !== undefined ? { startFromOrigin: options.startFromOrigin } : {}),
+  };
+}
+
+/**
+ * The state a thread created while viewing `routeTarget` carries from: the
+ * persisted thread or draft behind the route, plus that route's composer
+ * overrides. Snapshot read, for dispatch time.
+ */
+export function readThreadCarrySources(routeTarget: ThreadRouteTarget | null) {
+  const { getComposerDraft, getDraftSession } = useComposerDraftStore.getState();
+  return {
+    shell: routeTarget?.kind === "server" ? readThreadShell(routeTarget.threadRef) : null,
+    draft: routeTarget?.kind === "draft" ? getDraftSession(routeTarget.draftId) : null,
+    composer: routeTarget
+      ? getComposerDraft(
+          routeTarget.kind === "server" ? routeTarget.threadRef : routeTarget.draftId,
+        )
+      : null,
   };
 }
 
@@ -109,37 +128,15 @@ export function useNewThreadHandler() {
       // viewed. The target project's configured model still wins; runtime and
       // interaction modes carry independently. Branch, worktree, and env mode
       // come from configured defaults unless the caller passes them explicitly.
-      const carrySourceShell =
-        currentRouteTarget?.kind === "server"
-          ? readThreadShell(currentRouteTarget.threadRef)
-          : null;
-      const carrySourceDraft =
-        currentRouteTarget?.kind === "draft" ? getDraftSession(currentRouteTarget.draftId) : null;
-      // Composer overrides win over the persisted thread state — they are
-      // what the user currently sees in the composer controls.
-      const carrySourceComposer = currentRouteTarget
-        ? getComposerDraft(
-            currentRouteTarget.kind === "server"
-              ? currentRouteTarget.threadRef
-              : currentRouteTarget.draftId,
-          )
-        : null;
-      const composerActiveProvider = carrySourceComposer?.activeProvider ?? null;
+      const carrySources = readThreadCarrySources(currentRouteTarget);
+      const composerActiveProvider = carrySources.composer?.activeProvider ?? null;
       const composerModelSelection = composerActiveProvider
-        ? (carrySourceComposer?.modelSelectionByProvider[composerActiveProvider] ?? null)
+        ? (carrySources.composer?.modelSelectionByProvider[composerActiveProvider] ?? null)
         : null;
       const carryModelSelection =
-        composerModelSelection ?? carrySourceShell?.modelSelection ?? null;
-      const carryRuntimeMode =
-        carrySourceComposer?.runtimeMode ??
-        carrySourceShell?.runtimeMode ??
-        carrySourceDraft?.runtimeMode ??
-        null;
-      const carryInteractionMode =
-        carrySourceComposer?.interactionMode ??
-        carrySourceShell?.interactionMode ??
-        carrySourceDraft?.interactionMode ??
-        null;
+        composerModelSelection ?? carrySources.shell?.modelSelection ?? null;
+      const { runtimeMode: carryRuntimeMode, interactionMode: carryInteractionMode } =
+        resolveCarriedThreadModes(carrySources);
       const project = projects.find(
         (candidate) =>
           candidate.id === projectRef.projectId &&

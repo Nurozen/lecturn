@@ -1,10 +1,13 @@
+import type { ScopedProjectRef } from "@lecturn/contracts";
+
 // Tiny event bus allowing components to programmatically open the command palette
 // without owning its React state.
 const COMMAND_PALETTE_OPEN_EVENT = "lecturn:open-command-palette";
 
-export interface CommandPaletteOpenDetail {
-  readonly open?: "add-project" | "new-thread-in";
-}
+export type CommandPaletteOpenDetail =
+  | { readonly open?: "add-project" | "new-thread-in" }
+  // Opens straight into the session picker for that project.
+  | { readonly open: "import-session"; readonly projectRef: ScopedProjectRef };
 
 export function openCommandPalette(detail?: CommandPaletteOpenDetail): void {
   window.dispatchEvent(

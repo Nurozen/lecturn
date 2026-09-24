@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
+import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@lecturn/contracts";
 import type { Thread } from "../types";
 import {
@@ -45,6 +46,22 @@ describe("browseInputEndPaddingClass", () => {
 
 describe("reduceCommandPaletteUiState", () => {
   const closedState = { open: false, mode: "command", openIntent: null } as const;
+
+  it("opens for a session import with its project, and forgets it on close", () => {
+    const projectRef = scopeProjectRef(EnvironmentId.make("env-1"), ProjectId.make("project-1"));
+    const opened = reduceCommandPaletteUiState(closedState, {
+      _tag: "OpenImportSession",
+      projectRef,
+    });
+    expect(opened).toEqual({
+      open: true,
+      mode: "command",
+      openIntent: { kind: "import-session", projectRef },
+    });
+    expect(reduceCommandPaletteUiState(opened, { _tag: "SetOpen", open: false }).openIntent).toBe(
+      null,
+    );
+  });
 
   it("toggles each overlay mode open and closed", () => {
     const filesOpen = reduceCommandPaletteUiState(closedState, {

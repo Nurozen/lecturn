@@ -9,6 +9,9 @@ different direction without disturbing the original.
 The original thread is never changed by a fork. Delete a fork like any other thread; deleting the
 original does not delete its forks.
 
+To continue a conversation you started outside Lecturn instead, see
+[Importing sessions](./importing-sessions.md).
+
 ## Where to fork
 
 On web and desktop, hover over a completed reply to reveal the **Fork from here** icon below it,

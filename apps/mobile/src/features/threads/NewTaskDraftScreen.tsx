@@ -103,6 +103,7 @@ import { removeThreadOutboxMessage } from "../../state/thread-outbox-removal";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
 import { useNewTaskFlow } from "./new-task-flow-provider";
 import { resolveProjectThreadCreationBranch } from "./projectThreadCreationValidation";
+import { useThreadImportAvailability } from "./use-import-thread";
 import { useCreateProjectThread } from "./use-project-actions";
 import { resolveDraftProjectSelection } from "./new-task-project-selection";
 import {
@@ -181,6 +182,7 @@ export function NewTaskDraftScreen(props: {
   const selectedEnvironmentServerConfig = useEnvironmentServerConfig(
     selectedProject?.environmentId ?? null,
   );
+  const importAvailability = useThreadImportAvailability(selectedProject?.environmentId ?? null);
   const environmentConnected =
     selectedProject !== null &&
     connectedEnvironments.find(
@@ -1134,7 +1136,9 @@ export function NewTaskDraftScreen(props: {
     void KeyboardController.dismiss({ animated: true });
     navigation.dispatch(StackActions.push("NewTask", { incomingShareId: props.incomingShareId }));
   };
-  const openContextPicker = (routeName: "NewTaskBranch" | "NewTaskEnvironment") => {
+  const openContextPicker = (
+    routeName: "NewTaskBranch" | "NewTaskEnvironment" | "NewTaskImportSession",
+  ) => {
     if (isComposerInteractionLocked) {
       return;
     }
@@ -1265,6 +1269,19 @@ export function NewTaskDraftScreen(props: {
             maxWidth={190}
             onPress={() => openContextPicker("NewTaskBranch")}
           />
+
+          {importAvailability.available ? (
+            <ComposerInlineControl
+              accessibilityHint="Continues a session you started in the agent's own app"
+              accessibilityLabel="Import session"
+              chevronDirection="right"
+              disabled={isComposerInteractionLocked}
+              icon="square.and.arrow.down"
+              label="Import"
+              maxWidth={140}
+              onPress={() => openContextPicker("NewTaskImportSession")}
+            />
+          ) : null}
         </>
       )}
     </View>

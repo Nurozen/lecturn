@@ -390,6 +390,9 @@ import {
   PullRequestDialogState,
   cloneComposerImageForRetry,
   deriveLockedProvider,
+  deriveUnsentImportInstanceId,
+  resolveThreadHistoryDividers,
+  shouldShowImportTruncatedNote,
   readFileAsDataUrl,
   resolveFileAttachmentUrl,
   reconcileMountedTerminalThreadIds,
@@ -2269,6 +2272,7 @@ function ChatViewContent(props: ChatViewProps) {
     selectedProvider: selectedProviderByThreadId,
     threadProvider,
   });
+  const unsentImportInstanceId = deriveUnsentImportInstanceId(activeThread);
   // Once a thread selects an environment, never substitute the primary
   // environment's config while the selected environment is still loading.
   const serverConfig = activeThread
@@ -2504,7 +2508,10 @@ function ChatViewContent(props: ChatViewProps) {
         ],
         lockedProvider,
         lockedInstanceId:
-          activeThread?.session?.providerInstanceId ?? activeThread?.modelSelection.instanceId,
+          unsentImportInstanceId ??
+          activeThread?.session?.providerInstanceId ??
+          activeThread?.modelSelection.instanceId,
+        requireExactInstance: unsentImportInstanceId !== null,
       }),
     [
       activeProject?.defaultModelSelection?.instanceId,
@@ -2513,6 +2520,7 @@ function ChatViewContent(props: ChatViewProps) {
       lockedProvider,
       providerInstanceEntries,
       selectedProviderByThreadId,
+      unsentImportInstanceId,
     ],
   );
   const selectedProvider = selectedProviderEntry?.driverKind ?? requestedDriverKind;
@@ -2999,8 +3007,10 @@ function ChatViewContent(props: ChatViewProps) {
         timelineEntries,
         turnDiffSummaryByAssistantMessageId,
         inferredCheckpointTurnCountByTurnId,
+        importedFrom: activeThread?.importedFrom,
       }),
     [
+      activeThread?.importedFrom,
       supportsConversationRollback,
       inferredCheckpointTurnCountByTurnId,
       timelineEntries,
@@ -3056,22 +3066,23 @@ function ChatViewContent(props: ChatViewProps) {
     timelineEntries,
     turnDiffSummaryByAssistantMessageId,
   ]);
-  // Anchor for the "forked here" divider: the last inherited message. Copied
-  // rows carry child-minted ids (`forkedFrom.messageId` stays parent-side) but
-  // keep timestamps that precede the child's creation, so the fork time
-  // separates inherited history from post-fork conversation.
-  const forkDividerAfterMessageId = useMemo(() => {
-    if (!activeThread || activeThread.forkedFrom == null) {
-      return null;
-    }
-    let lastInherited: MessageId | null = null;
-    for (const message of activeThread.messages) {
-      if (message.createdAt <= activeThread.createdAt) {
-        lastInherited = message.id;
-      }
-    }
-    return lastInherited;
-  }, [activeThread]);
+  const historyDividers = useMemo(() => resolveThreadHistoryDividers(activeThread), [activeThread]);
+  const forkDividerAfterMessageId = historyDividers.forkAfterMessageId;
+  // Rebuilt only when its content changes: the timeline derives rows from it.
+  const importDividerLabel = historyDividers.importDivider?.label ?? null;
+  const importDividerBeforeMessageId = historyDividers.importDivider?.beforeMessageId ?? null;
+  const importDivider = useMemo(
+    () =>
+      importDividerLabel === null
+        ? null
+        : { label: importDividerLabel, beforeMessageId: importDividerBeforeMessageId },
+    [importDividerBeforeMessageId, importDividerLabel],
+  );
+  const importHistoryTruncated = shouldShowImportTruncatedNote({
+    importedFrom: activeThread?.importedFrom,
+    hasOlderTurns: loadEarlierTurns !== null,
+    firstMessage: activeThread?.messages[0],
+  });
   const forkWarning =
     activeThread?.session?.status === "running"
       ? "Shares files with an agent that is still working"
@@ -7577,6 +7588,11 @@ function ChatViewContent(props: ChatViewProps) {
         scheduleComposerFocus();
         return;
       }
+      // An unsent import only resumes on the instance it was imported with.
+      if (unsentImportInstanceId !== null && instanceId !== unsentImportInstanceId) {
+        scheduleComposerFocus();
+        return;
+      }
       if (lockedProvider !== null && activeThread.session?.providerInstanceId) {
         const currentEntry = providerStatuses.find(
           (snapshot) => snapshot.instanceId === activeThread.session?.providerInstanceId,
@@ -7636,6 +7652,7 @@ function ChatViewContent(props: ChatViewProps) {
       setStickyComposerModelSelection,
       providerStatuses,
       settings,
+      unsentImportInstanceId,
     ],
   );
   const onEnvModeChange = useCallback(
@@ -8109,6 +8126,8 @@ function ChatViewContent(props: ChatViewProps) {
                 forkWarning={forkWarning}
                 revertDisabledReason={revertDisabledReason}
                 forkDividerAfterMessageId={forkDividerAfterMessageId}
+                importDivider={importDivider}
+                importHistoryTruncated={importHistoryTruncated}
                 onUseArtifactTemplate={useArtifactTemplate}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}

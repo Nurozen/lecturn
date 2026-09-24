@@ -55,6 +55,10 @@ function threadDetailToShell(
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     linkedPullRequest: thread.linkedPullRequest ?? null,
+    // Origin drives the header label, the imported divider and fold grouping,
+    // so a detail-only thread must keep it.
+    forkedFrom: thread.forkedFrom ?? null,
+    importedFrom: thread.importedFrom ?? null,
     latestTurn: thread.latestTurn,
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,

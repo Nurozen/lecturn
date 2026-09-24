@@ -364,10 +364,12 @@ export type MessagesTimelineRow =
       createdAt: string | null;
     }
   | {
-      // Static marker in a forked thread showing where it diverged from the
-      // source conversation. At most one per timeline.
+      // Static marker where copied-in history ends: the point a fork diverged
+      // from its source conversation, or (with a `label`) the end of an
+      // imported session. At most one of each per timeline.
       kind: "fork-divider";
       id: string;
+      label?: string | undefined;
     };
 
 export interface StableMessagesTimelineRowsState {
@@ -809,6 +811,8 @@ export function deriveMessagesTimelineRows(input: {
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
   forkTurnIdByMessageId?: ReadonlyMap<MessageId, TurnId>;
   forkDividerAfterMessageId?: MessageId | null;
+  /** Drawn above `beforeMessageId`, or after the last entry when that is null. */
+  importDivider?: { label: string; beforeMessageId: MessageId | null } | null;
 }): MessagesTimelineRow[] {
   const nextRows: MessagesTimelineRow[] = [];
   const durationStartByMessageId = computeMessageDurationStart(
@@ -936,10 +940,23 @@ export function deriveMessagesTimelineRows(input: {
     );
   };
 
+  const importDividerRow: MessagesTimelineRow | null = input.importDivider
+    ? { kind: "fork-divider", id: "import-divider-row", label: input.importDivider.label }
+    : null;
+
   for (let index = 0; index < input.timelineEntries.length; index += 1) {
     const timelineEntry = input.timelineEntries[index];
     if (!timelineEntry) {
       continue;
+    }
+
+    // Ahead of the turn fold and working rows that open the first new turn.
+    if (
+      importDividerRow !== null &&
+      timelineEntry.kind === "message" &&
+      timelineEntry.message.id === input.importDivider?.beforeMessageId
+    ) {
+      nextRows.push(importDividerRow);
     }
 
     if (input.isWorking && index === activeTurnHeaderIndex) {
@@ -1174,6 +1191,9 @@ export function deriveMessagesTimelineRows(input: {
     }
   }
 
+  if (importDividerRow !== null && input.importDivider?.beforeMessageId == null) {
+    nextRows.push(importDividerRow);
+  }
   if (input.isWorking && activeTurnHeaderIndex === input.timelineEntries.length) {
     appendWorkingRow();
   }
@@ -1217,9 +1237,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "thinking":
       return a.createdAt === (b as typeof a).createdAt;
 
-    // Fully determined by kind and id, both already compared above.
     case "fork-divider":
-      return true;
+      return a.label === (b as typeof a).label;
     case "assistant-meta": {
       const bm = b as typeof a;
       return (
