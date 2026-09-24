@@ -52,6 +52,16 @@ function readProviderContext(expanded: string): unknown {
 }
 
 describe("assistant citation references", () => {
+  it("round-trips raw message references without changing legacy rendered selectors", () => {
+    const raw = { ...legacyCitation, coordinateSpace: "raw-message" as const, text: "**SQLite**" };
+    expect(parseAssistantCitationHref(formatAssistantCitationHref(raw))).toStrictEqual(raw);
+    expect(
+      parseAssistantCitationHref(
+        formatAssistantCitationHref(raw).replace("raw-message", "unknown"),
+      ),
+    ).toBeNull();
+  });
+
   it("preserves legacy v1 link bytes without adding a comment", () => {
     expect(parseAssistantCitationHref(legacyHref)).toStrictEqual(legacyCitation);
     expect(formatAssistantCitationHref(legacyCitation)).toBe(legacyHref);

@@ -5,7 +5,7 @@ import {
   selectThreadPullRequestWatches,
   threadPullRequestLinks,
 } from "@lecturn/client-runtime/state/threadPullRequests";
-import { GitPullRequestIcon } from "lucide-react";
+import { GitPullRequestIcon, ListChecksIcon } from "lucide-react";
 import { usePullRequestWatches } from "../state/pullRequestWatch";
 import type { PullRequestWatch } from "@lecturn/contracts";
 import { StaveIcon } from "./StaveIcon";
@@ -4614,6 +4614,33 @@ export default function Sidebar() {
                                 message.
                               </TooltipPopup>
                             </Tooltip>
+                            {serverConfigs.get(project.environmentId)?.environment.capabilities
+                              .threadDecisions === true ? (
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={
+                                    <button
+                                      type="button"
+                                      data-lecturn-hover
+                                      className="rounded px-1 text-xs text-muted-foreground hover:bg-sidebar-row-hover"
+                                      aria-label={`Decisions for ${project.displayName}`}
+                                      onClick={() =>
+                                        void router.navigate({
+                                          to: "/decisions/$environmentId/$projectId",
+                                          params: {
+                                            environmentId: project.environmentId,
+                                            projectId: project.id,
+                                          },
+                                        })
+                                      }
+                                    >
+                                      D
+                                    </button>
+                                  }
+                                />
+                                <TooltipPopup>Project decisions</TooltipPopup>
+                              </Tooltip>
+                            ) : null}
                             <Tooltip>
                               <TooltipTrigger
                                 render={

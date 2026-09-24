@@ -5,7 +5,7 @@ import { useNavigation } from "@react-navigation/native";
 import { SymbolView } from "../../components/AppSymbol";
 import type { EnvironmentId } from "@lecturn/contracts";
 import { useCallback, useState } from "react";
-import { Platform, ScrollView, View } from "react-native";
+import { Platform, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/AppText";
@@ -104,6 +104,7 @@ export function SettingsEnvironmentsRouteScreen() {
       ) : (
         <NativeHeaderToolbar placement="right">
           <NativeHeaderToolbar.Button
+            accessibilityLabel="Add environment"
             icon="plus"
             onPress={() =>
               navigation.navigate("SettingsSheet", {
@@ -161,9 +162,21 @@ export function SettingsEnvironmentsRouteScreen() {
               />
             </View>
             <Text className="text-center text-sm leading-normal text-foreground-muted">
-              No environments connected yet.{"\n"}Tap{" "}
-              <Text className="font-lecturn-bold text-foreground">+</Text> to add one.
+              No environments connected yet.
             </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Add environment"
+              className="min-h-11 items-center justify-center rounded-xl bg-subtle px-5 py-3"
+              onPress={() =>
+                navigation.navigate("SettingsSheet", {
+                  screen: "SettingsContent",
+                  params: { screen: "SettingsEnvironmentNew" },
+                })
+              }
+            >
+              <Text className="font-lecturn-bold text-foreground">Add environment</Text>
+            </Pressable>
           </GlassCard>
         )}
 

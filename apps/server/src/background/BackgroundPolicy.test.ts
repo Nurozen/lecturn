@@ -80,6 +80,24 @@ function makeLayer(
 }
 
 describe("BackgroundPolicy", () => {
+  it.effect("runs durable queued work with no clients but respects host suspension", () =>
+    Effect.gen(function* () {
+      const policy = yield* BackgroundPolicy.BackgroundPolicy;
+      assert.isTrue(yield* policy.shouldRunDurableWork);
+      assert.isFalse(yield* policy.shouldRunOpportunisticWork);
+      yield* policy.reportHostPowerState({ ...nominalHostPower, suspended: true, stale: false });
+      assert.isFalse(yield* policy.shouldRunDurableWork);
+      yield* policy.reportHostPowerState({
+        ...nominalHostPower,
+        thermalState: "serious",
+        stale: false,
+      });
+      assert.isFalse(yield* policy.shouldRunDurableWork);
+      yield* policy.reportHostPowerState(nominalHostPower);
+      assert.isTrue(yield* policy.shouldRunDurableWork);
+    }).pipe(Effect.provide(makeLayer(nominalHostPower))),
+  );
+
   it.effect("records foreground scoped client demand", () =>
     Effect.gen(function* () {
       const policy = yield* BackgroundPolicy.BackgroundPolicy;

@@ -342,7 +342,7 @@ export function unpublishPrimaryEnvironmentBeforeSignOut(input: {
 // "publish_only" links the environment to the relay for agent-activity
 // publishing alone: no managed tunnel is provisioned, so it can be toggled
 // independently of Lecturn Connect while clients reach the environment out of band.
-export type CloudLinkMode = "managed" | "publish_only";
+export type CloudLinkMode = "managed" | "publish_only" | "decisions";
 
 const PUBLISH_ONLY_PROVIDER_KIND = "manual" satisfies RelayManagedEndpointProviderKind;
 
@@ -365,6 +365,7 @@ export function linkPrimaryEnvironmentToCloud(input: {
       });
     }
     const managedTunnelsEnabled = (input.mode ?? "managed") === "managed";
+    const publishEnabled = input.mode !== "decisions" && input.publishAgentActivity !== false;
     const providerKind = managedTunnelsEnabled
       ? MANAGED_ENDPOINT_PROVIDER_KIND
       : PUBLISH_ONLY_PROVIDER_KIND;
@@ -378,8 +379,8 @@ export function linkPrimaryEnvironmentToCloud(input: {
       .createEnvironmentLinkChallenge({
         clerkToken: input.clerkToken,
         payload: {
-          notificationsEnabled: input.publishAgentActivity !== false,
-          liveActivitiesEnabled: input.publishAgentActivity !== false,
+          notificationsEnabled: publishEnabled,
+          liveActivitiesEnabled: publishEnabled,
           managedTunnelsEnabled,
         },
       })
@@ -411,8 +412,8 @@ export function linkPrimaryEnvironmentToCloud(input: {
         payload: {
           proof,
           ...(input.organizationId ? { organizationId: input.organizationId } : {}),
-          notificationsEnabled: input.publishAgentActivity !== false,
-          liveActivitiesEnabled: input.publishAgentActivity !== false,
+          notificationsEnabled: publishEnabled,
+          liveActivitiesEnabled: publishEnabled,
           managedTunnelsEnabled,
         },
       })

@@ -1,5 +1,7 @@
 "use client";
 
+import { useServerConfigs } from "../state/entities";
+
 import {
   scopedThreadKey,
   scopeProjectRef,
@@ -622,6 +624,7 @@ function OpenCommandPaletteDialog(props: {
     useHandleNewThread();
   const { forkThreadAtLatestTurn } = useForkThread();
   const projects = useProjects();
+  const decisionConfigs = useServerConfigs();
   const changeRequestSnapshotByKey = useAtomValue(ThreadPr.threadChangeRequestSnapshotsAtom);
   const activeThreadProject = useProject(
     activeThread === null
@@ -1670,6 +1673,39 @@ function OpenCommandPaletteDialog(props: {
 
   const connectAccountItems = useConnectAccountPaletteItems();
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+
+  const decisionProjects = projects.filter(
+    (project) =>
+      decisionConfigs.get(project.environmentId)?.environment.capabilities.threadDecisions === true,
+  );
+  if (decisionProjects.length)
+    actionItems.push({
+      kind: "submenu",
+      value: "action:project-decisions",
+      addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
+      searchTerms: ["decisions", "notes", "tracking", "project"],
+      title: "Project decisions…",
+      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+      groups: [
+        {
+          value: "decisions",
+          label: "Projects",
+          items: decisionProjects.map((project) => ({
+            kind: "action",
+            value: `decisions:${project.environmentId}:${project.id}`,
+            title: project.title,
+            icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+            searchTerms: [project.title, project.workspaceRoot],
+            description: project.workspaceRoot,
+            run: () =>
+              navigate({
+                to: "/decisions/$environmentId/$projectId",
+                params: { environmentId: project.environmentId, projectId: project.id },
+              }),
+          })),
+        },
+      ],
+    });
 
   if (projects.length > 0) {
     const activeProjectTitle =

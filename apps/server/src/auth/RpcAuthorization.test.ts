@@ -11,6 +11,25 @@ import { describe, expect, it } from "@effect/vitest";
 import { RPC_REQUIRED_SCOPES, requiredScopeForRpcMethod } from "./RpcAuthorization.ts";
 
 describe("RPC authorization scopes", () => {
+  it("keeps Decisions data readable without granting processing or mutation", () => {
+    for (const method of [
+      WS_METHODS.threadDecisionsList,
+      WS_METHODS.threadDecisionsGet,
+      WS_METHODS.threadDecisionsStatus,
+      WS_METHODS.threadDecisionsSourceWindow,
+      WS_METHODS.threadDecisionsExport,
+      WS_METHODS.threadDecisionsSubscribe,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+    }
+    for (const method of [
+      WS_METHODS.threadDecisionsMutate,
+      WS_METHODS.threadDecisionsSettings,
+      WS_METHODS.threadDecisionsScan,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    }
+  });
   it("allows notes reads while reserving mutations for operators", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.threadNotesList)).toBe(AuthOrchestrationReadScope);
     for (const method of [
@@ -45,6 +64,12 @@ describe("RPC authorization scopes", () => {
       AuthRelayReadScope,
     );
     expect(requiredScopeForRpcMethod(WS_METHODS.cloudInstallRelayClient)).toBe(AuthRelayWriteScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.cloudCreateManualLinkProof)).toBe(
+      AuthRelayWriteScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.cloudApplyManualRelayConfig)).toBe(
+      AuthRelayWriteScope,
+    );
   });
 
   it("treats Stave status probes as orchestration reads", () => {

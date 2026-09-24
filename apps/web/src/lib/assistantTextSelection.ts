@@ -1,6 +1,7 @@
 import { ASSISTANT_CITATION_CONTEXT_LENGTH, type AssistantCitation } from "@lecturn/contracts";
 
 export type AssistantTextSelector = {
+  readonly coordinateSpace?: "raw-message" | undefined;
   readonly text: string;
   readonly start: number;
   readonly end: number;
@@ -97,6 +98,7 @@ function findNormalizedCitationText(
   normalized: string,
   selector: AssistantTextSelector,
 ): { start: number; end: number } | null {
+  if (selector.coordinateSpace === "raw-message") return null;
   const quote = normalizeWhitespace(selector.text);
   if (quote.trim().length === 0) return null;
 

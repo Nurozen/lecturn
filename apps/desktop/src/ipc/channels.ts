@@ -1,3 +1,4 @@
+export const SAVE_TEXT_FILE_CHANNEL = "desktop:save-text-file";
 export const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 export const PICK_PROJECT_FAVICON_CHANNEL = "desktop:pick-project-favicon";
 export const PICK_THEME_FILES_CHANNEL = "desktop:pick-theme-files";

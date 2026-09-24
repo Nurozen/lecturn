@@ -1,3 +1,7 @@
+import Migration0055 from "./Migrations/055_ThreadDecisions.ts";
+import Migration0056 from "./Migrations/056_DecisionScanBacklog.ts";
+import Migration0057 from "./Migrations/057_DecisionScanPreparation.ts";
+import Migration0058 from "./Migrations/058_DecisionEvaluationReuse.ts";
 import Migration0054 from "./Migrations/054_ThreadNotes.ts";
 /**
  * Migration runner with an inline loader.
@@ -132,6 +136,10 @@ export const migrationEntries = [
   [52, "PullRequestWatches", Migration0052],
   [53, "ProjectionThreadImportOrigin", Migration0053],
   [54, "ThreadNotes", Migration0054],
+  [55, "ThreadDecisions", Migration0055],
+  [56, "DecisionScanBacklog", Migration0056],
+  [57, "DecisionScanPreparation", Migration0057],
+  [58, "DecisionEvaluationReuse", Migration0058],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

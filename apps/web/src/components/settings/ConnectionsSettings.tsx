@@ -1808,7 +1808,8 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
             <AlertDialogTitle>Unlink this environment?</AlertDialogTitle>
             <AlertDialogDescription>
               Other devices will lose Connect access to this environment. Agent activity publishing
-              will stop. Your local projects and conversations stay on this device.
+              will stop, and Decisions funding for this host will be revoked. Your local projects,
+              conversations, and saved decisions stay on this device.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1819,7 +1820,11 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
               disabled={isBusy}
               onClick={async () => {
                 setIsUpdating(true);
-                const ok = await reconcileCloudState({ managedTunnel: false, publish: false });
+                const ok = await reconcileCloudState({
+                  managedTunnel: false,
+                  publish: false,
+                  unlink: true,
+                });
                 setIsUpdating(false);
                 if (ok) setConfirmUnlink(false);
               }}

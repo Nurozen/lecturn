@@ -210,6 +210,25 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
       expect(personal!.adapter).not.toBe(work!.adapter);
       expect(personal!.textGeneration).not.toBe(work!.textGeneration);
       expect(personal!.snapshot).not.toBe(work!.snapshot);
+      expect(personal!.configurationFingerprint).toMatch(/^[a-f0-9]{64}$/);
+      expect(personal!.configurationFingerprint).not.toBe(work!.configurationFingerprint);
+      const restarted = yield* makeProviderInstanceRegistry({ drivers: [CodexDriver], configMap });
+      expect((yield* restarted.registry.getInstance(personalId))!.configurationFingerprint).toBe(
+        personal!.configurationFingerprint,
+      );
+      const changed = yield* makeProviderInstanceRegistry({
+        drivers: [CodexDriver],
+        configMap: {
+          ...configMap,
+          [personalId]: {
+            ...configMap[personalId]!,
+            environment: [{ name: "WRITER_ACCOUNT", value: "other", sensitive: false }],
+          },
+        },
+      });
+      expect((yield* changed.registry.getInstance(personalId))!.configurationFingerprint).not.toBe(
+        personal!.configurationFingerprint,
+      );
 
       // Snapshots identify themselves by instanceId + driver — this is
       // what makes per-instance routing distinguishable downstream.

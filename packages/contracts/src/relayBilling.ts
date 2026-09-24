@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import { RelayDecisionsStatus } from "./relayDecisions.ts";
 
 export const RelayBillingInterval = Schema.Literals(["month", "year"]);
 export type RelayBillingInterval = typeof RelayBillingInterval.Type;
@@ -29,6 +30,7 @@ export const RelayBillingStatus = Schema.Struct({
     liveActivities: Schema.Boolean,
   }),
   quota: Schema.Struct({ limit: Schema.Number, used: Schema.Number }),
+  decisions: Schema.optionalKey(RelayDecisionsStatus),
 });
 export type RelayBillingStatus = typeof RelayBillingStatus.Type;
 export const RelayBillingCheckoutRequest = Schema.Struct({ interval: RelayBillingInterval });

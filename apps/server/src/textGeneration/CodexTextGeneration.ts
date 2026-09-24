@@ -24,6 +24,7 @@ import * as TextGeneration from "./TextGeneration.ts";
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
+  buildDecisionNotesPrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
   buildWorkflowSummaryPrompt,
@@ -34,11 +35,44 @@ import {
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
-  toJsonSchemaObject,
+  toCodexJsonSchemaObject,
 } from "./TextGenerationUtils.ts";
 import { getModelSelectionStringOptionValue } from "@lecturn/shared/model";
+import { prepareCodexInferenceIsolation } from "./CodexInferenceIsolation.ts";
 import { getCodexServiceTierOptionValue } from "../codexModelOptions.ts";
 
+const CODEX_INFERENCE_CONFIG = [
+  "features.view_image=false",
+  "features.tool_suggest=false",
+  "features.deferred_executor=false",
+  "features.send_message_to_user_async=false",
+  "features.request_permissions_tool=false",
+  "features.token_budget=false",
+  "features.current_time_reminder=false",
+  "features.sleep_tool=false",
+  "features.code_mode=false",
+  "features.code_mode_only=false",
+  "tools.update_plan.enabled=false",
+  "tools.experimental_request_user_input.enabled=false",
+
+  'developer_instructions=""',
+  "features.hooks=false",
+  "notify=[]",
+  "project_doc_max_bytes=0",
+  "include_environment_context=false",
+  "include_collaboration_mode_instructions=false",
+  "features.memories=false",
+  "features.plugins=false",
+  "features.apps=false",
+  "features.skip_host_skill_discovery=true",
+  "features.shell_tool=false",
+  "features.multi_agent=false",
+  "features.multi_agent_v2=false",
+  "features.browser_use=false",
+  "features.computer_use=false",
+  "features.image_generation=false",
+  'web_search="disabled"',
+];
 const CODEX_TIMEOUT_MS = 180_000;
 const encodeJsonString = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 /**
@@ -54,6 +88,12 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const serverConfig = yield* Effect.service(ServerConfig.ServerConfig);
   const resolvedEnvironment = environment ?? process.env;
+
+  const prepareIsolation = (input: Parameters<typeof prepareCodexInferenceIsolation>[0]) =>
+    prepareCodexInferenceIsolation(input).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, commandSpawner),
+    );
 
   type MaterializedImageAttachments = {
     readonly imagePaths: ReadonlyArray<string>;
@@ -90,7 +130,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
             new TextGenerationError({
               operation,
               detail: `Failed to write temp file`,
-              cause,
+              ...(operation === "generateWorkflowSummary" || operation === "generateDecisionNotes"
+                ? {}
+                : { cause }),
             }),
         ),
       );
@@ -104,7 +146,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateWorkflowSummary",
+      | "generateWorkflowSummary"
+      | "generateDecisionNotes",
     value: unknown,
   ): Effect.Effect<string, TextGenerationError> =>
     encodeJsonString(value).pipe(
@@ -113,7 +156,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           new TextGenerationError({
             operation,
             detail: "Failed to encode structured output schema.",
-            cause,
+            ...(operation === "generateWorkflowSummary" || operation === "generateDecisionNotes"
+              ? {}
+              : { cause }),
           }),
       ),
     );
@@ -124,7 +169,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateWorkflowSummary",
+      | "generateWorkflowSummary"
+      | "generateDecisionNotes",
     attachments: TextGeneration.BranchNameGenerationInput["attachments"],
   ): Effect.fn.Return<MaterializedImageAttachments, TextGenerationError> {
     if (!attachments || attachments.length === 0) {
@@ -167,7 +213,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateWorkflowSummary";
+      | "generateWorkflowSummary"
+      | "generateDecisionNotes";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -177,13 +224,14 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
   }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
     const schemaJson = yield* encodeJsonForOperation(
       operation,
-      toJsonSchemaObject(outputSchemaJson),
+      toCodexJsonSchemaObject(outputSchemaJson),
     );
     const schemaPath = yield* writeTempFile(operation, "codex-schema", schemaJson);
     const outputPath = yield* writeTempFile(operation, "codex-output", "");
 
     const runCodexCommand = Effect.fn("runCodexJson.runCodexCommand")(function* () {
-      const inference = operation === "generateWorkflowSummary";
+      const inference =
+        operation === "generateWorkflowSummary" || operation === "generateDecisionNotes";
       const commandCwd = inference
         ? yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-workflow-inference-" }).pipe(
             Effect.mapError(
@@ -191,16 +239,15 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
                 new TextGenerationError({
                   operation,
                   detail: "Could not isolate workflow inference.",
-                  cause,
+                  ...(operation === "generateWorkflowSummary" ||
+                  operation === "generateDecisionNotes"
+                    ? {}
+                    : { cause }),
                 }),
             ),
           )
         : cwd;
       const launchArgs = resolveCodexLaunchArgs(codexConfig.launchArgs, resolvedEnvironment);
-      // Retain provider profiles and authentication settings. Override instruction
-      // sources after launch arguments instead of discarding the account's config.
-      // Account-managed MCP schemas can remain exposed by the CLI; the inference
-      // instructions prohibit their use and no tool payload enters our prompt.
       const inferenceInstructions = inference
         ? yield* writeTempFile(
             operation,
@@ -210,46 +257,43 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         : undefined;
       const reasoningEffort =
         getModelSelectionStringOptionValue(modelSelection, "reasoningEffort") ??
-        DEFAULT_TEXT_GENERATION_REASONING_EFFORT;
+        (operation === "generateDecisionNotes"
+          ? undefined
+          : DEFAULT_TEXT_GENERATION_REASONING_EFFORT);
       const serviceTier = getCodexServiceTierOptionValue(modelSelection);
+      const commandEnvironment = {
+        ...resolvedEnvironment,
+        ...(codexConfig.homePath ? { CODEX_HOME: expandHomePath(codexConfig.homePath) } : {}),
+      };
+      const inferenceArgs = inference
+        ? [`model_instructions_file=${inferenceInstructions}`, ...CODEX_INFERENCE_CONFIG].flatMap(
+            (value) => ["--config", value],
+          )
+        : [];
+      const isolation = inference
+        ? yield* prepareIsolation({
+            binary: codexConfig.binaryPath || "codex",
+            args: [...codexExecLaunchArgs(launchArgs), ...inferenceArgs],
+            env: commandEnvironment,
+            cwd: commandCwd,
+            operation,
+            model: modelSelection.model,
+          })
+        : undefined;
+      yield* isolation?.verify ?? Effect.void;
       const spawnCommand = yield* resolveSpawnCommand(
         codexConfig.binaryPath || "codex",
         [
           "exec",
           ...codexExecLaunchArgs(launchArgs),
-          ...(inference
-            ? [
-                "--ignore-rules",
-                ...[
-                  `model_instructions_file=${inferenceInstructions}`,
-                  'developer_instructions=""',
-                  "features.hooks=false",
-                  "notify=[]",
-                  "project_doc_max_bytes=0",
-                  "include_environment_context=false",
-                  "include_collaboration_mode_instructions=false",
-                  "features.memories=false",
-                  "features.plugins=false",
-                  "features.apps=false",
-                  "features.skip_host_skill_discovery=true",
-                  "features.shell_tool=false",
-                  "features.multi_agent=false",
-                  "features.multi_agent_v2=false",
-                  "features.browser_use=false",
-                  "features.computer_use=false",
-                  "features.image_generation=false",
-                  'web_search="disabled"',
-                ].flatMap((value) => ["--config", value]),
-              ]
-            : []),
+          ...(inference ? ["--ignore-rules", ...inferenceArgs, ...(isolation?.args ?? [])] : []),
           "--ephemeral",
           "--skip-git-repo-check",
           "-s",
           "read-only",
           "--model",
           modelSelection.model,
-          "--config",
-          `model_reasoning_effort="${reasoningEffort}"`,
+          ...(reasoningEffort ? ["--config", `model_reasoning_effort="${reasoningEffort}"`] : []),
           ...(serviceTier ? ["--config", `service_tier="${serviceTier}"`] : []),
           "--output-schema",
           schemaPath,
@@ -261,10 +305,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         { env: resolvedEnvironment },
       );
       const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-        env: {
-          ...resolvedEnvironment,
-          ...(codexConfig.homePath ? { CODEX_HOME: expandHomePath(codexConfig.homePath) } : {}),
-        },
+        env: commandEnvironment,
         cwd: commandCwd,
         shell: spawnCommand.shell,
         stdin: {
@@ -293,6 +334,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         { concurrency: "unbounded" },
       );
 
+      yield* isolation?.verify ?? Effect.void;
       if (exitCode !== 0) {
         const stderrDetail = stderr.trim();
         const stdoutDetail = stdout.trim();
@@ -300,7 +342,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         return yield* new TextGenerationError({
           operation,
           detail:
-            detail.length > 0
+            !inference && detail.length > 0
               ? `Codex CLI command failed: ${detail}`
               : `Codex CLI command failed with code ${exitCode}.`,
         });
@@ -329,7 +371,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         ),
       );
 
-      const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(outputSchemaJson));
+      const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(outputSchemaJson), {
+        onExcessProperty: operation === "generateDecisionNotes" ? "error" : "ignore",
+      });
 
       return yield* fileSystem.readFileString(outputPath).pipe(
         Effect.mapError(
@@ -337,7 +381,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
             new TextGenerationError({
               operation,
               detail: "Failed to read Codex output file.",
-              cause,
+              ...(operation === "generateWorkflowSummary" || operation === "generateDecisionNotes"
+                ? {}
+                : { cause }),
             }),
         ),
         Effect.flatMap(decodeOutput),
@@ -347,7 +393,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
               new TextGenerationError({
                 operation,
                 detail: "Codex returned invalid structured output.",
-                cause,
+                ...(operation === "generateWorkflowSummary" || operation === "generateDecisionNotes"
+                  ? {}
+                  : { cause }),
               }),
             ),
         }),
@@ -463,11 +511,10 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     Effect.fn("CodexTextGeneration.generateWorkflowSummary")(function* (input) {
       const { prompt, outputSchema } = yield* Effect.try({
         try: () => buildWorkflowSummaryPrompt(input),
-        catch: (cause) =>
+        catch: () =>
           new TextGenerationError({
             operation: "generateWorkflowSummary",
             detail: "Workflow inference requires a prior summary and completed textual turns.",
-            cause,
           }),
       });
       const generated = yield* runCodexJson({
@@ -487,7 +534,67 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       return { summary, stage: generated.stage, confidence: generated.confidence };
     });
 
+  const checkDecisionWriter: NonNullable<
+    TextGeneration.TextGeneration["Service"]["checkDecisionWriter"]
+  > = Effect.fn("CodexTextGeneration.checkDecisionWriter")(
+    function* (input) {
+      const cwd = yield* fileSystem
+        .makeTempDirectoryScoped({ prefix: "lecturn-decision-preflight-" })
+        .pipe(
+          Effect.mapError(
+            () =>
+              new TextGenerationError({
+                operation: "checkDecisionWriter",
+                detail: "Could not isolate Codex preflight.",
+              }),
+          ),
+        );
+      const isolation = yield* prepareIsolation({
+        binary: codexConfig.binaryPath || "codex",
+        args: [
+          ...codexExecLaunchArgs(
+            resolveCodexLaunchArgs(codexConfig.launchArgs, resolvedEnvironment),
+          ),
+          ...CODEX_INFERENCE_CONFIG.flatMap((value) => ["--config", value]),
+        ],
+        env: {
+          ...resolvedEnvironment,
+          ...(codexConfig.homePath ? { CODEX_HOME: expandHomePath(codexConfig.homePath) } : {}),
+        },
+        cwd,
+        operation: "checkDecisionWriter",
+        model: input.modelSelection.model,
+      });
+      yield* isolation.verify;
+      return { supported: true, reason: null };
+    },
+    Effect.scoped,
+    Effect.catch((error) => Effect.succeed({ supported: false, reason: error.detail })),
+  );
+
+  const generateDecisionNotes: NonNullable<
+    TextGeneration.TextGeneration["Service"]["generateDecisionNotes"]
+  > = Effect.fn("CodexTextGeneration.generateDecisionNotes")(function* (input) {
+    const { prompt, outputSchema } = yield* Effect.try({
+      try: () => buildDecisionNotesPrompt(input),
+      catch: () =>
+        new TextGenerationError({
+          operation: "generateDecisionNotes",
+          detail: "Decision writing requires bounded valid evidence.",
+        }),
+    });
+    return yield* runCodexJson({
+      operation: "generateDecisionNotes",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+  });
+
   return {
+    generateDecisionNotes,
+    checkDecisionWriter,
     generateCommitMessage,
     generatePrContent,
     generateBranchName,

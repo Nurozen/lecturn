@@ -1,3 +1,6 @@
+import { useNavigation } from "@react-navigation/native";
+import { useAtomValue } from "@effect/atom-react";
+import { serverEnvironment } from "../../state/server";
 import { GlassCard } from "../../components/GlassCard";
 import { useGlassPalette } from "../../lib/useGlassPalette";
 import { StaveIcon } from "./StaveIcon";
@@ -161,6 +164,10 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
   readonly onNewThread?: (project: EnvironmentProject) => void;
 }) {
   const { groupKey, onGroupAction, onNewThread } = props;
+  const navigation = useNavigation();
+  const decisionConfig = useAtomValue(
+    serverEnvironment.configValueAtom(props.project.environmentId),
+  );
   const newThreadTarget = props.newThreadTarget ?? null;
   const compact = props.variant === "compact";
   const handleToggle = useCallback(
@@ -271,6 +278,21 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
             {props.threadCount}
           </Text>
         </Pressable>
+        {newThreadTarget && decisionConfig?.environment.capabilities.threadDecisions ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Decisions for ${props.title}`}
+            style={{ minHeight: 44, minWidth: 44, alignItems: "center", justifyContent: "center" }}
+            onPress={() =>
+              navigation.navigate("Decisions", {
+                environmentId: props.project.environmentId,
+                projectId: props.project.id,
+              })
+            }
+          >
+            <Text className="text-primary">Decisions</Text>
+          </Pressable>
+        ) : null}
         {showNewThreadButton ? (
           <Pressable
             accessibilityLabel={

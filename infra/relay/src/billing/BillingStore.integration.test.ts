@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer, Redacted } from "effect";
 import * as PgClient from "@effect/sql-pg/PgClient";
 import { RelayDb } from "../db.ts";
-import { makeBillingStore, operationId } from "./BillingStore.ts";
+import { makeBillingStore, operationId, currentPersonalPaidFacts } from "./BillingStore.ts";
 
 const databaseUrl = process.env.BILLING_TEST_DATABASE_URL;
 const database = Layer.effect(
@@ -109,5 +109,56 @@ describe.skipIf(!databaseUrl)("BillingStore PostgreSQL", () => {
           expect((yield* store.stale(4300, 100)).some((row) => row.user_id === user)).toBe(true);
         }),
       ),
+  );
+  it.effect("persists paid provenance and clears it durably on account deletion", () =>
+    run(
+      Effect.gen(function* () {
+        const store = yield* makeBillingStore;
+        const user = `test-paid-${yield* operationId}`;
+        const account = yield* store.acquire(user, 5000);
+        account.paid_facts = {
+          source: "stripe_personal_subscription",
+          subscriptionId: "sub_fixture",
+          invoiceId: "in_fixture",
+          interval: "year",
+          paidPeriodStart: 4900,
+          paidPeriodEnd: 500000,
+          subscriptionAnniversary: 4900,
+          reconciledAt: 5000,
+        };
+        yield* store.save(account, 5001);
+        const loaded = yield* store.load(user);
+        expect(loaded?.paid_facts).toEqual(account.paid_facts);
+        expect(currentPersonalPaidFacts(loaded, 5002, 300)).toEqual(account.paid_facts);
+        expect(currentPersonalPaidFacts(loaded, 5300, 300)).toBeNull();
+        const { $client: sql } = yield* RelayDb;
+        yield* sql`INSERT INTO relay_decision_funding(environment_id,public_key,generation,payer_id,state) VALUES (${user},'key',1,${user},'active')`;
+        yield* sql`INSERT INTO relay_decision_funding_challenges(id,environment_id,public_key,generation,expires_at,payer_id) VALUES (${user},${user},'key',1,9000,${user})`;
+        yield* sql`INSERT INTO relay_decision_grants(id,user_id,starts_at,ends_at,monthly_input_tokens,operator,reason) VALUES (${user},${user},4000,9000,1000,'test','fixture')`;
+        yield* sql`UPDATE relay_billing_accounts SET decisions_account_label='deleted-sponsor@example.test' WHERE user_id=${user}`;
+        yield* store.tombstone(user, 5003, `delete:${user}`);
+        const funding = yield* sql<{
+          state: string;
+          generation: number;
+        }>`SELECT state,generation FROM relay_decision_funding WHERE environment_id=${user}`;
+        expect(funding[0]).toEqual({ state: "revoked", generation: 2 });
+        const challenges = yield* sql<{
+          revoked: boolean;
+        }>`SELECT revoked FROM relay_decision_funding_challenges WHERE id=${user}`;
+        expect(challenges[0]?.revoked).toBe(true);
+        const grants = yield* sql<{
+          revoked_at: unknown;
+        }>`SELECT revoked_at FROM relay_decision_grants WHERE id=${user}`;
+        expect(Number(grants[0]?.revoked_at)).toBe(5003);
+        const label = yield* sql<{
+          decisions_account_label: string | null;
+        }>`SELECT decisions_account_label FROM relay_billing_accounts WHERE user_id=${user}`;
+        expect(label[0]?.decisions_account_label).toBeNull();
+        const deleted = yield* store.load(user);
+        expect(deleted?.paid_facts).toBeNull();
+        expect((yield* Effect.result(store.save(account, 5004)))._tag).toBe("Failure");
+        expect(currentPersonalPaidFacts(deleted, 5004, 300)).toBeNull();
+      }),
+    ),
   );
 });

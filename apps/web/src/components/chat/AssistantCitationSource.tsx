@@ -215,11 +215,19 @@ export function observeAssistantCitationSource({
       activation.scrolled = true;
       request.onComplete();
       if (!range) {
-        toastManager.add({
-          type: "warning",
-          title: "The quoted text has changed",
-          description: "Showing the source response. The saved quote is unchanged.",
-        });
+        toastManager.add(
+          request.citation.coordinateSpace === "raw-message"
+            ? {
+                type: "info",
+                title: "Source message",
+                description: "Exact raw evidence is preserved in the Decisions source view.",
+              }
+            : {
+                type: "warning",
+                title: "The quoted text has changed",
+                description: "Showing the source response. The saved quote is unchanged.",
+              },
+        );
       }
     }
     if (!range) {

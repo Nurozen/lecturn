@@ -1,3 +1,12 @@
+import {
+  ManualCloudLinkProofInput,
+  ManualCloudLinkProofResult,
+  ManualCloudRelayConfigInput,
+  ManualCloudLinkError,
+} from "./manualCloudLink.ts";
+import { EnvironmentCloudRelayConfigResult } from "./environmentHttp.ts";
+import { DecisionFundingStatusResult } from "./relayDecisions.ts";
+import * as ThreadDecisions from "./threadDecisions.ts";
 import * as ThreadNotes from "./threadNotes.ts";
 import * as PullRequestWatch from "./pullRequestWatch.ts";
 import * as SagaWorkbench from "./sagaWorkbench.ts";
@@ -354,6 +363,8 @@ export const WS_METHODS = {
   serverRefreshUsageRates: "server.refreshUsageRates",
 
   // Cloud environment methods
+  cloudCreateManualLinkProof: "cloud.createManualLinkProof",
+  cloudApplyManualRelayConfig: "cloud.applyManualRelayConfig",
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
 
@@ -378,6 +389,17 @@ export const WS_METHODS = {
   staveRunOperation: "stave.runOperation",
   staveObserveOperation: "stave.observeOperation",
 
+  threadDecisionsFunding: "threadDecisions.funding",
+  threadDecisionsFundingStatus: "threadDecisions.fundingStatus",
+  threadDecisionsList: "threadDecisions.list",
+  threadDecisionsGet: "threadDecisions.get",
+  threadDecisionsMutate: "threadDecisions.mutate",
+  threadDecisionsSettings: "threadDecisions.settings",
+  threadDecisionsStatus: "threadDecisions.status",
+  threadDecisionsSourceWindow: "threadDecisions.sourceWindow",
+  threadDecisionsScan: "threadDecisions.scan",
+  threadDecisionsExport: "threadDecisions.export",
+  threadDecisionsSubscribe: "threadDecisions.subscribe",
   threadNotesList: "threadNotes.list",
   threadNotesCreate: "threadNotes.create",
   threadNotesUpdate: "threadNotes.update",
@@ -637,6 +659,17 @@ export const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess,
   error: EnvironmentAuthorizationError,
 });
 
+export const WsCloudCreateManualLinkProofRpc = Rpc.make(WS_METHODS.cloudCreateManualLinkProof, {
+  payload: ManualCloudLinkProofInput,
+  success: ManualCloudLinkProofResult,
+  error: Schema.Union([ManualCloudLinkError, EnvironmentAuthorizationError]),
+});
+export const WsCloudApplyManualRelayConfigRpc = Rpc.make(WS_METHODS.cloudApplyManualRelayConfig, {
+  payload: ManualCloudRelayConfigInput,
+  success: EnvironmentCloudRelayConfigResult,
+  error: Schema.Union([ManualCloudLinkError, EnvironmentAuthorizationError]),
+});
+
 export const WsCloudGetRelayClientStatusRpc = Rpc.make(WS_METHODS.cloudGetRelayClientStatus, {
   payload: Schema.Struct({}),
   success: RelayClientStatusSchema,
@@ -787,6 +820,63 @@ export const WsPullRequestsListStatsRpc = Rpc.make(WS_METHODS.pullRequestsListSt
   payload: PullRequestListStatsInput,
   success: PullRequestListStatsResult,
   error: PullRequestRpcError,
+});
+
+export const WsThreadDecisionsFundingRpc = Rpc.make(WS_METHODS.threadDecisionsFunding, {
+  payload: ThreadDecisions.ThreadDecisionFundingInput,
+  success: ThreadDecisions.ThreadDecisionFundingResult,
+  error: Schema.Union([ThreadDecisions.ThreadDecisionError, EnvironmentAuthorizationError]),
+});
+export const WsThreadDecisionsFundingStatusRpc = Rpc.make(WS_METHODS.threadDecisionsFundingStatus, {
+  payload: {},
+  success: DecisionFundingStatusResult,
+  error: Schema.Union([ThreadDecisions.ThreadDecisionError, EnvironmentAuthorizationError]),
+});
+export const WsThreadDecisionsListRpc = Rpc.make(WS_METHODS.threadDecisionsList, {
+  payload: ThreadDecisions.ThreadDecisionListInput,
+  success: ThreadDecisions.ThreadDecisionListResult,
+  error: Schema.Union([ThreadDecisions.ThreadDecisionError, EnvironmentAuthorizationError]),
+});
+export const WsThreadDecisionsGetRpc = Rpc.make(WS_METHODS.threadDecisionsGet, {
+  payload: ThreadDecisions.ThreadDecisionGetInput,
+  success: ThreadDecisions.ThreadDecision,
+  error: Schema.Union([ThreadDecisions.ThreadDecisionError, EnvironmentAuthorizationError]),
+});
+export const WsThreadDecisionsMutateRpc = Rpc.make(WS_METHODS.threadDecisionsMutate, {
+  payload: ThreadDecisions.ThreadDecisionMutateInput,
+  success: ThreadDecisions.ThreadDecisionMutateResult,
+  error: Schema.Union([ThreadDecisions.ThreadDecisionError, EnvironmentAuthorizationError]),
+});
+export const WsThreadDecisionsSettingsRpc = Rpc.make(WS_METHODS.threadDecisionsSettings, {
+  payload: ThreadDecisions.ThreadDecisionSettingsInput,
+  success: ThreadDecisions.ThreadDecisionSettingsResult,
+  error: Schema.Union([ThreadDecisions.ThreadDecisionError, EnvironmentAuthorizationError]),
+});
+export const WsThreadDecisionsStatusRpc = Rpc.make(WS_METHODS.threadDecisionsStatus, {
+  payload: ThreadDecisions.ThreadDecisionStatusInput,
+  success: ThreadDecisions.ThreadDecisionStatusResult,
+  error: Schema.Union([ThreadDecisions.ThreadDecisionError, EnvironmentAuthorizationError]),
+});
+export const WsThreadDecisionsSourceWindowRpc = Rpc.make(WS_METHODS.threadDecisionsSourceWindow, {
+  payload: ThreadDecisions.ThreadDecisionSourceWindowInput,
+  success: ThreadDecisions.ThreadDecisionSourceWindowResult,
+  error: Schema.Union([ThreadDecisions.ThreadDecisionError, EnvironmentAuthorizationError]),
+});
+export const WsThreadDecisionsScanRpc = Rpc.make(WS_METHODS.threadDecisionsScan, {
+  payload: ThreadDecisions.ThreadDecisionScanInput,
+  success: ThreadDecisions.ThreadDecisionScanResult,
+  error: Schema.Union([ThreadDecisions.ThreadDecisionError, EnvironmentAuthorizationError]),
+});
+export const WsThreadDecisionsExportRpc = Rpc.make(WS_METHODS.threadDecisionsExport, {
+  payload: ThreadDecisions.ThreadDecisionExportInput,
+  success: ThreadDecisions.ThreadDecisionExportResult,
+  error: Schema.Union([ThreadDecisions.ThreadDecisionError, EnvironmentAuthorizationError]),
+});
+export const WsThreadDecisionsSubscribeRpc = Rpc.make(WS_METHODS.threadDecisionsSubscribe, {
+  payload: Schema.Struct({}),
+  success: ThreadDecisions.ThreadDecisionChange,
+  error: Schema.Union([ThreadDecisions.ThreadDecisionError, EnvironmentAuthorizationError]),
+  stream: true,
 });
 
 export const WsThreadNotesListRpc = Rpc.make(WS_METHODS.threadNotesList, {
@@ -1492,10 +1582,23 @@ export const WsRpcGroup = RpcGroup.make(
   WsStaveDryRunRpc,
   WsStaveRunOperationRpc,
   WsStaveObserveOperationRpc,
+  WsCloudCreateManualLinkProofRpc,
+  WsCloudApplyManualRelayConfigRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsPullRequestsListRpc,
   WsPullRequestsListStatsRpc,
+  WsThreadDecisionsFundingRpc,
+  WsThreadDecisionsFundingStatusRpc,
+  WsThreadDecisionsListRpc,
+  WsThreadDecisionsGetRpc,
+  WsThreadDecisionsMutateRpc,
+  WsThreadDecisionsSettingsRpc,
+  WsThreadDecisionsStatusRpc,
+  WsThreadDecisionsSourceWindowRpc,
+  WsThreadDecisionsScanRpc,
+  WsThreadDecisionsExportRpc,
+  WsThreadDecisionsSubscribeRpc,
   WsThreadNotesListRpc,
   WsThreadNotesCreateRpc,
   WsThreadNotesUpdateRpc,

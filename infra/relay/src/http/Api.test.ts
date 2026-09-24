@@ -1,3 +1,4 @@
+import { DecisionsService } from "../decisions/DecisionsService.ts";
 import { createClerkClient, verifyToken } from "@clerk/backend";
 import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
@@ -249,6 +250,48 @@ const linkedEnvironmentRecord = {
 } as const;
 
 describe("relay environment unlink", () => {
+  it.effect("revokes Decisions funding within the same unlink transaction", () => {
+    const events: string[] = [];
+    return Effect.gen(function* () {
+      yield* revokeEnvironmentLinkRecord({
+        userId: "payer",
+        environmentId: "environment",
+        environmentPublicKey: "key",
+      });
+      expect(events).toEqual(["transaction", "link", "funding", "credential"]);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          relayUnlinkTestLayer({
+            withTransaction: (effect) => {
+              events.push("transaction");
+              return effect;
+            },
+            revokeForUser: () =>
+              Effect.sync(() => {
+                events.push("link");
+                return true;
+              }),
+            revokeCredential: () =>
+              Effect.sync(() => {
+                events.push("credential");
+                return true;
+              }),
+          }),
+          Layer.succeed(DecisionsService, {
+            funding: {
+              revokeEnvironment: (id: string, key: string) =>
+                Effect.sync(() => {
+                  expect([id, key]).toEqual(["environment", "key"]);
+                  events.push("funding");
+                }),
+            },
+          } as unknown as DecisionsService["Service"]),
+        ),
+      ),
+    );
+  });
+
   it.effect("revokes the link and its credentials in one database transaction", () => {
     const calls: Array<string> = [];
     return Effect.gen(function* () {

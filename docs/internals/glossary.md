@@ -290,3 +290,7 @@ See [Lecturn Connect](lecturn-connect.md#multiple-signed-in-accounts) for the me
 ### Thread notes
 
 A **thread note** is a project-scoped quote and optional comment saved independently of the chat draft. Its **note anchor** records the message identity, role, normalized rendered-text offsets, quote, and nearby context. Anchors share citation matching and navigation; they never index raw stored message text. See [Thread notes](./thread-notes.md).
+
+## Decision
+
+An opt-in, project-scoped note derived from conversation evidence. Review state (unreviewed, confirmed, dismissed) is independent of lifecycle (current, superseded). An environment’s funding account pays for bounded detection; the selected thread provider writes the note. See [Thread decisions](thread-decisions.md).

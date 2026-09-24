@@ -1,3 +1,4 @@
+import { DecisionsService } from "../decisions/DecisionsService.ts";
 import { and, asc, desc, eq, isNull, ne } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
 import * as RelayDb from "../db.ts";
@@ -38,6 +39,7 @@ export const make = Effect.gen(function* () {
   const provider = yield* ManagedEndpointProvider;
   const credentials = yield* EnvironmentCredentials;
   const teams = yield* Effect.serviceOption(TeamRuntime);
+  const decisions = yield* Effect.serviceOption(DecisionsService);
   const lock = Effect.fn("relay.environment_relinks.lock")(function* (environmentId: string) {
     yield* db.$client`SET LOCAL lock_timeout = '5s'`;
     yield* db.insert(relayEnvironmentLinkOwners).values({ environmentId }).onConflictDoUpdate({
@@ -125,6 +127,11 @@ export const make = Effect.gen(function* () {
         );
       const now = DateTime.formatIso(yield* DateTime.now);
       for (const link of displaced) {
+        if (Option.isSome(decisions))
+          yield* decisions.value.funding.revokeEnvironment(
+            input.environmentId,
+            link.environmentPublicKey,
+          );
         const target = yield* provider.prepareDeprovision({
           userId: link.userId,
           environmentId: input.environmentId,

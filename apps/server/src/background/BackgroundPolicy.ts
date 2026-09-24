@@ -52,6 +52,8 @@ export class BackgroundPolicy extends Context.Service<
     readonly hasDemand: (scope: BackgroundScope) => Effect.Effect<boolean>;
     readonly shouldRunScopeWork: (scope: BackgroundScope) => Effect.Effect<boolean>;
     readonly shouldRunOpportunisticWork: Effect.Effect<boolean>;
+    /** Durable queued work respects host power policy without requiring an open client. */
+    readonly shouldRunDurableWork: Effect.Effect<boolean>;
     /** True while any client, on any device, holds a lease that passes `isUserPresentLease`. */
     readonly isUserPresent: Effect.Effect<boolean>;
   }
@@ -315,6 +317,11 @@ export const make = Effect.fn("background.policy.make")(function* () {
     (current) => current.shouldRunOpportunisticWork,
   );
 
+  const shouldRunDurableWork = Effect.gen(function* () {
+    const [current, settings] = yield* Effect.all([snapshot, backgroundActivitySettings]);
+    return !isHostConstrained(current.hostPower, settings);
+  });
+
   // Reads the clock on every call: an expired lease emits no change event.
   const isUserPresent = Effect.gen(function* () {
     const [leases, now] = yield* Effect.all([Ref.get(leasesRef), DateTime.now]);
@@ -363,6 +370,7 @@ export const make = Effect.fn("background.policy.make")(function* () {
     hasDemand,
     shouldRunScopeWork,
     shouldRunOpportunisticWork,
+    shouldRunDurableWork,
     isUserPresent,
   });
 });

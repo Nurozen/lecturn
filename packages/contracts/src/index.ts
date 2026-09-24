@@ -50,3 +50,7 @@ export { RelayPullRequestActivity } from "./relay.ts";
 export * from "./relayTeams.ts";
 
 export * from "./threadNotes.ts";
+export * from "./threadDecisions.ts";
+export * from "./relayDecisions.ts";
+
+export * from "./manualCloudLink.ts";

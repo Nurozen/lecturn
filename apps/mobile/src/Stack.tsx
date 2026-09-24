@@ -1,3 +1,4 @@
+import { DecisionsRouteScreen } from "./features/decisions/DecisionsRouteScreen";
 import {
   createPathConfigForStaticNavigation,
   getPathFromState,
@@ -483,6 +484,11 @@ export const RootStack = createNativeStackNavigator({
         headerBackVisible: false,
         ...getCompactBrandHeaderOptions(),
       },
+    }),
+    Decisions: createNativeStackScreen({
+      screen: DecisionsRouteScreen,
+      linking: "decisions/:environmentId/:projectId",
+      options: { ...SOLID_HEADER_OPTIONS, title: "Decisions" },
     }),
     PullRequestWatch: createNativeStackScreen({
       screen: PullRequestWatchRouteScreen,
