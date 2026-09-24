@@ -4,7 +4,9 @@ import {
   type AssetCreateUrlResult,
   type ChatFileAttachment,
   type EnvironmentId,
+  isImportedHistoryRow,
   isProviderDriverKind,
+  PROVIDER_DISPLAY_NAMES,
   ProjectId,
   type MessageId,
   type ModelSelection,
@@ -15,6 +17,7 @@ import {
   type ScopedProjectRef,
   type ScopedThreadRef,
   type ThreadId,
+  type ThreadImportOrigin,
   type TurnId,
 } from "@lecturn/contracts";
 import { resolveAssetUrl } from "@lecturn/client-runtime/state/assets";
@@ -46,6 +49,7 @@ import {
   type TerminalContextDraft,
 } from "../lib/terminalContext";
 import type { DraftThreadEnvMode } from "../composerDraftStore";
+import { formatCalendarDate } from "../timestampFormat";
 import type { ComposerSubmissionIntent } from "../composer-logic";
 import type { TimelineEntry } from "../session-logic";
 import type { DesktopPreviewOverlay } from "../previewStateStore";
@@ -344,6 +348,8 @@ export function resolveComposerProviderSelection(input: {
   candidateInstanceIds: ReadonlyArray<ProviderInstanceId | null | undefined>;
   lockedProvider: ProviderDriverKind | null;
   lockedInstanceId: ProviderInstanceId | null | undefined;
+  /** Pin the lock to `lockedInstanceId` itself, not its continuation group. */
+  requireExactInstance?: boolean;
 }) {
   const requestedInstanceId = input.candidateInstanceIds.find(
     (candidate) => candidate != null && candidate !== NO_PROVIDER_MODEL_SELECTION.instanceId,
@@ -359,9 +365,9 @@ export function resolveComposerProviderSelection(input: {
     : null;
   // Missing metadata must not move Antigravity history into another Google profile.
   const requiresExactInstance =
-    input.lockedProvider === "antigravity" &&
     input.lockedInstanceId != null &&
-    lockedContinuationGroupKey === null;
+    (input.requireExactInstance === true ||
+      (input.lockedProvider === "antigravity" && lockedContinuationGroupKey === null));
   const compatibleEntries = input.entries.filter(
     (entry) =>
       (!input.lockedProvider || entry.driverKind === input.lockedProvider) &&
@@ -451,6 +457,8 @@ export function buildRevertTurnCountByUserMessageId(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
   inferredCheckpointTurnCountByTurnId: Readonly<Record<string, number | undefined>>;
+  /** Imported history has no checkpoints, so its messages never offer revert. */
+  importedFrom?: ThreadImportOrigin | null | undefined;
 }) {
   const byUserMessageId = new Map<MessageId, number>();
   if (!input.supportsConversationRollback) {
@@ -459,6 +467,9 @@ export function buildRevertTurnCountByUserMessageId(input: {
   for (let index = 0; index < input.timelineEntries.length; index += 1) {
     const entry = input.timelineEntries[index];
     if (!entry || entry.kind !== "message" || entry.message.role !== "user") {
+      continue;
+    }
+    if (isImportedHistoryRow(input, entry.message)) {
       continue;
     }
 
@@ -793,6 +804,9 @@ export function deriveLockedProvider(input: {
   if (sessionProvider && isProviderDriverKind(sessionProvider)) {
     return sessionProvider;
   }
+  if (deriveUnsentImportInstanceId(input.thread) !== null) {
+    return input.thread?.importedFrom?.driverKind ?? null;
+  }
   const narrowedThreadProvider =
     input.threadProvider && isProviderDriverKind(input.threadProvider)
       ? input.threadProvider
@@ -802,6 +816,22 @@ export function deriveLockedProvider(input: {
       ? input.selectedProvider
       : null;
   return narrowedThreadProvider ?? narrowedSelectedProvider ?? null;
+}
+
+/**
+ * The one provider instance an imported thread can take its first message on,
+ * or null once that no longer applies. The import's session only resumes on
+ * the instance it was imported with, and it has no Lecturn session until that
+ * first send, so the picker pins the instance (models within it stay open).
+ * A fork of an import starts from its parent's live session instead.
+ */
+export function deriveUnsentImportInstanceId(
+  thread: Pick<Thread, "importedFrom" | "forkedFrom" | "session"> | null | undefined,
+): ProviderInstanceId | null {
+  if (!thread || thread.importedFrom == null || thread.forkedFrom != null) {
+    return null;
+  }
+  return thread.session === null ? thread.importedFrom.providerInstanceId : null;
 }
 
 export function getStartedThreadModelChangeBlockReason(input: {
@@ -840,6 +870,93 @@ export function getStartedThreadModelChangeBlockReason(input: {
     title: "Start a new chat to change models",
     description: "This provider does not allow switching models after a conversation has started.",
   };
+}
+
+/** The product an imported session was made in, as users know it. */
+export function importSourceLabel(driverKind: ProviderDriverKind): string {
+  return driverKind === "claudeAgent"
+    ? "Claude Code"
+    : (PROVIDER_DISPLAY_NAMES[driverKind] ?? driverKind);
+}
+
+/** Header chip for an imported thread: a short label and a fuller tooltip. */
+export function buildImportChip(importedFrom: ThreadImportOrigin): {
+  label: string;
+  tooltip: string;
+} {
+  const source = importSourceLabel(importedFrom.driverKind);
+  const title = importedFrom.title.trim();
+  return {
+    label: title ? `Imported from ${source} · ${title}` : `Imported from ${source}`,
+    tooltip: `Imported from ${source} on ${formatCalendarDate(importedFrom.importedAt)} · ${importedFrom.cwd}`,
+  };
+}
+
+export interface ThreadHistoryDividers {
+  /** Last message a fork inherited from its parent thread. */
+  forkAfterMessageId: MessageId | null;
+  /** Where an imported session's history ends, with the label to show there. */
+  importDivider: { label: string; beforeMessageId: MessageId | null } | null;
+}
+
+const NO_HISTORY_DIVIDERS: ThreadHistoryDividers = {
+  forkAfterMessageId: null,
+  importDivider: null,
+};
+
+/**
+ * Where copied-in history ends in a thread's timeline. A fork's inherited rows
+ * keep timestamps that precede the child's creation (`forkedFrom.messageId`
+ * stays parent-side), so the fork time is that boundary. An import's boundary
+ * is its first message from Lecturn, or the end of the timeline until one is
+ * sent, so the session's trailing tool activity stays above the line. A fork
+ * of an import has both: the import line, then the parent's turns, then the
+ * fork line.
+ */
+export function resolveThreadHistoryDividers(
+  thread: Pick<Thread, "forkedFrom" | "importedFrom" | "createdAt" | "messages"> | null | undefined,
+): ThreadHistoryDividers {
+  if (!thread || (thread.forkedFrom == null && thread.importedFrom == null)) {
+    return NO_HISTORY_DIVIDERS;
+  }
+  let forkAfterMessageId: MessageId | null = null;
+  if (thread.forkedFrom != null) {
+    for (const message of thread.messages) {
+      if (message.createdAt <= thread.createdAt) {
+        forkAfterMessageId = message.id;
+      }
+    }
+  }
+  const importedFrom = thread.importedFrom ?? null;
+  // A fork can keep `importedFrom` for a window that no longer holds any
+  // imported row; then there is nothing to mark.
+  const firstMessage = thread.messages[0];
+  const importDivider =
+    importedFrom !== null && firstMessage && isImportedHistoryRow(thread, firstMessage)
+      ? {
+          label: `Imported from ${importSourceLabel(importedFrom.driverKind)} · ${formatCalendarDate(importedFrom.importedAt)}`,
+          beforeMessageId:
+            thread.messages.find((message) => !isImportedHistoryRow(thread, message))?.id ?? null,
+        }
+      : null;
+  return { forkAfterMessageId, importDivider };
+}
+
+/**
+ * Whether to tell the user the import left earlier history out. Waits for the
+ * oldest page so the note always sits above the first message shown.
+ */
+export function shouldShowImportTruncatedNote(input: {
+  importedFrom: ThreadImportOrigin | null | undefined;
+  hasOlderTurns: boolean;
+  firstMessage: Pick<ChatMessage, "turnId" | "createdAt"> | undefined;
+}): boolean {
+  return (
+    input.importedFrom?.historyTruncated === true &&
+    !input.hasOlderTurns &&
+    input.firstMessage !== undefined &&
+    isImportedHistoryRow(input, input.firstMessage)
+  );
 }
 
 /** Child thread title minted at fork time; also sent as the first-turn

@@ -32,6 +32,7 @@ import {
   type EnvironmentMachineKind,
   type FilesystemBrowseResult,
   type ProjectId,
+  type ScopedProjectRef,
   type SourceControlDiscoveryResult,
   type SourceControlProviderKind,
   type SourceControlRepositoryInfo,
@@ -48,6 +49,7 @@ import {
   FolderIcon,
   FolderPlusIcon,
   GitForkIcon,
+  ImportIcon,
   LayersIcon,
   LinkIcon,
   MessageSquareIcon,
@@ -150,6 +152,12 @@ import { orderItemsByPreferredIds, sortLogicalProjectsForSidebar } from "./Sideb
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { CommandPaletteContent } from "./CommandPaletteContent";
 import { CommandPaletteResults } from "./CommandPaletteResults";
+import { IMPORT_SESSION_VIEW_VALUE } from "./ImportSessionPalette.logic";
+import {
+  type ImportSessionScope,
+  readCanImportSessions,
+  useImportSessionPalette,
+} from "./ImportSessionPalette";
 import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon } from "./Icons";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectFavicon } from "./ProjectFavicon";
@@ -419,6 +427,10 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   );
   const openAddProject = useCallback(() => dispatch({ _tag: "OpenAddProject" }), []);
   const openNewThreadIn = useCallback(() => dispatch({ _tag: "OpenNewThreadIn" }), []);
+  const openImportSession = useCallback(
+    (projectRef: ScopedProjectRef) => dispatch({ _tag: "OpenImportSession", projectRef }),
+    [],
+  );
   const clearOpenIntent = useCallback(() => dispatch({ _tag: "ClearOpenIntent" }), []);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { theme, themeHalves, resolvedTheme } = useTheme();
@@ -489,7 +501,9 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   useEffect(
     () =>
       onOpenCommandPalette((detail) => {
-        if (detail.open === "new-thread-in") {
+        if (detail.open === "import-session") {
+          openImportSession(detail.projectRef);
+        } else if (detail.open === "new-thread-in") {
           openNewThreadIn();
         } else if (detail.open === "add-project") {
           openAddProject();
@@ -497,7 +511,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           setOpen(true);
         }
       }),
-    [openAddProject, openNewThreadIn, setOpen],
+    [openAddProject, openImportSession, openNewThreadIn, setOpen],
   );
 
   return (
@@ -689,6 +703,14 @@ function OpenCommandPaletteDialog(props: {
   }, [environments, primaryEnvironmentId, providers]);
   const [viewStack, setViewStack] = useState<CommandPaletteView[]>([]);
   const currentView = viewStack.at(-1) ?? null;
+  // The import view's groups are live, so the stack holds a marker group and
+  // the scope lives here; it only applies while that marker is on top.
+  const [importSessionScope, setImportSessionScope] = useState<ImportSessionScope | null>(null);
+  const isImportSessionView = currentView?.groups[0]?.value === IMPORT_SESSION_VIEW_VALUE;
+  const toggleImportSessionAllFolders = useCallback(() => {
+    setHighlightedItemValue(null);
+    setImportSessionScope((scope) => (scope ? { ...scope, allFolders: !scope.allFolders } : scope));
+  }, []);
   const environmentIds = useMemo(
     () =>
       environments
@@ -1256,6 +1278,12 @@ function OpenCommandPaletteDialog(props: {
     ],
   );
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
+  const importSession = useImportSessionPalette({
+    scope: isImportSessionView ? importSessionScope : null,
+    projects,
+    threads,
+    onToggleAllFolders: toggleImportSessionAllFolders,
+  });
 
   const pushPaletteView = useCallback(
     (view: CommandPaletteView): void => {
@@ -1272,6 +1300,17 @@ function OpenCommandPaletteDialog(props: {
       setQuery(view.initialQuery ?? "");
     },
     [browseNavigation],
+  );
+
+  const openImportSessionView = useCallback(
+    (projectRef: ScopedProjectRef): void => {
+      setImportSessionScope({ projectRef, allFolders: false });
+      pushPaletteView({
+        addonIcon: <ImportIcon className={ADDON_ICON_CLASS} />,
+        groups: [{ value: IMPORT_SESSION_VIEW_VALUE, label: "Sessions", items: [] }],
+      });
+    },
+    [pushPaletteView],
   );
 
   function pushView(item: CommandPaletteSubmenuItem): void {
@@ -1618,6 +1657,16 @@ function OpenCommandPaletteDialog(props: {
     pushPaletteView,
   ]);
 
+  useLayoutEffect(() => {
+    if (openIntent?.kind !== "import-session") {
+      return;
+    }
+    clearOpenIntent();
+    setAddProjectCloneFlow(null);
+    setViewStack([]);
+    openImportSessionView(openIntent.projectRef);
+  }, [clearOpenIntent, openImportSessionView, openIntent]);
+
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
   if (projects.length > 0) {
@@ -1692,6 +1741,37 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "chat.fork",
       run: async () => {
         await forkThreadAtLatestTurn(forkThreadRef);
+      },
+    });
+  }
+
+  // Imports land in the same contextual project "New thread" targets. Shown
+  // only where an import can succeed: the environment forks threads and at
+  // least one provider instance lists external sessions.
+  if (contextualProjectRef && readCanImportSessions(contextualProjectRef.environmentId)) {
+    const importProjectRef = contextualProjectRef;
+    const importProjectTitle = projectGroupByTargetKey.get(
+      `${importProjectRef.environmentId}:${importProjectRef.projectId}`,
+    )?.displayName;
+    actionItems.push({
+      kind: "action",
+      value: "action:import-session",
+      searchTerms: [
+        "import session",
+        "import",
+        "continue",
+        "resume",
+        "claude",
+        "codex",
+        "cli",
+        "history",
+      ],
+      title: "Import session…",
+      ...(importProjectTitle ? { description: importProjectTitle } : {}),
+      icon: <ImportIcon className={ITEM_ICON_CLASS} />,
+      keepOpen: true,
+      run: async () => {
+        openImportSessionView(importProjectRef);
       },
     });
   }
@@ -1863,7 +1943,9 @@ function OpenCommandPaletteDialog(props: {
           addProjectEnvironmentId,
           buildAddProjectRemoteSourceReadiness(sourceControlDiscovery.data),
         )
-      : (currentView?.groups ?? rootGroups);
+      : isImportSessionView
+        ? importSession.sessionGroups
+        : (currentView?.groups ?? rootGroups);
 
   const filteredGroups = filterCommandPaletteGroups({
     activeGroups,
@@ -2219,7 +2301,17 @@ function OpenCommandPaletteDialog(props: {
     displayedGroups = relativePathNeedsActiveProject ? [] : cloneDestinationBrowseGroups;
   } else if (isBrowsing) {
     displayedGroups = relativePathNeedsActiveProject ? [] : browseGroups;
+  } else if (isImportSessionView) {
+    // The folder toggle sits outside the search filter so a query that
+    // matches nothing still offers the wider list.
+    displayedGroups = [...filteredGroups, ...importSession.trailingGroups];
   }
+  // The folder toggle keeps the list non-empty, so the usual empty state never
+  // renders for a query that matches no session; say it in the notes instead.
+  const importSessionNotes =
+    filteredGroups.length === 0 && importSession.sessionGroups.length > 0
+      ? ["No matching sessions.", ...importSession.notes]
+      : importSession.notes;
 
   const inputPlaceholder =
     remoteProjectInputPlaceholder(addProjectCloneFlow) ??
@@ -2650,6 +2742,7 @@ function OpenCommandPaletteDialog(props: {
         isActionsOnly={isActionsOnly}
         keybindings={keybindings}
         onExecuteItem={executeItem}
+        {...(isImportSessionView && !isBrowsing ? { notes: importSessionNotes } : {})}
         {...(addProjectCloneFlow?.step === "repository"
           ? {
               emptyStateMessage:
@@ -2665,9 +2758,11 @@ function OpenCommandPaletteDialog(props: {
                 ? {
                     emptyStateMessage: "Press Enter to create this folder and add it as a project.",
                   }
-                : threadSearch.isPending
-                  ? { emptyStateMessage: "Searching thread messages…" }
-                  : {})}
+                : isImportSessionView && importSession.isLoading
+                  ? { emptyStateMessage: "Loading sessions…" }
+                  : threadSearch.isPending
+                    ? { emptyStateMessage: "Searching thread messages…" }
+                    : {})}
       />
     </CommandPaletteContent>
   );

@@ -264,6 +264,19 @@ function TimelineLoadEarlierHeader({
     </div>
   );
 }
+// Shares the header slot with "Load earlier turns", so it only ever sits above
+// the oldest message and adds no row to the virtualized list.
+function TimelineImportTruncatedHeader({ fade }: { fade: boolean }) {
+  return (
+    <div className={fade ? "pt-[var(--workspace-titlebar-scroll-fade-height)]" : "pt-3 sm:pt-4"}>
+      <div className="mx-auto w-full max-w-3xl pb-2">
+        <p className="py-1.5 text-center text-xs text-muted-foreground/60">
+          Earlier messages from this session aren't shown. The model still has the full session.
+        </p>
+      </div>
+    </div>
+  );
+}
 function TimelineListFooter({ composerInset }: { readonly composerInset: number }) {
   return (
     <div aria-hidden>
@@ -317,6 +330,10 @@ interface MessagesTimelineProps {
   forkWarning: string | null;
   revertDisabledReason: string | null;
   forkDividerAfterMessageId: MessageId | null;
+  /** Identity-stable: a new object rebuilds the timeline rows. */
+  importDivider?: { label: string; beforeMessageId: MessageId | null } | null;
+  /** The import left earlier history out and the oldest page is on screen. */
+  importHistoryTruncated?: boolean;
   onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
@@ -374,6 +391,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   forkWarning,
   revertDisabledReason,
   forkDividerAfterMessageId,
+  importDivider = null,
+  importHistoryTruncated = false,
   onUseArtifactTemplate = NOOP_USE_ARTIFACT_TEMPLATE,
   isRevertingCheckpoint,
   onImageExpand,
@@ -531,6 +550,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         revertTurnCountByUserMessageId,
         forkTurnIdByMessageId,
         forkDividerAfterMessageId,
+        importDivider,
       }),
     [
       timelineEntries,
@@ -544,6 +564,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       revertTurnCountByUserMessageId,
       forkTurnIdByMessageId,
       forkDividerAfterMessageId,
+      importDivider,
     ],
   );
   const rows = useStableRows(rawRows);
@@ -795,6 +816,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   onLoadEarlier={loadEarlier.onLoadEarlier}
                   fade={topFadeEnabled}
                 />
+              ) : importHistoryTruncated ? (
+                <TimelineImportTruncatedHeader fade={topFadeEnabled} />
               ) : topFadeEnabled ? (
                 TIMELINE_LIST_FADE_HEADER
               ) : (
@@ -1169,7 +1192,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
       {row.kind === "thinking" ? <ThinkingTimelineRow /> : null}
-      {row.kind === "fork-divider" ? <ForkDividerTimelineRow /> : null}
+      {row.kind === "fork-divider" ? <ForkDividerTimelineRow label={row.label} /> : null}
     </div>
   );
 });
@@ -1497,12 +1520,12 @@ function ForkFromMessageButton({ messageId }: { messageId: MessageId }) {
   );
 }
 
-function ForkDividerTimelineRow() {
+function ForkDividerTimelineRow({ label }: { label: string | undefined }) {
   return (
     <div className="flex items-center gap-3 py-1">
       <div className="h-px flex-1 bg-border/60" />
       <span className="shrink-0 text-muted-foreground text-xs">
-        Forked from the original conversation here
+        {label ?? "Forked from the original conversation here"}
       </span>
       <div className="h-px flex-1 bg-border/60" />
     </div>
