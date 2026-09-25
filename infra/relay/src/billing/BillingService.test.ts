@@ -932,7 +932,9 @@ describe("personal paid facts for metered Decisions", () => {
       const time = Math.floor((yield* Clock.currentTimeMillis) / 1000);
       const h = paidHarness([paidInvoice("in_current", time - 100, time + 100)]);
       yield* h.service.processPending();
-      expect(currentPersonalPaidFacts(h.account(), time, 300)).toEqual({
+      // Reconciliation stamps its own clock read; check freshness at or after it.
+      const now = Math.floor((yield* Clock.currentTimeMillis) / 1000);
+      expect(currentPersonalPaidFacts(h.account(), now, 300)).toEqual({
         source: "stripe_personal_subscription",
         subscriptionId: "sub_test",
         invoiceId: "in_current",
@@ -963,7 +965,9 @@ describe("personal paid facts for metered Decisions", () => {
         retrieveSubscription: async () => annual,
       });
       yield* h.service.processPending();
-      expect(currentPersonalPaidFacts(h.account(), time, 300)).toMatchObject({
+      // Reconciliation stamps its own clock read; check freshness at or after it.
+      const now = Math.floor((yield* Clock.currentTimeMillis) / 1000);
+      expect(currentPersonalPaidFacts(h.account(), now, 300)).toMatchObject({
         interval: "year",
         subscriptionAnniversary: annual.billing_cycle_anchor,
         paidPeriodEnd: invoice.lines.data[0]!.period.end,
