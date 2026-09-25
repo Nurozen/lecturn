@@ -39,6 +39,10 @@
       "types": "./src/markdownLinks.ts",
       "default": "./src/markdownLinks.ts"
     },
+    "./external-session-import": {
+      "types": "./src/externalSessionImport.ts",
+      "default": "./src/externalSessionImport.ts"
+    },
     "./stave-repo-filter": {
       "types": "./src/staveRepoFilter.ts",
       "default": "./src/staveRepoFilter.ts"

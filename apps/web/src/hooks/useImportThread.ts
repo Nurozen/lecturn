@@ -12,6 +12,7 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   type ExternalSessionSummary,
+  type ScopedThreadRef,
 } from "@lecturn/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback } from "react";
@@ -32,26 +33,37 @@ import type { Project } from "../types";
 import { useAtomCommand } from "../state/use-atom-command";
 import { readThreadCarrySources } from "./useHandleNewThread";
 
+interface ImportThreadInput {
+  readonly session: ExternalSessionSummary;
+  readonly project: Pick<Project, "environmentId" | "id" | "defaultModelSelection">;
+  readonly worktreePath: string | null;
+  readonly branch: string | null;
+}
+
+/** The new thread, or why the import did not land. An interrupted dispatch stays quiet. */
+export type ThreadImportDispatchResult =
+  | { readonly ok: true; readonly value: ScopedThreadRef }
+  | {
+      readonly ok: false;
+      readonly message: string;
+      readonly tone: "warning" | "error";
+      readonly interrupted: boolean;
+    };
+
 /**
- * The one import dispatcher every web entry point funnels through, mirroring
- * `useForkThread`: mint the thread id, dispatch `thread.import`, wait for the
- * new thread's shell row, navigate. Like a new thread, the import carries the
- * viewed thread's runtime and interaction mode, so importing from a restricted
- * thread never yields a full-access one. Failure toasts; the server
- * materializes nothing on a refused import, so there is no client-side
- * compensation.
+ * The single-session import path every web entry point shares, without toasts
+ * or navigation: mint the thread id, dispatch `thread.import`, wait for the
+ * new thread's shell row. Like a new thread, the import carries the viewed
+ * thread's runtime and interaction mode, so importing from a restricted thread
+ * never yields a full-access one. The server materializes nothing on a refused
+ * import, so there is no client-side compensation.
  */
-export function useImportThread() {
+export function useDispatchThreadImport() {
   const importThreadCommand = useAtomCommand(threadEnvironment.import, { reportFailure: false });
   const router = useRouter();
 
   return useCallback(
-    async (input: {
-      session: ExternalSessionSummary;
-      project: Pick<Project, "environmentId" | "id" | "defaultModelSelection">;
-      worktreePath: string | null;
-      branch: string | null;
-    }): Promise<boolean> => {
+    async (input: ImportThreadInput): Promise<ThreadImportDispatchResult> => {
       const { project, session } = input;
       const modelSelection = resolveImportModelSelection({
         instanceId: session.providerInstanceId,
@@ -63,14 +75,12 @@ export function useImportThread() {
           ],
       });
       if (modelSelection === null) {
-        toastManager.add(
-          stackedThreadToast({
-            type: "warning",
-            title: "Could not import session",
-            description: threadImportFailureMessage("provider-unavailable"),
-          }),
-        );
-        return false;
+        return {
+          ok: false,
+          message: threadImportFailureMessage("provider-unavailable"),
+          tone: "warning",
+          interrupted: false,
+        };
       }
       const carried = resolveCarriedThreadModes(
         readThreadCarrySources(resolveThreadRouteTarget(router.state.matches.at(-1)?.params ?? {})),
@@ -93,28 +103,63 @@ export function useImportThread() {
         },
       });
       if (importResult._tag === "Failure") {
-        if (!isAtomCommandInterrupted(importResult)) {
-          const error = squashAtomCommandFailure(importResult);
-          const reason = threadImportFailureReason(error);
+        if (isAtomCommandInterrupted(importResult)) {
+          return {
+            ok: false,
+            message: "The import was interrupted.",
+            tone: "error",
+            interrupted: true,
+          };
+        }
+        const error = squashAtomCommandFailure(importResult);
+        const reason = threadImportFailureReason(error);
+        return {
+          ok: false,
+          message:
+            reason !== null
+              ? threadImportFailureMessage(reason)
+              : (staveAdmissionErrorMessage(error) ??
+                (error instanceof Error
+                  ? error.message
+                  : "An error occurred while importing the session.")),
+          tone: "error",
+          interrupted: false,
+        };
+      }
+      // A timed-out wait still resolves: the thread route renders a loading
+      // state until its shell arrives, matching the fork flow.
+      await waitForThreadShell(threadRef);
+      return { ok: true, value: threadRef };
+    },
+    [importThreadCommand, router],
+  );
+}
+
+/**
+ * The one dispatcher every single-session web entry point funnels through,
+ * mirroring `useForkThread`: import, toast a refusal, navigate to the new
+ * thread.
+ */
+export function useImportThread() {
+  const dispatchImport = useDispatchThreadImport();
+  const router = useRouter();
+
+  return useCallback(
+    async (input: ImportThreadInput): Promise<boolean> => {
+      const result = await dispatchImport(input);
+      if (!result.ok) {
+        if (!result.interrupted) {
           toastManager.add(
             stackedThreadToast({
-              type: "error",
+              type: result.tone,
               title: "Could not import session",
-              description:
-                reason !== null
-                  ? threadImportFailureMessage(reason)
-                  : (staveAdmissionErrorMessage(error) ??
-                    (error instanceof Error
-                      ? error.message
-                      : "An error occurred while importing the session.")),
+              description: result.message,
             }),
           );
         }
         return false;
       }
-      // A timed-out wait still navigates: the thread route renders a loading
-      // state until its shell arrives, matching the fork flow.
-      await waitForThreadShell(threadRef);
+      const threadRef = result.value;
       const navigateResult = await settlePromise(() =>
         router.navigate({
           to: "/$environmentId/$threadId",
@@ -123,6 +168,6 @@ export function useImportThread() {
       );
       return navigateResult._tag === "Success";
     },
-    [importThreadCommand, router],
+    [dispatchImport, router],
   );
 }
