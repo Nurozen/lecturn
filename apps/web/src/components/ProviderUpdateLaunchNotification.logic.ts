@@ -27,6 +27,8 @@ export interface ProviderUpdateToastView {
   readonly type: ProviderUpdateToastType;
   readonly title: string;
   readonly description: string;
+  /** Tail of the failed update command's captured output, when there is any. */
+  readonly output?: string | undefined;
   readonly dismissAfterVisibleMs?: number;
 }
 
@@ -48,6 +50,8 @@ export interface ProviderUpdateSidebarPillView {
   readonly tone: ProviderUpdateSidebarPillTone;
   readonly title: string;
   readonly description: string;
+  /** Tail of the failed update command's captured output, when there is any. */
+  readonly output?: string | undefined;
   readonly dismissible?: boolean;
   readonly dismissAfterVisibleMs?: number;
 }
@@ -264,6 +268,7 @@ export function getProviderUpdateProgressToastView(input: {
       type: "error",
       title: failedProviders.length === 1 ? "Provider update failed" : "Provider updates failed",
       description: getFailedProviderUpdateDescription(failedProviders),
+      output: getFailedProviderUpdateOutput(failedProviders),
     };
   }
 
@@ -456,6 +461,7 @@ export function getProviderUpdateSidebarPillView(
           ? getProviderFailedUpdateTitle(failedProvider)
           : `${failedProviders.length} provider updates failed`,
       description: getFailedProviderUpdateDescription(failedProviders),
+      output: getFailedProviderUpdateOutput(failedProviders),
       dismissible: true,
     });
   }
@@ -544,14 +550,60 @@ function getProviderUpdateInitialToastTitle(
   return `Updates Available: ${providers.length} providers`;
 }
 
+const PROVIDER_UPDATE_OUTPUT_TAIL_LINES = 40;
+const NPM_ERROR_LINE_MAX_LENGTH = 120;
+const NPM_ERROR_LINE_PATTERN = /^npm (?:error|ERR!) (.+)$/;
+
+/** The last lines of an update command's captured output, for a "Show output" area. */
+export function tailProviderUpdateOutput(output: string | null | undefined): string | undefined {
+  const lines = output?.trimEnd().split(/\r?\n/) ?? [];
+  const tail = lines.slice(-PROVIDER_UPDATE_OUTPUT_TAIL_LINES).join("\n");
+  return tail.length > 0 ? tail : undefined;
+}
+
+/**
+ * The one npm error line worth putting in a toast: its error code
+ * (`npm error code EACCES`) when present, otherwise the last line that is not
+ * npm's pointer to its own log file.
+ */
+export function extractNpmErrorLine(output: string | null | undefined): string | null {
+  const errorLines = (output ?? "").split(/\r?\n/).flatMap((line) => {
+    const detail = NPM_ERROR_LINE_PATTERN.exec(line.trim())?.[1]?.trim();
+    return detail && !/complete log of this run|_logs[\\/]/.test(detail) ? [detail] : [];
+  });
+  const errorLine = errorLines.find((line) => line.startsWith("code ")) ?? errorLines.at(-1);
+  if (!errorLine) {
+    return null;
+  }
+  const text = `npm error ${errorLine}`;
+  return text.length > NPM_ERROR_LINE_MAX_LENGTH
+    ? `${text.slice(0, NPM_ERROR_LINE_MAX_LENGTH - 1)}…`
+    : text;
+}
+
 function getFailedProviderUpdateDescription(providers: ReadonlyArray<ServerProvider>): string {
   if (providers.length === 1) {
     const provider = providers[0]!;
     if (provider.updateState?.message) {
-      return provider.updateState.message;
+      const npmErrorLine = extractNpmErrorLine(provider.updateState.output);
+      return npmErrorLine
+        ? `${provider.updateState.message} ${npmErrorLine}`
+        : provider.updateState.message;
     }
   }
   return `${formatProviderList(providers)} failed to update. Check provider settings for details.`;
+}
+
+function getFailedProviderUpdateOutput(
+  providers: ReadonlyArray<ServerProvider>,
+): string | undefined {
+  for (const provider of providers) {
+    const output = tailProviderUpdateOutput(provider.updateState?.output);
+    if (output) {
+      return output;
+    }
+  }
+  return undefined;
 }
 
 // ===========================================================================
@@ -773,6 +825,8 @@ export type ProviderUpdateRowStatusKind = "idle" | "loading" | "success" | "fail
 export interface ProviderUpdateRowStatus {
   readonly kind: ProviderUpdateRowStatusKind;
   readonly text: string;
+  /** Tail of the failed update command's captured output, when there is any. */
+  readonly output?: string | undefined;
 }
 
 function environmentProviderNames(group: LocalEnvironmentUpdateGroup): string {
@@ -807,7 +861,7 @@ export function resolveEnvironmentUpdateRowStatus(input: {
       case "succeeded":
         return { kind: "success", text: "Updated" };
       case "failed":
-        return { kind: "failed", text: input.result.description };
+        return { kind: "failed", text: input.result.description, output: input.result.output };
       case "unchanged":
         return { kind: "unchanged", text: input.result.description };
       // "running" / "initial": non-terminal snapshot — fall through to live state.
@@ -818,7 +872,7 @@ export function resolveEnvironmentUpdateRowStatus(input: {
       case "success":
         return { kind: "success", text: "Updated" };
       case "error":
-        return { kind: "failed", text: input.pill.description };
+        return { kind: "failed", text: input.pill.description, output: input.pill.output };
       case "warning":
         return { kind: "unchanged", text: input.pill.description };
       default:
