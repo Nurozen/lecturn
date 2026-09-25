@@ -542,6 +542,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             status.message,
             "Timed out while checking Codex app-server provider status.",
           );
+          assert.strictEqual(status.discovery?.status, "timed-out");
           assert.strictEqual(yield* Ref.get(killCalls), 1);
         }),
       );

@@ -22,6 +22,11 @@ import { ServerSettingsService } from "../serverSettings.ts";
 import { applyUsageLimitsUpdate, resolveUsageLimitsAfterProbe } from "./providerUsageLimits.ts";
 import type { ServerProviderShape } from "./Services/ServerProvider.ts";
 
+const DETECTION_TIMED_OUT_MESSAGE =
+  "Provider detection timed out. Retry or configure the executable path in Settings.";
+const DETECTION_RETRY_BASE_DELAY_MS = 5_000;
+const DETECTION_RETRY_MAX_DELAY_MS = 60_000;
+
 interface ProviderSnapshotState {
   readonly snapshot: ServerProvider;
   readonly enrichmentGeneration: number;
@@ -108,6 +113,37 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   const routineTimeoutsRef = yield* Ref.make(0);
   const enrichmentFiberRef = yield* Ref.make<Fiber.Fiber<void, unknown> | null>(null);
   const scope = yield* Effect.scope;
+  const detectionRetryRef = yield* Ref.make<{
+    readonly attempts: number;
+    readonly fiber: Fiber.Fiber<void, unknown> | null;
+  }>({ attempts: 0, fiber: null });
+
+  // Timed-out detection retries itself with backoff, so a busy host recovers
+  // without the user pressing Retry. The pending fiber clears its own slot
+  // before refreshing, so the refresh it runs never interrupts itself.
+  const scheduleDetectionRetry = Effect.gen(function* () {
+    const state = yield* Ref.get(detectionRetryRef);
+    if (state.fiber !== null) return;
+    const delayMs = Math.min(
+      DETECTION_RETRY_BASE_DELAY_MS * 2 ** state.attempts,
+      DETECTION_RETRY_MAX_DELAY_MS,
+    );
+    const fiber = yield* Effect.sleep(Duration.millis(delayMs)).pipe(
+      Effect.andThen(Ref.update(detectionRetryRef, (current) => ({ ...current, fiber: null }))),
+      Effect.andThen(
+        Effect.suspend((): Effect.Effect<ServerProvider, ServerSettingsError> => refreshSnapshot()),
+      ),
+      Effect.asVoid,
+      Effect.ignoreCause({ log: true }),
+      Effect.forkIn(scope),
+    );
+    yield* Ref.set(detectionRetryRef, { attempts: state.attempts + 1, fiber });
+  });
+
+  const cancelDetectionRetry = Effect.gen(function* () {
+    const { fiber } = yield* Ref.getAndSet(detectionRetryRef, { attempts: 0, fiber: null });
+    if (fiber) yield* Fiber.interrupt(fiber).pipe(Effect.ignore);
+  });
 
   const publishEnrichedSnapshot = Effect.fn("publishEnrichedSnapshot")(function* (
     generation: number,
@@ -248,13 +284,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
         Effect.timeoutOrElse({
           duration: input.detectionTimeout ?? "15 seconds",
           orElse: () =>
-            Effect.succeed(
-              failure(
-                "timed-out",
-                "provider",
-                "Provider detection timed out. Retry or configure the executable path in Settings.",
-              ),
-            ),
+            Effect.succeed(failure("timed-out", "provider", DETECTION_TIMED_OUT_MESSAGE)),
         }),
         Effect.catchCause((cause) =>
           Effect.logWarning("Provider detection failed", cause).pipe(
@@ -285,6 +315,11 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       }
     }
     yield* Ref.set(routineTimeoutsRef, 0);
+    if (probedSnapshot.discovery?.status === "timed-out") {
+      yield* scheduleDetectionRetry;
+    } else {
+      yield* cancelDetectionRetry;
+    }
     const { snapshot: nextSnapshot, generation: nextGeneration } = yield* Ref.modify(
       snapshotStateRef,
       (state) => {
