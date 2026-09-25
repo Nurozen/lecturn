@@ -26,8 +26,9 @@ import {
   type StaveWizardRepoRow,
   updateWizardState,
   validateRegisterRepoForm,
-} from "../staveSpaceWizard.logic";
+} from "@lecturn/client-runtime/state/stave-space-wizard";
 import { StaveOperationProgress } from "../StaveOperationProgress";
+import { StaveRepoPicker } from "../StaveRepoPicker";
 
 const REPO_MODES: ReadonlyArray<{ value: StaveWizardRepoMode; label: string }> = [
   { value: "none", label: "Skip" },
@@ -234,12 +235,15 @@ export function ReposStep(props: {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
-        {state.repos.length === 0 ? (
-          <p className="rounded-lg border border-border/70 bg-muted/35 p-3 text-sm text-muted-foreground">
-            No repos are registered with Stave yet. Register one below, or create an empty space.
-          </p>
-        ) : (
-          state.repos.map((row) => (
+        <StaveRepoPicker
+          rows={state.repos}
+          registry={context.repos}
+          empty={
+            <p className="rounded-lg border border-border/70 bg-muted/35 p-3 text-sm text-muted-foreground">
+              No repos are registered with Stave yet. Register one below, or create an empty space.
+            </p>
+          }
+          renderRow={(row) => (
             <RepoRow
               key={row.repo}
               row={row}
@@ -249,8 +253,8 @@ export function ReposStep(props: {
               onBase={(base) => onChange(setRepoBase(state, row.repo, base))}
               onRef={(ref) => onChange(setRepoRef(state, row.repo, ref))}
             />
-          ))
-        )}
+          )}
+        />
         <Label className="gap-1.5 font-normal">
           <Checkbox
             data-lecturn-hover

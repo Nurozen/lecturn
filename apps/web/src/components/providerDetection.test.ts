@@ -2,6 +2,7 @@ import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@le
 import { describe, expect, it } from "vite-plus/test";
 import {
   isProviderExecutableError,
+  providerDetectionHint,
   providerDetectionLabel,
   providerDetectionSendBlock,
   shouldShowProviderDetection,
@@ -50,6 +51,17 @@ describe("provider discovery recovery", () => {
     expect(
       providerDetectionLabel({ ...provider, discovery: { status: "timed-out", phase: "shell" } }),
     ).toBe("Codex detection timed out");
+  });
+  it("explains a timeout as a busy machine and keeps the folder hint for failed starts", () => {
+    const timedOut = {
+      ...provider,
+      discovery: { status: "timed-out", phase: "provider" },
+    } as const;
+    expect(providerDetectionHint(timedOut)).toMatch(/took too long.*busy/);
+    expect(providerDetectionHint(timedOut)).not.toMatch(/project folder/);
+    const failed = { ...provider, discovery: { status: "error", phase: "provider" } } as const;
+    expect(providerDetectionLabel(failed)).toBe("Codex could not be started");
+    expect(providerDetectionHint(failed)).toMatch(/project folder still exists/);
   });
   it("recognizes the reported spawn stack while leaving unrelated missing-file failures alone", () => {
     expect(
