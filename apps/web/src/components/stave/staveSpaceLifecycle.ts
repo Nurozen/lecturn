@@ -1,16 +1,22 @@
 import { environmentSupportsStave } from "@lecturn/client-runtime/state/stave";
 import type { EnvironmentId, StaveOperation, StaveProjectInfo } from "@lecturn/contracts";
+import { useNavigate } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/unstable/reactivity";
+import { useCallback } from "react";
 
 import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { readProjects } from "../../state/entities";
 import { serverEnvironment } from "../../state/server";
 import { staveStatus } from "../../state/stave";
 import { staveOperationUnavailableReason } from "./staveCompatibility.logic";
+import { staveArchiveLandingSaga } from "./staveLifecycle.logic";
 
 export interface StaveSpaceConfirmation {
   readonly title: string;
   readonly operation: StaveOperation;
+  /** Saga the archived space leaves, captured when the confirmation opens. */
+  readonly sagaId?: string | undefined;
 }
 
 /**
@@ -24,6 +30,7 @@ export function staveArchiveSpaceConfirmation(
 ): StaveSpaceConfirmation {
   return {
     title: stave.memberOf ? `Archive space and leave saga ${stave.memberOf}` : "Archive space",
+    sagaId: stave.memberOf,
     operation: {
       kind: "archiveSpace",
       workspaceRoot,
@@ -33,6 +40,29 @@ export function staveArchiveSpaceConfirmation(
       ...(stave.memberOf ? { sagaRemoveConfirmed: true } : {}),
     },
   };
+}
+
+/**
+ * Leaves a route inside a space that was just archived: the space is done
+ * with, so land on the board of the saga it left, or home. Space settings and
+ * the sidebar both land here once the archive succeeds.
+ */
+export function useStaveArchiveLanding() {
+  const navigate = useNavigate();
+  return useCallback(
+    (space: { readonly environmentId: EnvironmentId; readonly sagaId?: string | undefined }) => {
+      const saga = staveArchiveLandingSaga(readProjects(), space);
+      if (saga)
+        void navigate({
+          to: "/sagas/$environmentId/$projectId",
+          params: { environmentId: saga.environmentId, projectId: saga.id },
+          search: { view: "board" },
+          replace: true,
+        });
+      else void navigate({ to: "/", replace: true });
+    },
+    [navigate],
+  );
 }
 
 export function staveUnarchiveSpaceConfirmation(

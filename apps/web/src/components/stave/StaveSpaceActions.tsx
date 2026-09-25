@@ -21,6 +21,8 @@ import { StaveConfirmDialog } from "./StaveConfirmDialog";
 import {
   staveArchiveSpaceConfirmation,
   staveUnarchiveSpaceConfirmation,
+  useStaveArchiveLanding,
+  type StaveSpaceConfirmation,
 } from "./staveSpaceLifecycle";
 
 type Editor = { kind: "add" } | { kind: "retarget"; repo: StaveRepoEntry } | { kind: "memory" };
@@ -38,10 +40,8 @@ export function StaveSpaceActions({
   onFinished: () => void;
 }) {
   const [editor, setEditor] = useState<Editor | null>(null);
-  const [confirmation, setConfirmation] = useState<{
-    title: string;
-    operation: StaveOperation;
-  } | null>(null);
+  const [confirmation, setConfirmation] = useState<StaveSpaceConfirmation | null>(null);
+  const landAfterArchive = useStaveArchiveLanding();
   const [referencesOnly, setReferencesOnly] = useState(false);
   const scope = { workspaceRoot, expectedManifestCreatedAt: stave.createdAt };
   const bound = stave.createdAt !== undefined;
@@ -245,7 +245,14 @@ export function StaveSpaceActions({
           title={confirmation.title}
           operation={confirmation.operation}
           onClose={() => setConfirmation(null)}
-          onFinished={onFinished}
+          // Archive leaves this page the way the sidebar entry does; other edits
+          // stay on the space and keep the result open.
+          onFinished={
+            confirmation.operation.kind === "archiveSpace"
+              ? () => landAfterArchive({ environmentId, sagaId: confirmation.sagaId })
+              : onFinished
+          }
+          closeOnFinish={confirmation.operation.kind === "archiveSpace"}
         />
       ) : null}
     </div>

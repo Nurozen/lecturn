@@ -46,13 +46,19 @@ type Preview = {
   code?: string | undefined;
 };
 
-/** A confirmation is bound to the exact payload whose dry run is displayed. */
+/**
+ * A confirmation is bound to the exact payload whose dry run is displayed.
+ * With `closeOnFinish` a successful run closes the dialog right after
+ * `onFinished`, so one confirmation is the whole action; a failure stays open
+ * with its error.
+ */
 export function StaveConfirmDialog({
   environmentId,
   operation: initial,
   title,
   onClose,
   onFinished,
+  closeOnFinish = false,
   membershipWorkspaceRoot,
   lifecycleIsSaga,
 }: {
@@ -61,6 +67,7 @@ export function StaveConfirmDialog({
   title: string;
   onClose: () => void;
   onFinished: () => void;
+  closeOnFinish?: boolean | undefined;
   membershipWorkspaceRoot?: string | undefined;
   lifecycleIsSaga?: boolean | undefined;
 }) {
@@ -157,9 +164,12 @@ export function StaveConfirmDialog({
     ) {
       notified.current = operationId;
       notifyStaveMutation(environmentId);
-      if (state.status === "finished") onFinished();
+      if (state.status === "finished") {
+        onFinished();
+        if (closeOnFinish) onClose();
+      }
     }
-  }, [state.status, operationId, onFinished, environmentId]);
+  }, [state.status, operationId, onFinished, onClose, closeOnFinish, environmentId]);
 
   const currentPreview = unavailableReason
     ? { key, error: unavailableReason }

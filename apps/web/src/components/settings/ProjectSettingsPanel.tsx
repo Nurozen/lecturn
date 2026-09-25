@@ -2,6 +2,7 @@ import { AccountSurface } from "../AccountSurface";
 import { accountByEnvironmentIdAtom } from "../../cloud/connectAccounts";
 import "./project-settings-glass.css";
 import { StaveLifecycleNotice } from "../stave/StaveLifecycleNotice";
+import { useStaveArchiveLanding } from "../stave/staveSpaceLifecycle";
 import { prepareStaveProjectDeletion } from "../../lib/staveProjectDeletion";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -20,6 +21,7 @@ import {
 } from "../../logicalProject";
 import type {
   ContextMenuItem,
+  EnvironmentId,
   ModelSelection,
   ProjectIconOverride,
   ProviderDriverKind,
@@ -292,26 +294,34 @@ export function ProjectSettingsPanel({ projectKey }: { projectKey: string }) {
 
   const selected = groups.find((group) => group.projectKey === projectKey) ?? null;
 
+  const landAfterArchive = useStaveArchiveLanding();
+
   // Remember the members of the last rendered group so a grouping-rule change
   // (which changes the group key) can follow the project to its new group.
   const lastSelectionRef = useRef<{
     key: string;
     memberKeys: string[];
     memberIds: string[];
+    sagaMember: { environmentId: EnvironmentId; sagaId: string } | null;
   } | null>(null);
   useEffect(() => {
     if (!selected) return;
+    const sagaMember = selected.memberProjects.find((member) => member.stave?.memberOf);
     lastSelectionRef.current = {
       key: selected.projectKey,
       memberKeys: selected.memberProjects.map((member) => member.physicalProjectKey),
       memberIds: selected.memberProjects.map(memberKey),
+      sagaMember: sagaMember?.stave?.memberOf
+        ? { environmentId: sagaMember.environmentId, sagaId: sagaMember.stave.memberOf }
+        : null,
     };
   }, [selected]);
 
   // A grouping-rule change or a Stave unarchive (which moves the workspace
   // root) replaces the group key mid-visit; follow the project to its new key.
-  // A project that was archived or removed is done with, so leave for home like
-  // project removal does instead of parking on the not-found state.
+  // A project that was archived or removed is done with, so leave instead of
+  // parking on the not-found state: an archived saga member for its saga's
+  // board (as the archive confirmation does), anything else for home.
   useEffect(() => {
     if (selected !== null) return;
     const last = lastSelectionRef.current;
@@ -334,9 +344,16 @@ export function ProjectSettingsPanel({ projectKey }: { projectKey: string }) {
         hashScrollIntoView: false,
       });
     } else if (groups.length > 0) {
-      void navigate({ to: "/", replace: true });
+      const archived = groups.some((group) =>
+        group.memberProjects.some(
+          (member) =>
+            last.memberIds.includes(memberKey(member)) && member.stave?.state === "archived",
+        ),
+      );
+      if (archived && last.sagaMember) landAfterArchive(last.sagaMember);
+      else void navigate({ to: "/", replace: true });
     }
-  }, [groups, navigate, projectKey, selected]);
+  }, [groups, landAfterArchive, navigate, projectKey, selected]);
 
   if (!selected) {
     return (

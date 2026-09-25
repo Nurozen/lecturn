@@ -15,6 +15,7 @@ import { describeStaveWorkspace } from "./stave/staveWorkspaceContext.logic";
 import { StaveConfirmDialog } from "./stave/StaveConfirmDialog";
 import {
   readStaveSpaceLifecycleMenuEntry,
+  useStaveArchiveLanding,
   type StaveSpaceConfirmation,
 } from "./stave/staveSpaceLifecycle";
 import { useAtomValue } from "@effect/atom-react";
@@ -3827,16 +3828,12 @@ export default function Sidebar() {
     | (StaveSpaceConfirmation & {
         environmentId: EnvironmentId;
         projectId: string;
-        saga: SidebarProjectSnapshot | null;
       })
     | null
   >(null);
+  const landAfterStaveArchive = useStaveArchiveLanding();
   const handleProjectHeaderContextMenu = useCallback(
-    (
-      event: ReactMouseEvent,
-      project: SidebarProjectSnapshot,
-      saga: SidebarProjectSnapshot | null,
-    ) => {
+    (event: ReactMouseEvent, project: SidebarProjectSnapshot) => {
       const entries = project.memberProjects.flatMap((member) => {
         const entry = readStaveSpaceLifecycleMenuEntry(member);
         return entry ? [{ member, entry }] : [];
@@ -3871,9 +3868,9 @@ export default function Sidebar() {
         setSpaceConfirmation({
           title: chosen.entry.title,
           operation: chosen.entry.operation,
+          sagaId: chosen.entry.sagaId,
           environmentId: chosen.member.environmentId,
           projectId: chosen.member.id,
-          saga,
         });
       })();
     },
@@ -3881,6 +3878,7 @@ export default function Sidebar() {
   );
   // An archived space's threads stay readable, but the space is done with:
   // leave a route inside it for the saga it left, or home (as settings does).
+  // Runs on the operation's success; the dialog then closes itself.
   const handleSpaceConfirmationFinished = useCallback(() => {
     if (spaceConfirmation?.operation.kind !== "archiveSpace") return;
     const route = routeTargetRef.current;
@@ -3895,15 +3893,8 @@ export default function Sidebar() {
       location.projectId !== spaceConfirmation.projectId
     )
       return;
-    const saga = spaceConfirmation.saga;
-    if (saga)
-      void router.navigate({
-        to: "/sagas/$environmentId/$projectId",
-        params: { environmentId: saga.environmentId, projectId: saga.id },
-        search: { view: "board" },
-      });
-    else void router.navigate({ to: "/" });
-  }, [router, spaceConfirmation]);
+    landAfterStaveArchive(spaceConfirmation);
+  }, [landAfterStaveArchive, spaceConfirmation]);
 
   // Thread jump (cmd+1..9) and prev/next traversal reuse the same commands as
   // v1 — the keybinding layer is shared, only the ordered list differs.
@@ -4586,11 +4577,7 @@ export default function Sidebar() {
                             data-thread-selection-safe
                             className="lecturn-project-header flex items-center gap-1 pt-2"
                             onContextMenu={(event) =>
-                              handleProjectHeaderContextMenu(
-                                event,
-                                project,
-                                parent?.stave?.isSaga ? parent : null,
-                              )
+                              handleProjectHeaderContextMenu(event, project)
                             }
                           >
                             <button
@@ -5142,6 +5129,7 @@ export default function Sidebar() {
           operation={spaceConfirmation.operation}
           onClose={() => setSpaceConfirmation(null)}
           onFinished={handleSpaceConfirmationFinished}
+          closeOnFinish
         />
       ) : null}
       <SidebarChromeFooter />
