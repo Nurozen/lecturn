@@ -40,7 +40,7 @@ import {
   toggleMemorySpec,
   updateWizardState,
   wizardSteps,
-} from "./staveSpaceWizard.logic";
+} from "@lecturn/client-runtime/state/stave-space-wizard";
 import { StaveOperationProgress } from "./StaveOperationProgress";
 import { IdentityStep } from "./steps/IdentityStep";
 import { MemoryStep } from "./steps/MemoryStep";

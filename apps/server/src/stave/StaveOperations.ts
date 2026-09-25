@@ -1206,6 +1206,31 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       return found;
     });
 
+  /**
+   * A confirmed member archive/destroy runs `saga remove` first. Without it the
+   * operation would quiesce sessions and then fail, so it is refused up front.
+   */
+  const requireSagaRemove = (
+    operation: SpaceOperation,
+    spaceId: string,
+    createdAt: string | undefined,
+  ) =>
+    Effect.gen(function* () {
+      if (
+        (operation.kind !== "archiveSpace" && operation.kind !== "destroySpace") ||
+        operation.sagaRemoveConfirmed !== true ||
+        createdAt === undefined ||
+        (yield* cli.supports("saga remove")) ||
+        (yield* membership(spaceId, createdAt)).length === 0
+      )
+        return;
+      return yield* refuse(
+        "unsupported_feature",
+        `The selected Stave binary does not support saga remove, so this saga member cannot leave its saga before being ${operation.kind === "archiveSpace" ? "archived" : "deleted"}. Update Stave or choose another binary.`,
+        { missing: ["saga remove"] },
+      );
+    });
+
   const deleteProject = (projectId: ProjectId) =>
     engine
       .dispatch({
@@ -1412,6 +1437,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
             "saga_space",
             "Use Archive saga or Destroy saga to review all member spaces.",
           );
+        yield* requireSagaRemove(operation, id, info.createdAt);
         const isLifecycle =
           operation.kind === "archiveSpace" ||
           operation.kind === "destroySpace" ||
@@ -1643,6 +1669,20 @@ export const make = Effect.fn("StaveOperations.make")(function* (
               break;
             }
             case "archiveSpace": {
+              // A saga member leaves its roster first, so one reviewed archive
+              // replaces the separate "remove from saga" step.
+              if (operation.sagaRemoveConfirmed === true && info.createdAt !== undefined) {
+                for (const member of yield* membership(id, info.createdAt)) {
+                  const removal = { sagaId: member.sagaId, spaceId: id };
+                  yield* invoke(
+                    entry,
+                    "saga remove",
+                    buildStaveArgv.sagaRemove(removal),
+                    (stream) => cli.sagaRemove(removal, stream),
+                    notesUnlessPlan,
+                  ).pipe(Effect.ensuring(afterMutation(member.sagaRoot)));
+                }
+              }
               const input = { ...operation, id };
               const result = yield* invoke(
                 entry,
@@ -2764,6 +2804,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
               workspaceRoot: operation.workspaceRoot,
               ...scope,
               memory: operation.memory as "keep" | "contribute",
+              sagaRemoveConfirmed: operation.sagaRemoveConfirmed ?? row.sagaRemoveConfirmed,
             }
           : {
               kind: "destroySpace" as const,
@@ -3296,6 +3337,20 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                 stderrTail: null,
                 verb: STAVE_OPERATION_VERB[operation.kind],
               });
+            yield* requireSagaRemove(operation, info.spaceId, info.createdAt).pipe(
+              Effect.mapError((error) =>
+                error._tag === "StaveError"
+                  ? error
+                  : new StaveError({
+                      code: error.code,
+                      message: error.message,
+                      details: error.details,
+                      exitCode: null,
+                      stderrTail: null,
+                      verb: STAVE_OPERATION_VERB[operation.kind],
+                    }),
+              ),
+            );
             switch (operation.kind) {
               case "addRepo":
                 return yield* cli
@@ -3309,10 +3364,42 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                 return yield* cli
                   .spaceRetarget({ ...operation, id: info.spaceId, dryRun: true })
                   .pipe(Effect.flatMap((value) => expectPlan("space retarget", value)));
-              case "archiveSpace":
+              case "archiveSpace": {
+                if (operation.sagaRemoveConfirmed === true && info.createdAt !== undefined) {
+                  const memberships = yield* membership(info.spaceId, info.createdAt).pipe(
+                    Effect.mapError(
+                      (error) =>
+                        new StaveError({
+                          code: error.code,
+                          message: error.message,
+                          details: error.details,
+                          exitCode: null,
+                          stderrTail: null,
+                          verb: "space archive",
+                        }),
+                    ),
+                  );
+                  // Stave refuses to plan a member's archive, so the archive step is described.
+                  if (memberships.length > 0) {
+                    const plan: Array<string> = [];
+                    for (const member of memberships) {
+                      plan.push(`Leave saga '${member.sagaId}'.`);
+                      const removal = yield* cli
+                        .sagaRemove({ sagaId: member.sagaId, spaceId: info.spaceId, dryRun: true })
+                        .pipe(Effect.flatMap((value) => expectPlan("saga remove", value)));
+                      plan.push(...removal.plan);
+                    }
+                    plan.push(
+                      `Then archive space '${info.spaceId}' with memory=${operation.memory}${operation.force ? " (forced)" : ""}.`,
+                      "Archive guards are checked after leaving the saga. A refusal leaves the space live and outside the saga.",
+                    );
+                    return { dryRun: true as const, plan };
+                  }
+                }
                 return yield* cli
                   .spaceArchive({ ...operation, id: info.spaceId, dryRun: true })
                   .pipe(Effect.flatMap((value) => expectPlan("space archive", value)));
+              }
               case "restoreSpace":
                 return yield* cli
                   .spaceRestore({ ...operation, id: info.spaceId, dryRun: true })

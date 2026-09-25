@@ -1,7 +1,9 @@
 import type {
+  EnvironmentId,
   ProjectId,
   StaveLifecycleActionOperation,
   StaveLifecycleSettings,
+  StaveProjectInfo,
   StaveProjectNotice,
 } from "@lecturn/contracts";
 
@@ -61,4 +63,30 @@ export function lifecycleNoticeDescription(
   return notice.code
     ? `Cleanup needs attention: ${notice.code}.`
     : "Space cleanup needs your attention.";
+}
+
+/**
+ * The saga board an archived space returns the user to: the live saga it was a
+ * member of, in the same environment. Null when it had none (or the saga is
+ * gone), which lands home.
+ */
+export function staveArchiveLandingSaga<
+  Project extends {
+    readonly environmentId: EnvironmentId;
+    readonly stave?: StaveProjectInfo | null | undefined;
+  },
+>(
+  projects: ReadonlyArray<Project>,
+  space: { readonly environmentId: EnvironmentId; readonly sagaId?: string | undefined },
+): Project | null {
+  if (!space.sagaId) return null;
+  return (
+    projects.find(
+      (project) =>
+        project.environmentId === space.environmentId &&
+        (project.stave?.isSaga === true || project.stave?.kind === "saga") &&
+        project.stave.state !== "archived" &&
+        project.stave.spaceId === space.sagaId,
+    ) ?? null
+  );
 }

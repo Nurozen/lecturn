@@ -192,6 +192,11 @@ its actions. Each action shows Stave's dry-run plan before you confirm it.
 **Archive space** stops the space's sessions, removes its worktrees, and moves it into the
 archive. The project follows the archived directory. Its manifest, spec, notes, and committed
 branches survive. **Unarchive** restores that exact archive and allows new threads again.
+Archiving a saga member is one action: the dialog says it will also leave the saga, the plan
+lists that removal first, and confirming removes the member from the saga and then archives it.
+Other members' ordering edges to it are dropped. If the archive itself is then refused, the space
+stays live and outside the saga. **Archive now** and archive retries behave the same way. After
+an archive, the app leaves the archived project's settings for the home screen.
 
 **Destroy space** stops sessions and permanently removes the space directory and project.
 Specs and notes are lost; committed branches survive in Stave's repository cache. The dialog
@@ -254,7 +259,11 @@ tablet sidebar adds saga project navigation beside its default flat thread list;
 legacy list nests project headers. **Project Grouping → Nest saga members** is a device-local
 preference. Nesting requires a verified member path and creation identity. Spaces with the same
 name in another installation, older archives, or incomplete identity information stay at the top
-level. Create and edit sagas on web or desktop.
+level. **Add Project → New Stave space** and **New Stave saga** create spaces and sagas from a
+phone: pick registered repos to edit or reference (with search), optionally enroll the space in
+an existing saga, and follow the create's progress. Memory, custom kinds, base branches, reference
+pins, landing order, the plan preview, and repo registration stay on web and desktop, as does
+editing a saga.
 
 ## Automatic cleanup
 

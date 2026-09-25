@@ -66,6 +66,24 @@ export function addProjectStaveSourceDescription(source: AddProjectStaveSource):
   }
 }
 
+/**
+ * The Stave sources an add-project list offers: none unless the feature gate
+ * passes (capability, enabled, runnable), minus any create the selected
+ * binary reports as unsupported.
+ */
+export function availableAddProjectStaveSources(input: {
+  readonly available: boolean;
+  readonly unsupportedOperations?: ReadonlyArray<string> | undefined;
+}): ReadonlyArray<AddProjectStaveSource> {
+  if (!input.available) return [];
+  return ADD_PROJECT_STAVE_SOURCES.filter(
+    (source) =>
+      !input.unsupportedOperations?.includes(
+        source === "stave-space" ? "createSpace" : "createSaga",
+      ),
+  );
+}
+
 export function canCreateProjectInEnvironment(
   connectionPhase: EnvironmentConnectionPhase | null | undefined,
 ): boolean {

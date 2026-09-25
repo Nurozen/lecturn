@@ -25,13 +25,13 @@ export function staveOperationLossCopy(operation: StaveOperation): string {
       if (operation.action === "dismiss")
         return "Dismiss this cleanup record. Lecturn will leave the space and its memories in place.";
       return operation.action === "archiveNow" || operation.target === "archive"
-        ? "This stops sessions and archives the space. Specs, notes, memories and committed branches survive. Unarchive restores its worktrees."
+        ? "This stops sessions and archives the space. A saga member leaves its saga first. Specs, notes, memories and committed branches survive. Unarchive restores its worktrees."
         : "This permanently removes the space directory, including its spec and notes. Committed branches remain in Stave's repository cache.";
     case "destroySpace":
     case "removePartialSpace":
       return "This permanently removes the space directory, including its spec and notes. Committed branches remain in Stave's repository cache.";
     case "archiveSpace":
-      return "This stops sessions, removes worktrees, and moves the space into the archive. Its manifest, spec, notes, and committed branches survive. Unarchive restores the worktrees.";
+      return "This stops sessions, removes worktrees, and moves the space into the archive. A saga member leaves its saga first, dropping other members' ordering edges to it. Its manifest, spec, notes, and committed branches survive. Unarchive restores the worktrees.";
     case "sagaDestroy":
       return "This permanently removes the saga and every live member, including their specs and notes, in reverse dependency order. Committed branches remain in Stave's repository cache. A refusal can leave earlier members already removed; review the result before retrying.";
     case "sagaArchive":

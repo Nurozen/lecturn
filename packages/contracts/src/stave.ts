@@ -441,6 +441,9 @@ export const StaveArchiveSpaceOperation = Schema.Struct({
   ...SpaceScoped.fields,
   force: Schema.Boolean,
   memory: StaveArchiveMemoryFate,
+  /** Leave every saga the space belongs to before archiving it; without it a
+      member is refused with `saga_member`. */
+  sagaRemoveConfirmed: Schema.optional(Schema.Boolean),
 });
 export type StaveArchiveSpaceOperation = typeof StaveArchiveSpaceOperation.Type;
 

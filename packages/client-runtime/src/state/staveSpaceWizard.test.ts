@@ -13,12 +13,14 @@ import {
   buildRegisterRepoOperation,
   buildRemovePartialSpaceOperation,
   canAdvance,
+  canCreateSpace,
   createInitialSagaWizardState,
   createInitialWizardState,
   describeCreateSpaceCommand,
   describeRegisterRepoCommand,
   EMPTY_WIZARD_CONTEXT,
   findSagaByRoot,
+  joinableSagas,
   isOperationNotImplemented,
   memoryAvailableFrom,
   memorySuggestions,
@@ -47,7 +49,7 @@ import {
   type StaveWizardContext,
   type StaveWizardRepoMode,
   type StaveWizardRepoRow,
-} from "./staveSpaceWizard.logic";
+} from "./staveSpaceWizard.ts";
 
 // ── Fixtures ──────────────────────────────────────────────────
 
@@ -475,6 +477,15 @@ describe("saga", () => {
     sagaRow("epic-dir", { logicalId: "epic-logical", members: ["c"] }),
   ];
 
+  it("joinableSagas drops plain spaces and unreadable sagas", () => {
+    const rows = [
+      sagaRow("epic"),
+      sagaRow("ticket", { isSaga: false, kind: "ticket" }),
+      sagaRow("broken", { error: "manifest unreadable" }),
+    ];
+    expect(joinableSagas(rows).map((row) => row.id)).toEqual(["epic"]);
+  });
+
   it("findSagaByRoot ignores trailing slashes on either side", () => {
     expect(findSagaByRoot(sagas, "/work/epic/")?.id).toBe("epic");
     expect(findSagaByRoot(sagas, " /work/epic ")?.id).toBe("epic");
@@ -632,6 +643,41 @@ describe("canAdvance", () => {
 });
 
 // ── Operations ────────────────────────────────────────────────
+
+describe("canCreateSpace", () => {
+  const context = contextWith({ repos: [repoRow("web")], spaces: [liveSpace({ id: "taken" })] });
+
+  it("reports the first failing step gate in step order", () => {
+    const state = wizardState({ spaceId: "taken", repos: [wizardRepo("web", "none")] });
+    expect(canCreateSpace(state, context)).toMatchObject({
+      ok: false,
+      message: expect.stringContaining("already exists"),
+    });
+    expect(canCreateSpace({ ...state, spaceId: "fresh" }, context)).toMatchObject({
+      ok: false,
+      message: expect.stringContaining("Pick at least one repo"),
+    });
+  });
+
+  it("gates the saga step even though a form never visits it", () => {
+    const state = wizardState({
+      spaceId: "fresh",
+      repos: [wizardRepo("web", "edit")],
+      after: ["a"],
+    });
+    expect(canCreateSpace(state, context).ok).toBe(false);
+    expect(canCreateSpace({ ...state, after: [] }, context)).toEqual({ ok: true });
+  });
+
+  it("ignores the step the state happens to be on", () => {
+    const state = wizardState({
+      step: "progress",
+      spaceId: "fresh",
+      repos: [wizardRepo("web", "reference")],
+    });
+    expect(canCreateSpace(state, context)).toEqual({ ok: true });
+  });
+});
 
 describe("buildCreateSpaceOperation", () => {
   it("builds the full payload", () => {

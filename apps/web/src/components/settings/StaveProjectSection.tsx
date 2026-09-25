@@ -152,9 +152,11 @@ export function StaveProjectSection({
           </div>
         </SettingsRow>
       ) : null}
+      {/* Sibling keys must stay distinct: a duplicate made React remount the saga
+          editor on every render and orphan the old copy, open dialog included. */}
       {available && (stave.isSaga || stave.kind === "saga") ? (
         <StaveSagaActions
-          key={`${environmentId}:${workspaceRoot}:${stave.createdAt}`}
+          key={`${environmentId}:${workspaceRoot}:${stave.createdAt}:saga`}
           environmentId={environmentId}
           sagaRoot={workspaceRoot}
           stave={stave}
@@ -170,7 +172,7 @@ export function StaveProjectSection({
       ) : null}
       {available && (!archived || kind !== "saga") ? (
         <StaveSpaceActions
-          key={`${environmentId}:${workspaceRoot}:${stave.createdAt ?? "legacy"}`}
+          key={`${environmentId}:${workspaceRoot}:${stave.createdAt ?? "legacy"}:actions`}
           environmentId={environmentId}
           workspaceRoot={workspaceRoot}
           stave={stave}

@@ -347,6 +347,7 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
           ),
           options.cliLayer ??
             Layer.mock(StaveCli)({
+              supports: () => Effect.succeed(true),
               sagaList: Effect.succeed([]),
               spaceCreate: record("spaceCreate", fakes.spaceCreate),
               spaceStatus: record("spaceStatus", fakes.spaceStatus),
@@ -2398,6 +2399,177 @@ it.effect("previews confirmed saga removal and guarded destroy without mutating 
         expect(
           (yield* Ref.get(harness.cliCalls)).some((call) => call.method === "spaceDestroy"),
         ).toBe(false);
+        expect(yield* Ref.get(harness.dispatched)).toEqual([]);
+      }),
+  ),
+);
+
+/** A live space enrolled in saga `story`; Stave refuses its archive while it is a member. */
+const archivedMemberScenario = (roots: Roots) =>
+  Effect.gen(function* () {
+    const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+    const archived = roots.path.join(roots.agentWorkDir, ".archive", SPACE_ID);
+    const sagaRoot = roots.path.join(roots.agentWorkDir, "story");
+    yield* roots.fs.makeDirectory(root);
+    yield* roots.fs.makeDirectory(archived, { recursive: true });
+    const fixture = lifecycleFixture(root);
+    let enrolled = true;
+    const calls: Array<string> = [];
+    const sagaManifest = () => ({
+      ...manifest("story"),
+      saga: {
+        members: enrolled
+          ? [
+              { id: SPACE_ID, createdAt: CREATED_AT, after: [], prs: [] },
+              { id: "dependent", createdAt: CREATED_AT, after: [SPACE_ID], prs: [] },
+            ]
+          : [{ id: "dependent", createdAt: CREATED_AT, after: [], prs: [] }],
+      },
+    });
+    return {
+      root,
+      archived,
+      sagaRoot,
+      fixture,
+      calls,
+      activeProject: project("p", root),
+      lifecycle: fixture.service,
+      readerLoad: (candidate: string) =>
+        Effect.succeed(Option.some(infoFor(candidate === archived ? "archived" : "live"))),
+      cliExtra: {
+        sagaList: Effect.sync(() => [
+          {
+            id: "story",
+            logicalId: "story",
+            path: sagaRoot,
+            isSaga: true,
+            members: enrolled ? [SPACE_ID, "dependent"] : ["dependent"],
+          },
+        ]),
+        spaceStatus: () =>
+          Effect.sync(() => ({ ...statusResult("story", sagaRoot), manifest: sagaManifest() })),
+        spaceList: (input) => Effect.succeed(input?.archived ? [] : [listRow(root)]),
+        sagaRemove: (input: { dryRun?: boolean | undefined }) =>
+          Effect.sync(() => {
+            calls.push(input.dryRun ? "sagaRemove --dry-run" : "sagaRemove");
+            if (input.dryRun) return { dryRun: true as const, plan: ["remove demo from story"] };
+            enrolled = false;
+            return { sagaId: "story", spacePath: sagaRoot, manifest: sagaManifest(), notes: [] };
+          }),
+        spaceArchive: (input: { dryRun?: boolean | undefined }) =>
+          Effect.suspend(() => {
+            calls.push(input.dryRun ? "spaceArchive --dry-run" : "spaceArchive");
+            if (enrolled)
+              return Effect.fail(
+                new StaveError({
+                  code: "saga_member",
+                  message: `space "${SPACE_ID}" is a member of saga "story"`,
+                  details: null,
+                  verb: "space archive",
+                  exitCode: 1,
+                  stderrTail: null,
+                }),
+              );
+            return Effect.succeed({
+              spaceId: SPACE_ID,
+              archivedPath: archived,
+              memory: "keep" as const,
+              notes: [],
+            });
+          }),
+      } satisfies Partial<StaveCliShape>,
+    };
+  }).pipe(Effect.orDie);
+
+it.effect("archives a saga member in one confirmed operation by leaving the saga first", () =>
+  scenario(archivedMemberScenario, (harness, options) =>
+    Effect.gen(function* () {
+      const ops = yield* StaveOperations;
+      const archive = {
+        kind: "archiveSpace" as const,
+        workspaceRoot: options.root,
+        expectedManifestCreatedAt: CREATED_AT,
+        force: false,
+        memory: "keep" as const,
+      };
+
+      // Unconfirmed, the member keeps Stave's own refusal and its roster entry.
+      expect(failedError(yield* runToEnd(ops, "archive-unconfirmed", archive)).code).toBe(
+        "saga_member",
+      );
+      expect(options.calls).toEqual(["spaceArchive"]);
+
+      options.calls.length = 0;
+      const events = yield* runToEnd(ops, "archive-member", {
+        ...archive,
+        sagaRemoveConfirmed: true,
+      });
+      expect(finishedResult(events).kind).toBe("archiveSpace");
+      expect(options.calls).toEqual(["sagaRemove", "spaceArchive"]);
+      expect(outline(events)).toContain("phase_started:saga remove");
+      expect(yield* Ref.get(harness.invalidated)).toContain(options.sagaRoot);
+      expect(
+        (yield* Ref.get(harness.dispatched)).some(
+          (command) =>
+            command.type === "project.meta.update" && command.workspaceRoot === options.archived,
+        ),
+      ).toBe(true);
+    }),
+  ),
+);
+
+it.effect("previews leaving the saga before a confirmed member archive without mutating", () =>
+  scenario(archivedMemberScenario, (harness, options) =>
+    Effect.gen(function* () {
+      const ops = yield* StaveOperations;
+      const result = yield* ops.dryRun({
+        kind: "archiveSpace",
+        workspaceRoot: options.root,
+        expectedManifestCreatedAt: CREATED_AT,
+        sagaRemoveConfirmed: true,
+        force: false,
+        memory: "keep",
+      });
+      expect(result.plan[0]).toBe("Leave saga 'story'.");
+      expect(result.plan).toContain("remove demo from story");
+      expect(result.plan.join(" ")).toContain(`Then archive space '${SPACE_ID}'`);
+      expect(options.calls).toEqual(["sagaRemove --dry-run"]);
+      expect(yield* Ref.get(harness.dispatched)).toEqual([]);
+    }),
+  ),
+);
+
+it.effect("refuses a confirmed member archive up front when the binary lacks saga remove", () =>
+  scenario(
+    (roots) =>
+      archivedMemberScenario(roots).pipe(
+        Effect.map((options) => ({
+          ...options,
+          quiesced: [] as Array<string>,
+          cliExtra: { ...options.cliExtra, supports: () => Effect.succeed(false) },
+        })),
+      ),
+    (harness, options) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        const archive = {
+          kind: "archiveSpace" as const,
+          workspaceRoot: options.root,
+          expectedManifestCreatedAt: CREATED_AT,
+          sagaRemoveConfirmed: true,
+          force: false,
+          memory: "keep" as const,
+        };
+        const preview = yield* ops.dryRun(archive).pipe(Effect.flip);
+        expect(preview.code).toBe("unsupported_feature");
+
+        const error = failedError(yield* runToEnd(ops, "archive-member-old-binary", archive));
+        expect(error.code).toBe("unsupported_feature");
+        expect(error.message).toContain("saga remove");
+        // Nothing ran: no Stave mutation, no quiesced sessions, no lifecycle transition.
+        expect(options.calls).toEqual([]);
+        expect(options.quiesced).toEqual([]);
+        expect(options.fixture.row().disposition).toBe("live");
         expect(yield* Ref.get(harness.dispatched)).toEqual([]);
       }),
   ),
