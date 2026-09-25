@@ -1,12 +1,20 @@
-import type { ExternalSessionSummary, ScopedProjectRef } from "@lecturn/contracts";
+import {
+  type ExternalSessionFolder,
+  groupExternalSessionsByFolder,
+} from "@lecturn/client-runtime/external-session-import";
+import type {
+  EnvironmentId,
+  ExternalSessionSummary,
+  ProviderDriverKind,
+  ScopedProjectRef,
+} from "@lecturn/contracts";
 import { FolderIcon, FolderSearchIcon, GitBranchIcon, MessageSquareIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 
+import { externalSessionListNotes, useExternalSessionList } from "../hooks/useExternalSessionList";
 import { useImportThread } from "../hooks/useImportThread";
-import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from "../providerInstances";
+import type { ProviderInstanceEntry } from "../providerInstances";
 import { readEnvironmentProviders, readEnvironmentSupportsForking } from "../state/entities";
-import { externalSessionsEnvironment } from "../state/externalSessions";
-import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import type { Project, ThreadShell } from "../types";
 import {
@@ -17,17 +25,15 @@ import {
 import {
   collectImportedSessionIds,
   createImportTargetResolver,
-  type ExternalSessionsInstanceResult,
   externalSessionMetadataParts,
   externalSessionSearchTerms,
   externalSessionTitle,
+  IMPORT_FOLDERS_TRUNCATED_NOTE,
   IMPORT_SESSION_COST_NOTE,
-  IMPORT_SESSION_LIST_LIMIT,
   IMPORT_SESSION_OTHER_FOLDER_REASON,
   IMPORT_SESSION_TRUNCATED_NOTE,
   IMPORT_SESSION_UNMATCHED_FOLDER_REASON,
   listImportCapableProviders,
-  mergeExternalSessionResults,
   sessionRanOutsideFolder,
 } from "./ImportSessionPalette.logic";
 import { COMMAND_PALETTE_META_ICON_CLASS, CommandPaletteMetaDot } from "./ThreadCommandSubtitle";
@@ -39,17 +45,24 @@ export interface ImportSessionScope {
   readonly allFolders: boolean;
 }
 
-/** Snapshot read, like fork availability: entry points evaluate it when they render or open. */
-export function readCanImportSessions(environmentId: ScopedProjectRef["environmentId"]): boolean {
-  return (
-    listImportCapableProviders({
-      supportsForking: readEnvironmentSupportsForking(environmentId),
-      providers: readEnvironmentProviders(environmentId),
-    }).length > 0
-  );
+/**
+ * Driver kinds of the instances whose sessions can be imported. Snapshot read,
+ * like fork availability: entry points evaluate it when they render or open.
+ */
+export function readImportCapableDriverKinds(
+  environmentId: EnvironmentId,
+): ReadonlyArray<ProviderDriverKind> {
+  return listImportCapableProviders({
+    supportsForking: readEnvironmentSupportsForking(environmentId),
+    providers: readEnvironmentProviders(environmentId),
+  }).map((provider) => provider.driver);
 }
 
-function ExternalSessionSubtitle(props: {
+export function readCanImportSessions(environmentId: EnvironmentId): boolean {
+  return readImportCapableDriverKinds(environmentId).length > 0;
+}
+
+export function ExternalSessionSubtitle(props: {
   session: ExternalSessionSummary;
   provider: ProviderInstanceEntry | undefined;
   imported: boolean;
@@ -123,11 +136,6 @@ export function useImportSessionPalette(input: {
 } {
   const { onToggleAllFolders, projects, scope, threads } = input;
   const importThread = useImportThread();
-  const listSessions = useAtomQueryRunner(externalSessionsEnvironment.list, {
-    reportFailure: false,
-    reportDefect: false,
-  });
-  const environmentId = scope?.projectRef.environmentId ?? null;
   const scopeProject =
     scope === null
       ? null
@@ -137,60 +145,10 @@ export function useImportSessionPalette(input: {
             project.id === scope.projectRef.projectId,
         ) ?? null);
   const listCwd = scope === null || scope.allFolders ? null : (scopeProject?.workspaceRoot ?? null);
-  const providerEntries = useMemo(
-    () =>
-      environmentId === null
-        ? []
-        : deriveProviderInstanceEntries(
-            listImportCapableProviders({
-              supportsForking: readEnvironmentSupportsForking(environmentId),
-              providers: readEnvironmentProviders(environmentId),
-            }),
-          ),
-    [environmentId],
-  );
-  const requestKey =
-    environmentId === null || scopeProject === null
-      ? null
-      : JSON.stringify([environmentId, listCwd, providerEntries.map((entry) => entry.instanceId)]);
-  const [loaded, setLoaded] = useState<{
-    readonly key: string;
-    readonly merged: ReturnType<typeof mergeExternalSessionResults>;
-  } | null>(null);
-
-  useEffect(() => {
-    if (requestKey === null || environmentId === null) return;
-    let cancelled = false;
-    void Promise.all(
-      providerEntries.map(async (entry): Promise<ExternalSessionsInstanceResult> => {
-        const providerInstanceId = entry.instanceId;
-        try {
-          const result = await listSessions({
-            environmentId,
-            input: {
-              providerInstanceId,
-              ...(listCwd === null ? {} : { cwd: listCwd }),
-              limit: IMPORT_SESSION_LIST_LIMIT,
-            },
-          });
-          return result._tag === "Success"
-            ? { providerInstanceId, ok: true, ...result.value }
-            : { providerInstanceId, ok: false };
-        } catch {
-          return { providerInstanceId, ok: false };
-        }
-      }),
-    ).then((results) => {
-      if (!cancelled) {
-        setLoaded({ key: requestKey, merged: mergeExternalSessionResults(results) });
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [environmentId, listCwd, listSessions, providerEntries, requestKey]);
-
-  const merged = loaded !== null && loaded.key === requestKey ? loaded.merged : null;
+  const { merged, providerEntries, isLoading } = useExternalSessionList({
+    environmentId: scopeProject === null ? null : scopeProject.environmentId,
+    cwd: listCwd,
+  });
 
   const sessionGroups = useMemo((): ReadonlyArray<CommandPaletteGroup> => {
     if (merged === null || scope === null || merged.sessions.length === 0) return [];
@@ -272,23 +230,119 @@ export function useImportSessionPalette(input: {
 
   const notes = useMemo(() => {
     if (merged === null || scope === null) return [];
-    const failedNames = merged.failedInstanceIds.map(
-      (instanceId) =>
-        providerEntries.find((entry) => entry.instanceId === instanceId)?.displayName ?? instanceId,
-    );
     return [
       ...(merged.sessions.length === 0
         ? [scope.allFolders ? "No sessions found." : "No sessions found for this project's folder."]
         : [IMPORT_SESSION_COST_NOTE]),
-      ...failedNames.map((name) => `Could not load sessions from ${name}.`),
-      ...(merged.truncated ? [IMPORT_SESSION_TRUNCATED_NOTE] : []),
+      ...externalSessionListNotes({
+        merged,
+        providerEntries,
+        truncatedNote: IMPORT_SESSION_TRUNCATED_NOTE,
+      }),
     ];
   }, [merged, providerEntries, scope]);
 
-  return {
-    isLoading: requestKey !== null && merged === null,
-    sessionGroups,
-    trailingGroups,
-    notes,
-  };
+  return { isLoading, sessionGroups, trailingGroups, notes };
+}
+
+function ExternalSessionFolderSubtitle(props: {
+  folder: ExternalSessionFolder<Project>;
+  providerEntries: ReadonlyArray<ProviderInstanceEntry>;
+}) {
+  const { folder } = props;
+  const updatedLabel = formatRelativeTimeLabel(folder.latestUpdatedAt);
+  return (
+    <span className="flex min-w-0 max-w-full items-center gap-1">
+      {folder.project ? (
+        <>
+          <span className="shrink-0">Already a project</span>
+          <CommandPaletteMetaDot />
+        </>
+      ) : null}
+      {folder.providerCounts.map((count, index) => {
+        const displayName =
+          props.providerEntries.find((entry) => entry.instanceId === count.providerInstanceId)
+            ?.displayName ?? count.driverKind;
+        return (
+          <span className="inline-flex shrink-0 items-center gap-1" key={count.providerInstanceId}>
+            {index > 0 ? <CommandPaletteMetaDot /> : null}
+            <ProviderInstanceIcon
+              driverKind={count.driverKind}
+              displayName={displayName}
+              iconClassName="size-3 shrink-0 opacity-70"
+            />
+            <span>{`${displayName} (${count.count})`}</span>
+          </span>
+        );
+      })}
+      {updatedLabel ? (
+        <span className="inline-flex shrink-0 items-center gap-1">
+          <CommandPaletteMetaDot />
+          <span>{updatedLabel}</span>
+        </span>
+      ) : null}
+      <span className="inline-flex min-w-0 items-center gap-1">
+        <CommandPaletteMetaDot />
+        <FolderIcon className={COMMAND_PALETTE_META_ICON_CLASS} aria-hidden />
+        <span className="min-w-0 truncate">{folder.cwd}</span>
+      </span>
+    </span>
+  );
+}
+
+/**
+ * Live content of the add-project "From Claude Code or Codex" view: every
+ * folder the environment's import-capable instances have sessions in, newest
+ * activity first. Lists once per environment while `environmentId` is set;
+ * the palette filters `folderGroups` client-side.
+ */
+export function useImportFolderPalette(input: {
+  readonly environmentId: EnvironmentId | null;
+  readonly projects: ReadonlyArray<Project>;
+  readonly onPickFolder: (folder: ExternalSessionFolder<Project>) => Promise<void>;
+}): {
+  readonly isLoading: boolean;
+  readonly folderGroups: ReadonlyArray<CommandPaletteGroup>;
+  readonly notes: ReadonlyArray<string>;
+} {
+  const { environmentId, onPickFolder, projects } = input;
+  const { merged, providerEntries, isLoading } = useExternalSessionList({
+    environmentId,
+    cwd: null,
+  });
+
+  const folderGroups = useMemo((): ReadonlyArray<CommandPaletteGroup> => {
+    if (merged === null || environmentId === null || merged.sessions.length === 0) return [];
+    const folders = groupExternalSessionsByFolder({
+      sessions: merged.sessions,
+      projects: projects.filter((project) => project.environmentId === environmentId),
+    });
+    const items = folders.map((folder): CommandPaletteActionItem => ({
+      kind: "action",
+      value: `import-folder:${folder.cwd}`,
+      searchTerms: [folder.name, folder.cwd],
+      title: folder.name,
+      description: (
+        <ExternalSessionFolderSubtitle folder={folder} providerEntries={providerEntries} />
+      ),
+      icon: <FolderIcon className={ITEM_ICON_CLASS} />,
+      keepOpen: true,
+      run: () => onPickFolder(folder),
+    }));
+    return [{ value: "import-folders", label: "Folders", items }];
+  }, [environmentId, merged, onPickFolder, projects, providerEntries]);
+
+  const notes = useMemo(() => {
+    if (merged === null || environmentId === null) return [];
+    return [
+      ...(merged.sessions.length === 0 ? ["No sessions found."] : []),
+      ...externalSessionListNotes({
+        merged,
+        providerEntries,
+        truncatedNote: IMPORT_FOLDERS_TRUNCATED_NOTE,
+      }),
+    ];
+  }, [environmentId, merged, providerEntries]);
+
+  return { isLoading, folderGroups, notes };
 }

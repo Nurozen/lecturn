@@ -307,6 +307,7 @@ import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { SettledThreadMetadata } from "./chat/SettledThreadMetadata";
 import { createPageScrollController, type PageScrollKey } from "./chat/pageScrollController";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
+import { DraftImportSessionLink } from "./chat/DraftImportSessionLink";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
@@ -8210,6 +8211,11 @@ function ChatViewContent(props: ChatViewProps) {
                           activeProjectTitle={activeProject?.title ?? null}
                         />
                       </div>
+                    </div>
+                  ) : null}
+                  {isDraftHeroState && activeProjectRef && activeProject ? (
+                    <div className="absolute inset-x-0 top-full z-0">
+                      <DraftImportSessionLink projectRef={activeProjectRef} />
                     </div>
                   ) : null}
                   <div
