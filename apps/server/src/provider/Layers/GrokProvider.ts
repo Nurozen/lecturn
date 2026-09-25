@@ -55,6 +55,12 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
 const VERSION_PROBE_TIMEOUT_MS = 4_000;
 // `initialize` is a single local round trip, so this is generous even on slow machines.
 const GROK_ACP_INITIALIZE_TIMEOUT_MS = 8_000;
+/**
+ * Discovery runs the version, `grok models`, and ACP initialize probes in
+ * sequence, so its outer limit covers all three plus spawn and skill-scan slack.
+ */
+export const GROK_DETECTION_TIMEOUT_MS =
+  VERSION_PROBE_TIMEOUT_MS + AUTH_PROBE_TIMEOUT_MS + GROK_ACP_INITIALIZE_TIMEOUT_MS + 5_000;
 const GROK_API_KEY_ENV = "XAI_API_KEY";
 
 const GROK_BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [

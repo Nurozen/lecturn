@@ -12,6 +12,12 @@ import { StaveIcon } from "./StaveIcon";
 import { projectSettledPage } from "./sidebarSettledGroups";
 import { StaveLifecycleBadge } from "./stave/StaveLifecycleBadge";
 import { describeStaveWorkspace } from "./stave/staveWorkspaceContext.logic";
+import { StaveConfirmDialog } from "./stave/StaveConfirmDialog";
+import {
+  readStaveSpaceLifecycleMenuEntry,
+  useStaveArchiveLanding,
+  type StaveSpaceConfirmation,
+} from "./stave/staveSpaceLifecycle";
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
 import {
@@ -44,6 +50,8 @@ import {
 } from "@lecturn/client-runtime/environment";
 import {
   resolveEnvironmentMachineKind,
+  type ContextMenuItem,
+  type EnvironmentId,
   type EnvironmentMachineKind,
   type ProjectIconOverride,
   type ScopedThreadRef,
@@ -3814,6 +3822,80 @@ export default function Sidebar() {
     ],
   );
 
+  // Stave space rows offer Archive (or Unarchive) straight from the sidebar,
+  // through the same single confirmation space settings opens.
+  const [spaceConfirmation, setSpaceConfirmation] = useState<
+    | (StaveSpaceConfirmation & {
+        environmentId: EnvironmentId;
+        projectId: string;
+      })
+    | null
+  >(null);
+  const landAfterStaveArchive = useStaveArchiveLanding();
+  const handleProjectHeaderContextMenu = useCallback(
+    (event: ReactMouseEvent, project: SidebarProjectSnapshot) => {
+      const entries = project.memberProjects.flatMap((member) => {
+        const entry = readStaveSpaceLifecycleMenuEntry(member);
+        return entry ? [{ member, entry }] : [];
+      });
+      if (entries.length === 0) return;
+      event.preventDefault();
+      const position = { x: event.clientX, y: event.clientY };
+      void (async () => {
+        const api = readLocalApi();
+        if (!api) return;
+        const items: ContextMenuItem[] = [
+          { id: "settings", label: "Space settings", icon: "settings" },
+          ...entries.map(({ member, entry }, index) => ({
+            id: `lifecycle:${index}`,
+            label:
+              entries.length > 1
+                ? `${entry.title} (${member.environmentLabel ?? member.workspaceRoot})`
+                : entry.title,
+            icon: "archive",
+            disabled: entry.disabled,
+            ...(index === 0 ? { separatorBefore: true } : {}),
+          })),
+        ];
+        const clicked = await settlePromise(() => api.contextMenu.show(items, position));
+        if (clicked._tag === "Failure" || !clicked.value) return;
+        if (clicked.value === "settings") {
+          openProjectSettings(project);
+          return;
+        }
+        const chosen = entries[Number(clicked.value.slice("lifecycle:".length))];
+        if (!chosen || chosen.entry.disabled) return;
+        setSpaceConfirmation({
+          title: chosen.entry.title,
+          operation: chosen.entry.operation,
+          sagaId: chosen.entry.sagaId,
+          environmentId: chosen.member.environmentId,
+          projectId: chosen.member.id,
+        });
+      })();
+    },
+    [openProjectSettings],
+  );
+  // An archived space's threads stay readable, but the space is done with:
+  // leave a route inside it for the saga it left, or home (as settings does).
+  // Runs on the operation's success; the dialog then closes itself.
+  const handleSpaceConfirmationFinished = useCallback(() => {
+    if (spaceConfirmation?.operation.kind !== "archiveSpace") return;
+    const route = routeTargetRef.current;
+    const threadKey = routeThreadKeyRef.current;
+    const location =
+      (threadKey ? threadByKeyRef.current.get(threadKey) : undefined) ??
+      (route?.kind === "draft"
+        ? useComposerDraftStore.getState().getDraftSession(route.draftId)
+        : null);
+    if (
+      location?.environmentId !== spaceConfirmation.environmentId ||
+      location.projectId !== spaceConfirmation.projectId
+    )
+      return;
+    landAfterStaveArchive(spaceConfirmation);
+  }, [landAfterStaveArchive, spaceConfirmation]);
+
   // Thread jump (cmd+1..9) and prev/next traversal reuse the same commands as
   // v1 — the keybinding layer is shared, only the ordered list differs.
   const routeTerminalOpen = useTerminalUiStateStore((state) =>
@@ -4453,8 +4535,9 @@ export default function Sidebar() {
                             : ("active" as const);
                     const renderNode = (
                       node: (typeof sagaTree)[number],
-                      nested = false,
+                      parent: SidebarProjectSnapshot | null = null,
                     ): ReactNode => {
+                      const nested = parent !== null;
                       const project = navigationProjectByKey.get(node.group.key);
                       if (!project) return null;
                       const closed = collapsedProjectKeys.has(node.group.key);
@@ -4493,6 +4576,9 @@ export default function Sidebar() {
                           <div
                             data-thread-selection-safe
                             className="lecturn-project-header flex items-center gap-1 pt-2"
+                            onContextMenu={(event) =>
+                              handleProjectHeaderContextMenu(event, project)
+                            }
                           >
                             <button
                               type="button"
@@ -4769,7 +4855,7 @@ export default function Sidebar() {
                                   </SidebarHierarchyPanel>
                                 </li>
                               ) : null}
-                              {node.children.map((child) => renderNode(child, true))}
+                              {node.children.map((child) => renderNode(child, project))}
                             </ul>
                           </SidebarHierarchyPanel>
                         </li>
@@ -5036,6 +5122,16 @@ export default function Sidebar() {
           ) : null}
         </SidebarGroup>
       </SidebarContent>
+      {spaceConfirmation ? (
+        <StaveConfirmDialog
+          environmentId={spaceConfirmation.environmentId}
+          title={spaceConfirmation.title}
+          operation={spaceConfirmation.operation}
+          onClose={() => setSpaceConfirmation(null)}
+          onFinished={handleSpaceConfirmationFinished}
+          closeOnFinish
+        />
+      ) : null}
       <SidebarChromeFooter />
     </>
   );

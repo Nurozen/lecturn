@@ -10,7 +10,7 @@ import {
   updateWizardState,
   validateSpaceId,
   validateSpaceKind,
-} from "../staveSpaceWizard.logic";
+} from "@lecturn/client-runtime/state/stave-space-wizard";
 
 function isKindChip(value: unknown): value is StaveSpaceKindChip {
   return STAVE_SPACE_KIND_CHIPS.some((chip) => chip === value);

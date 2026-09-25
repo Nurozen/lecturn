@@ -2,10 +2,10 @@ import type {
   StaveOperationOutputLine,
   StaveOperationPhaseState,
   StaveOperationState,
-} from "@lecturn/client-runtime/state/stave-operation";
+} from "./staveOperation.ts";
 import type { StaveOperationError, StaveRemovePartialSpaceOperation } from "@lecturn/contracts";
 
-import { buildRemovePartialSpaceOperation, partialSpaceFromError } from "./staveSpaceWizard.logic";
+import { buildRemovePartialSpaceOperation, partialSpaceFromError } from "./staveSpaceWizard.ts";
 
 /**
  * Pure rules behind `StaveOperationProgress`: what each phase's marker says,

@@ -4,6 +4,8 @@ import {
   addProjectRemoteSourceLabel,
   addProjectRemoteSourcePathHint,
   addProjectRemoteSourceProvider,
+  addProjectStaveSourceDescription,
+  addProjectStaveSourceLabel,
   buildAddProjectRemoteSourceReadiness,
   buildProjectCreateCommand,
   canCreateProjectInEnvironment,
@@ -56,6 +58,7 @@ import { filesystemEnvironment } from "../../state/filesystem";
 import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
 import { sourceControlEnvironment } from "../../state/sourceControl";
+import { useStaveCreateSources } from "../../state/stave";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
 import { EnvironmentMachineSymbol } from "../../components/EnvironmentMachineSymbol";
 import { ErrorBanner } from "../../components/ErrorBanner";
@@ -95,7 +98,7 @@ function platformFromOs(os: string | null | undefined): string {
   return "";
 }
 
-function errorMessage(error: unknown): string {
+export function errorMessage(error: unknown): string {
   return error instanceof Error && error.message.trim().length > 0
     ? error.message
     : "An error occurred.";
@@ -120,7 +123,7 @@ function sourceFromParam(value: string | string[] | undefined): AddProjectRemote
   return "url";
 }
 
-function SectionTitle(props: { readonly children: string }) {
+export function SectionTitle(props: { readonly children: string }) {
   return (
     <Text className="px-1 text-2xs font-lecturn-bold tracking-[0.7px] uppercase text-foreground-muted">
       {props.children}
@@ -128,7 +131,7 @@ function SectionTitle(props: { readonly children: string }) {
   );
 }
 
-function AddProjectShell(props: { readonly children: ReactNode }) {
+export function AddProjectShell(props: { readonly children: ReactNode }) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -155,11 +158,11 @@ function AddProjectShell(props: { readonly children: ReactNode }) {
   );
 }
 
-function ListSection(props: { readonly children: ReactNode }) {
+export function ListSection(props: { readonly children: ReactNode }) {
   return <GlassCard radius={24}>{props.children}</GlassCard>;
 }
 
-function ListRow(props: {
+export function ListRow(props: {
   readonly title: string;
   readonly subtitle?: string | null;
   readonly icon: ReactNode;
@@ -212,7 +215,7 @@ function ListRow(props: {
   );
 }
 
-function PrimaryActionButton(props: {
+export function PrimaryActionButton(props: {
   readonly label: string;
   readonly disabled?: boolean;
   readonly loading?: boolean;
@@ -399,7 +402,7 @@ function useSelectedEnvironment(): {
   };
 }
 
-function EmptyEnvironmentState() {
+export function EmptyEnvironmentState() {
   const navigation = useNavigation();
 
   return (
@@ -479,6 +482,7 @@ export function AddProjectSourceScreen() {
     () => buildAddProjectRemoteSourceReadiness(discoveryState.data),
     [discoveryState.data],
   );
+  const staveSources = useStaveCreateSources(selectedEnvironment?.environmentId ?? null);
 
   return (
     <AddProjectShell>
@@ -568,6 +572,34 @@ export function AddProjectSourceScreen() {
               ),
             )}
           </ListSection>
+          {staveSources.length > 0 ? (
+            <ListSection>
+              {staveSources.map((source, index) => (
+                <ListRow
+                  key={source}
+                  title={addProjectStaveSourceLabel(source)}
+                  subtitle={addProjectStaveSourceDescription(source)}
+                  icon={
+                    <SymbolView
+                      name={source === "stave-space" ? "cube" : "square.grid.2x2"}
+                      size={17}
+                      tintColorClassName={"accent-icon"}
+                      type="monochrome"
+                    />
+                  }
+                  isFirst={index === 0}
+                  onPress={() =>
+                    navigation.dispatch(
+                      StackActions.push(
+                        source === "stave-space" ? "AddProjectStaveSpace" : "AddProjectStaveSaga",
+                        { environmentId: selectedEnvironment.environmentId },
+                      ),
+                    )
+                  }
+                />
+              ))}
+            </ListSection>
+          ) : null}
           {discoveryState.isPending ? (
             <ActivityIndicator colorClassName={"accent-icon-muted"} />
           ) : null}
@@ -646,7 +678,7 @@ function useCreateProject(environment: EnvironmentOption | null) {
   );
 }
 
-function useEnvironmentFromParam(
+export function useEnvironmentFromParam(
   environmentIdParam: string | string[] | undefined,
 ): EnvironmentOption | null {
   const environmentOptions = useEnvironmentOptions();

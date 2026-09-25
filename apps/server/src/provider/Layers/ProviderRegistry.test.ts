@@ -469,6 +469,24 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         }),
       );
 
+      it.effect("reports a slow app-server probe as a detection timeout", () =>
+        Effect.gen(function* () {
+          const check = yield* checkCodexProviderStatus(
+            defaultCodexSettings,
+            () => Effect.never,
+          ).pipe(Effect.forkChild);
+          yield* TestClock.adjust("10 seconds");
+          const status = yield* Fiber.join(check);
+
+          assert.strictEqual(status.installed, true);
+          assert.deepStrictEqual(status.discovery, {
+            status: "timed-out",
+            phase: "provider",
+            message: "Timed out while checking Codex app-server provider status.",
+          });
+        }),
+      );
+
       it.effect("returns an Amazon Bedrock label for codex Bedrock auth", () =>
         Effect.gen(function* () {
           const status = yield* checkCodexProviderStatus(defaultCodexSettings, () =>

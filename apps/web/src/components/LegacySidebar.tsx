@@ -11,6 +11,7 @@ import {
   threadsForSagaProject,
 } from "./stave/staveSaga.logic";
 import { StaveConfirmDialog } from "./stave/StaveConfirmDialog";
+import { readStaveSpaceLifecycleMenuEntry } from "./stave/staveSpaceLifecycle";
 import { openStaveWizard } from "../staveWizard";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { serverEnvironment } from "../state/server";
@@ -1253,6 +1254,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const [sagaConfirmation, setSagaConfirmation] = useState<{
     member: SidebarProjectGroupMember;
     operation: StaveOperation;
+    title: string;
   } | null>(null);
   const deleteProject = useAtomCommand(projectEnvironment.delete, {
     reportFailure: false,
@@ -1884,6 +1886,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             if (member.stave?.createdAt)
               setSagaConfirmation({
                 member,
+                title: "Archive saga",
                 operation: {
                   kind: "sagaArchive",
                   sagaRoot: member.workspaceRoot,
@@ -1898,6 +1901,21 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             { id: archiveId, label: `Archive saga${suffix}`, disabled },
           ];
         });
+        // Stave spaces archive (or unarchive) with the same confirmation as space settings.
+        const spaceItems: ContextMenuItem<string>[] = project.memberProjects.flatMap((member) => {
+          const entry = readStaveSpaceLifecycleMenuEntry(member);
+          if (!entry) return [];
+          const id = `stave-space-lifecycle:${member.physicalProjectKey}`;
+          actionHandlers.set(id, () => {
+            if (!entry.disabled)
+              setSagaConfirmation({ member, title: entry.title, operation: entry.operation });
+          });
+          const suffix =
+            project.memberProjects.length > 1
+              ? ` (${member.environmentLabel ?? member.workspaceRoot})`
+              : "";
+          return [{ id, label: `${entry.title}${suffix}`, disabled: entry.disabled }];
+        });
         const clicked = await api.contextMenu.show(
           [
             ...sagaItems,
@@ -1911,6 +1929,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                   }),
                 ]
               : []),
+            ...spaceItems,
             buildTargetedItem("rename", "Rename"),
             buildTargetedItem("grouping", "Group into..."),
             buildTargetedItem("copy-path", "Copy Path"),
@@ -2763,7 +2782,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         <StaveConfirmDialog
           environmentId={sagaConfirmation.member.environmentId}
           operation={sagaConfirmation.operation}
-          title="Archive saga"
+          title={sagaConfirmation.title}
           onClose={() => setSagaConfirmation(null)}
           onFinished={() => {}}
         />

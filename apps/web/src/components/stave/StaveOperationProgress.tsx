@@ -5,8 +5,8 @@ import { staveOperations } from "../../state/staveOperations";
 import { Button } from "../ui/button";
 import { StaveConfirmDialog } from "./StaveConfirmDialog";
 import { StaveOperationProgress as ProgressBody } from "./StaveOperationProgressBody";
-import { removePartialSpaceAvailability } from "./staveOperationProgress.logic";
-import { partialSpaceFromError } from "./staveSpaceWizard.logic";
+import { removePartialSpaceAvailability } from "@lecturn/client-runtime/state/stave-operation-progress";
+import { partialSpaceFromError } from "@lecturn/client-runtime/state/stave-space-wizard";
 
 export function StaveOperationProgress(props: {
   environmentId: EnvironmentId;

@@ -17,6 +17,13 @@ export function providerDetectionLabel(provider: ServerProvider): string {
   }
 }
 
+/** Recovery guidance under a failed detection label. */
+export function providerDetectionHint(provider: ServerProvider): string {
+  return provider.discovery?.status === "timed-out"
+    ? "Detection took too long, which can happen when this machine is busy. Retry, or check the executable path in provider settings."
+    : "Retry detection or configure the executable path in provider settings. Check that the project folder still exists.";
+}
+
 export function providerDetectionSendBlock(
   provider: ServerProvider | null | undefined,
 ): string | null {

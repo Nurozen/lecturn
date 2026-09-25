@@ -373,6 +373,13 @@ export function findSagaByRoot(
   return sagas.find((row) => normalizePath(row.path) === wanted);
 }
 
+/** Sagas a new space can join: `saga list` also reports plain spaces and unreadable manifests. */
+export function joinableSagas(
+  rows: ReadonlyArray<StaveSagaListRow>,
+): ReadonlyArray<StaveSagaListRow> {
+  return rows.filter((row) => row.isSaga && row.error === undefined);
+}
+
 export function sagaIdOf(row: StaveSagaListRow): string {
   return row.logicalId ?? row.id;
 }
@@ -496,6 +503,22 @@ export function canAdvance(
     case "progress":
       return { ok: false };
   }
+}
+
+/**
+ * Every step gate before review at once, for single-screen forms (mobile)
+ * that collect the same fields without stepping; the first failing gate wins.
+ */
+export function canCreateSpace(
+  state: StaveSpaceWizardState,
+  context: StaveWizardContext,
+): StaveStepGate {
+  for (const step of wizardSteps(context)) {
+    if (step === "review" || step === "progress") break;
+    const gate = canAdvance(updateWizardState(state, { step }), context);
+    if (!gate.ok) return gate;
+  }
+  return { ok: true };
 }
 
 // ── Operations ────────────────────────────────────────────────

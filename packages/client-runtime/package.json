@@ -39,6 +39,10 @@
       "types": "./src/markdownLinks.ts",
       "default": "./src/markdownLinks.ts"
     },
+    "./stave-repo-filter": {
+      "types": "./src/staveRepoFilter.ts",
+      "default": "./src/staveRepoFilter.ts"
+    },
     "./media-reference": {
       "types": "./src/mediaReference.ts",
       "default": "./src/mediaReference.ts"
@@ -198,6 +202,14 @@
     "./state/stave-operation": {
       "types": "./src/state/staveOperation.ts",
       "default": "./src/state/staveOperation.ts"
+    },
+    "./state/stave-operation-progress": {
+      "types": "./src/state/staveOperationProgress.ts",
+      "default": "./src/state/staveOperationProgress.ts"
+    },
+    "./state/stave-space-wizard": {
+      "types": "./src/state/staveSpaceWizard.ts",
+      "default": "./src/state/staveSpaceWizard.ts"
     },
     "./state/source-control": {
       "types": "./src/state/sourceControl.ts",

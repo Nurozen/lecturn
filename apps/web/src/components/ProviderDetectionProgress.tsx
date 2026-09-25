@@ -5,7 +5,11 @@ import { useRef, useState } from "react";
 import { useEnvironments } from "../state/environments";
 import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
-import { providerDetectionLabel, shouldShowProviderDetection } from "./providerDetection";
+import {
+  providerDetectionHint,
+  providerDetectionLabel,
+  shouldShowProviderDetection,
+} from "./providerDetection";
 import { GoldThreadSpinner } from "./ui/gold-thread-spinner";
 import { Button } from "./ui/button";
 
@@ -67,10 +71,7 @@ export function ProviderDetectionRecovery({
           </p>
         ) : !detecting ? (
           <>
-            <p className="text-muted-foreground">
-              Retry detection or configure the executable path in provider settings. Check that the
-              project folder still exists.
-            </p>
+            <p className="text-muted-foreground">{providerDetectionHint(provider)}</p>
             <div className="flex gap-3">
               <Button variant="link" size="xs" className="px-0" onClick={() => void retry()}>
                 Retry
