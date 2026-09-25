@@ -16,6 +16,7 @@ import {
   collectUpdatedProviderSnapshots,
   deriveEnvironmentDisplayLabel,
   environmentGroupsWithUpdates,
+  extractNpmErrorLine,
   firstFailedProviderUpdateMessage,
   firstRejectedProviderUpdateMessage,
   firstUnsuccessfulSecondaryProviderOutcome,
@@ -366,6 +367,67 @@ describe("provider update launch notification logic", () => {
       title: "Provider update failed",
       description: "command failed",
     });
+  });
+
+  it("adds the npm error code and the output tail to a failed update", () => {
+    const output = [
+      ...Array.from({ length: 50 }, (_, index) => `npm http fetch ${index}`),
+      "npm error code ENOTEMPTY",
+      "npm error syscall rename",
+      "npm error path /usr/local/lib/node_modules/@openai/codex",
+      "npm error A complete log of this run can be found in: /home/user/.npm/_logs/debug-0.log",
+    ].join("\n");
+    const view = getProviderUpdateProgressToastView({
+      providers: [
+        provider({
+          driver: driver("codex"),
+          updateState: {
+            status: "failed",
+            startedAt: checkedAt,
+            finishedAt: checkedAt,
+            message: "Update command exited with code 190.",
+            output,
+          },
+        }),
+      ],
+      providerCount: 1,
+    });
+
+    expect(view.description).toBe("Update command exited with code 190. npm error code ENOTEMPTY");
+    const outputLines = view.output?.split("\n") ?? [];
+    expect(outputLines).toHaveLength(40);
+    expect(outputLines[0]).toBe("npm http fetch 14");
+    expect(outputLines.at(-1)).toContain("A complete log of this run");
+    expect(
+      resolveEnvironmentUpdateRowStatus({
+        group: {
+          environmentId: "env-local" as LocalEnvironmentUpdateGroup["environmentId"],
+          label: "Local",
+          isPrimary: true,
+          isSettling: false,
+          candidates: [],
+          providers: [],
+        },
+        error: undefined,
+        result: view,
+        pill: null,
+        isPending: false,
+      }),
+    ).toEqual({ kind: "failed", text: view.description, output: view.output });
+  });
+
+  it("falls back to the last npm error line that is not the log pointer", () => {
+    expect(
+      extractNpmErrorLine(
+        [
+          "npm ERR! Refusing to delete /usr/local/bin/codex: not a symlink",
+          "npm ERR! A complete log of this run can be found in:",
+          "npm ERR!     /home/user/.npm/_logs/debug-0.log",
+        ].join("\n"),
+      ),
+    ).toBe("npm error Refusing to delete /usr/local/bin/codex: not a symlink");
+    expect(extractNpmErrorLine("permission denied")).toBeNull();
+    expect(extractNpmErrorLine(null)).toBeNull();
   });
 
   it("resolves a single-provider completion view from the returned provider snapshot", () => {

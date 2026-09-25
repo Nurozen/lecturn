@@ -24,6 +24,7 @@ import {
   type ProviderUpdateRowStatusKind,
   type ProviderUpdateToastView,
 } from "./ProviderUpdateLaunchNotification.logic";
+import { ProviderUpdateOutput } from "./ProviderUpdateOutput";
 import { Button } from "./ui/button";
 import { Spinner } from "./ui/spinner";
 
@@ -141,12 +142,15 @@ function EnvironmentUpdateRow({
   }
 
   return (
-    <div className="flex items-center justify-between gap-3 py-0.5">
-      <div className="flex min-w-0 flex-col">
-        <span className="truncate font-medium text-foreground">{group.label}</span>
-        <span className={cn("truncate text-xs", rowToneClass(status.kind))}>{status.text}</span>
+    <div className="py-0.5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-col">
+          <span className="truncate font-medium text-foreground">{group.label}</span>
+          <span className={cn("truncate text-xs", rowToneClass(status.kind))}>{status.text}</span>
+        </div>
+        <div className="shrink-0">{trailing}</div>
       </div>
-      <div className="shrink-0">{trailing}</div>
+      {status.output ? <ProviderUpdateOutput output={status.output} className="mt-1" /> : null}
     </div>
   );
 }
