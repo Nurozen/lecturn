@@ -373,6 +373,13 @@ export function findSagaByRoot(
   return sagas.find((row) => normalizePath(row.path) === wanted);
 }
 
+/** Sagas a new space can join: `saga list` also reports plain spaces and unreadable manifests. */
+export function joinableSagas(
+  rows: ReadonlyArray<StaveSagaListRow>,
+): ReadonlyArray<StaveSagaListRow> {
+  return rows.filter((row) => row.isSaga && row.error === undefined);
+}
+
 export function sagaIdOf(row: StaveSagaListRow): string {
   return row.logicalId ?? row.id;
 }

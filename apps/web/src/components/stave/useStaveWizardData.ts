@@ -5,6 +5,7 @@ import { useEffect, useMemo } from "react";
 import { useEnvironmentQuery } from "../../state/query";
 import { staveMemoryProviders, staveRepos, staveSagas, staveSpaces } from "../../state/stave";
 import {
+  joinableSagas,
   memoryAvailableFrom,
   type StaveWizardContext,
 } from "@lecturn/client-runtime/state/stave-space-wizard";
@@ -57,7 +58,7 @@ export function useStaveWizardData(environmentId: EnvironmentId | null): StaveWi
 
   const repoRows = repos.data ?? EMPTY;
   const spaceRows = spaces.data ?? EMPTY;
-  const sagaRows = sagas.data ?? EMPTY;
+  const sagaRows = useMemo(() => joinableSagas(sagas.data ?? EMPTY), [sagas.data]);
   const memoryAvailable = memoryAvailableFrom(providers.data);
   const context = useMemo<StaveWizardContext>(
     () => ({ repos: repoRows, spaces: spaceRows, sagas: sagaRows, memoryAvailable }),

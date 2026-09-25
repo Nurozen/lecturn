@@ -20,6 +20,7 @@ import {
   describeRegisterRepoCommand,
   EMPTY_WIZARD_CONTEXT,
   findSagaByRoot,
+  joinableSagas,
   isOperationNotImplemented,
   memoryAvailableFrom,
   memorySuggestions,
@@ -475,6 +476,15 @@ describe("saga", () => {
     sagaRow("epic", { members: ["a", "b"] }),
     sagaRow("epic-dir", { logicalId: "epic-logical", members: ["c"] }),
   ];
+
+  it("joinableSagas drops plain spaces and unreadable sagas", () => {
+    const rows = [
+      sagaRow("epic"),
+      sagaRow("ticket", { isSaga: false, kind: "ticket" }),
+      sagaRow("broken", { error: "manifest unreadable" }),
+    ];
+    expect(joinableSagas(rows).map((row) => row.id)).toEqual(["epic"]);
+  });
 
   it("findSagaByRoot ignores trailing slashes on either side", () => {
     expect(findSagaByRoot(sagas, "/work/epic/")?.id).toBe("epic");

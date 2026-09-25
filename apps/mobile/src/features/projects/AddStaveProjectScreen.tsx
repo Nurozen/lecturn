@@ -19,6 +19,7 @@ import {
   setRepoMode,
   setSaga,
   STAVE_SPACE_KIND_CHIPS,
+  joinableSagas,
   syncRepoRows,
   updateWizardState,
   validateSagaWizard,
@@ -94,7 +95,7 @@ function useStaveCreateContext(environmentId: EnvironmentId | null) {
   );
   const repoRows = repos.data ?? EMPTY;
   const spaceRows = spaces.data ?? EMPTY;
-  const sagaRows = sagas.data ?? EMPTY;
+  const sagaRows = useMemo(() => joinableSagas(sagas.data ?? EMPTY), [sagas.data]);
   const context = useMemo<StaveWizardContext>(
     () => ({ ...EMPTY_WIZARD_CONTEXT, repos: repoRows, spaces: spaceRows, sagas: sagaRows }),
     [repoRows, sagaRows, spaceRows],
