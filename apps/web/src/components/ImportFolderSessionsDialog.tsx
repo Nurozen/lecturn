@@ -103,7 +103,11 @@ function ImportFolderSessionsContent(props: {
   const navigate = useNavigate();
   const handleNewThread = useNewThreadHandler();
   const dispatchImport = useDispatchThreadImport();
-  const project = useProject(scopeProjectRef(request.environmentId, request.projectId));
+  const projectRef = useMemo(
+    () => scopeProjectRef(request.environmentId, request.projectId),
+    [request.environmentId, request.projectId],
+  );
+  const project = useProject(projectRef);
   const threads = useThreadShells();
   const { merged, providerEntries, isLoading } = useExternalSessionList({
     environmentId: request.environmentId,
