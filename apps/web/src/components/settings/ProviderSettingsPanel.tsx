@@ -967,14 +967,20 @@ export function EnvironmentProviderSettings({
       >
         {deviceTabs}
         {readOnly ? (
-          <div className="overflow-hidden rounded-xl border border-border/60 bg-card/40 shadow-xs/5">
+          <div
+            data-slot="settings-section-card"
+            className="overflow-hidden rounded-xl border border-border/60 bg-card/40 shadow-xs/5"
+          >
             <SettingsRow
               title="Limited permissions"
               description={`This session can view ${environmentLabel}'s providers but can't change their settings.`}
             />
           </div>
         ) : null}
-        <div className="overflow-hidden rounded-xl border border-border/60 bg-card/40 shadow-xs/5 lg:grid lg:h-[min(44rem,calc(100dvh-11rem))] lg:min-h-[32rem] lg:grid-cols-[17rem_minmax(0,1fr)]">
+        <div
+          data-slot="settings-section-card"
+          className="overflow-hidden rounded-xl border border-border/60 bg-card/40 shadow-xs/5 lg:grid lg:h-[min(44rem,calc(100dvh-11rem))] lg:min-h-[32rem] lg:grid-cols-[17rem_minmax(0,1fr)]"
+        >
           <div className="border-b border-border/60 bg-muted/10 lg:flex lg:min-h-0 lg:flex-col lg:border-r lg:border-b-0">
             <ScrollArea scrollFade chainVerticalScroll className="lg:min-h-0 lg:flex-1">
               <div className="divide-y divide-border/50">

@@ -206,6 +206,7 @@ export function SettingsSection({
       )}
       <div
         data-settings-scroll-target={hideTitle ? "" : undefined}
+        data-slot={variant === "grouped" ? "settings-section-card" : undefined}
         className={cn(
           "relative overflow-visible text-foreground",
           variant === "grouped"
