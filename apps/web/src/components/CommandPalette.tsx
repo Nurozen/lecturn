@@ -1303,13 +1303,16 @@ function OpenCommandPaletteDialog(props: {
   });
 
   // Adds the folder as a project unless one is already rooted there, then
-  // hands off to the multi-select import dialog.
+  // hands off to the multi-select import dialog. The ref rejects a second pick
+  // while the first folder's project is still being added.
+  const pickingImportFolderRef = useRef(false);
   const pickImportFolder = useCallback(
     async (folder: ExternalSessionFolder<Project>): Promise<void> => {
       const environmentId = importFolderEnvironmentId;
-      if (environmentId === null) return;
+      if (environmentId === null || pickingImportFolderRef.current) return;
       let projectId = folder.project?.id ?? null;
       if (projectId === null) {
+        pickingImportFolderRef.current = true;
         const outcome = await addProjectAndOpenThread({
           environmentId,
           workspaceRoot: folder.cwd,
@@ -1320,6 +1323,8 @@ function OpenCommandPaletteDialog(props: {
           createProject,
           navigate,
           handleNewThread,
+        }).finally(() => {
+          pickingImportFolderRef.current = false;
         });
         if (outcome.status === "interrupted") return;
         if (outcome.status === "failed") {
