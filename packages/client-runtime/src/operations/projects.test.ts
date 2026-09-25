@@ -9,6 +9,7 @@ import * as Option from "effect/Option";
 
 import {
   ADD_PROJECT_STAVE_SOURCES,
+  availableAddProjectStaveSources,
   addProjectStaveSourceDescription,
   addProjectStaveSourceLabel,
   buildAddProjectRemoteSourceReadiness,
@@ -300,5 +301,22 @@ describe("add project shared logic", () => {
     expect(addProjectStaveSourceLabel("stave-saga")).toBe("New Stave saga");
     expect(addProjectStaveSourceDescription("stave-space")).toContain("space");
     expect(addProjectStaveSourceDescription("stave-saga")).toContain("saga");
+  });
+
+  it("offers Stave sources only behind the gate and drops unsupported creates", () => {
+    expect(availableAddProjectStaveSources({ available: false })).toEqual([]);
+    expect(availableAddProjectStaveSources({ available: true })).toEqual([
+      "stave-space",
+      "stave-saga",
+    ]);
+    expect(
+      availableAddProjectStaveSources({ available: true, unsupportedOperations: ["createSaga"] }),
+    ).toEqual(["stave-space"]);
+    expect(
+      availableAddProjectStaveSources({
+        available: true,
+        unsupportedOperations: ["createSpace", "createSaga"],
+      }),
+    ).toEqual([]);
   });
 });

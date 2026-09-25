@@ -498,6 +498,22 @@ export function canAdvance(
   }
 }
 
+/**
+ * Every step gate before review at once, for single-screen forms (mobile)
+ * that collect the same fields without stepping; the first failing gate wins.
+ */
+export function canCreateSpace(
+  state: StaveSpaceWizardState,
+  context: StaveWizardContext,
+): StaveStepGate {
+  for (const step of wizardSteps(context)) {
+    if (step === "review" || step === "progress") break;
+    const gate = canAdvance(updateWizardState(state, { step }), context);
+    if (!gate.ok) return gate;
+  }
+  return { ok: true };
+}
+
 // ── Operations ────────────────────────────────────────────────
 
 function optionalText(value: string): string | undefined {

@@ -2,7 +2,7 @@ import type { StaveLastFailure } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Ref from "effect/Ref";
 import { StaveExecutionContext } from "./StaveExecutionContext.ts";
-import { missingStaveFeatures } from "./staveFeatures.ts";
+import { missingStaveFeatures, supportsStaveVerb, type StaveFeatureVerb } from "./staveFeatures.ts";
 /**
  * StaveCli - the ONLY place Lecturn spawns `stave`.
  *
@@ -363,6 +363,8 @@ export type StaveMutationOutcome<A> = A | StaveDryRunPlan;
 
 export interface StaveCliShape {
   readonly lastFailure?: Effect.Effect<Option.Option<StaveLastFailure>>;
+  /** Whether the selected binary has `verb` with every flag Lecturn passes; spawns nothing. */
+  readonly supports: (verb: StaveFeatureVerb) => Effect.Effect<boolean, StaveError>;
   // Reads
   readonly version: Effect.Effect<StaveVersionInfo, StaveError>;
   readonly configShow: Effect.Effect<StaveConfigShow, StaveError>;
@@ -1030,8 +1032,31 @@ export const make = Effect.fn("StaveCli.make")(function* () {
   const memoryList = method("memory list", buildStaveArgv.memoryList, decodeStaveMemoryList);
   const setup = method("setup", buildStaveArgv.setup, decodeStaveSetupResult);
 
+  const supports = (verb: StaveFeatureVerb) =>
+    Effect.gen(function* () {
+      const execution = yield* StaveExecutionContext;
+      const binary = yield* (
+        execution === undefined ? staveBinary.resolve : Effect.succeed(execution.binary)
+      ).pipe(
+        Effect.mapError(
+          (error) =>
+            new StaveError({
+              code: "binary_missing",
+              message: error.message,
+              details: null,
+              exitCode: null,
+              stderrTail: null,
+              verb,
+            }),
+        ),
+      );
+      const features = yield* staveBinary.featuresFor(binary);
+      return supportsStaveVerb(features.commands, verb);
+    });
+
   return StaveCli.of({
     lastFailure: Ref.get(lastFailure),
+    supports,
     version: method("version", buildStaveArgv.version, decodeStaveVersion)(undefined),
     configShow: method("config show", buildStaveArgv.configShow, decodeStaveConfigShow)(undefined),
     reposList: method("repos list", buildStaveArgv.reposList, decodeStaveReposList)(undefined),

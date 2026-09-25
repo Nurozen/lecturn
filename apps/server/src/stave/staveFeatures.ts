@@ -61,6 +61,8 @@ const OPERATION_COMMANDS = {
   removeRepo: ["space remove"],
   retarget: ["space retarget"],
   syncSpace: ["space sync"],
+  // A confirmed member archive/destroy also runs `saga remove`; that path
+  // refuses up front when the binary lacks it (see StaveOperations).
   archiveSpace: ["space archive", "space list"],
   restoreSpace: ["space restore", "space list"],
   destroySpace: ["space destroy", "space list"],
@@ -81,22 +83,25 @@ export const requiredFlags = (verb: StaveFeatureVerb): ReadonlyArray<string> => 
   "json",
   ...STAVE_COMMAND_FLAGS[verb],
 ];
+/** Whether the command exists with every flag Lecturn passes to it. */
+export function supportsStaveVerb(
+  commands: ReadonlyArray<StaveFeatureCommand>,
+  verb: StaveFeatureVerb,
+): boolean {
+  const command = commands.find((entry) => entry.verb === verb);
+  return (
+    command?.available === true && requiredFlags(verb).every((flag) => command.flags.includes(flag))
+  );
+}
 export function makeStaveFeatures(
   source: StaveFeatures["source"],
   commands: ReadonlyArray<StaveFeatureCommand>,
 ): StaveFeatures {
-  const complete = (verb: StaveFeatureVerb) => {
-    const command = commands.find((entry) => entry.verb === verb);
-    return (
-      command?.available === true &&
-      requiredFlags(verb).every((flag) => command.flags.includes(flag))
-    );
-  };
   return {
     source,
     commands,
     unsupportedOperations: Object.entries(OPERATION_COMMANDS)
-      .filter(([, verbs]) => !verbs.every(complete))
+      .filter(([, verbs]) => !verbs.every((verb) => supportsStaveVerb(commands, verb)))
       .map(([kind]) => kind),
   };
 }

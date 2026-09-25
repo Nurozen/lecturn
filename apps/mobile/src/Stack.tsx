@@ -41,6 +41,7 @@ import { AddProjectLocalRoute } from "./features/projects/AddProjectLocalRoute";
 import { AddProjectRepositoryRoute } from "./features/projects/AddProjectRepositoryRoute";
 import { AddProjectSourceRoute } from "./features/projects/AddProjectSourceRoute";
 import { ImportSessionPickerRouteScreen } from "./features/threads/ImportSessionPickerScreen";
+import { AddStaveSagaRoute, AddStaveSpaceRoute } from "./features/projects/AddStaveProjectRoute";
 import { NewTaskDraftRouteScreen } from "./features/threads/NewTaskDraftRouteScreen";
 import {
   NewTaskBranchPickerRouteScreen,
@@ -337,6 +338,16 @@ const NewTaskSheetStack = createNativeStackNavigator({
     AddProjectLocal: createNativeStackScreen({
       screen: AddProjectLocalRoute,
       linking: "add-project/local",
+    }),
+    AddProjectStaveSpace: createNativeStackScreen({
+      screen: AddStaveSpaceRoute,
+      linking: "add-project/stave-space",
+      options: { title: "New Stave Space" },
+    }),
+    AddProjectStaveSaga: createNativeStackScreen({
+      screen: AddStaveSagaRoute,
+      linking: "add-project/stave-saga",
+      options: { title: "New Stave Saga" },
     }),
   },
 });

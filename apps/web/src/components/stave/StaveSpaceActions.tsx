@@ -18,6 +18,10 @@ import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogFooter } from "../ui/dialog";
 import { StaveConfirmDialog } from "./StaveConfirmDialog";
+import {
+  staveArchiveSpaceConfirmation,
+  staveUnarchiveSpaceConfirmation,
+} from "./staveSpaceLifecycle";
 
 type Editor = { kind: "add" } | { kind: "retarget"; repo: StaveRepoEntry } | { kind: "memory" };
 
@@ -66,11 +70,9 @@ export function StaveSpaceActions({
             disabled={!bound || !stave.archiveBasename || unsupported("restoreSpace")}
             onClick={() => {
               if (stave.archiveBasename)
-                confirm("Unarchive space", {
-                  kind: "restoreSpace",
-                  ...scope,
-                  from: stave.archiveBasename,
-                });
+                setConfirmation(
+                  staveUnarchiveSpaceConfirmation(workspaceRoot, stave, stave.archiveBasename),
+                );
             }}
           >
             Unarchive
@@ -200,14 +202,7 @@ export function StaveSpaceActions({
                 size="sm"
                 variant="outline"
                 disabled={!bound || unsupported("archiveSpace")}
-                onClick={() =>
-                  confirm("Archive space", {
-                    kind: "archiveSpace",
-                    ...scope,
-                    force: false,
-                    memory: "keep",
-                  })
-                }
+                onClick={() => setConfirmation(staveArchiveSpaceConfirmation(workspaceRoot, stave))}
               >
                 Archive space
               </Button>

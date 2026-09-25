@@ -129,6 +129,11 @@
   --glass-opacity: 55%;
   max-width: 830px;
 }
+/* The editor, attached banners, and context strip all size from the form, so
+   it must fill the widened shell rather than keep the default max-w-3xl. */
+.lecturn-account-surface [data-slot="composer-shell"] [data-chat-composer-form="true"] {
+  max-width: none;
+}
 .lecturn-account-surface [data-chat-composer-body="true"] {
   padding-block: 12px;
 }

@@ -294,24 +294,38 @@ export function ProjectSettingsPanel({ projectKey }: { projectKey: string }) {
 
   // Remember the members of the last rendered group so a grouping-rule change
   // (which changes the group key) can follow the project to its new group.
-  const lastSelectionRef = useRef<{ key: string; memberKeys: string[] } | null>(null);
+  const lastSelectionRef = useRef<{
+    key: string;
+    memberKeys: string[];
+    memberIds: string[];
+  } | null>(null);
   useEffect(() => {
     if (!selected) return;
     lastSelectionRef.current = {
       key: selected.projectKey,
       memberKeys: selected.memberProjects.map((member) => member.physicalProjectKey),
+      memberIds: selected.memberProjects.map(memberKey),
     };
   }, [selected]);
 
-  // A grouping-rule change replaces the group key mid-visit; follow the
-  // project to its new key instead of parking on the not-found state.
+  // A grouping-rule change or a Stave unarchive (which moves the workspace
+  // root) replaces the group key mid-visit; follow the project to its new key.
+  // A project that was archived or removed is done with, so leave for home like
+  // project removal does instead of parking on the not-found state.
   useEffect(() => {
     if (selected !== null) return;
     const last = lastSelectionRef.current;
     if (last?.key !== projectKey) return;
-    const successor = groups.find((group) =>
-      group.memberProjects.some((member) => last.memberKeys.includes(member.physicalProjectKey)),
-    );
+    const successor =
+      groups.find((group) =>
+        group.memberProjects.some((member) => last.memberKeys.includes(member.physicalProjectKey)),
+      ) ??
+      groups.find((group) =>
+        group.memberProjects.some(
+          (member) =>
+            last.memberIds.includes(memberKey(member)) && member.stave?.state !== "archived",
+        ),
+      );
     if (successor) {
       void navigate({
         to: "/projects/$projectKey",
@@ -319,6 +333,8 @@ export function ProjectSettingsPanel({ projectKey }: { projectKey: string }) {
         replace: true,
         hashScrollIntoView: false,
       });
+    } else if (groups.length > 0) {
+      void navigate({ to: "/", replace: true });
     }
   }, [groups, navigate, projectKey, selected]);
 

@@ -26,6 +26,7 @@ import {
   AlertDialogFooter,
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
+import { GoldThreadSpinner } from "../ui/gold-thread-spinner";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { StaveOperationProgress } from "./StaveOperationProgressBody";
@@ -117,6 +118,13 @@ export function StaveConfirmDialog({
   const run = useAtomCommand(staveOperations.run, { reportFailure: false });
   const readStatus = useAtomCommand(staveSpaceStatusRead, { reportFailure: false });
   const notified = useRef<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let stale = false;
@@ -163,9 +171,9 @@ export function StaveConfirmDialog({
     currentPreview?.sagaReview,
     lifecycleIsSaga,
   );
-  const busy =
-    started &&
-    (state.status === "idle" || state.status === "running" || state.status === "disconnected");
+  // Only a live stream holds the dialog open. Closing while it starts or after it
+  // dropped leaves the operation running on the server; its refresh still lands.
+  const busy = started && state.status === "running";
   const refusal = started ? state.error?.code : currentPreview?.code;
   useEffect(() => {
     let stale = false;
@@ -299,13 +307,18 @@ export function StaveConfirmDialog({
                 {currentPreview.plan?.join("\n") || "Stave reported no planned changes."}
               </pre>
             )
+          ) : state.status === "idle" ? (
+            <p aria-live="polite" className="flex items-center gap-3 text-sm font-medium">
+              <GoldThreadSpinner />
+              Starting…
+            </p>
           ) : (
             <StaveOperationProgress environmentId={environmentId} operationId={operationId} />
           )}
         </div>
         <AlertDialogFooter>
           <Button variant="outline" disabled={busy} onClick={onClose}>
-            {state.status === "finished" ? "Done" : "Cancel"}
+            {state.status === "finished" ? "Done" : started ? "Close" : "Cancel"}
           </Button>
           {forceAvailable ? (
             <Button
@@ -352,7 +365,11 @@ export function StaveConfirmDialog({
               onClick={() => {
                 if (!reviewedOperation) return;
                 setStarted(true);
-                void run({ environmentId, operationId, operation: reviewedOperation });
+                // A mutation can move this dialog's own project (archive), unmounting
+                // it before the terminal event; the refresh must still happen.
+                void run({ environmentId, operationId, operation: reviewedOperation }).then(() => {
+                  if (!mounted.current) notifyStaveMutation(environmentId);
+                });
               }}
             >
               {forced ? "Confirm force" : "Confirm"}

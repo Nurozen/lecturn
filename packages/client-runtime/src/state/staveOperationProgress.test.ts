@@ -2,7 +2,7 @@ import {
   initialStaveOperationState,
   reduceStaveProgressEvent,
   type StaveOperationState,
-} from "@lecturn/client-runtime/state/stave-operation";
+} from "./staveOperation.ts";
 import type { StaveOperationError, StaveProgressEvent } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -16,7 +16,7 @@ import {
   phaseStatus,
   removePartialSpaceAvailability,
   truncatedNotice,
-} from "./staveOperationProgress.logic";
+} from "./staveOperationProgress.ts";
 
 const operationId = "op-1";
 

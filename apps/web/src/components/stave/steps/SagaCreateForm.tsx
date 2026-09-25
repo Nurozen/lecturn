@@ -33,8 +33,9 @@ import {
   toggleMemoryEntry,
   validateSagaWizard,
   validateSpaceId,
-} from "../staveSpaceWizard.logic";
+} from "@lecturn/client-runtime/state/stave-space-wizard";
 import { StaveOperationProgress } from "../StaveOperationProgress";
+import { StaveRepoPicker } from "../StaveRepoPicker";
 import { useStaveWizardData } from "../useStaveWizardData";
 import { MemoryStep } from "./MemoryStep";
 
@@ -224,12 +225,18 @@ export function SagaCreateForm(props: {
             </div>
             <div className="flex flex-col gap-1.5">
               <p className="text-sm font-medium">References</p>
-              {state.references.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  {data.isPending ? "Loading registry…" : "No repos are registered with Stave yet."}
-                </p>
-              ) : (
-                state.references.map((row) => (
+              <StaveRepoPicker
+                rows={state.references}
+                registry={context.repos}
+                listClassName="flex flex-col gap-2 p-0.5"
+                empty={
+                  <p className="text-xs text-muted-foreground">
+                    {data.isPending
+                      ? "Loading registry…"
+                      : "No repos are registered with Stave yet."}
+                  </p>
+                }
+                renderRow={(row) => (
                   <div key={row.repo} className="flex flex-wrap items-center gap-2">
                     <Label className="min-w-40 gap-1.5 font-normal">
                       <Checkbox
@@ -269,8 +276,8 @@ export function SagaCreateForm(props: {
                       />
                     ) : null}
                   </div>
-                ))
-              )}
+                )}
+              />
             </div>
             {context.memoryAvailable ? (
               <div className="flex flex-col gap-1.5">

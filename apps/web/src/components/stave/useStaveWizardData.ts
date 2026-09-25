@@ -4,7 +4,10 @@ import { useEffect, useMemo } from "react";
 
 import { useEnvironmentQuery } from "../../state/query";
 import { staveMemoryProviders, staveRepos, staveSagas, staveSpaces } from "../../state/stave";
-import { memoryAvailableFrom, type StaveWizardContext } from "./staveSpaceWizard.logic";
+import {
+  memoryAvailableFrom,
+  type StaveWizardContext,
+} from "@lecturn/client-runtime/state/stave-space-wizard";
 
 const EMPTY: ReadonlyArray<never> = [];
 

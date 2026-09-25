@@ -537,7 +537,7 @@ disconnectReason? }`; each phase keeps `commandLine?`, `startedAt`, `finishedAt?
   returns nothing unless `available`; `CommandPalette.tsx` feeds it
   `useStaveFeatureAvailable(addProjectEnvironmentId).available` and launches the bus with the
   chosen kind.
-- `apps/web/src/components/stave/staveSpaceWizard.logic.ts` holds every rule of the wizard, so
+- `packages/client-runtime/src/state/staveSpaceWizard.ts` holds every rule of the wizard (shared with mobile), so
   the dialog and step components only render. Steps `identity → repos → memory → saga → review →
 progress`, with `memory` present only when some `stave.memoryProviders` row is `available`
   (`wizardSteps`). `validateSpaceId`: charset via `isValidStaveSpaceId`, a live row (`id` or
@@ -562,7 +562,7 @@ progress`, with `memory` present only when some `stave.memoryProviders` row is `
   `StaveOperationProgress.tsx` renders one operation from `staveOperations.stateAtom` — every
   phase with its command line, retained output and duration, a **Reattach** button while the
   state is `disconnected` (manual, `staveOperations.reattach`), and the nested **Remove partial
-  space** operation on a failed create. Its rules live in `staveOperationProgress.logic.ts`:
+  space** operation on a failed create. Its rules live in `packages/client-runtime/src/state/staveOperationProgress.ts`:
   `phaseStatus` (`running | done | failed | interrupted`, where `interrupted` is an open phase of
   a disconnected operation), `removePartialSpaceAvailability` (available only with a manifest
   stamp; otherwise a hint that nothing was created), `outputRuns` (consecutive lines of one
@@ -734,6 +734,12 @@ entry points request it immediately before confirmation. The prompt names the sa
 dependent ordering edges, then sets `staveSagaRemoveConfirmed` on the delete command. A failed
 or older-server read never authorizes roster changes. Explicit destroy has a separate
 `sagaRemoveConfirmed` payload field and a combined removal confirmation after `saga_member`.
+`archiveSpace` carries the same field. The web sets it only when the space reports `memberOf`
+(space settings, the sidebar space menu, and lifecycle `archiveNow`; archive retries fall back to
+the row's recorded consent), so a non-member archive never scans saga rosters: the dry run
+lists `saga remove` plans ahead of a described archive step, and the run removes the space from
+every saga roster (refreshing each saga root) before `space archive`. Without the field a member
+still gets Stave's own `saga_member` refusal.
 
 `StaveSpaceActions` and `StaveConfirmDialog` supply edits, per-mode removal, sync, retarget,
 memory fate, archive/destroy, and Unarchive. Confirmation is tied to the exact payload whose

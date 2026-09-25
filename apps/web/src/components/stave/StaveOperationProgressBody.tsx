@@ -20,7 +20,7 @@ import {
   phaseStatus,
   truncatedNotice,
   type StavePhaseStatus,
-} from "./staveOperationProgress.logic";
+} from "@lecturn/client-runtime/state/stave-operation-progress";
 
 interface StaveOperationProgressProps {
   readonly environmentId: EnvironmentId;
