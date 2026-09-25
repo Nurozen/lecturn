@@ -18,6 +18,7 @@ import {
   buildInitialGrokProviderSnapshot,
   checkGrokProviderStatus,
   enrichGrokSnapshot,
+  GROK_DETECTION_TIMEOUT_MS,
 } from "../Layers/GrokProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
@@ -123,6 +124,7 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
         initialSnapshot: (settings) =>
           buildInitialGrokProviderSnapshot(settings.provider).pipe(Effect.map(stampIdentity)),
         checkProvider,
+        detectionTimeout: GROK_DETECTION_TIMEOUT_MS,
         enrichSnapshot: ({ settings, snapshot: currentSnapshot, publishSnapshot }) =>
           enrichGrokSnapshot({
             snapshot: currentSnapshot,

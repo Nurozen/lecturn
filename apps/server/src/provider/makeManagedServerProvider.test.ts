@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
@@ -410,7 +411,8 @@ describe("makeManagedServerProvider", () => {
 
         yield* TestClock.adjust("999 millis");
         assert.strictEqual(yield* Ref.get(checkCalls), 1);
-        yield* TestClock.adjust("1 millis");
+        // Periodic checks add up to 10% jitter to the interval.
+        yield* TestClock.adjust("101 millis");
         yield* Deferred.await(periodicCheckDone);
         assert.strictEqual(yield* Ref.get(checkCalls), 2);
       }),
@@ -728,4 +730,141 @@ describe("makeManagedServerProvider", () => {
       }),
     ).pipe(Effect.provide(AlwaysRunTestLayer)),
   );
+
+  describe("routine health check timeouts", () => {
+    const selfTimedOutSnapshot: ServerProvider = {
+      ...refreshedSnapshot,
+      status: "error",
+      message: "Timed out while checking provider status.",
+      discovery: {
+        status: "timed-out",
+        phase: "provider",
+        message: "Timed out while checking provider status.",
+      },
+    };
+
+    // Call 0 is the startup check; later calls follow `later` by call index.
+    const makeScriptedProvider = (input: {
+      readonly later: (call: number) => Effect.Effect<ServerProvider>;
+      readonly refreshOnInterval?: boolean;
+      readonly detectionTimeout?: Duration.Input;
+    }) =>
+      Effect.gen(function* () {
+        const started = yield* Queue.unbounded<number>();
+        const calls = yield* Ref.make(0);
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: () => false,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          discovery: { waitForShell: false, refreshEnvironment: () => {} },
+          checkProvider: Ref.getAndUpdate(calls, (count) => count + 1).pipe(
+            Effect.tap((call) => Queue.offer(started, call)),
+            Effect.flatMap((call) =>
+              call === 0 ? Effect.succeed(refreshedSnapshot) : input.later(call),
+            ),
+          ),
+          refreshInterval: "1 second",
+          ...(input.refreshOnInterval === false ? { refreshOnInterval: false } : {}),
+          ...(input.detectionTimeout ? { detectionTimeout: input.detectionTimeout } : {}),
+        });
+        const firstWithDiscovery = (status: NonNullable<ServerProvider["discovery"]>["status"]) =>
+          provider.streamChanges.pipe(
+            Stream.filter((snapshot) => snapshot.discovery?.status === status),
+            Stream.take(1),
+            Stream.runCollect,
+            Effect.map((chunk) => Array.from(chunk)[0]),
+            Effect.forkChild,
+          );
+        return { provider, started, firstWithDiscovery };
+      });
+
+    it.effect("keeps a ready provider through one routine timeout and demotes it on the next", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { provider, started, firstWithDiscovery } = yield* makeScriptedProvider({
+            later: (call) => (call === 1 ? Effect.never : Effect.succeed(selfTimedOutSnapshot)),
+          });
+          const timedOut = yield* firstWithDiscovery("timed-out");
+          assert.strictEqual(yield* Queue.take(started), 0);
+
+          // Interval jitter stays under 10% of the 1 second interval.
+          yield* TestClock.adjust("1100 millis");
+          assert.strictEqual(yield* Queue.take(started), 1);
+          assert.equal((yield* provider.getSnapshot).discovery?.status, "ready");
+          yield* TestClock.adjust("15 seconds");
+          assert.equal((yield* provider.getSnapshot).discovery?.status, "ready");
+
+          yield* TestClock.adjust("1100 millis");
+          assert.strictEqual(yield* Queue.take(started), 2);
+          // The first published timeout is the second probe's, not the absorbed one.
+          const demoted = yield* Fiber.join(timedOut);
+          assert.equal(demoted?.discovery?.message, "Timed out while checking provider status.");
+          assert.equal((yield* provider.getSnapshot).discovery?.status, "timed-out");
+        }),
+      ).pipe(Effect.provide(Layer.mergeAll(AlwaysRunTestLayer, TestClock.layer()))),
+    );
+
+    it.effect("publishes a timeout from a user retry immediately", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { provider, started } = yield* makeScriptedProvider({
+            later: () => Effect.never,
+            refreshOnInterval: false,
+          });
+          assert.strictEqual(yield* Queue.take(started), 0);
+          const retry = yield* provider.refresh.pipe(Effect.forkChild);
+          assert.strictEqual(yield* Queue.take(started), 1);
+          assert.equal((yield* provider.getSnapshot).discovery?.status, "ready");
+          yield* TestClock.adjust("15 seconds");
+          const result = yield* Fiber.join(retry);
+          assert.equal(result.discovery?.status, "timed-out");
+          assert.equal((yield* provider.getSnapshot).discovery?.status, "timed-out");
+        }),
+      ).pipe(Effect.provide(Layer.mergeAll(AlwaysRunTestLayer, TestClock.layer()))),
+    );
+
+    it.effect("publishes a missing executable from a routine check immediately", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { started, firstWithDiscovery } = yield* makeScriptedProvider({
+            later: () =>
+              Effect.succeed({
+                ...refreshedSnapshot,
+                installed: false,
+                status: "error",
+                message: "Codex CLI (`codex`) was not found on PATH.",
+              }),
+          });
+          const failed = yield* firstWithDiscovery("error");
+          assert.strictEqual(yield* Queue.take(started), 0);
+          yield* TestClock.adjust("1100 millis");
+          assert.strictEqual(yield* Queue.take(started), 1);
+          const failure = yield* Fiber.join(failed);
+          assert.equal(failure?.installed, false);
+          assert.equal(failure?.discovery?.message, "Codex CLI (`codex`) was not found on PATH.");
+        }),
+      ).pipe(Effect.provide(Layer.mergeAll(AlwaysRunTestLayer, TestClock.layer()))),
+    );
+
+    it.effect("waits for a driver's longer detection timeout", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { provider, started } = yield* makeScriptedProvider({
+            later: () => Effect.never,
+            refreshOnInterval: false,
+            detectionTimeout: "27 seconds",
+          });
+          assert.strictEqual(yield* Queue.take(started), 0);
+          const retry = yield* provider.refresh.pipe(Effect.forkChild);
+          assert.strictEqual(yield* Queue.take(started), 1);
+          yield* TestClock.adjust("15 seconds");
+          assert.equal((yield* provider.getSnapshot).discovery?.status, "ready");
+          yield* TestClock.adjust("12 seconds");
+          assert.equal((yield* Fiber.join(retry)).discovery?.status, "timed-out");
+        }),
+      ).pipe(Effect.provide(Layer.mergeAll(AlwaysRunTestLayer, TestClock.layer()))),
+    );
+  });
 });
