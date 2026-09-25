@@ -10,10 +10,27 @@ the original wherever you started it, and deleting the imported thread leaves it
 
 ## Where to import
 
-On web and desktop, open the command palette and choose **Import session…**. On mobile, start a
-new task, choose the project, then tap **Import** below the prompt. Either way the list shows the
-sessions that ran in that project's folder, and **Show sessions from all folders** widens it to
-every session on that machine. Pick a session from the list to import it.
+On web and desktop, click **Continue a Claude Code or Codex session** below the prompt on a new
+thread's start screen, or open the command palette and choose **Import session…**. On mobile,
+start a new task, choose the project, then tap **Import** below the prompt. Either way the list
+shows the sessions that ran in that project's folder, and **Show sessions from all folders** widens
+it to every session on that machine. Pick a session from the list to import it. The link names only
+the tools you can import from, so it reads **Continue a Codex session** when Codex is the only one.
+
+### Starting from a folder you haven't added yet
+
+To bring over a folder you have been working in with Claude Code or Codex, add a new project and
+choose **From Claude Code or Codex** as its source. Lecturn lists every folder with sessions on
+that machine, most recently active first, with how many sessions each tool has there. Folders you
+already added are marked **Already a project**. Each folder a session ran in is listed on its own,
+so a git worktree appears separately from its main checkout.
+
+Pick a folder and Lecturn adds it as a project, then lists its sessions with checkboxes. Sessions
+from the last 14 days start selected, except ones you already imported, which show **Imported**.
+Use **Select all** or **Select none** to change the selection, then choose **Import**. Sessions
+import one at a time while Lecturn shows its progress. If any session cannot be imported, the rest
+still import and Lecturn lists the ones that failed at the end. You land on the most recently
+active imported thread.
 
 A session imports only into a project whose folder matches the folder the session ran in. A
 session that ran in one of the project's worktrees imports when a thread in that project already

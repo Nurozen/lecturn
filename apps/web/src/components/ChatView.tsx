@@ -307,6 +307,7 @@ import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { SettledThreadMetadata } from "./chat/SettledThreadMetadata";
 import { createPageScrollController, type PageScrollKey } from "./chat/pageScrollController";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
+import { DraftImportSessionLink } from "./chat/DraftImportSessionLink";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
@@ -8420,6 +8421,12 @@ function ChatViewContent(props: ChatViewProps) {
                       className="h-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(env(safe-area-inset-bottom)+1.25rem)]"
                     />
                   </div>
+                  {/* After the composer so it follows the prompt in tab order. */}
+                  {isDraftHeroState && activeProjectRef && activeProject ? (
+                    <div className="absolute inset-x-0 top-full z-0">
+                      <DraftImportSessionLink projectRef={activeProjectRef} />
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>

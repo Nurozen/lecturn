@@ -21,6 +21,10 @@ import {
   type AddProjectRemoteSource,
 } from "@lecturn/client-runtime/operations/projects";
 import {
+  IMPORT_FOLDER_SOURCE_DESCRIPTION,
+  importFolderSourceLabel,
+} from "@lecturn/client-runtime/external-session-import";
+import {
   connectionStatusText,
   type EnvironmentConnectionPhase,
 } from "@lecturn/client-runtime/connection";
@@ -71,6 +75,7 @@ import {
   useRemoteEnvironmentRuntime,
   useSavedRemoteConnections,
 } from "../../state/use-remote-environment-registry";
+import { useThreadImportAvailability } from "../threads/use-import-thread";
 import { resolveAddProjectEnvironment } from "./AddProjectScreen.logic";
 
 interface EnvironmentOption {
@@ -483,6 +488,9 @@ export function AddProjectSourceScreen() {
     [discoveryState.data],
   );
   const staveSources = useStaveCreateSources(selectedEnvironment?.environmentId ?? null);
+  const importAvailability = useThreadImportAvailability(
+    selectedEnvironment?.environmentId ?? null,
+  );
 
   return (
     <AddProjectShell>
@@ -572,6 +580,32 @@ export function AddProjectSourceScreen() {
               ),
             )}
           </ListSection>
+          {importAvailability.available ? (
+            <ListSection>
+              <ListRow
+                title={importFolderSourceLabel(
+                  importAvailability.providers.map((provider) => provider.driver),
+                )}
+                subtitle={IMPORT_FOLDER_SOURCE_DESCRIPTION}
+                icon={
+                  <SymbolView
+                    name="clock"
+                    size={17}
+                    tintColorClassName={"accent-icon"}
+                    type="monochrome"
+                  />
+                }
+                isFirst
+                onPress={() =>
+                  navigation.dispatch(
+                    StackActions.push("AddProjectImportFolders", {
+                      environmentId: selectedEnvironment.environmentId,
+                    }),
+                  )
+                }
+              />
+            </ListSection>
+          ) : null}
           {staveSources.length > 0 ? (
             <ListSection>
               {staveSources.map((source, index) => (
@@ -609,9 +643,42 @@ export function AddProjectSourceScreen() {
   );
 }
 
+/**
+ * Dispatches `project.create` for a folder and resolves to the new project's
+ * id with the command result. Callers own the existing-project check and where
+ * to go next.
+ */
+export function useDispatchProjectCreate() {
+  const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
+  return useCallback(
+    async (input: {
+      readonly environmentId: EnvironmentId;
+      readonly workspaceRoot: string;
+      /** Defaults to true; a folder picked from existing sessions must already exist. */
+      readonly createWorkspaceRootIfMissing?: boolean;
+    }) => {
+      const projectId = ProjectId.make(uuidv4());
+      const result = await createProject({
+        environmentId: input.environmentId,
+        input: buildProjectCreateCommand({
+          commandId: CommandId.make(uuidv4()),
+          projectId,
+          workspaceRoot: input.workspaceRoot,
+          createdAt: new Date().toISOString(),
+          ...(input.createWorkspaceRootIfMissing === undefined
+            ? {}
+            : { createWorkspaceRootIfMissing: input.createWorkspaceRootIfMissing }),
+        }),
+      });
+      return { projectId, result };
+    },
+    [createProject],
+  );
+}
+
 function useCreateProject(environment: EnvironmentOption | null) {
   const navigation = useNavigation();
-  const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
+  const dispatchProjectCreate = useDispatchProjectCreate();
   const projects = useProjects();
 
   return useCallback(
@@ -643,16 +710,9 @@ function useCreateProject(environment: EnvironmentOption | null) {
         return;
       }
 
-      const projectId = ProjectId.make(uuidv4());
-      const command = buildProjectCreateCommand({
-        commandId: CommandId.make(uuidv4()),
-        projectId,
-        workspaceRoot,
-        createdAt: new Date().toISOString(),
-      });
-      const result = await createProject({
+      const { projectId, result } = await dispatchProjectCreate({
         environmentId: environment.environmentId,
-        input: command,
+        workspaceRoot,
       });
       if (AsyncResult.isFailure(result)) {
         return result;
@@ -674,7 +734,7 @@ function useCreateProject(environment: EnvironmentOption | null) {
       );
       return result;
     },
-    [createProject, environment, projects, navigation],
+    [dispatchProjectCreate, environment, projects, navigation],
   );
 }
 
