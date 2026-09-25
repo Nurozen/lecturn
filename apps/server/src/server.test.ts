@@ -120,6 +120,7 @@ import {
   isThreadDetailEvent,
   resolveAvailableEditorsForConfig,
   resolveFileManagerRevealKindForConfig,
+  resolveConfigDiscoveries,
 } from "./ws.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
@@ -5112,6 +5113,25 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const revealKind = yield* Fiber.join(responseFiber);
       yield* Deferred.await(discoveryInterrupted);
       assert.isUndefined(revealKind);
+    }),
+  );
+
+  it.effect("bounds all stalled config discoveries by one shared timeout", () =>
+    Effect.gen(function* () {
+      const responseFiber = yield* resolveConfigDiscoveries({
+        availableEditors: Effect.never,
+        fileManagerRevealKind: Effect.never,
+        remoteOpenTargets: Effect.never,
+      }).pipe(Effect.forkChild);
+
+      yield* TestClock.adjust(Duration.seconds(5));
+
+      const discovered = yield* Fiber.join(responseFiber);
+      assert.deepEqual(discovered, {
+        availableEditors: [],
+        fileManagerRevealKind: undefined,
+        remoteOpenTargets: [],
+      });
     }),
   );
 

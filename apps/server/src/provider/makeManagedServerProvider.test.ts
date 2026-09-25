@@ -100,6 +100,12 @@ const refreshedSnapshotSecond: ServerProvider = {
   message: "Refreshed provider availability again.",
 };
 
+const probeTimedOutSnapshot: ServerProvider = {
+  ...refreshedSnapshot,
+  status: "error",
+  discovery: { status: "timed-out", phase: "provider" },
+};
+
 function makeBackgroundPolicyLayer(shouldRunScopeWork: boolean) {
   return Layer.mock(BackgroundPolicy.BackgroundPolicy)({
     reportClientActivity: () => Effect.void,
@@ -220,6 +226,47 @@ describe("makeManagedServerProvider", () => {
         const recovered = yield* provider.refresh;
         assert.equal(recovered.discovery?.status, "ready");
         assert.equal(recovered.installed, true);
+      }),
+    ).pipe(Effect.provide(AlwaysRunTestLayer)),
+  );
+
+  it.effect("retries a timed out detection on its own until the provider is found", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const checks = yield* Ref.make(0);
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: () => false,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          discovery: { waitForShell: false, refreshEnvironment: () => {} },
+          // The probe itself reports running out of time (a busy host), twice.
+          checkProvider: Ref.updateAndGet(checks, (count) => count + 1).pipe(
+            Effect.map((count) => (count <= 2 ? probeTimedOutSnapshot : refreshedSnapshot)),
+          ),
+          refreshOnInterval: false,
+        });
+        const recovered = yield* provider.streamChanges.pipe(
+          Stream.filter((snapshot) => snapshot.discovery?.status === "ready"),
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* Effect.yieldNow;
+        const firstFailure = yield* provider.getSnapshot;
+        assert.equal(firstFailure.discovery?.status, "timed-out");
+        assert.equal(firstFailure.installed, true);
+
+        yield* TestClock.adjust("5 seconds");
+        assert.equal((yield* provider.getSnapshot).discovery?.status, "timed-out");
+        yield* TestClock.adjust("10 seconds");
+        const [ready] = yield* Fiber.join(recovered);
+        assert.equal(ready?.discovery?.status, "ready");
+        assert.equal(yield* Ref.get(checks), 3);
+
+        yield* TestClock.adjust("5 minutes");
+        assert.equal(yield* Ref.get(checks), 3);
       }),
     ).pipe(Effect.provide(AlwaysRunTestLayer)),
   );
