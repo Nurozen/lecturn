@@ -24,7 +24,13 @@ import {
   ProviderInstanceId,
 } from "@lecturn/contracts";
 import { LegendList } from "@legendapp/list/react-native";
-import { CommonActions, StackActions, useNavigation } from "@react-navigation/native";
+import {
+  CommonActions,
+  StackActions,
+  useNavigation,
+  usePreventRemove,
+  type NavigationAction,
+} from "@react-navigation/native";
 import * as Cause from "effect/Cause";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -349,6 +355,7 @@ export function AddProjectImportFoldersScreen(props: {
         const { projectId, result } = await dispatchProjectCreate({
           environmentId,
           workspaceRoot: folder.cwd,
+          createWorkspaceRootIfMissing: false,
         });
         if (AsyncResult.isFailure(result)) {
           setError(errorMessage(Cause.squash(result.cause)));
@@ -573,6 +580,23 @@ export function AddProjectImportSessionsScreen(props: {
   } | null>(null);
   const importingRef = useRef(false);
   const importing = progress !== null;
+  // Leaving mid-import would strand the run, so the screen and its sheet stay
+  // put until it settles; the finishing navigation waits for the guard to lift.
+  const [finishAction, setFinishAction] = useState<{
+    readonly action: NavigationAction;
+    readonly fromSheet: boolean;
+  } | null>(null);
+  usePreventRemove(importing, () => undefined);
+  useEffect(() => {
+    if (importing || finishAction === null) return;
+    const frame = requestAnimationFrame(() => {
+      setFinishAction(null);
+      (finishAction.fromSheet ? (navigation.getParent() ?? navigation) : navigation).dispatch(
+        finishAction.action,
+      );
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [finishAction, importing, navigation]);
 
   const toggle = useCallback(
     (key: string) => {
@@ -596,6 +620,8 @@ export function AddProjectImportSessionsScreen(props: {
   const runImport = useCallback(async () => {
     if (project === null || selectedSessions.length === 0 || importingRef.current) return;
     importingRef.current = true;
+    // Pin the selection: sessions drop out of the default as the run imports them.
+    setChosenKeys(selectedKeys);
     setProgress({ position: 1, total: selectedSessions.length });
     try {
       const result = await importSessionsSequentially({
@@ -632,15 +658,17 @@ export function AddProjectImportSessionsScreen(props: {
       if (thread !== null) {
         // The Thread route renders its loading state until the imported
         // thread's shell arrives, matching the single-session picker.
-        (navigation.getParent() ?? navigation).dispatch(
-          StackActions.replace("Thread", {
+        setFinishAction({
+          fromSheet: true,
+          action: StackActions.replace("Thread", {
             environmentId: String(thread.environmentId),
             threadId: String(thread.threadId),
           }),
-        );
+        });
       } else {
-        navigation.dispatch(
-          CommonActions.reset({
+        setFinishAction({
+          fromSheet: false,
+          action: CommonActions.reset({
             index: 0,
             routes: [
               {
@@ -653,13 +681,13 @@ export function AddProjectImportSessionsScreen(props: {
               },
             ],
           }),
-        );
+        });
       }
     } finally {
       importingRef.current = false;
       setProgress(null);
     }
-  }, [importThread, navigation, project, selectedSessions]);
+  }, [importThread, project, selectedKeys, selectedSessions]);
 
   const renderRow = useCallback(
     ({ item, index }: { readonly item: SessionRowModel; readonly index: number }) => (

@@ -651,7 +651,12 @@ export function AddProjectSourceScreen() {
 export function useDispatchProjectCreate() {
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
   return useCallback(
-    async (input: { readonly environmentId: EnvironmentId; readonly workspaceRoot: string }) => {
+    async (input: {
+      readonly environmentId: EnvironmentId;
+      readonly workspaceRoot: string;
+      /** Defaults to true; a folder picked from existing sessions must already exist. */
+      readonly createWorkspaceRootIfMissing?: boolean;
+    }) => {
       const projectId = ProjectId.make(uuidv4());
       const result = await createProject({
         environmentId: input.environmentId,
@@ -660,6 +665,9 @@ export function useDispatchProjectCreate() {
           projectId,
           workspaceRoot: input.workspaceRoot,
           createdAt: new Date().toISOString(),
+          ...(input.createWorkspaceRootIfMissing === undefined
+            ? {}
+            : { createWorkspaceRootIfMissing: input.createWorkspaceRootIfMissing }),
         }),
       });
       return { projectId, result };
