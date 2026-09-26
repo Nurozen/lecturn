@@ -279,6 +279,8 @@ export type StaveArchiveTaskState =
       /** The restored space's project, opened once the shell reaches `sequence`. */
       readonly projectId: ProjectId | null;
       readonly sequence: number | null;
+      /** The restored space's live root and manifest stamp (a saga adopting it needs both). */
+      readonly restored: { readonly spacePath: string; readonly createdAt: string } | null;
     }
   | { readonly status: "failed"; readonly message: string };
 
@@ -329,7 +331,12 @@ async function runRestoreSteps(
 ): Promise<StaveArchiveTaskState> {
   if (steps.length === 0)
     throw new StaveArchiveTaskError("This archive can no longer be restored.");
-  let opened: { projectId: ProjectId; sequence: number } | null = null;
+  let opened: {
+    projectId: ProjectId;
+    sequence: number;
+    spacePath: string;
+    createdAt: string;
+  } | null = null;
   for (const [index, step] of steps.entries()) {
     const result = await runStep(
       client,
@@ -338,13 +345,19 @@ async function runRestoreSteps(
       onState,
     );
     if (opened === null && result.kind === "restoreSpace") {
-      opened = { projectId: result.result.projectId, sequence: result.result.sequence };
+      opened = {
+        projectId: result.result.projectId,
+        sequence: result.result.sequence,
+        spacePath: result.result.spacePath,
+        createdAt: result.result.manifest.createdAt,
+      };
     }
   }
   return {
     status: "finished",
     projectId: opened?.projectId ?? null,
     sequence: opened?.sequence ?? null,
+    restored: opened === null ? null : { spacePath: opened.spacePath, createdAt: opened.createdAt },
   };
 }
 
@@ -443,6 +456,6 @@ export function deleteStaveArchive(
         onState,
       );
     }
-    return { status: "finished", projectId: null, sequence: null };
+    return { status: "finished", projectId: null, sequence: null, restored: null };
   });
 }

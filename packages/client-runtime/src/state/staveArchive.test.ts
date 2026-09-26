@@ -247,7 +247,12 @@ describe("archive undo", () => {
       "m1",
       "m2",
     ]);
-    expect(final).toEqual({ status: "finished", projectId: "project-sg", sequence: 10 });
+    expect(final).toEqual({
+      status: "finished",
+      projectId: "project-sg",
+      sequence: 10,
+      restored: { spacePath: `${WORK}/sg`, createdAt: STAMP },
+    });
     expect(states.at(-1)).toEqual(final);
   });
 
