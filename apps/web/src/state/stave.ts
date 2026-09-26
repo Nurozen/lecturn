@@ -160,6 +160,12 @@ export const staveDryRun = createEnvironmentRpcCommand(connectionAtomRuntime, {
   tag: WS_METHODS.staveDryRun,
 });
 
+/** A fresh `space list` (live + archived) for restore, undo and delete; bypasses the query cache. */
+export const staveSpacesRead = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:stave:spaces-fresh",
+  tag: WS_METHODS.staveListSpaces,
+});
+
 /** Bypasses client query caching when a confirmation needs the current saga roster. */
 export const staveSpaceStatusRead = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:stave:space-status-fresh",
