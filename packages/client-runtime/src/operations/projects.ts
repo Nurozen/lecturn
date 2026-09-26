@@ -60,9 +60,9 @@ export function addProjectStaveSourceLabel(source: AddProjectStaveSource): strin
 export function addProjectStaveSourceDescription(source: AddProjectStaveSource): string {
   switch (source) {
     case "stave-space":
-      return "Create a Stave space from registered repos and open it";
+      return "Create a Stave space, or add or restore an existing one";
     case "stave-saga":
-      return "Create a Stave saga that groups spaces and open it";
+      return "Create a Stave saga, or add or restore an existing one";
   }
 }
 

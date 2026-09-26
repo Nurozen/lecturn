@@ -142,6 +142,13 @@ export const staveSpaces = createEnvironmentRpcQueryAtomFamily(connectionAtomRun
   staleTimeMs: 15_000,
 });
 
+// A picker can open after a mutation that ran while nothing listed spaces
+// (an archive from the sidebar): drop the cached list so it opens current.
+subscribeStaveMutation((environmentId) => {
+  for (const includeArchived of [true, false])
+    appAtomRegistry.refresh(staveSpaces({ environmentId, input: { includeArchived } }));
+});
+
 export const staveSagas = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
   label: "environment-data:stave:sagas",
   tag: WS_METHODS.staveListSagas,
