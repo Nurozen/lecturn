@@ -732,11 +732,12 @@ export type StaveCreateSpaceResult = typeof StaveCreateSpaceResult.Type;
 
 /** `restoreSpace` reuses the Lecturn project that owned the archive (or creates
     one when none survives); clients wait for `snapshotSequence >= sequence`
-    before opening it, as after a create. */
+    before opening it, as after a create. Optional because older servers
+    report only the Stave mutation. */
 export const StaveRestoreSpaceResult = Schema.Struct({
   ...StaveSpaceMutationResult.fields,
-  projectId: ProjectId,
-  sequence: NonNegativeInt,
+  projectId: Schema.optionalKey(ProjectId),
+  sequence: Schema.optionalKey(NonNegativeInt),
 });
 export type StaveRestoreSpaceResult = typeof StaveRestoreSpaceResult.Type;
 

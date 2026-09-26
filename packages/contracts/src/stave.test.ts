@@ -321,6 +321,12 @@ describe("StaveOperationResult", () => {
     );
   });
 
+  it("reads a restore result from a server that predates project reuse", () => {
+    expect(Exit.isSuccess(decodeResultExit({ kind: "restoreSpace", result: spaceMutation }))).toBe(
+      true,
+    );
+  });
+
   it("reads literal members a newer Stave adds as unknown", () => {
     const exit = decodeResultExit({
       kind: "sagaArchive",

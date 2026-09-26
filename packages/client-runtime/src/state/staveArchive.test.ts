@@ -285,6 +285,20 @@ describe("restoreStaveArchive", () => {
     });
     expect(ran).toHaveLength(1);
   });
+
+  it("names what was already restored when a later member fails", async () => {
+    const saga = row("sg", { basename: "sg", isSaga: true, sagaMembers: [{ id: "m1" }] });
+    const { client } = fakeClient({
+      fail: (operation) =>
+        operation.kind === "restoreSpace" && operation.from === "m1" ? "space_exists: m1" : null,
+    });
+    expect(
+      await restoreStaveArchive(client, { row: saga, rows: [saga, row("m1", { basename: "m1" })] }),
+    ).toEqual({
+      status: "failed",
+      message: "Restored sg, but restoring m1 failed: space_exists: m1",
+    });
+  });
 });
 
 describe("deleteStaveArchive", () => {
@@ -336,5 +350,36 @@ describe("deleteStaveArchive", () => {
     expect(final).toMatchObject({ status: "failed" });
     expect(final.status === "failed" && final.message).toContain("members m1 are still live");
     expect(ran.map((operation) => operation.kind)).toEqual(["restoreSpace"]);
+  });
+
+  it("says the space is active again when the destroy after its restore fails", async () => {
+    const { client } = fakeClient({
+      fail: (operation) => (operation.kind === "destroySpace" ? "worktree is dirty" : null),
+    });
+    const final = await deleteStaveArchive(client, row("a", { basename: "a-2026" }));
+    expect(final).toEqual({
+      status: "failed",
+      message: "a was restored and is active again, but deleting it failed: worktree is dirty",
+    });
+  });
+});
+
+describe("restore results from older servers", () => {
+  it("finish without a project to open", async () => {
+    const { client } = fakeClient({});
+    const legacy: StaveArchiveClient = {
+      ...client,
+      run: async (operationId, operation) => {
+        const state = await client.run(operationId, operation);
+        if (state.status !== "finished" || state.result?.kind !== "restoreSpace") return state;
+        const { projectId: _projectId, sequence: _sequence, ...result } = state.result.result;
+        return { ...state, result: { kind: "restoreSpace", result } };
+      },
+    };
+    const final = await restoreStaveArchive(legacy, {
+      row: row("a", { basename: "a-2026" }),
+      rows: [],
+    });
+    expect(final).toMatchObject({ status: "finished", projectId: null, sequence: null });
   });
 });

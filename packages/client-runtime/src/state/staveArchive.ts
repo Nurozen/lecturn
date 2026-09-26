@@ -332,8 +332,8 @@ async function runRestoreSteps(
   if (steps.length === 0)
     throw new StaveArchiveTaskError("This archive can no longer be restored.");
   let opened: {
-    projectId: ProjectId;
-    sequence: number;
+    projectId: ProjectId | null;
+    sequence: number | null;
     spacePath: string;
     createdAt: string;
   } | null = null;
@@ -343,11 +343,19 @@ async function runRestoreSteps(
       step.operation,
       { label: `Restore ${step.spaceId}`, step: index + 1, total: steps.length },
       onState,
-    );
+    ).catch((error: unknown) => {
+      if (index === 0) throw error;
+      // Earlier entries stay restored; the failure must not read as "nothing changed".
+      const done = steps.slice(0, index).map((earlier) => earlier.spaceId);
+      throw new StaveArchiveTaskError(
+        `Restored ${done.join(", ")}, but restoring ${step.spaceId} failed: ${describe(error, "the Stave operation failed.")}`,
+      );
+    });
     if (opened === null && result.kind === "restoreSpace") {
       opened = {
-        projectId: result.result.projectId,
-        sequence: result.result.sequence,
+        // Servers before project reuse report neither.
+        projectId: result.result.projectId ?? null,
+        sequence: result.result.sequence ?? null,
         spacePath: result.result.spacePath,
         createdAt: result.result.manifest.createdAt,
       };
@@ -416,6 +424,13 @@ export function deleteStaveArchive(
       throw new StaveArchiveTaskError("Restore did not finish.");
     const { spacePath, manifest } = restored.result;
     const label = { label: `Delete ${step.spaceId}`, step: 2, total: 2 };
+    // Past the restore the entry is live again, so a failure must say so.
+    const destroyed = <A>(run: Promise<A>) =>
+      run.catch((error: unknown) => {
+        throw new StaveArchiveTaskError(
+          `${step.spaceId} was restored and is active again, but deleting it failed: ${describe(error, "the Stave operation failed.")}`,
+        );
+      });
     if (row.isSaga) {
       const teardown = {
         kind: "sagaDestroy",
@@ -425,9 +440,11 @@ export function deleteStaveArchive(
         memory: "keep",
       } as const;
       onState({ status: "running", ...label, operationId: null });
-      const review = (await client.dryRun(teardown)).sagaReview;
+      const review = (await destroyed(client.dryRun(teardown))).sagaReview;
       if (review === undefined)
-        throw new StaveArchiveTaskError("The saga's teardown scope could not be reviewed.");
+        throw new StaveArchiveTaskError(
+          "The saga space was restored, but its teardown scope could not be reviewed.",
+        );
       const live = review.participants.filter(
         (participant) => participant.state === "live" && participant.workspaceRoot !== spacePath,
       );
@@ -435,25 +452,24 @@ export function deleteStaveArchive(
         throw new StaveArchiveTaskError(
           `The saga space was restored, but members ${live.map((member) => member.spaceId).join(", ")} are still live. Archive or remove them, then delete the saga from its settings.`,
         );
-      await runStep(
-        client,
-        { ...teardown, expectedSagaReview: review.fingerprint },
-        label,
-        onState,
+      await destroyed(
+        runStep(client, { ...teardown, expectedSagaReview: review.fingerprint }, label, onState),
       );
     } else {
-      await runStep(
-        client,
-        {
-          kind: "destroySpace",
-          workspaceRoot: spacePath,
-          expectedManifestCreatedAt: manifest.createdAt,
-          force: false,
-          memory: "keep",
-          sagaRemoveConfirmed: true,
-        },
-        label,
-        onState,
+      await destroyed(
+        runStep(
+          client,
+          {
+            kind: "destroySpace",
+            workspaceRoot: spacePath,
+            expectedManifestCreatedAt: manifest.createdAt,
+            force: false,
+            memory: "keep",
+            sagaRemoveConfirmed: true,
+          },
+          label,
+          onState,
+        ),
       );
     }
     return { status: "finished", projectId: null, sequence: null, restored: null };
