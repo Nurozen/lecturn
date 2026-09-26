@@ -62,24 +62,36 @@ export function useThreadImportAvailability(
   );
 }
 
-/**
- * Imports an external provider session as a new thread and resolves to its ref
- * (null when the import was refused or failed, after alerting). Mirrors
- * `useForkThread`: mint the thread id, dispatch once per session, alert from a
- * message table. The session fixes the provider instance, so the thread starts
- * on that instance's model, while the caller supplies the modes its entry
- * point offers (see `resolveImportThreadModes`) and the instance clamps the
- * interaction mode it cannot honor. A refused import materializes nothing
- * server-side, so there is nothing to compensate.
- */
-export function useImportThread(): (input: {
+type ImportThreadInput = {
   readonly session: ExternalSessionSummary;
   readonly project: EnvironmentProject;
   readonly worktreePath: string | null;
   readonly branch: string | null;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
-}) => Promise<ScopedThreadRef | null> {
+};
+
+/**
+ * One import's outcome. A null message means there is nothing to tell the
+ * user: the same session was already importing, or the command was interrupted.
+ */
+export type ImportThreadAttempt =
+  | { readonly ok: true; readonly value: ScopedThreadRef }
+  | { readonly ok: false; readonly message: string | null };
+
+/**
+ * Imports an external provider session as a new thread and resolves to its
+ * outcome without alerting, so a bulk import can report failures together.
+ * Mirrors `useForkThread`: mint the thread id, dispatch once per session, read
+ * failures from a message table. The session fixes the provider instance, so
+ * the thread starts on that instance's model, while the caller supplies the
+ * modes its entry point offers (see `resolveImportThreadModes`) and the
+ * instance clamps the interaction mode it cannot honor. A refused import
+ * materializes nothing server-side, so there is nothing to compensate.
+ */
+export function useImportThreadAttempt(): (
+  input: ImportThreadInput,
+) => Promise<ImportThreadAttempt> {
   const importMutation = useAtomCommand(threadEnvironment.import, { reportFailure: false });
   const inFlightSessionKeys = useRef(new Set<string>());
 
@@ -87,7 +99,7 @@ export function useImportThread(): (input: {
     async ({ branch, interactionMode, project, runtimeMode, session, worktreePath }) => {
       const key = `${project.environmentId}:${session.providerInstanceId}:${session.sessionId}`;
       if (inFlightSessionKeys.current.has(key)) {
-        return null;
+        return { ok: false, message: null };
       }
       const serverConfig = appAtomRegistry.get(
         serverEnvironment.configValueAtom(project.environmentId),
@@ -105,8 +117,7 @@ export function useImportThread(): (input: {
         ),
       });
       if (modelSelection === null) {
-        Alert.alert(ALERT_TITLE, threadImportFailureMessage("provider-unavailable"));
-        return null;
+        return { ok: false, message: threadImportFailureMessage("provider-unavailable") };
       }
 
       inFlightSessionKeys.current.add(key);
@@ -133,26 +144,42 @@ export function useImportThread(): (input: {
           },
         });
         if (result._tag === "Failure") {
-          if (!isAtomCommandInterrupted(result)) {
-            const error = squashAtomCommandFailure(result);
-            const reason = threadImportFailureReason(error);
-            Alert.alert(
-              ALERT_TITLE,
+          if (isAtomCommandInterrupted(result)) return { ok: false, message: null };
+          const error = squashAtomCommandFailure(result);
+          const reason = threadImportFailureReason(error);
+          return {
+            ok: false,
+            message:
               reason !== null
                 ? threadImportFailureMessage(reason)
                 : (staveAdmissionErrorMessage(error) ??
-                    (error instanceof Error && error.message.trim().length > 0
-                      ? error.message
-                      : "The session could not be imported.")),
-            );
-          }
-          return null;
+                  (error instanceof Error && error.message.trim().length > 0
+                    ? error.message
+                    : "The session could not be imported.")),
+          };
         }
-        return scopeThreadRef(project.environmentId, threadId);
+        return { ok: true, value: scopeThreadRef(project.environmentId, threadId) };
       } finally {
         inFlightSessionKeys.current.delete(key);
       }
     },
     [importMutation],
+  );
+}
+
+/**
+ * `useImportThreadAttempt` for single-session entry points: resolves to the
+ * imported thread's ref, or null after alerting why the import failed.
+ */
+export function useImportThread(): (input: ImportThreadInput) => Promise<ScopedThreadRef | null> {
+  const importThread = useImportThreadAttempt();
+  return useCallback(
+    async (input) => {
+      const attempt = await importThread(input);
+      if (attempt.ok) return attempt.value;
+      if (attempt.message !== null) Alert.alert(ALERT_TITLE, attempt.message);
+      return null;
+    },
+    [importThread],
   );
 }

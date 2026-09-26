@@ -540,20 +540,25 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   }
 
   if (Option.isNone(versionProbe.success)) {
-    return buildServerProvider({
-      presentation: CLAUDE_PRESENTATION,
-      enabled: claudeSettings.enabled,
-      checkedAt,
-      models: allModels,
-      probe: {
-        installed: true,
-        version: null,
-        status: "error",
-        auth: { status: "unknown" },
-        message:
-          "Claude Agent CLI is installed but failed to run. Timed out while running command.",
-      },
-    });
+    const message =
+      "Claude Agent CLI is installed but failed to run. Timed out while running command.";
+    return {
+      ...buildServerProvider({
+        presentation: CLAUDE_PRESENTATION,
+        enabled: claudeSettings.enabled,
+        checkedAt,
+        models: allModels,
+        probe: {
+          installed: true,
+          version: null,
+          status: "error",
+          auth: { status: "unknown" },
+          message,
+        },
+      }),
+      // A slow CLI is a timeout, not a failed start.
+      discovery: { status: "timed-out", phase: "provider", message },
+    };
   }
 
   const version = versionProbe.success.value;

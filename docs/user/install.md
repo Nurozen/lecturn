@@ -70,11 +70,14 @@ default. Turn them on in **Settings** > **Providers** when you want to use them.
 On macOS, Lecturn opens while it loads your shell environment and detects providers in the
 background. Progress appears in the bottom-right corner; settings and navigation remain usable.
 Shell loading and provider detection each allow up to 15 seconds. If detection times out, the
-indicator turns grey with a retry button and a link to that provider's settings. You can retry
-without restarting, or configure an explicit executable path to bypass shell discovery. New
-turns wait for their provider to be ready; existing running turns continue. Brief connection
-interruptions do not restart provider detection. The progress indicator is hidden while an
-environment is disconnected and resumes from its current status after reconnecting.
+indicator turns grey with a retry button and a link to that provider's settings. Lecturn also
+retries on its own, waiting a little longer each time (up to a minute), so detection recovers
+once a busy machine frees up. A provider that was already detected stays usable through one
+slow background check. You can retry without restarting, or configure an explicit
+executable path to bypass shell discovery. New turns wait for their provider to be ready;
+existing running turns continue. Brief connection interruptions do not restart provider
+detection. The progress indicator is hidden while an environment is disconnected and resumes
+from its current status after reconnecting.
 
 If a provider cannot start, use the recovery panel to retry or open settings. **Show details**
 keeps the technical error available for troubleshooting.

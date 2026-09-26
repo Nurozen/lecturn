@@ -39,6 +39,8 @@ import type { DriverOption } from "./providerDriverMeta";
 import { ProviderSettingsForm } from "./ProviderSettingsForm";
 import { ProviderModelsSection } from "./ProviderModelsSection";
 import { ProviderInstanceIcon, providerInstanceInitials } from "../chat/ProviderInstanceIcon";
+import { tailProviderUpdateOutput } from "../ProviderUpdateLaunchNotification.logic";
+import { ProviderUpdateOutput } from "../ProviderUpdateOutput";
 import { ProviderAccentColorPicker } from "./ProviderAccentColorPicker";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
@@ -432,6 +434,9 @@ export function ProviderInstanceCard({
   const versionLabel = getProviderVersionLabel(liveProvider?.version);
   const versionAdvisory = getProviderVersionAdvisoryPresentation(liveProvider?.versionAdvisory);
   const updateCommand = versionAdvisory?.updateCommand ?? null;
+  const failedUpdateState =
+    liveProvider?.updateState?.status === "failed" ? liveProvider.updateState : null;
+  const failedUpdateOutput = tailProviderUpdateOutput(failedUpdateState?.output);
   const FallbackIconComponent = driverOption?.icon;
   const displayName =
     instance.displayName?.trim() || driverOption?.label || String(instance.driver);
@@ -703,6 +708,16 @@ export function ProviderInstanceCard({
                     {isUpdating ? <LoaderIcon className="animate-spin" /> : <DownloadIcon />}
                     {isUpdating ? "Updating" : "Update now"}
                   </Button>
+                ) : null}
+                {failedUpdateState ? (
+                  <div className="grid min-w-0 gap-1">
+                    <p className="text-xs leading-snug text-destructive">
+                      {failedUpdateState.message ?? "Update failed."}
+                    </p>
+                    {failedUpdateOutput ? (
+                      <ProviderUpdateOutput output={failedUpdateOutput} />
+                    ) : null}
+                  </div>
                 ) : null}
                 {onRunUpdate && updateCommand ? (
                   <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">

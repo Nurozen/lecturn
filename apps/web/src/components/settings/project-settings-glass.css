@@ -1,7 +1,7 @@
 @import "../account-surface.css";
 
-/* Scoped to project and Stave settings, including editors rendered in portals. */
-:is(.lecturn-project-settings section, section.lecturn-project-settings) > div.relative {
+/* Scoped to settings pages, project settings, and Stave editors (including portals). */
+.lecturn-project-settings [data-slot="settings-section-card"] {
   border-radius: 18px;
   border-color: color-mix(in srgb, var(--glass-light) 24%, var(--border));
   background:
@@ -29,14 +29,14 @@
   background: color-mix(in srgb, var(--card) 74%, transparent);
 }
 @media (prefers-reduced-transparency: reduce) {
-  :is(.lecturn-project-settings section, section.lecturn-project-settings) > div.relative,
+  .lecturn-project-settings [data-slot="settings-section-card"],
   .lecturn-project-settings-dialog {
     background: var(--card);
     backdrop-filter: none;
   }
 }
 @media (forced-colors: active) {
-  :is(.lecturn-project-settings section, section.lecturn-project-settings) > div.relative,
+  .lecturn-project-settings [data-slot="settings-section-card"],
   .lecturn-project-settings-dialog {
     background: Canvas;
     border-color: CanvasText;

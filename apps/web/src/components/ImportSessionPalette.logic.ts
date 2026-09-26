@@ -12,12 +12,15 @@ import { getDefaultProviderInstanceModel } from "../providerInstances";
 
 /** Marks the palette view whose groups are swapped for the live session list. */
 export const IMPORT_SESSION_VIEW_VALUE = "import-session";
+/** Marks the add-project view whose groups are swapped for the live folder list. */
+export const IMPORT_FOLDER_VIEW_VALUE = "import-folder";
 /** Per-instance page size: the contract's maximum, fetched once and filtered client-side. */
 export const IMPORT_SESSION_LIST_LIMIT = 100;
 
 export const IMPORT_SESSION_COST_NOTE =
   "The first message re-reads the whole session, so large sessions use more of your plan.";
 export const IMPORT_SESSION_TRUNCATED_NOTE = `Showing the ${IMPORT_SESSION_LIST_LIMIT} most recent sessions per provider.`;
+export const IMPORT_FOLDERS_TRUNCATED_NOTE = `Showing folders from the ${IMPORT_SESSION_LIST_LIMIT} most recent sessions per provider.`;
 export const IMPORT_SESSION_UNMATCHED_FOLDER_REASON = "Add this folder as a project to import";
 /** A project's list also holds sessions from its git worktrees, which Lecturn may not manage. */
 export const IMPORT_SESSION_OTHER_FOLDER_REASON = "This session ran in a different folder";

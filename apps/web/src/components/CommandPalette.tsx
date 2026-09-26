@@ -155,12 +155,20 @@ import { orderItemsByPreferredIds, sortLogicalProjectsForSidebar } from "./Sideb
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { CommandPaletteContent } from "./CommandPaletteContent";
 import { CommandPaletteResults } from "./CommandPaletteResults";
-import { IMPORT_SESSION_VIEW_VALUE } from "./ImportSessionPalette.logic";
+import { IMPORT_FOLDER_VIEW_VALUE, IMPORT_SESSION_VIEW_VALUE } from "./ImportSessionPalette.logic";
 import {
   type ImportSessionScope,
   readCanImportSessions,
+  readImportCapableDriverKinds,
+  useImportFolderPalette,
   useImportSessionPalette,
 } from "./ImportSessionPalette";
+import { openImportFolderSessions } from "../importFolderSessions";
+import {
+  type ExternalSessionFolder,
+  IMPORT_FOLDER_SOURCE_DESCRIPTION,
+  importFolderSourceLabel,
+} from "@lecturn/client-runtime/external-session-import";
 import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon } from "./Icons";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectFavicon } from "./ProjectFavicon";
@@ -711,6 +719,11 @@ function OpenCommandPaletteDialog(props: {
   // the scope lives here; it only applies while that marker is on top.
   const [importSessionScope, setImportSessionScope] = useState<ImportSessionScope | null>(null);
   const isImportSessionView = currentView?.groups[0]?.value === IMPORT_SESSION_VIEW_VALUE;
+  // Same marker scheme for the add-project "From Claude Code or Codex" folder list.
+  const [importFolderEnvironmentId, setImportFolderEnvironmentId] = useState<EnvironmentId | null>(
+    null,
+  );
+  const isImportFolderView = currentView?.groups[0]?.value === IMPORT_FOLDER_VIEW_VALUE;
   const toggleImportSessionAllFolders = useCallback(() => {
     setHighlightedItemValue(null);
     setImportSessionScope((scope) => (scope ? { ...scope, allFolders: !scope.allFolders } : scope));
@@ -1289,6 +1302,63 @@ function OpenCommandPaletteDialog(props: {
     onToggleAllFolders: toggleImportSessionAllFolders,
   });
 
+  // Adds the folder as a project unless one is already rooted there, then
+  // hands off to the multi-select import dialog. The ref rejects a second pick
+  // while the first folder's project is still being added.
+  const pickingImportFolderRef = useRef(false);
+  const pickImportFolder = useCallback(
+    async (folder: ExternalSessionFolder<Project>): Promise<void> => {
+      const environmentId = importFolderEnvironmentId;
+      if (environmentId === null || pickingImportFolderRef.current) return;
+      let projectId = folder.project?.id ?? null;
+      if (projectId === null) {
+        pickingImportFolderRef.current = true;
+        const outcome = await addProjectAndOpenThread({
+          environmentId,
+          workspaceRoot: folder.cwd,
+          createWorkspaceRootIfMissing: false,
+          projects,
+          threads,
+          sidebarThreadSortOrder: clientSettings.sidebarThreadSortOrder,
+          createProject,
+          navigate,
+          handleNewThread,
+        }).finally(() => {
+          pickingImportFolderRef.current = false;
+        });
+        if (outcome.status === "interrupted") return;
+        if (outcome.status === "failed") {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to add project",
+              description: errorMessage(outcome.error),
+            }),
+          );
+          return;
+        }
+        projectId = outcome.projectId;
+      }
+      setOpen(false);
+      openImportFolderSessions({ environmentId, projectId, folder: folder.cwd });
+    },
+    [
+      clientSettings.sidebarThreadSortOrder,
+      createProject,
+      handleNewThread,
+      importFolderEnvironmentId,
+      navigate,
+      projects,
+      setOpen,
+      threads,
+    ],
+  );
+  const importFolder = useImportFolderPalette({
+    environmentId: isImportFolderView ? importFolderEnvironmentId : null,
+    projects,
+    onPickFolder: pickImportFolder,
+  });
+
   const pushPaletteView = useCallback(
     (view: CommandPaletteView): void => {
       browseNavigation.invalidate();
@@ -1415,6 +1485,26 @@ function OpenCommandPaletteDialog(props: {
         },
       ];
 
+      const importDriverKinds = readImportCapableDriverKinds(environmentId);
+      if (importDriverKinds.length > 0) {
+        sourceItems.push({
+          kind: "action",
+          value: `action:add-project:${environmentId}:agent-sessions`,
+          searchTerms: ["import", "sessions", "claude", "codex", "agent", "history", "continue"],
+          title: importFolderSourceLabel(importDriverKinds),
+          description: IMPORT_FOLDER_SOURCE_DESCRIPTION,
+          icon: <ImportIcon className={ITEM_ICON_CLASS} />,
+          keepOpen: true,
+          run: async () => {
+            setImportFolderEnvironmentId(environmentId);
+            pushPaletteView({
+              addonIcon: <ImportIcon className={ADDON_ICON_CLASS} />,
+              groups: [{ value: IMPORT_FOLDER_VIEW_VALUE, label: "Folders", items: [] }],
+            });
+          },
+        });
+      }
+
       sourceItems.push(
         ...buildStaveAddProjectItems({
           environmentId,
@@ -1509,6 +1599,7 @@ function OpenCommandPaletteDialog(props: {
     },
     [
       openSourceControlSettings,
+      pushPaletteView,
       setOpen,
       startAddProjectBrowse,
       startAddProjectClone,
@@ -1985,7 +2076,9 @@ function OpenCommandPaletteDialog(props: {
         )
       : isImportSessionView
         ? importSession.sessionGroups
-        : (currentView?.groups ?? rootGroups);
+        : isImportFolderView
+          ? importFolder.folderGroups
+          : (currentView?.groups ?? rootGroups);
 
   const filteredGroups = filterCommandPaletteGroups({
     activeGroups,
@@ -2783,6 +2876,7 @@ function OpenCommandPaletteDialog(props: {
         keybindings={keybindings}
         onExecuteItem={executeItem}
         {...(isImportSessionView && !isBrowsing ? { notes: importSessionNotes } : {})}
+        {...(isImportFolderView && !isBrowsing ? { notes: importFolder.notes } : {})}
         {...(addProjectCloneFlow?.step === "repository"
           ? {
               emptyStateMessage:
@@ -2800,9 +2894,11 @@ function OpenCommandPaletteDialog(props: {
                   }
                 : isImportSessionView && importSession.isLoading
                   ? { emptyStateMessage: "Loading sessions…" }
-                  : threadSearch.isPending
-                    ? { emptyStateMessage: "Searching thread messages…" }
-                    : {})}
+                  : isImportFolderView && importFolder.isLoading
+                    ? { emptyStateMessage: "Loading folders…" }
+                    : threadSearch.isPending
+                      ? { emptyStateMessage: "Searching thread messages…" }
+                      : {})}
       />
     </CommandPaletteContent>
   );

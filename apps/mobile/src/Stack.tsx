@@ -37,6 +37,10 @@ import { ConnectionsRouteScreen } from "./features/connection/ConnectionsRouteSc
 import { ConnectionsNewRouteScreen } from "./features/connection/ConnectionsNewRouteScreen";
 import { HomeRouteScreen } from "./features/home/HomeRouteScreen";
 import { AddProjectDestinationRoute } from "./features/projects/AddProjectDestinationRoute";
+import {
+  AddProjectImportFoldersRoute,
+  AddProjectImportSessionsRoute,
+} from "./features/projects/AddProjectImportRoute";
 import { AddProjectLocalRoute } from "./features/projects/AddProjectLocalRoute";
 import { AddProjectRepositoryRoute } from "./features/projects/AddProjectRepositoryRoute";
 import { AddProjectSourceRoute } from "./features/projects/AddProjectSourceRoute";
@@ -338,6 +342,16 @@ const NewTaskSheetStack = createNativeStackNavigator({
     AddProjectLocal: createNativeStackScreen({
       screen: AddProjectLocalRoute,
       linking: "add-project/local",
+    }),
+    AddProjectImportFolders: createNativeStackScreen({
+      screen: AddProjectImportFoldersRoute,
+      linking: "add-project/import",
+      options: { title: "Choose folder" },
+    }),
+    AddProjectImportSessions: createNativeStackScreen({
+      screen: AddProjectImportSessionsRoute,
+      linking: "add-project/import/sessions",
+      options: { title: "Import sessions" },
     }),
     AddProjectStaveSpace: createNativeStackScreen({
       screen: AddStaveSpaceRoute,
