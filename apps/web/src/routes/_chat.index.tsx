@@ -1,3 +1,4 @@
+import { withoutArchivedStaveProjects } from "@lecturn/client-runtime/state/stave-archive";
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
@@ -46,7 +47,11 @@ function IndexDraftLanding() {
   const mostRecentProject = useMemo(
     () =>
       bootstrapped
-        ? (sortScopedProjectsForSidebar(projects, threads, "updated_at")[0] ?? null)
+        ? (sortScopedProjectsForSidebar(
+            withoutArchivedStaveProjects(projects),
+            threads,
+            "updated_at",
+          )[0] ?? null)
         : null,
     [bootstrapped, projects, threads],
   );

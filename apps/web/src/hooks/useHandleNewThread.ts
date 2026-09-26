@@ -5,6 +5,7 @@ import {
   normalizeProjectThreadWorkspace,
   staveThreadStartMessage,
 } from "@lecturn/client-runtime/state/projectGit";
+import { withoutArchivedStaveProjects } from "@lecturn/client-runtime/state/stave-archive";
 import { toastManager } from "../components/ui/toast";
 import {
   scopedProjectKey,
@@ -146,7 +147,7 @@ export function useNewThreadHandler() {
       if (staveStartMessage !== null) {
         toastManager.add({
           type: "warning",
-          title: "Unarchive to start a thread",
+          title: "This Stave space is archived",
           description: staveStartMessage,
         });
         return Promise.resolve(null);
@@ -501,9 +502,10 @@ export function useHandleNewThread() {
       : null,
   );
   const projects = useProjects();
+  // The default target is a listed project: an archived Stave space starts no threads.
   const orderedProjects = useMemo(() => {
     return orderItemsByPreferredIds({
-      items: projects,
+      items: withoutArchivedStaveProjects(projects),
       preferredIds: projectOrder,
       getId: getProjectOrderKey,
       getPreferenceIds: (project) => [

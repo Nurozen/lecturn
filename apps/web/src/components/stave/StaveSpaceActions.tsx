@@ -20,7 +20,6 @@ import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogFooter } from "..
 import { StaveConfirmDialog } from "./StaveConfirmDialog";
 import {
   staveArchiveSpaceConfirmation,
-  staveUnarchiveSpaceConfirmation,
   useStaveArchiveLanding,
   type StaveSpaceConfirmation,
 } from "./staveSpaceLifecycle";
@@ -61,23 +60,9 @@ export function StaveSpaceActions({
         </p>
       ) : null}
       {archived ? (
-        <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
-          <p className="text-sm text-muted-foreground">
-            Unarchive this space to start a thread or edit its repos.
-          </p>
-          <Button
-            size="sm"
-            disabled={!bound || !stave.archiveBasename || unsupported("restoreSpace")}
-            onClick={() => {
-              if (stave.archiveBasename)
-                setConfirmation(
-                  staveUnarchiveSpaceConfirmation(workspaceRoot, stave, stave.archiveBasename),
-                );
-            }}
-          >
-            Unarchive
-          </Button>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          This space is archived. Restore it from New project → Stave.
+        </p>
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-2">

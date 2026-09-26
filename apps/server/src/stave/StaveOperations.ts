@@ -46,6 +46,7 @@ import {
   StaveOperationRejectedError,
   type StaveOperationResult,
   type StaveProgressEvent,
+  type StaveProjectInfo,
   type StaveProgressOutputStream,
   type StaveRegisterRepoOperation,
   type StaveRemovePartialSpaceOperation,
@@ -729,7 +730,11 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       }
     });
 
-  const createProject = (spacePath: string, title: string) =>
+  const createProject = (
+    spacePath: string,
+    title: string,
+    failure = "The space was created but the project could not be",
+  ) =>
     Effect.gen(function* () {
       const projectId = ProjectId.make(NodeCrypto.randomUUID());
       const command = yield* normalizeDispatchCommand({
@@ -747,7 +752,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       return { projectId, sequence };
     }).pipe(
       Effect.mapError((cause) =>
-        refuse("unknown", `The space was created but the project could not be: ${cause.message}`, {
+        refuse("unknown", `${failure}: ${cause.message}`, {
           spacePath,
         }),
       ),
@@ -1241,6 +1246,54 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       })
       .pipe(Effect.mapError(asRefusal), Effect.asVoid);
 
+  /**
+   * A restore picked from the archive list may have no project on the archive
+   * root. Reuse the project that last owned this incarnation (so its threads
+   * come back) when its recorded root is gone, else create one on the archive
+   * root. The restore's reconciliation then moves it to the live root.
+   */
+  const adoptArchiveProject = (workspaceRoot: string, info: StaveProjectInfo) =>
+    Effect.gen(function* () {
+      const createdAt = info.createdAt;
+      const rows =
+        createdAt === undefined
+          ? []
+          : yield* lifecycle.listActiveBySpaceId(info.spaceId).pipe(Effect.mapError(asRefusal));
+      for (const row of rows) {
+        if (
+          row.manifestCreatedAt === null ||
+          createdAt === undefined ||
+          !sameManifestIncarnation(row.manifestCreatedAt, createdAt)
+        )
+          continue;
+        const owner = yield* snapshotQuery
+          .getProjectShellById(row.projectId)
+          .pipe(Effect.mapError(asRefusal));
+        if (Option.isNone(owner) || (yield* pathEntryExists(owner.value.workspaceRoot))) continue;
+        const root = yield* workspacePaths
+          .normalizeWorkspaceRoot(workspaceRoot)
+          .pipe(Effect.mapError(asRefusal));
+        yield* engine
+          .dispatch(
+            {
+              type: "project.meta.update",
+              commandId: CommandId.make(`server:stave:adopt:${NodeCrypto.randomUUID()}`),
+              projectId: owner.value.id,
+              workspaceRoot: root,
+            },
+            { staveReconciliation: true },
+          )
+          .pipe(Effect.mapError(asRefusal));
+        return owner.value.id;
+      }
+      const created = yield* createProject(
+        workspaceRoot,
+        info.spaceId,
+        "The archive could not get a project to restore into",
+      );
+      return created.projectId;
+    });
+
   type LifecycleRow = StaveLifecycleRow;
   const reconcileRow = (row: LifecycleRow) =>
     Effect.gen(function* () {
@@ -1450,12 +1503,16 @@ export const make = Effect.fn("StaveOperations.make")(function* (
         let lease: LifecycleRow | undefined;
         let removedEdges: unknown = null;
         if (isLifecycle) {
-          if (Option.isNone(project) && durableTarget === undefined)
-            return yield* refuse(
-              "invalid_arguments",
-              "Lifecycle operations require an active project.",
-            );
-          const projectId = durableTarget?.projectId ?? Option.getOrThrow(project).id;
+          const projectId =
+            durableTarget?.projectId ??
+            (Option.isSome(project)
+              ? project.value.id
+              : operation.kind === "restoreSpace"
+                ? yield* adoptArchiveProject(operation.workspaceRoot, info)
+                : yield* refuse(
+                    "invalid_arguments",
+                    "Lifecycle operations require an active project.",
+                  ));
           if (
             durableTarget !== undefined &&
             Option.isSome(project) &&
@@ -1739,7 +1796,11 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                 notesUnlessPlan,
               );
               if (isStaveDryRunPlan(result)) return yield* unexpectedPlan("space restore");
-              outcome = { kind: operation.kind, result };
+              // `sequence` is stamped once reconciliation has moved the project.
+              outcome = {
+                kind: operation.kind,
+                result: { ...result, projectId: lease!.projectId, sequence: 0 },
+              };
               break;
             }
             case "destroySpace": {
@@ -1845,6 +1906,13 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           }
           if (lease !== undefined && operation.kind !== "destroySpace") {
             yield* patch(yield* reconcileRow(lease));
+          }
+          if (outcome.kind === "restoreSpace") {
+            const shell = yield* snapshotQuery.getShellSnapshot().pipe(Effect.mapError(asRefusal));
+            outcome = {
+              ...outcome,
+              result: { ...outcome.result, sequence: shell.snapshotSequence },
+            };
           }
           return outcome;
         });

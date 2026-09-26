@@ -41,6 +41,11 @@ import {
   updateWizardState,
   wizardSteps,
 } from "@lecturn/client-runtime/state/stave-space-wizard";
+import {
+  ExistingStaveSpacePicker,
+  StaveWizardModeToggle,
+  type StaveWizardMode,
+} from "./ExistingStaveSpacePicker";
 import { StaveOperationProgress } from "./StaveOperationProgress";
 import { IdentityStep } from "./steps/IdentityStep";
 import { MemoryStep } from "./steps/MemoryStep";
@@ -149,15 +154,19 @@ function SpaceWizard(props: {
   const [operationId, setOperationId] = useState<string | null>(null);
   const [dryRunPending, setDryRunPending] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
+  // Launched from inside a saga, the wizard only creates a member.
+  const existingAllowed = request.saga === undefined;
+  const [mode, setMode] = useState<StaveWizardMode>("new");
+  const [pickerBusy, setPickerBusy] = useState(false);
   const runOperation = useAtomCommand(staveOperations.run, { reportFailure: false });
   const operationState = useAtomValue(staveOperations.stateAtom(operationId ?? IDLE_OPERATION_ID));
   const running = operationState.status === "running" || operationState.status === "disconnected";
   const terminal = operationState.status === "finished" || operationState.status === "failed";
 
   useEffect(() => {
-    onBusyChange(running);
+    onBusyChange(running || pickerBusy);
     return () => onBusyChange(false);
-  }, [onBusyChange, running]);
+  }, [onBusyChange, pickerBusy, running]);
 
   // Registry rows follow the registry (an inline register adds a row) and the
   // launch request's saga is applied once the saga list arrives; both adjust
@@ -221,6 +230,27 @@ function SpaceWizard(props: {
     });
   }, [environmentId, handleNewThread, navigate, result]);
 
+  if (mode === "existing") {
+    return (
+      <>
+        <DialogHeader>
+          <DialogTitle>Existing Stave space</DialogTitle>
+          <DialogDescription>
+            Add a space that is not a project yet, or restore an archived one with its threads.
+          </DialogDescription>
+          {pickerBusy ? null : (
+            <StaveWizardModeToggle kind="space" mode={mode} onChange={setMode} />
+          )}
+        </DialogHeader>
+        <ExistingStaveSpacePicker
+          environmentId={environmentId}
+          kind="space"
+          onBusyChange={setPickerBusy}
+        />
+      </>
+    );
+  }
+
   return (
     <div
       className="contents"
@@ -253,6 +283,9 @@ function SpaceWizard(props: {
         <DialogDescription>
           Worktrees for the repos you pick, a spec and memory, grouped under one Lecturn project.
         </DialogDescription>
+        {existingAllowed && state.step !== "progress" ? (
+          <StaveWizardModeToggle kind="space" mode={mode} onChange={setMode} />
+        ) : null}
         <ol aria-label="Steps" className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
           {steps.map((step, index) => (
             <li

@@ -2731,6 +2731,95 @@ it.effect("reconciles a restore that renamed the archive before failing", () =>
   ),
 );
 
+const restoreScenario = (adopt: boolean) =>
+  scenario(
+    (roots) =>
+      Effect.gen(function* () {
+        const live = roots.path.join(roots.agentWorkDir, SPACE_ID);
+        const archived = roots.path.join(roots.agentWorkDir, ".archive", SPACE_ID);
+        const gone = roots.path.join(roots.agentWorkDir, "moved-away", SPACE_ID);
+        yield* roots.fs.makeDirectory(archived, { recursive: true }).pipe(Effect.orDie);
+        const fixture = lifecycleFixture(archived, "archived");
+        const ensured: Array<{ projectId: string; workspaceRoot: string }> = [];
+        return {
+          live,
+          archived,
+          ensured,
+          shellProjects: adopt ? [projectShell("owner", gone)] : [],
+          readerLoad: (candidate: string) =>
+            Effect.succeed(Option.some(infoFor(candidate === archived ? "archived" : "live"))),
+          lifecycle: {
+            ...fixture.service,
+            listActiveBySpaceId: () =>
+              Effect.succeed(
+                adopt
+                  ? [{ ...fixture.row(), projectId: ProjectId.make("owner"), workspaceRoot: gone }]
+                  : [],
+              ),
+            ensure: (input: Parameters<StaveLifecycleRepositoryShape["ensure"]>[0]) =>
+              Effect.sync(() => {
+                ensured.push({ projectId: input.projectId, workspaceRoot: input.workspaceRoot });
+                return { ...fixture.row(), projectId: input.projectId };
+              }),
+            acquireLease: (input: Parameters<StaveLifecycleRepositoryShape["acquireLease"]>[0]) =>
+              fixture.service.acquireLease!(input).pipe(
+                Effect.map(Option.map((row) => ({ ...row, projectId: input.projectId }))),
+              ),
+          },
+          cliExtra: {
+            spaceRestore: (input: { from?: string | undefined }) =>
+              Effect.gen(function* () {
+                expect(input.from).toBe(SPACE_ID);
+                yield* roots.fs.rename(archived, live).pipe(Effect.orDie);
+                return mutationResult(SPACE_ID, live);
+              }),
+            spaceList: (input?: { archived?: boolean | undefined }) =>
+              Effect.succeed(input?.archived ? [] : [listRow(live)]),
+          },
+        };
+      }),
+    (harness, options) =>
+      Effect.gen(function* () {
+        const ops = yield* StaveOperations;
+        const events = yield* runToEnd(ops, `restore-${adopt}`, {
+          kind: "restoreSpace",
+          workspaceRoot: options.archived,
+          from: SPACE_ID,
+          expectedManifestCreatedAt: CREATED_AT,
+        });
+        const result = finishedResult(events);
+        const dispatched = yield* Ref.get(harness.dispatched);
+        return { result, dispatched, options };
+      }),
+  );
+
+it.effect("restores an archive without a project into one created on the archive root", () =>
+  Effect.gen(function* () {
+    const { result, dispatched, options } = yield* restoreScenario(false);
+    const creates = dispatched.filter((command) => command.type === "project.create");
+    expect(creates).toMatchObject([{ workspaceRoot: options.archived, title: SPACE_ID }]);
+    const created = creates[0]!.type === "project.create" ? creates[0]!.projectId : undefined;
+    expect(options.ensured).toEqual([{ projectId: created, workspaceRoot: options.archived }]);
+    expect(result).toMatchObject({
+      kind: "restoreSpace",
+      result: { spacePath: options.live, projectId: created },
+    });
+  }),
+);
+
+it.effect("restore reuses the project that owned the archived incarnation", () =>
+  Effect.gen(function* () {
+    const { result, dispatched, options } = yield* restoreScenario(true);
+    expect(dispatched.some((command) => command.type === "project.create")).toBe(false);
+    expect(dispatched.find((command) => command.type === "project.meta.update")).toMatchObject({
+      projectId: "owner",
+      workspaceRoot: options.archived,
+    });
+    expect(options.ensured).toEqual([{ projectId: "owner", workspaceRoot: options.archived }]);
+    expect(result).toMatchObject({ kind: "restoreSpace", result: { projectId: "owner" } });
+  }),
+);
+
 for (const retained of [true, false]) {
   it.effect(
     `startup reconciliation ${retained ? "renews its lease while CLI reads run" : "stops without project mutation after lease loss"}`,

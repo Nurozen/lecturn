@@ -175,9 +175,7 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
     [groupKey, onGroupAction],
   );
   const handleNewThread = useCallback(() => {
-    if (newThreadTarget && newThreadTarget.stave?.state !== "archived") {
-      onNewThread?.(newThreadTarget);
-    }
+    if (newThreadTarget) onNewThread?.(newThreadTarget);
   }, [newThreadTarget, onNewThread]);
   const showNewThreadButton = onNewThread !== undefined && newThreadTarget !== null;
   const glass = useGlassPalette();
@@ -295,13 +293,7 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
         ) : null}
         {showNewThreadButton ? (
           <Pressable
-            accessibilityLabel={
-              newThreadTarget?.stave?.state === "archived"
-                ? "Unarchive to start a thread"
-                : `Create new thread in ${props.title}`
-            }
-            disabled={newThreadTarget?.stave?.state === "archived"}
-            accessibilityState={{ disabled: newThreadTarget?.stave?.state === "archived" }}
+            accessibilityLabel={`Create new thread in ${props.title}`}
             accessibilityRole="button"
             onPress={handleNewThread}
             style={({ pressed }) => ({

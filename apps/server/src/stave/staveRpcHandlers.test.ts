@@ -10,7 +10,12 @@ import { StaveExecutionContext } from "./StaveExecutionContext.ts";
 import { StaveCli } from "./StaveCli.ts";
 import { StaveReadCache, layer as readCacheLayer } from "./StaveReadCache.ts";
 import { StaveWorkspaceReader } from "./StaveWorkspaceReader.ts";
-import { makeRuntime, toSagaStatusDto, type StaveRpcRuntimeShape } from "./staveRpcHandlers.ts";
+import {
+  makeRuntime,
+  sagaRosterFromManifest,
+  toSagaStatusDto,
+  type StaveRpcRuntimeShape,
+} from "./staveRpcHandlers.ts";
 import { decodeStaveSagaStatus } from "./staveJson.ts";
 import { SAMPLE_SAGA_STATUS } from "./testing/staveJsonSamples.ts";
 import { StaveError } from "./StaveError.ts";
@@ -29,6 +34,32 @@ const readerLayer = Layer.mock(StaveWorkspaceReader)({
         memories: [],
       }),
     ),
+});
+
+describe("sagaRosterFromManifest", () => {
+  it("reads an archived saga's member ids and enrolment stamps", () => {
+    expect(
+      sagaRosterFromManifest(
+        [
+          "version: 2",
+          "id: sg",
+          "kind: saga",
+          "saga:",
+          "  members:",
+          "    - id: m1",
+          "      createdAt: 2026-09-26T04:23:52.891873Z",
+          "    - id: m2",
+          "      after: [m1]",
+          "    - nonsense",
+        ].join("\n"),
+      ),
+    ).toEqual([{ id: "m1", createdAt: "2026-09-26T04:23:52.891873Z" }, { id: "m2" }]);
+  });
+
+  it("has no roster for manifests without one", () => {
+    expect(sagaRosterFromManifest("id: plain\n")).toBeUndefined();
+    expect(sagaRosterFromManifest(": : :\n  - [")).toBeUndefined();
+  });
 });
 
 describe("saga status RPC runtime", () => {

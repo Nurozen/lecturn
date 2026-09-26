@@ -1,3 +1,4 @@
+import { withoutArchivedStaveProjects } from "@lecturn/client-runtime/state/stave-archive";
 import { DesktopActivityBridge } from "../components/pullRequest/DesktopActivityBridge";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
@@ -38,7 +39,7 @@ function ChatRouteGlobalShortcuts() {
   const projectGroupCount = useMemo(
     () =>
       buildSidebarProjectSnapshots({
-        projects,
+        projects: withoutArchivedStaveProjects(projects),
         settings: projectGroupingSettings,
         primaryEnvironmentId,
         resolveEnvironmentLabel: () => null,

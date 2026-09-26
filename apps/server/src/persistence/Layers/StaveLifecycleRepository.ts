@@ -46,6 +46,11 @@ const make = Effect.gen(function* () {
     read(
       sql`SELECT ${columns} FROM stave_project_lifecycle WHERE workspace_root = ${root} ORDER BY (owner_token IS NOT NULL) DESC, updated_at DESC LIMIT 1`,
     ).pipe(Effect.map(Option.fromIterable));
+  const listActiveBySpaceId: StaveLifecycleRepositoryShape["listActiveBySpaceId"] = (spaceId) =>
+    read(sql`SELECT ${columns} FROM stave_project_lifecycle
+      WHERE space_id = ${spaceId}
+        AND project_id IN (SELECT project_id FROM projection_projects WHERE deleted_at IS NULL)
+      ORDER BY updated_at DESC`);
   const listPending: StaveLifecycleRepositoryShape["listPending"] = () =>
     read(
       sql`SELECT ${columns} FROM stave_project_lifecycle WHERE delete_intent_sequence IS NOT NULL OR disposition IN ('pending_evaluation','pending_destroy','pending_archive','archiving','restoring','destroying') ORDER BY project_id`,
@@ -203,6 +208,7 @@ const make = Effect.gen(function* () {
   return {
     getByProjectId,
     getByWorkspaceRoot,
+    listActiveBySpaceId,
     listPending,
     listDeletedCleanups,
     isProjectDeleted,

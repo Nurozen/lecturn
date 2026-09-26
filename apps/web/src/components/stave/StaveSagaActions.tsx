@@ -9,10 +9,17 @@ import type {
 } from "@lecturn/contracts";
 import { useEffect, useState } from "react";
 import { isValidStaveSpaceId } from "@lecturn/shared/stave";
+import {
+  restoreStaveArchive,
+  type StaveArchiveTaskState,
+} from "@lecturn/client-runtime/state/stave-archive";
+import { webStaveArchiveClient } from "../../lib/staveArchiveClient";
 import { staveSpaces, useStaveSagaStatus } from "../../state/stave";
 import { useEnvironmentQuery } from "../../state/query";
 import { openStaveWizard } from "../../staveWizard";
-import { subscribeStaveMutation } from "../../staveMutation";
+import { notifyStaveMutation, subscribeStaveMutation } from "../../staveMutation";
+import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
+import { Switch } from "../ui/switch";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Input } from "../ui/input";
@@ -20,6 +27,13 @@ import { Label } from "../ui/label";
 import { Checkbox } from "../ui/checkbox";
 import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogFooter } from "../ui/dialog";
 import { StaveConfirmDialog } from "./StaveConfirmDialog";
+import { StaveOperationProgress } from "./StaveOperationProgress";
+import {
+  archivedSagaRow,
+  sagaAdoptCandidates,
+  showArchivedLabel,
+  staveArchiveTaskLabel,
+} from "./existingStaveSpace.logic";
 import { parseSagaAfter, resolveSagaMemberSpace, staveSagaMemberBadges } from "./staveSaga.logic";
 
 export function StaveSagaActions({
@@ -55,6 +69,40 @@ export function StaveSagaActions({
     title: string;
     operation: StaveOperation;
   } | null>(null);
+  const [sagaRestore, setSagaRestore] = useState<ArchiveRestoreView | null>(null);
+  const restoreSaga = async () => {
+    const client = webStaveArchiveClient(environmentId);
+    const progress = followArchiveRestore(setSagaRestore);
+    setSagaRestore({ status: "running", label: "Reading archives", operationId: null });
+    let rows: readonly StaveSpaceListRow[];
+    try {
+      rows = await client.listSpaces();
+    } catch (error) {
+      setSagaRestore({
+        status: "failed",
+        message: error instanceof Error ? error.message : "Could not read the Stave archives.",
+        operationId: null,
+      });
+      return;
+    }
+    const row = archivedSagaRow(rows, sagaRoot);
+    if (row === null) {
+      setSagaRestore({
+        status: "failed",
+        message: "This saga's archive is gone; it may already have been restored.",
+        operationId: null,
+      });
+      notifyStaveMutation(environmentId);
+      return;
+    }
+    const final = await restoreStaveArchive(client, { row, rows }, progress.onState);
+    notifyStaveMutation(environmentId);
+    setSagaRestore(
+      final.status === "failed"
+        ? { status: "failed", message: final.message, operationId: progress.lastOperationId() }
+        : null,
+    );
+  };
   const scope = {
     sagaRoot,
     ...(stave.createdAt ? { expectedManifestCreatedAt: stave.createdAt } : {}),
@@ -96,7 +144,7 @@ export function StaveSagaActions({
       {status.error ? <p className="text-xs text-destructive-foreground">{status.error}</p> : null}
       {archived ? (
         <p className="text-xs text-muted-foreground">
-          This saga is archived. Unarchive its space and then individual members to resume work.
+          This saga is archived. Restore it to resume work.
         </p>
       ) : null}
       {!memberRoot && !archived ? (
@@ -236,19 +284,19 @@ export function StaveSagaActions({
         <Button
           size="sm"
           className="self-start"
-          disabled={!bound || !stave.archiveBasename || unsupported("restoreSpace")}
-          onClick={() => {
-            if (stave.archiveBasename)
-              review("Unarchive saga space", {
-                kind: "restoreSpace",
-                workspaceRoot: sagaRoot,
-                expectedManifestCreatedAt: stave.createdAt,
-                from: stave.archiveBasename,
-              });
-          }}
+          disabled={sagaRestore?.status === "running" || unsupported("restoreSpace")}
+          onClick={() => void restoreSaga()}
         >
-          Unarchive saga space
+          Restore saga
         </Button>
+      ) : null}
+      {/* Outlives `archived`: a member can fail after the saga space is live again. */}
+      {sagaRestore && !memberRoot ? (
+        <ArchiveRestoreProgress
+          environmentId={environmentId}
+          view={sagaRestore}
+          failureTitle="Could not restore the saga"
+        />
       ) : null}
       {editor ? (
         <SagaMemberEditor
@@ -256,6 +304,7 @@ export function StaveSagaActions({
           spaces={spaces.data ?? []}
           editor={editor}
           sagaId={stave.spaceId}
+          canRestore={!unsupported("restoreSpace")}
           onClose={() => setEditor(null)}
           onReview={(member, after, clearAfter) => {
             setEditor(null);
@@ -288,11 +337,57 @@ export function StaveSagaActions({
   );
 }
 
+type ArchiveRestoreView =
+  | { status: "running"; label: string; operationId: string | null }
+  | { status: "failed"; message: string; operationId: string | null };
+
+/** Mirrors an archive runner's running states into a view, keeping its last operation. */
+function followArchiveRestore(set: (view: ArchiveRestoreView) => void) {
+  let operationId: string | null = null;
+  return {
+    onState: (state: StaveArchiveTaskState) => {
+      if (state.status !== "running") return;
+      operationId = state.operationId ?? operationId;
+      set({ status: "running", label: staveArchiveTaskLabel(state), operationId });
+    },
+    lastOperationId: () => operationId,
+  };
+}
+
+function ArchiveRestoreProgress({
+  environmentId,
+  view,
+  failureTitle,
+}: {
+  environmentId: EnvironmentId;
+  view: ArchiveRestoreView;
+  failureTitle: string;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      {view.status === "running" ? (
+        <p aria-live="polite" className="text-xs font-medium">
+          {view.label}
+        </p>
+      ) : (
+        <Alert variant="error">
+          <AlertTitle>{failureTitle}</AlertTitle>
+          <AlertDescription>{view.message}</AlertDescription>
+        </Alert>
+      )}
+      {view.operationId !== null ? (
+        <StaveOperationProgress environmentId={environmentId} operationId={view.operationId} />
+      ) : null}
+    </div>
+  );
+}
+
 function SagaMemberEditor({
   environmentId,
   spaces,
   editor,
   sagaId,
+  canRestore,
   onClose,
   onReview,
 }: {
@@ -300,32 +395,67 @@ function SagaMemberEditor({
   spaces: readonly StaveSpaceListRow[];
   editor: { member?: StaveSpaceListRow; after: readonly string[] };
   sagaId: string;
+  /** Archived spaces are offered (restored before the adopt) only when restore is supported. */
+  canRestore: boolean;
   onClose: () => void;
-  onReview: (member: StaveSpaceListRow, after: readonly string[], clearAfter: boolean) => void;
+  onReview: (
+    member: { path: string; manifestCreatedAt?: string | undefined },
+    after: readonly string[],
+    clearAfter: boolean,
+  ) => void;
 }) {
   const glass = useSettingsAccountGlass(environmentId);
   const [path, setPath] = useState(editor.member?.path ?? "");
   const [selected, setSelected] = useState(editor.member);
   const [afterText, setAfterText] = useState(editor.after.join(", "));
   const [clearAfter, setClearAfter] = useState(!!editor.member);
-  const candidates = spaces.filter(
-    (space) =>
-      !space.isSaga &&
-      !space.archived &&
-      !space.error &&
-      !!space.manifestCreatedAt &&
-      (!space.memberOf || space.memberOf === sagaId),
+  const [showArchived, setShowArchived] = useState(false);
+  const [restore, setRestore] = useState<ArchiveRestoreView | null>(null);
+  const restoring = restore?.status === "running";
+  const { candidates, archivedCount } = sagaAdoptCandidates(
+    spaces,
+    sagaId,
+    showArchived && canRestore,
   );
   const member = selected?.path === path ? selected : undefined;
   const after = parseSagaAfter(afterText);
   const valid =
     !!member &&
     after.every((id) => isValidStaveSpaceId(id) && id !== (member.logicalId ?? member.id));
+  const submit = async () => {
+    if (!member || !valid || restoring) return;
+    if (!member.archived) {
+      onReview(member, after, clearAfter);
+      return;
+    }
+    const progress = followArchiveRestore(setRestore);
+    const final = await restoreStaveArchive(
+      webStaveArchiveClient(environmentId),
+      { row: member, rows: spaces },
+      progress.onState,
+    );
+    notifyStaveMutation(environmentId);
+    if (final.status === "finished" && final.restored !== null) {
+      // The adopt binds the live root and stamp the restore produced.
+      onReview(
+        { path: final.restored.spacePath, manifestCreatedAt: final.restored.createdAt },
+        after,
+        clearAfter,
+      );
+      return;
+    }
+    setRestore({
+      status: "failed",
+      message:
+        final.status === "failed" ? final.message : "The restore did not report the space's root.",
+      operationId: progress.lastOperationId(),
+    });
+  };
   return (
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open) onClose();
+        if (!open && !restoring) onClose();
       }}
     >
       <DialogPopup
@@ -350,11 +480,34 @@ function SagaMemberEditor({
             <datalist id="stave-saga-spaces">
               {candidates.map((space) => (
                 <option key={space.path} value={space.path}>
-                  {space.logicalId ?? space.id}
+                  {`${space.logicalId ?? space.id}${space.archived ? " (archived)" : ""}`}
                 </option>
               ))}
             </datalist>
           </Label>
+          {!editor.member && canRestore ? (
+            <Label className="gap-2 text-xs font-normal">
+              <Switch
+                size="sm"
+                checked={showArchived}
+                disabled={restoring}
+                onCheckedChange={(checked) => setShowArchived(checked)}
+              />
+              {showArchivedLabel(archivedCount)}
+            </Label>
+          ) : null}
+          {member?.archived && !restore ? (
+            <p className="text-xs text-muted-foreground">
+              This space is archived. It is restored first, then adopted.
+            </p>
+          ) : null}
+          {restore ? (
+            <ArchiveRestoreProgress
+              environmentId={environmentId}
+              view={restore}
+              failureTitle={`Could not restore ${member?.logicalId ?? member?.id ?? "the space"}`}
+            />
+          ) : null}
           <Label className="flex flex-col gap-2">
             After member ids
             <Input
@@ -378,16 +531,15 @@ function SagaMemberEditor({
           </p>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" disabled={restoring} onClick={onClose}>
             Cancel
           </Button>
-          <Button
-            disabled={!valid}
-            onClick={() => {
-              if (member && valid) onReview(member, after, clearAfter);
-            }}
-          >
-            Review plan
+          <Button disabled={!valid || restoring} onClick={() => void submit()}>
+            {restoring
+              ? "Restoring…"
+              : member?.archived
+                ? "Restore and review plan"
+                : "Review plan"}
           </Button>
         </DialogFooter>
       </DialogPopup>

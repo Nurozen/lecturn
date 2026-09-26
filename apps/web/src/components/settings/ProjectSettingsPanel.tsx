@@ -317,7 +317,7 @@ export function ProjectSettingsPanel({ projectKey }: { projectKey: string }) {
     };
   }, [selected]);
 
-  // A grouping-rule change or a Stave unarchive (which moves the workspace
+  // A grouping-rule change or a Stave restore (which moves the workspace
   // root) replaces the group key mid-visit; follow the project to its new key.
   // A project that was archived or removed is done with, so leave instead of
   // parking on the not-found state: an archived saga member for its saga's

@@ -34,6 +34,11 @@ import {
   validateSagaWizard,
   validateSpaceId,
 } from "@lecturn/client-runtime/state/stave-space-wizard";
+import {
+  ExistingStaveSpacePicker,
+  StaveWizardModeToggle,
+  type StaveWizardMode,
+} from "../ExistingStaveSpacePicker";
 import { StaveOperationProgress } from "../StaveOperationProgress";
 import { StaveRepoPicker } from "../StaveRepoPicker";
 import { useStaveWizardData } from "../useStaveWizardData";
@@ -57,6 +62,8 @@ export function SagaCreateForm(props: {
     createInitialSagaWizardState(context.repos),
   );
   const [operationId, setOperationId] = useState<string | null>(null);
+  const [mode, setMode] = useState<StaveWizardMode>("new");
+  const [pickerBusy, setPickerBusy] = useState(false);
   const runOperation = useAtomCommand(staveOperations.run, { reportFailure: false });
   const operation = useAtomValue(staveOperations.stateAtom(operationId ?? IDLE_OPERATION_ID));
   const running =
@@ -87,9 +94,9 @@ export function SagaCreateForm(props: {
   }, [environmentId, result, navigate, handleNewThread]);
 
   useEffect(() => {
-    onBusyChange(running);
+    onBusyChange(running || pickerBusy);
     return () => onBusyChange(false);
-  }, [onBusyChange, running]);
+  }, [onBusyChange, pickerBusy, running]);
 
   // Reference rows follow the registry, adjusted in render when it changes.
   const [seenRepos, setSeenRepos] = useState(context.repos);
@@ -141,6 +148,26 @@ export function SagaCreateForm(props: {
     });
   };
 
+  if (mode === "existing") {
+    return (
+      <>
+        <DialogHeader>
+          <DialogTitle>Existing Stave saga</DialogTitle>
+          <DialogDescription>
+            Add a saga that is not a project yet, or restore an archived one; its archived members
+            come back with it.
+          </DialogDescription>
+          {pickerBusy ? null : <StaveWizardModeToggle kind="saga" mode={mode} onChange={setMode} />}
+        </DialogHeader>
+        <ExistingStaveSpacePicker
+          environmentId={environmentId}
+          kind="saga"
+          onBusyChange={setPickerBusy}
+        />
+      </>
+    );
+  }
+
   return (
     <div
       className="contents"
@@ -157,6 +184,9 @@ export function SagaCreateForm(props: {
         <DialogDescription>
           A saga groups spaces that land in order. Members join it from the space wizard.
         </DialogDescription>
+        {operationId === null ? (
+          <StaveWizardModeToggle kind="saga" mode={mode} onChange={setMode} />
+        ) : null}
       </DialogHeader>
       <DialogPanel>
         {operationId !== null ? (

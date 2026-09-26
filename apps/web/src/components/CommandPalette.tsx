@@ -152,6 +152,8 @@ import {
 } from "./CommandPalette.logic";
 import { useConnectAccountPaletteItems } from "./clerk/useConnectAccountPaletteItems";
 import { orderItemsByPreferredIds, sortLogicalProjectsForSidebar } from "./Sidebar.logic";
+import { withoutArchivedStaveProjectThreads } from "./stave/listedProjects.logic";
+import { useListedProjects } from "./stave/useListedProjects";
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { CommandPaletteContent } from "./CommandPaletteContent";
 import { CommandPaletteResults } from "./CommandPaletteResults";
@@ -632,6 +634,9 @@ function OpenCommandPaletteDialog(props: {
     useHandleNewThread();
   const { forkThreadAtLatestTurn } = useForkThread();
   const projects = useProjects();
+  // Pickers and thread lists leave out archived Stave spaces; they come back
+  // through New project → Stave. Path lookups (add, import) keep every project.
+  const { projects: listedProjects, archivedProjectKeys } = useListedProjects();
   const decisionConfigs = useServerConfigs();
   const changeRequestSnapshotByKey = useAtomValue(ThreadPr.threadChangeRequestSnapshotsAtom);
   const activeThreadProject = useProject(
@@ -803,7 +808,7 @@ function OpenCommandPaletteDialog(props: {
   const orderedProjects = useMemo(
     () =>
       orderItemsByPreferredIds({
-        items: projects,
+        items: listedProjects,
         preferredIds: projectOrder,
         getId: getProjectOrderKey,
         getPreferenceIds: (project) => [
@@ -811,12 +816,13 @@ function OpenCommandPaletteDialog(props: {
           legacyProjectCwdPreferenceKey(project.workspaceRoot),
         ],
       }),
-    [projectOrder, projects],
+    [projectOrder, listedProjects],
   );
   const unsortedProjectGroups = useMemo(
     () =>
       buildSidebarProjectSnapshots({
-        projects: clientSettings.sidebarProjectSortOrder === "manual" ? orderedProjects : projects,
+        projects:
+          clientSettings.sidebarProjectSortOrder === "manual" ? orderedProjects : listedProjects,
         settings: projectGroupingSettings,
         primaryEnvironmentId,
         resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
@@ -824,10 +830,10 @@ function OpenCommandPaletteDialog(props: {
     [
       clientSettings.sidebarProjectSortOrder,
       environmentLabelById,
+      listedProjects,
       orderedProjects,
       primaryEnvironmentId,
       projectGroupingSettings,
-      projects,
     ],
   );
   const projectGroups = useMemo(
@@ -1222,10 +1228,14 @@ function OpenCommandPaletteDialog(props: {
     ],
   );
 
+  const listedThreads = useMemo(
+    () => withoutArchivedStaveProjectThreads(threads, archivedProjectKeys),
+    [archivedProjectKeys, threads],
+  );
   const allThreadItems = useMemo(
     () =>
       buildThreadActionItems({
-        threads,
+        threads: listedThreads,
         ...(activeThreadId ? { activeThreadId } : {}),
         projectTitleById,
         sortOrder: clientSettings.sidebarThreadSortOrder,
@@ -1291,7 +1301,7 @@ function OpenCommandPaletteDialog(props: {
       providerEntryByEnvironmentAndInstanceId,
       threadContentMatchByKey,
       threadSearchQuery,
-      threads,
+      listedThreads,
     ],
   );
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
@@ -1765,7 +1775,7 @@ function OpenCommandPaletteDialog(props: {
   const connectAccountItems = useConnectAccountPaletteItems();
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
-  const decisionProjects = projects.filter(
+  const decisionProjects = listedProjects.filter(
     (project) =>
       decisionConfigs.get(project.environmentId)?.environment.capabilities.threadDecisions === true,
   );
@@ -1798,7 +1808,7 @@ function OpenCommandPaletteDialog(props: {
       ],
     });
 
-  if (projects.length > 0) {
+  if (listedProjects.length > 0) {
     const activeProjectTitle =
       projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
       (currentProjectId ? (projectTitleById.get(currentProjectId) ?? null) : null);

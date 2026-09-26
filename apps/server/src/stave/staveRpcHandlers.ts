@@ -63,6 +63,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
+import { parse as parseYamlDocument } from "yaml";
 
 import { StaveLifecycleRepository } from "../persistence/Services/StaveLifecycleRepository.ts";
 import { ServerConfig } from "../config.ts";
@@ -83,6 +84,7 @@ import type {
   StaveSpaceStatus as StaveSpaceStatusJson,
 } from "./staveJson.ts";
 import { StaveWorkspaceReader } from "./StaveWorkspaceReader.ts";
+import { STAVE_MANIFEST_FILE_NAME } from "./staveManifest.ts";
 
 /** How long one `space status` answer is reused for a root before Stave is asked again. */
 export const STAVE_SPACE_STATUS_CACHE_TTL = Duration.seconds(15);
@@ -187,6 +189,30 @@ export function toRepoRows(rows: StaveReposList): ReadonlyArray<StaveRepoRow> {
     ...optionalString("description", row.description),
     tetherCount: row.tetherCount,
   }));
+}
+
+/** Member ids (and enrolment stamps) of a saga manifest; undefined when it has no readable roster. */
+export function sagaRosterFromManifest(text: string): StaveSpaceListRow["sagaMembers"] | undefined {
+  let document: unknown;
+  try {
+    document = parseYamlDocument(text);
+  } catch {
+    return undefined;
+  }
+  const members = (document as { saga?: { members?: unknown } } | null)?.saga?.members;
+  if (!Array.isArray(members)) return undefined;
+  return members.flatMap((member: unknown) => {
+    if (typeof member !== "object" || member === null) return [];
+    const { id, createdAt } = member as { id?: unknown; createdAt?: unknown };
+    if (typeof id !== "string" || id.length === 0) return [];
+    const stamp =
+      createdAt instanceof Date
+        ? createdAt.toISOString()
+        : typeof createdAt === "string"
+          ? createdAt
+          : undefined;
+    return [{ id, ...(stamp === undefined ? {} : { createdAt: stamp }) }];
+  });
 }
 
 /** `space list [--archived] --json` rows; v0.4 identity fields pass through. */
@@ -649,12 +675,34 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
     );
 
   const listRepos = gatedRead(Effect.suspend(() => cli.reposList).pipe(Effect.map(toRepoRows)));
+  const fileSystem = yield* Effect.serviceOption(FileSystem.FileSystem);
+  /** Archived rows gain when they were archived and, for sagas, the roster a restore brings back. */
+  const describeArchive = (row: StaveSpaceListRow) =>
+    Effect.gen(function* () {
+      if (!row.archived || row.error !== undefined || Option.isNone(fileSystem)) return row;
+      const fs = fileSystem.value;
+      const info = yield* fs.stat(row.path).pipe(Effect.option);
+      const mtime = Option.isSome(info) ? Option.getOrUndefined(info.value.mtime) : undefined;
+      const manifest = row.isSaga
+        ? yield* fs
+            .readFileString(`${row.path}/${STAVE_MANIFEST_FILE_NAME}`)
+            .pipe(Effect.option, Effect.map(Option.getOrUndefined))
+        : undefined;
+      const sagaMembers = manifest === undefined ? undefined : sagaRosterFromManifest(manifest);
+      return {
+        ...row,
+        ...(mtime === undefined ? {} : { archivedAt: mtime.toISOString() }),
+        ...(sagaMembers === undefined ? {} : { sagaMembers }),
+      };
+    });
   const listSpaces = (input: StaveListSpacesInput) =>
     gatedRead(
       Effect.gen(function* () {
         const live = yield* cli.spaceList();
         const archived = input.includeArchived ? yield* cli.spaceList({ archived: true }) : [];
-        return toSpaceRows([...live, ...archived]);
+        return yield* Effect.forEach(toSpaceRows([...live, ...archived]), describeArchive, {
+          concurrency: 8,
+        });
       }),
     );
   const listSagas = gatedRead(Effect.suspend(() => cli.sagaList).pipe(Effect.map(toSagaRows)));

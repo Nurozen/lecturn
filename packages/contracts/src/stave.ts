@@ -730,6 +730,17 @@ export const StaveCreateSpaceResult = Schema.Struct({
 });
 export type StaveCreateSpaceResult = typeof StaveCreateSpaceResult.Type;
 
+/** `restoreSpace` reuses the Lecturn project that owned the archive (or creates
+    one when none survives); clients wait for `snapshotSequence >= sequence`
+    before opening it, as after a create. Optional because older servers
+    report only the Stave mutation. */
+export const StaveRestoreSpaceResult = Schema.Struct({
+  ...StaveSpaceMutationResult.fields,
+  projectId: Schema.optionalKey(ProjectId),
+  sequence: Schema.optionalKey(NonNegativeInt),
+});
+export type StaveRestoreSpaceResult = typeof StaveRestoreSpaceResult.Type;
+
 export const StaveArchiveResult = Schema.Struct({
   spaceId: Schema.String,
   archivedPath: Schema.String,
@@ -991,7 +1002,7 @@ export const StaveOperationResult = Schema.Union([
   operationResult("retarget", StaveSpaceMutationResult),
   operationResult("archiveSpace", StaveArchiveResult),
   operationResult("destroySpace", StaveDestroyResult),
-  operationResult("restoreSpace", StaveSpaceMutationResult),
+  operationResult("restoreSpace", StaveRestoreSpaceResult),
   operationResult("removePartialSpace", StaveDestroyResult),
   operationResult("setup", StaveSetupResult),
   operationResult("memoryAttach", StaveMemoryAttachResult),
@@ -1204,6 +1215,13 @@ export const StaveSpaceListRow = Schema.Struct({
   manifestCreatedAt: Schema.optionalKey(IsoDateTime),
   manifestVersion: Schema.Number,
   memories: Schema.Array(StaveMemoryEntry),
+  /** When the entry moved into `.archive/` (its directory's mtime); archived rows only. */
+  archivedAt: Schema.optionalKey(IsoDateTime),
+  /** An archived saga's roster, read from its manifest, so a restore can bring
+      the member archives back with it. */
+  sagaMembers: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ id: Schema.String, createdAt: Schema.optionalKey(IsoDateTime) })),
+  ),
 });
 export type StaveSpaceListRow = typeof StaveSpaceListRow.Type;
 

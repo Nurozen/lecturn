@@ -30,6 +30,7 @@ import { GoldThreadSpinner } from "../ui/gold-thread-spinner";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { StaveOperationProgress } from "./StaveOperationProgressBody";
+import { showStaveArchiveUndoToast } from "./staveArchiveToast";
 import {
   bindStaveSagaReview,
   canForceStaveOperation,
@@ -376,10 +377,15 @@ export function StaveConfirmDialog({
                 if (!reviewedOperation) return;
                 setStarted(true);
                 // A mutation can move this dialog's own project (archive), unmounting
-                // it before the terminal event; the refresh must still happen.
-                void run({ environmentId, operationId, operation: reviewedOperation }).then(() => {
-                  if (!mounted.current) notifyStaveMutation(environmentId);
-                });
+                // it before the terminal event; the refresh and the archive's undo
+                // toast must still happen, so both run from the settled run.
+                void run({ environmentId, operationId, operation: reviewedOperation }).then(
+                  (result) => {
+                    if (!mounted.current) notifyStaveMutation(environmentId);
+                    if (result._tag === "Success" && result.value.status === "finished")
+                      showStaveArchiveUndoToast(environmentId, result.value.result);
+                  },
+                );
               }}
             >
               {forced ? "Confirm force" : "Confirm"}

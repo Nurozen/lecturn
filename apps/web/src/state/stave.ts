@@ -142,6 +142,13 @@ export const staveSpaces = createEnvironmentRpcQueryAtomFamily(connectionAtomRun
   staleTimeMs: 15_000,
 });
 
+// A picker can open after a mutation that ran while nothing listed spaces
+// (an archive from the sidebar): drop the cached list so it opens current.
+subscribeStaveMutation((environmentId) => {
+  for (const includeArchived of [true, false])
+    appAtomRegistry.refresh(staveSpaces({ environmentId, input: { includeArchived } }));
+});
+
 export const staveSagas = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
   label: "environment-data:stave:sagas",
   tag: WS_METHODS.staveListSagas,
@@ -158,6 +165,12 @@ export const staveMemoryProviders = createEnvironmentRpcQueryAtomFamily(connecti
 export const staveDryRun = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:stave:dry-run",
   tag: WS_METHODS.staveDryRun,
+});
+
+/** A fresh `space list` (live + archived) for restore, undo and delete; bypasses the query cache. */
+export const staveSpacesRead = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:stave:spaces-fresh",
+  tag: WS_METHODS.staveListSpaces,
 });
 
 /** Bypasses client query caching when a confirmation needs the current saga roster. */
