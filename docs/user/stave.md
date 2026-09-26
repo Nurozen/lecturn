@@ -52,8 +52,9 @@ make a new space from the app, see [Create a space](#create-a-space).
 - **Checkpoints are unavailable.** A space spans several repositories, so per-thread checkpoints
   (and the diff and revert built on them) are off in spaces. Use Git in the editable repo
   instead.
-- **Archived spaces** show as archived in the project's Stave section. Choose **Unarchive**
-  there to review and restore the selected archive before resuming work.
+- **Archived spaces** leave the sidebar and project pickers. Their conversations are kept and
+  come back when you restore the space from **New project → Stave** (see
+  [Existing spaces and archives](#existing-spaces-and-archives)).
 
 ## The Stave section in project settings
 
@@ -174,6 +175,24 @@ elsewhere are kept. If the server cannot establish which space this attempt crea
 creation timed out after writing files—it reports the uncertain outcome and leaves removal
 disabled. Inspect the reported directory before importing it or retrying creation.
 
+## Existing spaces and archives
+
+Both **New Stave space** and **New Stave saga** can switch to **Existing space** (or **Existing
+saga**). The list shows spaces on the server's machine that are not already projects: active
+spaces created outside Lecturn, and, after you turn on **Show archived**, archived ones. An
+archived row shows when it was archived and its archive entry, because the same id can be
+archived more than once.
+
+- **Add** opens an active space as a project.
+- **Restore** brings an archive back, recreating its worktrees, and reopens the project it had,
+  with its conversations. Restoring a saga also restores the members that were archived with it.
+  If Stave refuses, for example because a live space already uses the id, the error is shown and
+  nothing else changes.
+- **Delete permanently** removes an archive for good after a confirmation. The space is briefly
+  restored and then destroyed: its spec and notes are removed, committed branches survive, owned
+  memory is kept, and its project and conversations are deleted. A saga is only deleted while
+  none of its members are live; its archived members stay in the archive.
+
 ## Edit a space
 
 Open the project's settings and find **Stave space**. Enable Stave on that environment to use
@@ -190,8 +209,9 @@ its actions. Each action shows Stave's dry-run plan before you confirm it.
   keep the store; an owned store also offers an explicit destroy choice. Detach stops the space's provider sessions first so they release their memory connections.
 
 **Archive space** stops the space's sessions, removes its worktrees, and moves it into the
-archive. The project follows the archived directory. Its manifest, spec, notes, and committed
-branches survive. **Unarchive** restores that exact archive and allows new threads again.
+archive. Its manifest, spec, notes, committed branches, and conversations survive, and the
+project disappears from the sidebar. A **Space archived** notice offers **Undo**, which restores
+it straight away; later, restore it from **New project → Stave → Existing space**.
 Archiving a saga member is one action: the dialog says it will also leave the saga, the plan
 lists that removal first, and confirming removes the member from the saga and then archives it.
 Other members' ordering edges to it are dropped. If the archive itself is then refused, the space
@@ -226,7 +246,7 @@ spec, reference repositories, and optional memory. Review the plan, then create 
 opens after the server has created it, including when you reattach after a connection loss.
 
 In the saga's project settings, **Add member** can create a new space or adopt an existing
-space. Choose predecessors with **after** to express dependency order. Editing that selection
+space. Turn on **Show archived** to adopt an archived space; it is restored first, then added. Choose predecessors with **after** to express dependency order. Editing that selection
 updates the existing member; clearing it removes its ordering edges. Removing a member leaves
 its space on disk and drops the edges that depended on that membership.
 
@@ -240,7 +260,9 @@ never combine saga membership. Nesting can be disabled in client settings.
 teardown plan, memory fate, and losses before confirmation. They stop sessions across all
 members. A failure may leave some members already archived or destroyed; Lecturn rereads every
 member so their projects follow what actually happened. Force remains a separate explicit
-choice after a refusal. Archived survivors can be restored from their own project settings.
+choice after a refusal. A **Saga archived** notice offers **Undo**, which restores the saga and
+the members it archived. Archived sagas and members can also be restored from **New project →
+Stave**.
 
 Saga archive and destroy confirmations list every affected space. Destroy also names imported
 member projects and counts the conversations it removes, including archived threads. This
