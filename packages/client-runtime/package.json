@@ -203,6 +203,10 @@
       "types": "./src/state/stave.ts",
       "default": "./src/state/stave.ts"
     },
+    "./state/stave-archive": {
+      "types": "./src/state/staveArchive.ts",
+      "default": "./src/state/staveArchive.ts"
+    },
     "./state/stave-operation": {
       "types": "./src/state/staveOperation.ts",
       "default": "./src/state/staveOperation.ts"
