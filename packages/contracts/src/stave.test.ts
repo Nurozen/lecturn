@@ -208,7 +208,7 @@ const RESULTS: { readonly [K in StaveOperationKind]: Record<string, unknown> } =
     memory: "destroy",
     notes: [],
   },
-  restoreSpace: spaceMutation,
+  restoreSpace: { ...spaceMutation, projectId: "project-1", sequence: 13 },
   removePartialSpace: {
     spaceId: "ticket-42",
     spacePath: ROOT,
