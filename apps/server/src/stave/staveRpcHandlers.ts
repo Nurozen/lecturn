@@ -191,7 +191,6 @@ export function toRepoRows(rows: StaveReposList): ReadonlyArray<StaveRepoRow> {
   }));
 }
 
-/** `space list [--archived] --json` rows; v0.4 identity fields pass through. */
 /** Member ids (and enrolment stamps) of a saga manifest; undefined when it has no readable roster. */
 export function sagaRosterFromManifest(text: string): StaveSpaceListRow["sagaMembers"] | undefined {
   let document: unknown;
@@ -216,6 +215,7 @@ export function sagaRosterFromManifest(text: string): StaveSpaceListRow["sagaMem
   });
 }
 
+/** `space list [--archived] --json` rows; v0.4 identity fields pass through. */
 export function toSpaceRows(rows: StaveSpaceList): ReadonlyArray<StaveSpaceListRow> {
   return rows.map((row) => ({
     id: row.id,

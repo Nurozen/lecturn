@@ -285,7 +285,10 @@ export function ExistingStaveSpacePicker(props: {
     });
   };
 
-  const deleteCopy = deleting === null ? null : deleteStaveArchiveCopy(deleting);
+  const deleteCopy =
+    deleting === null
+      ? null
+      : deleteStaveArchiveCopy({ ...deleting, memberOf: deleting.row.memberOf });
 
   return (
     <>

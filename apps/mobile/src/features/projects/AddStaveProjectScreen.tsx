@@ -513,6 +513,8 @@ function ModeSwitch(props: {
   readonly kind: ExistingStaveSpaceKind;
   readonly value: StaveFormMode;
   readonly onChange: (mode: StaveFormMode) => void;
+  /** Held while an Existing task runs; switching away would unmount it mid-flight. */
+  readonly disabled?: boolean;
 }) {
   return (
     <View className="flex-row gap-1 rounded-full bg-subtle p-1">
@@ -522,7 +524,8 @@ function ModeSwitch(props: {
           <Pressable
             key={mode}
             accessibilityRole="button"
-            accessibilityState={{ selected }}
+            accessibilityState={{ selected, disabled: props.disabled === true }}
+            disabled={props.disabled === true}
             onPress={() => props.onChange(mode)}
             className={cn(
               "h-9 flex-1 items-center justify-center rounded-full active:opacity-70",
@@ -617,8 +620,14 @@ function confirmDeleteArchive(entry: ExistingStaveSpace, onConfirm: () => void) 
     `Delete ${entry.spaceId} permanently?`,
     [
       `Stave restores its worktrees briefly, then destroys the ${entry.isSaga ? "saga" : "space"}: its spec and notes are removed, committed branches survive, and owned memory is kept.`,
-      "Its Lecturn project and threads are deleted.",
-      ...(entry.isSaga ? ["A saga that still has live members is refused."] : []),
+      "Its Lecturn project and threads are deleted. This cannot be undone.",
+      ...(entry.isSaga
+        ? [
+            "Archived members stay archived. A saga that still has live members is restored but not deleted.",
+          ]
+        : entry.row.memberOf !== undefined
+          ? [`If saga ${entry.row.memberOf} still lists it, it leaves that saga first.`]
+          : []),
     ].join(" "),
     [
       { text: "Cancel", style: "cancel" },
@@ -641,6 +650,7 @@ type ExistingTask = {
 function ExistingStaveSpaces(props: {
   readonly environmentId: EnvironmentId;
   readonly kind: ExistingStaveSpaceKind;
+  readonly onBusyChange: (busy: boolean) => void;
 }) {
   const { environmentId, kind } = props;
   const spaces = useEnvironmentQuery(
@@ -659,6 +669,11 @@ function ExistingStaveSpaces(props: {
     [kind, projects, rows, showArchived],
   );
   const busy = task !== null;
+  const { onBusyChange } = props;
+  useEffect(() => {
+    onBusyChange(busy);
+    return () => onBusyChange(false);
+  }, [busy, onBusyChange]);
 
   const track = (entry: ExistingStaveSpace) => (state: StaveArchiveTaskState) =>
     setTask({ key: entry.key, state });
@@ -794,6 +809,7 @@ export function AddStaveSpaceScreen(props: { readonly environmentId?: string | s
   );
   const operation = useStaveCreateOperation(environmentId);
   const [mode, setMode] = useState<StaveFormMode>("new");
+  const [existingBusy, setExistingBusy] = useState(false);
 
   // Repo rows follow the registry, adjusted in render when it changes.
   const [seenRepos, setSeenRepos] = useState(context.repos);
@@ -842,8 +858,12 @@ export function AddStaveSpaceScreen(props: { readonly environmentId?: string | s
   if (mode === "existing") {
     return (
       <AddProjectShell>
-        <ModeSwitch kind="space" value={mode} onChange={setMode} />
-        <ExistingStaveSpaces environmentId={environment.environmentId} kind="space" />
+        <ModeSwitch kind="space" value={mode} onChange={setMode} disabled={existingBusy} />
+        <ExistingStaveSpaces
+          environmentId={environment.environmentId}
+          kind="space"
+          onBusyChange={setExistingBusy}
+        />
       </AddProjectShell>
     );
   }
@@ -966,6 +986,7 @@ export function AddStaveSagaScreen(props: { readonly environmentId?: string | st
   );
   const operation = useStaveCreateOperation(environmentId);
   const [mode, setMode] = useState<StaveFormMode>("new");
+  const [existingBusy, setExistingBusy] = useState(false);
 
   const [seenRepos, setSeenRepos] = useState(context.repos);
   if (seenRepos !== context.repos) {
@@ -1014,8 +1035,12 @@ export function AddStaveSagaScreen(props: { readonly environmentId?: string | st
   if (mode === "existing") {
     return (
       <AddProjectShell>
-        <ModeSwitch kind="saga" value={mode} onChange={setMode} />
-        <ExistingStaveSpaces environmentId={environment.environmentId} kind="saga" />
+        <ModeSwitch kind="saga" value={mode} onChange={setMode} disabled={existingBusy} />
+        <ExistingStaveSpaces
+          environmentId={environment.environmentId}
+          kind="saga"
+          onBusyChange={setExistingBusy}
+        />
       </AddProjectShell>
     );
   }

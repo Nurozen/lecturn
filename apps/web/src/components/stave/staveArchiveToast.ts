@@ -22,6 +22,8 @@ export function showStaveArchiveUndoToast(
 ): void {
   const undo = result === undefined ? null : staveArchiveUndo(result);
   if (undo === null) return;
+  // The button stays clickable while the toast animates out.
+  let undone = false;
   const toastId = toastManager.add({
     type: "success",
     title: undo.title,
@@ -30,6 +32,8 @@ export function showStaveArchiveUndoToast(
     actionProps: {
       children: "Undo",
       onClick: () => {
+        if (undone) return;
+        undone = true;
         toastManager.close(toastId);
         void restoreArchive(environmentId, undo);
       },

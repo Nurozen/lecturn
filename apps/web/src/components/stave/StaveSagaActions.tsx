@@ -281,23 +281,22 @@ export function StaveSagaActions({
         </div>
       ) : null}
       {archived && !memberRoot ? (
-        <>
-          <Button
-            size="sm"
-            className="self-start"
-            disabled={sagaRestore?.status === "running" || unsupported("restoreSpace")}
-            onClick={() => void restoreSaga()}
-          >
-            Restore saga
-          </Button>
-          {sagaRestore ? (
-            <ArchiveRestoreProgress
-              environmentId={environmentId}
-              view={sagaRestore}
-              failureTitle="Could not restore the saga"
-            />
-          ) : null}
-        </>
+        <Button
+          size="sm"
+          className="self-start"
+          disabled={sagaRestore?.status === "running" || unsupported("restoreSpace")}
+          onClick={() => void restoreSaga()}
+        >
+          Restore saga
+        </Button>
+      ) : null}
+      {/* Outlives `archived`: a member can fail after the saga space is live again. */}
+      {sagaRestore && !memberRoot ? (
+        <ArchiveRestoreProgress
+          environmentId={environmentId}
+          view={sagaRestore}
+          failureTitle="Could not restore the saga"
+        />
       ) : null}
       {editor ? (
         <SagaMemberEditor

@@ -52,7 +52,12 @@ describe("deleteStaveArchiveCopy", () => {
     const saga = deleteStaveArchiveCopy({ spaceId: "epic", isSaga: true });
     expect(space.title).toBe("Delete feat permanently?");
     expect(saga.paragraphs.length).toBe(space.paragraphs.length + 1);
-    expect(saga.paragraphs.at(-1)).toContain("live members is refused");
+    expect(saga.paragraphs.at(-1)).toContain("live members is restored but not deleted");
+  });
+
+  it("warns that a saga member leaves its saga", () => {
+    const member = deleteStaveArchiveCopy({ spaceId: "feat", isSaga: false, memberOf: "epic" });
+    expect(member.paragraphs.at(-1)).toContain("If saga epic still lists it");
   });
 });
 

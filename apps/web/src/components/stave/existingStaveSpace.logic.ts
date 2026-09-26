@@ -32,6 +32,7 @@ export function existingStaveSpaceEmptyMessage(input: {
 export function deleteStaveArchiveCopy(entry: {
   readonly spaceId: string;
   readonly isSaga: boolean;
+  readonly memberOf?: string | undefined;
 }): { readonly title: string; readonly paragraphs: ReadonlyArray<string> } {
   const paragraphs = [
     "The archive's worktrees are restored briefly, then the space is destroyed: its spec and notes are removed, committed branches survive, and owned memory is kept.",
@@ -39,7 +40,11 @@ export function deleteStaveArchiveCopy(entry: {
   ];
   if (entry.isSaga) {
     paragraphs.push(
-      "Archived members stay archived. A saga that still has live members is refused before anything is destroyed.",
+      "Archived members stay archived. A saga that still has live members is restored but not deleted.",
+    );
+  } else if (entry.memberOf !== undefined) {
+    paragraphs.push(
+      `If saga ${entry.memberOf} still lists it, it leaves that saga first, dropping other members' ordering edges to it.`,
     );
   }
   return { title: `Delete ${entry.spaceId} permanently?`, paragraphs };
