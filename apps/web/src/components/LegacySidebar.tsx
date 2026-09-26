@@ -5,6 +5,7 @@ import "./sidebar/account-glass.css";
 import { SidebarHierarchyPanel } from "./sidebar/SidebarHierarchyPanel";
 import { StaveLifecycleBadge } from "./stave/StaveLifecycleBadge";
 import { useSagaSidebarTree } from "./stave/useSagaSidebarTree";
+import { withoutArchivedStaveProjects } from "@lecturn/client-runtime/state/stave-archive";
 import {
   flattenSagaSidebarTree,
   staveSagaMemberBadges,
@@ -1873,8 +1874,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           );
           const disabled =
             !staveFeatureAvailable({ config, settings: config.settings, status }) ||
-            !member.stave.createdAt ||
-            member.stave.state === "archived";
+            !member.stave.createdAt;
           actionHandlers.set(addId, () =>
             openStaveWizard({
               environmentId: member.environmentId,
@@ -1901,7 +1901,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             { id: archiveId, label: `Archive saga${suffix}`, disabled },
           ];
         });
-        // Stave spaces archive (or unarchive) with the same confirmation as space settings.
+        // Stave spaces archive with the same confirmation as space settings.
         const spaceItems: ContextMenuItem<string>[] = project.memberProjects.flatMap((member) => {
           const entry = readStaveSpaceLifecycleMenuEntry(member);
           if (!entry) return [];
@@ -1922,10 +1922,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             ...(project.memberProjects.some((member) => readCanImportSessions(member.environmentId))
               ? [
                   buildTargetedItem("import-session", "Import session…", {
-                    // Same rule as New thread: an archived Stave space starts no threads.
-                    isDisabled: (member) =>
-                      member.stave?.state === "archived" ||
-                      !readCanImportSessions(member.environmentId),
+                    isDisabled: (member) => !readCanImportSessions(member.environmentId),
                   }),
                 ]
               : []),
@@ -2198,11 +2195,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           api.contextMenu.show(
             project.memberProjects.map((member) => ({
               id: member.physicalProjectKey,
-              label:
-                member.stave?.state === "archived"
-                  ? `${formatProjectMemberActionLabel(member, project.groupedProjectCount)} — Unarchive to start a thread`
-                  : formatProjectMemberActionLabel(member, project.groupedProjectCount),
-              disabled: member.stave?.state === "archived",
+              label: formatProjectMemberActionLabel(member, project.groupedProjectCount),
             })),
             {
               x: event.clientX,
@@ -2709,14 +2702,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               <div className="pointer-events-none absolute top-[calc(50%+1px)] right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
                 <button
                   type="button"
-                  aria-label={
-                    project.memberProjects.every((member) => member.stave?.state === "archived")
-                      ? "Unarchive to start a thread"
-                      : `Create new thread in ${project.displayName}`
-                  }
-                  disabled={project.memberProjects.every(
-                    (member) => member.stave?.state === "archived",
-                  )}
+                  aria-label={`Create new thread in ${project.displayName}`}
                   data-testid="new-thread-button"
                   className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
                   onClick={handleCreateThreadClick}
@@ -2727,11 +2713,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             }
           />
           <TooltipPopup side="top">
-            {project.memberProjects.every((member) => member.stave?.state === "archived")
-              ? "Unarchive to start a thread"
-              : newThreadShortcutLabel
-                ? `New thread (${newThreadShortcutLabel})`
-                : "New thread"}
+            {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
           </TooltipPopup>
         </Tooltip>
       </div>
@@ -3536,12 +3518,19 @@ export default function LegacySidebar() {
     [orderedProjects],
   );
 
+  // Archived Stave spaces (and so their threads) leave the sidebar; they come
+  // back through New project → Stave. The order above keeps them, so a manual
+  // reorder does not forget where they sat.
+  const listedProjects = useMemo(
+    () => withoutArchivedStaveProjects(orderedProjects),
+    [orderedProjects],
+  );
   const sidebarProjects = useMemo<SidebarProjectSnapshot[]>(() => {
     return namedSnapshotsPerAccount(
       segmentation,
       buildSidebarProjectSnapshots,
     )({
-      projects: orderedProjects,
+      projects: listedProjects,
       settings: projectGroupingSettings,
       primaryEnvironmentId,
       resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
@@ -3550,7 +3539,7 @@ export default function LegacySidebar() {
   }, [
     environmentLabelById,
     desktopLocalEnvironmentIds,
-    orderedProjects,
+    listedProjects,
     projectGroupingSettings,
     primaryEnvironmentId,
     segmentation,
@@ -4175,7 +4164,7 @@ export default function LegacySidebar() {
         suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
         suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
         attachProjectListAutoAnimateRef={attachProjectListAutoAnimateRef}
-        projectsLength={projects.length}
+        projectsLength={listedProjects.length}
       />
       <SidebarChromeFooter />
     </>

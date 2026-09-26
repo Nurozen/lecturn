@@ -124,7 +124,7 @@ export function isStaveProject(project: ProjectLike | null | undefined): boolean
 
 export function staveThreadStartMessage(project: ProjectLike | null | undefined): string | null {
   return project?.stave?.state === "archived"
-    ? "Unarchive this Stave space in project settings to start a thread."
+    ? "Restore it from New project → Stave to start a thread."
     : null;
 }
 

@@ -141,7 +141,7 @@ export function StaveProjectSection({
           title="Provider memory"
           description={
             archived
-              ? "Unarchive this space before starting a provider session with its memory."
+              ? "Restore this space from New project → Stave before starting a provider session with its memory."
               : !available
                 ? "Enable Stave with a runnable binary to inspect memory wiring."
                 : staveMemoryConfigurationText(live.data?.memoryWiring)

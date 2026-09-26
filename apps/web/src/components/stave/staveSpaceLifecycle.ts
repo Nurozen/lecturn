@@ -65,27 +65,12 @@ export function useStaveArchiveLanding() {
   );
 }
 
-export function staveUnarchiveSpaceConfirmation(
-  workspaceRoot: string,
-  stave: StaveProjectInfo,
-  from: string,
-): StaveSpaceConfirmation {
-  return {
-    title: "Unarchive space",
-    operation: {
-      kind: "restoreSpace",
-      workspaceRoot,
-      expectedManifestCreatedAt: stave.createdAt,
-      from,
-    },
-  };
-}
-
 /**
- * The Archive or Unarchive menu entry for a Stave space row, read at
- * menu-open time. Null for sagas, non-Stave projects, and environments where
- * Stave is off; disabled for unbound manifests or a binary that lacks the
- * operation (the same check space settings applies).
+ * The Archive menu entry for a live Stave space row, read at menu-open time.
+ * Null for sagas, archived spaces (restored from New project → Stave),
+ * non-Stave projects, and environments where Stave is off; disabled for
+ * unbound manifests or a binary that lacks the operation (the same check
+ * space settings applies).
  */
 export function readStaveSpaceLifecycleMenuEntry(member: {
   readonly environmentId: EnvironmentId;
@@ -93,7 +78,7 @@ export function readStaveSpaceLifecycleMenuEntry(member: {
   readonly stave?: StaveProjectInfo | null | undefined;
 }): (StaveSpaceConfirmation & { readonly disabled: boolean }) | null {
   const stave = member.stave;
-  if (!stave || stave.isSaga || stave.kind === "saga") return null;
+  if (!stave || stave.isSaga || stave.kind === "saga" || stave.state !== "live") return null;
   const config = appAtomRegistry.get(serverEnvironment.configValueAtom(member.environmentId));
   if (!environmentSupportsStave(config) || config?.settings.stave.enabled !== true) return null;
   const status = Option.getOrNull(
@@ -101,18 +86,8 @@ export function readStaveSpaceLifecycleMenuEntry(member: {
       appAtomRegistry.get(staveStatus({ environmentId: member.environmentId, input: {} })),
     ),
   );
-  const unsupported = (kind: StaveOperation["kind"]) =>
-    staveOperationUnavailableReason(status, kind) !== null;
-  if (stave.state === "archived") {
-    if (!stave.archiveBasename) return null;
-    return {
-      ...staveUnarchiveSpaceConfirmation(member.workspaceRoot, stave, stave.archiveBasename),
-      disabled: !stave.createdAt || unsupported("restoreSpace"),
-    };
-  }
-  if (stave.state !== "live") return null;
   return {
     ...staveArchiveSpaceConfirmation(member.workspaceRoot, stave),
-    disabled: !stave.createdAt || unsupported("archiveSpace"),
+    disabled: !stave.createdAt || staveOperationUnavailableReason(status, "archiveSpace") !== null,
   };
 }

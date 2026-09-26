@@ -136,6 +136,7 @@ import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments"
 import {
   readEnvironmentSupportsForking,
   useProject,
+  readThreadShell,
   useProjects,
   useThreadShells,
 } from "../state/entities";
@@ -223,6 +224,7 @@ import {
   useComboboxFilter,
 } from "./ui/combobox";
 import { useSagaSidebarTree } from "./stave/useSagaSidebarTree";
+import { useListedProjects } from "./stave/useListedProjects";
 import { sagaSidebarThreadOrder } from "./stave/staveSaga.logic";
 import { SidebarContent, SidebarGroup, SidebarMenuButton, useSidebar } from "./ui/sidebar";
 import { snapshotsPerAccount, useSidebarSegmentation } from "./sidebar/accountProjectGroups";
@@ -2102,7 +2104,9 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 
 export default function Sidebar() {
   const sidebarAccountStyle = useSidebarAccountStyle();
-  const projects = useProjects();
+  // Archived Stave spaces (and their threads) leave the sidebar; they come
+  // back through New project → Stave.
+  const { projects, archivedProjectKeys } = useListedProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
   const router = useRouter();
@@ -2511,6 +2515,7 @@ export default function Sidebar() {
     const visible = threads.filter(
       (thread) =>
         thread.archivedAt === null &&
+        !archivedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`) &&
         (scopedProjectKeys === null ||
           scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
     );
@@ -2564,7 +2569,7 @@ export default function Sidebar() {
       settledThreads: sortSettledThreadsForSidebar(settled),
       snoozeNow: preciseNow,
     };
-  }, [nowMinute, scopedProjectKeys, serverConfigs, snoozeWakeTick, threads]);
+  }, [archivedProjectKeys, nowMinute, scopedProjectKeys, serverConfigs, snoozeWakeTick, threads]);
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
@@ -3822,8 +3827,8 @@ export default function Sidebar() {
     ],
   );
 
-  // Stave space rows offer Archive (or Unarchive) straight from the sidebar,
-  // through the same single confirmation space settings opens.
+  // Stave space rows offer Archive straight from the sidebar, through the
+  // same single confirmation space settings opens.
   const [spaceConfirmation, setSpaceConfirmation] = useState<
     | (StaveSpaceConfirmation & {
         environmentId: EnvironmentId;
@@ -3876,18 +3881,19 @@ export default function Sidebar() {
     },
     [openProjectSettings],
   );
-  // An archived space's threads stay readable, but the space is done with:
-  // leave a route inside it for the saga it left, or home (as settings does).
-  // Runs on the operation's success; the dialog then closes itself.
+  // An archived space leaves the sidebar, so leave a route inside it for the
+  // saga it left, or home (as settings does). Runs on the operation's
+  // success; the dialog then closes itself. The route's thread is read from
+  // the store: the sidebar's own list no longer holds an archived space's threads.
   const handleSpaceConfirmationFinished = useCallback(() => {
     if (spaceConfirmation?.operation.kind !== "archiveSpace") return;
     const route = routeTargetRef.current;
-    const threadKey = routeThreadKeyRef.current;
     const location =
-      (threadKey ? threadByKeyRef.current.get(threadKey) : undefined) ??
-      (route?.kind === "draft"
-        ? useComposerDraftStore.getState().getDraftSession(route.draftId)
-        : null);
+      route?.kind === "server"
+        ? readThreadShell(route.threadRef)
+        : route?.kind === "draft"
+          ? useComposerDraftStore.getState().getDraftSession(route.draftId)
+          : null;
     if (
       location?.environmentId !== spaceConfirmation.environmentId ||
       location.projectId !== spaceConfirmation.projectId
@@ -4072,21 +4078,8 @@ export default function Sidebar() {
                         type="button"
                         className="relative focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                         onClick={handleNewThreadClick}
-                        disabled={
-                          projects.length === 0 ||
-                          (projectGroups.length === 1 &&
-                            projectGroups[0]?.memberProjects.every(
-                              (member) => member.stave?.state === "archived",
-                            ))
-                        }
-                        aria-label={
-                          projectGroups.length === 1 &&
-                          projectGroups[0]?.memberProjects.every(
-                            (member) => member.stave?.state === "archived",
-                          )
-                            ? "Unarchive to start a thread"
-                            : "New thread"
-                        }
+                        disabled={projects.length === 0}
+                        aria-label="New thread"
                       />
                     }
                   >
@@ -4097,12 +4090,7 @@ export default function Sidebar() {
                     />
                   </TooltipTrigger>
                   <TooltipPopup side="right">
-                    {projectGroups.length === 1 &&
-                    projectGroups[0]?.memberProjects.every(
-                      (member) => member.stave?.state === "archived",
-                    ) ? (
-                      "Unarchive to start a thread"
-                    ) : projectGroups.length > 1 ? (
+                    {projectGroups.length > 1 ? (
                       <span className="flex flex-col gap-0.5">
                         <span>
                           {newThreadShortcutLabel
@@ -4682,9 +4670,6 @@ export default function Sidebar() {
                                     data-lecturn-hover
                                     className="rounded px-1 text-xs text-muted-foreground hover:bg-sidebar-row-hover"
                                     aria-label={`New thread in ${project.displayName}`}
-                                    disabled={project.memberProjects.every(
-                                      (member) => member.stave?.state === "archived",
-                                    )}
                                     onClick={() =>
                                       void newThreadContext.handleNewThread(
                                         scopeProjectRef(project.environmentId, project.id),
