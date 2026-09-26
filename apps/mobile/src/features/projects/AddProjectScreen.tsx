@@ -654,6 +654,8 @@ export function useDispatchProjectCreate() {
     async (input: {
       readonly environmentId: EnvironmentId;
       readonly workspaceRoot: string;
+      /** Defaults to the folder name; a Stave space passes its id. */
+      readonly title?: string;
       /** Defaults to true; a folder picked from existing sessions must already exist. */
       readonly createWorkspaceRootIfMissing?: boolean;
     }) => {
@@ -665,6 +667,7 @@ export function useDispatchProjectCreate() {
           projectId,
           workspaceRoot: input.workspaceRoot,
           createdAt: new Date().toISOString(),
+          ...(input.title === undefined ? {} : { title: input.title }),
           ...(input.createWorkspaceRootIfMissing === undefined
             ? {}
             : { createWorkspaceRootIfMissing: input.createWorkspaceRootIfMissing }),

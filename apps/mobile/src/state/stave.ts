@@ -2,10 +2,16 @@ import { useAtomValue } from "@effect/atom-react";
 import type { SagaProjectIndexEntry } from "@lecturn/client-runtime/state/project-grouping";
 import type { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
 import { availableAddProjectStaveSources } from "@lecturn/client-runtime/operations/projects";
+import { staveRpcErrorMessage } from "@lecturn/client-runtime/errors";
 import {
+  type AtomCommandResult,
+  createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
   createRuntimeCommand,
+  runAtomCommand,
+  squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
+import type { StaveArchiveClient } from "@lecturn/client-runtime/state/stave-archive";
 import { waitForProjectVisible } from "@lecturn/client-runtime/state/shell";
 import {
   environmentSupportsStave,
@@ -18,6 +24,7 @@ import { useEffect, useMemo } from "react";
 import { AppState } from "react-native";
 
 import { connectionAtomRuntime } from "../connection/runtime";
+import { uuidv4 } from "../lib/uuid";
 import { appAtomRegistry } from "./atom-registry";
 import { useEnvironmentServerConfig } from "./entities";
 import { mobilePreferencesAtom } from "./preferences";
@@ -118,6 +125,72 @@ export const staveSagas = createEnvironmentRpcQueryAtomFamily(connectionAtomRunt
 
 /** One state atom per operation id plus start-or-resume `run`, as on web. */
 export const staveOperations = createStaveOperationManager(connectionAtomRuntime);
+
+/** A fresh `space list` (live + archived) for restore and delete; bypasses the query cache. */
+const staveSpacesRead = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "mobile:stave:spaces-fresh",
+  tag: WS_METHODS.staveListSpaces,
+});
+
+const staveDryRun = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "mobile:stave:dry-run",
+  tag: WS_METHODS.staveDryRun,
+});
+
+function commandFailureMessage(result: {
+  readonly cause: Parameters<typeof squashAtomCommandFailure>[0]["cause"];
+}) {
+  const error = squashAtomCommandFailure(result);
+  return (
+    staveRpcErrorMessage(error) ??
+    (error instanceof Error && error.message.length > 0
+      ? error.message
+      : "The Stave request failed.")
+  );
+}
+
+/**
+ * Mobile binding of the shared archive runners (`restoreStaveArchive`,
+ * `deleteStaveArchive`) over the mobile operation manager.
+ */
+export function mobileStaveArchiveClient(environmentId: EnvironmentId): StaveArchiveClient {
+  const unwrap = async <A, E>(pending: Promise<AtomCommandResult<A, E>>) => {
+    const result = await pending;
+    if (result._tag === "Failure") throw new Error(commandFailureMessage(result));
+    return result.value;
+  };
+  const options = { reportFailure: false } as const;
+  return {
+    newOperationId: uuidv4,
+    run: (operationId, operation) =>
+      unwrap(
+        runAtomCommand(
+          appAtomRegistry,
+          staveOperations.run,
+          { environmentId, operationId, operation },
+          options,
+        ),
+      ),
+    listSpaces: () =>
+      unwrap(
+        runAtomCommand(
+          appAtomRegistry,
+          staveSpacesRead,
+          { environmentId, input: { includeArchived: true } },
+          options,
+        ),
+      ),
+    dryRun: (operation) =>
+      unwrap(
+        runAtomCommand(
+          appAtomRegistry,
+          staveDryRun,
+          { environmentId, input: { operation } },
+          options,
+        ),
+      ),
+  };
+}
 
 /** `createSpace`/`createSaga` report the shell sequence that makes their project visible. */
 export const waitForStaveProjectVisible = createRuntimeCommand(connectionAtomRuntime, {

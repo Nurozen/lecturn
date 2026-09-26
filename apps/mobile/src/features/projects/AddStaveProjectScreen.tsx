@@ -30,12 +30,21 @@ import {
   type StaveWizardRepoMode,
   type StaveWizardRepoRow,
 } from "@lecturn/client-runtime/state/stave-space-wizard";
-import type { EnvironmentId, StaveOperation } from "@lecturn/contracts";
+import {
+  deleteStaveArchive,
+  existingStaveSpaceDetail,
+  existingStaveSpaces,
+  restoreStaveArchive,
+  type ExistingStaveSpace,
+  type ExistingStaveSpaceKind,
+  type StaveArchiveTaskState,
+} from "@lecturn/client-runtime/state/stave-archive";
+import type { EnvironmentId, ProjectId, StaveOperation } from "@lecturn/contracts";
 import { CommonActions, useNavigation } from "@react-navigation/native";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, Pressable, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ActivityIndicator, Alert, Pressable, View } from "react-native";
 
 import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
@@ -44,8 +53,10 @@ import { GlassCard } from "../../components/GlassCard";
 import { ThemedSwitch } from "../../components/ThemedSwitch";
 import { cn } from "../../lib/cn";
 import { uuidv4 } from "../../lib/uuid";
+import { useProjects } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import {
+  mobileStaveArchiveClient,
   staveOperations,
   staveRepos,
   staveSagas,
@@ -62,6 +73,7 @@ import {
   ListSection,
   PrimaryActionButton,
   SectionTitle,
+  useDispatchProjectCreate,
   useEnvironmentFromParam,
 } from "./AddProjectScreen";
 
@@ -108,15 +120,52 @@ function useStaveCreateContext(environmentId: EnvironmentId | null) {
   };
 }
 
+/** Replaces the stack with a new task in the project. */
+function useOpenNewTaskInProject() {
+  const navigation = useNavigation();
+  return useCallback(
+    (environmentId: EnvironmentId, projectId: ProjectId, title: string) =>
+      navigation.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [{ name: "NewTaskDraft", params: { environmentId, projectId, title } }],
+        }),
+      ),
+    [navigation],
+  );
+}
+
+/**
+ * Waits for this client's shell to reach the `sequence` a Stave operation
+ * reported for its project, then opens a new task in it. Resolves to an error
+ * message when the project never showed up.
+ */
+function useOpenStaveProject() {
+  const openNewTask = useOpenNewTaskInProject();
+  const waitForProject = useAtomCommand(waitForStaveProjectVisible, { reportFailure: false });
+  return useCallback(
+    async (
+      environmentId: EnvironmentId,
+      projectId: ProjectId,
+      sequence: number,
+    ): Promise<string | null> => {
+      const visible = await waitForProject({ environmentId, projectId, sequence });
+      if (AsyncResult.isFailure(visible)) return errorMessage(Cause.squash(visible.cause));
+      openNewTask(environmentId, projectId, visible.value.title);
+      return null;
+    },
+    [openNewTask, waitForProject],
+  );
+}
+
 /**
  * Starts an operation, follows its state atom, and once the server reports
  * the created project waits for this client's shell to see it before
  * replacing the stack with a new task in it.
  */
 function useStaveCreateOperation(environmentId: EnvironmentId | null) {
-  const navigation = useNavigation();
   const runOperation = useAtomCommand(staveOperations.run, { reportFailure: false });
-  const waitForProject = useAtomCommand(waitForStaveProjectVisible, { reportFailure: false });
+  const openProject = useOpenStaveProject();
   const [started, setStarted] = useState<{
     readonly operationId: string;
     readonly operation: StaveOperation;
@@ -137,24 +186,8 @@ function useStaveCreateOperation(environmentId: EnvironmentId | null) {
     if (result?.kind !== "createSpace" && result?.kind !== "createSaga") return;
     openedRef.current = true;
     const { projectId, sequence } = result.result;
-    void waitForProject({ environmentId, projectId, sequence }).then((visible) => {
-      if (AsyncResult.isFailure(visible)) {
-        setOpenError(errorMessage(Cause.squash(visible.cause)));
-        return;
-      }
-      navigation.dispatch(
-        CommonActions.reset({
-          index: 0,
-          routes: [
-            {
-              name: "NewTaskDraft",
-              params: { environmentId, projectId, title: visible.value.title },
-            },
-          ],
-        }),
-      );
-    });
-  }, [environmentId, navigation, result, waitForProject]);
+    void openProject(environmentId, projectId, sequence).then(setOpenError);
+  }, [environmentId, openProject, result]);
 
   return {
     state: started === null ? null : state,
@@ -473,6 +506,272 @@ function OperationProgress(props: {
   );
 }
 
+type StaveFormMode = "new" | "existing";
+
+/** New/Existing segmented control at the top of the space and saga forms. */
+function ModeSwitch(props: {
+  readonly kind: ExistingStaveSpaceKind;
+  readonly value: StaveFormMode;
+  readonly onChange: (mode: StaveFormMode) => void;
+}) {
+  return (
+    <View className="flex-row gap-1 rounded-full bg-subtle p-1">
+      {(["new", "existing"] as const).map((mode) => {
+        const selected = props.value === mode;
+        return (
+          <Pressable
+            key={mode}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            onPress={() => props.onChange(mode)}
+            className={cn(
+              "h-9 flex-1 items-center justify-center rounded-full active:opacity-70",
+              selected && "bg-primary",
+            )}
+          >
+            <Text
+              className={cn(
+                "text-sm font-lecturn-bold",
+                selected ? "text-primary-foreground" : "text-foreground-muted",
+              )}
+            >
+              {mode === "new" ? `New ${props.kind}` : `Existing ${props.kind}`}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function RowButton(props: {
+  readonly label: string;
+  readonly destructive?: boolean;
+  readonly disabled: boolean;
+  readonly onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={props.disabled}
+      onPress={props.onPress}
+      className="rounded-full bg-subtle px-3 py-1.5 active:opacity-70 disabled:opacity-45"
+    >
+      <Text
+        className={cn(
+          "text-sm font-lecturn-bold",
+          props.destructive ? "text-danger-foreground" : "text-foreground",
+        )}
+      >
+        {props.label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function ExistingSpaceRow(props: {
+  readonly entry: ExistingStaveSpace;
+  readonly isFirst: boolean;
+  readonly busy: boolean;
+  readonly onAdd: () => void;
+  readonly onRestore: () => void;
+  readonly onDelete: () => void;
+}) {
+  const { entry } = props;
+  return (
+    <View className={cn("gap-2 px-4 py-3", !props.isFirst && "border-t border-border-subtle")}>
+      <View className="flex-row items-center gap-2">
+        <Text className="flex-shrink text-base leading-snug font-lecturn-bold" numberOfLines={1}>
+          {entry.spaceId}
+        </Text>
+        <View className="rounded-full bg-subtle px-2 py-0.5">
+          <Text className="text-2xs font-lecturn-bold uppercase text-foreground-muted">
+            {entry.archived ? "Archived" : "Active"}
+          </Text>
+        </View>
+      </View>
+      <Text className="text-sm leading-snug text-foreground-muted" numberOfLines={2}>
+        {existingStaveSpaceDetail(entry)}
+      </Text>
+      <View className="flex-row flex-wrap gap-2">
+        {entry.archived ? (
+          <>
+            <RowButton label="Restore" disabled={props.busy} onPress={props.onRestore} />
+            <RowButton
+              label="Delete permanently"
+              destructive
+              disabled={props.busy}
+              onPress={props.onDelete}
+            />
+          </>
+        ) : (
+          <RowButton label="Add" disabled={props.busy} onPress={props.onAdd} />
+        )}
+      </View>
+    </View>
+  );
+}
+
+function confirmDeleteArchive(entry: ExistingStaveSpace, onConfirm: () => void) {
+  Alert.alert(
+    `Delete ${entry.spaceId} permanently?`,
+    [
+      `Stave restores its worktrees briefly, then destroys the ${entry.isSaga ? "saga" : "space"}: its spec and notes are removed, committed branches survive, and owned memory is kept.`,
+      "Its Lecturn project and threads are deleted.",
+      ...(entry.isSaga ? ["A saga that still has live members is refused."] : []),
+    ].join(" "),
+    [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: onConfirm },
+    ],
+  );
+}
+
+type ExistingTask = {
+  readonly key: string;
+  readonly state: StaveArchiveTaskState | { readonly status: "adding" };
+};
+
+/**
+ * Existing space/saga: the environment's spaces of `kind` that are not
+ * visible projects. Active ones are added as projects; archives are restored
+ * into their project (threads come back) or deleted permanently. The list is
+ * only fetched while this mode is shown.
+ */
+function ExistingStaveSpaces(props: {
+  readonly environmentId: EnvironmentId;
+  readonly kind: ExistingStaveSpaceKind;
+}) {
+  const { environmentId, kind } = props;
+  const spaces = useEnvironmentQuery(
+    staveSpaces({ environmentId, input: { includeArchived: true } }),
+  );
+  const projects = useProjects();
+  const [showArchived, setShowArchived] = useState(false);
+  const [task, setTask] = useState<ExistingTask | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const openProject = useOpenStaveProject();
+  const openNewTask = useOpenNewTaskInProject();
+  const dispatchProjectCreate = useDispatchProjectCreate();
+  const rows = spaces.data ?? EMPTY;
+  const { entries, archivedCount } = useMemo(
+    () => existingStaveSpaces({ rows, projects, kind, showArchived }),
+    [kind, projects, rows, showArchived],
+  );
+  const busy = task !== null;
+
+  const track = (entry: ExistingStaveSpace) => (state: StaveArchiveTaskState) =>
+    setTask({ key: entry.key, state });
+  const fail = (message: string) => {
+    setTask(null);
+    setError(message);
+    spaces.refresh();
+  };
+
+  const add = async (entry: ExistingStaveSpace) => {
+    setError(null);
+    setTask({ key: entry.key, state: { status: "adding" } });
+    const { projectId, result } = await dispatchProjectCreate({
+      environmentId,
+      workspaceRoot: entry.path,
+      title: entry.spaceId,
+      createWorkspaceRootIfMissing: false,
+    });
+    if (AsyncResult.isFailure(result)) {
+      fail(errorMessage(Cause.squash(result.cause)));
+      return;
+    }
+    openNewTask(environmentId, projectId, entry.spaceId);
+  };
+
+  const restore = async (entry: ExistingStaveSpace) => {
+    setError(null);
+    const client = mobileStaveArchiveClient(environmentId);
+    const final = await restoreStaveArchive(client, { row: entry.row, rows }, track(entry));
+    if (final.status === "failed") return fail(final.message);
+    if (final.status !== "finished" || final.projectId === null || final.sequence === null) {
+      return fail("Restored, but the server did not report its project.");
+    }
+    const openError = await openProject(environmentId, final.projectId, final.sequence);
+    if (openError !== null) fail(`Restored, but opening it failed: ${openError}`);
+  };
+
+  const remove = async (entry: ExistingStaveSpace) => {
+    setError(null);
+    const client = mobileStaveArchiveClient(environmentId);
+    const final = await deleteStaveArchive(client, entry.row, track(entry));
+    if (final.status === "failed") return fail(final.message);
+    setTask(null);
+    spaces.refresh();
+  };
+
+  const running = task?.state.status === "running" ? task.state : null;
+  const progress =
+    task === null
+      ? null
+      : task.state.status === "adding"
+        ? "Adding project…"
+        : running !== null
+          ? `${running.label}${running.total > 1 ? ` (${running.step}/${running.total})` : ""}…`
+          : task.state.status === "finished"
+            ? "Opening project…"
+            : null;
+
+  return (
+    <>
+      {spaces.error !== null ? <ErrorBanner message={spaces.error} /> : null}
+      {error !== null ? <ErrorBanner message={error} /> : null}
+      {progress !== null ? (
+        <GlassCard radius={20} className="flex-row items-center gap-3 px-4 py-3">
+          <ActivityIndicator size="small" colorClassName={"accent-icon-muted"} />
+          <Text className="flex-1 text-sm text-foreground-muted" numberOfLines={2}>
+            {progress}
+          </Text>
+        </GlassCard>
+      ) : null}
+      <ListSection>
+        <ListRow
+          title={`Show archived (${archivedCount})`}
+          icon={iconFor("square.grid.2x2", !showArchived)}
+          isFirst
+          right={
+            <ThemedSwitch
+              accessibilityLabel="Show archived"
+              value={showArchived}
+              onValueChange={setShowArchived}
+            />
+          }
+        />
+      </ListSection>
+      {entries.length === 0 ? (
+        <GlassCard radius={20} className="px-4 py-3.5">
+          <Text className="text-sm leading-snug text-foreground-muted">
+            {spaces.isPending
+              ? `Loading ${kind}s…`
+              : showArchived || archivedCount === 0
+                ? `No ${kind}s to add. Every ${kind} here is already a project.`
+                : `No active ${kind}s to add. Turn on Show archived to restore one.`}
+          </Text>
+        </GlassCard>
+      ) : (
+        <ListSection>
+          {entries.map((entry, index) => (
+            <ExistingSpaceRow
+              key={entry.key}
+              entry={entry}
+              isFirst={index === 0}
+              busy={busy}
+              onAdd={() => void add(entry)}
+              onRestore={() => void restore(entry)}
+              onDelete={() => confirmDeleteArchive(entry, () => void remove(entry))}
+            />
+          ))}
+        </ListSection>
+      )}
+    </>
+  );
+}
+
 function StaveUnavailableState() {
   return (
     <GlassCard radius={20} className="items-center gap-2 px-5 py-8">
@@ -494,6 +793,7 @@ export function AddStaveSpaceScreen(props: { readonly environmentId?: string | s
     createInitialWizardState(context),
   );
   const operation = useStaveCreateOperation(environmentId);
+  const [mode, setMode] = useState<StaveFormMode>("new");
 
   // Repo rows follow the registry, adjusted in render when it changes.
   const [seenRepos, setSeenRepos] = useState(context.repos);
@@ -539,8 +839,18 @@ export function AddStaveSpaceScreen(props: { readonly environmentId?: string | s
     );
   }
 
+  if (mode === "existing") {
+    return (
+      <AddProjectShell>
+        <ModeSwitch kind="space" value={mode} onChange={setMode} />
+        <ExistingStaveSpaces environmentId={environment.environmentId} kind="space" />
+      </AddProjectShell>
+    );
+  }
+
   return (
     <AddProjectShell>
+      <ModeSwitch kind="space" value={mode} onChange={setMode} />
       {data.error !== null ? <ErrorBanner message={data.error} /> : null}
       <Field
         label="Space id"
@@ -655,6 +965,7 @@ export function AddStaveSagaScreen(props: { readonly environmentId?: string | st
     createInitialSagaWizardState(context.repos),
   );
   const operation = useStaveCreateOperation(environmentId);
+  const [mode, setMode] = useState<StaveFormMode>("new");
 
   const [seenRepos, setSeenRepos] = useState(context.repos);
   if (seenRepos !== context.repos) {
@@ -700,8 +1011,18 @@ export function AddStaveSagaScreen(props: { readonly environmentId?: string | st
     );
   }
 
+  if (mode === "existing") {
+    return (
+      <AddProjectShell>
+        <ModeSwitch kind="saga" value={mode} onChange={setMode} />
+        <ExistingStaveSpaces environmentId={environment.environmentId} kind="saga" />
+      </AddProjectShell>
+    );
+  }
+
   return (
     <AddProjectShell>
+      <ModeSwitch kind="saga" value={mode} onChange={setMode} />
       {data.error !== null ? <ErrorBanner message={data.error} /> : null}
       <Field
         label="Saga id"

@@ -1,4 +1,4 @@
-import { useThreadShells } from "../../state/entities";
+import { useListedThreadShells } from "../../state/entities";
 import { accountAttention } from "./accountSections";
 import { useAtomValue } from "@effect/atom-react";
 import { relayAccountByEnvironmentId } from "@lecturn/client-runtime/relay";
@@ -24,7 +24,7 @@ export function useAccountSections(): AccountSectionContext | undefined {
 }
 
 export function useAccountAttention(context: AccountSectionContext | undefined) {
-  const threads = useThreadShells();
+  const threads = useListedThreadShells();
   return useMemo(
     () =>
       new Map(
