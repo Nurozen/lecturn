@@ -54,10 +54,8 @@ const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
     Effect.provide(Layer.mergeAll(database, NodeCryptoLayer.layer, NodeFileSystem.layer)),
   );
-const fixture = Effect.gen(function* () {
+const unpromotedFixture = Effect.gen(function* () {
   const { $client: sql } = yield* RelayDb;
-  yield* sql`UPDATE relay_extensions_schema SET compatibility_deployments=2 WHERE id=1`;
-  yield* sql`SELECT relay_extensions_promote(true,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')`;
   const id = NodeCrypto.randomUUID(),
     payerId = `user_${id}`;
   const now = Math.floor((yield* Clock.currentTimeMillis) / 1000);
@@ -86,6 +84,12 @@ const fixture = Effect.gen(function* () {
   });
   return { sql, payerId, host, config, decisions, contextual, now };
 });
+const fixture = Effect.gen(function* () {
+  const f = yield* unpromotedFixture;
+  yield* f.sql`UPDATE relay_extensions_schema SET compatibility_deployments=2 WHERE id=1`;
+  yield* f.sql`SELECT relay_extensions_promote(true,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')`;
+  return f;
+});
 const fund = Effect.fn("extensionTest.fund")(function* (
   f: Effect.Success<typeof fixture>,
   feature: "decisions" | "contextual",
@@ -96,7 +100,172 @@ const fund = Effect.fn("extensionTest.fund")(function* (
   yield* store.redeem(f.host, challenge.challengeId, 0);
   return challenge;
 });
+const contextualRequest = (environmentId: string) => ({
+  featureId: "contextual",
+  requestId: "readiness",
+  runId: "readiness",
+  fundingGeneration: 0,
+  templateVersion: "contextual-v1",
+  task: {
+    environmentId,
+    projectId: "project",
+    threadId: "thread",
+    submissionId: "submission",
+    messageId: "message",
+    turnId: null,
+    providerInstanceId: "provider",
+    providerContextEpoch: "epoch",
+    taskFingerprint: "task",
+    knownContextFingerprint: "known",
+    threadSettingsRevision: 1,
+    projectSettingsRevision: 1,
+    sourceScopeRevision: 1,
+    threadExclusionRevision: 1,
+    fundingGeneration: 0,
+    purgeGeneration: 1,
+    newestMessage: "Build the rocket",
+    projectDescription: "Synthetic",
+    explicitReferences: [],
+    recentContext: "",
+    trigger: "submission",
+  },
+  targets: [
+    {
+      id: "candidate",
+      sourceId: "source",
+      occurrenceId: "occurrence",
+      recordRevision: 1,
+      guidanceId: "guidance",
+      contentFingerprint: "content",
+      lineageIds: [],
+      coverage: { complete: true, missingAntecedents: false, truncated: false, unexaminedCount: 0 },
+      state: "not-yet-evaluated",
+      sourceKind: "slack",
+      workspaceId: "workspace",
+      channelId: "channel",
+      messageTs: "1720000000.123456",
+      threadTs: null,
+      evidence: [
+        {
+          id: "evidence",
+          sourceId: "source",
+          sourceKind: "slack",
+          occurrenceId: "occurrence",
+          sourceRevision: 1,
+          sourceHash: "hash",
+          canonicalVersion: "v1",
+          coordinateSystem: "utf16",
+          quote: "Use steel",
+          start: 0,
+          end: 9,
+          prefix: "",
+          suffix: "",
+          author: "Synthetic",
+          occurredAt: "2026-09-25T00:00:00.000Z",
+          observedAt: "2026-09-25T00:00:00.000Z",
+          sourceUrl: null,
+          availability: "available",
+          lineageIds: [],
+          locator: {
+            sourceKind: "slack",
+            workspaceId: "workspace",
+            channelId: "channel",
+            messageTs: "1720000000.123456",
+            threadTs: null,
+          },
+        },
+      ],
+    },
+  ],
+});
 describe.skipIf(!url)("Extensions PostgreSQL consent and shared ledger", () => {
+  for (const schemaState of ["phase-0", "phase-1", "missing-row", "missing-table"] as const) {
+    it.live(`checks Contextual readiness before funding with ${schemaState}`, () =>
+      run(
+        Effect.gen(function* () {
+          const f = yield* schemaState === "phase-1" ? fixture : unpromotedFixture;
+          if (schemaState === "missing-row") yield* f.sql`DELETE FROM relay_extensions_schema`;
+          if (schemaState === "missing-table")
+            yield* f.sql`ALTER TABLE relay_extensions_schema RENAME TO unavailable_extensions_schema`;
+          let dispatches = 0;
+          const service = yield* makeExtensionsService(
+            parseExtensionsConfig({
+              EXTENSIONS_DECISIONS_ENABLED: "true",
+              EXTENSIONS_DECISIONS_COHORT: "*",
+              EXTENSIONS_CONTEXTUAL_ENABLED: "true",
+              EXTENSIONS_CONTEXTUAL_COHORT: "*",
+            }),
+            "https://fixture.invalid",
+            Effect.succeed({
+              fetch: async () => {
+                dispatches++;
+                return new Response(null, { status: 503 });
+              },
+            }),
+          );
+          const ready = schemaState === "phase-1";
+          expect((yield* service.status(f.payerId)).features).toMatchObject([
+            { featureId: "decisions", available: true, eligible: true, reason: "eligible" },
+            {
+              featureId: "contextual",
+              available: ready,
+              eligible: ready,
+              reason: ready ? "eligible" : "unavailable",
+            },
+          ]);
+          if (schemaState !== "missing-table") {
+            const decisions = service.funding.decisions;
+            const challenge = yield* decisions.challenge(f.host, 0);
+            yield* decisions.approve(f.payerId, challenge.challengeId, "fixture@example.invalid");
+            expect(yield* decisions.redeem(f.host, challenge.challengeId, 0)).toMatchObject({
+              state: "active",
+              eligible: true,
+            });
+          }
+          const contextual = service.funding.contextual;
+          if (ready) {
+            const challenge = yield* contextual.challenge(f.host, 0);
+            yield* contextual.approve(f.payerId, challenge.challengeId, "fixture@example.invalid");
+            expect(yield* contextual.redeem(f.host, challenge.challengeId, 0)).toMatchObject({
+              state: "active",
+              eligible: true,
+            });
+          } else {
+            expect(yield* contextual.status(f.host)).toMatchObject({
+              state: "unfunded",
+              eligible: false,
+              reason: "unavailable",
+              allowance: null,
+            });
+            for (const blocked of [
+              contextual.challenge(f.host, 0).pipe(Effect.asVoid),
+              service
+                .evaluate(f.host, contextualRequest(f.host.environmentId), "relevance")
+                .pipe(Effect.asVoid),
+              contextual
+                .approve(f.payerId, "not-created", "fixture@example.invalid")
+                .pipe(Effect.asVoid),
+              contextual.redeem(f.host, "not-created", 0).pipe(Effect.asVoid),
+            ]) {
+              expect(yield* blocked.pipe(Effect.flip)).toMatchObject({
+                code: "unavailable",
+                message: "This extension is not ready yet",
+              });
+            }
+            expect(
+              yield* f.sql`SELECT 1 FROM relay_decision_funding WHERE feature_id='contextual'`,
+            ).toHaveLength(0);
+            expect(
+              yield* f.sql`SELECT 1 FROM relay_decision_funding_challenges WHERE feature_id='contextual'`,
+            ).toHaveLength(0);
+          }
+          expect(yield* f.sql`SELECT 1 FROM relay_decision_usage_attempts`).toHaveLength(0);
+          expect(dispatches).toBe(0);
+        }),
+      ),
+    );
+  }
+
   it.live(
     "releases the entire reservation when bounded evaluation completes without upstream usage",
     () =>
