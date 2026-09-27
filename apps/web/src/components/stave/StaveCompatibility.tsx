@@ -25,6 +25,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   claude: "Claude Code",
   cursor: "Cursor",
   grok: "Grok",
+  githubCopilot: "GitHub Copilot",
   opencode: "OpenCode",
 };
 export function StaveMemoryProviderSupport({

@@ -78,4 +78,4 @@ the part you cannot see.
 ## Availability
 
 You can import Claude Code and Codex sessions. Claude instances that use a custom home folder are
-not supported yet, and neither are OpenCode, Cursor, Grok, or Antigravity sessions.
+not supported yet, and neither are OpenCode, Cursor, Grok, GitHub Copilot, or Antigravity sessions.

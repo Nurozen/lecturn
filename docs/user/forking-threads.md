@@ -44,8 +44,8 @@ the two threads idle.
 
 ## Availability
 
-Forking works on Codex, Claude, and OpenCode threads. Cursor and Grok threads do not offer the
-fork action in Lecturn yet.
+Forking works on Codex, Claude, and OpenCode threads. Cursor, Grok, and GitHub Copilot threads do
+not offer the fork action in Lecturn yet.
 
 Grok's current Lecturn integration cannot preserve its native conversation context at a selected
 reply in a separate session. The missing option is an integration limitation, unrelated to

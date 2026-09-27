@@ -7,16 +7,17 @@ orchestration layer does not know which one is behind a thread.
 
 ## Built-in drivers
 
-[`builtInDrivers.ts`][drivers] exports `BUILT_IN_DRIVERS` with six entries:
+[`builtInDrivers.ts`][drivers] exports `BUILT_IN_DRIVERS` with seven entries:
 
-| Driver kind   | Driver source                                 |
-| ------------- | --------------------------------------------- |
-| `codex`       | [`Drivers/CodexDriver.ts`][codex]             |
-| `claudeAgent` | [`Drivers/ClaudeDriver.ts`][claude]           |
-| `cursor`      | [`Drivers/CursorDriver.ts`][cursor]           |
-| `grok`        | [`Drivers/GrokDriver.ts`][grok]               |
-| `opencode`    | [`Drivers/OpenCodeDriver.ts`][opencode]       |
-| `antigravity` | [`Drivers/AntigravityDriver.ts`][antigravity] |
+| Driver kind     | Driver source                                 |
+| --------------- | --------------------------------------------- |
+| `codex`         | [`Drivers/CodexDriver.ts`][codex]             |
+| `claudeAgent`   | [`Drivers/ClaudeDriver.ts`][claude]           |
+| `cursor`        | [`Drivers/CursorDriver.ts`][cursor]           |
+| `grok`          | [`Drivers/GrokDriver.ts`][grok]               |
+| `githubCopilot` | [`Drivers/CopilotDriver.ts`][github-copilot]  |
+| `opencode`      | [`Drivers/OpenCodeDriver.ts`][opencode]       |
+| `antigravity`   | [`Drivers/AntigravityDriver.ts`][antigravity] |
 
 Each driver declares its `driverKind`, a `configSchema`, and a `create` function that builds an
 adapter in a child scope. Adapter implementations live beside them in
@@ -99,6 +100,31 @@ list instead of persisting `error` over a working install. The built-in `grok-bu
 CLI's product name, not an ACP model id. `applyGrokAcpModelSelection` treats it as "keep the
 session's current model" and never sends it in `session/set_model`.
 
+### Copilot health check
+
+The `githubCopilot` probe also never opens an ACP session. It runs `copilot --version`, then parses
+the model list from `copilot help config`. That list is the installed CLI version's built-in
+catalog, not filtered per account or plan; org policy can still reject a listed model at turn time.
+The snapshot always leads with `auto` (default, Copilot picks per request). Auth state comes from the CLI itself: a short-lived
+`copilot --acp` process answers `initialize` and `authenticate` (`copilot-login`), then is closed.
+Success is "authenticated" (labelled with the last user in `~/.copilot/config.json` when present),
+ACP's `auth_required` error (-32000) is "unauthenticated" with a `copilot login` hint, and any other
+failure or timeout is "unknown". Token env vars are not trusted because Copilot falls back to its
+keychain login; Copilot reads `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, and `GITHUB_TOKEN` itself. The CLI
+is driven over ACP (`copilot --acp --no-ask-user`, since ask-user questions have no ACP answer
+path): threads resume with `session/load`, every model selection, `auto` included, goes out as
+`session/set_model` unless it equals the model last set in that session, and permission modes map
+onto the session's `mode` and `allow_all` config options. Cancel waits for Copilot to resolve the
+prompt as `cancelled` (`cancelBehavior: "wait-for-prompt"`), and the adapter drains queued updates
+before `turn.completed`. In `#plan` mode Copilot writes its plan with `apply_patch` to
+`${COPILOT_HOME:-~/.copilot}/session-state/<acpSessionId>/plan.md`; the adapter hides edits inside
+that directory and, at the end of a plan turn, emits `turn.proposed.completed` with `plan.md` when
+the turn changed it, else with the final assistant message. Updates go through npm for npm, bun,
+pnpm, and Vite+ installs (including the Windows `%APPDATA%\npm` shim) and through `copilot update`
+otherwise. Title and commit generation uses `gpt-5-mini` in a one-shot `--no-ask-user
+--disable-builtin-mcps` session, which stays in Copilot's own session history because the CLI
+cannot delete sessions.
+
 ## Adapter capabilities
 
 Each adapter declares a static `ProviderAdapterCapabilities` record, defined in
@@ -111,14 +137,15 @@ and clients gate per-provider features on it instead of switching on driver kind
   when a session starts with a `fork` input (`native`), or must reject that start
   (`unsupported`).
 
-| Driver kind   | `sessionModelSwitch` | `conversationFork` |
-| ------------- | -------------------- | ------------------ |
-| `codex`       | `in-session`         | `native`           |
-| `claudeAgent` | `in-session`         | `native`           |
-| `cursor`      | `in-session`         | `unsupported`      |
-| `grok`        | `in-session`         | `unsupported`      |
-| `opencode`    | `in-session`         | `native`           |
-| `antigravity` | `in-session`         | `unsupported`      |
+| Driver kind     | `sessionModelSwitch` | `conversationFork` |
+| --------------- | -------------------- | ------------------ |
+| `codex`         | `in-session`         | `native`           |
+| `claudeAgent`   | `in-session`         | `native`           |
+| `cursor`        | `in-session`         | `unsupported`      |
+| `grok`          | `in-session`         | `unsupported`      |
+| `githubCopilot` | `in-session`         | `unsupported`      |
+| `opencode`      | `in-session`         | `native`           |
+| `antigravity`   | `in-session`         | `unsupported`      |
 
 The values live at the top of each adapter (`CodexAdapter.ts`, `ClaudeAdapter.ts`, and so on in
 `apps/server/src/provider/Layers/`). A driver with `conversationFork: "unsupported"` fails a
@@ -170,14 +197,15 @@ provider: Codex matches natively on the thread title, Claude matches title, firs
 branch. `truncated` is true when more matching sessions exist than were returned, including when
 a lister stopped at its own scan cap.
 
-| Driver kind   | `externalSessions` | Source                                      | Importer                                               |
-| ------------- | ------------------ | ------------------------------------------- | ------------------------------------------------------ |
-| `codex`       | `supported`        | app-server `thread/list` on the Codex home  | app-server `thread/fork`, turns read from the fork     |
-| `claudeAgent` | `supported`        | SDK `listSessions` on the default home only | SDK `forkSession` beside the source, default home only |
-| `cursor`      | `unsupported`      | none                                        | none                                                   |
-| `grok`        | `unsupported`      | none                                        | none                                                   |
-| `opencode`    | `unsupported`      | none                                        | none                                                   |
-| `antigravity` | `unsupported`      | none                                        | none                                                   |
+| Driver kind     | `externalSessions` | Source                                      | Importer                                               |
+| --------------- | ------------------ | ------------------------------------------- | ------------------------------------------------------ |
+| `codex`         | `supported`        | app-server `thread/list` on the Codex home  | app-server `thread/fork`, turns read from the fork     |
+| `claudeAgent`   | `supported`        | SDK `listSessions` on the default home only | SDK `forkSession` beside the source, default home only |
+| `cursor`        | `unsupported`      | none                                        | none                                                   |
+| `grok`          | `unsupported`      | none                                        | none                                                   |
+| `githubCopilot` | `unsupported`      | none                                        | none                                                   |
+| `opencode`      | `unsupported`      | none                                        | none                                                   |
+| `antigravity`   | `unsupported`      | none                                        | none                                                   |
 
 ## Antigravity ownership and protocol
 
@@ -463,6 +491,7 @@ when a request opens (approval) or user input is requested, via
 [claude]: ../../apps/server/src/provider/Drivers/ClaudeDriver.ts
 [cursor]: ../../apps/server/src/provider/Drivers/CursorDriver.ts
 [grok]: ../../apps/server/src/provider/Drivers/GrokDriver.ts
+[github-copilot]: ../../apps/server/src/provider/Drivers/CopilotDriver.ts
 [opencode]: ../../apps/server/src/provider/Drivers/OpenCodeDriver.ts
 [antigravity]: ../../apps/server/src/provider/Drivers/AntigravityDriver.ts
 [antigravity-adapter]: ../../apps/server/src/provider/Layers/AntigravityAdapter.ts

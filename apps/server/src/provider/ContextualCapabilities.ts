@@ -49,6 +49,11 @@ export const contextualProviderCapabilities = {
     delivery: "receipt-hook",
     acceptanceEvidence: ["acp-prompt-response"],
   },
+  githubCopilot: {
+    ...unsupported,
+    delivery: "receipt-hook",
+    acceptanceEvidence: ["acp-prompt-response"],
+  },
   opencode: {
     ...unsupported,
     delivery: "receipt-hook",
@@ -72,6 +77,7 @@ export function getContextualProviderCapabilities(driver: string): ContextualPro
     case "claude":
     case "cursor":
     case "grok":
+    case "githubCopilot":
     case "opencode":
     case "antigravity":
       return contextualProviderCapabilities[driver];
@@ -121,7 +127,10 @@ export function providerContextIdForSession(driver: string, resumeCursor: unknow
   if (driver === "codex") return nonempty(cursor.threadId) ?? null;
   if (driver === "claude" || driver === "claudeAgent")
     return nonempty(cursor.resume) ?? nonempty(cursor.sessionId) ?? null;
-  if (["cursor", "grok", "opencode", "antigravity"].includes(driver) && cursor.schemaVersion === 1)
+  if (
+    ["cursor", "grok", "githubCopilot", "opencode", "antigravity"].includes(driver) &&
+    cursor.schemaVersion === 1
+  )
     return nonempty(cursor.sessionId) ?? null;
   return null;
 }

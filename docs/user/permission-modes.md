@@ -18,7 +18,7 @@ without prompting; commands and anything else still stop for approval.
 **Auto**: routine actions proceed without you; risky ones still ask. How this is enforced depends
 on the provider: Codex delegates routine approvals to an AI reviewer, Claude uses its own auto
 permission mode, Cursor uses Smart Auto review, and providers without an equivalent (such as
-OpenCode and Antigravity) fall back to asking, like Supervised.
+OpenCode, GitHub Copilot, and Antigravity) fall back to asking, like Supervised.
 
 **Full access**: allow commands and edits without prompts. The default. The agent runs
 unattended until it finishes or asks a question of its own.
@@ -54,6 +54,10 @@ set to always-approve, and **Full access** starts Grok with always-approve. The 
 describe what you get; the exact per-provider translation is internal and may change.
 
 Mobile offers the same four modes with the same labels and descriptions.
+
+GitHub Copilot asks for approval in **Supervised** and **Auto**, allows file edits in
+**Auto-accept edits**, and allows all actions in **Full access**. Copilot supports Lecturn's Plan
+mode control. See [GitHub Copilot](./providers-copilot.md).
 
 Antigravity's native `/plan` command requests a plan. It does not change the permission mode.
 Lecturn's separate Plan mode control is not available for Antigravity. See

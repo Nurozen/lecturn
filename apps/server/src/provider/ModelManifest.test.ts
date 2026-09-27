@@ -75,7 +75,15 @@ describe("classifyModels", () => {
 });
 
 describe("discovered model classification across providers", () => {
-  for (const driver of ["codex", "claudeAgent", "cursor", "grok", "opencode", "antigravity"]) {
+  for (const driver of [
+    "codex",
+    "claudeAgent",
+    "cursor",
+    "grok",
+    "githubCopilot",
+    "opencode",
+    "antigravity",
+  ]) {
     it(`keeps ${driver} discoveries visible with an older manifest`, () => {
       const manifest: ModelManifestData = {
         version: 1,

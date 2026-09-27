@@ -603,6 +603,7 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
         { provider: "codex", supported: true },
         { provider: "cursor", supported: true },
         { provider: "grok", supported: true },
+        { provider: "githubCopilot", supported: true },
         { provider: "antigravity", supported: true },
         { provider: "opencode", supported: true, limitation: "external_server_unsupported" },
       ],
