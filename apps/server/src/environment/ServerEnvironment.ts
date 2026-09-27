@@ -236,6 +236,7 @@ export const make = Effect.gen(function* () {
       // the capability is absent, and the ws dispatcher enforces it besides.
       threadNotes: true,
       threadDecisions: true,
+      contextual: true,
       manualCloudLink: true,
       ...(serverConfig.threadForkingEnabled ? { threadForking: true } : {}),
       ...(serverConfig.staveEnabled ? { stave: { protocolVersion: STAVE_PROTOCOL_VERSION } } : {}),

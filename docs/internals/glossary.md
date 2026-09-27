@@ -294,3 +294,7 @@ A **thread note** is a project-scoped quote and optional comment saved independe
 ## Decision
 
 An opt-in, project-scoped note derived from conversation evidence. Review state (unreviewed, confirmed, dismissed) is independent of lifecycle (current, superseded). An environment’s funding account pays for bounded detection; the selected thread provider writes the note. See [Thread decisions](thread-decisions.md).
+
+### Extensions and Contextual
+
+**Extensions** is the optional private implementation boundary for desktop capture and fixed-policy evaluation; public contracts, consent, accounting and clients stay in Lecturn. **Contextual** selects relevant source evidence for a thread at submission. A **preparation** is its durable pending assessment, a **packet** is the bounded selected evidence, and a **delivery receipt** records the provider's proven or unknown acceptance. The **supply ledger** prevents repeatedly attaching unchanged guidance. A **context epoch** changes only with proven continuity loss such as native compaction or an explicit refresh. See [Extensions architecture](extensions.md).

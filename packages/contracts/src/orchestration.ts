@@ -1087,6 +1087,12 @@ const ThreadInteractionModeSetCommand = Schema.Struct({
 });
 
 const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
+  contextual: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.Boolean,
+      sourceIds: Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(256)),
+    }),
+  ),
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
@@ -1200,6 +1206,9 @@ const ThreadForkCommand = Schema.Struct({
   forkSource: Schema.NullOr(ThreadForkProviderSource),
   // The parent's import origin, when the fork keeps imported history rows.
   importedFrom: Schema.optional(Schema.NullOr(ThreadImportOrigin)),
+  contextualMessageIdMap: Schema.optional(
+    Schema.Array(Schema.Struct({ sourceId: MessageId, targetId: MessageId })),
+  ),
   history: ThreadForkHistory,
 });
 
@@ -1250,6 +1259,9 @@ const ThreadImportCommand = Schema.Struct({
   importSource: ThreadImportSource,
   // Imported rows belong to no Lecturn turn: every turnId is null and
   // `turns` is empty.
+  contextualMessageIdMap: Schema.optional(
+    Schema.Array(Schema.Struct({ sourceId: MessageId, targetId: MessageId })),
+  ),
   history: ThreadForkHistory,
 });
 
@@ -1761,6 +1773,9 @@ export const ThreadForkedPayload = Schema.Struct({
   // rows stays protected (see isImportedHistoryRow). Optional so events
   // recorded before imports existed still decode.
   importedFrom: Schema.optional(Schema.NullOr(ThreadImportOrigin)),
+  contextualMessageIdMap: Schema.optional(
+    Schema.Array(Schema.Struct({ sourceId: MessageId, targetId: MessageId })),
+  ),
   history: ThreadForkHistory,
   // The fork inherits the parent's linked pull request. Optional so events
   // recorded by pre-fork servers still decode.
@@ -1774,6 +1789,9 @@ export const ThreadImportedPayload = Schema.Struct({
   // Server-only fork cursor for the thread's first send; never mapped onto
   // wire thread shapes.
   importSource: ThreadImportSource,
+  contextualMessageIdMap: Schema.optional(
+    Schema.Array(Schema.Struct({ sourceId: MessageId, targetId: MessageId })),
+  ),
   history: ThreadForkHistory,
 });
 export type ThreadImportedPayload = typeof ThreadImportedPayload.Type;

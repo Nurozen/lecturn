@@ -55,6 +55,48 @@ const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 
 describe.skipIf(!url)("Decisions funding PostgreSQL", () => {
   it.live(
+    "reports why approval is denied without treating rollout gates as unpaid membership",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const { sql, payerId, host, store, time, facts } = yield* fixture;
+          const challenge = yield* store.challenge(host, 0);
+          for (const [config, reason] of [
+            [{ ...baseConfig, enabled: false }, "disabled"],
+            [{ ...baseConfig, cohort: [] }, "cohort"],
+          ] as const) {
+            const access = yield* makeDecisionsAccess(config);
+            const gatedStore = yield* makeDecisionFundingStore(access, {
+              approvalOrigin: "https://test.invalid",
+            });
+            expect(yield* gatedStore.approvalInfo(payerId, challenge.challengeId)).toMatchObject({
+              eligible: false,
+              reason,
+            });
+            expect(
+              (yield* Effect.flip(gatedStore.approve(payerId, challenge.challengeId))).code,
+            ).toBe("forbidden");
+          }
+          yield* sql`UPDATE relay_billing_accounts SET paid_facts=${encodeJson({ ...facts, reconciledAt: time - 601 })}::jsonb WHERE user_id=${payerId}`;
+          expect(yield* store.approvalInfo(payerId, challenge.challengeId)).toMatchObject({
+            eligible: false,
+            reason: "stale-billing",
+          });
+          yield* sql`UPDATE relay_billing_accounts SET paid_facts=NULL,state=${encodeJson({ status: "trialing" })}::jsonb WHERE user_id=${payerId}`;
+          expect(yield* store.approvalInfo(payerId, challenge.challengeId)).toMatchObject({
+            eligible: false,
+            reason: "trial",
+          });
+          yield* sql`UPDATE relay_billing_accounts SET state='{}'::jsonb WHERE user_id=${payerId}`;
+          expect(yield* store.approvalInfo(payerId, challenge.challengeId)).toMatchObject({
+            eligible: false,
+            reason: "not-paid",
+          });
+        }),
+      ),
+  );
+
+  it.live(
     "lists only this payer's active hosts in bounded pages and permits expired sponsors to revoke",
     () =>
       run(
@@ -148,6 +190,7 @@ describe.skipIf(!url)("Decisions funding PostgreSQL", () => {
           environmentId: host.environmentId,
           approved: false,
           eligible: true,
+          reason: "eligible",
         });
         expect(
           (yield* Effect.flip(store.approve("forged-payer", challenge.challengeId))).code,

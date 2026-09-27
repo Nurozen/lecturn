@@ -1,3 +1,4 @@
+import { ContextualRouteScreen } from "./features/contextual/ContextualRouteScreen";
 import { DecisionsRouteScreen } from "./features/decisions/DecisionsRouteScreen";
 import {
   createPathConfigForStaticNavigation,
@@ -509,6 +510,11 @@ export const RootStack = createNativeStackNavigator({
         headerBackVisible: false,
         ...getCompactBrandHeaderOptions(),
       },
+    }),
+    Contextual: createNativeStackScreen({
+      screen: ContextualRouteScreen,
+      linking: "contextual/:environmentId",
+      options: { ...SOLID_HEADER_OPTIONS, title: "Contextual" },
     }),
     Decisions: createNativeStackScreen({
       screen: DecisionsRouteScreen,

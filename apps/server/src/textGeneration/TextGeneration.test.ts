@@ -109,6 +109,43 @@ describe("makeTextGenerationFromRegistry", () => {
       );
     }),
   );
+  it.effect(
+    "routes display summaries to the configured instance and fails closed on unsupported adapters",
+    () =>
+      Effect.gen(function* () {
+        const id = ProviderInstanceId.make("display-summary-provider");
+        const input = {
+          cwd: "/",
+          message: "Original evidence",
+          modelSelection: { instanceId: id, model: "selected-model" },
+        };
+        let calls = 0;
+        const service = TextGeneration.makeTextGenerationFromRegistry(
+          makeStubRegistry([
+            makeStubInstance(
+              id,
+              makeStubTextGeneration({
+                generateContextualSummary: (received) => {
+                  calls++;
+                  expect(received).toEqual(input);
+                  return Effect.succeed({ text: "A display summary" });
+                },
+              }),
+            ),
+          ]),
+        );
+        expect(yield* service.generateContextualSummary(input)).toEqual({
+          text: "A display summary",
+        });
+        expect(calls).toBe(1);
+        const unsupported = TextGeneration.makeTextGenerationFromRegistry(
+          makeStubRegistry([makeStubInstance(id, makeStubTextGeneration({}))]),
+        );
+        expect(
+          (yield* unsupported.generateContextualSummary(input).pipe(Effect.flip)).detail,
+        ).toContain("does not support isolated");
+      }),
+  );
   it.effect("routes workflow summaries through the selected provider instance", () =>
     Effect.gen(function* () {
       const id = ProviderInstanceId.make("summary-provider");

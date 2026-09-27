@@ -676,6 +676,26 @@ describe("relay routing fallback", () => {
 
 for (const [method, path, origin, preflightMethod, expectedOrigin] of [
   ["GET", "/v1/billing/status", "lecturn://app", "", "lecturn://app"],
+  [
+    "OPTIONS",
+    "/v1/extensions/status",
+    "https://lecturn.cloudgatherer.net",
+    "GET",
+    "https://lecturn.cloudgatherer.net",
+  ],
+  [
+    "OPTIONS",
+    "/v1/extensions/funding/approve",
+    "https://lecturn.cloudgatherer.net",
+    "POST",
+    "https://lecturn.cloudgatherer.net",
+  ],
+  ["GET", "/v1/extensions/status", "lecturn://app", "", "lecturn://app"],
+  ["OPTIONS", "/v1/extensions/funding/account-revoke", "lecturn://app", "POST", "lecturn://app"],
+  ["POST", "/v1/extensions/funding/account-revoke", "lecturn://app", "", "lecturn://app"],
+  ["OPTIONS", "/v1/extensions/funding/approve", "lecturn://app", "POST", undefined],
+  ["OPTIONS", "/v1/extensions/status", "https://untrusted.example", "GET", undefined],
+  ["GET", "/v1/extensions/status", "https://untrusted.example", "", undefined],
   ["OPTIONS", "/v1/billing/status", "lecturn://app", "GET", "lecturn://app"],
   ["OPTIONS", "/v1/billing/status", "lecturn://app", "POST", undefined],
   ["POST", "/v1/billing/checkout", "lecturn://app", "", undefined],
@@ -706,7 +726,7 @@ for (const [method, path, origin, preflightMethod, expectedOrigin] of [
       expect(response.headers["access-control-allow-origin"]).toBe(expectedOrigin);
       if (method === "OPTIONS") expect(response.status).toBe(expectedOrigin ? 204 : 403);
       if (origin === "lecturn://app" && expectedOrigin && method === "OPTIONS") {
-        expect(response.headers["access-control-allow-methods"]).toBe("GET,OPTIONS");
+        expect(response.headers["access-control-allow-methods"]).toBe(`${preflightMethod},OPTIONS`);
         expect(response.headers["access-control-allow-headers"]).toContain("authorization");
       }
     }).pipe(Effect.scoped),

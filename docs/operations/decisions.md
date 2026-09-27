@@ -1,10 +1,12 @@
 # Decisions operations
 
-Decisions ships disabled by default. The desktop host stores notes, evidence, traversal checkpoints, and jobs in SQLite; the relay stores funding, authoritative paid-access facts, and the usage ledger in PostgreSQL. Jev receives only the bounded evaluation request. The user's connected provider writes notes locally; the relay never supplies a substitute writer.
+Decisions ships disabled by default. The desktop host stores notes, evidence, traversal checkpoints, and jobs in SQLite; the relay stores funding, authoritative paid-access facts, and the usage ledger in PostgreSQL. The private evaluation service receives only the bounded evaluation request. The user's connected provider writes notes locally; the relay never supplies a substitute writer.
 
 ## Deployment configuration
 
-Set `TYPESAFE_API_KEY` as a secret in the relay's GitHub **production** environment. `deploy-relay.yml` passes it to the relay deployment; the runtime reads it as a redacted value. Local relay testing reads the same variable from the gitignored `infra/relay/.env`. Never put this key in web/mobile environment variables.
+Configure `EXTENSIONS_EVALUATOR_WORKER` to bind the private evaluation service. There is no public vendor transport fallback. Upstream credentials, model policy and qualification probes are configured and maintained only in the private implementation. Missing service bindings prevent evaluation; they do not authorize another backend.
+
+This intentionally replaces the former direct evaluation backend. Roll out matching public contracts and private service versions with new admission disabled, then verify the service binding before enabling a cohort. Settled retired requests may replay their retained judgments without charging again; unresolved retired attempts remain fenced and are never redirected to a different backend. Preserve their accounting records and cleanup jobs. New public results expose an opaque evaluation identity; upstream model details remain private.
 
 The deployment applies migrations `20260923000000_personal_paid_facts`, `20260923000100_decision_funding`, `20260923000200_decision_usage`, and `20260923000300_decision_payer_label`. Apply them before admitting traffic. Keep the once-per-minute reconciliation cron active even while admission is disabled: unknown attempts and reservations still need cleanup.
 
@@ -29,19 +31,19 @@ Use GitHub production environment **variables** for the following settings. Empt
 | `DECISIONS_REQUEST_TIMEOUT_MS`        | `30000`      | Upstream request deadline                                                         |
 | `DECISIONS_BILLING_MAX_AGE_SECONDS`   | `86400`      | Maximum authoritative paid-fact age                                               |
 
-The pinned detector is `jev-1.13.0`, priced at 42 nano-USD per input token ($0.042 per million). A one-cent hold reserves 238,096 allowance tokens; only actual reported input usage is settled. The hold is headroom, not a charge. Unknown upstream outcomes release the user's reservation after the deadline while retaining bounded operator exposure. Late results do not create a second user debit. No automatic overage charging exists.
+Only actual reported input usage is settled against the shared allowance. An attempt hold is headroom, not a charge. Unknown upstream outcomes release the user's reservation after the deadline while retaining bounded operator exposure. Late results do not create a second user debit. No automatic overage charging exists.
 
 ## Access and rollout
 
 A personal settled paid subscription, or a distinct explicit Decisions grant, supplies eligibility. Connect trials, team membership, grace periods, and generic Connect bypasses do not. Annual purchases receive monthly allowance windows anchored to the subscription anniversary. Funding approval binds an authenticated payer to the environment credential and generation; unlink, key rotation, payer revocation, and account deletion invalidate that binding.
 
-Before enabling a cohort, verify migrated schema, the secret, fresh paid-fact reconciliation, the cleanup cron, a supported exact writer configuration, and an end-to-end synthetic evaluation including replay and revocation. Start with an explicit cohort. Small synthetic quality tests are regression evidence, not production accuracy measurements. Review unreviewed-note quality, coverage, failures, and spend before expanding access.
+Before enabling a cohort, verify migrated schema, the private service binding, fresh paid-fact reconciliation, the cleanup cron, a supported exact writer configuration, and an end-to-end synthetic evaluation including replay and revocation. Start with an explicit cohort. Small synthetic quality tests are regression evidence, not production accuracy measurements. Review unreviewed-note quality, coverage, failures, and spend before expanding access.
 
 Disable `DECISIONS_ENABLED` to stop new admissions. Keep database reconciliation running. Saved local notes remain readable/exportable. Do not manually delete pending ledger rows to free allowance: doing so would lose unknown spend exposure and replay protection.
 
 ## Verification
 
-The `DecisionsService.live.test.ts` and `DecisionsQuality.live.test.ts` tests are opt-in and use synthetic data. Their environment requirements are documented in each test. Normal focused suites cover real PostgreSQL reservation races, funding, late results, source/evidence validation, ingestion, and writer fencing. Never point billing integration tests at production databases.
+Public tests exercise the fixed service boundary with synthetic responses and verify allowance accounting, replay protection, funding, source evidence and writer fencing. Upstream transport and model-quality probes live in the private implementation. Never point billing integration tests at production databases.
 
 ## Operational visibility
 

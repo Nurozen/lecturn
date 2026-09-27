@@ -3,6 +3,8 @@ import {
   DecisionEvaluationError,
   EnvironmentId,
   type DecisionFundingApprovalResult,
+  type ExtensionFeatureId,
+  type ExtensionFundingObserveResult,
   type DecisionFundingChallengeResult,
   type DecisionFundingStatusResult,
 } from "@lecturn/contracts";
@@ -11,6 +13,7 @@ import type { EnvironmentCredentialPrincipal } from "../environments/Environment
 import { decisionError, decisionStorage, type DecisionsAccess } from "./DecisionsAccess.ts";
 
 export interface DecisionFundingRecord {
+  readonly feature_id: ExtensionFeatureId;
   readonly environment_id: string;
   readonly public_key: string;
   readonly generation: number;
@@ -26,9 +29,11 @@ interface Challenge {
   readonly payer_id: string | null;
   readonly redeemed_generation: number | null;
   readonly revoked: boolean;
+  readonly canceled: boolean;
 }
 export interface DecisionFundingConfig {
   readonly approvalOrigin: string;
+  readonly featureId?: ExtensionFeatureId;
   readonly challengeTtlSeconds?: number;
 }
 const isDecisionError = Schema.is(DecisionEvaluationError);
@@ -40,9 +45,16 @@ export const makeDecisionFundingStore = (access: DecisionsAccess, config: Decisi
     const { $client: sql } = yield* RelayDb;
     const crypto = yield* Crypto.Crypto;
     const ttl = config.challengeTtlSeconds ?? 600;
+    const featureId = config.featureId ?? "decisions";
     const transaction = <A>(effect: Effect.Effect<A, DecisionEvaluationError>) =>
       sql
-        .withTransaction(effect)
+        .withTransaction(
+          Effect.gen(function* () {
+            yield* sql`SELECT pg_advisory_xact_lock(192837465)`;
+            yield* sql`SELECT set_config('lecturn.extensions_reservation_epoch','1',true)`;
+            return yield* effect;
+          }),
+        )
         .pipe(
           Effect.mapError((error) =>
             isDecisionError(error)
@@ -62,22 +74,22 @@ export const makeDecisionFundingStore = (access: DecisionsAccess, config: Decisi
     });
     const get = (environmentId: string) =>
       decisionStorage(
-        sql<DecisionFundingRecord>`SELECT * FROM relay_decision_funding WHERE environment_id=${environmentId}`,
+        sql<DecisionFundingRecord>`SELECT * FROM relay_decision_funding WHERE feature_id=${featureId} AND environment_id=${environmentId}`,
       ).pipe(Effect.map((rows) => rows[0]));
     const lock = Effect.fn("DecisionFunding.lock")(function* (
       host: EnvironmentCredentialPrincipal,
     ) {
       yield* decisionStorage(
-        sql`INSERT INTO relay_decision_funding(environment_id,public_key,generation,state) VALUES (${host.environmentId},${host.environmentPublicKey},0,'unfunded') ON CONFLICT DO NOTHING`,
+        sql`INSERT INTO relay_decision_funding(feature_id,environment_id,public_key,generation,state) VALUES (${featureId},${host.environmentId},${host.environmentPublicKey},0,'unfunded') ON CONFLICT DO NOTHING`,
       );
       const rows = yield* decisionStorage(
-        sql<DecisionFundingRecord>`SELECT * FROM relay_decision_funding WHERE environment_id=${host.environmentId} FOR UPDATE`,
+        sql<DecisionFundingRecord>`SELECT * FROM relay_decision_funding WHERE feature_id=${featureId} AND environment_id=${host.environmentId} FOR UPDATE`,
       );
       return rows[0]!;
     });
     const loadChallenge = (id: string) =>
       decisionStorage(
-        sql<Challenge>`SELECT id,environment_id,public_key,generation,expires_at::float8,payer_id,redeemed_generation,revoked FROM relay_decision_funding_challenges WHERE id=${id} FOR UPDATE`,
+        sql<Challenge>`SELECT id,environment_id,public_key,generation,expires_at::float8,payer_id,redeemed_generation,revoked,canceled FROM relay_decision_funding_challenges WHERE feature_id=${featureId} AND id=${id} FOR UPDATE`,
       ).pipe(Effect.map((rows) => rows[0]));
     const ensureGeneration = (row: DecisionFundingRecord, generation: number) =>
       row.generation === generation
@@ -87,7 +99,19 @@ export const makeDecisionFundingStore = (access: DecisionsAccess, config: Decisi
       environmentId: string,
       row: DecisionFundingRecord | undefined,
       key?: string,
-    ): Effect.fn.Return<DecisionFundingStatusResult, DecisionEvaluationError> {
+    ): Effect.fn.Return<
+      DecisionFundingStatusResult & {
+        readonly reason:
+          | "eligible"
+          | "disabled"
+          | "not-paid"
+          | "trial"
+          | "stale-billing"
+          | "cohort"
+          | "unavailable";
+      },
+      DecisionEvaluationError
+    > {
       const belongs = row && (key === undefined || row.public_key === key);
       const eligibility =
         belongs && row.state === "active" && row.payer_id
@@ -96,7 +120,7 @@ export const makeDecisionFundingStore = (access: DecisionsAccess, config: Decisi
       const pending =
         belongs && row.state !== "active"
           ? yield* decisionStorage(
-              sql`SELECT 1 FROM relay_decision_funding_challenges WHERE environment_id=${environmentId} AND generation=${row.generation} AND public_key=${row.public_key} AND revoked=false AND redeemed_generation IS NULL AND expires_at > ${yield* nowSeconds} LIMIT 1`,
+              sql`SELECT 1 FROM relay_decision_funding_challenges WHERE feature_id=${featureId} AND environment_id=${environmentId} AND generation=${row.generation} AND public_key=${row.public_key} AND revoked=false AND canceled=false AND redeemed_generation IS NULL AND expires_at > ${yield* nowSeconds} LIMIT 1`,
             )
           : [];
       const account =
@@ -116,6 +140,7 @@ export const makeDecisionFundingStore = (access: DecisionsAccess, config: Decisi
             ? (account[0]?.decisions_account_label ?? `Account ${row.payer_id}`).slice(0, 200)
             : null,
         eligible: eligibility?.eligible ?? false,
+        reason: eligibility?.reason ?? "not-paid",
         allowance: null,
         remoteRevocationPending: false,
       };
@@ -171,19 +196,23 @@ export const makeDecisionFundingStore = (access: DecisionsAccess, config: Decisi
             row.generation + (row.public_key === host.environmentPublicKey ? 0 : 1);
           if (row.public_key !== host.environmentPublicKey)
             yield* decisionStorage(
-              sql`UPDATE relay_decision_funding SET public_key=${host.environmentPublicKey},generation=${generation},payer_id=NULL,state='revoked' WHERE environment_id=${host.environmentId}`,
+              sql`UPDATE relay_decision_funding SET public_key=${host.environmentPublicKey},generation=${generation},payer_id=NULL,state='revoked' WHERE feature_id=${featureId} AND environment_id=${host.environmentId}`,
             );
           yield* decisionStorage(
-            sql`UPDATE relay_decision_funding_challenges SET revoked=true WHERE environment_id=${host.environmentId} AND redeemed_generation IS NULL`,
+            sql`UPDATE relay_decision_funding_challenges SET revoked=true WHERE feature_id=${featureId} AND environment_id=${host.environmentId} AND redeemed_generation IS NULL`,
           );
           yield* decisionStorage(
-            sql`INSERT INTO relay_decision_funding_challenges(id,environment_id,public_key,generation,expires_at) VALUES (${id},${host.environmentId},${host.environmentPublicKey},${generation},${expires})`,
+            sql`INSERT INTO relay_decision_funding_challenges(feature_id,id,environment_id,public_key,generation,expires_at) VALUES (${featureId},${id},${host.environmentId},${host.environmentPublicKey},${generation},${expires})`,
           );
           return generation;
         }),
       );
-      const url = new URL("/decisions/funding/approve", config.approvalOrigin);
+      const url = new URL(
+        config.featureId ? "/extensions/funding/approve" : "/decisions/funding/approve",
+        config.approvalOrigin,
+      );
       url.searchParams.set("challengeId", id);
+      if (config.featureId) url.searchParams.set("featureId", featureId);
       return { challengeId: id, generation, approvalUrl: url.toString(), expiresAt: iso(expires) };
     });
     const approvalInfo = Effect.fn("DecisionFunding.approvalInfo")(function* (
@@ -191,10 +220,10 @@ export const makeDecisionFundingStore = (access: DecisionsAccess, config: Decisi
       challengeId: string,
     ) {
       const items = yield* decisionStorage(
-        sql<Challenge>`SELECT id,environment_id,public_key,generation,expires_at::float8,payer_id,redeemed_generation,revoked FROM relay_decision_funding_challenges WHERE id=${challengeId}`,
+        sql<Challenge>`SELECT id,environment_id,public_key,generation,expires_at::float8,payer_id,redeemed_generation,revoked,canceled FROM relay_decision_funding_challenges WHERE feature_id=${featureId} AND id=${challengeId}`,
       );
       const item = items[0];
-      if (!item || item.revoked)
+      if (!item || item.revoked || item.canceled)
         return yield* decisionError("forbidden", "Funding approval is unavailable");
       if (item.expires_at <= (yield* nowSeconds))
         return yield* decisionError("expired", "Funding approval expired");
@@ -214,13 +243,22 @@ export const makeDecisionFundingStore = (access: DecisionsAccess, config: Decisi
       );
       if (!labels.length)
         return yield* decisionError("forbidden", "Environment authorization is no longer valid");
+      const eligibility = yield* access.status(payerId);
       return {
         challengeId,
+        generation: item.generation,
+        state:
+          item.redeemed_generation !== null
+            ? ("linked" as const)
+            : item.payer_id
+              ? ("approved-awaiting-host" as const)
+              : ("awaiting-approval" as const),
         environmentId: EnvironmentId.make(item.environment_id),
         environmentLabel: labels[0]!.environment_label.slice(0, 200),
         expiresAt: iso(item.expires_at),
         approved: item.payer_id === payerId,
-        eligible: (yield* access.status(payerId)).eligible,
+        eligible: eligibility.eligible,
+        reason: eligibility.reason,
       };
     });
     const approve = Effect.fn("DecisionFunding.approve")(function* (
@@ -231,7 +269,7 @@ export const makeDecisionFundingStore = (access: DecisionsAccess, config: Decisi
       return yield* transaction(
         Effect.gen(function* () {
           const item = yield* loadChallenge(challengeId);
-          if (!item || item.revoked)
+          if (!item || item.revoked || item.canceled)
             return yield* decisionError("forbidden", "Funding approval is unavailable");
           if (item.expires_at <= (yield* nowSeconds))
             return yield* decisionError("expired", "Funding approval expired");
@@ -253,7 +291,7 @@ export const makeDecisionFundingStore = (access: DecisionsAccess, config: Decisi
               sql`UPDATE relay_billing_accounts SET decisions_account_label=${verifiedAccountLabel.trim().slice(0, 200)} WHERE user_id=${authenticatedPayerId} AND deleted_at IS NULL`,
             );
           yield* decisionStorage(
-            sql`UPDATE relay_decision_funding_challenges SET payer_id=${authenticatedPayerId} WHERE id=${challengeId}`,
+            sql`UPDATE relay_decision_funding_challenges SET payer_id=${authenticatedPayerId} WHERE feature_id=${featureId} AND id=${challengeId}`,
           );
           return { challengeId, approved: true, expiresAt: iso(item.expires_at) };
         }),
@@ -272,6 +310,7 @@ export const makeDecisionFundingStore = (access: DecisionsAccess, config: Decisi
           if (
             !item ||
             item.revoked ||
+            item.canceled ||
             item.environment_id !== host.environmentId ||
             item.public_key !== host.environmentPublicKey ||
             row.public_key !== host.environmentPublicKey
@@ -302,10 +341,10 @@ export const makeDecisionFundingStore = (access: DecisionsAccess, config: Decisi
             );
           const generation = row.generation + 1;
           yield* decisionStorage(
-            sql`UPDATE relay_decision_funding SET payer_id=${item.payer_id},generation=${generation},state='active' WHERE environment_id=${host.environmentId}`,
+            sql`UPDATE relay_decision_funding SET payer_id=${item.payer_id},generation=${generation},state='active' WHERE feature_id=${featureId} AND environment_id=${host.environmentId}`,
           );
           yield* decisionStorage(
-            sql`UPDATE relay_decision_funding_challenges SET redeemed_generation=${generation} WHERE id=${challengeId}`,
+            sql`UPDATE relay_decision_funding_challenges SET redeemed_generation=${generation} WHERE feature_id=${featureId} AND id=${challengeId}`,
           );
         }),
       );
@@ -313,10 +352,10 @@ export const makeDecisionFundingStore = (access: DecisionsAccess, config: Decisi
     });
     const revoke = Effect.fn("DecisionFunding.revoke")(function* (environmentId: string) {
       yield* decisionStorage(
-        sql`UPDATE relay_decision_funding SET generation=generation+1,payer_id=NULL,state='revoked' WHERE environment_id=${environmentId} AND (state <> 'revoked' OR payer_id IS NOT NULL OR EXISTS(SELECT 1 FROM relay_decision_funding_challenges WHERE environment_id=${environmentId} AND revoked=false))`,
+        sql`UPDATE relay_decision_funding SET generation=generation+1,payer_id=NULL,state='revoked' WHERE feature_id=${featureId} AND environment_id=${environmentId} AND (state <> 'revoked' OR payer_id IS NOT NULL OR EXISTS(SELECT 1 FROM relay_decision_funding_challenges WHERE feature_id=${featureId} AND environment_id=${environmentId} AND revoked=false))`,
       );
       yield* decisionStorage(
-        sql`UPDATE relay_decision_funding_challenges SET revoked=true WHERE environment_id=${environmentId}`,
+        sql`UPDATE relay_decision_funding_challenges SET revoked=true WHERE feature_id=${featureId} AND environment_id=${environmentId}`,
       );
     });
     const revokeByHost = Effect.fn("DecisionFunding.revokeByHost")(function* (
@@ -343,7 +382,7 @@ export const makeDecisionFundingStore = (access: DecisionsAccess, config: Decisi
       yield* transaction(
         Effect.gen(function* () {
           const rows = yield* decisionStorage(
-            sql<DecisionFundingRecord>`SELECT * FROM relay_decision_funding WHERE environment_id=${environmentId} FOR UPDATE`,
+            sql<DecisionFundingRecord>`SELECT * FROM relay_decision_funding WHERE feature_id=${featureId} AND environment_id=${environmentId} FOR UPDATE`,
           );
           const row = rows[0];
           if (!row || row.payer_id !== payerId)
@@ -375,7 +414,7 @@ export const makeDecisionFundingStore = (access: DecisionsAccess, config: Decisi
           environment_id: string;
           environment_label: string;
           generation: number;
-        }>`SELECT f.environment_id,f.generation,COALESCE((SELECT l.environment_label FROM relay_environment_links l WHERE l.environment_id=f.environment_id AND l.environment_public_key=f.public_key ORDER BY l.updated_at DESC LIMIT 1),f.environment_id) AS environment_label FROM relay_decision_funding f WHERE f.payer_id=${payerId} AND f.state='active' AND (${input.cursor ?? null}::text IS NULL OR f.environment_id > ${input.cursor ?? null}) ORDER BY f.environment_id LIMIT ${limit + 1}`,
+        }>`SELECT f.environment_id,f.generation,COALESCE((SELECT l.environment_label FROM relay_environment_links l WHERE l.environment_id=f.environment_id AND l.environment_public_key=f.public_key ORDER BY l.updated_at DESC LIMIT 1),f.environment_id) AS environment_label FROM relay_decision_funding f WHERE f.feature_id=${featureId} AND f.payer_id=${payerId} AND f.state='active' AND (${input.cursor ?? null}::text IS NULL OR f.environment_id > ${input.cursor ?? null}) ORDER BY f.environment_id LIMIT ${limit + 1}`,
       );
       const environments = rows.slice(0, limit).map((row) => ({
         environmentId: EnvironmentId.make(row.environment_id),
@@ -393,31 +432,118 @@ export const makeDecisionFundingStore = (access: DecisionsAccess, config: Decisi
     ) {
       yield* transaction(
         Effect.gen(function* () {
-          const rows = yield* decisionStorage(
-            sql<DecisionFundingRecord>`SELECT * FROM relay_decision_funding WHERE environment_id=${environmentId} FOR UPDATE`,
+          yield* decisionStorage(
+            sql`UPDATE relay_decision_funding SET generation=generation+1,payer_id=NULL,state='revoked' WHERE environment_id=${environmentId} AND (${publicKey ?? null}::text IS NULL OR public_key=${publicKey ?? null}) AND state <> 'revoked'`,
           );
-          if (!rows[0] || (publicKey !== undefined && rows[0].public_key !== publicKey)) return;
-          yield* revoke(environmentId);
+          yield* decisionStorage(
+            sql`UPDATE relay_decision_funding_challenges SET revoked=true WHERE environment_id=${environmentId} AND (${publicKey ?? null}::text IS NULL OR public_key=${publicKey ?? null})`,
+          );
         }),
       );
     });
     const revokeAccount = Effect.fn("DecisionFunding.revokeAccount")(function* (payerId: string) {
       yield* transaction(
         Effect.gen(function* () {
-          const rows = yield* decisionStorage(
-            sql<DecisionFundingRecord>`SELECT * FROM relay_decision_funding WHERE payer_id=${payerId} ORDER BY environment_id FOR UPDATE`,
+          yield* decisionStorage(
+            sql`UPDATE relay_decision_funding SET generation=generation+1,payer_id=NULL,state='revoked' WHERE payer_id=${payerId}`,
           );
-          for (const row of rows) yield* revoke(row.environment_id);
           yield* decisionStorage(
             sql`UPDATE relay_decision_funding_challenges SET revoked=true WHERE payer_id=${payerId}`,
           );
           yield* decisionStorage(
             sql`UPDATE relay_decision_grants SET revoked_at=${yield* nowSeconds} WHERE user_id=${payerId} AND revoked_at IS NULL`,
           );
+          yield* decisionStorage(
+            sql`UPDATE relay_extension_admission_grants SET revoked_at=${yield* nowSeconds} WHERE user_id=${payerId} AND revoked_at IS NULL`,
+          );
         }),
       );
     });
+    const observe = Effect.fn("DecisionFunding.observe")(function* (
+      host: EnvironmentCredentialPrincipal,
+      challengeId: string,
+      expectedGeneration: number,
+    ): Effect.fn.Return<ExtensionFundingObserveResult, DecisionEvaluationError> {
+      return yield* transaction(
+        Effect.gen(function* () {
+          yield* assertHost(host);
+          const row = yield* get(host.environmentId);
+          const item = yield* loadChallenge(challengeId);
+          if (
+            !item ||
+            item.environment_id !== host.environmentId ||
+            item.public_key !== host.environmentPublicKey ||
+            item.generation !== expectedGeneration
+          )
+            return yield* decisionError(
+              "forbidden",
+              "Approval does not match this pending operation",
+            );
+          const state: ExtensionFundingObserveResult["state"] = item.canceled
+            ? "canceled"
+            : item.revoked ||
+                !row ||
+                row.public_key !== item.public_key ||
+                row.generation !== (item.redeemed_generation ?? item.generation)
+              ? "revoked"
+              : item.redeemed_generation !== null
+                ? "linked"
+                : item.expires_at <= (yield* nowSeconds)
+                  ? "expired"
+                  : item.payer_id
+                    ? "approved-awaiting-host"
+                    : "awaiting-approval";
+          const labels =
+            item.payer_id && ["approved-awaiting-host", "linked"].includes(state)
+              ? yield* decisionStorage(
+                  sql<{
+                    decisions_account_label: string | null;
+                  }>`SELECT decisions_account_label FROM relay_billing_accounts WHERE user_id=${item.payer_id} AND deleted_at IS NULL`,
+                )
+              : [];
+          return {
+            featureId,
+            environmentId: EnvironmentId.make(host.environmentId),
+            challengeId,
+            generation: item.generation,
+            state,
+            expiresAt: iso(item.expires_at),
+            accountLabel: labels[0]?.decisions_account_label ?? null,
+          };
+        }),
+      );
+    });
+    const cancel = Effect.fn("DecisionFunding.cancel")(function* (
+      host: EnvironmentCredentialPrincipal,
+      challengeId: string,
+      expectedGeneration: number,
+    ) {
+      yield* transaction(
+        Effect.gen(function* () {
+          yield* assertHost(host);
+          const item = yield* loadChallenge(challengeId);
+          if (
+            !item ||
+            item.environment_id !== host.environmentId ||
+            item.public_key !== host.environmentPublicKey ||
+            item.generation !== expectedGeneration
+          )
+            return yield* decisionError(
+              "forbidden",
+              "Approval does not match this pending operation",
+            );
+          if (item.redeemed_generation !== null)
+            return yield* decisionError("conflict", "Linked funding must be revoked explicitly");
+          yield* decisionStorage(
+            sql`UPDATE relay_decision_funding_challenges SET canceled=true WHERE feature_id=${featureId} AND id=${challengeId}`,
+          );
+        }),
+      );
+      return yield* observe(host, challengeId, expectedGeneration);
+    });
     return {
+      observe,
+      cancel,
       challenge,
       approvalInfo,
       approve,

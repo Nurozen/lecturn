@@ -1,3 +1,4 @@
+import { ContextualThreadControl } from "../contextual/ContextualControls";
 import { useAtomValue } from "@effect/atom-react";
 import type {
   EnvironmentId,
@@ -496,27 +497,36 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     [currentModelOption?.capabilities, currentModelSelection.options],
   );
   const settingsOwnerId = composerOwnerKey;
+  const updateModelSelection = props.onUpdateModelSelection;
   const settingsRouteSession = useMemo<ExistingThreadSettingsRouteSession>(
     () => ({
       ownerId: settingsOwnerId,
+      contextualControl: (
+        <ContextualThreadControl
+          environmentId={props.environmentId}
+          threadId={props.selectedThread.id}
+        />
+      ),
       environmentId: props.environmentId,
       providerInstanceId: currentModelSelection.instanceId,
       providerGroups: threadProviderGroups,
       selectedModel: currentModelSelection,
-      onSelectModel: (option) => props.onUpdateModelSelection(option.selection),
+      onSelectModel: (option) => updateModelSelection(option.selection),
       optionDescriptors: providerOptionDescriptors,
       onUpdateOptionSelections: (options) =>
-        props.onUpdateModelSelection({ ...currentModelSelection, options }),
+        updateModelSelection({ ...currentModelSelection, options }),
       runtimeMode: currentRuntimeMode,
       onUpdateRuntimeMode: props.onUpdateRuntimeMode,
     }),
     [
       currentModelSelection,
       currentRuntimeMode,
-      props.onUpdateModelSelection,
+      updateModelSelection,
       props.onUpdateRuntimeMode,
       providerOptionDescriptors,
       settingsOwnerId,
+      props.environmentId,
+      props.selectedThread.id,
       threadProviderGroups,
     ],
   );
@@ -786,6 +796,11 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                   />
                 ) : (
                   <View className="min-w-0 flex-1 flex-row items-center justify-between">
+                    <ContextualThreadControl
+                      compact
+                      environmentId={props.environmentId}
+                      threadId={props.selectedThread.id}
+                    />
                     <ComposerAttachmentButton
                       supportsFiles={Boolean(
                         props.serverConfig?.environment.capabilities.fileAttachments,

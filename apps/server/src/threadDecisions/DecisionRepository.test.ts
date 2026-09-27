@@ -16,7 +16,9 @@ import { decisionSourceHash } from "@lecturn/shared/decisionEvidence";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
 import { parseAssistantCitationHref } from "@lecturn/shared/assistantCitations";
-import { make, type CreateDecisionFromWriter } from "./DecisionRepository.ts";
+import { DecisionRepository, make, type CreateDecisionFromWriter } from "./DecisionRepository.ts";
+import { make as makeGroups } from "../contextual/ContextualGroups.ts";
+import { ExtensionsRuntime } from "../extensions/ExtensionsRuntime.ts";
 
 const decodeExport = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Struct({ decisions: Schema.Array(Schema.Unknown) })),
@@ -58,7 +60,7 @@ const input: CreateDecisionFromWriter = {
     sourceFingerprint: "fingerprint",
     canonicalVersion: "1",
     templateVersion: "1",
-    detectorModel: "jev-1.13.0",
+    detectorModel: "extensions-v1",
     writerSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-luna" },
     writerConfigurationGeneration: "1",
     identityConfidence: "configuration-only",
@@ -67,6 +69,10 @@ const input: CreateDecisionFromWriter = {
 const fixture = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   for (const table of [
+    "contextual_actions",
+    "contextual_outbox",
+    "contextual_group_members",
+    "contextual_decision_groups",
     "decision_suppression",
     "decision_relationships",
     "decision_evidence",
@@ -106,7 +112,161 @@ const relationshipInput = (
   expectedSuccessorRevision: successor.revision,
 });
 
+const groupsFor = (service: DecisionRepository["Service"]) =>
+  makeGroups.pipe(
+    Effect.provideService(DecisionRepository, service),
+    Effect.provideService(ExtensionsRuntime, {
+      environmentId: EnvironmentId.make("fixture-environment"),
+      hostName: "Synthetic",
+      describe: Effect.succeed(null),
+      request: () => Effect.die("Unexpected extension request"),
+      readExport: () => Effect.die("Unexpected export read"),
+    }),
+  );
+
 it.layer(SqlitePersistenceMemory)("DecisionRepository", (it) => {
+  it.effect("offers and executes the latest merge undo from the visible canonical decision", () =>
+    Effect.gen(function* () {
+      const { sql, service } = yield* fixture;
+      const canonical = (yield* service.createFromWriter(input))!;
+      const groups = yield* groupsFor(service);
+      const groupId = yield* groups.ensure(canonical);
+      const members = [];
+      for (const id of ["second", "third"]) {
+        const member = (yield* service.createFromWriter({
+          ...input,
+          id: DecisionId.make(id),
+          actionKey: id,
+          attribution: "agent-chosen",
+        }))!;
+        members.push(member);
+        // A captured occurrence may already have its own singleton group.
+        yield* groups.ensure(member);
+        yield* groups.mutateGroup({
+          actionId: `merge-${id}`,
+          groupId,
+          expectedRevision: members.length - 1,
+          canonicalDecisionId: canonical.id,
+          occurrenceId: member.id,
+          expectedOccurrenceRevision: member.revision,
+          action: "merge",
+        });
+      }
+      assert.equal(
+        (yield* service.get({ projectId, id: members[0]!.id })).consolidation?.undo?.mergeId,
+        "merge-second",
+      );
+      // Equal timestamps must still select the most recently persisted action.
+      yield* sql`UPDATE contextual_actions SET created_at='same-time'`;
+      for (const member of members.toReversed()) {
+        const listed = (yield* service.list({ projectId })).decisions;
+        const visible = listed.find((decision) => decision.id === canonical.id)!;
+        assert.isFalse(listed.some((decision) => decision.id === member.id));
+        const metadata = visible.consolidation!;
+        assert.deepEqual(metadata.undo, {
+          mergeId: `merge-${member.id}`,
+          occurrenceId: member.id,
+          expectedOccurrenceRevision: member.revision,
+        });
+        const after = yield* groups.undoGroup({
+          actionId: `undo-${member.id}`,
+          groupId: metadata.groupId,
+          mergeId: metadata.undo!.mergeId,
+          expectedRevision: metadata.revision,
+          expectedOccurrenceRevision: metadata.undo!.expectedOccurrenceRevision,
+        });
+        assert.equal(after.occurrenceCount, metadata.occurrenceCount - 1);
+        const restored = yield* service.get({ projectId, id: member.id });
+        assert.equal(restored.attribution, "agent-chosen");
+        assert.deepEqual(restored.evidence, member.evidence);
+        assert.isUndefined(restored.consolidation?.undo);
+      }
+      const final = (yield* service.list({ projectId })).decisions;
+      assert.lengthOf(final, 3);
+      assert.isUndefined(
+        final.find((decision) => decision.id === canonical.id)?.consolidation?.undo,
+      );
+    }),
+  );
+  it.effect("does not offer an undo for an occurrence whose evidence revision changed", () =>
+    Effect.gen(function* () {
+      const { service } = yield* fixture;
+      const canonical = (yield* service.createFromWriter(input))!;
+      const member = (yield* service.createFromWriter({
+        ...input,
+        id: DecisionId.make("second"),
+        actionKey: "second",
+      }))!;
+      const groups = yield* groupsFor(service);
+      const groupId = yield* groups.ensure(canonical);
+      yield* groups.mutateGroup({
+        actionId: "merge-second",
+        groupId,
+        expectedRevision: 0,
+        canonicalDecisionId: canonical.id,
+        occurrenceId: member.id,
+        expectedOccurrenceRevision: member.revision,
+        action: "merge",
+      });
+      assert.equal(
+        (yield* service.list({ projectId })).decisions[0]?.consolidation?.undo?.mergeId,
+        "merge-second",
+      );
+      yield* service.addEvidence({
+        projectId,
+        id: member.id,
+        expectedRevision: member.revision,
+        evidence: [
+          { ...input.evidence[0]!, quote: "Use", end: 3, suffix: " Postgres for storage." },
+        ],
+      });
+      const listed = (yield* service.list({ projectId })).decisions;
+      assert.lengthOf(listed, 2);
+      assert.isUndefined(
+        listed.find((decision) => decision.id === canonical.id)?.consolidation?.undo,
+      );
+    }),
+  );
+  for (const editCanonical of [false, true])
+    it.effect(
+      `detaches a changed ${editCanonical ? "canonical" : "member"} occurrence without hiding its new commitment`,
+      () =>
+        Effect.gen(function* () {
+          const { sql, service } = yield* fixture;
+          const first = (yield* service.createFromWriter(input))!;
+          const second = (yield* service.createFromWriter({
+            ...input,
+            id: DecisionId.make("second"),
+            actionKey: "second",
+          }))!;
+          yield* sql`INSERT OR REPLACE INTO contextual_decision_groups VALUES('merged',${projectId},${first.id},0,'now')`;
+          yield* sql`INSERT OR REPLACE INTO contextual_group_members VALUES(${first.id},'merged',1,'original'),(${second.id},'merged',1,'merge-action')`;
+          assert.lengthOf((yield* service.list({ projectId })).decisions, 1);
+          const target = editCanonical ? first : second;
+          const untouched = editCanonical ? second : first;
+          const edited = (yield* service.mutate({
+            operation: "edit",
+            projectId,
+            id: target.id,
+            expectedRevision: 1,
+            title: "Use SQLite",
+            body: "Use SQLite for local persistence",
+            rationale: null,
+          })).decision!;
+          assert.lengthOf((yield* service.list({ projectId })).decisions, 2);
+          assert.deepEqual(
+            (yield* service.list({ projectId, search: "SQLite" })).decisions.map((d) => d.id),
+            [target.id],
+          );
+          assert.equal(edited.consolidation?.canonicalDecisionId, target.id);
+          assert.equal(edited.consolidation?.occurrenceCount, 1);
+          assert.isUndefined(edited.consolidation?.undo);
+          const remaining = yield* service.get({ projectId, id: untouched.id });
+          assert.equal(remaining.body, input.body);
+          assert.equal(remaining.consolidation?.canonicalDecisionId, untouched.id);
+          assert.equal(remaining.consolidation?.revision, 1);
+        }),
+    );
   it.effect(
     "preserves edits and comments on writer replay and handles independent review state",
     () =>

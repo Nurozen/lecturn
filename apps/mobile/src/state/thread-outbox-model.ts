@@ -1,3 +1,7 @@
+import {
+  ContextualDraftSchema,
+  type ContextualDraft,
+} from "../features/contextual/contextualDraft";
 import { isTransportConnectionErrorMessage } from "@lecturn/client-runtime/errors";
 import {
   clampFileAttachmentUploadBytes,
@@ -31,6 +35,7 @@ const THREAD_OUTBOX_SCHEMA_VERSION = 3;
 const THREAD_OUTBOX_MAX_RETRY_DELAY_MS = 16_000;
 
 const QueuedThreadCreationSchema = Schema.Struct({
+  contextual: Schema.optional(ContextualDraftSchema),
   projectId: ProjectId,
   // Snapshot of the project's display metadata so a pending task stays
   // presentable in the thread list even when the project shell is not loaded.
@@ -63,6 +68,7 @@ const decodeStoredQueuedThreadMessage = Schema.decodeUnknownSync(QueuedThreadMes
 const encodeStoredQueuedThreadMessage = Schema.encodeUnknownSync(QueuedThreadMessageSchema);
 
 export interface QueuedThreadCreation {
+  readonly contextual?: ContextualDraft;
   readonly projectId: ProjectIdType;
   readonly projectTitle?: string;
   readonly projectCwd?: string;

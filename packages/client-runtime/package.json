@@ -282,6 +282,10 @@
     "./state/threadDecisions": {
       "types": "./src/state/threadDecisions.ts",
       "default": "./src/state/threadDecisions.ts"
+    },
+    "./state/contextual": {
+      "types": "./src/state/contextual.ts",
+      "default": "./src/state/contextual.ts"
     }
   },
   "scripts": {

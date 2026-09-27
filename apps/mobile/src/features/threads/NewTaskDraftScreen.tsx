@@ -1,3 +1,4 @@
+import { ContextualDraftControl } from "../contextual/ContextualDraftControl";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { useAtomValue } from "@effect/atom-react";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
@@ -990,6 +991,7 @@ export function NewTaskDraftScreen(props: {
     });
     const result = await createProjectThread({
       project: selectedProject,
+      ...(draft.contextual ? { contextual: draft.contextual } : {}),
       modelSelection,
       envMode: workspaceMode,
       branch: creationBranch,
@@ -1362,6 +1364,13 @@ export function NewTaskDraftScreen(props: {
                     onPickMedia={handlePickMedia}
                     onPickFiles={handlePickFiles}
                   />
+                  {flow.selectedProject && flow.draftKey ? (
+                    <ContextualDraftControl
+                      environmentId={flow.selectedProject.environmentId}
+                      projectId={flow.selectedProject.id}
+                      draftKey={flow.draftKey}
+                    />
+                  ) : null}
                   <ComposerToolbarScroller align="end" contentPaddingRight={0} fadeSurface="sheet">
                     <ComposerInlineControl
                       accessibilityLabel="Model and reasoning settings"

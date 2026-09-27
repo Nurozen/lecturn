@@ -80,7 +80,7 @@ const fixture = (id = "note-a") =>
       sourceFingerprint: "hash",
       canonicalVersion: "v1",
       templateVersion: "v1",
-      detectorModel: "jev",
+      detectorModel: "extensions-v1",
       writerSelection: { instanceId: "codex", model: "exact-model" },
       writerConfigurationGeneration: "generation",
       identityConfidence: "verified",

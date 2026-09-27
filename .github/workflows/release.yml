@@ -581,6 +581,26 @@ jobs:
             Select-Object -Unique
           "PSModulePath=$($modulePathEntries -join ';')" >> $env:GITHUB_ENV
 
+      - name: Fetch pinned private extensions helper
+        if: matrix.platform == 'mac' && github.repository == 'Nurozen/lecturn'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.EXTENSIONS_ARTIFACT_READ_TOKEN }}
+          HELPER_COMMIT: ${{ vars.EXTENSIONS_HELPER_COMMIT }}
+          HELPER_ARCHIVE_SHA256: ${{ vars.EXTENSIONS_HELPER_ARCHIVE_SHA256 }}
+          HELPER_TEAM: ${{ vars.EXTENSIONS_HELPER_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          [[ "$HELPER_COMMIT" =~ ^[a-f0-9]{40}$ ]] && [[ "$HELPER_ARCHIVE_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          test -n "$GH_TOKEN"
+          tag="extensions-helper-$HELPER_COMMIT-$HELPER_ARCHIVE_SHA256"
+          gh api "repos/Nurozen/lecturn-extensions/releases/tags/$tag" > "$RUNNER_TEMP/extensions-release.json"
+          jq -e --arg commit "$HELPER_COMMIT" --arg tag "$tag" '.immutable == true and .draft == false and .tag_name == $tag and .target_commitish == $commit and ([.assets[] | select(.name == "helper.zip")] | length == 1)' "$RUNNER_TEMP/extensions-release.json"
+          asset_id=$(jq -r '.assets[] | select(.name == "helper.zip") | .id' "$RUNNER_TEMP/extensions-release.json")
+          [[ "$asset_id" =~ ^[0-9]+$ ]]
+          gh api -H 'Accept: application/octet-stream' "repos/Nurozen/lecturn-extensions/releases/assets/$asset_id" > "$RUNNER_TEMP/extensions-helper.zip"
+          python3 scripts/extract-extensions-artifact.py --archive "$RUNNER_TEMP/extensions-helper.zip" --output "$RUNNER_TEMP/extensions-helper" --sha256 "$HELPER_ARCHIVE_SHA256" --commit "$HELPER_COMMIT" --team "$HELPER_TEAM"
+
       - name: Build desktop artifact
         shell: bash
         env:
@@ -706,6 +726,9 @@ jobs:
             args+=(--stave-binary "$GITHUB_WORKSPACE/stave-bin/${{ matrix.resource_key }}/stave")
           fi
 
+          if [[ "${{ matrix.platform }}" == "mac" && "${{ github.repository }}" == "Nurozen/lecturn" ]]; then
+            args+=(--extensions-resources "$RUNNER_TEMP/extensions-helper")
+          fi
           vp run dist:desktop:artifact "${args[@]}"
 
       - name: Collect release assets

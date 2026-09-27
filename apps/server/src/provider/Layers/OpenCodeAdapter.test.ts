@@ -1,3 +1,4 @@
+import * as Deferred from "effect/Deferred";
 import * as NodeAssert from "node:assert/strict";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
@@ -11,6 +12,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+const encodeContextualTestJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
@@ -693,6 +695,95 @@ const makeStaveTestAdapter = (resolution: StaveMemoryResolution, external = fals
   );
 
 it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
+  it.effect("contextual promptAsync alone remains unknown without a native message echo", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("contextual-opencode-no-echo");
+      runtimeMock.state.autoPromptEcho = false;
+      yield* adapter.startSession({
+        threadId,
+        runtimeMode: "full-access",
+        resumeCursor: { schemaVersion: 1, sessionId: "ses_contextual" },
+      });
+      const receipts: import("@lecturn/contracts").ContextualDeliveryReceipt[] = [];
+      const result = yield* adapter.sendTurn({
+        threadId,
+        input: "Base",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "anthropic/sonnet",
+        ),
+        contextualEvidence: {
+          preparationId: "prep",
+          packetId: "packet",
+          dispatchId: "dispatch",
+          submissionId: "submission",
+          providerInstanceId: ProviderInstanceId.make("opencode"),
+          providerContextEpoch: "epoch",
+          providerContextId: "ses_contextual",
+          text: "contextual source",
+          evidenceIds: ["source"],
+        },
+        onContextualReceipt: (r) =>
+          Effect.sync(() => {
+            receipts.push(r);
+          }),
+      });
+      NodeAssert.equal(result.contextualReceipt?.acceptance, "unknown");
+      NodeAssert.equal(result.contextualReceipt?.evidenceIncluded, true);
+      NodeAssert.deepEqual(result.contextualReceipt?.suppliedEvidenceIds, []);
+      NodeAssert.ok(receipts.every((r) => r.acceptance === "unknown"));
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("contextual acceptance requires the correlated native user message", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("contextual-opencode");
+      yield* adapter.startSession({
+        threadId,
+        runtimeMode: "full-access",
+        resumeCursor: { schemaVersion: 1, sessionId: "ses_contextual" },
+      });
+      const receipts: import("@lecturn/contracts").ContextualDeliveryReceipt[] = [];
+      const acknowledged = yield* Deferred.make<void>();
+      const result = yield* adapter.sendTurn({
+        threadId,
+        input: "Base",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "anthropic/sonnet",
+        ),
+        contextualEvidence: {
+          preparationId: "prep",
+          packetId: "packet",
+          dispatchId: "dispatch",
+          submissionId: "submission",
+          providerInstanceId: ProviderInstanceId.make("opencode"),
+          providerContextEpoch: "epoch",
+          providerContextId: "ses_contextual",
+          text: "contextual source",
+          evidenceIds: ["source"],
+        },
+        onContextualReceipt: (r) =>
+          Effect.gen(function* () {
+            receipts.push(r);
+            if (r.acceptance === "accepted") yield* Deferred.succeed(acknowledged, undefined);
+          }),
+      });
+      yield* Deferred.await(acknowledged);
+      NodeAssert.match(
+        encodeContextualTestJson(runtimeMock.state.promptCalls[0]),
+        /contextual source/,
+      );
+      NodeAssert.ok(receipts.some((r) => r.acceptance === "accepted" && r.evidenceIncluded));
+      NodeAssert.ok(result.contextualReceipt);
+      NodeAssert.deepEqual(receipts.at(-1)?.suppliedEvidenceIds, ["source"]);
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("bounds a held Stave MCP disconnect and still closes the owned server", () =>
     Effect.gen(function* () {
       const adapter = yield* makeStaveTestAdapter(configuredStaveMemory);

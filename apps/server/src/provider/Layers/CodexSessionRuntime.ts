@@ -1,10 +1,11 @@
+import { prepareContextualDispatch } from "../ContextualDispatch.ts";
 import {
   ApprovalRequestId,
   DEFAULT_MODEL,
   EventId,
   ProviderDriverKind,
   ProviderItemId,
-  type ProviderInstanceId,
+  ProviderInstanceId,
   type ProviderApprovalDecision,
   type ProviderApprovalOption,
   type ProviderEvent,
@@ -28,6 +29,7 @@ import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
@@ -182,7 +184,10 @@ export interface CodexSessionRuntimeOptions {
   readonly appServerArgs?: ReadonlyArray<string>;
 }
 
-export interface CodexSessionRuntimeSendTurnInput {
+export interface CodexSessionRuntimeSendTurnInput extends Pick<
+  import("../Services/ProviderAdapter.ts").ProviderAdapterSendTurnInput,
+  "contextualEvidence" | "onContextualReceipt"
+> {
   readonly input?: string;
   readonly attachments?: ReadonlyArray<{
     readonly type: "image";
@@ -1353,6 +1358,64 @@ function parseThreadSnapshot(
   };
 }
 
+/** The same native request boundary used by the runtime; transport is injected for conformance tests. */
+export const dispatchCodexContextualTurn = Effect.fn("dispatchCodexContextualTurn")(
+  function* (options: {
+    readonly input: CodexSessionRuntimeSendTurnInput;
+    readonly threadId: ThreadId;
+    readonly providerThreadId: string;
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly runtimeMode: RuntimeMode;
+    readonly normalizedModel: string | undefined;
+    readonly browserToolsAvailable: boolean;
+    readonly readActiveTurnId: Effect.Effect<TurnId | undefined>;
+    readonly request: (
+      params: EffectCodexSchema.V2TurnStartParams,
+    ) => Effect.Effect<unknown, CodexSessionRuntimeError>;
+  }) {
+    const { input, providerThreadId, normalizedModel } = options;
+    const beforeDispatch = yield* options.readActiveTurnId;
+    const contextual = prepareContextualDispatch(
+      { ...input, threadId: options.threadId },
+      beforeDispatch ? "provider-queued" : "fresh",
+      options.providerInstanceId,
+      providerThreadId,
+    );
+    const prompt = [input.input, contextual.text].filter(Boolean).join("\n\n");
+    const params = yield* buildTurnStartParams({
+      threadId: providerThreadId,
+      runtimeMode: options.runtimeMode,
+      ...(prompt ? { prompt } : {}),
+      ...(input.attachments ? { attachments: input.attachments } : {}),
+      ...(normalizedModel ? { model: normalizedModel } : {}),
+      ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
+      ...(input.effort ? { effort: input.effort } : {}),
+      ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
+      browserToolsAvailable: options.browserToolsAvailable,
+    });
+    yield* contextual.receipt("unknown", null, null);
+    const rawResponse = yield* options.request(params);
+    const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(
+      Effect.mapError((error) =>
+        CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
+          "decode-response-payload",
+          error,
+          { method: "turn/start" },
+        ),
+      ),
+    );
+    const turnId = TurnId.make(response.turn.id);
+    const atAck = yield* options.readActiveTurnId;
+    const contextualReceipt = yield* contextual.receipt(
+      "accepted",
+      turnId,
+      `codex:${providerThreadId}:${response.turn.id}`,
+      beforeDispatch || (atAck && atAck !== turnId) ? "provider-queued" : "fresh",
+    );
+    return { turnId, contextualReceipt };
+  },
+);
+
 export const makeCodexSessionRuntime = (
   options: CodexSessionRuntimeOptions,
 ): Effect.Effect<
@@ -1438,6 +1501,7 @@ export const makeCodexSessionRuntime = (
       updatedAt: sessionCreatedAt,
     } satisfies ProviderSession;
     const sessionRef = yield* Ref.make<ProviderSession>(initialSession);
+    const turnDispatchLock = yield* Semaphore.make(1);
     const offerEvent = (event: ProviderEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
 
     const emitEvent = (event: Omit<ProviderEvent, "id" | "provider" | "createdAt">) =>
@@ -2524,31 +2588,19 @@ export const makeCodexSessionRuntime = (
           const normalizedModel = normalizeCodexModelSlug(
             input.model ?? (yield* Ref.get(sessionRef)).model,
           );
-          const params = yield* buildTurnStartParams({
-            threadId: providerThreadId,
+          const { turnId, contextualReceipt } = yield* dispatchCodexContextualTurn({
+            input,
+            threadId: options.threadId,
+            providerThreadId,
+            providerInstanceId: options.providerInstanceId ?? ProviderInstanceId.make("codex"),
             runtimeMode: options.runtimeMode,
-            ...(input.input ? { prompt: input.input } : {}),
-            ...(input.attachments ? { attachments: input.attachments } : {}),
-            ...(normalizedModel ? { model: normalizedModel } : {}),
-            ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
-            ...(input.effort ? { effort: input.effort } : {}),
-            ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
-            // Derived from the session's own MCP configuration rather than the
-            // setting, so the prompt describes the tools this turn actually
-            // has even if the setting changed after the session started.
+            normalizedModel,
             browserToolsAvailable: hasT3BrowserMcpServer(options.appServerArgs),
-          });
-          const rawResponse = yield* client.raw.request("turn/start", params);
-          const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(
-            Effect.mapError((error) =>
-              CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
-                "decode-response-payload",
-                error,
-                { method: "turn/start" },
-              ),
+            readActiveTurnId: Ref.get(sessionRef).pipe(
+              Effect.map((session) => session.activeTurnId),
             ),
-          );
-          const turnId = TurnId.make(response.turn.id);
+            request: (params) => client.raw.request("turn/start", params),
+          });
           yield* updateSession(sessionRef, (session) => ({
             status: "running",
             // Codex accepts follow-ups while the current turn is still
@@ -2564,8 +2616,9 @@ export const makeCodexSessionRuntime = (
             ...(resumedProviderThreadId
               ? { resumeCursor: { threadId: resumedProviderThreadId } }
               : {}),
+            ...(contextualReceipt ? { contextualReceipt } : {}),
           } satisfies ProviderTurnStartResult;
-        }),
+        }).pipe(turnDispatchLock.withPermit),
       interruptTurn: (turnId) =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;

@@ -1,3 +1,4 @@
+import { ContextualDraftControl } from "../contextual/ContextualDraftControl";
 import type {
   EnvironmentId,
   ModelSelection,
@@ -322,6 +323,7 @@ type ThreadSettingsSubmenuPage =
   | { readonly kind: "runtime" };
 
 type ThreadSettingsSessionProps = {
+  readonly contextualControl?: ReactNode;
   readonly environmentId: EnvironmentId | null;
   readonly providerInstanceId?: ProviderInstanceId;
   readonly providerGroups: ReadonlyArray<ProviderGroup>;
@@ -375,6 +377,7 @@ export function useExistingThreadSettingsRoutePresentation() {
 }
 
 type ThreadSettingsSessionValue = {
+  readonly contextualControl?: ReactNode;
   readonly environmentId: EnvironmentId | null;
   readonly providerInstanceId?: ProviderInstanceId;
   readonly providerGroups: ReadonlyArray<ProviderGroup>;
@@ -500,6 +503,7 @@ function ThreadSettingsSessionProvider(
 
   const value = useMemo<ThreadSettingsSessionValue>(
     () => ({
+      contextualControl: props.contextualControl,
       environmentId: props.environmentId,
       providerInstanceId: props.providerInstanceId,
       providerGroups: props.providerGroups,
@@ -530,6 +534,7 @@ function ThreadSettingsSessionProvider(
       hasLegacyModels,
       isApplied,
       isDisplayed,
+      props.contextualControl,
       props.environmentId,
       props.providerInstanceId,
       pendingModel,
@@ -783,6 +788,7 @@ function ThreadSettingsOptionsItem(props: {
         </Animated.View>
       </Animated.View>
 
+      {session.contextualControl}
       {Platform.OS !== "ios" && session.hasLegacyModels ? (
         <>
           <Text className="px-5 pb-2 pt-7 text-sm font-lecturn-medium text-foreground-muted">
@@ -1353,6 +1359,15 @@ export function NewTaskThreadSettingsRouteScreen() {
 
   return (
     <ThreadSettingsSessionProvider
+      contextualControl={
+        flow.selectedProject && flow.draftKey ? (
+          <ContextualDraftControl
+            environmentId={flow.selectedProject.environmentId}
+            projectId={flow.selectedProject.id}
+            draftKey={flow.draftKey}
+          />
+        ) : null
+      }
       environmentId={flow.selectedEnvironmentId}
       providerGroups={flow.providerGroups}
       selectedModel={flow.selectedModel}

@@ -146,10 +146,12 @@ export const makeBillingStore = Effect.gen(function* () {
     query(
       sql.withTransaction(
         Effect.gen(function* () {
+          yield* sql`SELECT pg_advisory_xact_lock(192837465)`;
           yield* sql`INSERT INTO relay_billing_accounts(user_id,deleted_at,updated_at) VALUES (${userId},${now},${now}) ON CONFLICT(user_id) DO UPDATE SET deleted_at=COALESCE(relay_billing_accounts.deleted_at,${now}),paid_facts=NULL,decisions_account_label=NULL,generation=relay_billing_accounts.generation+1,lease_until=0,lease_token=NULL`;
           yield* sql`UPDATE relay_decision_funding SET generation=generation+1,payer_id=NULL,state='revoked' WHERE payer_id=${userId}`;
           yield* sql`UPDATE relay_decision_funding_challenges SET revoked=true WHERE payer_id=${userId}`;
           yield* sql`UPDATE relay_decision_grants SET revoked_at=${now} WHERE user_id=${userId} AND revoked_at IS NULL`;
+          yield* sql`UPDATE relay_extension_admission_grants SET revoked_at=${now} WHERE user_id=${userId} AND revoked_at IS NULL`;
           yield* receipt(
             { id: eventId, user_id: userId, customer_id: null, kind: "user.deleted" },
             now,

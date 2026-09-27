@@ -1,3 +1,5 @@
+import { DecisionRelationSuggestions } from "../contextual/DecisionRelationSuggestions";
+import { DecisionGroupPanel } from "../contextual/DecisionGroupPanel";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import {
@@ -67,6 +69,8 @@ function DecisionsScreen(params: DecisionsRouteParams) {
     access.data?.authenticated === true &&
     access.data.scopes?.includes(AuthOrchestrationOperateScope) === true;
   const [search, setSearch] = useState("");
+  const [attribution, setAttribution] = useState<ThreadDecision["attribution"] | "all">("all");
+  const contextualSupported = config?.environment.capabilities.contextual === true;
   const [showAll, setShowAll] = useState(false);
   const [cursor, setCursor] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
@@ -75,6 +79,7 @@ function DecisionsScreen(params: DecisionsRouteParams) {
   );
   const filters = {
     projectId,
+    ...(contextualSupported && attribution !== "all" ? { attribution } : {}),
     ...(threadId ? { threadId } : {}),
     ...(search.trim() ? { search: search.trim() } : {}),
     ...(showAll ? { reviewState: "all" as const, lifecycle: "all" as const } : {}),
@@ -167,6 +172,37 @@ function DecisionsScreen(params: DecisionsRouteParams) {
               {status.data ? decisionStatusLabel(status.data.processing) : "Loading status"}. Saved
               decisions remain available to read and share.
             </Text>
+            {contextualSupported ? (
+              <View className="flex-row flex-wrap gap-2">
+                {(["all", "user-directed", "user-accepted", "agent-chosen"] as const).map(
+                  (value) => (
+                    <Pressable
+                      key={value}
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: attribution === value }}
+                      accessibilityLabel={value.replaceAll("-", " ")}
+                      className={
+                        attribution === value
+                          ? "min-h-11 justify-center rounded-full bg-primary px-3"
+                          : "min-h-11 justify-center rounded-full border border-border px-3"
+                      }
+                      onPress={() => {
+                        setAttribution(value);
+                        setCursor(undefined);
+                      }}
+                    >
+                      <Text
+                        className={
+                          attribution === value ? "text-primary-foreground" : "text-foreground"
+                        }
+                      >
+                        {value.replaceAll("-", " ")}
+                      </Text>
+                    </Pressable>
+                  ),
+                )}
+              </View>
+            ) : null}
             <TextInput
               accessibilityLabel="Search decisions"
               placeholder="Search decisions"
@@ -230,9 +266,17 @@ function DecisionsScreen(params: DecisionsRouteParams) {
                   {note.title}
                 </Text>
                 <Text className="text-muted-foreground">
-                  {note.reviewState} · {note.lifecycle} · {note.attribution.replaceAll("-", " ")}
+                  {note.reviewState} · {note.lifecycle}
                   {note.userEdited ? " · edited" : ""}
                 </Text>
+                <View className="self-start rounded-full border border-border px-3 py-1">
+                  <Text
+                    accessibilityLabel={`Decision attribution: ${note.attribution.replaceAll("-", " ")}`}
+                    className="text-foreground"
+                  >
+                    {note.attribution.replaceAll("-", " ")}
+                  </Text>
+                </View>
                 <Text className="text-foreground" selectable>
                   {note.body}
                 </Text>
@@ -298,6 +342,22 @@ function DecisionsScreen(params: DecisionsRouteParams) {
                     </>
                   ) : null}
                 </View>
+                {contextualSupported ? (
+                  <DecisionGroupPanel
+                    environmentId={environmentId}
+                    note={note}
+                    canOperate={canOperate}
+                    onChanged={list.refresh}
+                  />
+                ) : null}
+                {contextualSupported ? (
+                  <DecisionRelationSuggestions
+                    environmentId={environmentId}
+                    note={note}
+                    canOperate={canOperate}
+                    onChanged={list.refresh}
+                  />
+                ) : null}
                 {note.relationships.length ? (
                   <Text className="text-muted-foreground">
                     {note.relationships

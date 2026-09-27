@@ -893,6 +893,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       setComposerDraftText(draftKey, message.text);
       replaceComposerDraftAttachments(draftKey, message.attachments);
       updateComposerDraftSettings(draftKey, {
+        ...(message.creation.contextual ? { contextual: message.creation.contextual } : {}),
         modelSelection: message.modelSelection,
         runtimeMode: message.runtimeMode,
         interactionMode: message.interactionMode,
@@ -966,6 +967,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
           ),
         }),
         creation: {
+          ...(draft.contextual ? { contextual: draft.contextual } : {}),
           projectId: selectedProject.id,
           ...(projectTitle !== undefined ? { projectTitle } : {}),
           ...(projectCwd !== undefined ? { projectCwd } : {}),

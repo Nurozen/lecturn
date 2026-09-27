@@ -68,6 +68,7 @@ export function threadDecisionListKey(
       projectId: input.projectId,
       ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
       ...(input.search?.trim() ? { search: input.search.trim() } : {}),
+      ...(input.attribution === undefined ? {} : { attribution: input.attribution }),
       ...(input.reviewState === undefined ? {} : { reviewState: input.reviewState }),
       lifecycle: input.lifecycle ?? "current",
       ...(input.cursor === undefined ? {} : { cursor: input.cursor }),

@@ -316,6 +316,27 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
     ),
   );
 
+  it.effect("generates display summaries with tools disabled", () =>
+    withFakeClaudeEnv(
+      {
+        argsMustContain: "--safe-mode --tools  --strict-mcp-config",
+        argsMustNotContain: "--dangerously-skip-permissions",
+        output: JSON.stringify({ structured_output: { text: "SQLite supports the local cache." } }),
+      },
+      (generation) =>
+        Effect.gen(function* () {
+          const result = yield* generation.generateContextualSummary!({
+            cwd: process.cwd(),
+            message: "Use SQLite for the cache.",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+            },
+          });
+          expect(result).toEqual({ text: "SQLite supports the local cache." });
+        }),
+    ),
+  );
   it.effect("forwards Claude thinking settings without passing unsupported effort", () =>
     withFakeClaudeEnv(
       {

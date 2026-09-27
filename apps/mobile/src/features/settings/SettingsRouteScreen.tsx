@@ -1,3 +1,4 @@
+import { ContextualButton } from "../contextual/ContextualControls";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { LECTURN_LEGAL_NOTICES } from "@lecturn/shared/legalNotices";
 import { useAuth } from "@clerk/expo";
@@ -145,6 +146,7 @@ function LocalSettingsRouteScreen() {
           />
         </SettingsSection>
 
+        <ContextualSettingsSection />
         <GeneralSettingsSection />
 
         <SettingsSection title="Appearance">
@@ -554,6 +556,7 @@ function ConfiguredSettingsRouteScreen() {
           />
         </SettingsSection>
 
+        <ContextualSettingsSection />
         <GeneralSettingsSection />
 
         <SettingsSection title="Appearance">
@@ -865,6 +868,31 @@ function ArchivedThreadsSettingsSection() {
   return (
     <SettingsSection title="Threads">
       <SettingsRow icon="archivebox" label="Archived Threads" target="SettingsArchive" />
+    </SettingsSection>
+  );
+}
+
+function ContextualSettingsSection() {
+  const { environments } = useEnvironments();
+  const navigation =
+    useNavigation<
+      import("@react-navigation/native").NavigationProp<{ Contextual: { environmentId: string } }>
+    >();
+  const supported = environments.filter(
+    (environment) => environment.serverConfig?.environment.capabilities.contextual === true,
+  );
+  if (!supported.length) return null;
+  return (
+    <SettingsSection title="Contextual">
+      {supported.map((environment) => (
+        <ContextualButton
+          key={environment.environmentId}
+          label={`Sources and membership · ${environment.label}`}
+          onPress={() =>
+            navigation.navigate("Contextual", { environmentId: environment.environmentId })
+          }
+        />
+      ))}
     </SettingsSection>
   );
 }

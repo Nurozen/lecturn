@@ -1,6 +1,7 @@
+import * as NodeCrypto from "node:crypto";
 import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
-import { Effect, Clock, Fiber } from "effect";
+import { Effect, Clock, Fiber, Schema } from "effect";
 import type Stripe from "stripe";
 import type { PaymentReviewRecorder } from "./PaymentReviews.ts";
 import { TestClock } from "effect/testing";
@@ -14,6 +15,7 @@ import {
 } from "./BillingStore.ts";
 import type { StripeClient } from "./StripeClient.ts";
 
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const config = parseBillingConfig({
   BILLING_MODE: "observe",
   BILLING_CHECKOUT_ENABLED: "true",
@@ -231,6 +233,51 @@ describe("BillingService", () => {
         checkoutEnabled: true,
         hasAccess: false,
       });
+    }),
+  );
+  it.live("processes signed account deletion even when billing is disabled", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      const deleted: string[] = [];
+      const store = {
+        ...h.store,
+        tombstone: (userId: string) =>
+          Effect.sync(() => {
+            deleted.push(userId);
+          }),
+      };
+      const service = makeBillingService(
+        parseBillingConfig({}),
+        store,
+        h.stripe,
+        h.recordPaymentReview,
+      );
+      const secret = "whsec_c2FuZGJveC1kZWxldGlvbi10ZXN0LXNlY3JldA==";
+      const body = encodeJson({
+        type: "user.deleted",
+        data: { id: "user_deleted" },
+        object: "event",
+      });
+      const timestamp = String(Math.floor((yield* Clock.currentTimeMillis) / 1000));
+      const id = "msg_disabled_billing";
+      const signature = NodeCrypto.createHmac("sha256", Buffer.from(secret.slice(6), "base64"))
+        .update(`${id}.${timestamp}.${body}`)
+        .digest("base64");
+      yield* service.receiveClerkWebhook(
+        new Request("https://fixture.invalid/webhook", {
+          method: "POST",
+          body,
+          headers: {
+            "svix-id": id,
+            "svix-timestamp": timestamp,
+            "svix-signature": `v1,${signature}`,
+            "content-type": "application/json",
+          },
+        }),
+        secret,
+      );
+      expect(deleted).toEqual(["user_deleted"]);
+      expect(h.stripe.listSubscriptions).not.toHaveBeenCalled();
     }),
   );
   it.live("disabled status and cron never query storage or Stripe", () =>

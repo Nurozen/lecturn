@@ -28,6 +28,7 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
   buildWorkflowSummaryPrompt,
+  buildContextualSummaryPrompt,
   normalizeWorkflowSummary,
 } from "./TextGenerationPrompts.ts";
 import {
@@ -130,7 +131,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
             new TextGenerationError({
               operation,
               detail: `Failed to write temp file`,
-              ...(operation === "generateWorkflowSummary" || operation === "generateDecisionNotes"
+              ...(operation === "generateWorkflowSummary" ||
+              operation === "generateContextualSummary" ||
+              operation === "generateDecisionNotes"
                 ? {}
                 : { cause }),
             }),
@@ -147,6 +150,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateBranchName"
       | "generateThreadTitle"
       | "generateWorkflowSummary"
+      | "generateContextualSummary"
       | "generateDecisionNotes",
     value: unknown,
   ): Effect.Effect<string, TextGenerationError> =>
@@ -156,7 +160,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           new TextGenerationError({
             operation,
             detail: "Failed to encode structured output schema.",
-            ...(operation === "generateWorkflowSummary" || operation === "generateDecisionNotes"
+            ...(operation === "generateWorkflowSummary" ||
+            operation === "generateContextualSummary" ||
+            operation === "generateDecisionNotes"
               ? {}
               : { cause }),
           }),
@@ -170,6 +176,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateBranchName"
       | "generateThreadTitle"
       | "generateWorkflowSummary"
+      | "generateContextualSummary"
       | "generateDecisionNotes",
     attachments: TextGeneration.BranchNameGenerationInput["attachments"],
   ): Effect.fn.Return<MaterializedImageAttachments, TextGenerationError> {
@@ -214,6 +221,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateBranchName"
       | "generateThreadTitle"
       | "generateWorkflowSummary"
+      | "generateContextualSummary"
       | "generateDecisionNotes";
     cwd: string;
     prompt: string;
@@ -231,7 +239,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
 
     const runCodexCommand = Effect.fn("runCodexJson.runCodexCommand")(function* () {
       const inference =
-        operation === "generateWorkflowSummary" || operation === "generateDecisionNotes";
+        operation === "generateWorkflowSummary" ||
+        operation === "generateContextualSummary" ||
+        operation === "generateDecisionNotes";
       const commandCwd = inference
         ? yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-workflow-inference-" }).pipe(
             Effect.mapError(
@@ -240,6 +250,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
                   operation,
                   detail: "Could not isolate workflow inference.",
                   ...(operation === "generateWorkflowSummary" ||
+                  operation === "generateContextualSummary" ||
                   operation === "generateDecisionNotes"
                     ? {}
                     : { cause }),
@@ -381,7 +392,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
             new TextGenerationError({
               operation,
               detail: "Failed to read Codex output file.",
-              ...(operation === "generateWorkflowSummary" || operation === "generateDecisionNotes"
+              ...(operation === "generateWorkflowSummary" ||
+              operation === "generateContextualSummary" ||
+              operation === "generateDecisionNotes"
                 ? {}
                 : { cause }),
             }),
@@ -393,7 +406,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
               new TextGenerationError({
                 operation,
                 detail: "Codex returned invalid structured output.",
-                ...(operation === "generateWorkflowSummary" || operation === "generateDecisionNotes"
+                ...(operation === "generateWorkflowSummary" ||
+                operation === "generateContextualSummary" ||
+                operation === "generateDecisionNotes"
                   ? {}
                   : { cause }),
               }),
@@ -534,6 +549,43 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       return { summary, stage: generated.stage, confidence: generated.confidence };
     });
 
+  const generateContextualSummary: NonNullable<
+    TextGeneration.TextGeneration["Service"]["generateContextualSummary"]
+  > = Effect.fn("CodexTextGeneration.generateContextualSummary")(
+    function* (input) {
+      const { prompt, outputSchema } = yield* Effect.try({
+        try: () => buildContextualSummaryPrompt(input),
+        catch: () =>
+          new TextGenerationError({
+            operation: "generateContextualSummary",
+            detail: "Contextual summary requires bounded evidence text.",
+          }),
+      });
+      const generated = yield* runCodexJson({
+        operation: "generateContextualSummary",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        imagePaths: [],
+        modelSelection: input.modelSelection,
+      });
+      const text = generated.text.trim();
+      if (!text)
+        return yield* new TextGenerationError({
+          operation: "generateContextualSummary",
+          detail: "The provider returned an empty Contextual summary.",
+        });
+      return { text };
+    },
+    Effect.mapError(
+      () =>
+        new TextGenerationError({
+          operation: "generateContextualSummary",
+          detail: "Contextual summary generation is unavailable.",
+        }),
+    ),
+  );
+
   const checkDecisionWriter: NonNullable<
     TextGeneration.TextGeneration["Service"]["checkDecisionWriter"]
   > = Effect.fn("CodexTextGeneration.checkDecisionWriter")(
@@ -600,5 +652,6 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     generateBranchName,
     generateThreadTitle,
     generateWorkflowSummary,
+    generateContextualSummary,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

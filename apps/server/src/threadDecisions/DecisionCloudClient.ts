@@ -8,15 +8,18 @@ import {
   type ThreadDecisionFundingInput,
   type ThreadDecisionFundingResult,
 } from "@lecturn/contracts";
-import { Context, Effect, Layer, Option, PubSub, Schema, Semaphore, Stream } from "effect";
+import { Context, Effect, Layer, Option, PubSub, Schema, Stream } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
 import { RELAY_URL_SECRET, RELAY_ENVIRONMENT_CREDENTIAL_SECRET } from "../cloud/config.ts";
 import { getOrCreateEnvironmentKeyPairFromSecretStore } from "../cloud/environmentKeys.ts";
 
-const FUNDING_STATUS = "decisions-funding-status";
-const FUNDING_REVOKED = "decisions-funding-revoked";
+import {
+  decisionFundingState,
+  DECISION_FUNDING_STATUS as FUNDING_STATUS,
+  DECISION_FUNDING_REVOKED as FUNDING_REVOKED,
+} from "./DecisionFundingState.ts";
 const unavailable = () =>
   new ThreadDecisionError({
     code: "unavailable",
@@ -24,13 +27,66 @@ const unavailable = () =>
   });
 const decodeStatus = Schema.decodeUnknownEffect(Schema.fromJsonString(DecisionFundingStatusResult));
 const encodeStatus = Schema.encodeEffect(Schema.fromJsonString(DecisionFundingStatusResult));
+// The relay sends a plain error body, not the tagged in-process error class.
+const RelayError = Schema.Struct({
+  code: DecisionEvaluationError.fields.code,
+  message: Schema.String.check(Schema.isMaxLength(2000)),
+});
+const invalidFundingResponse = () =>
+  new ThreadDecisionError({
+    code: "unavailable",
+    message: "Decisions funding returned an invalid response. Please try again.",
+  });
+const filterFundingResponse = Effect.fn("Decisions.cloud.fundingResponse")(function* (
+  response: HttpClientResponse.HttpClientResponse,
+) {
+  if (response.status >= 200 && response.status < 300) return response;
+  const error = yield* HttpClientResponse.schemaBodyJson(RelayError)(response).pipe(Effect.option);
+  if (Option.isSome(error)) {
+    // Only the allowlisted code crosses this boundary, never upstream text or causes.
+    switch (error.value.code) {
+      case "forbidden":
+        return yield* new ThreadDecisionError({
+          code: "forbidden",
+          message:
+            "Decisions funding was not authorized. Check this environment's account link and approve funding with an account that has Decisions access.",
+        });
+      case "expired":
+      case "conflict":
+        return yield* new ThreadDecisionError({
+          code: "conflict",
+          message: "Decisions funding approval expired or changed. Start a new approval.",
+        });
+      case "invalid":
+        return yield* new ThreadDecisionError({
+          code: "invalid",
+          message: "Decisions funding rejected the request. Start a new approval.",
+        });
+      case "allowance-exhausted":
+        return yield* new ThreadDecisionError({
+          code: "allowance-exhausted",
+          message: "Your Decisions allowance is exhausted.",
+        });
+      default:
+        return yield* new ThreadDecisionError({
+          code: "unavailable",
+          message: "Decisions funding is currently unavailable. Please try again later.",
+        });
+    }
+  }
+  return yield* new ThreadDecisionError({
+    code: response.status === 401 || response.status === 403 ? "forbidden" : "unavailable",
+    message: `Decisions funding returned HTTP ${response.status} without a recognized response. Please try again.`,
+  });
+});
 
 export const make = Effect.gen(function* () {
   const secrets = yield* ServerSecretStore;
   const environment = yield* ServerEnvironmentIdentity;
   const http = yield* HttpClient.HttpClient;
   const environmentId = yield* environment.getEnvironmentId;
-  const fundingMutex = yield* Semaphore.make(1);
+  const sharedFunding = decisionFundingState(secrets);
+  const fundingMutex = sharedFunding.mutex;
   const changes = yield* PubSub.sliding<DecisionFundingStatusResult>({ capacity: 16 });
   let observed: DecisionFundingStatusResult | undefined;
   const observe = (status: DecisionFundingStatusResult) =>
@@ -67,7 +123,7 @@ export const make = Effect.gen(function* () {
           Option.isSome(value) ? new TextDecoder().decode(value.value) : null,
         ),
       );
-  const stored = read(FUNDING_STATUS).pipe(
+  const stored = sharedFunding.status.pipe(
     Effect.flatMap((value) => (value ? decodeStatus(value) : Effect.succeed(empty))),
     Effect.orElseSucceed(() => empty),
   );
@@ -101,14 +157,17 @@ export const make = Effect.gen(function* () {
   const fetchStatus = request(
     `funding/status?environmentId=${encodeURIComponent(environmentId)}`,
   ).pipe(
-    Effect.flatMap(HttpClientResponse.filterStatusOk),
-    Effect.flatMap(HttpClientResponse.schemaBodyJson(DecisionFundingStatusResult)),
-    Effect.mapError(unavailable),
+    Effect.flatMap(filterFundingResponse),
+    Effect.flatMap((response) =>
+      HttpClientResponse.schemaBodyJson(DecisionFundingStatusResult)(response).pipe(
+        Effect.mapError(invalidFundingResponse),
+      ),
+    ),
   );
   const fundingStatusUnsafe = Effect.gen(function* () {
     const local = yield* stored;
-    const revoked = yield* read(FUNDING_REVOKED).pipe(Effect.orElseSucceed(() => "true"));
-    if (revoked === "true") return { ...local, state: "revoked" as const, eligible: false };
+    const revoked = yield* sharedFunding.revoked.pipe(Effect.orElseSucceed(() => true));
+    if (revoked) return { ...local, state: "revoked" as const, eligible: false };
     return yield* fetchStatus.pipe(
       Effect.tap(save),
       Effect.catch(() =>
@@ -133,9 +192,12 @@ export const make = Effect.gen(function* () {
         publicKey: key.publicKey.replace(/\r\n/g, "\n").trim(),
         expectedGeneration: input.expectedGeneration,
       }).pipe(
-        Effect.flatMap(HttpClientResponse.filterStatusOk),
-        Effect.flatMap(HttpClientResponse.schemaBodyJson(DecisionFundingChallengeResult)),
-        Effect.mapError(unavailable),
+        Effect.flatMap(filterFundingResponse),
+        Effect.flatMap((response) =>
+          HttpClientResponse.schemaBodyJson(DecisionFundingChallengeResult)(response).pipe(
+            Effect.mapError(invalidFundingResponse),
+          ),
+        ),
       );
       return {
         status: {
@@ -153,6 +215,7 @@ export const make = Effect.gen(function* () {
       yield* secrets
         .set(FUNDING_REVOKED, new TextEncoder().encode("true"))
         .pipe(Effect.mapError(unavailable));
+      yield* secrets.remove("extensions-decisions-pending").pipe(Effect.mapError(unavailable));
       const stopped = {
         ...(yield* stored),
         state: "revoked" as const,
@@ -164,7 +227,7 @@ export const make = Effect.gen(function* () {
         environmentId,
         expectedGeneration: input.expectedGeneration,
       }).pipe(
-        Effect.flatMap(HttpClientResponse.filterStatusOk),
+        Effect.flatMap(filterFundingResponse),
         Effect.flatMap(HttpClientResponse.schemaBodyJson(DecisionFundingStatusResult)),
         Effect.filterOrFail(
           (status) => status.state === "revoked" && !status.eligible,
@@ -180,12 +243,15 @@ export const make = Effect.gen(function* () {
       challengeId: input.challengeId,
       expectedGeneration: input.expectedGeneration,
     }).pipe(
-      Effect.flatMap(HttpClientResponse.filterStatusOk),
-      Effect.flatMap(HttpClientResponse.schemaBodyJson(DecisionFundingStatusResult)),
-      Effect.mapError(unavailable),
+      Effect.flatMap(filterFundingResponse),
+      Effect.flatMap((response) =>
+        HttpClientResponse.schemaBodyJson(DecisionFundingStatusResult)(response).pipe(
+          Effect.mapError(invalidFundingResponse),
+        ),
+      ),
     );
     yield* save(status);
-    yield* secrets.remove(FUNDING_REVOKED).pipe(Effect.mapError(unavailable));
+    yield* sharedFunding.clearRevoked.pipe(Effect.mapError(unavailable));
     return { status, challenge: null };
   });
   const funding = (input: ThreadDecisionFundingInput) =>
@@ -197,7 +263,7 @@ export const make = Effect.gen(function* () {
     );
   const retryPendingRevocation = Effect.gen(function* () {
     const local = yield* stored;
-    if (!local.remoteRevocationPending || (yield* read(FUNDING_REVOKED)) !== "true") return;
+    if (!local.remoteRevocationPending || !(yield* sharedFunding.revoked)) return;
     const current = yield* fetchStatus;
     if (current.state === "revoked" || current.state === "unfunded") {
       yield* save({
@@ -236,9 +302,7 @@ export const make = Effect.gen(function* () {
       ),
     );
     if (response.status < 200 || response.status >= 300) {
-      const error = yield* HttpClientResponse.schemaBodyJson(DecisionEvaluationError)(
-        response,
-      ).pipe(
+      const error = yield* HttpClientResponse.schemaBodyJson(RelayError)(response).pipe(
         Effect.orElseSucceed(
           () =>
             new DecisionEvaluationError({

@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import { EnvironmentId, type DecisionFundingStatusResult } from "@lecturn/contracts";
 import { Effect, Option, Result, Stream } from "effect";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http";
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
 import { RELAY_URL_SECRET, RELAY_ENVIRONMENT_CREDENTIAL_SECRET } from "../cloud/config.ts";
@@ -17,11 +17,15 @@ const active: DecisionFundingStatusResult = {
   allowance: null,
   remoteRevocationPending: false,
 };
-const setup = (handle: (url: string) => Response) =>
+const setup = (handle: (url: string) => Response, transportFailure = false) =>
   Effect.gen(function* () {
     const values = new Map<string, Uint8Array>([
       [RELAY_URL_SECRET, new TextEncoder().encode("https://relay.test")],
       [RELAY_ENVIRONMENT_CREDENTIAL_SECRET, new TextEncoder().encode("secret-test-credential")],
+      [
+        "cloud-link-ed25519-key-pair",
+        new TextEncoder().encode('{"privateKey":"test-private","publicKey":"test-public"}'),
+      ],
     ]);
     const secrets: ServerSecretStore["Service"] = {
       get: (name) => Effect.sync(() => Option.fromNullishOr(values.get(name))),
@@ -38,9 +42,16 @@ const setup = (handle: (url: string) => Response) =>
     };
     const urls: string[] = [];
     const http = HttpClient.make((request) =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
         urls.push(request.url);
         assert.equal(request.headers.authorization, "Bearer secret-test-credential");
+        if (transportFailure)
+          return yield* new HttpClientError.HttpClientError({
+            reason: new HttpClientError.TransportError({
+              request,
+              cause: new Error("PRIVATE_TRANSPORT_DETAILS"),
+            }),
+          });
         return HttpClientResponse.fromWeb(request, handle(request.url));
       }),
     );
@@ -196,5 +207,105 @@ it.effect("does not accept an active reply as confirmation of remote revocation"
     assert.equal(result.status.state, "revoked");
     assert.isFalse(result.status.eligible);
     assert.isTrue(result.status.remoteRevocationPending);
+  }),
+);
+
+it.effect.each(["challenge", "redeem"] as const)(
+  "preserves an application authorization rejection during funding %s",
+  (operation) =>
+    Effect.gen(function* () {
+      const { client } = yield* setup(() =>
+        Response.json({ code: "forbidden", message: "PRIVATE_UPSTREAM_DETAILS" }, { status: 403 }),
+      );
+      const error = yield* client
+        .funding(
+          operation === "challenge"
+            ? { operation, expectedGeneration: 4 }
+            : { operation, challengeId: "approved", expectedGeneration: 4 },
+        )
+        .pipe(Effect.flip);
+      assert.equal(error.code, "forbidden");
+      assert.include(error.message, "not authorized");
+      assert.include(error.message, "Decisions access");
+      assert.notInclude(error.message, "could not be reached");
+      assert.notInclude(error.message, "PRIVATE_UPSTREAM_DETAILS");
+    }),
+);
+
+it.effect.each(["expired", "conflict"] as const)(
+  "makes a funding %s rejection actionable without clearing local revocation",
+  (code) =>
+    Effect.gen(function* () {
+      const { client, values } = yield* setup(() =>
+        Response.json({ code, message: "PRIVATE_UPSTREAM_DETAILS" }, { status: 409 }),
+      );
+      values.set("decisions-funding-revoked", new TextEncoder().encode("true"));
+      const error = yield* client
+        .funding({ operation: "redeem", challengeId: "approved", expectedGeneration: 4 })
+        .pipe(Effect.flip);
+      assert.equal(error.code, "conflict");
+      assert.include(error.message, "Start a new approval");
+      assert.equal((yield* client.fundingStatus).state, "revoked");
+    }),
+);
+
+it.effect("distinguishes malformed relay replies from transport failure", () =>
+  Effect.gen(function* () {
+    for (const status of [200, 503]) {
+      const { client } = yield* setup(() => new Response("PRIVATE_UPSTREAM_DETAILS", { status }));
+      const error = yield* client
+        .funding({ operation: "redeem", challengeId: "approved", expectedGeneration: 4 })
+        .pipe(Effect.flip);
+      assert.equal(error.code, "unavailable");
+      assert.include(error.message, status === 200 ? "invalid response" : "HTTP 503");
+      assert.notInclude(error.message, "could not be reached");
+      assert.notInclude(error.message, "PRIVATE_UPSTREAM_DETAILS");
+    }
+    const { client } = yield* setup(() => Response.json(active), true);
+    const error = yield* client
+      .funding({ operation: "redeem", challengeId: "approved", expectedGeneration: 4 })
+      .pipe(Effect.flip);
+    assert.equal(error.code, "unavailable");
+    assert.include(error.message, "could not be reached");
+    assert.notInclude(error.message, "PRIVATE_TRANSPORT_DETAILS");
+  }),
+);
+
+it.effect("preserves missing environment authorization when starting approval", () =>
+  Effect.gen(function* () {
+    const { client, values, urls } = yield* setup(() => Response.json(active));
+    values.delete(RELAY_ENVIRONMENT_CREDENTIAL_SECRET);
+    const error = yield* client
+      .funding({ operation: "challenge", expectedGeneration: 4 })
+      .pipe(Effect.flip);
+    assert.equal(error.code, "forbidden");
+    assert.include(error.message, "Link this environment");
+    assert.deepEqual(urls, []);
+  }),
+);
+
+it.effect("decodes untagged evaluation rejections without exposing upstream messages", () =>
+  Effect.gen(function* () {
+    const { client } = yield* setup((url) =>
+      url.endsWith("/evaluate")
+        ? Response.json(
+            { code: "allowance-exhausted", message: "PRIVATE_UPSTREAM_DETAILS" },
+            { status: 429 },
+          )
+        : Response.json(active),
+    );
+    const error = yield* client
+      .evaluate({
+        requestId: "r",
+        runId: "run",
+        fundingGeneration: 4,
+        targets: [{ id: "t", text: "Use Postgres" }],
+        context: "",
+        description: "",
+        templateVersion: "decisions-v1",
+      })
+      .pipe(Effect.flip);
+    assert.equal(error.code, "allowance-exhausted");
+    assert.notInclude(error.message, "PRIVATE_UPSTREAM_DETAILS");
   }),
 );

@@ -16,6 +16,11 @@ vi.mock("../state/query", () => ({
 vi.mock("../state/threadDecisions", () => ({
   threadDecisionEnvironment: { sourceWindow: () => null },
 }));
+vi.mock("./ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
+  TooltipPopup: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
+}));
 vi.mock("./ui/button", () => ({
   Button: ({ children, ...props }: React.ComponentProps<"button">) => (
     <button {...props}>{children}</button>

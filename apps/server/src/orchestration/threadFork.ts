@@ -467,6 +467,10 @@ export function assembleThreadFork(input: AssembleThreadForkInput): AssembleThre
     },
     forkSource,
     ...(importedFrom === null ? {} : { importedFrom }),
+    contextualMessageIdMap: [...messageIdMap].map(([sourceId, targetId]) => ({
+      sourceId,
+      targetId,
+    })),
     history: { messages, activities, proposedPlans, turns },
   };
 

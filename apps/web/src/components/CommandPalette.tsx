@@ -1,4 +1,11 @@
-"use client";
+import { contextualDraftKey, useContextualDrafts } from "../state/contextualDrafts";
+import { randomUUID } from "../lib/utils";
+import {
+  contextualEnvironment,
+  useContextualAccess,
+  useContextualAvailable,
+} from "../state/contextual";
+("use client");
 
 import { useServerConfigs } from "../state/entities";
 
@@ -639,6 +646,43 @@ function OpenCommandPaletteDialog(props: {
   const { projects: listedProjects, archivedProjectKeys } = useListedProjects();
   const decisionConfigs = useServerConfigs();
   const changeRequestSnapshotByKey = useAtomValue(ThreadPr.threadChangeRequestSnapshotsAtom);
+  const contextualTargetEnvironment =
+    activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
+  const contextualAvailable = useContextualAvailable(contextualTargetEnvironment);
+  const contextualAccess = useContextualAccess(contextualTargetEnvironment);
+  const contextualRoute = useParams({
+    strict: false,
+    select: (params) => resolveThreadRouteTarget(params),
+  });
+  const draftContextualKey =
+    contextualRoute?.kind === "draft" && activeDraftThread
+      ? contextualDraftKey(
+          activeDraftThread.environmentId,
+          activeDraftThread.projectId,
+          contextualRoute.draftId,
+        )
+      : null;
+  const draftContextualChoice = useContextualDrafts((state) =>
+    draftContextualKey ? state.choices[draftContextualKey] : undefined,
+  );
+  const draftContextualSettings = useEnvironmentQuery(
+    contextualAvailable && activeDraftThread && draftContextualKey
+      ? contextualEnvironment.projectSettings({
+          environmentId: activeDraftThread.environmentId,
+          input: { projectId: activeDraftThread.projectId },
+        })
+      : null,
+  );
+  const contextualStatus = useEnvironmentQuery(
+    activeThread && contextualAvailable
+      ? contextualEnvironment.status({
+          environmentId: activeThread.environmentId,
+          input: { threadId: activeThread.id },
+        })
+      : null,
+  );
+  const contextualToggle = useAtomCommand(contextualEnvironment.updateThreadSettings);
+  const contextualRefresh = useAtomCommand(contextualEnvironment.refresh);
   const activeThreadProject = useProject(
     activeThread === null
       ? null
@@ -1775,6 +1819,81 @@ function OpenCommandPaletteDialog(props: {
   const connectAccountItems = useConnectAccountPaletteItems();
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
+  if (
+    draftContextualKey &&
+    contextualAvailable &&
+    contextualAccess.operate &&
+    draftContextualSettings.data
+  ) {
+    const key = draftContextualKey,
+      settings = draftContextualSettings.data;
+    const enabled = draftContextualChoice?.enabled ?? settings.defaultEnabled;
+    actionItems.push({
+      kind: "action",
+      value: "action:contextual-draft-toggle",
+      title: `Contextual: turn ${enabled ? "off" : "on"} for this new thread`,
+      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+      searchTerms: ["contextual", "context", "slack", "sources"],
+      run: () => {
+        useContextualDrafts.getState().set(key, {
+          enabled: !enabled,
+          sourceIds: draftContextualChoice?.sourceIds ?? settings.sourceIds,
+        });
+        return Promise.resolve();
+      },
+    });
+  }
+  if (activeThread && contextualAvailable && contextualAccess.operate && contextualStatus.data) {
+    const targetThread = activeThread;
+    const settings = contextualStatus.data.thread;
+    actionItems.push({
+      kind: "action",
+      value: "action:contextual-toggle",
+      title: `Contextual: turn ${settings.enabled ? "off" : "on"} for this thread`,
+      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+      searchTerms: ["context", "sources", "slack", "contextual"],
+      run: async () => {
+        await contextualToggle({
+          environmentId: targetThread.environmentId,
+          input: {
+            threadId: targetThread.id,
+            expectedRevision: settings.revision,
+            enabled: !settings.enabled,
+            sourceIds: settings.sourceIds,
+          },
+        });
+      },
+    });
+    if (settings.enabled)
+      actionItems.push({
+        kind: "action",
+        value: "action:contextual-refresh",
+        title: "Refresh context for next message",
+        icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+        searchTerms: ["contextual", "restore", "context"],
+        run: async () => {
+          await contextualRefresh({
+            environmentId: targetThread.environmentId,
+            input: {
+              threadId: targetThread.id,
+              expectedRevision: settings.revision,
+              actionId: randomUUID(),
+            },
+          });
+        },
+      });
+  }
+  if (contextualTargetEnvironment && contextualAvailable) {
+    const environmentId = contextualTargetEnvironment;
+    actionItems.push({
+      kind: "action",
+      value: "action:contextual-settings",
+      title: "Contextual sources and collection…",
+      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+      searchTerms: ["contextual", "sources", "slack", "funding", "collection"],
+      run: () => navigate({ to: "/contextual/$environmentId", params: { environmentId } }),
+    });
+  }
   const decisionProjects = listedProjects.filter(
     (project) =>
       decisionConfigs.get(project.environmentId)?.environment.capabilities.threadDecisions === true,

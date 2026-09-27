@@ -327,6 +327,41 @@ function makeForkInput(providerTurnRef: string | null) {
 }
 
 describe("ClaudeAdapterLive", () => {
+  it.effect(
+    "contextual evidence is skipped because SDK local queue admission is not acceptance",
+    () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({ threadId: THREAD_ID, runtimeMode: "full-access" });
+        const result = yield* adapter.sendTurn({
+          threadId: THREAD_ID,
+          input: "Base text",
+          contextualEvidence: {
+            preparationId: "prep",
+            packetId: "packet",
+            dispatchId: "dispatch",
+            submissionId: "submission",
+            providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+            providerContextEpoch: "epoch",
+            providerContextId: null,
+            text: "contextual source",
+            evidenceIds: ["source"],
+          },
+        });
+        assert.equal(result.contextualReceipt?.disposition, "skipped");
+        assert.equal(result.contextualReceipt?.evidenceIncluded, false);
+        const prompt = yield* Effect.promise(() =>
+          readFirstPromptText(harness.getLastCreateQueryInput()),
+        );
+        assert.equal(prompt, "Base text");
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
   it.effect("returns validation error for non-claude provider on startSession", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

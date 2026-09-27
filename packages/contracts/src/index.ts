@@ -54,3 +54,10 @@ export * from "./threadDecisions.ts";
 export * from "./relayDecisions.ts";
 
 export * from "./manualCloudLink.ts";
+
+export * from "./contextual.ts";
+export * from "./contextualRpc.ts";
+export * from "./extensionsHelper.ts";
+export * from "./extensions.ts";
+
+export * from "./extensionsEvaluator.ts";

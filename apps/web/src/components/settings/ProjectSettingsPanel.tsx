@@ -1,3 +1,4 @@
+import { ContextualProjectSettings } from "../contextual/ContextualProjectSettings";
 import { AccountSurface } from "../AccountSurface";
 import { accountByEnvironmentIdAtom } from "../../cloud/connectAccounts";
 import "./project-settings-glass.css";
@@ -892,6 +893,10 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   return (
     <>
       <SettingsPageContainer width="wide" className="gap-8">
+        <ContextualProjectSettings
+          environmentId={selectedCheckout.environmentId}
+          projectId={selectedCheckout.id}
+        />
         <SettingsSection title="Project">
           {selectedServerConfig?.environment.capabilities.threadDecisions === true ? (
             <SettingsRow

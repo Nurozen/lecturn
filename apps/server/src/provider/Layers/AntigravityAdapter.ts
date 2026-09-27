@@ -1,3 +1,4 @@
+import { prepareContextualDispatch } from "../ContextualDispatch.ts";
 import { StaveMemoryWiring, noop as noopStaveMemoryWiring } from "../../stave/StaveMemoryWiring.ts";
 import {
   ApprovalRequestId,
@@ -1125,12 +1126,20 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
             ...(model ? { model } : {}),
             updatedAt: yield* nowIso,
           };
+          const contextual = prepareContextualDispatch(
+            input,
+            steering ? "steered" : "fresh",
+            options.instanceId,
+            Option.getOrUndefined(decodeResumeCursor(context.session.resumeCursor))?.sessionId,
+          );
+          yield* contextual.receipt("unknown", turnId, null);
           const dispatched = yield* Deferred.make<void>();
           const fiber = yield* context.runtime
             .prompt(
               {
                 prompt: [
                   ...prompt,
+                  ...(contextual.text ? [{ type: "text" as const, text: contextual.text }] : []),
                   {
                     type: "text",
                     text: buildRuntimeInstructions({ harness: "Antigravity", model }),
@@ -1150,10 +1159,20 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
               Effect.asVoid,
             ),
           );
-          return { turn, fiber };
+          if (input.onDispatch) yield* input.onDispatch;
+          return { turn, fiber, contextual };
         }),
       );
       const result = yield* Fiber.await(launch.fiber).pipe(Effect.flatMap((exit) => exit));
+      const contextualReceipt = yield* launch.contextual.receipt(
+        result.stopReason === "cancelled" ? "unknown" : "accepted",
+        launch.turn.turnId,
+        result.stopReason === "cancelled"
+          ? null
+          : `acp:${Option.getOrUndefined(decodeResumeCursor(context.session.resumeCursor))?.sessionId}:${input.contextualEvidence?.dispatchId ?? launch.turn.turnId}`,
+        undefined,
+        true,
+      );
       yield* context.runtime.drainEvents;
       if (context.stopped) {
         return yield* new ProviderAdapterSessionClosedError({
@@ -1174,6 +1193,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
         threadId: input.threadId,
         turnId: launch.turn.turnId,
         resumeCursor: context.session.resumeCursor,
+        ...(contextualReceipt ? { contextualReceipt } : {}),
       };
     }).pipe(
       Effect.tapError((cause) =>

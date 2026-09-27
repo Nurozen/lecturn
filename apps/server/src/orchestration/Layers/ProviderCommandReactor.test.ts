@@ -57,6 +57,9 @@ import { makeProviderRegistryLayer } from "../../provider/testUtils/providerRegi
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import * as StaveWorkspaceReader from "../../stave/StaveWorkspaceReader.ts";
+import * as ContextualQueue from "../ContextualTurnQueue.ts";
+import { ContextualTurnCoordinator } from "../ContextualTurnCoordinator.ts";
+import * as ContextualNotifications from "../../contextual/ContextualNotifications.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
@@ -125,7 +128,8 @@ describe("ProviderCommandReactor", () => {
     | OrchestrationEngineService
     | ProviderCommandReactor
     | ProjectionSnapshotQuery
-    | SqlClient.SqlClient,
+    | SqlClient.SqlClient
+    | ContextualNotifications.ContextualNotifications,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -176,6 +180,10 @@ describe("ProviderCommandReactor", () => {
   });
 
   async function createHarness(input?: {
+    readonly contextual?: (
+      queue: ContextualQueue.ContextualTurnQueue["Service"],
+    ) => ContextualTurnCoordinator["Service"];
+    readonly sendTurnEffect?: ProviderServiceShape["sendTurn"];
     readonly baseDir?: string;
     readonly threadModelSelection?: ModelSelection;
     readonly sessionModelSwitch?: "unsupported" | "in-session";
@@ -274,11 +282,13 @@ describe("ProviderCommandReactor", () => {
         ),
       );
     });
-    const sendTurn = vi.fn((_: unknown) =>
-      Effect.succeed({
-        threadId: ThreadId.make("thread-1"),
-        turnId: asTurnId("turn-1"),
-      }),
+    const sendTurn = vi.fn<ProviderServiceShape["sendTurn"]>(
+      input?.sendTurnEffect ??
+        (() =>
+          Effect.succeed({
+            threadId: ThreadId.make("thread-1"),
+            turnId: asTurnId("turn-1"),
+          })),
     );
     const compactThread = vi.fn((_: ThreadId) => input?.compactThreadEffect?.() ?? Effect.void);
     const interruptTurn = vi.fn((_: unknown) => input?.interruptTurnEffect?.() ?? Effect.void);
@@ -516,7 +526,15 @@ describe("ProviderCommandReactor", () => {
         } satisfies OrchestrationEngineService["Service"];
       }),
     ).pipe(Layer.provide(orchestrationLayer));
+    const contextualLayer = input?.contextual
+      ? Layer.effect(
+          ContextualTurnCoordinator,
+          Effect.map(ContextualQueue.ContextualTurnQueue, input.contextual),
+        ).pipe(Layer.provideMerge(ContextualQueue.layer))
+      : Layer.empty;
     const layer = ProviderCommandReactorLive.pipe(
+      Layer.provideMerge(contextualLayer),
+      Layer.provideMerge(ContextualNotifications.layer),
       Layer.provideMerge(reactorOrchestrationLayer),
       Layer.provideMerge(reactorSnapshotLayer),
       Layer.provideMerge(providerSessionDirectoryLayer),
@@ -634,6 +652,37 @@ describe("ProviderCommandReactor", () => {
 
     return {
       engine,
+      enableContextual: (threadId: ThreadId) =>
+        runtime!.runPromise(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            yield* sql`INSERT INTO contextual_thread_settings(thread_id,project_id,enabled,source_ids_json,updated_at) VALUES(${threadId},'project-1',1,'[]',${now}) ON CONFLICT(thread_id) DO UPDATE SET enabled=1`;
+          }),
+        ),
+      notifyContextual: () =>
+        runtime!.runPromise(
+          Effect.flatMap(
+            ContextualNotifications.ContextualNotifications,
+            (notifications) => notifications.publish,
+          ),
+        ),
+      markContextualDispatching: () =>
+        runtime!.runPromise(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            yield* sql`UPDATE contextual_turn_queue SET state='dispatching'`;
+          }),
+        ),
+      readContextualQueue: () =>
+        runtime!.runPromise(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            return yield* sql<{
+              state: string;
+              thread_id: string;
+            }>`SELECT state,thread_id FROM contextual_turn_queue ORDER BY sequence`;
+          }),
+        ),
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
       readPendingTurnStarts: () =>
         runtime!.runPromise(
@@ -765,6 +814,304 @@ describe("ProviderCommandReactor", () => {
         expect(harness.startSession).not.toHaveBeenCalled();
         expect(harness.sendTurn).not.toHaveBeenCalled();
       }),
+  );
+
+  const passThroughContextual = (
+    queue: ContextualQueue.ContextualTurnQueue["Service"],
+  ): ContextualTurnCoordinator["Service"] => ({
+    prepare: () => Effect.succeed({ action: "send", preparation: null, packet: null }),
+    begin: (queued) =>
+      queue
+        .setState(queued.event.payload.threadId, queued.event.eventId, "dispatching", null)
+        .pipe(Effect.as(undefined)),
+    observe: () => Effect.void,
+    recover: () => Effect.void,
+  });
+
+  effectIt.effect(
+    "session stop cancels pending contextual work before it can restart the provider",
+    () =>
+      Effect.gen(function* () {
+        const preparing = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const stopped = yield* Deferred.make<void>();
+        const harness = yield* Effect.promise(() =>
+          createHarness({
+            contextual: (queue) => ({
+              ...passThroughContextual(queue),
+              prepare: () =>
+                Effect.gen(function* () {
+                  yield* Deferred.succeed(preparing, undefined);
+                  yield* Deferred.await(release);
+                  return { action: "send", preparation: null, packet: null } as const;
+                }),
+            }),
+          }),
+        );
+        const events = yield* harness.engine.subscribeDomainEvents;
+        yield* events.pipe(
+          Stream.runForEach((event) =>
+            event.type === "thread.session-set" && event.payload.session.status === "stopped"
+              ? Deferred.succeed(stopped, undefined)
+              : Effect.void,
+          ),
+          Effect.forkScoped,
+        );
+        const threadId = ThreadId.make("thread-1");
+        yield* Effect.promise(() => harness.enableContextual(threadId));
+        yield* harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("pending-before-stop"),
+          threadId,
+          message: {
+            messageId: asMessageId("pending-before-stop"),
+            role: "user",
+            text: "First",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: "2026-01-01T00:00:01.000Z",
+        });
+        yield* Deferred.await(preparing);
+        yield* harness.engine.dispatch({
+          type: "thread.session.stop",
+          commandId: CommandId.make("stop-during-preparation"),
+          threadId,
+          createdAt: "2026-01-01T00:00:02.000Z",
+        });
+        yield* Deferred.await(stopped);
+        yield* Deferred.succeed(release, undefined);
+        yield* Effect.promise(() => harness.drain());
+        expect(harness.startSession).not.toHaveBeenCalled();
+        expect(harness.sendTurn).not.toHaveBeenCalled();
+        expect(
+          (yield* Effect.promise(() => harness.readContextualQueue())).map((row) => row.state),
+        ).toEqual(["canceled"]);
+      }).pipe(Effect.scoped),
+  );
+
+  effectIt.effect(
+    "queued ACP dispatch releases all four permits before turn completion and permits FIFO steering",
+    () =>
+      Effect.gen(function* () {
+        const completed = yield* Deferred.make<void>();
+        const admitted = yield* Deferred.make<void>();
+        const calls: string[] = [];
+        const harness = yield* Effect.promise(() =>
+          createHarness({
+            threadModelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "auto" },
+            contextual: passThroughContextual,
+            sendTurnEffect: (request, _observe, onDispatch) =>
+              Effect.gen(function* () {
+                calls.push(`${request.threadId}:${request.input}`);
+                if (onDispatch) yield* onDispatch;
+                if (calls.length === 6) yield* Deferred.succeed(admitted, undefined);
+                yield* Deferred.await(completed);
+                return { threadId: request.threadId, turnId: asTurnId("turn-1") };
+              }),
+          }),
+        );
+        for (let index = 1; index <= 5; index++) {
+          const threadId = ThreadId.make(`thread-${index}`);
+          if (index > 1)
+            yield* harness.engine.dispatch({
+              type: "thread.create",
+              commandId: CommandId.make(`create-${index}`),
+              threadId,
+              projectId: asProjectId("project-1"),
+              title: "Thread",
+              modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "auto" },
+              interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+              runtimeMode: "approval-required",
+              branch: null,
+              worktreePath: null,
+              createdAt: "2026-01-01T00:00:00.000Z",
+            });
+          yield* Effect.promise(() => harness.enableContextual(threadId));
+          yield* harness.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.make(`send-${index}`),
+            threadId,
+            message: {
+              messageId: asMessageId(`message-${index}`),
+              role: "user",
+              text: "First",
+              attachments: [],
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "approval-required",
+            createdAt: "2026-01-01T00:00:01.000Z",
+          });
+        }
+        yield* harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("steer"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("steer"),
+            role: "user",
+            text: "Steer",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: "2026-01-01T00:00:02.000Z",
+        });
+        yield* Deferred.await(admitted);
+        yield* Effect.promise(() => harness.drain());
+        expect(calls).toHaveLength(6);
+        expect(calls.filter((call) => call.startsWith("thread-1:"))).toEqual([
+          "thread-1:First",
+          "thread-1:Steer",
+        ]);
+        expect(yield* Deferred.isDone(completed)).toBe(false);
+        expect(
+          (yield* Effect.promise(() => harness.readContextualQueue())).every(
+            (row) => row.state === "done",
+          ),
+        ).toBe(true);
+        yield* Effect.promise(() => harness.notifyContextual());
+        yield* Deferred.succeed(completed, undefined);
+        yield* Effect.promise(() => harness.drain());
+        expect(calls).toHaveLength(6);
+      }),
+  );
+
+  effectIt.effect(
+    "a queued preflight failure releases FIFO without replaying the failed turn",
+    () =>
+      Effect.gen(function* () {
+        const secondSent = yield* Deferred.make<void>();
+        const harness = yield* Effect.promise(() =>
+          createHarness({
+            contextual: passThroughContextual,
+            sendTurnEffect: (request, _observe, onDispatch) =>
+              Effect.gen(function* () {
+                if (request.input === "First")
+                  return yield* new ProviderAdapterRequestError({
+                    provider: "codex",
+                    method: "sendTurn",
+                    detail: "Synthetic preflight failure",
+                  });
+                if (onDispatch) yield* onDispatch;
+                yield* Deferred.succeed(secondSent, undefined);
+                return { threadId: request.threadId, turnId: asTurnId("second") };
+              }),
+          }),
+        );
+        const threadId = ThreadId.make("thread-1");
+        yield* Effect.promise(() => harness.enableContextual(threadId));
+        for (const text of ["First", "Second"])
+          yield* harness.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.make(text),
+            threadId,
+            message: { messageId: asMessageId(text), role: "user", text, attachments: [] },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "approval-required",
+            createdAt: "2026-01-01T00:00:01.000Z",
+          });
+        yield* Deferred.await(secondSent);
+        yield* Effect.promise(() => harness.drain());
+        expect(harness.sendTurn).toHaveBeenCalledTimes(2);
+        expect(
+          (yield* Effect.promise(() => harness.readContextualQueue())).map((row) => row.state),
+        ).toEqual(["unknown", "done"]);
+      }),
+  );
+
+  effectIt.effect("recovery reports uncertain fail-open dispatch and never replays it", () =>
+    Effect.gen(function* () {
+      const activated = yield* Deferred.make<void>();
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          contextual: passThroughContextual,
+          serverActivation: Deferred.await(activated),
+        }),
+      );
+      const threadId = ThreadId.make("thread-1");
+      yield* Effect.promise(() => harness.enableContextual(threadId));
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("crashed"),
+        threadId,
+        message: {
+          messageId: asMessageId("crashed"),
+          role: "user",
+          text: "Before restart",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:01.000Z",
+      });
+      yield* Effect.promise(() => harness.markContextualDispatching());
+      yield* Deferred.succeed(activated, undefined);
+      yield* Effect.promise(() => harness.drain());
+      expect(harness.sendTurn).not.toHaveBeenCalled();
+      expect(
+        (yield* Effect.promise(() => harness.readContextualQueue())).map((row) => row.state),
+      ).toEqual(["unknown"]);
+      const thread = (yield* Effect.promise(() => harness.readModel())).threads.find(
+        (entry) => entry.id === threadId,
+      );
+      expect(thread?.activities).toContainEqual(
+        expect.objectContaining({ summary: "Provider turn delivery could not be confirmed" }),
+      );
+    }),
+  );
+
+  effectIt.effect("held contextual heads do not generate titles on repeated notifications", () =>
+    Effect.gen(function* () {
+      const firstHold = yield* Deferred.make<void>();
+      const nextHold = yield* Deferred.make<void>();
+      let holds = 0;
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          contextual: (queue) => ({
+            ...passThroughContextual(queue),
+            prepare: (queued) =>
+              Effect.gen(function* () {
+                yield* queue.setState(
+                  queued.event.payload.threadId,
+                  queued.event.eventId,
+                  "held",
+                  null,
+                );
+                yield* Deferred.succeed(++holds === 1 ? firstHold : nextHold, undefined);
+                return { action: "hold" } as const;
+              }).pipe(Effect.orDie),
+          }),
+        }),
+      );
+      const threadId = ThreadId.make("thread-1");
+      yield* Effect.promise(() => harness.enableContextual(threadId));
+      yield* harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make("default-title"),
+        threadId,
+        title: "New thread",
+      });
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("held"),
+        threadId,
+        message: { messageId: asMessageId("held"), role: "user", text: "First", attachments: [] },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:01.000Z",
+      });
+      yield* Deferred.await(firstHold);
+      yield* Effect.promise(() => harness.drain());
+      yield* Effect.promise(() => harness.notifyContextual());
+      yield* Deferred.await(nextHold);
+      yield* Effect.promise(() => harness.drain());
+      expect(holds).toBeGreaterThanOrEqual(2);
+      expect(harness.generateThreadTitle).not.toHaveBeenCalled();
+      expect(harness.generateBranchName).not.toHaveBeenCalled();
+      expect(harness.sendTurn).not.toHaveBeenCalled();
+    }),
   );
 
   effectIt.effect("clears a failed sign-out request without sending it as a prompt", () =>

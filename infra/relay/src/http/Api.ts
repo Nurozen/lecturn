@@ -145,15 +145,23 @@ export const makeRelayCors = (
     ) {
       const request = yield* HttpServerRequest.HttpServerRequest;
       const billingRequest =
-        request.url.startsWith("/v1/billing/") || request.url.startsWith("/v1/decisions/");
+        request.url.startsWith("/v1/billing/") ||
+        request.url.startsWith("/v1/decisions/") ||
+        request.url.startsWith("/v1/extensions/");
       if (billingRequest) {
+        const path = request.url.split("?")[0];
+        const effectiveMethod =
+          request.method === "OPTIONS"
+            ? request.headers["access-control-request-method"]
+            : request.method;
+        const extensionPath =
+          request.url.startsWith("/v1/extensions/") || request.url.startsWith("/v1/decisions/");
         const desktopStatus =
           request.headers.origin === "lecturn://app" &&
-          (request.url.split("?")[0] === "/v1/billing/status" ||
-            request.url.startsWith("/v1/decisions/")) &&
-          (request.method === "GET" ||
-            (request.method === "OPTIONS" &&
-              request.headers["access-control-request-method"] === "GET"));
+          ((effectiveMethod === "GET" && (path === "/v1/billing/status" || extensionPath)) ||
+            (effectiveMethod === "POST" &&
+              (path === "/v1/extensions/funding/account-revoke" ||
+                path === "/v1/decisions/funding/account-revoke")));
         const allowed =
           isBillingAppOrigin(request.headers.origin, billingOrigin, additionalAppOrigins) ||
           desktopStatus;
@@ -167,7 +175,9 @@ export const makeRelayCors = (
             status: allowed ? 204 : 403,
             headers: {
               ...headers,
-              "access-control-allow-methods": desktopStatus ? "GET,OPTIONS" : "GET,POST,OPTIONS",
+              "access-control-allow-methods": desktopStatus
+                ? `${effectiveMethod},OPTIONS`
+                : "GET,POST,OPTIONS",
               "access-control-allow-headers": relayCorsAllowedHeaders.join(","),
             },
           });

@@ -146,6 +146,7 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   threadNotes: Schema.optionalKey(Schema.Boolean),
   /** Missing on pre-Decisions servers; clients must not probe their Decisions RPCs. */
   threadDecisions: Schema.optionalKey(Schema.Boolean),
+  contextual: Schema.optionalKey(Schema.Boolean),
   manualCloudLink: Schema.optionalKey(Schema.Boolean),
   threadForking: Schema.optionalKey(Schema.Boolean),
   /** This server build ships the Stave integration and speaks the given

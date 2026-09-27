@@ -71,7 +71,7 @@ const fixture = Effect.fn("usageTest.fixture")(function* (
     runId: `run-${id}`,
     fingerprint: "fixture-hash",
     templateVersion: "v1",
-    model: "jev-1.13.0",
+    model: "extensions-v1",
   };
   return {
     sql,
@@ -96,6 +96,34 @@ const admitted = Effect.fn("usageTest.admitted")(function* (
 });
 
 describe.skipIf(!url)("Decisions usage PostgreSQL", () => {
+  it.effect(
+    "replays settled retired requests without new reservations and keeps uncertain requests fenced",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const { store, input, sql, payerId } = yield* fixture();
+          const first = yield* admitted(store, input);
+          yield* store.markDispatched(first.attemptId);
+          yield* store.markUnknown(first.attemptId);
+          expect((yield* Effect.flip(store.replayLegacy(input))).code).toBe("in-progress");
+          yield* store.settle(first.attemptId, { inputTokens: 123, judgments: judgment });
+          // Treat every old backend/model as opaque metadata; do not rewrite ledger rows.
+          yield* sql`UPDATE relay_decision_usage_requests SET backend='retired-provider',model='private-historical-model' WHERE payer_id=${payerId}`;
+          const before = yield* store.getAllowance(payerId);
+          expect(yield* store.replayLegacy(input)).toMatchObject({
+            model: "extensions-v1",
+            replayed: true,
+            inputTokens: 123,
+          });
+          expect(yield* store.getAllowance(payerId)).toEqual(before);
+          expect(
+            (yield* Effect.flip(store.replayLegacy({ ...input, fingerprint: "different" }))).code,
+          ).toBe("conflict");
+          yield* sql`UPDATE relay_decision_funding SET generation=2,state='revoked' WHERE payer_id=${payerId}`;
+          expect((yield* Effect.flip(store.replayLegacy(input))).code).toBe("forbidden");
+        }),
+      ),
+  );
   it.effect(
     "materializes one window concurrently, dispatches once, debits once and replays content-free judgments",
     () =>

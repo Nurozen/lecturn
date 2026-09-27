@@ -12,6 +12,7 @@ import {
   type DecisionEvaluationRequest,
   type DecisionFundingStatusResult,
   type DecisionWriterOutput,
+  type DecisionWriterOutputV2,
   type DecisionWriterInput,
   type HostPowerSnapshot,
   type ServerProvider,
@@ -210,7 +211,7 @@ const fixture = (options: Options = {}) =>
           return {
             requestId: input.requestId,
             runId: input.runId,
-            model: "jev-1.13.0",
+            model: "extensions-v1",
             templateVersion: "decisions-v1",
             judgments: input.targets.map((target) => ({
               targetId: target.id,
@@ -245,9 +246,40 @@ const fixture = (options: Options = {}) =>
       write: (_binding, input) =>
         Effect.suspend(() => {
           writerCalls++;
-          return options.writer
-            ? options.writer(input, writerCalls, sql, settings)
-            : Effect.succeed(goodOutput(input));
+          return (
+            options.writer
+              ? options.writer(input, writerCalls, sql, settings)
+              : Effect.succeed(goodOutput(input))
+          ).pipe(
+            Effect.map(
+              (output) =>
+                ({
+                  ...output,
+                  version: 2 as const,
+                  actions: output.actions.map((action) => {
+                    if (action.action === "skip" || action.action === "needs_context")
+                      return action;
+                    const fields = {
+                      occurrenceEvidenceId: action.evidence[0]!.evidenceId,
+                      acceptanceEvidence: null,
+                      liveChoice: "new-choice" as const,
+                      sourceLineageIds: [],
+                    };
+                    if (action.action === "duplicate")
+                      return {
+                        ...action,
+                        ...fields,
+                        action: "duplicate_occurrence" as const,
+                        title: "Use SQLite",
+                        body: "Use SQLite for storage.",
+                        rationale: null,
+                        attribution: "agent-chosen" as const,
+                      };
+                    return { ...action, ...fields };
+                  }),
+                }) satisfies DecisionWriterOutputV2,
+            ),
+          );
         }),
     });
     const worker = yield* make.pipe(
@@ -555,31 +587,33 @@ it.layer(testLayer)("Decision worker", (it) => {
         assert.equal(notes[0]?.provenance.writerSelection.model, "new-model");
       }),
   );
-  it.effect("repairs invalid evidence once through the same writer without repeating Jev", () =>
-    Effect.gen(function* () {
-      const { worker, repository, requests, writerCalls } = yield* fixture({
-        writer: (input, attempt) =>
-          Effect.succeed(
-            attempt === 1
-              ? {
-                  ...goodOutput(input),
-                  actions: [
-                    {
-                      ...goodOutput(input).actions[0]!,
-                      evidence: [
-                        { evidenceId: input.evidence[0]!.id, quote: "fabricated quotation" },
-                      ],
-                    } as DecisionWriterOutput["actions"][number],
-                  ],
-                }
-              : goodOutput(input),
-          ),
-      });
-      yield* worker.drive;
-      assert.equal(requests.length, 1);
-      assert.equal(writerCalls(), 2);
-      assert.equal((yield* repository.list({ projectId })).decisions.length, 1);
-    }),
+  it.effect(
+    "repairs invalid evidence once through the same writer without repeating evaluation",
+    () =>
+      Effect.gen(function* () {
+        const { worker, repository, requests, writerCalls } = yield* fixture({
+          writer: (input, attempt) =>
+            Effect.succeed(
+              attempt === 1
+                ? {
+                    ...goodOutput(input),
+                    actions: [
+                      {
+                        ...goodOutput(input).actions[0]!,
+                        evidence: [
+                          { evidenceId: input.evidence[0]!.id, quote: "fabricated quotation" },
+                        ],
+                      } as DecisionWriterOutput["actions"][number],
+                    ],
+                  }
+                : goodOutput(input),
+            ),
+        });
+        yield* worker.drive;
+        assert.equal(requests.length, 1);
+        assert.equal(writerCalls(), 2);
+        assert.equal((yield* repository.list({ projectId })).decisions.length, 1);
+      }),
   );
   it.effect("rejects changed sources and purges during writing without a late note", () =>
     Effect.gen(function* () {
@@ -815,9 +849,9 @@ it.layer(testLayer)("Decision worker", (it) => {
         yield* f.worker.drive;
         const notes = (yield* f.repository.list({ projectId })).decisions;
         assert.equal(f.writerCalls(), 2);
-        assert.equal(notes.length, action === "duplicate" ? 1 : 2);
+        assert.equal(notes.length, 2);
         const persisted = yield* f.repository.get({ projectId, id: prior.id });
-        if (action === "duplicate") assert.equal(persisted.evidence.length, 2);
+        if (action === "duplicate") assert.equal(persisted.evidence.length, 1);
         else assert.equal(persisted.relationships[0]?.state, "proposed");
       }),
     );

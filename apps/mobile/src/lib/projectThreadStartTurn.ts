@@ -1,3 +1,4 @@
+import type { ContextualDraft } from "../features/contextual/contextualDraft";
 import {
   CommandId,
   MessageId,
@@ -23,6 +24,7 @@ export function deriveThreadTitleFromPrompt(value: string): string {
 }
 
 export interface ProjectThreadStartTurnSpec {
+  readonly contextual?: ContextualDraft;
   readonly projectId: ProjectId;
   readonly projectCwd: string;
   readonly threadId: string;
@@ -70,6 +72,7 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
     interactionMode: spec.interactionMode,
     bootstrap: {
       createThread: {
+        ...(spec.contextual ? { contextual: spec.contextual } : {}),
         projectId: spec.projectId,
         title,
         modelSelection: spec.modelSelection,

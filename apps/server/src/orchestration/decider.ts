@@ -1589,6 +1589,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           forkedFrom: command.forkedFrom,
           forkSource: command.forkSource,
+          ...(command.contextualMessageIdMap
+            ? { contextualMessageIdMap: command.contextualMessageIdMap }
+            : {}),
           ...(command.importedFrom != null ? { importedFrom: command.importedFrom } : {}),
           history: command.history,
           // Inherited from the read model's source thread; the materialized
