@@ -1,0 +1,80 @@
+name: Generated extension contract catalog
+on:
+  pull_request:
+    paths:
+      - packages/contracts/**
+      - apps/server/src/auth/RpcAuthorization.ts
+      - scripts/generate-extension-contracts*
+      - .github/workflows/extension-contracts.yml
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a digest-named immutable release after protected environment approval
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: extension-contracts-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+      - name: Verify authoritative schemas and generator
+        run: |
+          vp test run scripts/generate-extension-contracts.test.ts packages/contracts/src/extensionsHelper.test.ts packages/contracts/src/extensions.test.ts packages/contracts/src/contextual.test.ts packages/contracts/src/extensionsEvaluator.test.ts
+      - name: Generate deterministic clean-source catalog
+        run: |
+          test -z "$(git status --porcelain)"
+          node scripts/generate-extension-contracts.ts --out-dir "$RUNNER_TEMP/catalog"
+          node scripts/generate-extension-contracts.ts --out-dir "$RUNNER_TEMP/catalog-repeat"
+          diff -qr "$RUNNER_TEMP/catalog" "$RUNNER_TEMP/catalog-repeat"
+          jq -e --arg sha "$GITHUB_SHA" '.source.sourceDirty == false and .source.sourceCommit == $sha' "$RUNNER_TEMP/catalog/manifest.json"
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -czf "$RUNNER_TEMP/catalog.tar.gz" -C "$RUNNER_TEMP/catalog" .
+          cp "$RUNNER_TEMP/catalog/manifest.sha256" "$RUNNER_TEMP/manifest.sha256"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: extension-contract-catalog-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/catalog.tar.gz
+            ${{ runner.temp }}/manifest.sha256
+          if-no-files-found: error
+  publish:
+    needs: generate
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    # Configure required reviewers and restrict this environment to the default branch.
+    # The token needs contents:write and administration:read on this public repository only.
+    environment: extension-contract-publication
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: extension-contract-catalog-${{ github.sha }}
+          path: ${{ runner.temp }}/publication
+      - name: Require public repository with immutable releases enabled
+        env:
+          GH_TOKEN: ${{ secrets.EXTENSIONS_CONTRACT_PUBLICATION_TOKEN }}
+        run: |
+          test -n "$GH_TOKEN"
+          gh api "repos/$GITHUB_REPOSITORY" --jq '.private == false' | grep -qx true
+          gh api "repos/$GITHUB_REPOSITORY/immutable-releases" --jq '.enabled' | grep -qx true
+      - name: Publish generated catalog once
+        env:
+          GH_TOKEN: ${{ secrets.EXTENSIONS_CONTRACT_PUBLICATION_TOKEN }}
+        run: |
+          cd "$RUNNER_TEMP/publication"
+          digest=$(cut -d ' ' -f 1 manifest.sha256)
+          [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+          tag="extension-contracts-$digest"
+          # No clobber, tag rewrite, source checkout, or remote schema repository.
+          gh release create "$tag" catalog.tar.gz manifest.sha256 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --title "Extension contracts $digest" --notes "Generated public contracts from source commit $GITHUB_SHA. Manifest SHA-256: $digest."
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq '.immutable' | grep -qx true
+          printf 'EXTENSIONS_CONTRACT_CATALOG_URL=https://github.com/%s/releases/download/%s/catalog.tar.gz\nEXTENSIONS_CONTRACT_MANIFEST_SHA256=%s\n' "$GITHUB_REPOSITORY" "$tag" "$digest" >> "$GITHUB_STEP_SUMMARY"
