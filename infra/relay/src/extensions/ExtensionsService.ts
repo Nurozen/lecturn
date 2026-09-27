@@ -133,7 +133,7 @@ export const makeExtensionsService = (
         const access = yield* funding[featureId].access.status(payerId);
         features.push({
           featureId,
-          available,
+          available: available && access.reason !== "unavailable",
           enabled: access.enabled,
           eligible: access.eligible,
           reason: access.reason,
