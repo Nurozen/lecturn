@@ -40,7 +40,7 @@ export function providerDetectionSendBlock(
 
 export function isProviderExecutableError(error: string): boolean {
   // ENOENT by itself can describe a missing project directory or user file.
-  return /Provider detection (?:is still running|did not finish successfully)|Failed to spawn (?:Codex App Server|.*provider|Claude)|spawn\s+(?:[^\n]*[/\\])?(?:codex|claude|cursor(?:-agent)?|agent|grok|opencode|antigravity)(?:\.(?:exe|cmd))?\s+ENOENT/i.test(
+  return /Provider detection (?:is still running|did not finish successfully)|Failed to spawn (?:Codex App Server|.*provider|Claude)|spawn\s+(?:[^\n]*[/\\])?(?:codex|claude|cursor(?:-agent)?|agent|grok|copilot|opencode|antigravity)(?:\.(?:exe|cmd))?\s+ENOENT/i.test(
     error,
   );
 }

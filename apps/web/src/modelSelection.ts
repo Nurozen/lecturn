@@ -89,6 +89,11 @@ export interface AppModelOption {
   isUnavailable?: boolean;
 }
 
+/** Providers whose model list comes from the installed runtime and can drop a saved model. */
+function hasDynamicModelCatalog(provider: ProviderDriverKind): boolean {
+  return provider === "opencode" || provider === "antigravity" || provider === "githubCopilot";
+}
+
 function appendUnavailableDynamicModelSelection(
   options: AppModelOption[],
   rawModels: ReadonlyArray<ServerProvider["models"][number]>,
@@ -96,7 +101,7 @@ function appendUnavailableDynamicModelSelection(
   selectedModel: string | null | undefined,
   hiddenModels: ReadonlyArray<string>,
 ): AppModelOption[] {
-  if (provider !== "opencode" && provider !== "antigravity") return options;
+  if (!hasDynamicModelCatalog(provider)) return options;
   const slug = normalizeCustomModelSlug(selectedModel);
   if (!slug) return options;
   if (provider === "antigravity" && slug === ANTIGRAVITY_DEFAULT_MODEL) return options;
@@ -310,10 +315,7 @@ export function resolveAppModelSelectionForInstance(
   if (resolvedSelection) {
     return resolvedSelection;
   }
-  if (
-    resolutionOptions?.preserveUnavailableSelection &&
-    (entry.driverKind === "opencode" || entry.driverKind === "antigravity")
-  ) {
+  if (resolutionOptions?.preserveUnavailableSelection && hasDynamicModelCatalog(entry.driverKind)) {
     const unavailableSelection = normalizeCustomModelSlug(selectedModel);
     const hiddenModels = readInstanceModelPreferences(settings, entry.instanceId).hiddenModels;
     if (

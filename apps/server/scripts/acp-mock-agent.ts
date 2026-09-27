@@ -15,6 +15,19 @@ import type * as AcpSchema from "effect-acp/schema";
 const requestLogPath = process.env.LECTURN_ACP_REQUEST_LOG_PATH;
 const exitLogPath = process.env.LECTURN_ACP_EXIT_LOG_PATH;
 const antigravityProfile = process.env.LECTURN_ACP_ANTIGRAVITY === "1";
+// Mirrors GitHub Copilot CLI 1.0.x `--acp`: URL mode ids, `mode` + `allow_all`
+// config options, no model state, and underscore permission option ids.
+const copilotProfile = process.env.LECTURN_ACP_COPILOT === "1";
+/** Copilot without a usable login: `authenticate` and `session/new` fail with auth_required. */
+const copilotLoggedOut = copilotProfile && process.env.LECTURN_ACP_COPILOT_LOGGED_OUT === "1";
+const COPILOT_MODE_URL = "https://agentclientprotocol.com/protocol/session-modes";
+/**
+ * Copilot resolves a cancelled prompt, then keeps streaming the reply: the first prompt streams
+ * "1\n" until cancelled, sends "2\n3\n" after its cancelled response and "4\n5\n" once the
+ * next prompt arrives, ahead of that prompt's opening usage_update.
+ */
+const copilotStreamAfterCancel =
+  copilotProfile && process.env.LECTURN_ACP_COPILOT_STREAM_AFTER_CANCEL === "1";
 const emitToolCalls = process.env.LECTURN_ACP_EMIT_TOOL_CALLS === "1";
 const emitInterleavedAssistantToolCalls =
   process.env.LECTURN_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS === "1";
@@ -57,9 +70,14 @@ const initialGrokReasoningEffort =
   process.env.LECTURN_ACP_INITIAL_GROK_REASONING_EFFORT?.trim() || undefined;
 const promptDelayMs = Number(process.env.LECTURN_ACP_PROMPT_DELAY_MS ?? "0");
 const permissionOptionIds = {
-  allowOnce: process.env.LECTURN_ACP_ALLOW_ONCE_OPTION_ID ?? "allow-once",
-  allowAlways: process.env.LECTURN_ACP_ALLOW_ALWAYS_OPTION_ID ?? "allow-always",
-  rejectOnce: process.env.LECTURN_ACP_REJECT_ONCE_OPTION_ID ?? "reject-once",
+  allowOnce:
+    process.env.LECTURN_ACP_ALLOW_ONCE_OPTION_ID ?? (copilotProfile ? "allow_once" : "allow-once"),
+  allowAlways:
+    process.env.LECTURN_ACP_ALLOW_ALWAYS_OPTION_ID ??
+    (copilotProfile ? "allow_always" : "allow-always"),
+  rejectOnce:
+    process.env.LECTURN_ACP_REJECT_ONCE_OPTION_ID ??
+    (copilotProfile ? "reject_once" : "reject-once"),
 };
 const omitAllowAlways = process.env.LECTURN_ACP_OMIT_ALLOW_ALWAYS === "1";
 const permissionRequestCount = Math.max(
@@ -68,7 +86,12 @@ const permissionRequestCount = Math.max(
 );
 const sessionId = "mock-session-1";
 
-let currentModeId = antigravityProfile ? "default" : "ask";
+let currentModeId = antigravityProfile
+  ? "default"
+  : copilotProfile
+    ? `${COPILOT_MODE_URL}#agent`
+    : "ask";
+let currentAllowAll = "off";
 let currentModelId = antigravityProfile ? "gemini-test-low" : "default";
 let parameterizedModelPicker = false;
 let currentReasoning = "medium";
@@ -115,6 +138,29 @@ process.once("exit", (code) => {
 });
 
 function configOptions(): ReadonlyArray<AcpSchema.SessionConfigOption> {
+  if (copilotProfile) {
+    return [
+      {
+        id: "mode",
+        name: "Mode",
+        category: "mode",
+        type: "select",
+        currentValue: currentModeId,
+        options: availableModes.map((mode) => ({ value: mode.id, name: mode.name })),
+      },
+      {
+        id: "allow_all",
+        name: "Allow all",
+        category: "permissions",
+        type: "select",
+        currentValue: currentAllowAll,
+        options: [
+          { value: "on", name: "On" },
+          { value: "off", name: "Off" },
+        ],
+      },
+    ];
+  }
   if (antigravityProfile) {
     return [
       {
@@ -299,29 +345,35 @@ const antigravityModels = [
   { modelId: "gemini-test-high", name: "Gemini Test High" },
 ] satisfies ReadonlyArray<AcpSchema.ModelInfo>;
 
-const availableModes: ReadonlyArray<AcpSchema.SessionMode> = antigravityProfile
+const availableModes: ReadonlyArray<AcpSchema.SessionMode> = copilotProfile
   ? [
-      { id: "default", name: "Default" },
-      { id: "auto_edit", name: "Auto edit" },
-      { id: "yolo", name: "YOLO" },
+      { id: `${COPILOT_MODE_URL}#agent`, name: "Agent" },
+      { id: `${COPILOT_MODE_URL}#plan`, name: "Plan" },
+      { id: `${COPILOT_MODE_URL}#autopilot`, name: "Autopilot" },
     ]
-  : [
-      {
-        id: "ask",
-        name: "Ask",
-        description: "Request permission before making any changes",
-      },
-      {
-        id: "architect",
-        name: "Architect",
-        description: "Design and plan software systems without implementation",
-      },
-      {
-        id: "code",
-        name: "Code",
-        description: "Write and modify code with full tool access",
-      },
-    ];
+  : antigravityProfile
+    ? [
+        { id: "default", name: "Default" },
+        { id: "auto_edit", name: "Auto edit" },
+        { id: "yolo", name: "YOLO" },
+      ]
+    : [
+        {
+          id: "ask",
+          name: "Ask",
+          description: "Request permission before making any changes",
+        },
+        {
+          id: "architect",
+          name: "Architect",
+          description: "Design and plan software systems without implementation",
+        },
+        {
+          id: "code",
+          name: "Code",
+          description: "Write and modify code with full tool access",
+        },
+      ];
 
 function modeState(): AcpSchema.SessionModeState {
   return {
@@ -350,6 +402,11 @@ const grokAcpModels: ReadonlyArray<AcpSchema.ModelInfo> = [
   { modelId: "grok-mock-alt", name: "Grok Mock Alt" },
 ];
 
+/** Copilot advertises no model state; its sessions omit the field entirely. */
+function modelsField(): { readonly models?: AcpSchema.SessionModelState } {
+  return copilotProfile ? {} : { models: modelState() };
+}
+
 function modelState(): AcpSchema.SessionModelState {
   if (antigravityProfile) {
     return { currentModelId, availableModels: antigravityModels };
@@ -368,6 +425,8 @@ const program = Effect.gen(function* () {
   const resumeRelease = yield* Deferred.make<void>();
   const nativeCancelRequested = yield* Deferred.make<void>();
   const nativeCancelRelease = yield* Deferred.make<void>();
+  const copilotCancelRequested = yield* Deferred.make<void>();
+  const copilotCancelledTailSent = yield* Deferred.make<void>();
   const publishAntigravityCommands = (targetSessionId: string) =>
     agent.client.sessionUpdate({
       sessionId: targetSessionId,
@@ -392,6 +451,27 @@ const program = Effect.gen(function* () {
       }
       parameterizedModelPicker =
         request.clientCapabilities?._meta?.parameterizedModelPicker === true;
+      if (copilotProfile) {
+        return {
+          protocolVersion: 1,
+          agentInfo: { name: "Copilot", version: "mock" },
+          agentCapabilities: {
+            loadSession: true,
+            mcpCapabilities: { http: true, sse: true },
+            promptCapabilities: { image: true, audio: false, embeddedContext: true },
+            sessionCapabilities: { close: {}, list: {} },
+          },
+          authMethods: [
+            {
+              id: "copilot-login",
+              name: "Log in with Copilot CLI",
+              _meta: {
+                "terminal-auth": { command: "copilot", args: ["login"], label: "Copilot Login" },
+              },
+            },
+          ],
+        };
+      }
       if (antigravityProfile) {
         return {
           protocolVersion: 1,
@@ -418,15 +498,25 @@ const program = Effect.gen(function* () {
   // Mirrors the real agent: the API key method reads GEMINI_API_KEY from the
   // process environment and rejects when it is missing.
   yield* agent.handleAuthenticate((request) =>
-    !antigravityProfile || request.methodId === "oauth-personal"
-      ? Effect.succeed({})
-      : request.methodId === "gemini-api-key" && process.env.GEMINI_API_KEY
+    copilotProfile
+      ? copilotLoggedOut
+        ? Effect.fail(AcpError.AcpRequestError.authRequired())
+        : request.methodId === "copilot-login"
+          ? Effect.succeed({})
+          : Effect.fail(
+              AcpError.AcpRequestError.invalidParams(
+                `Mock Copilot rejected auth method ${request.methodId}.`,
+              ),
+            )
+      : !antigravityProfile || request.methodId === "oauth-personal"
         ? Effect.succeed({})
-        : Effect.fail(
-            AcpError.AcpRequestError.invalidParams(
-              `Mock Antigravity rejected auth method ${request.methodId}.`,
+        : request.methodId === "gemini-api-key" && process.env.GEMINI_API_KEY
+          ? Effect.succeed({})
+          : Effect.fail(
+              AcpError.AcpRequestError.invalidParams(
+                `Mock Antigravity rejected auth method ${request.methodId}.`,
+              ),
             ),
-          ),
   );
   if (antigravityProfile) {
     yield* agent.handleLogout(() => Effect.succeed({}));
@@ -440,7 +530,7 @@ const program = Effect.gen(function* () {
       return {
         sessionId,
         modes: modeState(),
-        models: modelState(),
+        ...modelsField(),
         configOptions: configOptions(),
       };
     }),
@@ -463,7 +553,7 @@ const program = Effect.gen(function* () {
       }
       return {
         modes: modeState(),
-        models: modelState(),
+        ...modelsField(),
         configOptions: configOptions(),
         _meta: { nativeResume: true },
       };
@@ -510,7 +600,7 @@ const program = Effect.gen(function* () {
         yield* Effect.sleep(loadSessionDelayMs);
         return {
           modes: modeState(),
-          models: modelState(),
+          ...modelsField(),
           configOptions: configOptions(),
         };
       }
@@ -526,7 +616,7 @@ const program = Effect.gen(function* () {
       });
       return {
         modes: modeState(),
-        models: modelState(),
+        ...modelsField(),
         configOptions: configOptions(),
       };
     }),
@@ -534,6 +624,10 @@ const program = Effect.gen(function* () {
 
   yield* agent.handleSetSessionModel((request) =>
     Effect.gen(function* () {
+      if (copilotProfile) {
+        currentModelId = request.modelId;
+        return {};
+      }
       if (!modelState().availableModels.some((model) => model.modelId === request.modelId)) {
         return yield* AcpError.AcpRequestError.invalidParams(
           `Unknown mock model id: ${request.modelId}`,
@@ -570,6 +664,9 @@ const program = Effect.gen(function* () {
       if (request.configId === "model" && typeof request.value === "string") {
         currentModelId = request.value;
       }
+      if (request.configId === "allow_all" && typeof request.value === "string") {
+        currentAllowAll = request.value;
+      }
       if (request.configId === "reasoning" && typeof request.value === "string") {
         currentReasoning = request.value;
       }
@@ -589,6 +686,9 @@ const program = Effect.gen(function* () {
     Effect.gen(function* () {
       const cancelledSessionId = String(sessionId ?? "mock-session-1");
       cancelledSessions.add(cancelledSessionId);
+      if (copilotStreamAfterCancel) {
+        yield* Deferred.succeed(copilotCancelRequested, undefined);
+      }
       if (completeFirstPromptOnCancel) {
         yield* Deferred.succeed(nativeCancelRequested, undefined);
         yield* agent.client.sessionUpdate({
@@ -618,6 +718,40 @@ const program = Effect.gen(function* () {
     Effect.gen(function* () {
       const requestedSessionId = String(request.sessionId ?? sessionId);
       promptCount += 1;
+
+      const copilotChunk = (text: string) =>
+        writeJsonRpcNotification("session/update", {
+          sessionId: requestedSessionId,
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+        });
+      if (copilotStreamAfterCancel && promptCount === 1) {
+        copilotChunk("1\n");
+        yield* Deferred.await(copilotCancelRequested);
+        // After the cancelled response goes out.
+        yield* Effect.sleep("20 millis").pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              copilotChunk("2\n");
+              copilotChunk("3\n");
+            }),
+          ),
+          Effect.andThen(Deferred.succeed(copilotCancelledTailSent, undefined)),
+          Effect.forkDetach,
+        );
+        return { stopReason: "cancelled" };
+      }
+      if (copilotStreamAfterCancel && promptCount === 2) {
+        yield* Deferred.await(copilotCancelledTailSent);
+        copilotChunk("4\n");
+        copilotChunk("5\n");
+      }
+      if (copilotProfile) {
+        // Copilot opens every prompt with a context usage report.
+        writeJsonRpcNotification("session/update", {
+          sessionId: requestedSessionId,
+          update: { sessionUpdate: "usage_update", used: 10_000, size: 128_000 },
+        });
+      }
 
       if (completeFirstPromptOnCancel && promptCount === 1) {
         yield* agent.client.sessionUpdate({
@@ -657,6 +791,49 @@ const program = Effect.gen(function* () {
 
       if (failPrompt) {
         return yield* AcpError.AcpRequestError.internalError("Mock prompt failure");
+      }
+
+      // Copilot plan mode: write plan.md under $COPILOT_HOME/session-state/<session>/
+      // with apply_patch, then only mention the file in the reply.
+      const copilotHome = process.env.COPILOT_HOME;
+      if (copilotProfile && copilotHome && currentModeId.endsWith("#plan")) {
+        const planDir = `${copilotHome}/session-state/${requestedSessionId}`;
+        const planPath = `${planDir}/plan.md`;
+        const planMarkdown = process.env.LECTURN_ACP_COPILOT_PLAN_MARKDOWN ?? "";
+        if (planMarkdown) {
+          yield* agent.client.sessionUpdate({
+            sessionId: requestedSessionId,
+            update: {
+              sessionUpdate: "tool_call",
+              toolCallId: `plan-patch-${promptCount}`,
+              title: "apply_patch",
+              kind: "edit",
+              status: "pending",
+              rawInput: `*** Begin Patch\n*** Add File: ${planPath}\n+${planMarkdown}\n*** End Patch`,
+            },
+          });
+          NodeFS.mkdirSync(planDir, { recursive: true });
+          NodeFS.writeFileSync(planPath, planMarkdown, "utf8");
+          yield* agent.client.sessionUpdate({
+            sessionId: requestedSessionId,
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: `plan-patch-${promptCount}`,
+              status: "completed",
+            },
+          });
+        }
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+              type: "text",
+              text: planMarkdown ? "Saved the plan to plan.md." : "Plan: answer inline.",
+            },
+          },
+        });
+        return { stopReason: "end_turn" };
       }
 
       if (emitStaleXAiPromptCompleteBeforeSecondHang && promptCount === 1) {

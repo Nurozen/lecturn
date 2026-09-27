@@ -2351,6 +2351,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                 "claudeAgent",
                 "codex",
                 "cursor",
+                "githubCopilot",
                 "grok",
                 "opencode",
               ]);

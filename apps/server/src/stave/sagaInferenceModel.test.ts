@@ -34,14 +34,28 @@ describe("saga account inference model", () => {
       "composer-2",
     );
   });
-  it.each(["codex", "claudeAgent", "cursor", "grok", "opencode", "antigravity", "custom-driver"])(
-    "preserves %s's selected account/model/options without an advertised preference",
-    (driver) => {
-      expect(resolveSagaInferenceModel(selection, ProviderDriverKind.make(driver), [])).toBe(
-        selection,
-      );
-    },
-  );
+  it("uses Copilot's gpt-5-mini on the same account", () => {
+    expect(
+      resolveSagaInferenceModel(selection, ProviderDriverKind.make("githubCopilot"), [
+        { slug: "auto" },
+        { slug: "gpt-5-mini" },
+      ]),
+    ).toEqual({ instanceId: account, model: "gpt-5-mini" });
+  });
+  it.each([
+    "codex",
+    "claudeAgent",
+    "cursor",
+    "githubCopilot",
+    "grok",
+    "opencode",
+    "antigravity",
+    "custom-driver",
+  ])("preserves %s's selected account/model/options without an advertised preference", (driver) => {
+    expect(resolveSagaInferenceModel(selection, ProviderDriverKind.make(driver), [])).toBe(
+      selection,
+    );
+  });
   it("never changes an OpenCode downstream provider even if another account advertises Luna", () => {
     const source = { ...selection, model: "my-anthropic/claude-sonnet-5" };
     expect(

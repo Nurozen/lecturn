@@ -90,7 +90,7 @@ Each adapter maps that input onto its provider's native mechanism
   init. Seeding a session id instead would write into the parent's history.
 - **OpenCode** calls `session.fork` and, for a mid-thread fork, `session.revert` to the fork
   turn's assistant message in the forked session.
-- **Cursor** and **Grok** declare `conversationFork: "unsupported"` and fail a start that
+- **Cursor**, **Grok**, and **GitHub Copilot** declare `conversationFork: "unsupported"` and fail a start that
   carries a `fork` input with a `ProviderAdapterValidationError` — no silent cold session.
 
 The `providerTurnRef` anchors come from turn completion: a `thread.session-set` event carries

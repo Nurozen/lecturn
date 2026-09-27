@@ -123,6 +123,10 @@ export type AcpParsedSessionEvent =
       readonly _tag: "ThoughtDelta";
       readonly text: string;
       readonly rawPayload: unknown;
+    }
+  | {
+      /** A context-usage report. GitHub Copilot opens every prompt with one. */
+      readonly _tag: "UsageUpdated";
     };
 
 type AcpSessionSetupResponse =
@@ -867,6 +871,10 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
           rawPayload: params,
         });
       }
+      break;
+    }
+    case "usage_update": {
+      events.push({ _tag: "UsageUpdated" });
       break;
     }
     case "agent_thought_chunk": {

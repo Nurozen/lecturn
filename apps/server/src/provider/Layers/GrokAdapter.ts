@@ -50,7 +50,7 @@ import {
   ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
 } from "../Errors.ts";
-import { mapAcpToAdapterError } from "../acp/AcpAdapterSupport.ts";
+import { mapAcpToAdapterError, selectAcpPermissionOptionId } from "../acp/AcpAdapterSupport.ts";
 import type * as AcpSessionRuntime from "../acp/AcpSessionRuntime.ts";
 import {
   makeAcpAssistantItemEvent,
@@ -290,38 +290,12 @@ function parseGrokResume(raw: unknown): { sessionId: string } | undefined {
   return { sessionId: raw.sessionId.trim() };
 }
 
-export function selectGrokPermissionOptionId(
-  request: EffectAcpSchema.RequestPermissionRequest,
-  decision: Exclude<ProviderApprovalDecision, "cancel">,
-): string | undefined {
-  const preferredKind =
-    decision === "acceptForSession"
-      ? "allow_always"
-      : decision === "accept"
-        ? "allow_once"
-        : "reject_once";
-  const preferred = request.options.find((entry) => entry.kind === preferredKind);
-  const preferredId = preferred?.optionId.trim();
-  if (preferredId) {
-    return preferredId;
-  }
-  // Grok 4.6 often omits allow_always. Lecturn still offers "Always allow this session".
-  if (decision === "acceptForSession") {
-    const once = request.options.find((entry) => entry.kind === "allow_once");
-    const onceId = once?.optionId.trim();
-    if (onceId) {
-      return onceId;
-    }
-  }
-  return undefined;
-}
-
 function selectAutoApprovedPermissionOption(
   request: EffectAcpSchema.RequestPermissionRequest,
 ): string | undefined {
   return (
-    selectGrokPermissionOptionId(request, "acceptForSession") ??
-    selectGrokPermissionOptionId(request, "accept")
+    selectAcpPermissionOptionId(request, "acceptForSession") ??
+    selectAcpPermissionOptionId(request, "accept")
   );
 }
 
@@ -1175,7 +1149,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     const autoApprovedOptionId =
                       input.runtimeMode === "full-access"
                         ? selectAutoApprovedPermissionOption(params)
-                        : selectGrokPermissionOptionId(params, "accept");
+                        : selectAcpPermissionOptionId(params, "accept");
                     if (autoApprovedOptionId !== undefined) {
                       return {
                         outcome: {
@@ -1226,7 +1200,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   const selectedOptionId =
                     resolved === "cancel"
                       ? undefined
-                      : selectGrokPermissionOptionId(params, resolved);
+                      : selectAcpPermissionOptionId(params, resolved);
                   if (
                     resolved === "acceptForSession" &&
                     selectedOptionId &&

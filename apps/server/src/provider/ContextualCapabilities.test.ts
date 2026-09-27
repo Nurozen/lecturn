@@ -17,7 +17,7 @@ describe("Contextual receipt evidence policy", () => {
     ).toBe(false);
   });
 
-  it.each(["cursor", "grok", "antigravity"])(
+  it.each(["cursor", "grok", "githubCopilot", "antigravity"])(
     "%s requires a real prompt response and rejects locally synthesized cancellation",
     (driver) => {
       const observation = {

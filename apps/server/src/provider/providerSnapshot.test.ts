@@ -23,6 +23,8 @@ import { CURSOR_ADAPTER_CAPABILITIES } from "./Layers/CursorAdapter.ts";
 import { CURSOR_PRESENTATION } from "./Layers/CursorProvider.ts";
 import { GROK_ADAPTER_CAPABILITIES } from "./Layers/GrokAdapter.ts";
 import { GROK_PRESENTATION } from "./Layers/GrokProvider.ts";
+import { COPILOT_ADAPTER_CAPABILITIES } from "./Layers/CopilotAdapter.ts";
+import { COPILOT_PRESENTATION } from "./Layers/CopilotProvider.ts";
 import { OPENCODE_ADAPTER_CAPABILITIES } from "./Layers/OpenCodeAdapter.ts";
 import { OPENCODE_PRESENTATION } from "./Layers/OpenCodeProvider.ts";
 
@@ -180,6 +182,11 @@ describe("conversationFork capability/presentation parity", () => {
       driver: "grok",
       capabilities: GROK_ADAPTER_CAPABILITIES,
       presentation: GROK_PRESENTATION,
+    },
+    {
+      driver: "githubCopilot",
+      capabilities: COPILOT_ADAPTER_CAPABILITIES,
+      presentation: COPILOT_PRESENTATION,
     },
   ] as const;
 
