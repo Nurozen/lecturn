@@ -143,7 +143,11 @@ export function normalizeCliError(
   error: unknown,
   fallback: string,
 ): TextGenerationError {
-  if (operation === "generateWorkflowSummary" || operation === "generateDecisionNotes") {
+  if (
+    operation === "generateWorkflowSummary" ||
+    operation === "generateContextualSummary" ||
+    operation === "generateDecisionNotes"
+  ) {
     return privateTextGenerationError(operation, fallback);
   }
   if (isTextGenerationError(error)) {

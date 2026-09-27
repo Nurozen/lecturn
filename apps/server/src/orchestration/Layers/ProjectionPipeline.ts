@@ -1,3 +1,4 @@
+import { applyContextualLifecycle } from "../ContextualLifecycle.ts";
 import {
   ApprovalRequestId,
   isImportedHistoryRow,
@@ -15,6 +16,11 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { admitContextualTurn } from "../ContextualTurnQueue.ts";
+import {
+  initializeContextualThread,
+  applyContextualOrigin,
+} from "../../contextual/ContextualSettings.ts";
 
 import { toPersistenceSqlError, type ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
@@ -672,6 +678,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             hasActionableProposedPlan: 0,
             deletedAt: null,
           });
+          yield* initializeContextualThread(sql, {
+            threadId: event.payload.threadId,
+            projectId: event.payload.projectId,
+          }).pipe(Effect.mapError(toPersistenceSqlError("Contextual.initializeThread")));
           return;
 
         case "thread.forked": {
@@ -692,6 +702,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             latestTurnId: event.payload.forkedFrom.turnId,
             updatedAt: event.occurredAt,
           });
+          yield* applyContextualOrigin(sql, {
+            threadId: event.payload.threadId,
+            projectId: existingRow.value.projectId,
+            parentThreadId: event.payload.forkedFrom.threadId,
+          }).pipe(Effect.mapError(toPersistenceSqlError("Contextual.forkIntent")));
           yield* refreshThreadShellSummary(event.payload.threadId);
           return;
         }
@@ -710,6 +725,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             importSource: event.payload.importSource,
             updatedAt: event.occurredAt,
           });
+          yield* applyContextualOrigin(sql, {
+            threadId: event.payload.threadId,
+            projectId: existingRow.value.projectId,
+          }).pipe(Effect.mapError(toPersistenceSqlError("Contextual.importIntent")));
           yield* refreshThreadShellSummary(event.payload.threadId);
           return;
         }
@@ -2174,12 +2193,27 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           };
           yield* sql.withTransaction(
             Effect.gen(function* () {
+              const queuedTurn =
+                event.type === "thread.turn-start-requested"
+                  ? yield* sql`SELECT 1 FROM contextual_turn_queue WHERE thread_id=${event.payload.threadId} AND state NOT IN ('done','canceled','unknown') LIMIT 1`
+                  : [];
               yield* Effect.forEach(
                 projectors,
-                (projector) => projector.apply(event, attachmentSideEffects),
+                (projector) =>
+                  queuedTurn.length && projector.name === ORCHESTRATION_PROJECTOR_NAMES.threadTurns
+                    ? Effect.void
+                    : projector.apply(event, attachmentSideEffects),
                 { concurrency: 1, discard: true },
               );
+              yield* applyContextualLifecycle(sql, event).pipe(
+                Effect.mapError(toPersistenceSqlError("Contextual.lifecycle")),
+              );
               // Runtime projectors commit together. Bootstrap still advances each cursor separately.
+              if (event.type === "thread.turn-start-requested") {
+                yield* admitContextualTurn(sql, event).pipe(
+                  Effect.mapError(toPersistenceSqlError("Contextual.admitTurn")),
+                );
+              }
               yield* projectionStateRepository.upsertMany(
                 projectors.map((projector) => ({
                   projector: projector.name,

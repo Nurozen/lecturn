@@ -1,3 +1,8 @@
+import { ContextualDraftControl } from "../contextual/ContextualDraftControl";
+import type { ProjectId } from "@lecturn/contracts";
+import { useContextualAvailable } from "../../state/contextual";
+import { ContextualControl } from "../contextual/ContextualControl";
+import { ContextualPreparationPanel } from "../contextual/ContextualPreparationPanel";
 import "./composer-glass.css";
 import { providerDetectionSendBlock } from "../providerDetection";
 import type {
@@ -1171,6 +1176,8 @@ export interface ChatComposerProps {
   routeKind: "server" | "draft";
   routeThreadRef: ScopedThreadRef;
   draftId: DraftId | null;
+
+  contextualProjectId?: ProjectId;
 
   // Thread context
   activeThreadId: ThreadId | null;
@@ -3787,12 +3794,33 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isTimelineAtLogicalEnd,
   ]);
 
+  const contextualAvailable = useContextualAvailable(environmentId);
+  const contextualBlock =
+    contextualAvailable &&
+    (activeThreadId !== null || Boolean(draftId && props.contextualProjectId));
+  const contextualControl = (size: "xs" | "sm", hidden = false) =>
+    routeKind === "draft" && draftId && props.contextualProjectId ? (
+      <ContextualDraftControl
+        environmentId={environmentId}
+        projectId={props.contextualProjectId}
+        draftId={draftId}
+        size={size}
+        hidden={hidden}
+      />
+    ) : activeThreadId ? (
+      <ContextualControl
+        environmentId={environmentId}
+        threadId={activeThreadId}
+        size={size}
+        hidden={hidden}
+      />
+    ) : null;
   const restingHiddenBlockCount = composerControlsInStrip ? restingControlsHiddenBlockCount : 0;
   const composerControlsCompact = !composerControlsInStrip && isComposerFooterCompact;
   const restingProviderTraitsPicker = renderProviderTraitsPicker({
     ...providerTraitsPickerInput,
     size: "xs",
-    hidden: composerControlsHidden || restingHiddenBlockCount > 1,
+    hidden: composerControlsHidden || restingHiddenBlockCount > (contextualBlock ? 2 : 1),
   });
   const restingBlockDefs = [
     ...(providerTraitsPicker
@@ -3816,33 +3844,49 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           interactionMode={interactionMode}
           runtimeMode={runtimeMode}
           size={composerControlsInStrip ? "xs" : "sm"}
-          hidden={composerControlsHidden || restingHiddenBlockCount > 0}
+          hidden={composerControlsHidden || restingHiddenBlockCount > (contextualBlock ? 1 : 0)}
           onToggleInteractionMode={toggleInteractionMode}
           onRuntimeModeChange={handleRuntimeModeChange}
         />
       ),
     },
   ];
+  if (contextualBlock)
+    restingBlockDefs.push({
+      id: "contextual",
+      content: (
+        <>
+          <ComposerControlSeparator size={composerControlsInStrip ? "xs" : "sm"} />
+          {contextualControl(
+            composerControlsInStrip ? "xs" : "sm",
+            composerControlsHidden || restingHiddenBlockCount > 0,
+          )}
+        </>
+      ),
+    });
   const hiddenRestingBlockIds = restingBlockDefs
     .slice(restingBlockDefs.length - restingHiddenBlockCount)
     .map((def) => def.id);
   const composerControls = noProviderAvailable ? (
-    <Button
-      type="button"
-      size="sm"
-      variant="ghost"
-      disabled={!providerSetupInstanceId}
-      onClick={() => {
-        if (providerSetupInstanceId) {
-          onOpenProviderSetup(providerSetupInstanceId);
-        }
-      }}
-      data-chat-provider-unavailable="true"
-      className="shrink-0 gap-2 px-2 text-secondary-label sm:px-3"
-    >
-      <CircleAlertIcon className="size-4" />
-      {providerSetupInstanceId ? "Open provider settings" : "No provider available"}
-    </Button>
+    <>
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        disabled={!providerSetupInstanceId}
+        onClick={() => {
+          if (providerSetupInstanceId) {
+            onOpenProviderSetup(providerSetupInstanceId);
+          }
+        }}
+        data-chat-provider-unavailable="true"
+        className="shrink-0 gap-2 px-2 text-secondary-label sm:px-3"
+      >
+        <CircleAlertIcon className="size-4" />
+        {providerSetupInstanceId ? "Open provider settings" : "No provider available"}
+      </Button>
+      {contextualControl(composerControlsInStrip ? "xs" : "sm")}
+    </>
   ) : (
     <>
       {composerControlsInStrip && restingControlsHaveLeadingContext ? (
@@ -3897,6 +3941,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           runtimeMode={runtimeMode}
           showInteractionModeToggle={planModeUiEnabled}
           traitsMenuContent={providerTraitsMenuContent}
+          contextualControl={contextualControl("sm")}
           onToggleInteractionMode={toggleInteractionMode}
           onRuntimeModeChange={handleRuntimeModeChange}
         />
@@ -3942,6 +3987,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 }
                 traitsMenuContent={
                   hiddenRestingBlockIds.includes("traits") ? providerTraitsMenuContent : undefined
+                }
+                contextualControl={
+                  hiddenRestingBlockIds.includes("contextual") ? contextualControl("xs") : null
                 }
                 onToggleInteractionMode={toggleInteractionMode}
                 onRuntimeModeChange={handleRuntimeModeChange}
@@ -4759,6 +4807,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       className="mx-auto w-full min-w-0 max-w-3xl"
       data-chat-composer-form="true"
     >
+      {routeKind === "server" && activeThreadId ? (
+        <ContextualPreparationPanel environmentId={environmentId} threadId={activeThreadId} />
+      ) : null}
       {composerControlsInStrip && restingControlsHost
         ? createPortal(
             <div

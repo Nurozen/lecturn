@@ -1,6 +1,14 @@
+import { extensionsLayer, ExtensionsService } from "./extensions/ExtensionsService.ts";
+import { extensionsApi } from "./http/ExtensionsApi.ts";
+import {
+  registerExtensionEvaluatorBinding,
+  EXTENSIONS_EVALUATOR_BINDING,
+} from "./extensions/ExtensionsEvaluatorBinding.ts";
+import type { ExtensionEvaluatorBinding } from "./extensions/ExtensionsEvaluatorClient.ts";
+import { extensionEnvironmentKeys, parseExtensionsConfig } from "./extensions/ExtensionsConfig.ts";
 import { parseDecisionsConfig } from "./decisions/DecisionsConfig.ts";
 import { DecisionsService, decisionsLayer } from "./decisions/DecisionsService.ts";
-import { decisionsRoutes } from "./http/DecisionsApi.ts";
+import { decisionsApi } from "./http/DecisionsApi.ts";
 import * as EnvironmentRelinks from "./environments/EnvironmentRelinks.ts";
 import { TeamStore, makeTeamStore, TeamError } from "./teams/TeamStore.ts";
 import { TeamDirectory, makeTeamDirectory } from "./teams/TeamDirectory.ts";
@@ -266,34 +274,25 @@ export const ApiLive = Api.make(
         STRIPE_PORTAL_CONFIGURATION_ID: portalConfiguration,
       }),
     ).pipe(Effect.orDie);
-    const typesafeKey = yield* Config.redacted("TYPESAFE_API_KEY").pipe(
-      Config.withDefault(Redacted.make("")),
-    );
     const decisionsSettings = yield* Effect.all(
       Object.fromEntries(
-        [
-          "DECISIONS_ENABLED",
-          "DECISIONS_COHORT",
-          "DECISIONS_BILLING_MAX_AGE_SECONDS",
-          "DECISIONS_MONTHLY_INPUT_TOKENS",
-          "DECISIONS_ATTEMPT_HOLD_NANO_USD",
-          "DECISIONS_RUN_BUDGET_NANO_USD",
-          "DECISIONS_MAX_ATTEMPTS_PER_RUN",
-          "DECISIONS_MAX_ATTEMPTS_PER_REQUEST",
-          "DECISIONS_ACCOUNT_CONCURRENCY",
-          "DECISIONS_ENVIRONMENT_CONCURRENCY",
-          "DECISIONS_REQUESTS_PER_MINUTE",
-          "DECISIONS_ACCOUNT_EXPOSURE_NANO_USD",
-          "DECISIONS_GLOBAL_EXPOSURE_NANO_USD",
-          "DECISIONS_UNKNOWN_HOLD_SECONDS",
-          "DECISIONS_RESULT_RETENTION_SECONDS",
-          "DECISIONS_REQUEST_TIMEOUT_MS",
-        ].map((key) => [key, Config.string(key).pipe(Config.withDefault(""))]),
+        extensionEnvironmentKeys.map((key) => [
+          key,
+          Config.string(key).pipe(Config.withDefault("")),
+        ]),
       ),
     );
+    const extensionSettings = Object.fromEntries(
+      Object.entries(decisionsSettings).filter(([, value]) => value !== ""),
+    );
+    const extensionsConfig = parseExtensionsConfig(extensionSettings);
+    const evaluatorWorker = yield* Config.string("EXTENSIONS_EVALUATOR_WORKER").pipe(
+      Config.withDefault(""),
+    );
+    if (evaluatorWorker) yield* registerExtensionEvaluatorBinding(evaluatorWorker);
     const decisionsConfig = parseDecisionsConfig({
       ...Object.fromEntries(Object.entries(decisionsSettings).filter(([, value]) => value !== "")),
-      TYPESAFE_API_KEY: Redacted.value(typesafeKey),
+      EXTENSIONS_EVALUATOR_WORKER: evaluatorWorker,
     });
     const teamsEnabled = yield* Config.boolean("TEAMS_ENABLED").pipe(Config.withDefault(false));
     const teamMonthlyPrice = yield* Config.string("STRIPE_TEAM_MONTHLY_PRICE_ID").pipe(
@@ -642,7 +641,15 @@ export const ApiLive = Api.make(
           ),
         ),
         Layer.provideMerge(
-          Layer.merge(teamLayer, decisionsLayer(decisionsConfig, billingConfig.appOrigin)),
+          Layer.merge(teamLayer, decisionsLayer(decisionsConfig, billingConfig.appOrigin)).pipe(
+            Layer.provideMerge(
+              extensionsLayer(
+                extensionsConfig,
+                billingConfig.appOrigin,
+                alchemyRuntimeContext.get<ExtensionEvaluatorBinding>(EXTENSIONS_EVALUATOR_BINDING),
+              ),
+            ),
+          ),
         ),
         Layer.provideMerge(LiveActivities.layer),
         Layer.provideMerge(DeliveryAttempts.layer),
@@ -656,7 +663,17 @@ export const ApiLive = Api.make(
       )
       .pipe(Layer.provideMerge(webcryptoLayer));
 
-    const appLayer = relayApiLayer.pipe(
+    const appLayer = Layer.mergeAll(
+      relayApiLayer,
+      decisionsApi({
+        appOrigin: billingConfig.appOrigin,
+        additionalAppOrigins: billingConfig.additionalAppOrigins ?? [],
+      }),
+      extensionsApi({
+        appOrigin: billingConfig.appOrigin,
+        additionalAppOrigins: billingConfig.additionalAppOrigins ?? [],
+      }),
+    ).pipe(
       Layer.provideMerge(relayClientAuthLayer),
       Layer.provideMerge(relayDpopClientAuthLayer),
       Layer.provideMerge(relayEnvironmentAuthLayer),
@@ -732,8 +749,7 @@ export const ApiLive = Api.make(
               ),
             );
           }
-          if (identityReconciliation)
-            tasks.push(operations.reconcileIdentities(5).pipe(Effect.asVoid));
+
           if (billingConfig.suspensionEnabled) {
             const suspensions = yield* makeManagedSuspensions({
               teamsEnabled,
@@ -768,11 +784,37 @@ export const ApiLive = Api.make(
       );
     }
 
+    // Identity deletion invalidates extension consent even when billing maintenance is disabled.
+    if (identityReconciliation)
+      yield* Cloudflare.Workers.cron("*/5 * * * *", () =>
+        Effect.gen(function* () {
+          const store = yield* makeBillingStore;
+          const operations = yield* makeBillingOperations({
+            store,
+            identity: clerkIdentityLookup(Redacted.value(clerkSecretKey)),
+          });
+          yield* operations.reconcileIdentities(5);
+        }).pipe(
+          Effect.timeout("45 seconds"),
+          Effect.catch(() => Effect.logWarning("Identity reconciliation deferred")),
+          Effect.provide(runtimeLayer),
+        ),
+      );
+
     // Admission may be disabled while dispatched attempts still need durable reconciliation.
     yield* Cloudflare.Workers.cron("* * * * *", () =>
       DecisionsService.pipe(
         Effect.flatMap((service) =>
           service.usage.reconcile().pipe(
+            Effect.andThen(
+              ExtensionsService.pipe(
+                Effect.flatMap((extensions) =>
+                  extensions
+                    .reconcilePrivate()
+                    .pipe(Effect.andThen(extensions.usage.contextual.reconcile())),
+                ),
+              ),
+            ),
             Effect.andThen(service.usage.health),
             Effect.flatMap((health) =>
               health.anomaly ||
@@ -785,6 +827,15 @@ export const ApiLive = Api.make(
         ),
         Effect.timeout("45 seconds"),
         Effect.catchCause(() => Effect.logWarning("Decisions reconciliation deferred")),
+        Effect.provide(runtimeLayer),
+      ),
+    );
+
+    yield* Cloudflare.Workers.cron("*/10 * * * *", () =>
+      ExtensionsService.pipe(
+        Effect.flatMap((service) => service.cleanupPrivate()),
+        Effect.timeout("45 seconds"),
+        Effect.catch(() => Effect.logWarning("Extensions evaluator cleanup deferred")),
         Effect.provide(runtimeLayer),
       ),
     );
@@ -827,10 +878,6 @@ export const ApiLive = Api.make(
               }).pipe(Layer.provide(runtimeLayer)),
             ]
           : []),
-        decisionsRoutes({
-          appOrigin: billingConfig.appOrigin,
-          additionalAppOrigins: billingConfig.additionalAppOrigins ?? [],
-        }).pipe(Layer.provide(runtimeLayer)),
         billingRoutes(billingConfig, Redacted.value(clerkBillingWebhook)).pipe(
           Layer.provide(runtimeLayer),
         ),

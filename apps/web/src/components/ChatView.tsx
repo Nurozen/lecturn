@@ -1,3 +1,4 @@
+import { contextualDraftKey, useContextualDrafts } from "../state/contextualDrafts";
 import { NotesPanel } from "./NotesPanel";
 import { AccountSurface } from "./AccountSurface";
 import { RepositoryPullRequestOverview } from "./pullRequest/RepositoryPullRequestOverview";
@@ -6881,6 +6882,17 @@ function ChatViewContent(props: ChatViewProps) {
                 ? {
                     createThread: {
                       projectId: activeProject.id,
+                      ...(draftId &&
+                      useContextualDrafts.getState().choices[
+                        contextualDraftKey(environmentId, activeProject.id, draftId)
+                      ]
+                        ? {
+                            contextual:
+                              useContextualDrafts.getState().choices[
+                                contextualDraftKey(environmentId, activeProject.id, draftId)
+                              ]!,
+                          }
+                        : {}),
                       title,
                       modelSelection: threadCreateModelSelection,
                       runtimeMode,
@@ -6936,6 +6948,10 @@ function ChatViewContent(props: ChatViewProps) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
+        if (draftId && isLocalDraftThread)
+          useContextualDrafts
+            .getState()
+            .set(contextualDraftKey(environmentId, activeProject.id, draftId), null);
         if (turnUsesAttachmentUploads) {
           releaseDraftAttachments(composerAttachmentsSnapshot);
         }
@@ -8273,6 +8289,7 @@ function ChatViewContent(props: ChatViewProps) {
                               routeKind={routeKind}
                               routeThreadRef={routeThreadRef}
                               draftId={draftId}
+                              {...(activeProject ? { contextualProjectId: activeProject.id } : {})}
                               activeThreadId={activeThreadId}
                               activeThreadEnvironmentId={activeThread?.environmentId}
                               activeThread={activeThread}

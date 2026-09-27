@@ -1,3 +1,4 @@
+import { ContextualMessageDisclosure } from "../contextual/ContextualDisclosure";
 import "./message-glass.css";
 import "./timeline-reveal.css";
 import { fadeOutTimeline, revealTimeline } from "./timelineExit";
@@ -1680,6 +1681,13 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           markdownCwd={ctx.markdownCwd}
         />
       </div>
+      {ctx.threadRef ? (
+        <ContextualMessageDisclosure
+          environmentId={ctx.threadRef.environmentId}
+          threadId={ctx.threadRef.threadId}
+          messageId={row.message.id}
+        />
+      ) : null}
       <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
         <div className="flex shrink-0 items-center gap-2">
           <Tooltip>

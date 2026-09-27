@@ -1,13 +1,20 @@
+import {
+  readContextualOrigins,
+  assertContextualOrigins,
+  recordContextualLineage,
+} from "./DecisionContextualLineage.ts";
 import * as NodeCrypto from "node:crypto";
 import {
   DecisionEvidenceId,
   DecisionId,
   ProjectId,
-  DecisionWriterOutput,
+  DecisionWriterOutputV2,
+  type DecisionWriterOutputAny,
   ThreadDecisionError,
   type DecisionEvidence,
   type DecisionWriterInput,
   type DecisionWriterAction,
+  type DecisionWriterActionV2,
   type ThreadDecision,
 } from "@lecturn/contracts";
 import {
@@ -35,7 +42,7 @@ import { DecisionCloudClient } from "./DecisionCloudClient.ts";
 import { DecisionWriterBinding, WriterBinding } from "./DecisionWriterBinding.ts";
 import { localizeDecisionSpan } from "./DecisionTraversal.ts";
 
-const MODEL = "jev-1.13.0";
+const MODEL = "extensions-v1";
 const TEMPLATE = "decisions-v1";
 const Counter = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const Continuation = Schema.Struct({
@@ -50,7 +57,7 @@ const Continuation = Schema.Struct({
 type Continuation = typeof Continuation.Type;
 const decodeContinuation = Schema.decodeUnknownEffect(Continuation);
 const decodeBinding = Schema.decodeUnknownEffect(WriterBinding);
-const decodeOutput = Schema.decodeUnknownEffect(DecisionWriterOutput, {
+const decodeOutput = Schema.decodeUnknownEffect(DecisionWriterOutputV2, {
   onExcessProperty: "error",
 });
 const fail = (code: ThreadDecisionError["code"], message: string) =>
@@ -110,12 +117,12 @@ const contextText = (evidence: ReadonlyArray<DecisionEvidence>) =>
   evidence.map((item) => `[${item.messageRole} ${item.messageId}]\n${item.quote}`).join("\n\n");
 
 interface ValidatedAction {
-  readonly action: DecisionWriterAction;
+  readonly action: DecisionWriterAction | DecisionWriterActionV2;
   readonly evidence: ReadonlyArray<DecisionEvidence>;
   readonly key: string;
 }
-const validateActions = (
-  output: DecisionWriterOutput,
+export const validateActions = (
+  output: DecisionWriterOutputAny,
   input: Omit<DecisionWriterInput, "modelSelection">,
   primaryId: string,
 ) =>
@@ -170,15 +177,26 @@ const validateActions = (
             "Each decision must cite its new target, not only old supporting context.",
           );
       }
-      if (action.action === "duplicate" || action.action === "propose_replacement") {
-        const id = action.action === "duplicate" ? action.existingId : action.predecessorId;
+      if (
+        action.action === "duplicate" ||
+        action.action === "duplicate_occurrence" ||
+        action.action === "propose_replacement"
+      ) {
+        const id =
+          action.action === "duplicate" || action.action === "duplicate_occurrence"
+            ? action.existingId
+            : action.predecessorId;
         if (existing.get(id)?.revision !== action.expectedRevision)
           return yield* fail(
             "invalid",
             "The writer referenced an existing decision or revision outside its input.",
           );
       }
-      if (action.action === "create" || action.action === "propose_replacement") {
+      if (
+        action.action === "create" ||
+        action.action === "propose_replacement" ||
+        action.action === "duplicate_occurrence"
+      ) {
         const roles = new Set(evidence.map((anchor) => anchor.messageRole));
         if (
           (action.attribution === "user-directed" && !roles.has("user")) ||
@@ -189,6 +207,66 @@ const validateActions = (
           return yield* fail(
             "invalid",
             "The claimed attribution lacks evidence from the required speaker.",
+          );
+      }
+      if ("occurrenceEvidenceId" in action) {
+        const occurrence = anchors.get(action.occurrenceEvidenceId);
+        if (
+          !occurrence ||
+          occurrence.messageId !== primaryId ||
+          !candidate.evidenceIds.includes(action.occurrenceEvidenceId)
+        )
+          return yield* fail(
+            "invalid",
+            "The occurrence must identify this candidate's new live target.",
+          );
+        if (
+          (action.attribution === "agent-chosen" && occurrence.messageRole !== "assistant") ||
+          (action.attribution !== "agent-chosen" && occurrence.messageRole !== "user")
+        )
+          return yield* fail(
+            "invalid",
+            "The occurrence speaker does not support its own attribution.",
+          );
+        if (action.acceptanceEvidence) {
+          const proposal = anchors.get(action.acceptanceEvidence.proposalEvidenceId);
+          const acceptance = anchors.get(action.acceptanceEvidence.acceptanceEvidenceId);
+          if (
+            !proposal ||
+            !acceptance ||
+            proposal.messageRole !== "assistant" ||
+            acceptance.messageRole !== "user" ||
+            proposal.occurrence >= acceptance.occurrence ||
+            proposal.threadId !== acceptance.threadId
+          )
+            return yield* fail(
+              "invalid",
+              "Acceptance requires its earlier proposal and exact later user acceptance.",
+            );
+        }
+        const origins = input.contextualOrigins ?? [];
+        if (
+          action.sourceLineageIds.some((id) => !origins.some((origin) => origin.evidenceId === id))
+        )
+          return yield* fail("invalid", "The writer referenced unknown original source lineage.");
+        const copiedOrigins = origins.filter(
+          (origin) =>
+            origin.quote !== null &&
+            evidence.some((e) => e.messageId === primaryId && origin.quote!.includes(e.quote)),
+        );
+        if (copiedOrigins.some((origin) => !action.sourceLineageIds.includes(origin.evidenceId)))
+          return yield* fail(
+            "invalid",
+            "A copied source occurrence must retain its original lineage.",
+          );
+        const copied = copiedOrigins.length > 0;
+        if (
+          copied &&
+          (occurrence.messageRole === "assistant" || action.liveChoice !== "explicit-reaffirmation")
+        )
+          return yield* fail(
+            "invalid",
+            "Repeating supplied source text is not a new original choice.",
           );
       }
       actions.push({ action, evidence, key: decisionFingerprint([action]) });
@@ -514,7 +592,21 @@ export const make = Effect.gen(function* () {
         yield* checkpoint("writing");
       }
       const existing = yield* related(job, stage.evidence);
+      const contextual = yield* readContextualOrigins(sql, job.threadId, job.id);
+      let originBudget = Math.max(
+        0,
+        64000 -
+          stage.evidence.reduce((sum, e) => sum + e.quote.length, 0) -
+          contextText(stage.evidence.filter((e) => e.messageId !== primary.messageId)).length,
+      );
+      const contextualOrigins = contextual.origins.map((origin) => {
+        if (origin.quote === null || origin.quote.length > originBudget)
+          return { ...origin, quote: null };
+        originBudget -= origin.quote.length;
+        return origin;
+      });
       const input: Omit<DecisionWriterInput, "modelSelection"> = {
+        contextualOrigins,
         description: job.description,
         descriptionRevision: job.configRevision,
         sourceFingerprint: job.fingerprint,
@@ -587,6 +679,7 @@ export const make = Effect.gen(function* () {
           output = repaired.result;
           validated = repaired.actions;
         }
+        yield* assertContextualOrigins(sql, contextual.generation, contextual);
         stage = { ...stage, writerOutput: output };
         yield* checkpoint("writing");
       } else validated = yield* validateActions(output, input, primary.messageId);
@@ -610,6 +703,7 @@ export const make = Effect.gen(function* () {
       const committed = yield* sql.withTransaction(
         Effect.gen(function* () {
           yield* writer.validate(binding);
+          yield* assertContextualOrigins(sql, contextual.generation, contextual);
           // Fence before writes and again at commit; nested repository transactions use savepoints.
           yield* jobs.checkpoint({
             ...fence,
@@ -622,7 +716,11 @@ export const make = Effect.gen(function* () {
           for (const item of validated) {
             if (continuation.actionKeys.includes(item.key)) continue;
             const action = item.action;
-            if (action.action === "create" || action.action === "propose_replacement") {
+            if (
+              action.action === "create" ||
+              action.action === "propose_replacement" ||
+              action.action === "duplicate_occurrence"
+            ) {
               const id = DecisionId.make(decisionFingerprint([job.id, item.key]));
               const note = yield* repository.createFromWriter({
                 id,
@@ -637,8 +735,30 @@ export const make = Effect.gen(function* () {
                 occurrence: primary.sourceSequence,
                 evidence: item.evidence,
                 provenance: {
+                  ...("occurrenceEvidenceId" in action
+                    ? {
+                        occurrence: {
+                          version: 2 as const,
+                          evidenceId: action.occurrenceEvidenceId,
+                          acceptance: action.acceptanceEvidence,
+                          liveChoice: action.liveChoice,
+                          sourceLineageIds: action.sourceLineageIds,
+                        },
+                      }
+                    : {}),
                   descriptionRevision: job.configRevision,
-                  sourceFingerprint: job.fingerprint,
+                  sourceFingerprint:
+                    "occurrenceEvidenceId" in action
+                      ? decisionFingerprint(
+                          item.evidence.map((e) => [
+                            e.id,
+                            e.sourceHash,
+                            e.sourceGeneration,
+                            e.start,
+                            e.end,
+                          ]),
+                        )
+                      : job.fingerprint,
                   canonicalVersion: "1",
                   templateVersion: TEMPLATE,
                   detectorModel: MODEL,
@@ -647,6 +767,8 @@ export const make = Effect.gen(function* () {
                   identityConfidence: "configuration-only",
                 },
               });
+              if (note && "sourceLineageIds" in action)
+                yield* recordContextualLineage(sql, job.id, note.id, action.sourceLineageIds);
               if (note && action.action === "propose_replacement") {
                 const predecessor =
                   currentNotes.get(action.predecessorId) ??

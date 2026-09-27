@@ -7,6 +7,7 @@ import {
   DecisionEvidenceId,
   DecisionId,
   DecisionProvenance,
+  DecisionRelationSuggestion,
   DecisionRelationship,
   ThreadDecision,
   ThreadDecisionError,
@@ -115,6 +116,7 @@ const boundary = (error: unknown) =>
 const decodeDecision = Schema.decodeUnknownEffect(ThreadDecision);
 const decodeEvidence = Schema.decodeUnknownEffect(DecisionEvidence);
 const decodeRelationship = Schema.decodeUnknownEffect(DecisionRelationship);
+const decodeSuggestion = Schema.decodeUnknownEffect(DecisionRelationSuggestion);
 const decodeProvenance = Schema.decodeUnknownEffect(Schema.fromJsonString(DecisionProvenance));
 const decodeList = Schema.decodeUnknownEffect(ThreadDecisionListInput);
 const decodeMutation = Schema.decodeUnknownEffect(ThreadDecisionMutateInput);
@@ -259,7 +261,72 @@ export const make = Effect.gen(function* () {
         updatedAt: link.updated_at,
       }),
     );
+    const suggestions = yield* sql<{
+      id: string;
+      kind: string;
+      other_id: string;
+      other_revision: number;
+      canonical_id: string;
+      state: string;
+      model: string;
+      policy_version: string;
+    }>`SELECT s.id,s.kind,CASE WHEN s.left_id=${row.id} THEN s.right_id ELSE s.left_id END AS other_id,CASE WHEN s.left_id=${row.id} THEN s.right_revision ELSE s.left_revision END AS other_revision,s.canonical_id,s.state,s.model,s.policy_version FROM decision_relation_suggestions s JOIN thread_decisions l ON l.id=s.left_id AND l.revision=s.left_revision JOIN thread_decisions r ON r.id=s.right_id AND r.revision=s.right_revision WHERE s.project_id=${row.project_id} AND (s.left_id=${row.id} OR s.right_id=${row.id}) ORDER BY s.created_at DESC,s.id LIMIT 32`;
+    const relationSuggestions = yield* Effect.forEach(suggestions, (s) =>
+      decodeSuggestion({
+        id: s.id,
+        kind: s.kind,
+        otherDecisionId: s.other_id,
+        decisionRevision: row.revision,
+        otherRevision: s.other_revision,
+        canonicalDecisionId: s.canonical_id,
+        state: s.state,
+        model: s.model,
+        policyVersion: s.policy_version,
+      }),
+    );
+    const grouped = yield* sql<{
+      group_id: string;
+      canonical_decision_id: string;
+      revision: number;
+      occurrence_count: number;
+    }>`SELECT m.group_id,g.canonical_decision_id,g.revision,(SELECT COUNT(*) FROM contextual_group_members all_members WHERE all_members.group_id=m.group_id) AS occurrence_count FROM contextual_group_members m JOIN contextual_decision_groups g ON g.id=m.group_id WHERE m.decision_id=${row.id} AND m.occurrence_revision=${row.revision} AND g.project_id=${row.project_id}`;
+    const consolidation = grouped[0];
+    // The list shows the canonical decision, whose own membership predates the merge.
+    const undoCandidates = consolidation
+      ? yield* sql<{
+          merge_id: string;
+          decision_id: string;
+          occurrence_revision: number;
+        }>`SELECT m.merge_id,m.decision_id,m.occurrence_revision
+          FROM contextual_group_members m
+          JOIN thread_decisions d ON d.id=m.decision_id AND d.revision=m.occurrence_revision
+          JOIN contextual_actions receipt ON receipt.action_id='undo:' || m.merge_id
+          WHERE m.group_id=${consolidation.group_id} AND d.project_id=${row.project_id}
+          AND m.merge_id<>'original'
+          AND ${row.id === consolidation.canonical_decision_id ? sql`1=1` : sql`m.decision_id=${row.id}`}
+          ORDER BY receipt.rowid DESC LIMIT 1`
+      : [];
+    const undo = undoCandidates[0];
     return yield* decodeDecision({
+      ...(consolidation
+        ? {
+            consolidation: {
+              groupId: consolidation.group_id,
+              canonicalDecisionId: consolidation.canonical_decision_id,
+              occurrenceCount: consolidation.occurrence_count,
+              revision: consolidation.revision,
+              ...(undo
+                ? {
+                    undo: {
+                      mergeId: undo.merge_id,
+                      occurrenceId: undo.decision_id,
+                      expectedOccurrenceRevision: undo.occurrence_revision,
+                    },
+                  }
+                : {}),
+            },
+          }
+        : {}),
       id: row.id,
       projectId: row.project_id,
       threadId: row.thread_id,
@@ -279,6 +346,7 @@ export const make = Effect.gen(function* () {
       updatedAt: row.updated_at,
       evidence,
       relationships,
+      relationSuggestions,
       provenance: yield* decodeProvenance(row.provenance_json),
     });
   });
@@ -299,6 +367,7 @@ export const make = Effect.gen(function* () {
       valid.threadId ?? null,
       valid.search ?? "",
       valid.reviewState ?? null,
+      valid.attribution ?? null,
       valid.lifecycle ?? null,
     ]);
     const cursor =
@@ -313,10 +382,12 @@ export const make = Effect.gen(function* () {
     const search = escapeLike(valid.search ?? "");
     const rows =
       yield* sql<StoredDecision>`SELECT d.* FROM thread_decisions d WHERE d.project_id = ${valid.projectId}
-      AND ${valid.threadId ? sql`d.thread_id = ${valid.threadId}` : sql`1 = 1`}
+      AND NOT EXISTS(SELECT 1 FROM contextual_group_members gm JOIN contextual_decision_groups cg ON cg.id=gm.group_id JOIN thread_decisions canonical ON canonical.id=cg.canonical_decision_id WHERE gm.decision_id=d.id AND gm.occurrence_revision=d.revision AND canonical.id<>d.id AND canonical.project_id=d.project_id AND canonical.lifecycle='current' AND canonical.review_state<>'dismissed')
+      AND ${valid.threadId ? sql`(d.thread_id = ${valid.threadId} OR EXISTS(SELECT 1 FROM contextual_decision_groups cg JOIN contextual_group_members gm ON gm.group_id=cg.id JOIN thread_decisions member ON member.id=gm.decision_id WHERE cg.canonical_decision_id=d.id AND gm.occurrence_revision=member.revision AND member.thread_id=${valid.threadId}))` : sql`1 = 1`}
       AND ${valid.reviewState === undefined ? sql`d.review_state <> 'dismissed'` : valid.reviewState === "all" ? sql`1 = 1` : sql`d.review_state = ${valid.reviewState}`}
+      AND ${valid.attribution === undefined || valid.attribution === "all" ? sql`1=1` : sql`(d.attribution=${valid.attribution} OR EXISTS(SELECT 1 FROM contextual_decision_groups cg JOIN contextual_group_members gm ON gm.group_id=cg.id JOIN thread_decisions member ON member.id=gm.decision_id WHERE cg.canonical_decision_id=d.id AND gm.occurrence_revision=member.revision AND member.attribution=${valid.attribution}))`}
       AND ${valid.lifecycle === undefined ? sql`d.lifecycle = 'current'` : valid.lifecycle === "all" ? sql`1 = 1` : sql`d.lifecycle = ${valid.lifecycle}`}
-      AND ${valid.search ? sql`(d.title LIKE ${search} ESCAPE '!' OR d.body LIKE ${search} ESCAPE '!' OR d.rationale LIKE ${search} ESCAPE '!' OR EXISTS (SELECT 1 FROM decision_evidence e WHERE e.decision_id = d.id AND e.quote LIKE ${search} ESCAPE '!'))` : sql`1 = 1`}
+      AND ${valid.search ? sql`(d.title LIKE ${search} ESCAPE '!' OR d.body LIKE ${search} ESCAPE '!' OR d.rationale LIKE ${search} ESCAPE '!' OR EXISTS (SELECT 1 FROM decision_evidence e WHERE e.decision_id = d.id AND e.quote LIKE ${search} ESCAPE '!') OR EXISTS(SELECT 1 FROM contextual_decision_groups cg JOIN contextual_group_members gm ON gm.group_id=cg.id JOIN thread_decisions member ON member.id=gm.decision_id WHERE cg.canonical_decision_id=d.id AND gm.occurrence_revision=member.revision AND (member.title LIKE ${search} ESCAPE '!' OR member.body LIKE ${search} ESCAPE '!' OR member.rationale LIKE ${search} ESCAPE '!' OR EXISTS(SELECT 1 FROM decision_evidence me WHERE me.decision_id=member.id AND me.quote LIKE ${search} ESCAPE '!'))))` : sql`1 = 1`}
       AND ${cursor ? sql`(d.occurred_at < ${cursor.at} OR (d.occurred_at = ${cursor.at} AND d.source_sequence < ${cursor.sequence}) OR (d.occurred_at = ${cursor.at} AND d.source_sequence = ${cursor.sequence} AND d.id < ${cursor.id}))` : sql`1 = 1`}
       ORDER BY d.occurred_at DESC, d.source_sequence DESC, d.id DESC LIMIT ${limit + 1}`;
     const page = rows.slice(0, limit);
@@ -467,12 +538,47 @@ export const make = Effect.gen(function* () {
     return yield* get(input);
   });
   const mutate = Effect.fn("Decisions.mutate")(function* (input: ThreadDecisionMutateInput) {
-    const valid = yield* decodeMutation(input).pipe(
+    let valid = yield* decodeMutation(input).pipe(
       Effect.mapError(() => fail("invalid", "Invalid decision mutation.")),
     );
     yield* requireProject(valid.projectId);
     const at = yield* now;
     let decision: ThreadDecision | null = null;
+    if (valid.operation === "resolve-suggestion") {
+      const note = yield* checkRevision(valid, valid.expectedRevision);
+      const rows = yield* sql<{
+        left_id: string;
+        right_id: string;
+        left_revision: number;
+        right_revision: number;
+        kind: string;
+        state: string;
+      }>`SELECT * FROM decision_relation_suggestions WHERE id=${valid.suggestionId} AND project_id=${valid.projectId}`;
+      const s = rows[0];
+      if (!s || s.state !== "suggested" || (s.left_id !== note.id && s.right_id !== note.id))
+        return yield* fail("conflict", "This suggestion changed. Refresh and try again.");
+      const otherId = DecisionId.make(s.left_id === note.id ? s.right_id : s.left_id);
+      const ownRevision = s.left_id === note.id ? s.left_revision : s.right_revision;
+      const otherRevision = s.left_id === note.id ? s.right_revision : s.left_revision;
+      if (ownRevision !== note.revision || otherRevision !== valid.expectedOtherRevision)
+        return yield* fail("conflict", "This suggestion changed. Refresh and try again.");
+      yield* checkRevision({ projectId: valid.projectId, id: otherId }, otherRevision);
+      if (valid.action === "propose-replacement") {
+        if (s.kind !== "conflict")
+          return yield* fail("invalid", "Only conflicting decisions can propose replacement.");
+        valid = {
+          operation: "propose-replacement",
+          projectId: valid.projectId,
+          predecessorId: otherId,
+          successorId: note.id,
+          expectedPredecessorRevision: otherRevision,
+          expectedSuccessorRevision: note.revision,
+        };
+      } else {
+        yield* sql`UPDATE decision_relation_suggestions SET state='ignored' WHERE id=${valid.suggestionId}`;
+        return { decision: yield* get(valid), projectRevision: yield* bump(valid.projectId) };
+      }
+    }
     if (
       valid.operation === "edit" ||
       valid.operation === "comment" ||
@@ -491,6 +597,26 @@ export const make = Effect.gen(function* () {
           yield* sql`INSERT OR IGNORE INTO decision_suppression(project_id, fingerprint, decision_id, created_at) VALUES (${valid.projectId}, ${"action:" + stored[0].action_key}, ${valid.id}, ${at})`;
       }
       if (valid.operation === "edit") {
+        const material =
+          valid.title !== note.title ||
+          valid.body !== note.body ||
+          valid.rationale !== note.rationale;
+        const membership = yield* sql<{
+          group_id: string;
+          canonical_decision_id: string;
+          count: number;
+        }>`SELECT m.group_id,g.canonical_decision_id,(SELECT COUNT(*) FROM contextual_group_members members WHERE members.group_id=m.group_id) AS count FROM contextual_group_members m JOIN contextual_decision_groups g ON g.id=m.group_id WHERE m.decision_id=${note.id}`;
+        if (material && membership[0] && membership[0].count > 1) {
+          const prior = membership[0];
+          yield* sql`DELETE FROM contextual_group_members WHERE decision_id=${note.id}`;
+          yield* sql`UPDATE contextual_decision_groups SET canonical_decision_id=CASE WHEN canonical_decision_id=${note.id} THEN (SELECT MIN(decision_id) FROM contextual_group_members WHERE group_id=${prior.group_id}) ELSE canonical_decision_id END,revision=revision+1,updated_at=${at} WHERE id=${prior.group_id}`;
+          const detached = `edited:${NodeCrypto.randomUUID()}`;
+          yield* sql`INSERT INTO contextual_decision_groups(id,project_id,canonical_decision_id,revision,updated_at) VALUES(${detached},${valid.projectId},${note.id},0,${at})`;
+          yield* sql`INSERT INTO contextual_group_members VALUES(${note.id},${detached},${note.revision + 1},'original')`;
+        } else if (membership[0]) {
+          yield* sql`UPDATE contextual_group_members SET occurrence_revision=${note.revision + 1},merge_id='original' WHERE decision_id=${note.id}`;
+          yield* sql`UPDATE contextual_decision_groups SET revision=revision+1,updated_at=${at} WHERE id=${membership[0].group_id}`;
+        }
         yield* sql`UPDATE thread_decisions SET title = ${valid.title}, body = ${valid.body}, rationale = ${valid.rationale}, user_edited = 1, revision = revision + 1, updated_at = ${at} WHERE id = ${valid.id}`;
       } else if (valid.operation === "comment") {
         yield* sql`UPDATE thread_decisions SET comment = ${valid.comment}, revision = revision + 1, updated_at = ${at} WHERE id = ${valid.id}`;
@@ -508,6 +634,10 @@ export const make = Effect.gen(function* () {
         yield* sql`DELETE FROM decision_relationships WHERE predecessor_id = ${valid.id} OR successor_id = ${valid.id}`;
         yield* sql`DELETE FROM decision_evidence WHERE decision_id = ${valid.id}`;
         yield* sql`DELETE FROM thread_decisions WHERE id = ${valid.id}`;
+      }
+      if (valid.operation === "comment" || valid.operation === "review") {
+        yield* sql`UPDATE contextual_group_members SET occurrence_revision=${note.revision + 1},merge_id='original' WHERE decision_id=${note.id}`;
+        yield* sql`UPDATE contextual_decision_groups SET revision=revision+1,updated_at=${at} WHERE id IN (SELECT group_id FROM contextual_group_members WHERE decision_id=${note.id})`;
       }
       if (valid.operation !== "delete") decision = yield* get(valid);
     } else if (valid.operation === "propose-replacement") {
@@ -609,6 +739,7 @@ export const make = Effect.gen(function* () {
                 input.threadId ?? null,
                 input.search ?? "",
                 input.reviewState ?? null,
+                input.attribution ?? null,
                 input.lifecycle ?? null,
               ]),
               at: last.occurredAt,

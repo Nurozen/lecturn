@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+const encodeContextualTestJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { createModelSelection } from "@lecturn/shared/model";
@@ -173,6 +174,62 @@ const cursorAdapterTestLayer = it.layer(
 );
 
 cursorAdapterTestLayer("CursorAdapterLive", (it) => {
+  it.effect(
+    "contextual fresh native prompt includes evidence and acknowledges its exact dispatch",
+    () =>
+      Effect.gen(function* () {
+        const tempDir = yield* Effect.promise(() =>
+          NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "contextual-cursor-")),
+        );
+        const requestLogPath = NodePath.join(tempDir, "requests.ndjson");
+        const settings = yield* ServerSettingsService;
+        const adapter = yield* CursorAdapter;
+        const wrapperPath = yield* Effect.promise(() =>
+          makeMockAgentWrapper({ LECTURN_ACP_REQUEST_LOG_PATH: requestLogPath }),
+        );
+        yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+        const threadId = ThreadId.make("contextual-cursor");
+        yield* adapter.startSession({ threadId, cwd: process.cwd(), runtimeMode: "full-access" });
+        const receipts: import("@lecturn/contracts").ContextualDeliveryReceipt[] = [];
+        let receiptsAtDispatch: string[] | undefined;
+        const result = yield* adapter.sendTurn({
+          threadId,
+          input: "Base",
+          onDispatch: Effect.sync(() => {
+            receiptsAtDispatch = receipts.map((r) => r.acceptance);
+          }),
+          contextualEvidence: {
+            preparationId: "prep",
+            packetId: "packet",
+            dispatchId: "dispatch",
+            submissionId: "submission",
+            providerInstanceId: ProviderInstanceId.make("cursor"),
+            providerContextEpoch: "epoch",
+            providerContextId: null,
+            text: "contextual source",
+            evidenceIds: ["source"],
+          },
+          onContextualReceipt: (r) =>
+            Effect.sync(() => {
+              receipts.push(r);
+            }),
+        });
+        assert.deepEqual(receiptsAtDispatch, ["unknown"]);
+        assert.equal(result.contextualReceipt?.acceptance, "accepted");
+        assert.deepEqual(result.contextualReceipt?.suppliedEvidenceIds, ["source"]);
+        assert.deepEqual(
+          receipts.map((r) => r.acceptance),
+          ["unknown", "accepted"],
+        );
+        yield* adapter.stopSession(threadId);
+        const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
+        assert.include(
+          encodeContextualTestJson(requests.filter((r) => r.method === "session/prompt")),
+          "contextual source",
+        );
+      }),
+  );
+
   for (const scenario of [
     { name: "configured with Lecturn", state: "configured", withT3: true },
     { name: "configured without Lecturn or env", state: "configured", withT3: false },

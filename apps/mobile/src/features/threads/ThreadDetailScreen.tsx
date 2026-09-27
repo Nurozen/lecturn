@@ -1,3 +1,4 @@
+import { ContextualPreparationNotice } from "../contextual/ContextualControls";
 import { AccountTintScope } from "../../lib/AccountTintScope";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { buildModelOptions } from "../../lib/modelOptions";
@@ -992,6 +993,10 @@ const ThreadDetailScreenContent = memo(function ThreadDetailScreenContent(
                   settled || activeUserInputRequestId !== null ? { display: "none" } : undefined
                 }
               >
+                <ContextualPreparationNotice
+                  environmentId={props.environmentId}
+                  threadId={props.selectedThread.id}
+                />
                 <ThreadComposer
                   editorRef={composerEditorRef}
                   draftMessage={props.draftMessage}

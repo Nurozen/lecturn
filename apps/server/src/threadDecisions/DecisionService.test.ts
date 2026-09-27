@@ -49,7 +49,7 @@ it.layer(SqlitePersistenceMemory)("Decision service", (it) => {
               status = { ...status, state: "revoked", eligible: false, generation: 4 };
               return { status, challenge: null };
             }),
-          evaluate: () => Effect.die("A settings read must never run Jev"),
+          evaluate: () => Effect.die("A settings read must never run the evaluator"),
         }),
       );
       const initial = yield* service.status({ projectId });

@@ -1,9 +1,14 @@
 import { Clock, DateTime, Effect } from "effect";
-import { DecisionEvaluationError, type RelayDecisionsStatus } from "@lecturn/contracts";
+import {
+  DecisionEvaluationError,
+  type ExtensionFeatureId,
+  type RelayDecisionsStatus,
+} from "@lecturn/contracts";
 import { RelayDb } from "../db.ts";
 import { currentPersonalPaidFacts, type BillingAccount } from "../billing/BillingStore.ts";
 
 export interface DecisionsAccessConfig {
+  readonly featureId?: ExtensionFeatureId;
   readonly enabled: boolean;
   readonly cohort?: readonly string[];
   readonly billingMaxAgeSeconds: number;
@@ -15,6 +20,7 @@ export interface DecisionAccessSnapshot {
   readonly reason: RelayDecisionsStatus["reason"];
   readonly window: { readonly start: number; readonly end: number } | null;
   readonly limitInputTokens: number;
+  readonly basis?: "subscription" | "grant";
 }
 
 /** Add each month to the original anchor, so a February clamp does not shift March's anniversary. */
@@ -68,6 +74,7 @@ export const makeDecisionsAccess = (config: DecisionsAccessConfig) =>
           enabled: true,
           eligible: true,
           reason: "eligible",
+          basis: "subscription",
           window: allowanceWindow(facts.subscriptionAnniversary, time),
           limitInputTokens: config.monthlyInputTokens,
         };
@@ -78,14 +85,21 @@ export const makeDecisionsAccess = (config: DecisionsAccessConfig) =>
       }>`
       SELECT starts_at::float8,ends_at::float8,monthly_input_tokens::float8 FROM relay_decision_grants
       WHERE user_id=${userId} AND revoked_at IS NULL AND starts_at <= ${time} AND ends_at > ${time}
-      ORDER BY starts_at DESC LIMIT 1`);
+      ORDER BY starts_at DESC,id DESC LIMIT 1`);
       const grant = grants[0];
       if (grant) {
+        if (config.featureId === "contextual") {
+          const admission = yield* decisionStorage(
+            sql`SELECT 1 FROM relay_extension_admission_grants WHERE user_id=${userId} AND feature_id='contextual' AND revoked_at IS NULL AND starts_at<=${time} AND ends_at>${time} LIMIT 1`,
+          );
+          if (!admission.length) return denied("not-paid");
+        }
         const window = allowanceWindow(grant.starts_at, time);
         return {
           enabled: true,
           eligible: true,
           reason: "eligible",
+          basis: "grant",
           window: { start: window.start, end: Math.min(window.end, grant.ends_at) },
           limitInputTokens: grant.monthly_input_tokens,
         };

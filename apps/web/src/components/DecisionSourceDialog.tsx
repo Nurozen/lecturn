@@ -1,3 +1,4 @@
+import { DecisionAttributionChip } from "./DecisionAttributionChip";
 import { useNavigate } from "@tanstack/react-router";
 import { canonicalDecisionText } from "@lecturn/shared/decisionEvidence";
 import { assistantCitationNavigation } from "../lib/assistantCitationNavigation";
@@ -86,6 +87,10 @@ export function DecisionSourceDialog({
           <DialogDescription>{note.title}</DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-4">
+          <div className="flex items-center gap-2">
+            <DecisionAttributionChip attribution={note.attribution} />
+            <span className="text-xs text-muted-foreground">{note.reviewState}</span>
+          </div>
           <blockquote className="border-l-2 border-primary pl-3 whitespace-pre-wrap text-sm">
             {evidence.quote}
           </blockquote>

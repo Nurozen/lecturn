@@ -1,3 +1,4 @@
+import * as ContextualLayers from "./extensions/ContextualLayers.ts";
 import * as DecisionWorker from "./threadDecisions/DecisionWorker.ts";
 import * as DecisionIngestion from "./threadDecisions/DecisionIngestion.ts";
 import * as DecisionCloudClient from "./threadDecisions/DecisionCloudClient.ts";
@@ -34,6 +35,7 @@ import * as HostPowerMonitor from "./background/HostPowerMonitor.ts";
 import * as ServerConfig from "./config.ts";
 import {
   otlpTracesProxyRouteLayer,
+  contextualExportRouteLayer,
   assetRouteLayer,
   attachmentUploadRouteLayer,
   serverEnvironmentHttpApiLayer,
@@ -528,6 +530,20 @@ const DecisionLayerLive = DecisionService.layer.pipe(
   Layer.provide(PersistenceLayerLive),
 );
 
+const ContextualLayerLive = ContextualLayers.layer.pipe(
+  Layer.provide(TextGeneration.layer),
+  Layer.provide(ServerSettingsLayerLive),
+  Layer.provide(
+    DecisionRepository.layer.pipe(
+      Layer.provide(PersistenceLayerLive),
+      Layer.provide(ServerEnvironment.identityLayer),
+    ),
+  ),
+  Layer.provide(ServerEnvironment.identityLayer),
+  Layer.provide(ServerSecretStore.layer),
+  Layer.provide(PersistenceLayerLive),
+);
+
 const PullRequestWatchLayerLive = PullRequestWatchService.layer.pipe(
   Layer.provide(StaveRpcRuntimeLayerLive),
   Layer.provide(PersistenceLayerLive),
@@ -655,6 +671,7 @@ const AntigravityInstallationRefreshLive = Layer.effectDiscard(
 );
 
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+  Layer.provideMerge(ContextualLayerLive),
   Layer.provideMerge(
     Layer.mergeAll(DecisionIngestionLayerLive, DecisionWorkerLayerLive, DecisionCloudLayerLive),
   ),
@@ -758,6 +775,7 @@ export const makeRoutesLayer = Layer.mergeAll(
       Layer.provide(environmentAuthenticatedAuthLayer),
     ),
     otlpTracesProxyRouteLayer,
+    contextualExportRouteLayer,
     assetRouteLayer,
     attachmentUploadRouteLayer,
     staticAndDevRouteLayer,
@@ -770,6 +788,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   Layer.provide(SagaWorkbenchLayerLive),
   Layer.provide(ThreadNoteLayerLive),
   Layer.provide(DecisionLayerLive),
+  Layer.provide(ContextualLayerLive),
   Layer.provide(PullRequestWatchLayerLive),
   Layer.provide(PullRequestServiceLive),
   // One registry per server: a Stave operation started over one socket keeps

@@ -6,6 +6,8 @@ On desktop or web, link an eligible personal Lecturn membership as the environme
 
 Funding approval covers the host. People with permission to operate that host can enable tracking for its projects using the approved allowance. Changing the funding account requires host administration and approval from the new payer. Revoking funding stops new detection across the host.
 
+The approval page explains when Decisions is unavailable, has not been enabled for your account, or cannot verify billing. A service availability or rollout restriction does not mean you need to change your membership. After access is restored, reload the approval request; if it has expired, start a new link from the host.
+
 The default filter tracks agreed architecture, product behavior, scope, and constraints while ignoring exploratory suggestions and routine implementation steps. Optionally describe what matters, such as “architecture and database choices” or “product scope and release decisions.” Tracking starts with new completed messages. Use **Scan existing conversation…** to preview and explicitly start a scan of older messages. Progress and incomplete work stay visible, and scans can be canceled or retried. Pausing a thread leaves the rest of the project running.
 
 Processing details show messages that remain unscanned. Messages received while tracking is paused, or while the live queue is full, require an explicit scan of existing conversation.
@@ -22,4 +24,10 @@ If detection is paused by allowance, account access, provider availability, or h
 
 ## Data and usage
 
-Enabling tracking sends bounded conversation excerpts and your tracking description through Lecturn’s proxy to TypeSafe for detection. Relevant context is also sent to the thread’s configured provider to write the note. Notes, evidence and review history are stored on the hosting environment. Turning tracking off stops new analysis and preserves saved notes; purge removes the project’s Decisions data. Detection and your provider’s subscription usage are separate allowances.
+Enabling tracking sends bounded conversation excerpts and your tracking description to Lecturn’s evaluation service for detection. Relevant context is also sent to the thread’s configured provider to write the note. Notes, evidence and review history are stored on the hosting environment. Turning tracking off stops new analysis and preserves saved notes; purge removes the project’s Decisions data. Detection and your provider’s subscription usage are separate allowances.
+
+## Attribution and shared context
+
+New notes distinguish a user's choice, an agent's choice, and an agent proposal explicitly accepted by the user. Older notes retain their original attribution and may lack the newer occurrence and acceptance details. These chips describe the source of a decision independently of its review state. Filtering and export preserve attribution.
+
+Decisions and [Contextual](contextual.md) share one monthly evaluation allowance, with usage attributed to each feature and separate funding approvals. Contextual can reuse relevant saved Decisions in a new task. Consolidated notes retain separately inspectable source occurrences and revision-bound Undo; automatic semantic combination remains disabled until qualified.

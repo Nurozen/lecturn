@@ -498,6 +498,7 @@ export const relayEnvironmentLinkCleanup = pgTable(
 export const relayDecisionFunding = pgTable(
   "relay_decision_funding",
   {
+    featureId: text("feature_id").notNull().default("decisions"),
     environmentId: text("environment_id").primaryKey(),
     publicKey: text("public_key").notNull(),
     generation: integer("generation").notNull().default(0),
@@ -505,6 +506,10 @@ export const relayDecisionFunding = pgTable(
     state: text("state").notNull().default("unfunded"),
   },
   (table) => [
+    check(
+      "relay_decision_funding_feature_id_check",
+      sql`${table.featureId} IN ('decisions','contextual')`,
+    ),
     index("relay_decision_funding_payer").on(table.payerId),
     check("relay_decision_funding_state", sql`${table.state} IN ('unfunded','active','revoked')`),
     check("relay_decision_funding_generation", sql`${table.generation} >= 0`),
@@ -513,6 +518,7 @@ export const relayDecisionFunding = pgTable(
 export const relayDecisionFundingChallenges = pgTable(
   "relay_decision_funding_challenges",
   {
+    featureId: text("feature_id").notNull().default("decisions"),
     id: text("id").primaryKey(),
     environmentId: text("environment_id")
       .notNull()
@@ -522,9 +528,16 @@ export const relayDecisionFundingChallenges = pgTable(
     expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
     payerId: text("payer_id"),
     redeemedGeneration: integer("redeemed_generation"),
+    canceled: boolean("canceled").notNull().default(false),
     revoked: boolean("revoked").notNull().default(false),
   },
-  (table) => [index("relay_decision_challenges_environment").on(table.environmentId)],
+  (table) => [
+    check(
+      "relay_decision_funding_challenges_feature_id_check",
+      sql`${table.featureId} IN ('decisions','contextual')`,
+    ),
+    index("relay_decision_challenges_environment").on(table.environmentId),
+  ],
 );
 export const relayDecisionGrants = pgTable(
   "relay_decision_grants",
@@ -565,6 +578,8 @@ export const relayDecisionUsageAccounts = pgTable(
 export const relayDecisionUsageWindows = pgTable(
   "relay_decision_usage_windows",
   {
+    limitInputTokens: bigint("limit_input_tokens", { mode: "number" }),
+    poolBasis: text("pool_basis"),
     payerId: text("payer_id").notNull(),
     windowStart: bigint("window_start", { mode: "number" }).notNull(),
     windowEnd: bigint("window_end", { mode: "number" }).notNull(),
@@ -572,6 +587,10 @@ export const relayDecisionUsageWindows = pgTable(
     reservedInputTokens: bigint("reserved_input_tokens", { mode: "number" }).notNull().default(0),
   },
   (table) => [
+    check(
+      "relay_decision_usage_windows_pool_basis_check",
+      sql`${table.poolBasis} IN ('subscription','grant')`,
+    ),
     primaryKey({ columns: [table.payerId, table.windowStart] }),
     check(
       "decision_usage_window_counts",
@@ -582,12 +601,17 @@ export const relayDecisionUsageWindows = pgTable(
 export const relayDecisionUsageRuns = pgTable(
   "relay_decision_usage_runs",
   {
+    featureId: text("feature_id").notNull().default("decisions"),
     payerId: text("payer_id").notNull(),
     runId: text("run_id").notNull(),
     attemptCount: integer("attempt_count").notNull().default(0),
     spentNano: bigint("spent_nano", { mode: "number" }).notNull().default(0),
   },
   (table) => [
+    check(
+      "relay_decision_usage_runs_feature_id_check",
+      sql`${table.featureId} IN ('decisions','contextual')`,
+    ),
     primaryKey({ columns: [table.payerId, table.runId] }),
     check("decision_usage_run_counts", sql`${table.attemptCount} >= 0 AND ${table.spentNano} >= 0`),
   ],
@@ -595,6 +619,9 @@ export const relayDecisionUsageRuns = pgTable(
 export const relayDecisionUsageRequests = pgTable(
   "relay_decision_usage_requests",
   {
+    legacyFingerprint: text("legacy_fingerprint"),
+    backend: text("backend").notNull().default("legacy"),
+    featureId: text("feature_id").notNull().default("decisions"),
     payerId: text("payer_id").notNull(),
     requestId: text("request_id").notNull(),
     environmentId: text("environment_id").notNull(),
@@ -613,10 +640,19 @@ export const relayDecisionUsageRequests = pgTable(
     attemptCount: integer("attempt_count").notNull().default(0),
     activeAttemptId: text("active_attempt_id"),
     resultJson: jsonb("result_json"),
+    qualificationId: text("qualification_id"),
     resultExpiresAt: bigint("result_expires_at", { mode: "number" }),
     createdAt: bigint("created_at", { mode: "number" }).notNull(),
   },
   (table) => [
+    check(
+      "relay_decision_usage_requests_feature_id_check",
+      sql`${table.featureId} IN ('decisions','contextual')`,
+    ),
+    check(
+      "decision_usage_qualification",
+      sql`${table.qualificationId} IS NULL OR (${table.templateVersion}='decisions-equivalence-v1' AND ${table.backend}='private-evaluator' AND length(${table.qualificationId}) BETWEEN 1 AND 256 AND btrim(${table.qualificationId})=${table.qualificationId})`,
+    ),
     primaryKey({ columns: [table.payerId, table.requestId] }),
     check(
       "decision_usage_request_status",
@@ -631,6 +667,11 @@ export const relayDecisionUsageRequests = pgTable(
 export const relayDecisionUsageAttempts = pgTable(
   "relay_decision_usage_attempts",
   {
+    nextCheckAt: bigint("next_check_at", { mode: "number" }).notNull().default(0),
+    policyVersion: text("policy_version").notNull().default("decisions-v1"),
+    requestFingerprint: text("request_fingerprint").notNull().default(""),
+    backend: text("backend").notNull().default("legacy"),
+    featureId: text("feature_id").notNull().default("decisions"),
     id: text("id").primaryKey(),
     payerId: text("payer_id").notNull(),
     requestId: text("request_id").notNull(),
@@ -646,6 +687,18 @@ export const relayDecisionUsageAttempts = pgTable(
     createdAt: bigint("created_at", { mode: "number" }).notNull(),
   },
   (table) => [
+    index("relay_extension_attempt_recovery")
+      .on(table.featureId, table.backend, table.nextCheckAt, table.id)
+      .where(
+        sql`${table.costNano} IS NULL AND ${table.status} IN ('dispatched','unknown','expired')`,
+      ),
+    index("relay_extension_attempt_unresolved")
+      .on(table.environmentId, table.createdAt)
+      .where(sql`${table.backend}='private-evaluator' AND ${table.costNano} IS NULL`),
+    check(
+      "relay_decision_usage_attempts_feature_id_check",
+      sql`${table.featureId} IN ('decisions','contextual')`,
+    ),
     index("decision_usage_attempt_account").on(table.payerId, table.createdAt),
     index("decision_usage_attempt_reconcile").on(table.status, table.deadline),
     index("decision_usage_attempt_environment").on(table.environmentId, table.status),
@@ -667,3 +720,49 @@ export const relayDecisionUsageControl = pgTable(
     check("decision_usage_control_exposure", sql`${table.exposureNano} >= 0`),
   ],
 );
+
+/** Compatibility shape; controlled promotion widens keys only after old workers retire. */
+export const relayExtensionsSchema = pgTable(
+  "relay_extensions_schema",
+  {
+    id: integer("id").primaryKey(),
+    phase: integer("phase").notNull().default(0),
+    minimumReservationEpoch: integer("minimum_reservation_epoch").notNull().default(0),
+    compatibilityDeployments: integer("compatibility_deployments").notNull().default(0),
+    rollbackFloor: text("rollback_floor"),
+  },
+  (table) => [
+    check("relay_extensions_schema_id_check", sql`${table.id}=1`),
+    check("relay_extensions_schema_phase_check", sql`${table.phase} IN (0,1)`),
+  ],
+);
+export const relayExtensionAdmissionGrants = pgTable(
+  "relay_extension_admission_grants",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => relayBillingAccounts.userId),
+    featureId: text("feature_id").notNull(),
+    startsAt: bigint("starts_at", { mode: "number" }).notNull(),
+    endsAt: bigint("ends_at", { mode: "number" }).notNull(),
+    revokedAt: bigint("revoked_at", { mode: "number" }),
+    operator: text("operator").notNull(),
+    reason: text("reason").notNull(),
+  },
+  (table) => [
+    check(
+      "relay_extension_admission_grants_feature_id_check",
+      sql`${table.featureId} IN ('decisions','contextual')`,
+    ),
+    check("relay_extension_admission_grants_check", sql`${table.endsAt} > ${table.startsAt}`),
+  ],
+);
+
+export const relayExtensionsEvaluatorCleanup = pgTable("relay_extensions_evaluator_cleanup", {
+  environmentId: text("environment_id").primaryKey(),
+  minimumAdmissibilityEpoch: bigint("minimum_admissibility_epoch", { mode: "number" })
+    .notNull()
+    .default(0),
+  nextCheckAt: bigint("next_check_at", { mode: "number" }).notNull().default(0),
+});

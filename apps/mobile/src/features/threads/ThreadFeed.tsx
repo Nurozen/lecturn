@@ -1,3 +1,4 @@
+import { ContextualMessageDisclosure } from "../contextual/ContextualMessageDisclosure";
 import * as Haptics from "expo-haptics";
 import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
 import { useViewabilityAmount, type LegendListRef } from "@legendapp/list/react-native";
@@ -1321,7 +1322,10 @@ function useMarkdownStyles(
 
 function renderFeedEntry(
   info: { item: ThreadFeedEntry; index: number },
-  props: Pick<ThreadFeedProps, "environmentId" | "onUseArtifactTemplate" | "skills"> & {
+  props: Pick<
+    ThreadFeedProps,
+    "environmentId" | "threadId" | "onUseArtifactTemplate" | "skills"
+  > & {
     readonly copiedRowId: string | null;
     readonly expandedWorkRows: Record<string, boolean>;
     readonly workRowSizing: ReturnType<typeof deriveThreadWorkLogSizing>;
@@ -1518,6 +1522,11 @@ function renderFeedEntry(
               );
             })}
           </GlassCard>
+          <ContextualMessageDisclosure
+            environmentId={props.environmentId}
+            threadId={props.threadId}
+            messageId={message.id}
+          />
           <View className="mt-1 flex-row items-center justify-end gap-1 pr-0.5">
             <Text className="font-lecturn-medium text-xs tabular-nums text-adaptive-neutral-600-400">
               {timestampLabel}
@@ -2675,6 +2684,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       >
         <ThreadMediaVisibility>
           {renderFeedEntry(info, {
+            threadId: props.threadId,
             environmentId: props.environmentId,
             copiedRowId,
             expandedWorkRows,
@@ -2727,6 +2737,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       onToggleWorkGroup,
       onToggleWorkRow,
       props.environmentId,
+      props.threadId,
       props.onUseArtifactTemplate,
       props.skills,
       renderMarkdownImage,

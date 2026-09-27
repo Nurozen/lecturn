@@ -573,7 +573,7 @@ export function makeBillingService(
     }),
     receiveClerkWebhook: Effect.fn("Billing.receiveClerkWebhook")(
       function* (request, signingSecret) {
-        yield* assertEnabled();
+        // Account deletion revokes extension consent regardless of billing rollout state.
         const event = yield* Effect.tryPromise({
           try: () => verifyAccountDeletion(request, signingSecret),
           catch: () => error("signature", "Clerk webhook signature is invalid"),

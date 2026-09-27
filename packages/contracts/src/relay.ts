@@ -1,3 +1,6 @@
+import * as Extensions from "./extensions.ts";
+import * as Contextual from "./contextual.ts";
+import * as Decisions from "./relayDecisions.ts";
 import * as Context from "effect/Context";
 import * as Schema from "effect/Schema";
 import * as HttpApi from "effect/unstable/httpapi/HttpApi";
@@ -1170,6 +1173,195 @@ export const RelayServerGroup = HttpApiGroup.make("server")
   )
   .middleware(RelayEnvironmentAuth);
 
+const extensionHttpErrors = [400, 401, 403, 409, 410, 429, 503].map((status) =>
+  Schema.Struct({
+    code: Extensions.ExtensionEvaluationError.fields.code,
+    message: Extensions.ExtensionEvaluationError.fields.message,
+  }).annotate({ httpApiStatus: status }),
+);
+const extensionHttpHeaders = Schema.Struct({ authorization: TrimmedNonEmptyString });
+export const RelayExtensionsGroup = HttpApiGroup.make("extensions")
+  .add(
+    HttpApiEndpoint.get("status", "/v1/extensions/status", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionServiceStatus,
+    }),
+    HttpApiEndpoint.post("challenge", "/v1/extensions/funding/challenge", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingChallengeResult,
+      payload: Extensions.ExtensionFundingChallengeRequest,
+    }),
+    HttpApiEndpoint.get("approvalInfo", "/v1/extensions/funding/approval", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingApprovalInfo,
+      query: Extensions.ExtensionFundingApprovalRequest,
+    }),
+    HttpApiEndpoint.post("approve", "/v1/extensions/funding/approve", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingApprovalResult,
+      payload: Extensions.ExtensionFundingApprovalRequest,
+    }),
+    HttpApiEndpoint.get("observe", "/v1/extensions/funding/observe", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingObserveResult,
+      query: Extensions.ExtensionFundingObserveRequest,
+    }),
+    HttpApiEndpoint.post("cancel", "/v1/extensions/funding/cancel", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingCancelResult,
+      payload: Extensions.ExtensionFundingCancelRequest,
+    }),
+    HttpApiEndpoint.post("redeem", "/v1/extensions/funding/redeem", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingRedeemResult,
+      payload: Extensions.ExtensionFundingRedeemRequest,
+    }),
+    HttpApiEndpoint.get("fundingStatus", "/v1/extensions/funding/status", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingStatusResult,
+      query: Extensions.ExtensionFundingStatusRequest,
+    }),
+    HttpApiEndpoint.post("revoke", "/v1/extensions/funding/revoke", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingRevokeResult,
+      payload: Extensions.ExtensionFundingRevokeRequest,
+    }),
+    HttpApiEndpoint.get("accountStatus", "/v1/extensions/funding/account-status", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingStatusResult,
+      query: Extensions.ExtensionFundingStatusRequest,
+    }),
+    HttpApiEndpoint.get("accountList", "/v1/extensions/funding/account-list", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingAccountListResult,
+      query: Extensions.ExtensionFundingAccountListRequest,
+    }),
+    HttpApiEndpoint.post("accountRevoke", "/v1/extensions/funding/account-revoke", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingRevokeResult,
+      payload: Extensions.ExtensionFundingRevokeRequest,
+    }),
+    HttpApiEndpoint.get("evaluationStatus", "/v1/extensions/evaluation/status", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionEvaluationStatusResult,
+      query: Extensions.ExtensionEvaluationStatusRequest,
+    }),
+    HttpApiEndpoint.post("evaluate", "/v1/extensions/evaluate", {
+      payload: Contextual.ContextualEvaluationRequest,
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Contextual.ContextualEvaluationResult,
+    }),
+    HttpApiEndpoint.post("conflicts", "/v1/extensions/conflicts", {
+      payload: Contextual.ContextualConflictCheckRequest,
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Contextual.ContextualConflictCheckResult,
+    }),
+    HttpApiEndpoint.post("equivalence", "/v1/extensions/equivalence", {
+      payload: Contextual.ContextualEquivalenceCheckRequest,
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Contextual.ContextualEquivalenceCheckResult,
+    }),
+    HttpApiEndpoint.post("decisions", "/v1/extensions/decisions", {
+      payload: Decisions.DecisionEvaluationRequest,
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionEvaluationResult,
+    }),
+  )
+  .annotate(
+    OpenApi.Description,
+    "Paid extensions with independent feature consent and one shared membership allowance. Account endpoints use Clerk bearer tokens; host endpoints use environment credentials.",
+  );
+
+export const RelayDecisionsGroup = HttpApiGroup.make("decisions")
+  .add(
+    HttpApiEndpoint.get("status", "/v1/decisions/status", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.RelayDecisionsStatus,
+    }),
+    HttpApiEndpoint.post("evaluate", "/v1/decisions/evaluate", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionEvaluationResult,
+      payload: Decisions.DecisionEvaluationRequest,
+    }),
+    HttpApiEndpoint.post("challenge", "/v1/decisions/funding/challenge", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionFundingChallengeResult,
+      payload: Decisions.DecisionFundingChallengeRequest,
+    }),
+    HttpApiEndpoint.post("approve", "/v1/decisions/funding/approve", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionFundingApprovalResult,
+      payload: Decisions.DecisionFundingApprovalRequest,
+    }),
+    HttpApiEndpoint.get("approvalInfo", "/v1/decisions/funding/approval", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionFundingApprovalInfo,
+      query: Decisions.DecisionFundingApprovalRequest,
+    }),
+    HttpApiEndpoint.get("fundingStatus", "/v1/decisions/funding/status", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionFundingStatusResult,
+      query: Decisions.DecisionFundingStatusRequest,
+    }),
+    HttpApiEndpoint.get("accountStatus", "/v1/decisions/funding/account-status", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionFundingStatusResult,
+      query: Decisions.DecisionFundingStatusRequest,
+    }),
+    HttpApiEndpoint.get("accountList", "/v1/decisions/funding/account-list", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionFundingAccountListResult,
+      query: Decisions.DecisionFundingAccountListRequest,
+    }),
+    HttpApiEndpoint.post("accountRevoke", "/v1/decisions/funding/account-revoke", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionFundingRevokeResult,
+      payload: Decisions.DecisionFundingRevokeRequest,
+    }),
+    HttpApiEndpoint.post("redeem", "/v1/decisions/funding/redeem", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionFundingRedeemResult,
+      payload: Decisions.DecisionFundingRedeemRequest,
+    }),
+    HttpApiEndpoint.post("revoke", "/v1/decisions/funding/revoke", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionFundingRevokeResult,
+      payload: Decisions.DecisionFundingRevokeRequest,
+    }),
+  )
+  .annotate(
+    OpenApi.Description,
+    "Legacy Decisions compatibility endpoints. These always select the Decisions feature and share the Extensions allowance.",
+  );
+
 export const RelayApi = HttpApi.make("RelayApi")
   .add(
     RelayHealthGroup,
@@ -1179,6 +1371,8 @@ export const RelayApi = HttpApi.make("RelayApi")
     RelayTokenGroup,
     RelayDpopClientGroup,
     RelayServerGroup,
+    RelayExtensionsGroup,
+    RelayDecisionsGroup,
   )
   .annotate(OpenApi.Title, "Lecturn Relay API")
   .annotate(OpenApi.Version, "1.0.0")

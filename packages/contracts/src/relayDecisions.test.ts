@@ -91,7 +91,7 @@ describe("relay Decisions contracts", () => {
         isDecisionEvaluationResult({
           requestId: "request-1",
           runId: "run-1",
-          model: "jev-1.13.0",
+          model: "extensions-v1",
           templateVersion: "1",
           judgments: [{ targetId: "target-1", exists: "yes", relevant: "yes" }],
           inputTokens,

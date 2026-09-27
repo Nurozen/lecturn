@@ -1,9 +1,13 @@
+import { DecisionRelationSuggestions } from "./contextual/DecisionRelationSuggestions";
+import { ContextualDecisionGroupCard } from "./contextual/ContextualDecisionGroupCard";
+import { DecisionAttributionChip } from "./DecisionAttributionChip";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { downloadTextFile } from "../lib/downloadTextFile";
 import type {
   DecisionEvidence,
+  DecisionAttribution,
   DecisionRelationship,
   EnvironmentId,
   ProjectId,
@@ -85,6 +89,7 @@ function AvailableDecisionsPanel({
   threadId?: ThreadId;
 }) {
   const canOperate = useDecisionOperateAccess(environmentId);
+  const [attribution, setAttribution] = useState<DecisionAttribution | "all">("all");
   const [search, setSearch] = useState(""),
     [review, setReview] = useState<"active" | "all" | "unreviewed" | "confirmed" | "dismissed">(
       "active",
@@ -97,11 +102,12 @@ function AvailableDecisionsPanel({
       projectId,
       ...(threadId ? { threadId } : {}),
       ...(search.trim() ? { search: search.trim() } : {}),
+      ...(attribution === "all" ? {} : { attribution }),
       ...(review === "active" ? {} : { reviewState: review }),
       lifecycle,
       ...(cursor ? { cursor } : {}),
     }),
-    [projectId, threadId, search, review, lifecycle, cursor],
+    [projectId, threadId, search, review, attribution, lifecycle, cursor],
   );
   const list = useEnvironmentQuery(threadDecisionEnvironment.list({ environmentId, input }));
   const status = useEnvironmentQuery(
@@ -319,6 +325,21 @@ function AvailableDecisionsPanel({
           />
         </label>
         <div className="flex flex-wrap gap-2">
+          <label className="text-xs">
+            Decision maker{" "}
+            <select
+              className={inputClass}
+              value={attribution}
+              onChange={(event) =>
+                setFilters(() => setAttribution(event.target.value as DecisionAttribution | "all"))
+              }
+            >
+              <option value="all">All origins</option>
+              <option value="user-directed">User directed</option>
+              <option value="user-accepted">User accepted</option>
+              <option value="agent-chosen">Agent chosen</option>
+            </select>
+          </label>
           <label className="text-xs">
             Review{" "}
             <select
@@ -544,18 +565,20 @@ function AvailableDecisionsPanel({
             }}
           >
             <div className="mb-2 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-              <span>
-                {note.attribution === "user-directed"
-                  ? "User directed"
-                  : note.attribution === "user-accepted"
-                    ? "User accepted"
-                    : "Agent chosen"}
-              </span>
+              <DecisionAttributionChip attribution={note.attribution} />
               <span>{note.reviewState}</span>
               {note.lifecycle === "superseded" ? <span>Superseded</span> : null}
               {note.userEdited ? <span>Edited</span> : null}
             </div>
             <h3 className="text-sm font-semibold">{note.title}</h3>
+            {note.consolidation && note.consolidation.occurrenceCount > 1 ? (
+              <ContextualDecisionGroupCard
+                environmentId={environmentId}
+                projectId={projectId}
+                note={note}
+                onChange={list.refresh}
+              />
+            ) : null}
             <p className="mt-2 whitespace-pre-wrap break-words text-sm">{note.body}</p>
             {note.rationale ? (
               <p className="mt-2 text-xs text-muted-foreground">Rationale: {note.rationale}</p>
@@ -587,6 +610,12 @@ function AvailableDecisionsPanel({
                 ))}
               </div>
             </details>
+            <DecisionRelationSuggestions
+              environmentId={environmentId}
+              note={note}
+              canOperate={canOperate}
+              onChange={list.refresh}
+            />
             {note.relationships
               .filter((r) => r.state !== "rejected" && r.state !== "undone")
               .map((relation) => (
@@ -778,7 +807,7 @@ function AvailableDecisionsPanel({
           <DialogPanel className="space-y-4">
             <DecisionsFunding environmentId={environmentId} onChange={status.refresh} />
             <p className="text-sm">
-              Lecturn uses TypeSafe to find decisions in conversation excerpts. Your thread’s
+              Lecturn’s evaluation service finds decisions in conversation excerpts. Your thread’s
               connected agent writes the notes using that account’s usage allowance. Detection uses
               your membership allowance.
             </p>

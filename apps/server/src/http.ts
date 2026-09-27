@@ -1,5 +1,7 @@
+import { ExtensionsRuntime } from "./extensions/ExtensionsRuntime.ts";
 import Mime from "@effect/platform-node/Mime";
 import {
+  AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   EnvironmentHttpApi,
@@ -269,7 +271,10 @@ export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
 }
 
 const authenticateRawRouteWithScope = (
-  scope: typeof AuthOrchestrationReadScope | typeof AuthOrchestrationOperateScope,
+  scope:
+    | typeof AuthOrchestrationReadScope
+    | typeof AuthOrchestrationOperateScope
+    | typeof AuthAccessWriteScope,
 ) =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
@@ -363,6 +368,47 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
       EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
     }),
   ),
+);
+
+/** Host archive exports require administrative access, including over remote connections. */
+export const contextualExportRouteLayer = Layer.unwrap(
+  Effect.gen(function* () {
+    const runtime = yield* ExtensionsRuntime;
+    return HttpRouter.add(
+      "GET",
+      "/api/contextual/exports/*",
+      Effect.gen(function* () {
+        yield* authenticateRawRouteWithScope(AuthAccessWriteScope);
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const url = HttpServerRequest.toURL(request);
+        if (Option.isNone(url)) return HttpServerResponse.text("Bad Request", { status: 400 });
+        const artifactId = url.value.pathname.slice("/api/contextual/exports/".length);
+        return yield* runtime.readExport(artifactId).pipe(
+          Effect.map((body) =>
+            HttpServerResponse.uint8Array(body, {
+              contentType: "application/x-ndjson",
+              headers: {
+                "content-disposition": 'attachment; filename="lecturn-contextual.jsonl"',
+                "cache-control": "no-store",
+                "x-content-type-options": "nosniff",
+              },
+            }),
+          ),
+          Effect.orElseSucceed(() =>
+            HttpServerResponse.text("Export unavailable. It may have been forgotten or expired.", {
+              status: 404,
+            }),
+          ),
+        );
+      }).pipe(
+        Effect.catchTags({
+          EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+          EnvironmentInternalError: HttpServerRespondable.toResponse,
+          EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+        }),
+      ),
+    );
+  }),
 );
 
 export const assetRouteLayer = HttpRouter.add(

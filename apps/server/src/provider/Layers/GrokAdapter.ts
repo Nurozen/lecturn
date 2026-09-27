@@ -1,3 +1,4 @@
+import { prepareContextualDispatch } from "../ContextualDispatch.ts";
 import {
   ApprovalRequestId,
   type GrokSettings,
@@ -1687,6 +1688,13 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             );
           }),
         );
+        let contextual = prepareContextualDispatch(
+          input,
+          "skipped",
+          boundInstanceId,
+          prepared.acpSessionId,
+        );
+        let contextualReceipt: import("@lecturn/contracts").ContextualDeliveryReceipt | undefined;
         const promptSettled = yield* Ref.make(false);
         const promptRpcSucceeded = yield* Ref.make(false);
         const promptResultRef = yield* Ref.make<EffectAcpSchema.PromptResponse | undefined>(
@@ -1720,12 +1728,22 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               if (liveCtx.interruptedTurnIds.has(prepared.turnId)) {
                 return { _tag: "Skipped" as const, interrupted: true };
               }
+              contextual = prepareContextualDispatch(
+                input,
+                prepared.steeringTurnId === undefined ? "fresh" : "steered",
+                boundInstanceId,
+                prepared.acpSessionId,
+              );
+              yield* contextual.receipt("unknown", prepared.turnId, null);
               const dispatched = yield* Deferred.make<void>();
               const fiber = yield* liveCtx.acp
                 .prompt(
                   {
                     prompt: [
                       ...prepared.promptParts,
+                      ...(contextual.text
+                        ? [{ type: "text" as const, text: contextual.text }]
+                        : []),
                       { type: "text", text: prepared.runtimeInstructions },
                     ],
                   },
@@ -1739,10 +1757,12 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 Deferred.await(dispatched),
                 Fiber.await(fiber).pipe(Effect.asVoid),
               );
+              if (input.onDispatch && (yield* Deferred.isDone(dispatched))) yield* input.onDispatch;
               return { _tag: "Started" as const, fiber };
             }),
           );
           if (promptStart._tag === "Skipped") {
+            contextualReceipt = yield* contextual.receipt("rejected", null, null);
             // Settle after releasing promptLifecycle. Holding both locks
             // deadlocks the next sendTurn, which takes the thread lock first.
             yield* withThreadLock(
@@ -1764,6 +1784,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             return {
               threadId: input.threadId,
               turnId: prepared.turnId,
+              ...(contextualReceipt ? { contextualReceipt } : {}),
               resumeCursor: liveCtx?.session.resumeCursor,
             };
           }
@@ -1788,6 +1809,16 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             Effect.mapError((error) =>
               mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
             ),
+          );
+
+          contextualReceipt = yield* contextual.receipt(
+            result.stopReason === "cancelled" ? "unknown" : "accepted",
+            prepared.turnId,
+            result.stopReason === "cancelled"
+              ? null
+              : `acp:${prepared.acpSessionId}:${input.contextualEvidence?.dispatchId ?? prepared.turnId}`,
+            undefined,
+            true,
           );
 
           return yield* withThreadLock(
@@ -1824,6 +1855,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 return {
                   threadId: input.threadId,
                   turnId: prepared.turnId,
+                  ...(contextualReceipt ? { contextualReceipt } : {}),
                   resumeCursor: ctx.session.resumeCursor,
                 };
               }
@@ -1837,6 +1869,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 return {
                   threadId: input.threadId,
                   turnId: prepared.turnId,
+                  ...(contextualReceipt ? { contextualReceipt } : {}),
                   resumeCursor: ctx.session.resumeCursor,
                 };
               }
@@ -1865,6 +1898,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   return {
                     threadId: input.threadId,
                     turnId: prepared.turnId,
+                    ...(contextualReceipt ? { contextualReceipt } : {}),
                     resumeCursor: ctx.session.resumeCursor,
                   };
                 }
@@ -1899,6 +1933,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               return {
                 threadId: input.threadId,
                 turnId: prepared.turnId,
+                ...(contextualReceipt ? { contextualReceipt } : {}),
                 resumeCursor: ctx.session.resumeCursor,
               };
             }),

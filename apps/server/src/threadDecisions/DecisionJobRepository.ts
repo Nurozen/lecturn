@@ -4,7 +4,7 @@ import {
   DecisionEvaluationResult,
   DecisionJobId,
   DecisionScanId,
-  DecisionWriterOutput,
+  DecisionWriterOutputAny,
   DEFAULT_DECISION_TRACKING_DESCRIPTION,
   ProjectId,
   ThreadId,
@@ -47,7 +47,7 @@ export const DecisionJobStage = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   evidence: Schema.Array(DecisionEvidence).check(Schema.isMaxLength(64)),
-  writerOutput: Schema.NullOr(DecisionWriterOutput),
+  writerOutput: Schema.NullOr(DecisionWriterOutputAny),
   resolvedCandidateIds: Schema.Array(boundedId).check(Schema.isMaxLength(256)),
   contextExpansionCount: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
   contextRefreshCount: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 1 })).pipe(

@@ -3250,6 +3250,28 @@ export function ConnectionsSettings() {
 
   return (
     <SettingsPageContainer>
+      {primaryEnvironmentId ? (
+        <SettingsSection title="Contextual">
+          <SettingsRow
+            title="Sources and collection"
+            description="Manage the sources, local archive, and shared membership allowance on this host."
+            control={
+              <Button
+                variant="outline"
+                size="sm"
+                render={
+                  <Link
+                    to="/contextual/$environmentId"
+                    params={{ environmentId: primaryEnvironmentId }}
+                  />
+                }
+              >
+                Manage Contextual
+              </Button>
+            }
+          />
+        </SettingsSection>
+      ) : null}
       {canManageLocalBackend ? (
         <>
           <SettingsSection {...searchableSetting("connections-environment")}>

@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { DecisionWriterInput, DecisionWriterOutput } from "@lecturn/contracts";
+import { DecisionWriterInput, DecisionWriterOutputV2 } from "@lecturn/contracts";
 
 export const decisionWriterInputFixture = Schema.decodeUnknownSync(DecisionWriterInput)({
   modelSelection: {
@@ -36,7 +36,8 @@ export const decisionWriterInputFixture = Schema.decodeUnknownSync(DecisionWrite
   existingDecisions: [],
   resolvedCandidateIds: [],
 });
-export const decisionWriterOutputFixture = Schema.decodeUnknownSync(DecisionWriterOutput)({
+export const decisionWriterOutputFixture = Schema.decodeUnknownSync(DecisionWriterOutputV2)({
+  version: 2,
   actions: [
     {
       action: "create",
@@ -45,6 +46,10 @@ export const decisionWriterOutputFixture = Schema.decodeUnknownSync(DecisionWrit
       body: "Store application data in SQLite.",
       rationale: null,
       attribution: "user-directed",
+      occurrenceEvidenceId: "evidence-1",
+      acceptanceEvidence: null,
+      liveChoice: "new-choice",
+      sourceLineageIds: [],
       evidence: [{ evidenceId: "evidence-1", quote: "Use SQLite." }],
     },
   ],

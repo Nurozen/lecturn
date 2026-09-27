@@ -1,3 +1,4 @@
+import { prepareContextualDispatch } from "../ContextualDispatch.ts";
 /**
  * CursorAdapterLive — Cursor CLI (`agent acp`) via ACP.
  *
@@ -1065,23 +1066,52 @@ export function makeCursorAdapter(
             });
           }
 
+          const nativeSessionId = parseCursorResume(ctx.session.resumeCursor)?.sessionId;
+          const contextual = prepareContextualDispatch(
+            input,
+            steeringTurnId === undefined && ctx.promptsInFlight === 1 ? "fresh" : "steered",
+            boundInstanceId,
+            nativeSessionId,
+          );
+          yield* contextual.receipt("unknown", turnId, null);
           // ACP has no system-message field; keep runtime context separate from the user's text.
-          const result = yield* ctx.acp
-            .prompt({
-              prompt: [
-                ...promptParts,
-                {
-                  type: "text",
-                  text: buildRuntimeInstructions({ harness: "Cursor", model: resolvedModel }),
-                },
-              ],
-            })
+          const dispatched = yield* Deferred.make<void>();
+          const promptFiber = yield* ctx.acp
+            .prompt(
+              {
+                prompt: [
+                  ...promptParts,
+                  ...(contextual.text ? [{ type: "text" as const, text: contextual.text }] : []),
+                  {
+                    type: "text",
+                    text: buildRuntimeInstructions({ harness: "Cursor", model: resolvedModel }),
+                  },
+                ],
+              },
+              { dispatched },
+            )
             .pipe(
               Effect.mapError((error) =>
                 mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
               ),
+              Effect.forkChild({ startImmediately: true }),
             );
+          yield* Effect.raceFirst(
+            Deferred.await(dispatched),
+            Fiber.join(promptFiber).pipe(Effect.asVoid),
+          );
+          if (input.onDispatch) yield* input.onDispatch;
+          const result = yield* Fiber.join(promptFiber);
 
+          const contextualReceipt = yield* contextual.receipt(
+            result.stopReason === "cancelled" ? "unknown" : "accepted",
+            turnId,
+            result.stopReason === "cancelled"
+              ? null
+              : `acp:${nativeSessionId}:${input.contextualEvidence?.dispatchId ?? turnId}`,
+            undefined,
+            true,
+          );
           const turnRecord = ctx.turns.find((turn) => turn.id === turnId);
           if (turnRecord) {
             turnRecord.items.push({ prompt: promptParts, result });
@@ -1116,6 +1146,7 @@ export function makeCursorAdapter(
             threadId: input.threadId,
             turnId,
             resumeCursor: ctx.session.resumeCursor,
+            ...(contextualReceipt ? { contextualReceipt } : {}),
           };
         }).pipe(
           Effect.ensuring(

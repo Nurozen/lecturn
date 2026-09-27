@@ -7,7 +7,7 @@ import type {
   ProviderInstanceId,
   SagaWorkbenchInferenceResult,
   DecisionWriterInput,
-  DecisionWriterOutput,
+  DecisionWriterOutputAny,
 } from "@lecturn/contracts";
 import { TextGenerationError } from "@lecturn/contracts";
 
@@ -76,6 +76,12 @@ export interface ThreadTitleGenerationInput {
   modelSelection: ModelSelection;
 }
 
+export interface ContextualSummaryGenerationInput {
+  cwd: string;
+  message: string;
+  modelSelection: ModelSelection;
+}
+
 export interface WorkflowSummaryGenerationInput {
   cwd: string;
   message: string;
@@ -110,7 +116,7 @@ export class TextGeneration extends Context.Service<
     /** Optional: absence means the provider cannot guarantee isolated background writing. */
     readonly generateDecisionNotes?: (
       input: DecisionNotesGenerationInput,
-    ) => Effect.Effect<DecisionWriterOutput, TextGenerationError>;
+    ) => Effect.Effect<DecisionWriterOutputAny, TextGenerationError>;
     /** Read-only preflight before paid detection and again before writer dispatch. */
     readonly checkDecisionWriter?: (
       input: DecisionWriterCheckInput,
@@ -136,6 +142,11 @@ export class TextGeneration extends Context.Service<
       input: BranchNameGenerationInput,
     ) => Effect.Effect<BranchNameGenerationResult, TextGenerationError>;
 
+    /** Optional: only providers that guarantee isolated, tool-free generation support this. */
+    readonly generateContextualSummary?: (
+      input: ContextualSummaryGenerationInput,
+    ) => Effect.Effect<{ text: string }, TextGenerationError>;
+
     /** Explain supplied workflow evidence without changing workflow facts. */
     readonly generateWorkflowSummary: (
       input: WorkflowSummaryGenerationInput,
@@ -154,6 +165,7 @@ type TextGenerationOp =
   | "generateBranchName"
   | "generateThreadTitle"
   | "generateWorkflowSummary"
+  | "generateContextualSummary"
   | "generateDecisionNotes"
   | "checkDecisionWriter";
 
@@ -176,7 +188,12 @@ const resolveInstance = (
   );
 
 export type RoutedTextGeneration = TextGeneration["Service"] &
-  Required<Pick<TextGeneration["Service"], "checkDecisionWriter" | "generateDecisionNotes">>;
+  Required<
+    Pick<
+      TextGeneration["Service"],
+      "checkDecisionWriter" | "generateDecisionNotes" | "generateContextualSummary"
+    >
+  >;
 
 export const makeTextGenerationFromRegistry = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -216,6 +233,19 @@ export const makeTextGenerationFromRegistry = (
   generateBranchName: (input) =>
     resolveInstance(registry, "generateBranchName", input.modelSelection.instanceId).pipe(
       Effect.flatMap((textGeneration) => textGeneration.generateBranchName(input)),
+    ),
+  generateContextualSummary: (input) =>
+    resolveInstance(registry, "generateContextualSummary", input.modelSelection.instanceId).pipe(
+      Effect.flatMap(
+        (generation) =>
+          generation.generateContextualSummary?.(input) ??
+          Effect.fail(
+            new TextGenerationError({
+              operation: "generateContextualSummary",
+              detail: "This provider does not support isolated Contextual summaries.",
+            }),
+          ),
+      ),
     ),
   generateWorkflowSummary: (input) =>
     resolveInstance(registry, "generateWorkflowSummary", input.modelSelection.instanceId).pipe(

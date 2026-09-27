@@ -3,8 +3,9 @@ import * as NodeAssert from "node:assert/strict";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+const encodeContextualTestJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 import { describe } from "vite-plus/test";
-import { DEFAULT_MODEL, ThreadId } from "@lecturn/contracts";
+import { DEFAULT_MODEL, ThreadId, ProviderInstanceId, TurnId } from "@lecturn/contracts";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexRpc from "effect-codex-app-server/rpc";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
@@ -17,6 +18,7 @@ import {
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import {
   buildTurnStartParams,
+  dispatchCodexContextualTurn,
   describeMcpElicitation,
   hasConfiguredMcpServer,
   hasT3BrowserMcpServer,
@@ -1321,4 +1323,57 @@ describe("Codex paginated thread rollback", () => {
       );
     }),
   );
+});
+
+describe("contextual Codex native admission", () => {
+  for (const queued of [false, true])
+    it.effect(`contextual turn/start acknowledges ${queued ? "queued" : "fresh"} input`, () =>
+      Effect.gen(function* () {
+        const observed: import("@lecturn/contracts").ContextualDeliveryReceipt[] = [];
+        let request: EffectCodexSchema.V2TurnStartParams | undefined;
+        const result = yield* dispatchCodexContextualTurn({
+          input: {
+            input: "Base",
+            contextualEvidence: {
+              preparationId: "prep",
+              packetId: "packet",
+              dispatchId: "dispatch",
+              submissionId: "submission",
+              providerInstanceId: ProviderInstanceId.make("codex"),
+              providerContextEpoch: "epoch",
+              providerContextId: "native-thread",
+              text: "source text",
+              evidenceIds: ["source"],
+            },
+            onContextualReceipt: (r) =>
+              Effect.sync(() => {
+                observed.push(r);
+              }),
+          },
+          threadId: ThreadId.make("thread"),
+          providerThreadId: "native-thread",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "full-access",
+          normalizedModel: undefined,
+          browserToolsAvailable: false,
+          readActiveTurnId: Effect.succeed(queued ? TurnId.make("active") : undefined),
+          request: (params) =>
+            Effect.sync(() => {
+              request = params;
+              NodeAssert.equal(observed.at(-1)?.acceptance, "unknown");
+              return { turn: { id: "native-turn", status: "inProgress", items: [], error: null } };
+            }),
+        });
+        NodeAssert.equal(encodeContextualTestJson(request).includes("source text"), !queued);
+        NodeAssert.equal(
+          result.contextualReceipt?.disposition,
+          queued ? "provider-queued" : "fresh",
+        );
+        NodeAssert.equal(result.contextualReceipt?.acceptance, "accepted");
+        NodeAssert.deepEqual(
+          result.contextualReceipt?.suppliedEvidenceIds,
+          queued ? [] : ["source"],
+        );
+      }),
+    );
 });

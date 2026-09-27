@@ -65,6 +65,20 @@ export const DecisionEvidence = Schema.Struct({
   ),
 );
 export const DecisionProvenance = Schema.Struct({
+  occurrence: Schema.optionalKey(
+    Schema.Struct({
+      version: Schema.Literal(2),
+      evidenceId: DecisionEvidenceId,
+      acceptance: Schema.NullOr(
+        Schema.Struct({
+          proposalEvidenceId: DecisionEvidenceId,
+          acceptanceEvidenceId: DecisionEvidenceId,
+        }),
+      ),
+      liveChoice: Schema.Literals(["new-choice", "explicit-reaffirmation", "revision"]),
+      sourceLineageIds: Schema.Array(nonemptyText(256)).check(Schema.isMaxLength(64)),
+    }),
+  ),
   descriptionRevision: DecisionRevision,
   sourceFingerprint: nonemptyText(256),
   canonicalVersion: nonemptyText(80),
@@ -83,7 +97,35 @@ export const DecisionRelationship = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 }).check(Schema.makeFilter((value) => value.predecessorId !== value.successorId));
+export const DecisionConsolidation = Schema.Struct({
+  groupId: nonemptyText(256),
+  canonicalDecisionId: DecisionId,
+  occurrenceCount: counter,
+  revision: counter,
+  undo: Schema.optionalKey(
+    Schema.Struct({
+      mergeId: nonemptyText(256),
+      occurrenceId: DecisionId,
+      expectedOccurrenceRevision: counter,
+    }),
+  ),
+});
+export const DecisionRelationSuggestion = Schema.Struct({
+  id: nonemptyText(256),
+  kind: Schema.Literals(["conflict", "equivalent"]),
+  otherDecisionId: DecisionId,
+  decisionRevision: DecisionRevision,
+  otherRevision: DecisionRevision,
+  canonicalDecisionId: DecisionId,
+  state: Schema.Literals(["suggested", "ignored", "accepted"]),
+  model: nonemptyText(200),
+  policyVersion: nonemptyText(100),
+});
 export const ThreadDecision = Schema.Struct({
+  relationSuggestions: Schema.optionalKey(
+    Schema.Array(DecisionRelationSuggestion).check(Schema.isMaxLength(32)),
+  ),
+  consolidation: Schema.optionalKey(DecisionConsolidation),
   id: DecisionId,
   projectId: ProjectId,
   threadId: ThreadId,
@@ -169,6 +211,7 @@ const filterFields = {
   projectId: ProjectId,
   threadId: Schema.optionalKey(ThreadId),
   search: Schema.optionalKey(boundedText(500)),
+  attribution: Schema.optionalKey(Schema.Union([DecisionAttribution, Schema.Literal("all")])),
   reviewState: Schema.optionalKey(Schema.Union([DecisionReviewState, Schema.Literal("all")])),
   lifecycle: Schema.optionalKey(Schema.Union([DecisionLifecycle, Schema.Literal("all")])),
 };
@@ -193,6 +236,13 @@ const relationMutationFields = {
   expectedSuccessorRevision: DecisionRevision,
 };
 export const ThreadDecisionMutateInput = Schema.Union([
+  Schema.Struct({
+    operation: Schema.Literal("resolve-suggestion"),
+    ...mutationFields,
+    suggestionId: nonemptyText(256),
+    expectedOtherRevision: DecisionRevision,
+    action: Schema.Literals(["ignore", "propose-replacement"]),
+  }),
   Schema.Struct({
     operation: Schema.Literal("edit"),
     ...mutationFields,
@@ -426,7 +476,108 @@ export const DecisionWriterOutput = Schema.Struct({
         : value.unresolvedCandidateIds.length > 0),
   ),
 );
+/** V2 records own an explicit live occurrence and retain original Contextual lineage. */
+const writerNoteFieldsV2 = {
+  ...writerNoteFields,
+  occurrenceEvidenceId: DecisionEvidenceId,
+  acceptanceEvidence: Schema.NullOr(
+    Schema.Struct({
+      proposalEvidenceId: DecisionEvidenceId,
+      acceptanceEvidenceId: DecisionEvidenceId,
+    }),
+  ),
+  liveChoice: Schema.Literals(["new-choice", "explicit-reaffirmation", "revision"]),
+  sourceLineageIds: Schema.Array(nonemptyText(256)).check(
+    Schema.isMaxLength(64),
+    Schema.makeFilter((ids) => new Set(ids).size === ids.length),
+  ),
+};
+const validWriterOccurrence = Schema.makeFilter(
+  (action: {
+    attribution: typeof DecisionAttribution.Type;
+    occurrenceEvidenceId: string;
+    acceptanceEvidence: { proposalEvidenceId: string; acceptanceEvidenceId: string } | null;
+    evidence: readonly { evidenceId: string }[];
+  }) =>
+    action.evidence.some((e) => e.evidenceId === action.occurrenceEvidenceId) &&
+    (action.attribution === "user-accepted"
+      ? action.acceptanceEvidence !== null &&
+        action.acceptanceEvidence.acceptanceEvidenceId === action.occurrenceEvidenceId &&
+        action.acceptanceEvidence.proposalEvidenceId !==
+          action.acceptanceEvidence.acceptanceEvidenceId &&
+        action.evidence.some((e) => e.evidenceId === action.acceptanceEvidence!.proposalEvidenceId)
+      : action.acceptanceEvidence === null),
+);
+/** A new occurrence owns its note and attribution before it can join an existing group. */
+export const DecisionWriterDuplicateOccurrenceAction = Schema.Struct({
+  action: Schema.Literal("duplicate_occurrence"),
+  ...writerNoteFieldsV2,
+  existingId: DecisionId,
+  expectedRevision: DecisionRevision,
+}).check(validWriterOccurrence);
+export const DecisionWriterActionV2 = Schema.Union([
+  Schema.Struct({ action: Schema.Literal("create"), ...writerNoteFieldsV2 }).check(
+    validWriterOccurrence,
+  ),
+  Schema.Struct({
+    action: Schema.Literal("propose_replacement"),
+    ...writerNoteFieldsV2,
+    predecessorId: DecisionId,
+    expectedRevision: DecisionRevision,
+  }).check(validWriterOccurrence),
+  DecisionWriterDuplicateOccurrenceAction,
+  Schema.Struct({
+    action: Schema.Literal("skip"),
+    candidateId: nonemptyText(200),
+    reason: Schema.Literals([
+      "proposal",
+      "irrelevant",
+      "insufficient_evidence",
+      "already_represented",
+    ]),
+  }),
+  Schema.Struct({
+    action: Schema.Literal("needs_context"),
+    candidateId: nonemptyText(200),
+    reason: nonemptyText(1000),
+  }),
+]);
+export const DecisionWriterOutputV2 = Schema.Struct({
+  version: Schema.Literal(2),
+  actions: Schema.Array(DecisionWriterActionV2).check(Schema.isMaxLength(64)),
+  complete: Schema.Boolean,
+  unresolvedCandidateIds: Schema.Array(nonemptyText(200)).check(Schema.isMaxLength(64)),
+}).check(
+  Schema.makeFilter(
+    (value) =>
+      value.actions.filter(
+        (action) =>
+          action.action === "create" ||
+          action.action === "propose_replacement" ||
+          action.action === "duplicate_occurrence",
+      ).length <= 8 &&
+      (value.complete
+        ? value.unresolvedCandidateIds.length === 0
+        : value.unresolvedCandidateIds.length > 0),
+  ),
+);
+export type DecisionWriterDuplicateOccurrenceAction =
+  typeof DecisionWriterDuplicateOccurrenceAction.Type;
+export type DecisionWriterActionV2 = typeof DecisionWriterActionV2.Type;
+export type DecisionWriterOutputV2 = typeof DecisionWriterOutputV2.Type;
+export const DecisionWriterOutputAny = Schema.Union([DecisionWriterOutputV2, DecisionWriterOutput]);
+export type DecisionWriterOutputAny = typeof DecisionWriterOutputAny.Type;
 export const DecisionWriterInput = Schema.Struct({
+  contextualOrigins: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        sourceId: nonemptyText(256),
+        evidenceId: nonemptyText(256),
+        sourceHash: Schema.NullOr(nonemptyText(256)),
+        quote: Schema.NullOr(exactQuote),
+      }),
+    ).check(Schema.isMaxLength(64)),
+  ),
   modelSelection: Schema.toType(ModelSelection),
   description: boundedText(2000),
   descriptionRevision: DecisionRevision,
@@ -457,6 +608,7 @@ export const DecisionWriterInput = Schema.Struct({
   Schema.makeFilter(
     (value) =>
       value.context.length +
+        (value.contextualOrigins ?? []).reduce((n, e) => n + (e.quote?.length ?? 0), 0) +
         value.evidence.reduce((total, evidence) => total + evidence.quote.length, 0) <=
       64000,
   ),

@@ -140,7 +140,7 @@ it.layer(SqlitePersistenceMemory)("Decision job storage", (it) => {
       assert.isNull(yield* jobs.claim({ owner: "second" }));
       const stage = {
         ...emptyDecisionJobStage,
-        evaluatedFingerprints: ["reusable-jeV-result"],
+        evaluatedFingerprints: ["reusable-evaluator-result"],
         continuation: { target: "message" },
       };
       yield* jobs.checkpoint({
@@ -154,7 +154,7 @@ it.layer(SqlitePersistenceMemory)("Decision job storage", (it) => {
       yield* TestClock.adjust("2 seconds");
       const second = (yield* jobs.claim({ owner: "second" }))!;
       assert.equal(second.fence, first.fence + 1);
-      assert.equal(second.stage.evaluatedFingerprints[0], "reusable-jeV-result");
+      assert.equal(second.stage.evaluatedFingerprints[0], "reusable-evaluator-result");
       assert.isTrue(
         Result.isFailure(
           yield* jobs
@@ -171,7 +171,7 @@ it.layer(SqlitePersistenceMemory)("Decision job storage", (it) => {
       });
       yield* jobs.retry({ projectId, jobId: second.id });
       const retried = (yield* jobs.claim({ owner: "retry" }))!;
-      assert.equal(retried.stage.evaluatedFingerprints[0], "reusable-jeV-result");
+      assert.equal(retried.stage.evaluatedFingerprints[0], "reusable-evaluator-result");
       yield* jobs.finish({
         jobId: retried.id,
         owner: "retry",

@@ -1,3 +1,4 @@
+import { contextualBootstrap } from "../features/contextual/contextualDraft";
 import { useAtomValue } from "@effect/atom-react";
 import type {
   EnvironmentProject,
@@ -393,6 +394,9 @@ export async function restoreRejectedQueuedMessage(
       ...(queuedMessage.interactionMode ? { interactionMode: queuedMessage.interactionMode } : {}),
       ...(queuedMessage.creation
         ? {
+            ...(queuedMessage.creation.contextual
+              ? { contextual: queuedMessage.creation.contextual }
+              : {}),
             workspaceSelection: {
               mode: queuedMessage.creation.workspaceMode,
               branch: queuedMessage.creation.branch,
@@ -881,6 +885,10 @@ export function useThreadOutboxDrain(): void {
       const deliveryResult = await startTurn({
         environmentId: queuedMessage.environmentId,
         input: buildProjectThreadStartTurnInput({
+          ...contextualBootstrap(
+            currentConfig.environment.capabilities.contextual === true,
+            creation.contextual,
+          ),
           projectId: creation.projectId,
           projectCwd,
           threadId: queuedMessage.threadId,

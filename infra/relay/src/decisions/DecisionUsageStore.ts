@@ -2,6 +2,8 @@ import { Clock, DateTime, Effect, Schema } from "effect";
 import {
   DecisionEvaluationError,
   type DecisionAllowance,
+  type ExtensionFeatureId,
+  type ExtensionAllowance,
   type DecisionEvaluationJudgment,
   type DecisionEvaluationResult,
 } from "@lecturn/contracts";
@@ -54,12 +56,24 @@ export interface DecisionUsageReservation {
   readonly templateVersion: string;
   readonly model: string;
   readonly explicitRetry?: boolean;
+  readonly backend?: "legacy" | "private-evaluator";
 }
-export type DecisionUsageAdmission =
-  | { readonly kind: "admitted"; readonly attemptId: string; readonly allowance: DecisionAllowance }
-  | { readonly kind: "replay"; readonly result: DecisionEvaluationResult }
+export type UsageResult<J> = Omit<DecisionEvaluationResult, "judgments"> & {
+  readonly judgments: readonly J[];
+  readonly qualificationId?: string | undefined;
+};
+export type DecisionUsageAdmission<J = DecisionEvaluationJudgment> =
+  | {
+      readonly kind: "admitted";
+      readonly attemptId: string;
+      readonly allowance: DecisionAllowance;
+      readonly backend: string;
+      readonly admissibilityEpoch: number;
+    }
+  | { readonly kind: "replay"; readonly result: UsageResult<J> }
   | { readonly kind: "in-progress" };
-interface UsageRequest {
+interface UsageRequest<J> {
+  backend: string;
   payer_id: string;
   request_id: string;
   environment_id: string;
@@ -77,10 +91,16 @@ interface UsageRequest {
   status: string;
   attempt_count: number;
   active_attempt_id: string | null;
-  result_json: readonly DecisionEvaluationJudgment[] | null;
+  result_json: readonly J[] | null;
+  qualification_id: string | null;
   result_expires_at: number | null;
 }
 interface Attempt {
+  feature_id: ExtensionFeatureId;
+  backend: string;
+  policy_version: string;
+  request_fingerprint: string;
+  created_at: number;
   id: string;
   payer_id: string;
   request_id: string;
@@ -99,13 +119,22 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const nowSeconds = Clock.currentTimeMillis.pipe(Effect.map((ms) => Math.floor(ms / 1000)));
 const iso = (seconds: number) => DateTime.formatIso(DateTime.makeUnsafe(seconds * 1000));
 
-export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
+export const makeExtensionsUsageStore = <J = DecisionEvaluationJudgment>(
+  config: DecisionUsageConfig,
+) =>
   Effect.gen(function* () {
     const { $client: sql } = yield* RelayDb;
     const access = yield* makeDecisionsAccess(config);
+    const featureId = config.featureId ?? "decisions";
     const transaction = <A>(effect: Effect.Effect<A, DecisionEvaluationError>) =>
       sql
-        .withTransaction(effect)
+        .withTransaction(
+          Effect.gen(function* () {
+            yield* sql`SELECT pg_advisory_xact_lock(192837465)`;
+            yield* sql`SELECT set_config('lecturn.extensions_reservation_epoch','1',true)`;
+            return yield* effect;
+          }),
+        )
         .pipe(
           Effect.mapError((error) =>
             isDecisionError(error)
@@ -115,11 +144,13 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
         );
     const requestRow = (payerId: string, requestId: string) =>
       decisionStorage(
-        sql<UsageRequest>`SELECT payer_id,request_id,environment_id,public_key,credential_id,funding_generation,run_id,fingerprint,model,template_version,window_start::float8,window_end::float8,hold_tokens::float8,debited_input_tokens::float8,status,attempt_count,active_attempt_id,result_json,result_expires_at::float8 FROM relay_decision_usage_requests WHERE payer_id=${payerId} AND request_id=${requestId} FOR UPDATE`,
+        sql<
+          UsageRequest<J>
+        >`SELECT backend,payer_id,request_id,environment_id,public_key,credential_id,funding_generation,run_id,fingerprint,model,template_version,window_start::float8,window_end::float8,hold_tokens::float8,debited_input_tokens::float8,status,attempt_count,active_attempt_id,result_json,qualification_id,result_expires_at::float8 FROM relay_decision_usage_requests WHERE feature_id=${featureId} AND payer_id=${payerId} AND request_id=${requestId} FOR UPDATE`,
       ).pipe(Effect.map((rows) => rows[0]));
     const attemptRow = (attemptId: string) =>
       decisionStorage(
-        sql<Attempt>`SELECT id,payer_id,request_id,run_id,environment_id,window_start::float8,hold_nano::float8,price_nano::float8,status,deadline::float8,actual_tokens::float8,cost_nano::float8 FROM relay_decision_usage_attempts WHERE id=${attemptId}`,
+        sql<Attempt>`SELECT feature_id,backend,policy_version,request_fingerprint,created_at::float8,id,payer_id,request_id,run_id,environment_id,window_start::float8,hold_nano::float8,price_nano::float8,status,deadline::float8,actual_tokens::float8,cost_nano::float8 FROM relay_decision_usage_attempts WHERE feature_id=${featureId} AND id=${attemptId}`,
       ).pipe(Effect.map((rows) => rows[0]));
     const lockAccount = Effect.fn("DecisionUsage.lockAccount")(function* (payerId: string) {
       yield* decisionStorage(
@@ -154,27 +185,36 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
         sql<{
           used: number;
           reserved: number;
-        }>`SELECT used_input_tokens::float8 AS used,reserved_input_tokens::float8 AS reserved FROM relay_decision_usage_windows WHERE payer_id=${payerId} AND window_start=${start}`,
+          limit_input_tokens: number | null;
+        }>`SELECT limit_input_tokens::float8,used_input_tokens::float8 AS used,reserved_input_tokens::float8 AS reserved FROM relay_decision_usage_windows WHERE payer_id=${payerId} AND window_start=${start}`,
       );
       const used = rows[0]?.used ?? 0,
         reserved = rows[0]?.reserved ?? 0;
+      const pinnedLimit = rows[0]?.limit_input_tokens ?? limit;
       return {
         windowStart: iso(start),
         windowEnd: iso(end),
-        limitInputTokens: limit,
+        limitInputTokens: pinnedLimit,
         usedInputTokens: used,
         reservedInputTokens: reserved,
-        remainingInputTokens: Math.max(0, limit - used - reserved),
+        remainingInputTokens: Math.max(0, pinnedLimit - used - reserved),
       };
     });
     const getAllowance = Effect.fn("DecisionUsage.getAllowance")(function* (payerId: string) {
       const eligibility = yield* access.status(payerId);
       if (!eligibility.eligible || !eligibility.window)
         return yield* decisionError("forbidden", "Decisions requires an eligible paid account");
+      const time = yield* nowSeconds;
+      const prior = yield* decisionStorage(
+        sql<{
+          start: number;
+          end: number;
+        }>`SELECT window_start::float8 AS start,window_end::float8 AS end FROM relay_decision_usage_windows WHERE payer_id=${payerId} AND window_start<=${time} AND window_end>${time} ORDER BY window_start DESC LIMIT 1`,
+      );
       return yield* allowance(
         payerId,
-        eligibility.window.start,
-        eligibility.window.end,
+        prior[0]?.start ?? eligibility.window.start,
+        prior[0]?.end ?? eligibility.window.end,
         eligibility.limitInputTokens,
       );
     });
@@ -183,7 +223,7 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
     ) {
       const host = input.principal;
       const rows =
-        yield* decisionStorage(sql`SELECT 1 FROM relay_decision_funding f WHERE f.environment_id=${host.environmentId} AND f.public_key=${host.environmentPublicKey} AND f.generation=${input.fundingGeneration} AND f.payer_id=${input.payerId} AND f.state='active'
+        yield* decisionStorage(sql`SELECT 1 FROM relay_decision_funding f WHERE f.feature_id=${featureId} AND f.environment_id=${host.environmentId} AND f.public_key=${host.environmentPublicKey} AND f.generation=${input.fundingGeneration} AND f.payer_id=${input.payerId} AND f.state='active'
       AND EXISTS(SELECT 1 FROM relay_environment_credentials c WHERE c.credential_id=${host.credentialId} AND c.environment_id=f.environment_id AND c.environment_public_key=f.public_key AND c.revoked_at IS NULL)
       AND EXISTS(SELECT 1 FROM relay_environment_links l WHERE l.environment_id=f.environment_id AND l.environment_public_key=f.public_key AND l.revoked_at IS NULL) FOR UPDATE OF f`);
       if (!rows.length)
@@ -201,16 +241,21 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
       return rows[0];
     });
     const storedResult = Effect.fn("DecisionUsage.storedResult")(function* (
-      request: UsageRequest,
+      request: UsageRequest<J>,
       limit: number,
       replayed: boolean,
-    ): Effect.fn.Return<DecisionEvaluationResult, DecisionEvaluationError> {
+    ): Effect.fn.Return<UsageResult<J>, DecisionEvaluationError> {
       return {
         requestId: request.request_id,
         runId: request.run_id,
         model: request.model,
         templateVersion: request.template_version,
         judgments: request.result_json ?? [],
+        ...(request.template_version === "decisions-equivalence-v1" &&
+        request.backend === "private-evaluator" &&
+        request.qualification_id
+          ? { qualificationId: request.qualification_id }
+          : {}),
         inputTokens: request.debited_input_tokens,
         allowance: yield* allowance(
           request.payer_id,
@@ -223,7 +268,7 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
     });
     const reserve = Effect.fn("DecisionUsage.reserve")(function* (
       input: DecisionUsageReservation,
-    ): Effect.fn.Return<DecisionUsageAdmission, DecisionEvaluationError> {
+    ): Effect.fn.Return<DecisionUsageAdmission<J>, DecisionEvaluationError> {
       return yield* transaction(
         Effect.gen(function* () {
           const time = yield* nowSeconds;
@@ -231,11 +276,21 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
           const eligibility = yield* access.status(input.payerId);
           if (!eligibility.eligible || !eligibility.window)
             return yield* decisionError("forbidden", "Decisions requires an eligible paid account");
-          const { start, end } = eligibility.window;
+          const prior = yield* decisionStorage(
+            sql<{
+              start: number;
+              end: number;
+              limit_input_tokens: number | null;
+            }>`SELECT window_start::float8 AS start,window_end::float8 AS end,limit_input_tokens::float8 FROM relay_decision_usage_windows WHERE payer_id=${input.payerId} AND window_start<=${time} AND window_end>${time} ORDER BY window_start DESC LIMIT 1 FOR UPDATE`,
+          );
+          const { start, end } = prior[0] ?? eligibility.window;
           yield* lockWindow(input.payerId, start, end);
+          yield* decisionStorage(
+            sql`UPDATE relay_decision_usage_windows SET limit_input_tokens=COALESCE(limit_input_tokens,${eligibility.limitInputTokens}),pool_basis=COALESCE(pool_basis,${eligibility.basis ?? "subscription"}) WHERE payer_id=${input.payerId} AND window_start=${start}`,
+          );
           yield* assertFunding(input);
           yield* decisionStorage(
-            sql`INSERT INTO relay_decision_usage_requests(payer_id,request_id,environment_id,public_key,credential_id,funding_generation,run_id,fingerprint,model,template_version,window_start,window_end,created_at) VALUES (${input.payerId},${input.requestId},${input.principal.environmentId},${input.principal.environmentPublicKey},${input.principal.credentialId},${input.fundingGeneration},${input.runId},${input.fingerprint},${input.model},${input.templateVersion},${start},${end},${time}) ON CONFLICT DO NOTHING`,
+            sql`INSERT INTO relay_decision_usage_requests(feature_id,backend,payer_id,request_id,environment_id,public_key,credential_id,funding_generation,run_id,fingerprint,model,template_version,window_start,window_end,created_at) VALUES (${featureId},${input.backend ?? "legacy"},${input.payerId},${input.requestId},${input.principal.environmentId},${input.principal.environmentPublicKey},${input.principal.credentialId},${input.fundingGeneration},${input.runId},${input.fingerprint},${input.model},${input.templateVersion},${start},${end},${time}) ON CONFLICT DO NOTHING`,
           );
           const request = (yield* requestRow(input.payerId, input.requestId))!;
           if (
@@ -278,13 +333,13 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
               "This request reached its attempt limit",
             );
           yield* decisionStorage(
-            sql`INSERT INTO relay_decision_usage_runs(payer_id,run_id) VALUES (${input.payerId},${input.runId}) ON CONFLICT DO NOTHING`,
+            sql`INSERT INTO relay_decision_usage_runs(feature_id,payer_id,run_id) VALUES (${featureId},${input.payerId},${input.runId}) ON CONFLICT DO NOTHING`,
           );
           const runs = yield* decisionStorage(
             sql<{
               attempt_count: number;
               spent_nano: number;
-            }>`SELECT attempt_count,spent_nano::float8 FROM relay_decision_usage_runs WHERE payer_id=${input.payerId} AND run_id=${input.runId} FOR UPDATE`,
+            }>`SELECT attempt_count,spent_nano::float8 FROM relay_decision_usage_runs WHERE feature_id=${featureId} AND payer_id=${input.payerId} AND run_id=${input.runId} FOR UPDATE`,
           );
           const run = runs[0]!;
           if (
@@ -329,17 +384,21 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
           const attempts = yield* decisionStorage(
             sql<{
               id: string;
-            }>`INSERT INTO relay_decision_usage_attempts(id,payer_id,request_id,run_id,environment_id,window_start,hold_nano,price_nano,status,deadline,created_at) VALUES (gen_random_uuid()::text,${input.payerId},${input.requestId},${input.runId},${input.principal.environmentId},${start},${config.attemptHoldNanoUsd},${config.priceNanoUsdPerInputToken},'admitted',${time + config.unknownHoldSeconds},${time}) RETURNING id`,
+            }>`INSERT INTO relay_decision_usage_attempts(feature_id,backend,policy_version,request_fingerprint,id,payer_id,request_id,run_id,environment_id,window_start,hold_nano,price_nano,status,deadline,created_at) VALUES (${featureId},${request.backend},${input.templateVersion},${input.fingerprint},${time}::text || ':' || gen_random_uuid()::text,${input.payerId},${input.requestId},${input.runId},${input.principal.environmentId},${start},${config.attemptHoldNanoUsd},${config.priceNanoUsdPerInputToken},'admitted',${time + config.unknownHoldSeconds},${time}) RETURNING id`,
           );
           const attemptId = attempts[0]!.id;
+          if (request.backend === "private-evaluator")
+            yield* decisionStorage(
+              sql`INSERT INTO relay_extensions_evaluator_cleanup(environment_id) VALUES (${input.principal.environmentId}) ON CONFLICT DO NOTHING`,
+            );
           yield* decisionStorage(
             sql`UPDATE relay_decision_usage_windows SET reserved_input_tokens=reserved_input_tokens+${additionalHold} WHERE payer_id=${input.payerId} AND window_start=${start}`,
           );
           yield* decisionStorage(
-            sql`UPDATE relay_decision_usage_requests SET status='pending',attempt_count=attempt_count+1,active_attempt_id=${attemptId},credential_id=${input.principal.credentialId},hold_tokens=hold_tokens+${additionalHold} WHERE payer_id=${input.payerId} AND request_id=${input.requestId}`,
+            sql`UPDATE relay_decision_usage_requests SET status='pending',attempt_count=attempt_count+1,active_attempt_id=${attemptId},credential_id=${input.principal.credentialId},hold_tokens=hold_tokens+${additionalHold} WHERE feature_id=${featureId} AND payer_id=${input.payerId} AND request_id=${input.requestId}`,
           );
           yield* decisionStorage(
-            sql`UPDATE relay_decision_usage_runs SET attempt_count=attempt_count+1,spent_nano=spent_nano+${config.attemptHoldNanoUsd} WHERE payer_id=${input.payerId} AND run_id=${input.runId}`,
+            sql`UPDATE relay_decision_usage_runs SET attempt_count=attempt_count+1,spent_nano=spent_nano+${config.attemptHoldNanoUsd} WHERE feature_id=${featureId} AND payer_id=${input.payerId} AND run_id=${input.runId}`,
           );
           yield* decisionStorage(
             sql`UPDATE relay_decision_usage_accounts SET exposure_nano=exposure_nano+${config.attemptHoldNanoUsd} WHERE payer_id=${input.payerId}`,
@@ -350,6 +409,8 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
           return {
             kind: "admitted" as const,
             attemptId,
+            backend: request.backend,
+            admissibilityEpoch: time,
             allowance: yield* allowance(input.payerId, start, end, eligibility.limitInputTokens),
           };
         }),
@@ -363,18 +424,18 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
         sql`SELECT 1 FROM relay_decision_usage_windows WHERE payer_id=${initial.payer_id} AND window_start=${initial.window_start} FOR UPDATE`,
       );
       yield* decisionStorage(
-        sql`SELECT 1 FROM relay_decision_funding WHERE environment_id=${initial.environment_id} FOR UPDATE`,
+        sql`SELECT 1 FROM relay_decision_funding WHERE feature_id=${featureId} AND environment_id=${initial.environment_id} FOR UPDATE`,
       );
       const request = (yield* requestRow(initial.payer_id, initial.request_id))!;
       const attempt = (yield* attemptRow(attemptId))!;
       yield* decisionStorage(
-        sql`SELECT 1 FROM relay_decision_usage_runs WHERE payer_id=${attempt.payer_id} AND run_id=${attempt.run_id} FOR UPDATE`,
+        sql`SELECT 1 FROM relay_decision_usage_runs WHERE feature_id=${featureId} AND payer_id=${attempt.payer_id} AND run_id=${attempt.run_id} FOR UPDATE`,
       );
       yield* lockControl();
       return { request, attempt };
     });
     const releaseHold = Effect.fn("DecisionUsage.releaseHold")(function* (
-      request: UsageRequest,
+      request: UsageRequest<J>,
       status: string,
     ) {
       if (request.hold_tokens > 0)
@@ -382,7 +443,7 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
           sql`UPDATE relay_decision_usage_windows SET reserved_input_tokens=reserved_input_tokens-${request.hold_tokens} WHERE payer_id=${request.payer_id} AND window_start=${request.window_start}`,
         );
       yield* decisionStorage(
-        sql`UPDATE relay_decision_usage_requests SET hold_tokens=0,status=${status} WHERE payer_id=${request.payer_id} AND request_id=${request.request_id}`,
+        sql`UPDATE relay_decision_usage_requests SET hold_tokens=0,status=${status} WHERE feature_id=${featureId} AND payer_id=${request.payer_id} AND request_id=${request.request_id}`,
       );
     });
     const resolveExposure = Effect.fn("DecisionUsage.resolveExposure")(function* (
@@ -396,7 +457,7 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
         sql`UPDATE relay_decision_usage_control SET exposure_nano=exposure_nano-${attempt.hold_nano} WHERE id=1`,
       );
       yield* decisionStorage(
-        sql`UPDATE relay_decision_usage_runs SET spent_nano=spent_nano-${attempt.hold_nano}+${cost} WHERE payer_id=${attempt.payer_id} AND run_id=${attempt.run_id}`,
+        sql`UPDATE relay_decision_usage_runs SET spent_nano=spent_nano-${attempt.hold_nano}+${cost} WHERE feature_id=${featureId} AND payer_id=${attempt.payer_id} AND run_id=${attempt.run_id}`,
       );
     });
     const markDispatched = Effect.fn("DecisionUsage.markDispatched")(function* (attemptId: string) {
@@ -435,7 +496,7 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
           if (
             beforeDispatch
               ? attempt.status !== "admitted"
-              : !["admitted", "dispatched"].includes(attempt.status)
+              : !["admitted", "dispatched", "unknown", "expired"].includes(attempt.status)
           )
             return yield* decisionError(
               "conflict",
@@ -446,7 +507,7 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
             sql`UPDATE relay_decision_usage_attempts SET status='failed',cost_nano=0 WHERE id=${attemptId}`,
           );
           if (request.active_attempt_id === attemptId && request.status !== "succeeded")
-            yield* releaseHold(request, "failed");
+            yield* releaseHold(request, request.status === "expired" ? "expired" : "failed");
         }),
       );
     const failBeforeDispatch = Effect.fn("DecisionUsage.failBeforeDispatch")((attemptId: string) =>
@@ -467,7 +528,7 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
           );
           if (request.active_attempt_id === attemptId && request.status !== "succeeded")
             yield* decisionStorage(
-              sql`UPDATE relay_decision_usage_requests SET status='unknown' WHERE payer_id=${request.payer_id} AND request_id=${request.request_id}`,
+              sql`UPDATE relay_decision_usage_requests SET status='unknown' WHERE feature_id=${featureId} AND payer_id=${request.payer_id} AND request_id=${request.request_id}`,
             );
         }),
       );
@@ -476,11 +537,11 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
       attemptId: string,
       input: {
         readonly inputTokens: number;
-        readonly judgments: readonly DecisionEvaluationJudgment[];
+        readonly judgments: readonly J[];
+        readonly qualificationId?: string | undefined;
       },
     ): Effect.fn.Return<
-      | { kind: "settled"; result: DecisionEvaluationResult }
-      | { kind: "late"; operatorCostNanoUsd: number },
+      { kind: "settled"; result: UsageResult<J> } | { kind: "late"; operatorCostNanoUsd: number },
       DecisionEvaluationError
     > {
       if (!Number.isSafeInteger(input.inputTokens) || input.inputTokens < 0)
@@ -488,6 +549,18 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
       return yield* transaction(
         Effect.gen(function* () {
           const { attempt, request } = yield* lockedAttempt(attemptId);
+          const qualificationId =
+            request.template_version === "decisions-equivalence-v1" &&
+            request.backend === "private-evaluator"
+              ? (input.qualificationId ?? null)
+              : null;
+          if (
+            qualificationId !== null &&
+            (qualificationId.length === 0 ||
+              qualificationId.length > 256 ||
+              qualificationId.trim() !== qualificationId)
+          )
+            return yield* decisionError("invalid", "Invalid evaluation qualification");
           if (attempt.status === "succeeded" && request.status === "succeeded") {
             if (
               !request.result_json ||
@@ -497,7 +570,11 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
               return yield* decisionError("expired", "The stored Decisions result expired");
             return {
               kind: "settled" as const,
-              result: yield* storedResult(request, config.monthlyInputTokens, true),
+              result: yield* storedResult(
+                request,
+                (yield* access.status(request.payer_id)).limitInputTokens,
+                true,
+              ),
             };
           }
           if (attempt.status === "late")
@@ -543,7 +620,7 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
             sql`UPDATE relay_decision_usage_windows SET reserved_input_tokens=reserved_input_tokens-${request.hold_tokens},used_input_tokens=used_input_tokens+${debit} WHERE payer_id=${request.payer_id} AND window_start=${request.window_start}`,
           );
           yield* decisionStorage(
-            sql`UPDATE relay_decision_usage_requests SET status='succeeded',hold_tokens=0,debited_input_tokens=${debit},result_json=${encodeJson(input.judgments)}::jsonb,result_expires_at=${time + config.resultRetentionSeconds} WHERE payer_id=${request.payer_id} AND request_id=${request.request_id}`,
+            sql`UPDATE relay_decision_usage_requests SET status='succeeded',hold_tokens=0,debited_input_tokens=${debit},result_json=${encodeJson(input.judgments)}::jsonb,qualification_id=${qualificationId},result_expires_at=${time + config.resultRetentionSeconds} WHERE feature_id=${featureId} AND payer_id=${request.payer_id} AND request_id=${request.request_id}`,
           );
           yield* decisionStorage(
             sql`UPDATE relay_decision_usage_attempts SET status='succeeded',actual_tokens=${input.inputTokens},cost_nano=${cost} WHERE id=${attemptId}`,
@@ -562,7 +639,7 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
       const rows = yield* decisionStorage(
         sql<{
           id: string;
-        }>`SELECT id FROM relay_decision_usage_attempts WHERE status IN ('admitted','dispatched','unknown') AND deadline<=${time} ORDER BY deadline LIMIT 100`,
+        }>`SELECT id FROM relay_decision_usage_attempts WHERE feature_id=${featureId} AND status IN ('admitted','dispatched','unknown') AND deadline<=${time} ORDER BY deadline LIMIT 100`,
       );
       for (const row of rows)
         yield* transaction(
@@ -582,9 +659,147 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
           }),
         );
       yield* decisionStorage(
-        sql`UPDATE relay_decision_usage_requests SET result_json=NULL WHERE result_expires_at<=${time} AND result_json IS NOT NULL`,
+        sql`UPDATE relay_decision_usage_requests SET result_json=NULL,qualification_id=NULL WHERE feature_id=${featureId} AND result_expires_at<=${time} AND result_json IS NOT NULL`,
       );
       return rows.length;
+    });
+    const getSharedAllowance = Effect.fn("ExtensionsUsage.getSharedAllowance")(function* (
+      payerId: string,
+    ): Effect.fn.Return<ExtensionAllowance, DecisionEvaluationError> {
+      const base = yield* getAllowance(payerId);
+      const start = Date.parse(base.windowStart) / 1000;
+      const rows = yield* decisionStorage(
+        sql<{
+          feature_id: ExtensionFeatureId;
+          used: number;
+          reserved: number;
+        }>`SELECT feature_id,sum(debited_input_tokens)::float8 AS used,sum(hold_tokens)::float8 AS reserved FROM relay_decision_usage_requests WHERE payer_id=${payerId} AND window_start=${start} GROUP BY feature_id`,
+      );
+      const descriptor = yield* decisionStorage(
+        sql<{
+          pool_basis: "subscription" | "grant" | null;
+        }>`SELECT pool_basis FROM relay_decision_usage_windows WHERE payer_id=${payerId} AND window_start=${start}`,
+      );
+      return {
+        ...base,
+        poolId: `extensions:${(yield* decisionStorage(sql<{ id: string }>`SELECT md5(${payerId} || ':' || ${start}::text) AS id`))[0]!.id}`,
+        basis: descriptor[0]?.pool_basis ?? (yield* access.status(payerId)).basis ?? "subscription",
+        byFeature: rows.map((row) => ({
+          featureId: row.feature_id,
+          usedInputTokens: row.used,
+          reservedInputTokens: row.reserved,
+        })),
+      };
+    });
+    const requestBackend = Effect.fn("ExtensionsUsage.requestBackend")(function* (
+      input: Pick<
+        DecisionUsageReservation,
+        "principal" | "payerId" | "fundingGeneration" | "requestId"
+      >,
+    ) {
+      return yield* transaction(
+        Effect.gen(function* () {
+          yield* assertFunding(input);
+          const request = yield* requestRow(input.payerId, input.requestId);
+          if (!request) return null;
+          if (
+            request.environment_id !== input.principal.environmentId ||
+            request.public_key !== input.principal.environmentPublicKey ||
+            request.funding_generation !== input.fundingGeneration
+          )
+            return yield* decisionError(
+              "forbidden",
+              "Evaluation does not belong to this funding grant",
+            );
+          return request.backend;
+        }),
+      );
+    });
+    const pendingAttempt = Effect.fn("ExtensionsUsage.pendingAttempt")(function* (
+      input: Pick<
+        DecisionUsageReservation,
+        "principal" | "payerId" | "fundingGeneration" | "requestId"
+      >,
+    ) {
+      return yield* transaction(
+        Effect.gen(function* () {
+          yield* assertFunding(input);
+          const request = yield* requestRow(input.payerId, input.requestId);
+          if (
+            !request ||
+            request.environment_id !== input.principal.environmentId ||
+            request.public_key !== input.principal.environmentPublicKey ||
+            request.funding_generation !== input.fundingGeneration
+          )
+            return yield* decisionError(
+              "forbidden",
+              "Evaluation does not belong to this funding grant",
+            );
+          if (!(yield* access.status(input.payerId)).eligible)
+            return yield* decisionError("forbidden", "Extensions access is unavailable");
+          return {
+            request,
+            attempt: request.active_attempt_id
+              ? yield* attemptRow(request.active_attempt_id)
+              : undefined,
+          };
+        }),
+      );
+    });
+    const replayLegacy = Effect.fn("ExtensionsUsage.replayLegacy")(function* (
+      input: Pick<
+        DecisionUsageReservation,
+        | "principal"
+        | "payerId"
+        | "fundingGeneration"
+        | "requestId"
+        | "runId"
+        | "templateVersion"
+        | "fingerprint"
+      >,
+    ) {
+      return yield* transaction(
+        Effect.gen(function* () {
+          yield* assertFunding(input);
+          const eligibility = yield* access.status(input.payerId);
+          if (!eligibility.eligible)
+            return yield* decisionError("forbidden", "Extensions access is unavailable");
+          const request = yield* requestRow(input.payerId, input.requestId);
+          if (
+            !request ||
+            request.backend === "private-evaluator" ||
+            request.environment_id !== input.principal.environmentId ||
+            request.public_key !== input.principal.environmentPublicKey ||
+            request.funding_generation !== input.fundingGeneration ||
+            request.run_id !== input.runId ||
+            request.template_version !== input.templateVersion ||
+            request.fingerprint !== input.fingerprint
+          )
+            return yield* decisionError(
+              "conflict",
+              "Request identity was already used with different inputs",
+            );
+          if (request.status !== "succeeded")
+            return yield* decisionError(
+              "in-progress",
+              "This retired evaluation cannot be dispatched again",
+            );
+          if (
+            !request.result_json ||
+            !request.result_expires_at ||
+            request.result_expires_at <= (yield* nowSeconds)
+          )
+            return yield* decisionError("expired", "The stored Decisions result expired");
+          const result = yield* storedResult(request, eligibility.limitInputTokens, true);
+          return { ...result, model: "extensions-v1" };
+        }),
+      );
+    });
+    const recoveryAttempts = Effect.fn("ExtensionsUsage.recoveryAttempts")(function* () {
+      const time = yield* nowSeconds;
+      return yield* decisionStorage(
+        sql<Attempt>`WITH due AS (SELECT id FROM relay_decision_usage_attempts WHERE feature_id=${featureId} AND backend='private-evaluator' AND status IN ('dispatched','unknown','expired') AND cost_nano IS NULL AND next_check_at<=${time} ORDER BY next_check_at,id LIMIT 25 FOR UPDATE SKIP LOCKED) UPDATE relay_decision_usage_attempts a SET next_check_at=${time + 60} FROM due WHERE a.id=due.id RETURNING a.id,a.payer_id,a.request_id,a.run_id,a.environment_id,a.window_start::float8,a.hold_nano::float8,a.price_nano::float8,a.status,a.deadline::float8,a.actual_tokens::float8,a.cost_nano::float8,a.feature_id,a.backend,a.policy_version,a.request_fingerprint,a.created_at::float8`,
+      );
     });
     const health = Effect.gen(function* () {
       const [row] = yield* decisionStorage(sql<{
@@ -599,6 +814,11 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
       return row ?? { exposureNanoUsd: 0, anomaly: false, overdueAttempts: 0, unknownAttempts: 0 };
     });
     return {
+      getSharedAllowance,
+      pendingAttempt,
+      replayLegacy,
+      requestBackend,
+      recoveryAttempts,
       health,
       reserve,
       markDispatched,
@@ -610,4 +830,6 @@ export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
       getAllowance,
     };
   });
+export const makeDecisionUsageStore = (config: DecisionUsageConfig) =>
+  makeExtensionsUsageStore<DecisionEvaluationJudgment>(config);
 export type DecisionUsageStore = Effect.Success<ReturnType<typeof makeDecisionUsageStore>>;

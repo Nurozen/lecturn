@@ -1,3 +1,5 @@
+import { resolveExtensionsBootstrap } from "./DesktopExtensions.ts";
+import type { DesktopBackendBootstrap } from "@lecturn/contracts";
 import * as NodeOS from "node:os";
 
 import { parsePersistedServerObservabilitySettings } from "@lecturn/shared/serverSettings";
@@ -530,6 +532,7 @@ const buildObservabilityFragment = (observabilitySettings: BackendObservabilityS
 const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolvePrimary")(
   function* (
     input: SharedBootstrapInput & {
+      readonly extensions?: DesktopBackendBootstrap["extensions"];
       readonly resourceMonitorPath: Option.Option<string>;
       readonly stavePath: Option.Option<string>;
     },
@@ -553,6 +556,7 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       tailscaleServePort: backendExposure.tailscaleServePort,
       desktopTelemetryFd: 4,
       desktopTelemetryControlFd: 5,
+      ...(input.extensions ? { extensions: input.extensions } : {}),
       ...Option.match(input.resourceMonitorPath, {
         onNone: () => ({}),
         onSome: (resourceMonitorPath) => ({ resourceMonitorPath }),
@@ -883,7 +887,16 @@ export const make = Effect.gen(function* () {
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
     );
-    return yield* resolvePrimaryStartConfig({ ...shared, resourceMonitorPath, stavePath }).pipe(
+    const extensions = yield* resolveExtensionsBootstrap.pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
+    );
+    return yield* resolvePrimaryStartConfig({
+      ...shared,
+      resourceMonitorPath,
+      stavePath,
+      extensions,
+    }).pipe(
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
       Effect.provideService(DesktopServerExposure.DesktopServerExposure, serverExposure),
     );

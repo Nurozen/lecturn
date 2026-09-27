@@ -1,3 +1,5 @@
+import { RelayApi } from "@lecturn/contracts/relay";
+import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import { createClerkClient } from "@clerk/backend";
 import { Effect, Layer, Option, Redacted, Schema } from "effect";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
@@ -50,187 +52,209 @@ const json = (value: unknown, status = 200) =>
   });
 const invalid = () => decisionError("invalid", "Invalid Decisions request");
 /** Explicit environment credentials authorize host calls; Clerk account identity authorizes payer calls. */
-export function decisionsRoutes(routeConfig: DecisionsRouteConfig) {
-  return Layer.unwrap(
-    Effect.gen(function* () {
-      const service = yield* DecisionsService;
-      const credentials = yield* EnvironmentCredentials;
-      const config = yield* RelayConfiguration;
-      const handler = Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        const url = new URL(request.url, routeConfig.appOrigin);
-        const path = url.pathname;
-        const bearer = /^Bearer (\S+)$/i.exec(request.headers.authorization ?? "")?.[1];
-        if (!bearer) return json({ code: "forbidden", message: "Sign in to use Decisions" }, 401);
-        const payerRoute = [
-          "/v1/decisions/status",
-          "/v1/decisions/funding/approve",
-          "/v1/decisions/funding/approval",
-          "/v1/decisions/funding/account-status",
-          "/v1/decisions/funding/account-list",
-          "/v1/decisions/funding/account-revoke",
-        ].includes(path);
-        if (
-          request.headers.origin &&
-          !isBillingAppOrigin(
-            request.headers.origin,
-            routeConfig.appOrigin,
-            routeConfig.additionalAppOrigins,
-          ) &&
-          !(
-            request.headers.origin === "lecturn://app" &&
-            (request.method === "GET" ||
-              (request.method === "POST" && path === "/v1/decisions/funding/account-revoke"))
-          )
+const makeDecisionsHandler = (routeConfig: DecisionsRouteConfig) =>
+  Effect.gen(function* () {
+    const service = yield* DecisionsService;
+    const credentials = yield* EnvironmentCredentials;
+    const config = yield* RelayConfiguration;
+    const handler = Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const url = new URL(request.url, routeConfig.appOrigin);
+      const path = url.pathname;
+      const bearer = /^Bearer (\S+)$/i.exec(request.headers.authorization ?? "")?.[1];
+      if (!bearer) return json({ code: "forbidden", message: "Sign in to use Decisions" }, 401);
+      const payerRoute = [
+        "/v1/decisions/status",
+        "/v1/decisions/funding/approve",
+        "/v1/decisions/funding/approval",
+        "/v1/decisions/funding/account-status",
+        "/v1/decisions/funding/account-list",
+        "/v1/decisions/funding/account-revoke",
+      ].includes(path);
+      if (
+        request.headers.origin &&
+        !isBillingAppOrigin(
+          request.headers.origin,
+          routeConfig.appOrigin,
+          routeConfig.additionalAppOrigins,
+        ) &&
+        !(
+          request.headers.origin === "lecturn://app" &&
+          (request.method === "GET" ||
+            (request.method === "POST" && path === "/v1/decisions/funding/account-revoke"))
         )
-          return yield* decisionError("forbidden", "Use your Lecturn account to manage Decisions");
-        const decode = <S extends Schema.Top>(schema: S, payload: unknown) =>
-          Schema.decodeUnknownEffect(schema)(payload, { onExcessProperty: "error" }).pipe(
-            Effect.mapError(invalid),
-          );
-        const payload =
-          request.method === "POST"
-            ? yield* Effect.gen(function* () {
-                if (
-                  !(request.headers["content-type"] ?? "")
-                    .toLowerCase()
-                    .startsWith("application/json")
-                )
-                  return yield* invalid();
-                return yield* request.json.pipe(Effect.mapError(invalid));
-              })
-            : undefined;
-        if (payerRoute) {
-          const verified = yield* verifyRelayClientBearerToken(config, bearer).pipe(
-            Effect.mapError(() => decisionError("forbidden", "Sign in to manage Decisions")),
-          );
-          const userId = verified.sub;
-          if (path === "/v1/decisions/status" && request.method === "GET")
-            return json(yield* service.status(userId));
-          if (path === "/v1/decisions/funding/approval" && request.method === "GET") {
-            const query = yield* decode(DecisionFundingApprovalRequest, {
-              challengeId: url.searchParams.get("challengeId"),
-            });
-            return json(yield* service.funding.approvalInfo(userId, query.challengeId));
-          }
-          if (path === "/v1/decisions/funding/approve" && request.method === "POST") {
-            const body = yield* decode(DecisionFundingApprovalRequest, payload);
-            const user = yield* Effect.tryPromise({
-              try: () =>
-                createClerkClient({
-                  secretKey: Redacted.value(config.clerkSecretKey),
-                }).users.getUser(userId),
-              catch: () =>
-                decisionError("unavailable", "Account verification is temporarily unavailable"),
-            });
-            const email =
-              user.emailAddresses.find(
-                (item) =>
-                  item.id === user.primaryEmailAddressId &&
-                  item.verification?.status === "verified",
-              ) ?? user.emailAddresses.find((item) => item.verification?.status === "verified");
-            if (user.id !== userId || user.banned || user.locked || !email)
-              return yield* decisionError(
-                "forbidden",
-                "Verify your account email before approving Decisions",
-              );
-            return json(
-              yield* service.funding.approve(userId, body.challengeId, email.emailAddress),
-            );
-          }
-          if (path === "/v1/decisions/funding/account-revoke" && request.method === "POST") {
-            const body = yield* decode(DecisionFundingRevokeRequest, payload);
-            return json(
-              yield* service.funding.revokeByPayer(
-                userId,
-                body.environmentId,
-                body.expectedGeneration,
-              ),
-            );
-          }
-          if (path === "/v1/decisions/funding/account-list" && request.method === "GET") {
-            const raw = Object.fromEntries(url.searchParams);
-            const query = yield* decode(DecisionFundingAccountListRequest, {
-              ...raw,
-              ...(raw.limit === undefined ? {} : { limit: Number(raw.limit) }),
-            });
-            return json(yield* service.funding.listByPayer(userId, query));
-          }
-          if (path === "/v1/decisions/funding/account-status" && request.method === "GET") {
-            const query = yield* decode(DecisionFundingStatusRequest, {
-              environmentId: url.searchParams.get("environmentId"),
-            });
-            const result = yield* service.funding.statusByPayer(userId, query.environmentId);
-            return json({
-              ...result,
-              allowance: result.eligible ? yield* service.usage.getAllowance(userId) : null,
-            });
-          }
-          return json({ message: "Not found" }, 404);
+      )
+        return yield* decisionError("forbidden", "Use your Lecturn account to manage Decisions");
+      const decode = <S extends Schema.Top>(schema: S, payload: unknown) =>
+        Schema.decodeUnknownEffect(schema)(payload, { onExcessProperty: "error" }).pipe(
+          Effect.mapError(invalid),
+        );
+      const payload =
+        request.method === "POST"
+          ? yield* Effect.gen(function* () {
+              if (
+                !(request.headers["content-type"] ?? "")
+                  .toLowerCase()
+                  .startsWith("application/json")
+              )
+                return yield* invalid();
+              return yield* request.json.pipe(Effect.mapError(invalid));
+            })
+          : undefined;
+      if (payerRoute) {
+        const verified = yield* verifyRelayClientBearerToken(config, bearer).pipe(
+          Effect.mapError(() => decisionError("forbidden", "Sign in to manage Decisions")),
+        );
+        const userId = verified.sub;
+        if (path === "/v1/decisions/status" && request.method === "GET")
+          return json(yield* service.status(userId));
+        if (path === "/v1/decisions/funding/approval" && request.method === "GET") {
+          const query = yield* decode(DecisionFundingApprovalRequest, {
+            challengeId: url.searchParams.get("challengeId"),
+          });
+          return json(yield* service.funding.approvalInfo(userId, query.challengeId));
         }
-        const principal = yield* credentials
-          .authenticate(bearer)
-          .pipe(
-            Effect.mapError(() =>
-              decisionError("unavailable", "Environment authentication is unavailable"),
+        if (path === "/v1/decisions/funding/approve" && request.method === "POST") {
+          const body = yield* decode(DecisionFundingApprovalRequest, payload);
+          const user = yield* Effect.tryPromise({
+            try: () =>
+              createClerkClient({
+                secretKey: Redacted.value(config.clerkSecretKey),
+              }).users.getUser(userId),
+            catch: () =>
+              decisionError("unavailable", "Account verification is temporarily unavailable"),
+          });
+          const email =
+            user.emailAddresses.find(
+              (item) =>
+                item.id === user.primaryEmailAddressId && item.verification?.status === "verified",
+            ) ?? user.emailAddresses.find((item) => item.verification?.status === "verified");
+          if (user.id !== userId || user.banned || user.locked || !email)
+            return yield* decisionError(
+              "forbidden",
+              "Verify your account email before approving Decisions",
+            );
+          return json(yield* service.funding.approve(userId, body.challengeId, email.emailAddress));
+        }
+        if (path === "/v1/decisions/funding/account-revoke" && request.method === "POST") {
+          const body = yield* decode(DecisionFundingRevokeRequest, payload);
+          return json(
+            yield* service.funding.revokeByPayer(
+              userId,
+              body.environmentId,
+              body.expectedGeneration,
             ),
           );
-        if (Option.isNone(principal))
-          return json({ code: "forbidden", message: "Invalid environment credential" }, 401);
-        const host = principal.value;
-        const matches = (environmentId: string) =>
-          environmentId === host.environmentId
-            ? Effect.void
-            : Effect.fail(
-                decisionError("forbidden", "Environment identity does not match this credential"),
-              );
-        if (path === "/v1/decisions/funding/status" && request.method === "GET") {
+        }
+        if (path === "/v1/decisions/funding/account-list" && request.method === "GET") {
+          const raw = Object.fromEntries(url.searchParams);
+          const query = yield* decode(DecisionFundingAccountListRequest, {
+            ...raw,
+            ...(raw.limit === undefined ? {} : { limit: Number(raw.limit) }),
+          });
+          return json(yield* service.funding.listByPayer(userId, query));
+        }
+        if (path === "/v1/decisions/funding/account-status" && request.method === "GET") {
           const query = yield* decode(DecisionFundingStatusRequest, {
             environmentId: url.searchParams.get("environmentId"),
           });
-          yield* matches(query.environmentId);
-          return json(yield* service.fundingStatus(host));
-        }
-        if (request.method !== "POST") return json({ message: "Not found" }, 404);
-        if (path === "/v1/decisions/evaluate")
-          return json(
-            yield* service.evaluate(host, yield* decode(DecisionEvaluationRequest, payload)),
-          );
-        if (path === "/v1/decisions/funding/challenge") {
-          const body = yield* decode(DecisionFundingChallengeRequest, payload);
-          yield* matches(body.environmentId);
-          if (body.publicKey !== host.environmentPublicKey)
-            return yield* decisionError(
-              "forbidden",
-              "Environment key does not match this credential",
-            );
-          return json(yield* service.funding.challenge(host, body.expectedGeneration));
-        }
-        if (path === "/v1/decisions/funding/redeem") {
-          const body = yield* decode(DecisionFundingRedeemRequest, payload);
-          yield* matches(body.environmentId);
-          yield* service.funding.redeem(host, body.challengeId, body.expectedGeneration);
-          return json(yield* service.fundingStatus(host));
-        }
-        if (path === "/v1/decisions/funding/revoke") {
-          const body = yield* decode(DecisionFundingRevokeRequest, payload);
-          yield* matches(body.environmentId);
-          return json(yield* service.funding.revokeByHost(host, body.expectedGeneration));
+          const result = yield* service.funding.statusByPayer(userId, query.environmentId);
+          return json({
+            ...result,
+            allowance: result.eligible ? yield* service.usage.getAllowance(userId) : null,
+          });
         }
         return json({ message: "Not found" }, 404);
-      }).pipe(
-        Effect.provideService(HttpIncomingMessage.MaxBodySize, FileSystem.Size(256 * 1024)),
-        Effect.withTracerEnabled(false),
-        Effect.catchTag("DecisionEvaluationError", (error) =>
-          Effect.succeed(
-            json({ code: error.code, message: error.message }, decisionsErrorStatus(error.code)),
+      }
+      const principal = yield* credentials
+        .authenticate(bearer)
+        .pipe(
+          Effect.mapError(() =>
+            decisionError("unavailable", "Environment authentication is unavailable"),
           ),
+        );
+      if (Option.isNone(principal))
+        return json({ code: "forbidden", message: "Invalid environment credential" }, 401);
+      const host = principal.value;
+      const matches = (environmentId: string) =>
+        environmentId === host.environmentId
+          ? Effect.void
+          : Effect.fail(
+              decisionError("forbidden", "Environment identity does not match this credential"),
+            );
+      if (path === "/v1/decisions/funding/status" && request.method === "GET") {
+        const query = yield* decode(DecisionFundingStatusRequest, {
+          environmentId: url.searchParams.get("environmentId"),
+        });
+        yield* matches(query.environmentId);
+        return json(yield* service.fundingStatus(host));
+      }
+      if (request.method !== "POST") return json({ message: "Not found" }, 404);
+      if (path === "/v1/decisions/evaluate")
+        return json(
+          yield* service.evaluate(host, yield* decode(DecisionEvaluationRequest, payload)),
+        );
+      if (path === "/v1/decisions/funding/challenge") {
+        const body = yield* decode(DecisionFundingChallengeRequest, payload);
+        yield* matches(body.environmentId);
+        if (body.publicKey !== host.environmentPublicKey)
+          return yield* decisionError(
+            "forbidden",
+            "Environment key does not match this credential",
+          );
+        return json(yield* service.funding.challenge(host, body.expectedGeneration));
+      }
+      if (path === "/v1/decisions/funding/redeem") {
+        const body = yield* decode(DecisionFundingRedeemRequest, payload);
+        yield* matches(body.environmentId);
+        yield* service.funding.redeem(host, body.challengeId, body.expectedGeneration);
+        return json(yield* service.fundingStatus(host));
+      }
+      if (path === "/v1/decisions/funding/revoke") {
+        const body = yield* decode(DecisionFundingRevokeRequest, payload);
+        yield* matches(body.environmentId);
+        return json(yield* service.funding.revokeByHost(host, body.expectedGeneration));
+      }
+      return json({ message: "Not found" }, 404);
+    }).pipe(
+      Effect.provideService(HttpIncomingMessage.MaxBodySize, FileSystem.Size(256 * 1024)),
+      Effect.withTracerEnabled(false),
+      Effect.catchTag("DecisionEvaluationError", (error) =>
+        Effect.succeed(
+          json({ code: error.code, message: error.message }, decisionsErrorStatus(error.code)),
         ),
-      );
-      return Layer.mergeAll(
-        HttpRouter.add("GET", "/v1/decisions/*", handler),
-        HttpRouter.add("POST", "/v1/decisions/*", handler),
-      );
+      ),
+    );
+    return handler;
+  });
+export const decisionsRoutes = (routeConfig: DecisionsRouteConfig) =>
+  Layer.unwrap(
+    makeDecisionsHandler(routeConfig).pipe(
+      Effect.map((handler) =>
+        Layer.mergeAll(
+          HttpRouter.add("GET", "/v1/decisions/*", handler),
+          HttpRouter.add("POST", "/v1/decisions/*", handler),
+        ),
+      ),
+    ),
+  );
+export const decisionsApi = (routeConfig: DecisionsRouteConfig) =>
+  HttpApiBuilder.group(
+    RelayApi,
+    "decisions",
+    Effect.fnUntraced(function* (handlers) {
+      const handler = yield* makeDecisionsHandler(routeConfig);
+      return handlers
+        .handleRaw("status", () => handler)
+        .handleRaw("evaluate", () => handler)
+        .handleRaw("challenge", () => handler)
+        .handleRaw("approve", () => handler)
+        .handleRaw("approvalInfo", () => handler)
+        .handleRaw("fundingStatus", () => handler)
+        .handleRaw("accountStatus", () => handler)
+        .handleRaw("accountList", () => handler)
+        .handleRaw("accountRevoke", () => handler)
+        .handleRaw("redeem", () => handler)
+        .handleRaw("revoke", () => handler);
     }),
   );
-}

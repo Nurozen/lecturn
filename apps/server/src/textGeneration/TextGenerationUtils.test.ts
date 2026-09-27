@@ -33,7 +33,11 @@ describe("Codex structured output dialect", () => {
 
   it("does not leak provider output or nested causes from auxiliary failures", () => {
     const sentinel = "PRIVATE_CONVERSATION_SENTINEL";
-    for (const operation of ["generateWorkflowSummary", "generateDecisionNotes"]) {
+    for (const operation of [
+      "generateWorkflowSummary",
+      "generateDecisionNotes",
+      "generateContextualSummary",
+    ]) {
       for (const source of [
         new Error(`spawn codex ${sentinel}`),
         { stderr: sentinel },

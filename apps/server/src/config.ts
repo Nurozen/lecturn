@@ -89,6 +89,14 @@ export class ServerConfig extends Context.Service<
      * `StaveBinary` consults it after settings and `LECTURN_STAVE_PATH`.
      */
     readonly stavePath?: string | undefined;
+    readonly extensions?: {
+      readonly bundledRoot: string;
+      readonly reviewBinary?: {
+        readonly path: string;
+        readonly sha256: string;
+        readonly fixtureRoot?: string;
+      };
+    };
     readonly autoBootstrapProjectFromCwd: boolean;
     readonly logWebSocketEvents: boolean;
     readonly tailscaleServeEnabled: boolean;

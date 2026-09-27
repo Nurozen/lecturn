@@ -1,3 +1,4 @@
+import { prepareContextualDispatch } from "../ContextualDispatch.ts";
 /**
  * ClaudeAdapterLive - Scoped live implementation for the Claude Agent provider adapter.
  *
@@ -4869,6 +4870,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       ),
     });
 
+    // Local SDK queue admission is not native per-message acceptance.
+    const contextualReceipt = yield* prepareContextualDispatch(
+      input,
+      "skipped",
+      boundInstanceId,
+    ).receipt("rejected", null, null);
     yield* Queue.offer(context.promptQueue, {
       type: "message",
       message,
@@ -4877,6 +4884,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     return {
       threadId: context.session.threadId,
       turnId,
+      ...(contextualReceipt ? { contextualReceipt } : {}),
       ...(context.session.resumeCursor !== undefined
         ? { resumeCursor: context.session.resumeCursor }
         : {}),

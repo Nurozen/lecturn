@@ -95,6 +95,7 @@ export const DecisionFundingApprovalInfo = Schema.Struct({
   expiresAt: IsoDateTime,
   approved: Schema.Boolean,
   eligible: Schema.Boolean,
+  reason: Schema.optionalKey(RelayDecisionsStatus.fields.reason),
 });
 export type DecisionFundingApprovalInfo = typeof DecisionFundingApprovalInfo.Type;
 export const DecisionFundingApprovalRequest = Schema.Struct({ challengeId: identifier });

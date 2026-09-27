@@ -1,3 +1,4 @@
+import * as Data from "effect/Data";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import {
@@ -18,6 +19,8 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
+class ReceiptWriteError extends Data.TaggedError("ReceiptWriteError") {}
+const encodeContextualTestJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 import * as Stream from "effect/Stream";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as AcpErrors from "effect-acp/errors";
@@ -305,6 +308,141 @@ const layer = ServerConfig.layerTest(process.cwd(), {
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
 it.layer(layer)("AntigravityAdapter", (it) => {
+  it.effect(
+    "dispatch acknowledgement waits for native registration and precedes prompt completion",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness({ holdDispatch: true });
+        yield* h.adapter.startSession({
+          threadId,
+          cwd: process.cwd(),
+          runtimeMode: "approval-required",
+        });
+        const admitted = yield* Deferred.make<void>();
+        const sent = yield* h.adapter
+          .sendTurn({
+            threadId,
+            input: "First",
+            onDispatch: Deferred.succeed(admitted, undefined).pipe(Effect.asVoid),
+          })
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(h.dispatchStarted);
+        expect(yield* Deferred.isDone(admitted)).toBe(false);
+        yield* Deferred.succeed(h.dispatchRelease, undefined);
+        const first = yield* h.nextPrompt;
+        yield* Deferred.await(admitted);
+        expect(yield* Deferred.isDone(first.result)).toBe(false);
+        const steer = yield* h.adapter
+          .sendTurn({ threadId, input: "Steer" })
+          .pipe(Effect.forkChild);
+        const second = yield* h.nextPrompt;
+        expect(second.index).toBe(2);
+        yield* Deferred.succeed(second.result, { stopReason: "end_turn" });
+        yield* Fiber.join(sent);
+        yield* Fiber.join(steer);
+      }),
+  );
+  it.effect("contextual receipts track fresh native acceptance and omit evidence on a steer", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness();
+      yield* h.adapter.startSession({
+        threadId,
+        cwd: process.cwd(),
+        runtimeMode: "approval-required",
+      });
+      const receipts: import("@lecturn/contracts").ContextualDeliveryReceipt[] = [];
+      const contextualEvidence = {
+        preparationId: "prep",
+        packetId: "packet",
+        dispatchId: "first",
+        submissionId: "submission",
+        providerInstanceId: instanceId,
+        providerContextEpoch: "epoch",
+        providerContextId: nativeSessionId,
+        text: "retrieved secret source",
+        evidenceIds: ["source"],
+      };
+      const onContextualReceipt = (r: import("@lecturn/contracts").ContextualDeliveryReceipt) =>
+        Effect.sync(() => {
+          receipts.push(r);
+        });
+      const first = yield* h.adapter
+        .sendTurn({ threadId, input: "First", contextualEvidence, onContextualReceipt })
+        .pipe(Effect.forkChild);
+      const nativeFirst = yield* h.nextPrompt;
+      expect(encodeContextualTestJson(nativeFirst.content)).toContain(contextualEvidence.text);
+      expect(receipts[0]?.acceptance).toBe("unknown");
+      const steer = yield* h.adapter
+        .sendTurn({
+          threadId,
+          input: "Steer",
+          contextualEvidence: { ...contextualEvidence, dispatchId: "second" },
+          onContextualReceipt,
+        })
+        .pipe(Effect.forkChild);
+      const nativeSteer = yield* h.nextPrompt;
+      expect(encodeContextualTestJson(nativeSteer.content)).not.toContain(contextualEvidence.text);
+      yield* Deferred.succeed(nativeSteer.result, { stopReason: "end_turn" });
+      const result = yield* Fiber.join(steer);
+      yield* Fiber.join(first);
+      expect(result.contextualReceipt).toMatchObject({
+        disposition: "steered",
+        acceptance: "accepted",
+        evidenceIncluded: false,
+        suppliedEvidenceIds: [],
+      });
+      expect(
+        receipts.filter((r) => r.dispatchId === "first").every((r) => r.acceptance === "unknown"),
+      ).toBe(true);
+      const fresh = yield* h.adapter
+        .sendTurn({
+          threadId,
+          input: "Fresh",
+          contextualEvidence: { ...contextualEvidence, dispatchId: "third" },
+          onContextualReceipt,
+        })
+        .pipe(Effect.forkChild);
+      const nativeFresh = yield* h.nextPrompt;
+      yield* Deferred.succeed(nativeFresh.result, { stopReason: "end_turn" });
+      expect((yield* Fiber.join(fresh)).contextualReceipt).toMatchObject({
+        disposition: "fresh",
+        acceptance: "accepted",
+        evidenceIncluded: true,
+        suppliedEvidenceIds: ["source"],
+      });
+    }),
+  );
+  it.effect("contextual durable observer failure blocks the native request", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness();
+      yield* h.adapter.startSession({
+        threadId,
+        cwd: process.cwd(),
+        runtimeMode: "approval-required",
+      });
+      const result = yield* h.adapter
+        .sendTurn({
+          threadId,
+          input: "First",
+          contextualEvidence: {
+            preparationId: "prep",
+            packetId: "packet",
+            dispatchId: "first",
+            submissionId: "submission",
+            providerInstanceId: instanceId,
+            providerContextEpoch: "epoch",
+            providerContextId: nativeSessionId,
+            text: "source",
+            evidenceIds: ["source"],
+          },
+          onContextualReceipt: () => Effect.fail(new ReceiptWriteError()),
+        })
+        .pipe(Effect.exit);
+      expect(Exit.isFailure(result)).toBe(true);
+      expect(h.calls.some((c) => c.startsWith("prompt:"))).toBe(false);
+    }),
+  );
+
   it.effect("adds configured Stave memory to the ACP session", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({

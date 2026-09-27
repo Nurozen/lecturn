@@ -26,9 +26,11 @@ import { Route as SettingsConnectionsRouteImport } from './routes/settings.conne
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
 import { Route as ProjectsProjectKeyRouteImport } from './routes/projects.$projectKey'
+import { Route as ContextualEnvironmentIdRouteImport } from './routes/contextual.$environmentId'
 import { Route as ConnectCallbackRouteImport } from './routes/connect_.callback'
 import { Route as AccountBillingRouteImport } from './routes/account.billing'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
+import { Route as ExtensionsFundingApproveRouteImport } from './routes/extensions.funding.approve'
 import { Route as DecisionsFundingApproveRouteImport } from './routes/decisions.funding.approve'
 import { Route as DecisionsEnvironmentIdProjectIdRouteImport } from './routes/decisions.$environmentId.$projectId'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
@@ -119,6 +121,11 @@ const ProjectsProjectKeyRoute = ProjectsProjectKeyRouteImport.update({
   path: '/projects/$projectKey',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ContextualEnvironmentIdRoute = ContextualEnvironmentIdRouteImport.update({
+  id: '/contextual/$environmentId',
+  path: '/contextual/$environmentId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConnectCallbackRoute = ConnectCallbackRouteImport.update({
   id: '/connect_/callback',
   path: '/connect/callback',
@@ -134,6 +141,12 @@ const ChatPullRequestsRoute = ChatPullRequestsRouteImport.update({
   path: '/pull-requests',
   getParentRoute: () => ChatRoute,
 } as any)
+const ExtensionsFundingApproveRoute =
+  ExtensionsFundingApproveRouteImport.update({
+    id: '/extensions/funding/approve',
+    path: '/extensions/funding/approve',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const DecisionsFundingApproveRoute = DecisionsFundingApproveRouteImport.update({
   id: '/decisions/funding/approve',
   path: '/decisions/funding/approve',
@@ -172,6 +185,7 @@ export interface FileRoutesByFullPath {
   '/pull-requests': typeof ChatPullRequestsRoute
   '/account/billing': typeof AccountBillingRoute
   '/connect/callback': typeof ConnectCallbackRoute
+  '/contextual/$environmentId': typeof ContextualEnvironmentIdRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
@@ -187,6 +201,7 @@ export interface FileRoutesByFullPath {
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/decisions/$environmentId/$projectId': typeof DecisionsEnvironmentIdProjectIdRoute
   '/decisions/funding/approve': typeof DecisionsFundingApproveRoute
+  '/extensions/funding/approve': typeof ExtensionsFundingApproveRoute
   '/sagas/$environmentId/$projectId': typeof ChatSagasEnvironmentIdProjectIdRoute
 }
 export interface FileRoutesByTo {
@@ -197,6 +212,7 @@ export interface FileRoutesByTo {
   '/pull-requests': typeof ChatPullRequestsRoute
   '/account/billing': typeof AccountBillingRoute
   '/connect/callback': typeof ConnectCallbackRoute
+  '/contextual/$environmentId': typeof ContextualEnvironmentIdRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
@@ -213,6 +229,7 @@ export interface FileRoutesByTo {
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/decisions/$environmentId/$projectId': typeof DecisionsEnvironmentIdProjectIdRoute
   '/decisions/funding/approve': typeof DecisionsFundingApproveRoute
+  '/extensions/funding/approve': typeof ExtensionsFundingApproveRoute
   '/sagas/$environmentId/$projectId': typeof ChatSagasEnvironmentIdProjectIdRoute
 }
 export interface FileRoutesById {
@@ -225,6 +242,7 @@ export interface FileRoutesById {
   '/_chat/pull-requests': typeof ChatPullRequestsRoute
   '/account/billing': typeof AccountBillingRoute
   '/connect_/callback': typeof ConnectCallbackRoute
+  '/contextual/$environmentId': typeof ContextualEnvironmentIdRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
@@ -241,6 +259,7 @@ export interface FileRoutesById {
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/decisions/$environmentId/$projectId': typeof DecisionsEnvironmentIdProjectIdRoute
   '/decisions/funding/approve': typeof DecisionsFundingApproveRoute
+  '/extensions/funding/approve': typeof ExtensionsFundingApproveRoute
   '/_chat/sagas/$environmentId/$projectId': typeof ChatSagasEnvironmentIdProjectIdRoute
 }
 export interface FileRouteTypes {
@@ -254,6 +273,7 @@ export interface FileRouteTypes {
     | '/pull-requests'
     | '/account/billing'
     | '/connect/callback'
+    | '/contextual/$environmentId'
     | '/projects/$projectKey'
     | '/settings/appearance'
     | '/settings/archived'
@@ -269,6 +289,7 @@ export interface FileRouteTypes {
     | '/draft/$draftId'
     | '/decisions/$environmentId/$projectId'
     | '/decisions/funding/approve'
+    | '/extensions/funding/approve'
     | '/sagas/$environmentId/$projectId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -279,6 +300,7 @@ export interface FileRouteTypes {
     | '/pull-requests'
     | '/account/billing'
     | '/connect/callback'
+    | '/contextual/$environmentId'
     | '/projects/$projectKey'
     | '/settings/appearance'
     | '/settings/archived'
@@ -295,6 +317,7 @@ export interface FileRouteTypes {
     | '/draft/$draftId'
     | '/decisions/$environmentId/$projectId'
     | '/decisions/funding/approve'
+    | '/extensions/funding/approve'
     | '/sagas/$environmentId/$projectId'
   id:
     | '__root__'
@@ -306,6 +329,7 @@ export interface FileRouteTypes {
     | '/_chat/pull-requests'
     | '/account/billing'
     | '/connect_/callback'
+    | '/contextual/$environmentId'
     | '/projects/$projectKey'
     | '/settings/appearance'
     | '/settings/archived'
@@ -322,6 +346,7 @@ export interface FileRouteTypes {
     | '/_chat/draft/$draftId'
     | '/decisions/$environmentId/$projectId'
     | '/decisions/funding/approve'
+    | '/extensions/funding/approve'
     | '/_chat/sagas/$environmentId/$projectId'
   fileRoutesById: FileRoutesById
 }
@@ -333,9 +358,11 @@ export interface RootRouteChildren {
   UsageRoute: typeof UsageRoute
   AccountBillingRoute: typeof AccountBillingRoute
   ConnectCallbackRoute: typeof ConnectCallbackRoute
+  ContextualEnvironmentIdRoute: typeof ContextualEnvironmentIdRoute
   ProjectsProjectKeyRoute: typeof ProjectsProjectKeyRoute
   DecisionsEnvironmentIdProjectIdRoute: typeof DecisionsEnvironmentIdProjectIdRoute
   DecisionsFundingApproveRoute: typeof DecisionsFundingApproveRoute
+  ExtensionsFundingApproveRoute: typeof ExtensionsFundingApproveRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -459,6 +486,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsProjectKeyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/contextual/$environmentId': {
+      id: '/contextual/$environmentId'
+      path: '/contextual/$environmentId'
+      fullPath: '/contextual/$environmentId'
+      preLoaderRoute: typeof ContextualEnvironmentIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/connect_/callback': {
       id: '/connect_/callback'
       path: '/connect/callback'
@@ -479,6 +513,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/pull-requests'
       preLoaderRoute: typeof ChatPullRequestsRouteImport
       parentRoute: typeof ChatRoute
+    }
+    '/extensions/funding/approve': {
+      id: '/extensions/funding/approve'
+      path: '/extensions/funding/approve'
+      fullPath: '/extensions/funding/approve'
+      preLoaderRoute: typeof ExtensionsFundingApproveRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/decisions/funding/approve': {
       id: '/decisions/funding/approve'
@@ -574,9 +615,11 @@ const rootRouteChildren: RootRouteChildren = {
   UsageRoute: UsageRoute,
   AccountBillingRoute: AccountBillingRoute,
   ConnectCallbackRoute: ConnectCallbackRoute,
+  ContextualEnvironmentIdRoute: ContextualEnvironmentIdRoute,
   ProjectsProjectKeyRoute: ProjectsProjectKeyRoute,
   DecisionsEnvironmentIdProjectIdRoute: DecisionsEnvironmentIdProjectIdRoute,
   DecisionsFundingApproveRoute: DecisionsFundingApproveRoute,
+  ExtensionsFundingApproveRoute: ExtensionsFundingApproveRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

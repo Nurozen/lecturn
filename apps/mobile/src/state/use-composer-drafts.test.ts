@@ -1551,3 +1551,21 @@ describe("mobile composer drafts", () => {
     expect(composerAttachmentCleanupMocks.remove).not.toHaveBeenCalled();
   });
 });
+
+describe("Contextual draft persistence", () => {
+  it("retains a contentless explicit off choice and keeps it isolated by host and project", () => {
+    const off = { enabled: false, sourceIds: ["decisions:project-a"] };
+    const on = { enabled: true, sourceIds: ["decisions:project-a"] };
+    const restored = decodePersistedComposerDrafts({
+      schemaVersion: 1,
+      drafts: {
+        "new-task:host-a:project-a": { text: "", attachments: [], contextual: off },
+        "new-task:host-b:project-a": { text: "", attachments: [], contextual: on },
+      },
+    });
+    expect(restored["new-task:host-a:project-a"]?.contextual).toEqual(off);
+    expect(restored["new-task:host-b:project-a"]?.contextual).toEqual(on);
+    const cleared = clearComposerDraftContentState(restored, "new-task:host-a:project-a");
+    expect(cleared["new-task:host-a:project-a"]?.contextual).toEqual(off);
+  });
+});

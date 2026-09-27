@@ -3,11 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, AuthRelayWriteScope } from "@lecturn/contracts";
 const mocks = vi.hoisted(() => ({
   scopes: ["relay:write"] as string[],
+  contextual: true,
   refresh: vi.fn(),
   changed: vi.fn(),
   command: vi.fn(),
   funding: {
     environmentId: "env",
+    featureId: "decisions",
+    reason: "not-paid",
     state: "unfunded",
     generation: 1,
     accountLabel: null,
@@ -32,7 +35,10 @@ vi.mock("../cloud/useCloudLinkController", () => ({
     throw new Error("No Clerk provider in OSS build");
   },
 }));
-vi.mock("../state/environments", () => ({ usePrimaryEnvironmentId: () => "env" }));
+vi.mock("../state/environments", () => ({
+  usePrimaryEnvironmentId: () => "env",
+  useEnvironment: () => ({ label: "Fixture host" }),
+}));
 vi.mock("../state/session", () => ({
   useEnvironmentSessionState: () => ({ data: { authenticated: true, scopes: mocks.scopes } }),
 }));
@@ -43,6 +49,14 @@ vi.mock("../state/query", () => ({
     isPending: false,
     refresh: mocks.refresh,
   }),
+}));
+vi.mock("../state/contextual", () => ({
+  contextualEnvironment: { fundingStatus: () => null, funding: {} },
+  useContextualAvailable: () => mocks.contextual,
+  useContextualAccess: () => ({ funding: mocks.scopes.includes("relay:write") }),
+}));
+vi.mock("./ui/badge", () => ({
+  Badge: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
 }));
 vi.mock("../state/threadDecisions", () => ({
   threadDecisionEnvironment: { fundingStatus: () => null, funding: {} },
@@ -73,64 +87,90 @@ async function click(renderer: ReactTestRenderer, text: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.scopes = [AuthRelayWriteScope];
+  mocks.contextual = true;
   mocks.funding.state = "unfunded";
   mocks.funding.generation = 1;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 describe("funding controls without cloud auth configured", () => {
   it("reads status and completes a separately approved challenge with the challenge generation", async () => {
-    mocks.command
-      .mockResolvedValueOnce({
-        _tag: "Success",
-        value: {
-          status: { ...mocks.funding, state: "pending", generation: 2 },
-          challenge: {
-            challengeId: "challenge",
-            generation: 2,
-            approvalUrl: "https://example.test/decisions/funding/approve?challengeId=challenge",
-            expiresAt: "2026-09-23T12:00:00Z",
-          },
+    const challenge = {
+      featureId: "decisions",
+      environmentId: "env",
+      challengeId: "challenge",
+      generation: 1,
+      approvalUrl: "https://example.test/extensions/funding/approve?challengeId=challenge",
+      expiresAt: "2099-09-23T12:00:00Z",
+    };
+    mocks.command.mockImplementation(async ({ input }) => ({
+      _tag: "Success",
+      value:
+        input.operation === "create"
+          ? challenge
+          : input.operation === "observe"
+            ? { ...challenge, state: "approved-awaiting-host", accountLabel: "payer@example.test" }
+            : { ...mocks.funding, state: "active", generation: 2 },
+    }));
+    const renderer = await render();
+    await click(renderer, "Link membership");
+    expect(mocks.command).toHaveBeenNthCalledWith(1, {
+      environmentId,
+      input: { featureId: "decisions", operation: "create", expectedGeneration: 1 },
+    });
+    expect(mocks.command).toHaveBeenNthCalledWith(3, {
+      environmentId,
+      input: {
+        featureId: "decisions",
+        operation: "redeem",
+        challengeId: "challenge",
+        expectedGeneration: 1,
+      },
+    });
+    expect(JSON.stringify(renderer.toJSON())).toContain("Membership linked");
+    await act(async () => renderer.unmount());
+  });
+  it("retains legacy Decisions membership setup when the host does not support shared funding", async () => {
+    mocks.contextual = false;
+    mocks.command.mockResolvedValue({
+      _tag: "Success",
+      value: {
+        status: mocks.funding,
+        challenge: {
+          challengeId: "legacy",
+          generation: 2,
+          approvalUrl: "https://example.test/decisions/funding/approve",
+          expiresAt: "2099-09-23T12:00:00Z",
         },
-      })
-      .mockResolvedValueOnce({
-        _tag: "Success",
-        value: { status: { ...mocks.funding, state: "active", generation: 2 }, challenge: null },
-      });
+      },
+    });
     const renderer = await render();
     await click(renderer, "Link membership…");
-    expect(mocks.command).toHaveBeenNthCalledWith(1, {
+    expect(mocks.command).toHaveBeenCalledWith({
       environmentId,
       input: { operation: "challenge", expectedGeneration: 1 },
     });
-    const link = renderer.root.findByType("a");
-    expect(link.props.href).toContain("challengeId=challenge");
-    expect(mocks.command).toHaveBeenCalledTimes(1);
-    await click(renderer, "I approved — finish linking");
-    expect(mocks.command).toHaveBeenNthCalledWith(2, {
-      environmentId,
-      input: { operation: "redeem", challengeId: "challenge", expectedGeneration: 2 },
-    });
+    expect(renderer.root.findByType("a").props.href).toContain("/decisions/funding/approve");
     await act(async () => renderer.unmount());
   });
   it("requires a second explicit click before revoking and preserves read-only allowance access", async () => {
     mocks.funding.state = "active";
     mocks.command.mockResolvedValue({
       _tag: "Success",
-      value: { status: { ...mocks.funding, state: "revoked" }, challenge: null },
+      value: { ...mocks.funding, state: "revoked" },
     });
     const renderer = await render();
-    await click(renderer, "Revoke funding…");
+    await click(renderer, "Revoke access…");
     expect(mocks.command).not.toHaveBeenCalled();
-    await click(renderer, "Revoke funding");
+    await click(renderer, "Revoke Decisions");
     expect(mocks.command).toHaveBeenCalledWith({
       environmentId,
-      input: { operation: "revoke", expectedGeneration: 1 },
+      input: { featureId: "decisions", operation: "revoke", expectedGeneration: 1 },
     });
     await act(async () => renderer.unmount());
     mocks.scopes = [];
     const readonly = await render();
     expect(readonly.root.findAllByType("button")).toHaveLength(0);
-    expect(JSON.stringify(readonly.toJSON())).toContain("Detection allowance");
+    expect(JSON.stringify(readonly.toJSON())).toContain("Membership allowance");
     await act(async () => readonly.unmount());
   });
 });

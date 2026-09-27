@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import { ContextualDeliveryReceipt } from "./contextual.ts";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   ApprovalRequestId,
@@ -87,8 +88,26 @@ export const ProviderSessionStartInput = Schema.Struct({
 });
 export type ProviderSessionStartInput = typeof ProviderSessionStartInput.Type;
 
+/** Purgeable evidence is kept separate until adapter-local fresh/steer classification. */
+export const ProviderContextualEvidence = Schema.Struct({
+  preparationId: TrimmedNonEmptyString,
+  packetId: TrimmedNonEmptyString,
+  dispatchId: TrimmedNonEmptyString,
+  submissionId: TrimmedNonEmptyString,
+  providerInstanceId: ProviderInstanceId,
+  providerContextEpoch: TrimmedNonEmptyString,
+  providerContextId: Schema.NullOr(TrimmedNonEmptyString),
+  text: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(6000)),
+  evidenceIds: Schema.Array(TrimmedNonEmptyString).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(64),
+    Schema.makeFilter((v) => new Set(v).size === v.length),
+  ),
+});
+export type ProviderContextualEvidence = typeof ProviderContextualEvidence.Type;
 export const ProviderSendTurnInput = Schema.Struct({
   threadId: ThreadId,
+  contextualEvidence: Schema.optional(ProviderContextualEvidence),
   /** Internal recovery signal. Allows an empty turn only for adapters that
       explicitly support promptless continuation. */
   continuation: Schema.optional(Schema.Boolean),
@@ -105,6 +124,7 @@ export type ProviderSendTurnInput = typeof ProviderSendTurnInput.Type;
 
 export const ProviderTurnStartResult = Schema.Struct({
   threadId: ThreadId,
+  contextualReceipt: Schema.optional(ContextualDeliveryReceipt),
   turnId: TurnId,
   resumeCursor: Schema.optional(Schema.Unknown),
 });

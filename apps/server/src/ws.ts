@@ -1,3 +1,5 @@
+import { ContextualSettings } from "./contextual/ContextualSettings.ts";
+import { ContextualService } from "./contextual/ContextualService.ts";
 import { createManualCloudLinkProof, applyManualCloudRelayConfig } from "./cloud/http.ts";
 import { DecisionService } from "./threadDecisions/DecisionService.ts";
 import { ThreadNoteService } from "./threadNotes/ThreadNoteService.ts";
@@ -703,6 +705,8 @@ const makeWsRpcLayer = (
       const pullRequests = yield* PullRequestService.PullRequestService;
       const threadNotes = yield* ThreadNoteService;
       const threadDecisions = yield* DecisionService;
+      const contextual = yield* ContextualService;
+      const contextualSettings = yield* ContextualSettings;
       const pullRequestWatches = yield* PullRequestWatchService;
       const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
       const sessions = yield* SessionStore.SessionStore;
@@ -1208,6 +1212,14 @@ const makeWsRpcLayer = (
               // terminals and provider sessions under the reused thread id.
               yield* threadDeletionReactor.drainThrough(created.sequence);
               createdThread = true;
+              if (bootstrap.createThread.contextual) {
+                const settings = yield* contextualSettings.thread(command.threadId);
+                yield* contextual.updateThreadSettings({
+                  threadId: command.threadId,
+                  expectedRevision: settings.revision,
+                  ...bootstrap.createThread.contextual,
+                });
+              }
             }
 
             if (bootstrap?.prepareWorktree) {
@@ -1904,6 +1916,66 @@ const makeWsRpcLayer = (
 
       return WsRpcGroup.of({
         ...staveRpcHandlers,
+        [WS_METHODS.contextualStatus]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualStatus, contextual.status(input)),
+        [WS_METHODS.contextualProjectSettings]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualProjectSettings, contextual.projectSettings(input)),
+        [WS_METHODS.contextualUpdateProjectSettings]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.contextualUpdateProjectSettings,
+            contextual.updateProjectSettings(input),
+          ),
+        [WS_METHODS.contextualUpdateThreadSettings]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.contextualUpdateThreadSettings,
+            contextual.updateThreadSettings(input),
+          ),
+        [WS_METHODS.contextualRefresh]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualRefresh, contextual.refresh(input)),
+        [WS_METHODS.contextualExclude]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualExclude, contextual.exclude(input)),
+        [WS_METHODS.contextualPreparationAction]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.contextualPreparationAction,
+            contextual.preparationAction(input),
+          ),
+        [WS_METHODS.contextualDisclosures]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualDisclosures, contextual.disclosures(input)),
+        [WS_METHODS.contextualConflicts]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualConflicts, contextual.conflicts(input)),
+        [WS_METHODS.contextualResolveConflict]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualResolveConflict, contextual.resolveConflict(input)),
+        [WS_METHODS.contextualGroup]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualGroup, contextual.group(input)),
+        [WS_METHODS.contextualMutateGroup]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualMutateGroup, contextual.mutateGroup(input)),
+        [WS_METHODS.contextualUndoGroup]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualUndoGroup, contextual.undoGroup(input)),
+        [WS_METHODS.contextualSources]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualSources, contextual.sources(input)),
+        [WS_METHODS.contextualConfigureSources]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.contextualConfigureSources,
+            contextual.configureSources(input),
+          ),
+        [WS_METHODS.contextualCaptureStatus]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualCaptureStatus, contextual.captureStatus()),
+        [WS_METHODS.contextualSetCapture]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualSetCapture, contextual.setCapture(input)),
+        [WS_METHODS.contextualInspect]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualInspect, contextual.inspect(input)),
+        [WS_METHODS.contextualEvidence]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualEvidence, contextual.evidence(input)),
+        [WS_METHODS.contextualExport]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualExport, contextual.export(input)),
+        [WS_METHODS.contextualForget]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualForget, contextual.forget(input)),
+        [WS_METHODS.extensionsFundingStatus]: (input) =>
+          observeRpcEffect(WS_METHODS.extensionsFundingStatus, contextual.fundingStatus(input)),
+        [WS_METHODS.extensionsFunding]: (input) =>
+          observeRpcEffect(WS_METHODS.extensionsFunding, contextual.funding(input)),
+        [WS_METHODS.contextualSubscribe]: (input) =>
+          observeRpcStream(WS_METHODS.contextualSubscribe, contextual.subscribe(input)),
         [WS_METHODS.threadDecisionsFundingStatus]: () =>
           observeRpcEffect(WS_METHODS.threadDecisionsFundingStatus, threadDecisions.fundingStatus),
         [WS_METHODS.threadDecisionsFunding]: (input) =>
@@ -3634,6 +3706,8 @@ export const websocketRpcRouteLayer = Layer.unwrap(
     const pullRequests = yield* PullRequestService.PullRequestService;
     const threadNotes = yield* ThreadNoteService;
     const threadDecisions = yield* DecisionService;
+    const contextual = yield* ContextualService;
+    const contextualSettings = yield* ContextualSettings;
     const pullRequestWatches = yield* PullRequestWatchService;
     const staveOperations = yield* StaveOperations.StaveOperations;
     const sagaWorkbench = yield* SagaWorkbenchService;
@@ -3679,6 +3753,8 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               Layer.provide(Layer.succeed(PullRequestWatchService, pullRequestWatches)),
               Layer.provide(Layer.succeed(ThreadNoteService, threadNotes)),
               Layer.provide(Layer.succeed(DecisionService, threadDecisions)),
+              Layer.provide(Layer.succeed(ContextualService, contextual)),
+              Layer.provide(Layer.succeed(ContextualSettings, contextualSettings)),
               // Stave operations outlive the socket that started them, so every
               // connection attaches to the one server-lifetime registry.
               Layer.provide(Layer.succeed(StaveOperations.StaveOperations, staveOperations)),

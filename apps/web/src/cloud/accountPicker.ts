@@ -12,7 +12,11 @@ export type AccountPickerLastUsed = typeof AccountPickerLastUsed.Type;
 export const NO_ACCOUNT_PICKER_LAST_USED: AccountPickerLastUsed = {};
 
 /** Billing and Teams share one surface, so their tabs show the same account. */
-export type AccountPickerSurface = "publish" | "account-settings" | "cli-authorize";
+export type AccountPickerSurface =
+  | "publish"
+  | "account-settings"
+  | "cli-authorize"
+  | "funding-approval";
 
 export const NEEDS_SIGN_IN_REASON = "Sign in to this account again to use it here.";
 export const UNKNOWN_PICKER_ACCOUNT_NAME = "Lecturn Connect account";

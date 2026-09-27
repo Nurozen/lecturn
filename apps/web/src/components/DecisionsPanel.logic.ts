@@ -52,6 +52,7 @@ export function decisionFilterKey(input: ThreadDecisionListInput) {
     input.threadId ?? null,
     input.search ?? "",
     input.reviewState ?? null,
+    input.attribution ?? null,
     input.lifecycle ?? "current",
     input.cursor ?? null,
   ]);

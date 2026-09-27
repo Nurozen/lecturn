@@ -466,6 +466,25 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
       ),
   );
 
+  it.effect("generates display summaries through isolated tool-free Codex inference", () =>
+    withFakeCodexEnv(
+      {
+        requireArg: "--ignore-rules",
+        forbidArg: "--ignore-user-config",
+        stdinMustContain: "Original Contextual evidence",
+        output: JSON.stringify({ text: "  SQLite supports the local cache.  " }),
+      },
+      (generation) =>
+        Effect.gen(function* () {
+          const result = yield* generation.generateContextualSummary!({
+            cwd: process.cwd(),
+            message: "Original Contextual evidence",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+          expect(result).toEqual({ text: "SQLite supports the local cache." });
+        }),
+    ),
+  );
   it.effect("generates and sanitizes commit messages without branch by default", () =>
     withFakeCodexEnv(
       {

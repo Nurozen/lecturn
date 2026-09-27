@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
-import { Deferred, Effect, Fiber } from "effect";
+import { Effect } from "effect";
 import type { DecisionEvaluationRequest, DecisionEvaluationResult } from "@lecturn/contracts";
 import { decisionError } from "./DecisionsAccess.ts";
 import { parseDecisionsConfig } from "./DecisionsConfig.ts";
@@ -8,7 +8,7 @@ import { makeDecisionEvaluation, type DecisionEvaluationDependencies } from "./D
 const config = parseDecisionsConfig({
   DECISIONS_ENABLED: "true",
   DECISIONS_COHORT: "*",
-  TYPESAFE_API_KEY: "fixture-key",
+  EXTENSIONS_EVALUATOR_WORKER: "fixture",
 });
 const principal = {
   credentialId: "credential",
@@ -35,7 +35,7 @@ const allowance = {
 const result: DecisionEvaluationResult = {
   requestId: "request",
   runId: "run",
-  model: "jev-1.13.0",
+  model: "extensions-v1",
   templateVersion: "decisions-v1",
   judgments: [{ targetId: "target", exists: "yes", relevant: "yes" }],
   inputTokens: 5,
@@ -43,11 +43,12 @@ const result: DecisionEvaluationResult = {
   replayed: false,
 };
 function fixture() {
-  const funding: DecisionEvaluationDependencies["funding"] = {
+  const funding = {
     requireFunding: vi.fn(() =>
       Effect.succeed({
         payerId: "payer",
         funding: {
+          feature_id: "decisions" as const,
           environment_id: "environment",
           public_key: "key",
           generation: 1,
@@ -65,114 +66,84 @@ function fixture() {
     ),
   };
   const usage = {
-    reserve: vi.fn<DecisionEvaluationDependencies["usage"]["reserve"]>(() =>
-      Effect.succeed({ kind: "admitted", attemptId: "attempt", allowance }),
+    requestBackend: vi.fn<DecisionEvaluationDependencies["usage"]["requestBackend"]>(() =>
+      Effect.succeed(null),
     ),
-    markDispatched: vi.fn<DecisionEvaluationDependencies["usage"]["markDispatched"]>(() =>
-      Effect.succeed(true),
-    ),
-    settle: vi.fn<DecisionEvaluationDependencies["usage"]["settle"]>(() =>
-      Effect.succeed({ kind: "settled", result }),
-    ),
-    failBeforeDispatch: vi.fn<DecisionEvaluationDependencies["usage"]["failBeforeDispatch"]>(() =>
-      Effect.succeed(undefined),
-    ),
-    markUnknown: vi.fn<DecisionEvaluationDependencies["usage"]["markUnknown"]>(() =>
-      Effect.succeed(undefined),
+    replayLegacy: vi.fn<DecisionEvaluationDependencies["usage"]["replayLegacy"]>(() =>
+      Effect.succeed({ ...result, replayed: true }),
     ),
   };
-  const jev = {
-    evaluate: vi.fn<DecisionEvaluationDependencies["jev"]["evaluate"]>(() =>
-      Effect.succeed({ inputTokens: 5, judgments: [...result.judgments] }),
-    ),
-  };
-  const fingerprint = () => Effect.succeed("content-fingerprint");
-  return {
+  const evaluator = vi.fn<NonNullable<DecisionEvaluationDependencies["evaluator"]>>(() =>
+    Effect.succeed(result),
+  );
+  const deps = {
+    funding,
     usage,
-    jev,
-    evaluate: makeDecisionEvaluation(config, { funding, usage, jev, fingerprint }),
+    evaluator,
+    fingerprint: () => Effect.succeed("content-fingerprint"),
   };
+  return { funding, usage, evaluator, deps, evaluate: makeDecisionEvaluation(config, deps) };
 }
-describe("Decisions metered dispatch", () => {
-  it.effect("reserves before dispatch and settles one validated response", () =>
+describe("Decisions private service boundary", () => {
+  it.effect("uses only the fixed evaluator after funding and preserves explicit retry", () =>
     Effect.gen(function* () {
       const f = fixture();
-      expect(yield* f.evaluate(principal, request)).toEqual(result);
-      expect(f.usage.reserve.mock.invocationCallOrder[0]).toBeLessThan(
-        f.usage.markDispatched.mock.invocationCallOrder[0]!,
+      const input = { ...request, explicitRetry: true };
+      expect(yield* f.evaluate(principal, input)).toEqual(result);
+      expect(f.evaluator).toHaveBeenCalledWith(principal, input);
+      expect(f.funding.requireFunding.mock.invocationCallOrder[0]).toBeLessThan(
+        f.evaluator.mock.invocationCallOrder[0]!,
       );
-      expect(f.usage.markDispatched.mock.invocationCallOrder[0]).toBeLessThan(
-        f.jev.evaluate.mock.invocationCallOrder[0]!,
-      );
-      expect(f.usage.settle).toHaveBeenCalledWith("attempt", {
-        inputTokens: 5,
-        judgments: [...result.judgments],
-      });
-      expect(f.usage.markUnknown).not.toHaveBeenCalled();
+      expect(f.usage.replayLegacy).not.toHaveBeenCalled();
     }),
   );
-  it.effect("replays without calling Jev and rejects duplicate in-flight delivery", () =>
+  it.effect("fails closed without a private evaluator and never dispatches a retired attempt", () =>
     Effect.gen(function* () {
       const f = fixture();
-      f.usage.reserve.mockImplementationOnce(() =>
-        Effect.succeed({ kind: "replay", result: { ...result, replayed: true } }),
+      expect(
+        (yield* Effect.flip(
+          makeDecisionEvaluation(config, { ...f.deps, evaluator: null })(principal, request),
+        )).code,
+      ).toBe("unavailable");
+      f.usage.requestBackend.mockImplementationOnce(() => Effect.succeed("opaque-retired-backend"));
+      f.usage.replayLegacy.mockImplementationOnce(() =>
+        Effect.fail(decisionError("in-progress", "Retired attempt unresolved")),
       );
-      expect((yield* f.evaluate(principal, request)).replayed).toBe(true);
-      expect(f.jev.evaluate).not.toHaveBeenCalled();
-      f.usage.reserve.mockImplementationOnce(() => Effect.succeed({ kind: "in-progress" }));
       expect((yield* Effect.flip(f.evaluate(principal, request))).code).toBe("in-progress");
-      expect(f.usage.markDispatched).not.toHaveBeenCalled();
+      expect(f.evaluator).not.toHaveBeenCalled();
     }),
   );
-  it.effect(
-    "preserves unknown spending on upstream failure and releases only undispatched failures",
-    () =>
-      Effect.gen(function* () {
-        const f = fixture();
-        f.jev.evaluate.mockImplementationOnce(() =>
-          Effect.fail(decisionError("unavailable", "Fixture upstream unavailable")),
-        );
-        expect((yield* Effect.flip(f.evaluate(principal, request))).code).toBe("unavailable");
-        expect(f.usage.markUnknown).toHaveBeenCalledWith("attempt");
-        expect(f.usage.failBeforeDispatch).not.toHaveBeenCalled();
-        const revoked = fixture();
-        revoked.usage.markDispatched.mockImplementationOnce(() =>
-          Effect.fail(decisionError("forbidden", "Revoked")),
-        );
-        expect((yield* Effect.flip(revoked.evaluate(principal, request))).code).toBe("forbidden");
-        expect(revoked.usage.failBeforeDispatch).toHaveBeenCalledWith("attempt");
-        expect(revoked.jev.evaluate).not.toHaveBeenCalled();
-      }),
-  );
-  it.effect("records interrupted upstream work as unknown without an automatic retry", () =>
+  it.effect("replays settled retired results without a new service call", () =>
     Effect.gen(function* () {
       const f = fixture();
-      const started = yield* Deferred.make<void>();
-      f.jev.evaluate.mockImplementationOnce(() =>
-        Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
+      f.usage.requestBackend.mockImplementationOnce(() => Effect.succeed("opaque-retired-backend"));
+      expect(yield* f.evaluate(principal, request)).toEqual({ ...result, replayed: true });
+      expect(f.usage.replayLegacy).toHaveBeenCalledWith(
+        expect.objectContaining({ fingerprint: "content-fingerprint", runId: request.runId }),
       );
-      const fiber = yield* f.evaluate(principal, request).pipe(Effect.forkChild);
-      yield* Deferred.await(started);
-      yield* Fiber.interrupt(fiber);
-      expect(f.usage.markUnknown).toHaveBeenCalledTimes(1);
-      expect(f.usage.settle).not.toHaveBeenCalled();
-      expect(f.jev.evaluate).toHaveBeenCalledTimes(1);
+      expect(f.evaluator).not.toHaveBeenCalled();
     }),
   );
-  it.effect(
-    "rejects unsupported template before quota or upstream and preserves explicit retry intent",
-    () =>
-      Effect.gen(function* () {
-        const f = fixture();
-        expect(
-          (yield* Effect.flip(f.evaluate(principal, { ...request, templateVersion: "untrusted" })))
-            .code,
-        ).toBe("invalid");
-        expect(f.usage.reserve).not.toHaveBeenCalled();
-        yield* f.evaluate(principal, { ...request, explicitRetry: true });
-        expect(f.usage.reserve).toHaveBeenCalledWith(
-          expect.objectContaining({ explicitRetry: true }),
-        );
-      }),
+  it.effect("does not retry a private service failure", () =>
+    Effect.gen(function* () {
+      const f = fixture();
+      f.evaluator.mockImplementationOnce(() =>
+        Effect.fail(decisionError("unavailable", "Private service unavailable")),
+      );
+      expect((yield* Effect.flip(f.evaluate(principal, request))).code).toBe("unavailable");
+      expect(f.evaluator).toHaveBeenCalledTimes(1);
+      expect(f.usage.replayLegacy).not.toHaveBeenCalled();
+    }),
+  );
+  it.effect("rejects invalid templates before funding or service access", () =>
+    Effect.gen(function* () {
+      const f = fixture();
+      expect(
+        (yield* Effect.flip(f.evaluate(principal, { ...request, templateVersion: "untrusted" })))
+          .code,
+      ).toBe("invalid");
+      expect(f.funding.requireFunding).not.toHaveBeenCalled();
+      expect(f.evaluator).not.toHaveBeenCalled();
+    }),
   );
 });
