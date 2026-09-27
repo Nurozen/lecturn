@@ -120,10 +120,13 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         continuationGroupKey: continuationIdentity.continuationKey,
       });
       const effectiveConfig = { ...config, enabled } satisfies OpenCodeSettings;
-      const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
+      const resolveMaintenanceCapabilities = resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
-      });
+      }).pipe(
+        Effect.provideService(FileSystem.FileSystem, yield* FileSystem.FileSystem),
+        Effect.provideService(Path.Path, yield* Path.Path),
+      );
 
       const adapter = yield* makeOpenCodeAdapter(effectiveConfig, {
         staveMemoryWiring: yield* StaveMemoryWiring,
@@ -198,7 +201,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<OpenCodeSettings>>(
         {
-          maintenanceCapabilities,
+          resolveMaintenanceCapabilities,
           discovery: {
             waitForShell: !/[\\/]/.test(effectiveConfig.binaryPath?.trim() ?? ""),
             refreshEnvironment: () =>
@@ -212,7 +215,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
           initialSnapshot: (settings) =>
             makePendingOpenCodeProvider(settings.provider).pipe(Effect.map(stampIdentity)),
           checkProvider,
-          enrichSnapshot: ({ settings, snapshot, publishSnapshot }) =>
+          enrichSnapshot: ({ settings, snapshot, maintenanceCapabilities, publishSnapshot }) =>
             enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities, {
               enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
             }).pipe(
