@@ -321,6 +321,7 @@ it.effect.each(["extensions", "legacy"] as const)(
             featureId: "decisions",
             state: "revoked",
             eligible: false,
+            reason: "unavailable",
             remoteRevocationPending: true,
           }),
         ),

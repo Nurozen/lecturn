@@ -18,6 +18,10 @@ const occurrence = {
   body: "Use SQLite.",
   rationale: null,
   attribution: "agent-chosen",
+  occurrenceEvidenceId: "new-evidence",
+  acceptanceEvidence: null,
+  liveChoice: "new-choice",
+  sourceLineageIds: [],
 };
 describe("independently attributed writer occurrences", () => {
   it("keeps persisted legacy outputs readable without pretending they are restorable occurrences", () => {
@@ -33,7 +37,16 @@ describe("independently attributed writer occurrences", () => {
       unresolvedCandidateIds: [],
     };
     expect(isV2(output)).toBe(true);
-    for (const missing of ["title", "body", "attribution", "evidence"] as const) {
+    for (const missing of [
+      "title",
+      "body",
+      "attribution",
+      "evidence",
+      "occurrenceEvidenceId",
+      "acceptanceEvidence",
+      "liveChoice",
+      "sourceLineageIds",
+    ] as const) {
       const action = { ...occurrence };
       delete (action as Partial<typeof occurrence>)[missing];
       expect(isV2({ ...output, actions: [action] })).toBe(false);

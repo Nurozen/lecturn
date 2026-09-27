@@ -12,7 +12,9 @@ for (const keepRow of [true, false]) {
       yield* sql`INSERT INTO contextual_outbox(sequence,thread_id,revision,kind,entity_id,occurred_at)
         VALUES (50,'thread',1,'settings-changed','thread','2026-09-25T00:00:00Z')`;
       if (!keepRow) yield* sql`DELETE FROM contextual_outbox`;
-      assert.deepEqual(yield* runMigrations(), [[62, "ContextualInvalidations"]]);
+      assert.deepEqual(yield* runMigrations({ toMigrationInclusive: 62 }), [
+        [62, "ContextualInvalidations"],
+      ]);
       const retained = yield* sql`SELECT sequence,thread_id,project_id FROM contextual_outbox`;
       assert.deepEqual(
         [...retained],
@@ -24,7 +26,7 @@ for (const keepRow of [true, false]) {
         sequence: number;
       }>`SELECT sequence FROM contextual_outbox WHERE sequence>50`;
       assert.equal(rows[0]?.sequence, 51);
-      assert.deepEqual(yield* runMigrations(), []);
+      assert.deepEqual(yield* runMigrations({ toMigrationInclusive: 62 }), []);
     }).pipe(Effect.provide(layer({ filename: ":memory:" }))),
   );
 }
