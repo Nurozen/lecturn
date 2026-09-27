@@ -91,10 +91,13 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
         continuationGroupKey: continuationIdentity.continuationKey,
       });
       const effectiveConfig = { ...config, enabled } satisfies GrokSettings;
-      const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
+      const resolveMaintenanceCapabilities = resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
-      });
+      }).pipe(
+        Effect.provideService(FileSystem.FileSystem, yield* FileSystem.FileSystem),
+        Effect.provideService(Path.Path, yield* Path.Path),
+      );
 
       const adapter = yield* makeGrokAdapter(effectiveConfig, {
         staveMemoryWiring: yield* StaveMemoryWiring,
@@ -112,7 +115,7 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
 
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<GrokSettings>>({
-        maintenanceCapabilities,
+        resolveMaintenanceCapabilities,
         discovery: {
           waitForShell: !/[\\/]/.test(effectiveConfig.binaryPath?.trim() ?? ""),
           refreshEnvironment: () =>
@@ -125,7 +128,12 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
           buildInitialGrokProviderSnapshot(settings.provider).pipe(Effect.map(stampIdentity)),
         checkProvider,
         detectionTimeout: GROK_DETECTION_TIMEOUT_MS,
-        enrichSnapshot: ({ settings, snapshot: currentSnapshot, publishSnapshot }) =>
+        enrichSnapshot: ({
+          settings,
+          snapshot: currentSnapshot,
+          maintenanceCapabilities,
+          publishSnapshot,
+        }) =>
           enrichGrokSnapshot({
             snapshot: currentSnapshot,
             maintenanceCapabilities,

@@ -57,7 +57,13 @@ function withUsageLimits(
 export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(function* <
   Settings,
 >(input: {
-  readonly maintenanceCapabilities: ServerProviderShape["maintenanceCapabilities"];
+  /**
+   * Re-run after every provider check so the update method follows the
+   * provider's environment once the login-shell PATH has loaded.
+   */
+  readonly resolveMaintenanceCapabilities: Effect.Effect<
+    ServerProviderShape["maintenanceCapabilities"]
+  >;
   readonly getSettings: Effect.Effect<Settings, ServerSettingsError>;
   readonly streamSettings: Stream.Stream<Settings>;
   readonly haveSettingsChanged: (previous: Settings, next: Settings) => boolean;
@@ -70,6 +76,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   readonly enrichSnapshot?: (input: {
     readonly settings: Settings;
     readonly snapshot: ServerProvider;
+    readonly maintenanceCapabilities: ServerProviderShape["maintenanceCapabilities"];
     readonly getSnapshot: Effect.Effect<ServerProvider>;
     readonly publishSnapshot: (snapshot: ServerProvider) => Effect.Effect<void>;
   }) => Effect.Effect<void>;
@@ -110,6 +117,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     enrichmentGeneration: 0,
   });
   const settingsRef = yield* Ref.make(initialSettings);
+  let maintenanceCapabilities = yield* input.resolveMaintenanceCapabilities;
   const routineTimeoutsRef = yield* Ref.make(0);
   const enrichmentFiberRef = yield* Ref.make<Fiber.Fiber<void, unknown> | null>(null);
   const scope = yield* Effect.scope;
@@ -191,6 +199,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       .enrichSnapshot({
         settings,
         snapshot,
+        maintenanceCapabilities,
         getSnapshot: Ref.get(snapshotStateRef).pipe(Effect.map((state) => state.snapshot)),
         publishSnapshot: (nextSnapshot) => publishEnrichedSnapshot(generation, nextSnapshot),
       })
@@ -300,6 +309,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       );
     });
     const probedSnapshot = yield* probe;
+    maintenanceCapabilities = yield* input.resolveMaintenanceCapabilities;
     // A busy machine can stall one routine check. Keep a ready provider usable
     // until routine checks time out repeatedly; every other failure publishes now.
     if (probedSnapshot.discovery?.status === "timed-out" && options?.routine === true) {
@@ -462,7 +472,9 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   );
 
   return {
-    maintenanceCapabilities: input.maintenanceCapabilities,
+    get maintenanceCapabilities() {
+      return maintenanceCapabilities;
+    },
     getSnapshot: Ref.get(snapshotStateRef).pipe(Effect.map((state) => state.snapshot)),
     refresh: refreshSnapshot().pipe(Effect.tapError(Effect.logError), Effect.orDie),
     applyUsageLimits,

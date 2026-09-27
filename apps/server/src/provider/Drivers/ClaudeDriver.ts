@@ -142,10 +142,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
           ),
         ),
       );
-      const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
+      const resolveMaintenanceCapabilities = resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
-      });
+      }).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+      );
       const continuationGroupKey = yield* makeClaudeContinuationGroupKey(effectiveConfig);
       // External sessions are only listable from the server process's own
       // Claude home, so a custom-home instance reports the capability off.
@@ -207,7 +210,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
 
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<ClaudeSettings>>({
-        maintenanceCapabilities,
+        resolveMaintenanceCapabilities,
         discovery: {
           waitForShell: !/[\\/]/.test(effectiveConfig.binaryPath?.trim() ?? ""),
           refreshEnvironment: () =>
@@ -224,7 +227,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
             Effect.map(stampIdentity),
           ),
         checkProvider,
-        enrichSnapshot: ({ settings, snapshot, publishSnapshot }) =>
+        enrichSnapshot: ({ settings, snapshot, maintenanceCapabilities, publishSnapshot }) =>
           enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities, {
             enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
           }).pipe(
