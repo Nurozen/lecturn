@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./providerFactory": {
+      "types": "./src/providerFactory.ts",
+      "default": "./src/providerFactory.ts"
+    },
     "./state/threadNotes": {
       "types": "./src/state/threadNotes.ts",
       "default": "./src/state/threadNotes.ts"

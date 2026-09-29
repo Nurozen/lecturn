@@ -1,6 +1,7 @@
 import {
   ArrowLeftIcon,
   ChartNoAxesColumnIcon,
+  FactoryIcon,
   GitPullRequestIcon,
   SettingsIcon,
 } from "lucide-react";
@@ -141,9 +142,11 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
           ? "project-settings"
           : location.pathname === "/usage"
             ? "usage"
-            : location.pathname === "/pull-requests"
-              ? "pull-requests"
-              : null,
+            : location.pathname === "/factory"
+              ? "factory"
+              : location.pathname === "/pull-requests"
+                ? "pull-requests"
+                : null,
   });
   const { environments } = useEnvironments();
   // The page reads every connected server, so one of them offering pull requests is enough for
@@ -166,6 +169,11 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const handleSettingsClick = useCallback(() => {
     closeMobileSidebar();
     void navigate({ to: "/settings" });
+  }, [closeMobileSidebar, navigate]);
+
+  const handleFactoryClick = useCallback(() => {
+    closeMobileSidebar();
+    void navigate({ to: "/factory", search: {} });
   }, [closeMobileSidebar, navigate]);
 
   const handleUsageClick = useCallback(() => {
@@ -200,6 +208,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             label="Settings"
             onClick={handleSettingsClick}
           />
+          <SidebarUtilityItem icon={<FactoryIcon />} label="Factory" onClick={handleFactoryClick} />
           {pullRequestsSupported ? (
             <SidebarUtilityItem
               icon={<GitPullRequestIcon />}
