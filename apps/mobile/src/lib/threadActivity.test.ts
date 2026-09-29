@@ -614,6 +614,42 @@ describe("buildThreadFeed", () => {
     ]);
   });
 
+  it("previews Claude edits by file and counts repeated edits to one file once", () => {
+    const claudeEdit = (id: string) =>
+      makeActivity({
+        id: EventId.make(id),
+        kind: "tool.completed",
+        tone: "tool",
+        summary: "File change",
+        createdAt: "2026-09-01T00:00:00.000Z",
+        payload: {
+          itemType: "file_change",
+          toolCallId: id,
+          status: "completed",
+          title: "File change",
+          detail: 'Edit: {"file_path":"/repo/src/app.ts","old_string":"a","new_string":"b"}',
+          data: { toolCallId: id, toolName: "Edit", files: [{ path: "/repo/src/app.ts" }] },
+        },
+      });
+    const thread = makeThread({
+      id: ThreadId.make("thread-claude-edits"),
+      projectId: ProjectId.make("project-1"),
+      title: "Claude edits",
+      activities: [claudeEdit("edit-1"), claudeEdit("edit-2")],
+    });
+
+    const [group] = buildThreadFeed(thread);
+    expect(group?.type).toBe("activity-group");
+    if (group?.type !== "activity-group") return;
+    expect(group.activities.map((row) => row.detail)).toEqual([
+      "/repo/src/app.ts",
+      "/repo/src/app.ts",
+    ]);
+    expect(deriveThreadFeedPresentation([group], null, new Set())).toMatchObject([
+      { type: "work-toggle", summary: "Changed 1 file" },
+    ]);
+  });
+
   it("keeps long Claude commands expandable without repeating them in full detail", () => {
     const command = `printf 'first line\nsecond line'\n&& printf done`;
     const thread = makeThread({

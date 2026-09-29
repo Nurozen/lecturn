@@ -49,6 +49,20 @@ describe("summarizeToolGroup", () => {
     },
   );
 
+  it("counts repeated edits to one file once", () => {
+    const edit = (file: string) =>
+      ({
+        label: "File change",
+        tone: "tool",
+        itemType: "file_change",
+        changedFiles: [file],
+      }) satisfies WorkLogPresentationEntry;
+
+    expect(
+      summarizeToolGroup([edit("/repo/src/app.ts"), edit("/repo/src/app.ts"), edit("/repo/a.md")]),
+    ).toBe("Changed 2 files");
+  });
+
   it("deduplicates named sources ahead of ordinary actions", () => {
     const source = { key: "browser-use:chrome", name: "Chrome", kind: "integration" as const };
     expect(

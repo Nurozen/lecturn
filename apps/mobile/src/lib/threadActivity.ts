@@ -907,12 +907,14 @@ function memoizeValue<T>(build: () => T): () => T {
 }
 
 function workEntryPreview(
-  workEntry: Pick<WorkLogEntry, "detail" | "command" | "changedFiles">,
+  workEntry: Pick<WorkLogEntry, "detail" | "command" | "changedFiles" | "itemType">,
 ): string | null {
   if (workEntry.command) return workEntry.command;
-  if (workEntry.detail) return workEntry.detail;
-  if ((workEntry.changedFiles?.length ?? 0) === 0) return null;
   const [firstPath] = workEntry.changedFiles ?? [];
+  // A file change reads as the file it changed; Claude's detail is raw tool input.
+  if (workEntry.detail && !(workEntry.itemType === "file_change" && firstPath)) {
+    return workEntry.detail;
+  }
   if (!firstPath) return null;
   return workEntry.changedFiles!.length === 1
     ? firstPath

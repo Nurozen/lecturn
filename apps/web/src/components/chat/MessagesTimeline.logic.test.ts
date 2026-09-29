@@ -122,6 +122,20 @@ describe("work entry labels", () => {
     );
   });
 
+  it("labels a file change by its workspace-relative file rather than raw tool input", () => {
+    const claudeEdit = {
+      ...entry,
+      itemType: "file_change" as const,
+      detail: 'Edit: {"file_path":"/repo/src/app.ts","old_string":"a","new_string":"b"}',
+      changedFiles: ["/repo/src/app.ts"],
+    };
+    expect(workEntryDisplayLabel(claudeEdit, "/repo")).toBe("repo/src/app.ts");
+    // Without a known file, the detail is still the best label available.
+    expect(workEntryDisplayLabel({ ...claudeEdit, changedFiles: [] }, "/repo")).toBe(
+      claudeEdit.detail,
+    );
+  });
+
   it("keeps command summaries compact without replacing the full command in expanded rows", () => {
     const commandEntry = { ...entry, command: "vp test run", detail: "All tests passed" };
     expect(liveWorkEntryLabel(commandEntry, undefined, true)).toBe("Running vp");

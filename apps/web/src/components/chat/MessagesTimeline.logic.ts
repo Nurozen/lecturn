@@ -49,8 +49,9 @@ export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string
   const toolPresentation = resolveWorkEntryToolPresentation(entry);
   if (toolPresentation) return toolPresentation.displayName;
   if (entry.command) return entry.command;
-  if (entry.detail) return entry.detail;
   const [firstPath] = entry.changedFiles ?? [];
+  // A file change reads as the file it changed; Claude's detail is raw tool input.
+  if (entry.detail && !(entry.itemType === "file_change" && firstPath)) return entry.detail;
   if (firstPath) {
     const path = formatWorkspaceRelativePath(firstPath, workspaceRoot);
     return entry.changedFiles!.length === 1

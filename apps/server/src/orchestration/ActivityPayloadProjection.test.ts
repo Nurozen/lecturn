@@ -249,6 +249,44 @@ describe("projectActivityPayload", () => {
     expect(JSON.stringify(projected.payload).length).toBeLessThan(500);
   });
 
+  it("names the file a Claude file-editing tool changed", () => {
+    const changedFiles = (toolName: string, input: Record<string, unknown>) =>
+      (
+        projectActivityPayload(activity({ itemType: "file_change", data: { toolName, input } }))
+          .payload as { data: { files?: unknown } }
+      ).data.files;
+
+    expect(
+      changedFiles("Edit", {
+        file_path: "/repo/src/app.ts",
+        old_string: "a",
+        new_string: "b",
+      }),
+    ).toEqual([{ path: "/repo/src/app.ts" }]);
+    expect(changedFiles("Write", { file_path: "/repo/README.md", content: "# hi" })).toEqual([
+      { path: "/repo/README.md" },
+    ]);
+    expect(
+      changedFiles("MultiEdit", {
+        file_path: "/repo/src/app.ts",
+        edits: [{ old_string: "a", new_string: "b" }],
+      }),
+    ).toEqual([{ path: "/repo/src/app.ts" }]);
+    expect(
+      changedFiles("NotebookEdit", { notebook_path: "/repo/nb.ipynb", new_source: "x = 1" }),
+    ).toEqual([{ path: "/repo/nb.ipynb" }]);
+  });
+
+  it("does not treat a Claude Read as a changed file", () => {
+    const projected = projectActivityPayload(
+      activity({
+        itemType: "dynamic_tool_call",
+        data: { toolName: "Read", input: { file_path: "/repo/src/app.ts" } },
+      }),
+    );
+    expect((projected.payload as { data: { files?: unknown } }).data.files).toBeUndefined();
+  });
+
   it("passes task lifecycle payloads (no data field) through untouched", () => {
     const source = activity({
       taskId: "task-9",
