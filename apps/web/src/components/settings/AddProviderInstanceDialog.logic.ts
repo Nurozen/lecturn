@@ -1,3 +1,5 @@
+import { ProviderDriverKind, type ProviderInstanceConfig } from "@lecturn/contracts";
+
 export type WizardNavigation =
   | { readonly kind: "navigate"; readonly step: number }
   | { readonly kind: "blocked"; readonly step: number; readonly error: string };
@@ -33,4 +35,38 @@ export function resolveWizardNavigation(
   }
 
   return { kind: "navigate", step: targetStep };
+}
+
+/**
+ * Crusoe is offered as a preset rather than a driver: it is an OpenCode
+ * instance whose environment carries the Crusoe API key and limits OpenCode
+ * to its built-in `crusoe` provider, so the instance lists only Crusoe models.
+ */
+export const CRUSOE_PRESET = {
+  value: "crusoe",
+  label: "Crusoe",
+  driver: ProviderDriverKind.make("opencode"),
+} as const;
+
+export function buildCrusoeProviderInstance(input: {
+  readonly apiKey: string;
+  readonly displayName?: string;
+  readonly accentColor?: string;
+}): ProviderInstanceConfig | null {
+  const apiKey = input.apiKey.trim();
+  if (apiKey.length === 0) return null;
+  return {
+    driver: CRUSOE_PRESET.driver,
+    enabled: true,
+    ...(input.displayName ? { displayName: input.displayName } : {}),
+    ...(input.accentColor ? { accentColor: input.accentColor } : {}),
+    environment: [
+      { name: "CRUSOE_API_KEY", value: apiKey, sensitive: true },
+      {
+        name: "OPENCODE_CONFIG_CONTENT",
+        value: JSON.stringify({ enabled_providers: ["crusoe"] }),
+        sensitive: false,
+      },
+    ],
+  };
 }
