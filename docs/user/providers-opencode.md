@@ -7,6 +7,8 @@ Lecturn requires OpenCode 1.14.19 or newer. It checks the server version before 
 starts work. If the check fails, update OpenCode or fix the server URL and password, then refresh
 the provider status. Reconnecting the client also runs the check again.
 
+To run Crusoe's hosted open models through OpenCode, see [Crusoe](./providers-crusoe.md).
+
 ## Server authentication
 
 Without a server URL, Lecturn starts a local OpenCode server. The process inherits
