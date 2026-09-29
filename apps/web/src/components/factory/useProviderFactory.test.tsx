@@ -16,6 +16,7 @@ import * as Option from "effect/Option";
 import type { FactoryViewProps } from "./FactoryView.types";
 
 const ports = vi.hoisted(() => ({
+  connectionPhase: "connected",
   projects: [] as (OrchestrationProjectShell & { environmentId: EnvironmentId })[],
   shells: [] as (OrchestrationThreadShell & { environmentId: EnvironmentId })[],
   configs: new Map<string, { providers: ServerProvider[] }>(),
@@ -34,7 +35,7 @@ vi.mock("../../state/entities", () => ({
   useThreadShells: () => ports.shells,
 }));
 vi.mock("../../state/environments", () => ({
-  useEnvironment: () => ({ connection: { phase: "connected" } }),
+  useEnvironment: () => ({ connection: { phase: ports.connectionPhase } }),
 }));
 vi.mock("../../state/threads", () => ({
   threadEnvironment: { startTurn: "start", interruptTurn: "interrupt" },
@@ -177,6 +178,7 @@ beforeEach(() => {
   selection = {};
   vi.stubGlobal("window", { localStorage: storage });
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  ports.connectionPhase = "connected";
   ports.projects = [project(localId), project(remoteId)];
   ports.configs = new Map([
     [localId, { providers: [provider("local-executor", "local-model")] }],
@@ -236,6 +238,39 @@ describe("Factory controller launch and recovery", () => {
     });
     expect(ports.interrupt).not.toHaveBeenCalled();
     expect(ports.navigate).not.toHaveBeenCalled();
+  });
+
+  it.each(["synchronizing", "cached", "empty"])(
+    "keeps connected run controls available while history is %s",
+    async (status) => {
+      ports.shells = [shell({ latestTurn, worktreePath: "/tmp/factory-fixture/worktree" })];
+      ports.detail.mockReturnValue({ data: Option.none(), error: Option.none(), status });
+      selection = { environmentId: remoteId, threadId: runId };
+      await mount();
+      expect(ports.detail).toHaveBeenLastCalledWith(remoteId, runId);
+      expect(current.run?.canSteer).toBe(true);
+      expect(current.run?.canInterrupt).toBe(true);
+      expect(current.run?.connectionLabel).toMatch(/^Connected · /);
+      expect(current.run?.connectionLabel).not.toBe("Live environment");
+      await act(async () => current.onInterrupt());
+      expect(ports.interrupt).toHaveBeenCalledOnce();
+    },
+  );
+  it("keeps controls unavailable for disconnected or deleted runs even with a running shell", async () => {
+    ports.shells = [shell({ latestTurn, worktreePath: "/tmp/factory-fixture/worktree" })];
+    ports.connectionPhase = "reconnecting";
+    selection = { environmentId: remoteId, threadId: runId };
+    await mount();
+    expect(current.run?.canSteer).toBe(false);
+    expect(current.run?.canInterrupt).toBe(false);
+    expect(current.run?.connectionLabel).toBe("Last known state · reconnecting");
+    ports.connectionPhase = "connected";
+    ports.detail.mockReturnValue({ data: Option.none(), error: Option.none(), status: "deleted" });
+    await rerender();
+    expect(current.run?.canSteer).toBe(false);
+    expect(current.run?.canInterrupt).toBe(false);
+    await act(async () => current.onInterrupt());
+    expect(ports.interrupt).not.toHaveBeenCalled();
   });
 
   it("allows interruption of observed background work after the parent turn completed", async () => {

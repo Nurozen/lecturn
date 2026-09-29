@@ -229,8 +229,21 @@ export function useProviderFactory({
     .map(summarize)
     .toReversed();
   const reportedPhase = readFactoryStage(detail?.messages ?? []);
-  const live =
-    selectedEnvironment?.connection.phase === "connected" && threadState.status === "live";
+  // Controls route from the authoritative shell and connected RPC session. A history
+  // snapshot or replay may still be loading; it must not hide the running agent's stop control.
+  const connected = selectedEnvironment?.connection.phase === "connected";
+  const canControl = connected && threadState.status !== "deleted";
+  const connectionLabel = !connected
+    ? `Last known state · ${selectedEnvironment?.connection.phase ?? "unavailable"}`
+    : threadState.status === "live"
+      ? "Live environment"
+      : threadState.status === "cached"
+        ? "Connected · cached history"
+        : threadState.status === "synchronizing"
+          ? "Connected · synchronizing history"
+          : threadState.status === "deleted"
+            ? "Thread removed"
+            : "Connected · loading history";
   const run: FactoryRun | null = selected
     ? {
         ...summarize(selected),
@@ -251,9 +264,7 @@ export function useProviderFactory({
             : selected.latestTurn?.state === "completed"
               ? "The agent turn ended. Inspect its evidence and PR; completion does not certify the update."
               : "A real agent follows the provider-update recipe. Stages are agent-reported; checks and review are in the conversation."),
-        connectionLabel: live
-          ? "Live environment"
-          : `Last known state · ${selectedEnvironment?.connection.phase ?? threadState.status}`,
+        connectionLabel,
         pullRequest: factoryPullRequest(selected, git.data),
         evidence: detail
           ? [
@@ -277,13 +288,13 @@ export function useProviderFactory({
               .slice(-7)
           : [],
         canSteer:
-          live &&
+          canControl &&
           !selected.archivedAt &&
           selected.worktreePath !== null &&
           parseFactoryBranch(selected.branch) !== null &&
           selected.latestTurn !== null,
         canInterrupt:
-          live &&
+          canControl &&
           (selected.session?.status === "starting" ||
             selected.session?.status === "running" ||
             selected.latestTurn?.state === "running" ||
