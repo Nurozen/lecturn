@@ -483,9 +483,9 @@ const StaveRpcRuntimeLayerLive = StaveRpcHandlers.runtimeLayer.pipe(
   ),
 );
 const ThreadNoteLayerLive = ThreadNoteService.layer.pipe(Layer.provide(PersistenceLayerLive));
-// Memory demo store shared by /ws and /mcp. Package A swaps this to the real
-// `MemoryDemoStore.layer`, which gates itself on `memoryDemoEnabled`.
-const MemoryDemoLayerLive = MemoryDemoStore.layerStub;
+// Memory demo store shared by /ws and /mcp. The real layer gates itself on
+// `memoryDemoEnabled` and is the disabled stub when the flag is off.
+const MemoryDemoLayerLive = MemoryDemoStore.layer;
 const DecisionSettingsLayerLive = DecisionSettingsRepository.layer.pipe(
   Layer.provide(PersistenceLayerLive),
 );

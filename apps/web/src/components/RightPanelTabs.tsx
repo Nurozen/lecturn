@@ -8,6 +8,7 @@ import type {
 import { getTerminalLabel } from "@lecturn/shared/terminalLabels";
 import {
   Bot,
+  BrainIcon,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -110,6 +111,9 @@ interface RightPanelTabsProps {
   onAddNotes?: (() => void) | undefined;
   /** Omit on older servers; notes are not offered without the capability. */
   notesAvailable?: boolean | undefined;
+  onAddMemory?: (() => void) | undefined;
+  /** True only when the environment runs the memory demo. */
+  memoryAvailable?: boolean | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -161,6 +165,24 @@ export function notesSurfaceAction(
     shortcut: "N",
     available: true,
     disabledReason: "Notes require a connected, supported thread.",
+    onClick,
+    badgeCount: 0,
+  } as const;
+}
+
+/** Memory demo surface; offered only when the environment advertises it. */
+export function memorySurfaceAction(
+  available: boolean | undefined,
+  onClick: (() => void) | undefined,
+) {
+  if (!available || !onClick) return null;
+  return {
+    label: "Memory",
+    description: "See what agents recorded for this project.",
+    icon: BrainIcon,
+    shortcut: "M",
+    available: true,
+    disabledReason: "Memory requires the memory demo on this environment.",
     onClick,
     badgeCount: 0,
   } as const;
@@ -326,6 +348,9 @@ function RightPanelEmptyState(props: {
   onAddNotes?: (() => void) | undefined;
   /** Omit on older servers; notes are not offered without the capability. */
   notesAvailable?: boolean | undefined;
+  onAddMemory?: (() => void) | undefined;
+  /** True only when the environment runs the memory demo. */
+  memoryAvailable?: boolean | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -338,6 +363,7 @@ function RightPanelEmptyState(props: {
   const [highlight, setHighlight] = useState(-1);
 
   const notesAction = notesSurfaceAction(props.notesAvailable, props.onAddNotes);
+  const memoryAction = memorySurfaceAction(props.memoryAvailable, props.onAddMemory);
   const actions = [
     {
       label: "Browser",
@@ -400,6 +426,7 @@ function RightPanelEmptyState(props: {
       badgeCount: props.liveAgentCount,
     },
     ...(notesAction ? [notesAction] : []),
+    ...(memoryAction ? [memoryAction] : []),
   ] as const;
 
   type SurfaceAction = (typeof actions)[number];
@@ -634,6 +661,8 @@ function surfaceTitle(
       return "Agents";
     case "notes":
       return "Notes";
+    case "memory":
+      return "Memory";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -717,6 +746,8 @@ function SurfaceIcon({
       return <Bot className="size-3 shrink-0" />;
     case "notes":
       return <NotebookPen className="size-3 shrink-0" />;
+    case "memory":
+      return <BrainIcon className="size-3 shrink-0" />;
   }
 }
 
@@ -799,6 +830,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   }, []);
 
   const notesAction = notesSurfaceAction(props.notesAvailable, props.onAddNotes);
+  const memoryAction = memorySurfaceAction(props.memoryAvailable, props.onAddMemory);
   const addSurfaceActions = [
     {
       label: "Browser",
@@ -849,6 +881,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       onClick: props.onAddAgents,
     },
     ...(notesAction ? [notesAction] : []),
+    ...(memoryAction ? [memoryAction] : []),
   ] as const;
 
   const handleAddSurfaceMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -1288,6 +1321,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddAgents={props.onAddAgents}
             onAddNotes={props.onAddNotes}
             notesAvailable={props.notesAvailable}
+            onAddMemory={props.onAddMemory}
+            memoryAvailable={props.memoryAvailable}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}

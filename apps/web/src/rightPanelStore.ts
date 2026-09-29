@@ -23,6 +23,7 @@ export const RIGHT_PANEL_KINDS = [
   "pull-request",
   "agents",
   "notes",
+  "memory",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -69,7 +70,8 @@ export type RightPanelSurface =
       number: number;
     }
   | { id: "agents"; kind: "agents" }
-  | { id: "notes"; kind: "notes" };
+  | { id: "notes"; kind: "notes" }
+  | { id: "memory"; kind: "memory" };
 
 const RIGHT_PANEL_STORAGE_KEY = "lecturn:right-panel-state:v2";
 // v9 removed the "plan" surface kind (plans render inline in the transcript).
@@ -152,6 +154,8 @@ const singletonSurface = (
       return { id: "agents", kind };
     case "notes":
       return { id: "notes", kind };
+    case "memory":
+      return { id: "memory", kind };
   }
 };
 

@@ -209,6 +209,62 @@ export function buildStaveAddProjectItems(input: {
   }));
 }
 
+export type MemoryPaletteAction = "open-map" | "contribute" | "simulate-write" | "reset";
+
+const MEMORY_PALETTE_ENTRIES: ReadonlyArray<{
+  readonly action: MemoryPaletteAction;
+  readonly title: string;
+  readonly searchTerms: ReadonlyArray<string>;
+  readonly needsProject: boolean;
+}> = [
+  { action: "open-map", title: "Memory: open map", searchTerms: ["warren"], needsProject: false },
+  {
+    action: "contribute",
+    title: "Memory: close and contribute",
+    searchTerms: ["den", "gate", "review", "land"],
+    needsProject: true,
+  },
+  {
+    action: "simulate-write",
+    title: "Memory: simulate agent write",
+    searchTerms: ["den", "memory_write", "demo"],
+    needsProject: true,
+  },
+  {
+    action: "reset",
+    title: "Memory: reset demo data",
+    searchTerms: ["seed", "demo"],
+    needsProject: false,
+  },
+];
+
+/**
+ * Memory demo palette entries. Empty without a memory-demo environment.
+ * Project-bound entries target the active thread's project, else the first
+ * project with pending den nodes, and are omitted when neither exists.
+ */
+export function buildMemoryActionItems<TProjectId extends string>(input: {
+  readonly environmentId: string | null;
+  readonly activeProjectId: TProjectId | null;
+  readonly pending: ReadonlyArray<{ readonly projectId: TProjectId; readonly count: number }>;
+  readonly icon: ReactNode;
+  readonly run: (action: MemoryPaletteAction, projectId: TProjectId | null) => Promise<void>;
+}): CommandPaletteActionItem[] {
+  if (input.environmentId === null) return [];
+  const projectId =
+    input.activeProjectId ?? input.pending.find((entry) => entry.count > 0)?.projectId ?? null;
+  return MEMORY_PALETTE_ENTRIES.filter((entry) => !entry.needsProject || projectId !== null).map(
+    (entry) => ({
+      kind: "action",
+      value: `action:memory:${entry.action}`,
+      searchTerms: ["memory", ...entry.searchTerms],
+      title: entry.title,
+      icon: input.icon,
+      run: () => input.run(entry.action, projectId),
+    }),
+  );
+}
+
 export type BuildThreadActionItemsThread = Pick<
   SidebarThreadSummary,
   | "archivedAt"
