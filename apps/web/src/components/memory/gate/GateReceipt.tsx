@@ -20,8 +20,10 @@ export function GateReceipt({
   error,
   onRevert,
   onLandAgain,
+  territoryLabel,
 }: {
   receipt: MemoryReceipt;
+  territoryLabel: (territoryId: string) => string;
   busy: boolean;
   error: string | null;
   onRevert: () => void;
@@ -118,7 +120,7 @@ export function GateReceipt({
               <li key={territory.territoryId} className="text-[13px]">
                 <div className="flex items-baseline gap-2">
                   <span className="min-w-0 truncate font-display text-[14px]">
-                    {territory.territoryId}
+                    {territoryLabel(territory.territoryId)}
                   </span>
                   <span
                     className={cn(

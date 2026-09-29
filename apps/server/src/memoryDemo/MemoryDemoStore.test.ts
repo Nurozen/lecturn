@@ -1,11 +1,12 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProjectId } from "@lecturn/contracts";
 import { describe, expect, it } from "@effect/vitest";
-import { Effect, Exit, Fiber, Layer, Option, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Option, Stream } from "effect";
 import * as ServerConfig from "../config.ts";
 import { layer, make, MemoryDemoStore } from "./MemoryDemoStore.ts";
 
 const projectId = ProjectId.make("memory-demo-project");
+const otherProjectId = ProjectId.make("memory-demo-other");
 const AGENT = { origin: "agent" } as const;
 
 const configLayer = (memoryDemoEnabled: boolean) =>
@@ -25,15 +26,26 @@ const failureCode = <A, E extends { code: string }>(exit: Exit.Exit<A, E>) =>
     ? exit.cause.reasons.flatMap((r) => (r._tag === "Fail" ? [r.error.code] : []))
     : [];
 
+const failureMessage = <A, E extends { message: string }>(exit: Exit.Exit<A, E>) =>
+  Exit.isFailure(exit)
+    ? exit.cause.reasons.flatMap((r) => (r._tag === "Fail" ? [r.error.message] : [])).join("")
+    : "";
+
+/** Review verdicts from the round-trip test; the merge makes two landings overlap. */
+const reviewVerdicts = [
+  { nodeId: "infra/rotate-staging-password", verdict: "skip" },
+  { nodeId: "web/cart-test-timers", verdict: "merge" },
+] as const;
+
 describe("MemoryDemoStore", () => {
   it.effect("write appends a heuristic den node and publishes den-write", () =>
     Effect.gen(function* () {
       const store = yield* make();
-      const nextChange = yield* Stream.runHead(store.changes).pipe(Effect.forkChild);
-      yield* Effect.yieldNow;
       const den = yield* store.den({ projectId });
       expect(den.nodes).toHaveLength(11);
       expect(den.name).toBe(`den/${projectId.slice(0, 8)}`);
+      const nextChange = yield* Stream.runHead(store.changes).pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
 
       const node = yield* store.write(
         {
@@ -56,6 +68,19 @@ describe("MemoryDemoStore", () => {
       expect(
         plan.cards.find((card) => card.nodeId === node.id)?.flags.map((f) => f.kind),
       ).toContain("heuristic");
+    }),
+  );
+
+  it.effect("seeding a den publishes den-write so status counts it", () =>
+    Effect.gen(function* () {
+      const store = yield* make();
+      expect((yield* store.status).pending).toEqual([]);
+      const nextChange = yield* Stream.runHead(store.changes).pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+      yield* store.den({ projectId });
+      const change = Option.getOrThrow(yield* Fiber.join(nextChange));
+      expect(change).toMatchObject({ kind: "den-write", projectId, nodeIds: [] });
+      expect((yield* store.status).pending).toEqual([{ projectId, count: 11 }]);
     }),
   );
 
@@ -131,6 +156,21 @@ describe("MemoryDemoStore", () => {
           "web/cart-flaky-test",
         ].sort(),
       );
+      // New nodes land in open space at the territory's own spacing, not on its hubs.
+      const beforeIds = new Set(before.nodes.map((node) => node.id));
+      const nearestIn = (nodes: typeof graph.nodes, node: (typeof graph.nodes)[number]) =>
+        Math.min(
+          ...nodes
+            .filter((other) => other !== node && other.territoryId === node.territoryId)
+            .map((other) => Math.hypot(other.x - node.x, other.y - node.y)),
+        );
+      for (const node of graph.nodes) {
+        if (node.landedReceiptId !== receipt.id || beforeIds.has(node.id)) continue;
+        const base = before.nodes.filter((other) => other.territoryId === node.territoryId);
+        const spacing = base.map((other) => nearestIn(base, other)).sort((a, b) => a - b);
+        const median = spacing[Math.floor(spacing.length / 2)]!;
+        expect(nearestIn(graph.nodes, node)).toBeGreaterThanOrEqual(median * 0.7);
+      }
       const ids = new Set(graph.nodes.map((node) => node.id));
       expect(ids.has("auth/password-hashing-old")).toBe(false);
       expect(ids.has("infra/ci-runners-hosted")).toBe(false);
@@ -173,6 +213,155 @@ describe("MemoryDemoStore", () => {
       const receipt = yield* store.land({ projectId, planId: fresh.planId, verdicts: [] });
       expect(receipt.counts.added).toBe(5);
       expect(receipt.counts.skipped).toBe(5);
+    }),
+  );
+
+  it.effect("revert refuses a receipt that a later landing overlaps", () =>
+    Effect.gen(function* () {
+      const store = yield* make();
+      const before = yield* store.graph;
+      const mergeTarget = yield* store.node({ nodeId: "web/cart-flaky-test" });
+      const planA = yield* store.plan({ projectId });
+      const older = yield* store.land({
+        projectId,
+        planId: planA.planId,
+        verdicts: reviewVerdicts,
+      });
+      const planB = yield* store.plan({ projectId: otherProjectId });
+      const newer = yield* store.land({
+        projectId: otherProjectId,
+        planId: planB.planId,
+        verdicts: reviewVerdicts,
+      });
+      expect(newer.counts.merged).toBe(1);
+
+      const refused = yield* Effect.exit(store.revert({ receiptId: older.id }));
+      expect(failureCode(refused)).toEqual(["invalid"]);
+      expect(failureMessage(refused)).toContain(`Revert ${newer.id} first`);
+
+      yield* store.revert({ receiptId: newer.id });
+      yield* store.revert({ receiptId: older.id });
+      const after = yield* store.graph;
+      expect(after.nodes.map((n) => [n.id, n.label, n.landedReceiptId])).toEqual(
+        before.nodes.map((n) => [n.id, n.label, n.landedReceiptId]),
+      );
+      expect(after.edges).toEqual(before.edges);
+      expect(yield* store.node({ nodeId: "web/cart-flaky-test" })).toEqual(mergeTarget);
+      expect((yield* store.den({ projectId })).nodes).toHaveLength(11);
+      expect((yield* store.den({ projectId: otherProjectId })).nodes).toHaveLength(11);
+
+      const again = yield* Effect.exit(store.revert({ receiptId: older.id }));
+      expect(failureCode(again)).toEqual(["invalid"]);
+    }),
+  );
+
+  it.effect("land refuses a card whose landed text still holds a secret", () =>
+    Effect.gen(function* () {
+      const store = yield* make();
+      const inSummary = yield* store.write(
+        { projectId, summary: "Billing reads sk_live_abc123 from the environment." },
+        AGENT,
+      );
+      const inContext = yield* store.write(
+        {
+          projectId,
+          summary: "Staging database credentials live in the vault.",
+          context: "staging password: hunter2",
+        },
+        AGENT,
+      );
+      const land = (
+        verdicts: ReadonlyArray<{
+          nodeId: string;
+          verdict: "accept" | "edit" | "skip";
+          summary?: string;
+        }>,
+      ) =>
+        Effect.gen(function* () {
+          const plan = yield* store.plan({ projectId });
+          return yield* Effect.exit(store.land({ projectId, planId: plan.planId, verdicts }));
+        });
+
+      const accepted = yield* land([{ nodeId: inSummary.id, verdict: "accept" }]);
+      expect(failureCode(accepted)).toEqual(["invalid"]);
+      expect(failureMessage(accepted)).toContain(inSummary.id);
+      const stillSecret = yield* land([
+        { nodeId: inSummary.id, verdict: "edit", summary: "Uses sk_live_abc123 for billing." },
+      ]);
+      expect(failureCode(stillSecret)).toEqual(["invalid"]);
+      const cleanSummary = yield* land([
+        { nodeId: inSummary.id, verdict: "skip" },
+        {
+          nodeId: inContext.id,
+          verdict: "edit",
+          summary: "Staging credentials live in the vault.",
+        },
+      ]);
+      expect(failureCode(cleanSummary)).toEqual(["invalid"]);
+      expect(failureMessage(cleanSummary)).toContain(
+        `${inContext.id} has a password assignment in its body`,
+      );
+
+      const cleaned = yield* land([
+        {
+          nodeId: inSummary.id,
+          verdict: "edit",
+          summary: "Billing reads its Stripe key from the environment.",
+        },
+        { nodeId: inContext.id, verdict: "skip" },
+      ]);
+      expect(Exit.isSuccess(cleaned)).toBe(true);
+      const landed = yield* store.node({ nodeId: inSummary.id });
+      expect(landed).toMatchObject({ scope: "warren" });
+      expect(landed.summary).not.toContain("sk_live_");
+    }),
+  );
+
+  it.effect("land reports stale-plan after a reset or a landing elsewhere", () =>
+    Effect.gen(function* () {
+      const store = yield* make();
+      const beforeReset = yield* store.plan({ projectId });
+      yield* store.reset;
+      const afterReset = yield* Effect.exit(
+        store.land({ projectId, planId: beforeReset.planId, verdicts: [] }),
+      );
+      expect(failureCode(afterReset)).toEqual(["stale-plan"]);
+
+      const mine = yield* store.plan({ projectId });
+      const theirs = yield* store.plan({ projectId: otherProjectId });
+      const receipt = yield* store.land({
+        projectId: otherProjectId,
+        planId: theirs.planId,
+        verdicts: [],
+      });
+      const moved = yield* Effect.exit(
+        store.land({ projectId, planId: mine.planId, verdicts: [] }),
+      );
+      expect(failureCode(moved)).toEqual(["stale-plan"]);
+
+      const replanned = yield* store.plan({ projectId });
+      yield* store.revert({ receiptId: receipt.id });
+      const reverted = yield* Effect.exit(
+        store.land({ projectId, planId: replanned.planId, verdicts: [] }),
+      );
+      expect(failureCode(reverted)).toEqual(["stale-plan"]);
+      const fresh = yield* store.plan({ projectId });
+      expect(
+        Exit.isSuccess(
+          yield* Effect.exit(store.land({ projectId, planId: fresh.planId, verdicts: [] })),
+        ),
+      ).toBe(true);
+    }),
+  );
+
+  it.effect("warm-up builds the warren, index and layout in the background", () =>
+    Effect.gen(function* () {
+      const warmed = yield* Deferred.make<void>();
+      const store = yield* make({ warmUp: { done: Deferred.succeed(warmed, undefined) } });
+      expect(yield* Deferred.isDone(warmed)).toBe(false);
+      yield* Deferred.await(warmed);
+      expect((yield* store.graph).nodes.length).toBeGreaterThan(0);
+      expect((yield* store.query({ text: "webhook retry" }, AGENT)).hits.length).toBeGreaterThan(0);
     }),
   );
 

@@ -127,6 +127,43 @@ describe("gateState", () => {
     });
   });
 
+  it("re-tests an edited summary for secrets", () => {
+    const leaky = card("billing/stripe-key", {
+      den: { summary: "Billing reads sk_live_abc123.", context: "", sourcePath: null },
+      flags: [{ kind: "secret-suspect", reason: "Looks like a live Stripe key." }],
+    });
+    expect(verdictBlock(leaky, "accept")).toMatch(/secret/);
+    expect(draftBlock(leaky, "Billing now reads sk_live_abc123 from env.")).toMatch(
+      /live Stripe key/,
+    );
+    expect(draftBlock(leaky, "Billing reads its Stripe key from the environment.")).toBeNull();
+  });
+
+  it("allows only skip when the secret is in the body", () => {
+    const inBody = card("infra/staging-db", {
+      op: "update",
+      target: target("infra/staging"),
+      den: {
+        summary: "Staging database credentials live in the vault.",
+        context: "staging password: hunter2",
+        sourcePath: null,
+      },
+      flags: [{ kind: "secret-suspect", reason: "Looks like a password assignment." }],
+    });
+    for (const verdict of ["accept", "merge", "distinct", "edit"] as const)
+      expect(verdictBlock(inBody, verdict)).toBe("Secret is in the body; skip this node.");
+    expect(verdictBlock(inBody, "skip")).toBeNull();
+    expect(draftBlock(inBody, "Staging credentials are in the vault.")).toBe(
+      "Secret is in the body; skip this node.",
+    );
+    let state = run(createGateState(plan([inBody])), accept, merge, { type: "edit" });
+    state = run(state, { type: "draft", text: "Clean summary." }, { type: "confirmEdit" });
+    expect(state.verdicts.size).toBe(0);
+    expect(run(state, { type: "cancelEdit" }, skip).verdicts.get(inBody.nodeId)).toEqual({
+      verdict: "skip",
+    });
+  });
+
   it("rejects empty and oversized drafts and cancels without a verdict", () => {
     const first = demoPlan.cards[0]!;
     expect(draftBlock(first, "   ")).toMatch(/empty/);

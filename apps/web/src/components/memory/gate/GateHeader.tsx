@@ -43,7 +43,7 @@ export function GateHeader({
             className="size-[7px] shrink-0 rounded-full"
             style={{ background: GOLD, boxShadow: `0 0 0 2px ${goldMix(25, "transparent")}` }}
           />
-          <span className="truncate font-mono">den/{denName}</span>
+          <span className="truncate font-mono">{denName}</span>
           <ChevronRightIcon aria-hidden className="size-3.5 shrink-0" />
           <LockIcon aria-hidden className="size-3 shrink-0" />
           <span className="font-mono">warren</span>

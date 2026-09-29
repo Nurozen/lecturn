@@ -4,6 +4,7 @@ import type {
   MemoryCardVerdict,
   MemoryVerdict,
 } from "@lecturn/contracts";
+import { findSecret } from "./secretPatterns";
 
 /* Pure Contribution Gate state. The component maps keys to actions:
    A accept, S skip, E edit (opens a draft), M merge, D distinct, J/K move,
@@ -59,11 +60,19 @@ export const isSecretSuspect = (card: ContributionCard) =>
 export const suggestedVerdict = (card: ContributionCard): MemoryVerdict | null =>
   isSecretSuspect(card) ? "skip" : null;
 
+/** Edit only rewrites the summary, so a secret in the body can never land. */
+const SECRET_IN_BODY = "Secret is in the body; skip this node.";
+
+/** True when the card's den body (context) matches a secret pattern. */
+export const hasSecretInBody = (card: ContributionCard) => findSecret(card.den.context) !== null;
+
 /** Why `verdict` is not allowed on `card`, or null when it is. */
 export function verdictBlock(card: ContributionCard, verdict: MemoryVerdict): string | null {
   if ((verdict === "merge" || verdict === "distinct") && card.target === null)
     return "Needs a warren target. This card is a new node.";
-  if (verdict === "accept" && isSecretSuspect(card))
+  if (verdict !== "skip" && hasSecretInBody(card)) return SECRET_IN_BODY;
+  // Accept, merge and keep-both all land the flagged summary as is.
+  if (verdict !== "skip" && verdict !== "edit" && isSecretSuspect(card))
     return "Looks like a secret. Edit it out with E, or skip to keep it in the den.";
   return null;
 }
@@ -76,6 +85,9 @@ export function draftBlock(card: ContributionCard, draft: string): string | null
     return `Keep it under ${SUMMARY_MAX_LENGTH} characters (${text.length}).`;
   if (isSecretSuspect(card) && text === card.den.summary.trim())
     return "Still the flagged text. Remove the secret before accepting.";
+  const leaked = findSecret(text);
+  if (leaked) return `Still looks like it contains ${leaked}. Remove it before accepting.`;
+  if (hasSecretInBody(card)) return SECRET_IN_BODY;
   return null;
 }
 

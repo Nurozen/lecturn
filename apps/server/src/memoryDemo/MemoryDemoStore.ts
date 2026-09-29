@@ -7,8 +7,9 @@
  * Every method fails `MemoryDemoError{code:"disabled"}` when the server runs
  * without the flag. `layerStub` is that behavior unconditionally; `layer`
  * reads `ServerConfig.memoryDemoEnabled` and builds the in-memory store only
- * when it is on. The synthetic warren is generated on first use, never at
- * startup.
+ * when it is on. With the flag on, the layer warms the synthetic warren, its
+ * search index and its layout on a background fiber so startup never waits on
+ * them and the first page load does not either.
  *
  * @module MemoryDemoStore
  */
@@ -89,9 +90,11 @@ export interface MemoryDemoStoreShape {
   readonly removeDenNode: (input: MemoryRemoveDenNodeInput) => Effect.Effect<void, MemoryDemoError>;
   /** memory.plan: tier the den into Gate cards at the current den revision. */
   readonly plan: (input: MemoryPlanInput) => Effect.Effect<ContributionPlan, MemoryDemoError>;
-  /** memory.land: apply verdicts; fails `stale-plan` if the den moved since the plan. Publishes `land`. */
+  /** memory.land: apply verdicts; fails `stale-plan` if the plan is gone or the den or warren moved
+      since it, `invalid` if a landing card still holds a secret. Publishes `land`. */
   readonly land: (input: MemoryLandInput) => Effect.Effect<MemoryReceipt, MemoryDemoError>;
-  /** memory.revert: undo a receipt, returning landed nodes to the den. Publishes `revert`. */
+  /** memory.revert: undo a receipt, returning landed nodes to the den. Fails `invalid` when
+      already reverted or a later landing touched the same nodes. Publishes `revert`. */
   readonly revert: (input: MemoryRevertInput) => Effect.Effect<MemoryReceipt, MemoryDemoError>;
   /** memory.reset: reseed den and warren. Publishes `reset`. */
   readonly reset: Effect.Effect<void, MemoryDemoError>;
@@ -131,6 +134,9 @@ export const layerStub = Layer.succeed(MemoryDemoStore, stub);
 export interface MemoryDemoStoreOptions {
   /** Project title used to name the project's den; null when unknown. */
   readonly projectTitle?: (projectId: ProjectId) => Effect.Effect<string | null>;
+  /** Build the warren, search index and layout on a scoped background fiber,
+      then run `done`. Without it they build on first use. */
+  readonly warmUp?: { readonly done?: Effect.Effect<void> };
 }
 
 const unwrap = <A>(result: A | MemoryDemoError): Effect.Effect<A, MemoryDemoError> =>
@@ -153,21 +159,23 @@ export const make = Effect.fn("MemoryDemoStore.make")(function* (
   const warren = () => (warrenCache ??= buildWarren(spikeFixture()));
   const baseIndex = () => (baseIndexCache ??= indexBaseWarren(warren()));
   const layout = () => (layoutCache ??= layoutWarren(warren()));
+  if (options.warmUp) {
+    // Each step is synchronous CPU work; yielding between them lets other fibers run.
+    yield* Effect.forkScoped(
+      Effect.sync(warren).pipe(
+        Effect.andThen(Effect.yieldNow),
+        Effect.andThen(Effect.sync(baseIndex)),
+        Effect.andThen(Effect.yieldNow),
+        Effect.andThen(Effect.sync(layout)),
+        Effect.andThen(options.warmUp.done ?? Effect.void),
+      ),
+    );
+  }
 
   const denName = (projectId: ProjectId) =>
     (options.projectTitle ? options.projectTitle(projectId) : Effect.succeed(null)).pipe(
       Effect.map((title) => `den/${(title && slugify(title, 40)) || projectId.slice(0, 8)}`),
     );
-
-  const ensure = (projectId: ProjectId) =>
-    Effect.gen(function* () {
-      if ((yield* Ref.get(state)).dens.has(projectId)) return;
-      const name = yield* denName(projectId);
-      const nowMs = yield* Clock.currentTimeMillis;
-      yield* Ref.update(state, (current) =>
-        ensureDen(current, spikeFixture(), projectId, name, nowMs),
-      );
-    });
 
   /** Runs a pure transition atomically and publishes its change, if any. */
   const mutate = <A>(step: (current: DemoState, nowMs: number) => Step<A> | MemoryDemoError) =>
@@ -186,6 +194,23 @@ export const make = Effect.fn("MemoryDemoStore.make")(function* (
         return value;
       }),
     );
+
+  // Seeding changes the pending counts in `status`, so it publishes a den-write
+  // like any other den change; otherwise the sidebar badge stays stale.
+  const ensure = (projectId: ProjectId) =>
+    Effect.gen(function* () {
+      if ((yield* Ref.get(state)).dens.has(projectId)) return;
+      const name = yield* denName(projectId);
+      yield* mutate((current, nowMs): Step<void> => {
+        if (current.dens.has(projectId)) return [undefined, current, null];
+        const revision = current.revision + 1;
+        return [
+          undefined,
+          ensureDen({ ...current, revision }, spikeFixture(), projectId, name, nowMs),
+          { revision, kind: "den-write", projectId, nodeIds: [] },
+        ];
+      });
+    });
 
   const view = Effect.map(Ref.get(state), (current) => new WarrenView(warren(), current));
 
@@ -271,7 +296,7 @@ export const make = Effect.fn("MemoryDemoStore.make")(function* (
 
 /**
  * The real store, gated on `memoryDemoEnabled`: with the flag off this is
- * `stub` and nothing is generated. Den names use the project title when the
+ * `stub` and nothing is generated or forked. Den names use the project title when the
  * projection query service is available.
  */
 export const layer = Layer.effect(
@@ -281,6 +306,7 @@ export const layer = Layer.effect(
     if (config.memoryDemoEnabled !== true) return stub;
     const projections = yield* Effect.serviceOption(ProjectionSnapshotQuery);
     return yield* make({
+      warmUp: {},
       projectTitle: (projectId) =>
         Option.match(projections, {
           onNone: () => Effect.succeed(null),

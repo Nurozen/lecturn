@@ -9,7 +9,13 @@ import { FileIcon, LockIcon, SparklesIcon } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { Textarea } from "~/components/ui/textarea";
 import { cn } from "~/lib/utils";
-import { draftBlock, SUMMARY_MAX_LENGTH, verdictBlock, type GateVerdict } from "../gateState";
+import {
+  draftBlock,
+  hasSecretInBody,
+  SUMMARY_MAX_LENGTH,
+  verdictBlock,
+  type GateVerdict,
+} from "../gateState";
 import {
   Eyebrow,
   FLAG_CLASS,
@@ -33,6 +39,8 @@ export interface GateCardProps {
   readonly onConfirmEdit: () => void;
   readonly onCancelEdit: () => void;
   readonly onUnpull: () => void;
+  /** Display label for a territory id. */
+  readonly territoryLabel: (territoryId: string) => string;
 }
 
 /** One review card: den node beside its warren target, diffs, judgments, verdict keys. */
@@ -47,6 +55,7 @@ export function GateCard({
   onConfirmEdit,
   onCancelEdit,
   onUnpull,
+  territoryLabel,
 }: GateCardProps) {
   const summary = decided?.summary ?? card.den.summary;
   const editing = draft !== null;
@@ -74,7 +83,7 @@ export function GateCard({
         <NodeTypeIcon type={card.type} className="ml-1" />
         <span>{card.type}</span>
         <span aria-hidden>·</span>
-        <span className="font-mono">{card.territoryId}</span>
+        <span className="font-mono">{territoryLabel(card.territoryId)}</span>
         <span aria-hidden>·</span>
         <span>
           lands at <span className="font-mono text-foreground/80">{card.destination}</span>
@@ -160,7 +169,8 @@ export function GateCard({
           <section className="grid min-w-0 place-content-center gap-1 px-3.5 py-3 text-center text-muted-foreground text-xs">
             <b className="font-display font-normal text-base text-foreground">New in the warren</b>
             <span>
-              Lands in territory <span className="font-mono">{card.territoryId}</span>
+              Lands in territory{" "}
+              <span className="font-mono">{territoryLabel(card.territoryId)}</span>
             </span>
           </section>
         )}
@@ -382,7 +392,11 @@ function VerdictBar({
   onVerdict: (verdict: MemoryVerdict) => void;
 }) {
   const acceptBlock = verdictBlock(card, "accept");
-  const note = acceptBlock ? (
+  const note = hasSecretInBody(card) ? (
+    <span className="text-destructive-foreground">
+      The secret is in the body, which Edit cannot change. Press S to keep it in the den.
+    </span>
+  ) : acceptBlock ? (
     <span className="text-destructive-foreground">
       Accept is blocked while the summary looks like a secret. Press E to edit it out, or S to keep
       it in the den.

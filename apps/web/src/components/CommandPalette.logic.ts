@@ -257,7 +257,7 @@ export function buildMemoryActionItems<TProjectId extends string>(input: {
     (entry) => ({
       kind: "action",
       value: `action:memory:${entry.action}`,
-      searchTerms: ["memory", ...entry.searchTerms],
+      searchTerms: [entry.title, "memory", ...entry.searchTerms],
       title: entry.title,
       icon: input.icon,
       run: () => input.run(entry.action, projectId),

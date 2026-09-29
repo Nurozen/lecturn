@@ -127,7 +127,7 @@ function SidebarUtilityItem({
               aria-label={badgeCount > 0 ? `${label} (${badgeCount})` : label}
               onClick={onClick}
               size="icon"
-              className="relative"
+              className="relative overflow-visible"
             >
               {icon}
               {badgeCount > 0 ? (

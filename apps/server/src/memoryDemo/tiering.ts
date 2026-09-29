@@ -56,6 +56,11 @@ const SECRET_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
   [/password\s*[:=]/i, "a password assignment"],
 ];
 
+/** What `text` looks like it leaks (e.g. "a live Stripe key (sk_live_)"), or null. */
+export function findSecret(text: string): string | null {
+  return SECRET_PATTERNS.find(([pattern]) => pattern.test(text))?.[1] ?? null;
+}
+
 const DUPLICATE_THRESHOLD = 0.3;
 const fmt = (value: number) => value.toFixed(2);
 
@@ -90,10 +95,8 @@ export function tierFor(facts: TierFacts): {
   if (facts.op === "noop") return { tier: "silent", flags: [] };
   const flags: ContributionFlag[] = [];
   const text = `${facts.den.summary}\n${facts.den.context}`;
-  const secret = SECRET_PATTERNS.find(([pattern]) => pattern.test(text));
-  if (secret) {
-    flags.push({ kind: "secret-suspect", reason: `Looks like it contains ${secret[1]}` });
-  }
+  const secret = findSecret(text);
+  if (secret) flags.push({ kind: "secret-suspect", reason: `Looks like it contains ${secret}` });
   if (facts.target && (facts.op === "supersede" || removesText(facts.den, facts.target))) {
     flags.push({
       kind: "destructive-diff",

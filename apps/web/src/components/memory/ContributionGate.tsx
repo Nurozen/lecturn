@@ -7,12 +7,12 @@ import type {
 } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
 import { Undo2Icon } from "lucide-react";
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "~/components/ui/button";
 import { Dialog, DialogPopup } from "~/components/ui/dialog";
 import { GoldThreadSpinner } from "~/components/ui/gold-thread-spinner";
 import { cn } from "~/lib/utils";
-import { memoryDemoEnvironment, useMemoryDen } from "../../state/memoryDemo";
+import { memoryDemoEnvironment, useMemoryDen, useMemoryGraph } from "../../state/memoryDemo";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { GateCard } from "./gate/GateCard";
 import { GateHeader } from "./gate/GateHeader";
@@ -105,6 +105,16 @@ export function ContributionGate({ environmentId, projectId, onClose }: Contribu
   const landCommand = useAtomCommand(memoryDemoEnvironment.land, { reportFailure: false });
   const revertCommand = useAtomCommand(memoryDemoEnvironment.revert, { reportFailure: false });
   const den = useMemoryDen(environmentId, projectId);
+  // Cards carry territory ids; show the labels the Map shows, falling back to the id.
+  const graph = useMemoryGraph(environmentId);
+  const territoryLabels = useMemo(
+    () => new Map(graph.data?.territories.map((t) => [t.id, t.label]) ?? []),
+    [graph.data],
+  );
+  const territoryLabel = useCallback(
+    (territoryId: string) => territoryLabels.get(territoryId) ?? territoryId,
+    [territoryLabels],
+  );
   const headlineId = useId();
 
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
@@ -448,7 +458,7 @@ export function ContributionGate({ environmentId, projectId, onClose }: Contribu
             ? `${undecided} ${plural(undecided, "card")} ${undecided === 1 ? "needs" : "need"} you, ${counts?.auto ?? 0} ${counts?.auto === 1 ? "lands" : "land"} on ${counts?.auto === 1 ? "its" : "their"} own`
             : `All cards decided. ${landCount} ${plural(landCount, "node")} ready to land`;
   const destinations = gate
-    ? [...new Set([...gate.review, ...gate.auto].map((c) => c.territoryId))]
+    ? [...new Set([...gate.review, ...gate.auto].map((c) => territoryLabel(c.territoryId)))]
     : [];
 
   return (
@@ -515,6 +525,7 @@ export function ContributionGate({ environmentId, projectId, onClose }: Contribu
                     </div>
                   ) : phase.kind === "receipt" ? (
                     <GateReceipt
+                      territoryLabel={territoryLabel}
                       receipt={phase.receipt}
                       busy={busy !== null}
                       error={actionError}
@@ -523,6 +534,7 @@ export function ContributionGate({ environmentId, projectId, onClose }: Contribu
                     />
                   ) : gate && card ? (
                     <GateCard
+                      territoryLabel={territoryLabel}
                       card={card}
                       decided={gate.verdicts.get(card.nodeId)}
                       draft={gate.draft}

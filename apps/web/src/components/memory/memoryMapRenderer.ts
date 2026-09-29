@@ -529,7 +529,9 @@ export class MemoryMapRenderer {
         y0: ly - 8,
         x1: lx + w + 2,
         y1: ly + 8,
-        priority: (flags ? flags[i]! * 1e4 : 0) + m.score,
+        // Reveal path first, then the lit landing, so the nodes being shown keep their names.
+        priority:
+          (flags ? flags[i]! * 1e4 : 0) + (m.kind === "node" && m.landed ? 1e3 : 0) + m.score,
         force: i === hover || focus,
       });
     }

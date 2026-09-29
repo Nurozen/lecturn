@@ -37,7 +37,7 @@ import {
   type LexicalDoc,
 } from "./lexicalScore.ts";
 import { denSeedIds, recordedJudgments, type SpikeFixture } from "./spikeFixture.ts";
-import { deriveOp, heuristicJudgments, tierFor } from "./tiering.ts";
+import { deriveOp, findSecret, heuristicJudgments, tierFor } from "./tiering.ts";
 import {
   fnv1a,
   jitterNear,
@@ -86,6 +86,12 @@ interface ReceiptRecord {
 
 type Edge = readonly [a: string, b: string, receiptId: string];
 
+interface PlanRecord {
+  readonly plan: ContributionPlan;
+  /** `DemoState.warrenRevision` when planned; a later land or revert makes the plan stale. */
+  readonly warrenRevision: number;
+}
+
 export interface DemoState {
   readonly revision: number;
   readonly dens: ReadonlyMap<ProjectId, DenState>;
@@ -94,8 +100,11 @@ export interface DemoState {
   readonly extraEdges: readonly Edge[];
   /** Warren node id to the receipt that landed it. */
   readonly lit: ReadonlyMap<string, string>;
+  /** Receipts in landing order. */
   readonly receipts: ReadonlyMap<string, ReceiptRecord>;
-  readonly plans: ReadonlyMap<string, ContributionPlan>;
+  readonly plans: ReadonlyMap<string, PlanRecord>;
+  /** Store revision of the last land or revert. */
+  readonly warrenRevision: number;
   readonly lastReceiptId: string | null;
   readonly recalledTerritories: ReadonlySet<string>;
 }
@@ -108,6 +117,7 @@ export const initialState = (): DemoState => ({
   lit: new Map(),
   receipts: new Map(),
   plans: new Map(),
+  warrenRevision: 0,
   lastReceiptId: null,
   recalledTerritories: new Set(),
 });
@@ -499,7 +509,7 @@ export function planDen(
   const planId = `plan-${state.revision}-${(fnv1a(`${projectId}:${state.plans.size}`) >>> 0).toString(16)}`;
   const plan: ContributionPlan = { planId, projectId, denRevision: state.revision, cards, counts };
   const plans = new Map(state.plans);
-  plans.set(planId, plan);
+  plans.set(planId, { plan, warrenRevision: state.warrenRevision });
   return [plan, { ...state, plans }];
 }
 
@@ -524,13 +534,18 @@ export function landPlan(
   input: MemoryLandInput,
   nowMs: number,
 ): readonly [MemoryReceipt, DemoState, MemoryChange] | MemoryDemoError {
-  const plan = state.plans.get(input.planId);
-  if (!plan) return fail("not-found", "That Gate plan no longer exists. Review the den again.");
+  // A missing plan was dropped by a reset or a landing; re-planning recovers either way.
+  const planned = state.plans.get(input.planId);
+  if (!planned) return fail("stale-plan", "That Gate plan no longer exists. Review the den again.");
+  const { plan } = planned;
   if (plan.projectId !== input.projectId)
     return fail("invalid", "The plan is for another project.");
   const den = state.dens.get(input.projectId);
   if (!den || den.changedAt > plan.denRevision) {
     return fail("stale-plan", "The den changed since this plan was made. Review it again.");
+  }
+  if (state.warrenRevision > planned.warrenRevision) {
+    return fail("stale-plan", "The warren changed since this plan was made. Review it again.");
   }
   const verdicts = new Map(input.verdicts.map((verdict) => [verdict.nodeId, verdict]));
   for (const verdict of input.verdicts) {
@@ -584,6 +599,16 @@ export function landPlan(
     }
     const target = node.targetId ? liveView().node(node.targetId) : null;
     const summary = verdict === "edit" ? explicit!.summary!.trim() : node.summary;
+    // The Gate blocks these too; this holds for any caller. Edit only rewrites the summary.
+    const leakedSummary = findSecret(summary);
+    if (leakedSummary)
+      return fail("invalid", `${node.id} still looks like it contains ${leakedSummary}.`);
+    const leakedContext = findSecret(node.context);
+    if (leakedContext)
+      return fail(
+        "invalid",
+        `${node.id} has ${leakedContext} in its body; skip this node to keep it in the den.`,
+      );
     const asOverlay = (
       id: string,
       territoryId: string,
@@ -693,6 +718,7 @@ export function landPlan(
     extraEdges: [...state.extraEdges, ...edges],
     receipts,
     plans,
+    warrenRevision: revision,
     lastReceiptId: receiptId,
     dens: setDen(state, {
       ...den,
@@ -713,7 +739,21 @@ export function revertReceipt(
 ): readonly [MemoryReceipt, DemoState, MemoryChange | null] | MemoryDemoError {
   const record = state.receipts.get(receiptId);
   if (!record) return fail("not-found", `No receipt ${receiptId}.`);
-  if (record.receipt.reverted) return [record.receipt, state, null];
+  if (record.receipt.reverted) return fail("invalid", `Receipt ${receiptId} is already reverted.`);
+  // Restoring `overlayBefore` under a later landing that touched the same nodes
+  // would drop that landing's writes, so those must be reverted first.
+  const touched = (other: ReceiptRecord) =>
+    [...other.overlayBefore.keys()].some((id) => record.overlayBefore.has(id));
+  const later = [...state.receipts.values()].slice(
+    [...state.receipts.keys()].indexOf(receiptId) + 1,
+  );
+  const blocking = later.findLast((other) => !other.receipt.reverted && touched(other));
+  if (blocking) {
+    return fail(
+      "invalid",
+      `Revert ${blocking.receipt.id} first; it landed on the same nodes later.`,
+    );
+  }
   const overlay = new Map(state.overlay);
   for (const [id, before] of record.overlayBefore) {
     if (before === undefined) overlay.delete(id);
@@ -740,6 +780,7 @@ export function revertReceipt(
     lit,
     extraEdges: state.extraEdges.filter(([, , owner]) => owner !== receiptId),
     receipts,
+    warrenRevision: revision,
     dens: setDen(state, {
       projectId,
       name: den?.name ?? "den",
@@ -758,6 +799,41 @@ export function revertReceipt(
 // ---------------------------------------------------------------- map
 
 const ORIGIN = { x: 0, y: 0 };
+/** Floor for how close a landed node may sit to another mark in its territory. */
+const LANDED_GAP = 40;
+
+/** Median nearest-neighbour distance among `points`, the territory's own spacing. */
+function typicalSpacing(points: ReadonlyArray<{ x: number; y: number }>): number {
+  const nearest = points.map((p) =>
+    Math.min(...points.filter((q) => q !== p).map((q) => Math.hypot(p.x - q.x, p.y - q.y))),
+  );
+  nearest.sort((a, b) => a - b);
+  const median = nearest[Math.floor(nearest.length / 2)];
+  return median !== undefined && Number.isFinite(median) ? median : LANDED_GAP;
+}
+
+/** The first spot on a spiral out from `anchor` (starting at a hashed angle) that
+    keeps `gap` from every placed mark. Un-anchored nodes land at the territory
+    centre, among the hub nodes, and the map scales each territory by its own
+    spacing, so a fixed small offset would draw them on top of their neighbours. */
+function openSpotNear(
+  anchor: { x: number; y: number },
+  id: string,
+  placed: ReadonlyArray<{ x: number; y: number }>,
+  gap: number,
+): { x: number; y: number } {
+  const hashed = jitterNear(anchor, id);
+  const base = Math.atan2(hashed.y - anchor.y, hashed.x - anchor.x);
+  const clear = (p: { x: number; y: number }) =>
+    placed.every((q) => Math.hypot(p.x - q.x, p.y - q.y) >= gap);
+  for (let k = 0; k < 400; k++) {
+    const angle = base + k * 2.4;
+    const radius = gap * (0.9 + k * 0.12);
+    const p = { x: anchor.x + Math.cos(angle) * radius, y: anchor.y + Math.sin(angle) * radius };
+    if (clear(p)) return p;
+  }
+  return hashed;
+}
 
 export function buildGraph(view: WarrenView, layout: WarrenLayout): MemoryGraph {
   const { warren, state } = view;
@@ -777,7 +853,12 @@ export function buildGraph(view: WarrenView, layout: WarrenLayout): MemoryGraph 
     const baseIndex = warren.byId.get(id);
     return baseIndex === undefined ? null : (layout.nodes.get(baseIndex) ?? null);
   };
+  // Positions are relative to each territory's centre, so overlap checks stay per territory.
+  const placed = new Map<string, Array<{ x: number; y: number }>>();
   const pushNode = (node: EffectiveNode, position: { x: number; y: number }) => {
+    const list = placed.get(node.territoryId);
+    if (list) list.push(position);
+    else placed.set(node.territoryId, [position]);
     nodes.push({
       id: node.id,
       territoryId: node.territoryId,
@@ -796,11 +877,25 @@ export function buildGraph(view: WarrenView, layout: WarrenLayout): MemoryGraph 
       if (node) pushNode(node, layout.nodes.get(index) ?? ORIGIN);
     }
   }
+  const spacing = new Map(
+    [...placed].map(([territoryId, points]) => [
+      territoryId,
+      Math.max(LANDED_GAP, typicalSpacing(points) * 0.75),
+    ]),
+  );
   for (const id of view.addedIds()) {
     const node = view.node(id);
     if (!node) continue;
     const anchor = (node.anchorId && positionOf(node.anchorId)) || ORIGIN;
-    pushNode(node, jitterNear(anchor, id));
+    pushNode(
+      node,
+      openSpotNear(
+        anchor,
+        id,
+        placed.get(node.territoryId) ?? [],
+        spacing.get(node.territoryId) ?? LANDED_GAP,
+      ),
+    );
   }
   const indexById = new Map(nodes.map((node, i) => [node.id, i]));
   const edges: Array<readonly [number, number]> = [];

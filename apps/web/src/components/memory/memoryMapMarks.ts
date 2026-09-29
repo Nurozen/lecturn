@@ -610,8 +610,9 @@ export function fitCamera(
     y0 = Infinity,
     y1 = -Infinity;
   for (const m of marks) {
-    // Node labels hang to the right; leave them room.
-    const labelRoom = m.kind === "node" ? 90 : m.kind === "stub" ? 30 : 0;
+    // Node labels hang to the right, up to ~180 px for a truncated label;
+    // leave them room so the rightmost ones clear the node sheet.
+    const labelRoom = m.kind === "node" ? 170 : m.kind === "stub" ? 30 : 0;
     x0 = Math.min(x0, m.x - m.r - labelRoom / 3);
     x1 = Math.max(x1, m.x + m.r + labelRoom);
     y0 = Math.min(y0, m.y - m.r);

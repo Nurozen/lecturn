@@ -598,6 +598,25 @@ describe("buildMemoryActionItems", () => {
     expect(runs).toEqual([["contribute", "project-active"]]);
   });
 
+  it("matches on the entry title words, not only its keywords", () => {
+    const items = buildMemoryActionItems({
+      ...base,
+      environmentId: "env-1",
+      activeProjectId: "project-active",
+      pending: [],
+    });
+    const found = (query: string) =>
+      filterCommandPaletteGroups({
+        activeGroups: [{ value: "actions", label: "Actions", items }],
+        query,
+        isInSubmenu: false,
+        projectSearchItems: [],
+        threadSearchItems: [],
+      }).flatMap((group) => group.items.map((item) => item.title));
+    expect(found("close and contribute")).toEqual(["Memory: close and contribute"]);
+    expect(found("simulate agent write")).toEqual(["Memory: simulate agent write"]);
+  });
+
   it("falls back to the first project with pending den nodes", async () => {
     const runs: Array<[string, string | null]> = [];
     const items = buildMemoryActionItems({

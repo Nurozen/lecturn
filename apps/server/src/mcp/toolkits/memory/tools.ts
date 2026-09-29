@@ -60,9 +60,9 @@ export const MemoryQueryTool = Tool.make("memory_query", {
   dependencies,
 })
   .annotate(Tool.Title, "Recall project memory")
-  .annotate(Tool.Readonly, true)
+  // Not read-only: each call is recorded in the den's recent queries and published.
+  .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false)
-  .annotate(Tool.Idempotent, true)
   .annotate(Tool.OpenWorld, false);
 
 export const MemoryWriteTool = Tool.make("memory_write", {
