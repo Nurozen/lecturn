@@ -57,6 +57,8 @@ export * from "./manualCloudLink.ts";
 
 export * from "./contextual.ts";
 export * from "./contextualRpc.ts";
+export * from "./memory.ts";
+export * from "./memoryRpc.ts";
 export * from "./extensionsHelper.ts";
 export * from "./extensions.ts";
 

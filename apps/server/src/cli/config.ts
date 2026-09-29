@@ -145,6 +145,7 @@ const EnvServerConfig = Config.all({
   // action, not a per-invocation option.
   threadForkingEnabled: Config.boolean("LECTURN_THREAD_FORKING").pipe(Config.withDefault(true)),
   staveEnabled: Config.boolean("LECTURN_STAVE").pipe(Config.withDefault(true)),
+  memoryDemoEnabled: Config.boolean("LECTURN_MEMORY_DEMO").pipe(Config.withDefault(false)),
 });
 
 export interface CliServerFlags {
@@ -395,6 +396,7 @@ export const resolveServerConfig = (
       tailscaleServePort,
       threadForkingEnabled: env.threadForkingEnabled,
       staveEnabled: env.staveEnabled,
+      memoryDemoEnabled: env.memoryDemoEnabled,
     };
 
     return config;

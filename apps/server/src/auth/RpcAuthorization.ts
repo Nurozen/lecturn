@@ -1,4 +1,4 @@
-import { CONTEXTUAL_RPC_SCOPES } from "@lecturn/contracts";
+import { CONTEXTUAL_RPC_SCOPES, MEMORY_RPC_SCOPES } from "@lecturn/contracts";
 import {
   AuthAccessReadScope,
   AuthOrchestrationOperateScope,
@@ -32,6 +32,7 @@ export const RPC_REQUIRED_SCOPES = {
   [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.subscribeThread]: AuthOrchestrationReadScope,
   ...CONTEXTUAL_RPC_SCOPES,
+  ...MEMORY_RPC_SCOPES,
   [WS_METHODS.serverProbe]: AuthOrchestrationReadScope,
   [WS_METHODS.serverGetConfig]: AuthOrchestrationReadScope,
   [WS_METHODS.serverRefreshProviders]: AuthOrchestrationOperateScope,

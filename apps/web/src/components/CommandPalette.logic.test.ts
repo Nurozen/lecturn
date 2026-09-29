@@ -5,6 +5,7 @@ import type { Thread } from "../types";
 import {
   browseInputEndPaddingClass,
   buildBrowseGroups,
+  buildMemoryActionItems,
   buildStaveAddProjectItems,
   buildThreadActionItems,
   enumerateCommandPaletteItems,
@@ -544,5 +545,93 @@ describe("buildStaveAddProjectItems", () => {
 
     await items[1]?.run();
     expect(launched).toEqual(["stave-saga"]);
+  });
+});
+
+describe("buildMemoryActionItems", () => {
+  const titles = (items: ReturnType<typeof buildMemoryActionItems>) =>
+    items.map((item) => item.title);
+  const base = { icon: null, run: async () => {} };
+
+  it("offers nothing without a memory-demo environment", () => {
+    expect(
+      buildMemoryActionItems({
+        ...base,
+        environmentId: null,
+        activeProjectId: "project-a",
+        pending: [{ projectId: "project-a", count: 3 }],
+      }),
+    ).toEqual([]);
+  });
+
+  it("drops project-bound entries when no project is active and no den has nodes", () => {
+    expect(
+      titles(
+        buildMemoryActionItems({
+          ...base,
+          environmentId: "env-1",
+          activeProjectId: null,
+          pending: [{ projectId: "project-a", count: 0 }],
+        }),
+      ),
+    ).toEqual(["Memory: open map", "Memory: reset demo data"]);
+  });
+
+  it("targets the active thread's project before any pending den", async () => {
+    const runs: Array<[string, string | null]> = [];
+    const items = buildMemoryActionItems({
+      ...base,
+      environmentId: "env-1",
+      activeProjectId: "project-active",
+      pending: [{ projectId: "project-den", count: 4 }],
+      run: async (action, projectId) => {
+        runs.push([action, projectId]);
+      },
+    });
+    expect(titles(items)).toEqual([
+      "Memory: open map",
+      "Memory: close and contribute",
+      "Memory: simulate agent write",
+      "Memory: reset demo data",
+    ]);
+    await items[1]!.run();
+    expect(runs).toEqual([["contribute", "project-active"]]);
+  });
+
+  it("matches on the entry title words, not only its keywords", () => {
+    const items = buildMemoryActionItems({
+      ...base,
+      environmentId: "env-1",
+      activeProjectId: "project-active",
+      pending: [],
+    });
+    const found = (query: string) =>
+      filterCommandPaletteGroups({
+        activeGroups: [{ value: "actions", label: "Actions", items }],
+        query,
+        isInSubmenu: false,
+        projectSearchItems: [],
+        threadSearchItems: [],
+      }).flatMap((group) => group.items.map((item) => item.title));
+    expect(found("close and contribute")).toEqual(["Memory: close and contribute"]);
+    expect(found("simulate agent write")).toEqual(["Memory: simulate agent write"]);
+  });
+
+  it("falls back to the first project with pending den nodes", async () => {
+    const runs: Array<[string, string | null]> = [];
+    const items = buildMemoryActionItems({
+      ...base,
+      environmentId: "env-1",
+      activeProjectId: null,
+      pending: [
+        { projectId: "project-empty", count: 0 },
+        { projectId: "project-den", count: 2 },
+      ],
+      run: async (action, projectId) => {
+        runs.push([action, projectId]);
+      },
+    });
+    await items.find((item) => item.value === "action:memory:simulate-write")!.run();
+    expect(runs).toEqual([["simulate-write", "project-den"]]);
   });
 });
