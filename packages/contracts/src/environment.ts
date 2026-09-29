@@ -155,6 +155,9 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       Absent on pre-Stave servers (and builds started with LECTURN_STAVE=false),
       so clients hide every Stave control instead of probing the RPCs. */
   stave: Schema.optionalKey(Schema.Struct({ protocolVersion: Schema.Number })),
+  /** Server started with LECTURN_MEMORY_DEMO and serves the memory.* demo RPCs
+      and MCP tools. Absent otherwise, so clients hide every Memory entry point. */
+  memoryDemo: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

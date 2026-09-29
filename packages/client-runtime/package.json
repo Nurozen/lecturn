@@ -290,6 +290,10 @@
     "./state/contextual": {
       "types": "./src/state/contextual.ts",
       "default": "./src/state/contextual.ts"
+    },
+    "./state/memoryDemo": {
+      "types": "./src/state/memoryDemo.ts",
+      "default": "./src/state/memoryDemo.ts"
     }
   },
   "scripts": {
