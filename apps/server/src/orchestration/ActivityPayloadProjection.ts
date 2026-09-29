@@ -396,7 +396,15 @@ export function projectActivityPayload(
   }
 
   const changedFiles: string[] = [];
-  collectChangedFiles(data, changedFiles, new Set<string>(), 0);
+  const seenChangedFiles = new Set<string>();
+  if (payload.itemType === "file_change") {
+    // Claude's Edit/Write/NotebookEdit name their target with snake_case input
+    // keys. Only file changes read them: Claude's Read also takes `file_path`.
+    const input = asRecord(data.input);
+    pushChangedFile(changedFiles, seenChangedFiles, input?.file_path);
+    pushChangedFile(changedFiles, seenChangedFiles, input?.notebook_path);
+  }
+  collectChangedFiles(data, changedFiles, seenChangedFiles, 0);
   if (changedFiles.length > 0) {
     // Both clients discover file names by walking objects with path-like keys.
     projectedData.files = changedFiles.map((path) => ({ path }));
