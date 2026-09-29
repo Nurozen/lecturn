@@ -1,4 +1,5 @@
 import { ContextualRpcs, CONTEXTUAL_WS_METHODS } from "./contextualRpc.ts";
+import { MemoryRpcs, MEMORY_WS_METHODS } from "./memoryRpc.ts";
 import {
   ManualCloudLinkProofInput,
   ManualCloudLinkProofResult,
@@ -266,6 +267,7 @@ import { VcsError } from "./vcs.ts";
 
 export const WS_METHODS = {
   ...CONTEXTUAL_WS_METHODS,
+  ...MEMORY_WS_METHODS,
   // Project registry methods
   projectsList: "projects.list",
   projectsAdd: "projects.add",
@@ -1532,6 +1534,7 @@ export const WsSagaWorkbenchSummarizeRpc = Rpc.make(WS_METHODS.sagaWorkbenchSumm
 
 export const WsRpcGroup = RpcGroup.make(
   ...ContextualRpcs,
+  ...MemoryRpcs,
   WsSagaWorkbenchGetSnapshotRpc,
   WsSagaWorkbenchGetEvidenceRpc,
   WsSagaWorkbenchGetActivityRpc,

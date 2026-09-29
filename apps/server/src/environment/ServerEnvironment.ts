@@ -240,6 +240,7 @@ export const make = Effect.gen(function* () {
       manualCloudLink: true,
       ...(serverConfig.threadForkingEnabled ? { threadForking: true } : {}),
       ...(serverConfig.staveEnabled ? { stave: { protocolVersion: STAVE_PROTOCOL_VERSION } } : {}),
+      ...(serverConfig.memoryDemoEnabled ? { memoryDemo: true } : {}),
       environmentIcon: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
       ...(serverSelfUpdate === "boot-service" || desktopAppUpdate

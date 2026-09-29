@@ -1,0 +1,2035 @@
+{
+  "label": "recorded Jev judgments, synthetic spike data",
+  "model": "jev-1.13.0",
+  "recordedAt": "2026-09-20",
+  "standards": [
+    {
+      "id": "S1",
+      "title": "States a fact, not a work log",
+      "primitive": "noul"
+    },
+    {
+      "id": "S2",
+      "title": "Decisions say what was rejected or why",
+      "primitive": "noul"
+    },
+    {
+      "id": "S3",
+      "title": "Conventions say where they apply",
+      "primitive": "noul"
+    },
+    {
+      "id": "S4",
+      "title": "Summary is backed by the body",
+      "primitive": "noul"
+    },
+    {
+      "id": "S5",
+      "title": "Specific enough to act on",
+      "primitive": "score"
+    },
+    {
+      "id": "S6",
+      "title": "Destination project",
+      "primitive": "choice"
+    },
+    {
+      "id": "D1",
+      "title": "Duplicate check",
+      "primitive": "score",
+      "levels": ["different", "related", "same"]
+    }
+  ],
+  "nodes": [
+    {
+      "id": "billing/webhook-async",
+      "type": "decision",
+      "namespace": "billing",
+      "summary": "Stripe webhook handling in harbor-api is asynchronous.",
+      "context": "The handler acknowledges the event right away and puts it on the billing queue. Processing inline was rejected: Stripe retries when the endpoint is slow to answer, and invoice finalization can be slow, which produced duplicate deliveries.",
+      "tags": ["billing", "webhooks", "stripe"],
+      "sourcePath": "src/billing/webhooks/handler.ts",
+      "edges": [
+        {
+          "target": "billing/event-ledger",
+          "relation": "calls"
+        }
+      ],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.95
+        },
+        "S2": {
+          "kind": "noul",
+          "p": 0.98
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.97
+        },
+        "S5": {
+          "kind": "score",
+          "score": 2.64,
+          "confidence": 0.64
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-api",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "web/cart-zustand",
+      "type": "decision",
+      "namespace": "web",
+      "summary": "Migrated cart state to Zustand after discussing with the team.",
+      "context": "The Zustand store lives in src/state/store.ts. The cart slice was migrated first; the other slices still use the old context providers.",
+      "tags": ["state", "cart"],
+      "sourcePath": "src/state/store.ts",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.07
+        },
+        "S2": {
+          "kind": "noul",
+          "p": 0.08
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.7
+        },
+        "S5": {
+          "kind": "score",
+          "score": 1.19,
+          "confidence": 0.29
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-web",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "infra/tf-remote-state",
+      "type": "decision",
+      "namespace": "infra",
+      "summary": "Terraform state lives in an S3 bucket with DynamoDB locking; Terraform Cloud was rejected because the team did not want a second place to manage access.",
+      "context": "State bucket is harbor-tfstate with versioning on. State locking is not configured yet; two applies at once would both proceed.",
+      "tags": ["terraform", "state"],
+      "sourcePath": "backend.tf",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.64
+        },
+        "S2": {
+          "kind": "noul",
+          "p": 0.98
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.17
+        },
+        "S5": {
+          "kind": "score",
+          "score": 2.6,
+          "confidence": 0.6
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-infra",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "team/three-repos",
+      "type": "decision",
+      "namespace": "team",
+      "summary": "Harbor is kept as three repositories (harbor-api, harbor-web, harbor-infra) instead of a monorepo, so that infrastructure changes go through their own approval path.",
+      "context": "A monorepo was tried on a branch. The blocker was that the infra approvers would have been required reviewers on every application pull request.",
+      "tags": ["repos", "process"],
+      "sourcePath": null,
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.93
+        },
+        "S2": {
+          "kind": "noul",
+          "p": 0.98
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.86
+        },
+        "S5": {
+          "kind": "score",
+          "score": 2.84,
+          "confidence": 0.84
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "shared",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "api/versioning-sync",
+      "type": "decision",
+      "namespace": "api",
+      "summary": "API versioning approach was decided in the March sync.",
+      "context": "See meeting notes.",
+      "tags": ["api", "versioning"],
+      "sourcePath": null,
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.39
+        },
+        "S2": {
+          "kind": "noul",
+          "p": 0.04
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.08
+        },
+        "S5": {
+          "kind": "score",
+          "score": 0.31,
+          "confidence": 0.69
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "shared",
+          "confidence": 0.78
+        }
+      }
+    },
+    {
+      "id": "team/feature-flags",
+      "type": "decision",
+      "namespace": "team",
+      "summary": "Feature flags are evaluated on the server side and handed to the web app.",
+      "context": "Client-side evaluation was considered and rejected: it would ship the names of unreleased flags inside the bundle. harbor-api evaluates the flags and harbor-web reads them from the bootstrap payload.",
+      "tags": ["feature-flags"],
+      "sourcePath": null,
+      "edges": [
+        {
+          "target": "web/bootstrap-payload",
+          "relation": "references"
+        }
+      ],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.94
+        },
+        "S2": {
+          "kind": "noul",
+          "p": 0.98
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.97
+        },
+        "S5": {
+          "kind": "score",
+          "score": 1.51,
+          "confidence": 0.49
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "shared",
+          "confidence": 0.9
+        }
+      }
+    },
+    {
+      "id": "migrations/tooling-setup",
+      "type": "decision",
+      "namespace": "migrations",
+      "summary": "Set up node-pg-migrate and added the first migration.",
+      "context": "Migration scripts are wired into package.json as migrate:up and migrate:down. Files live in migrations/.",
+      "tags": ["migrations", "postgres"],
+      "sourcePath": "migrations/README.md",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.07
+        },
+        "S2": {
+          "kind": "noul",
+          "p": 0.04
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.71
+        },
+        "S5": {
+          "kind": "score",
+          "score": 1.33,
+          "confidence": 0.21
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-api",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "infra/ci-runners",
+      "type": "decision",
+      "namespace": "infra",
+      "summary": "The CI workflow runs on a custom runner setup.",
+      "context": "Jobs moved from GitHub-hosted runners to self-hosted runners in the build VPC after the hosted-minutes bill grew sharply. The runner label is harbor-build.",
+      "tags": ["ci", "runners"],
+      "sourcePath": ".github/workflows/ci.yml",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.92
+        },
+        "S2": {
+          "kind": "noul",
+          "p": 0.94
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.95
+        },
+        "S5": {
+          "kind": "score",
+          "score": 1.5,
+          "confidence": 0.5
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-infra",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "web/date-library",
+      "type": "decision",
+      "namespace": "web",
+      "summary": "Use date-fns for all date formatting in harbor-web.",
+      "context": "Moment.js remains the date library across the app. The bundle-size ticket that proposed a switch was closed without changes.",
+      "tags": ["dates", "dependencies"],
+      "sourcePath": "src/lib/dates.ts",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.58
+        },
+        "S2": {
+          "kind": "noul",
+          "p": 0.84
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.02
+        },
+        "S5": {
+          "kind": "score",
+          "score": 2.01,
+          "confidence": 0.01
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-web",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "api/email-provider",
+      "type": "decision",
+      "namespace": "api",
+      "summary": "Going with Postmark for transactional email.",
+      "context": "The mailer reads its credentials from the POSTMARK_TOKEN environment variable. It seemed better overall.",
+      "tags": ["email", "notifications"],
+      "sourcePath": "src/notifications/mailer.ts",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.58
+        },
+        "S2": {
+          "kind": "noul",
+          "p": 0.22
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.85
+        },
+        "S5": {
+          "kind": "score",
+          "score": 1.34,
+          "confidence": 0.19
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-api",
+          "confidence": 0.98
+        }
+      }
+    },
+    {
+      "id": "conventions/error-envelope",
+      "type": "concept",
+      "namespace": "api",
+      "summary": "All harbor-api JSON error responses use the envelope {error: {code, message, requestId}}.",
+      "context": "toErrorResponse in src/http/errors.ts builds the envelope. Handlers throw HarborError and never write error bodies themselves.",
+      "tags": ["convention", "errors", "http"],
+      "sourcePath": "src/http/errors.ts",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.97
+        },
+        "S3": {
+          "kind": "noul",
+          "p": 0.92
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.84
+        },
+        "S5": {
+          "kind": "score",
+          "score": 2.95,
+          "confidence": 0.95
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-api",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "conventions/naming",
+      "type": "concept",
+      "namespace": "team",
+      "summary": "Use descriptive names.",
+      "context": "Avoid abbreviations where possible.",
+      "tags": ["convention", "style"],
+      "sourcePath": null,
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.83
+        },
+        "S3": {
+          "kind": "noul",
+          "p": 0.05
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.81
+        },
+        "S5": {
+          "kind": "score",
+          "score": 0.35,
+          "confidence": 0.65
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "shared",
+          "confidence": 0.97
+        }
+      }
+    },
+    {
+      "id": "conventions/hooks-location",
+      "type": "concept",
+      "namespace": "web",
+      "summary": "Custom React hooks in harbor-web live under src/hooks and are named use<Thing>.",
+      "context": "Most hooks currently sit in src/utils/hooks. Moving them is planned but has not started; useCart is the only file under src/hooks.",
+      "tags": ["convention", "react", "hooks"],
+      "sourcePath": "src/hooks/useCart.ts",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.76
+        },
+        "S3": {
+          "kind": "noul",
+          "p": 0.95
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.19
+        },
+        "S5": {
+          "kind": "score",
+          "score": 2.39,
+          "confidence": 0.39
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-web",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "conventions/tests-colocated",
+      "type": "concept",
+      "namespace": "web",
+      "summary": "Test files sit next to the file they test.",
+      "context": "For example Button.tsx and Button.test.tsx share a folder.",
+      "tags": ["convention", "testing"],
+      "sourcePath": "src/components/Button.test.tsx",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.92
+        },
+        "S3": {
+          "kind": "noul",
+          "p": 0.66
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.95
+        },
+        "S5": {
+          "kind": "score",
+          "score": 1.28,
+          "confidence": 0.72
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-web",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "conventions/tf-tags",
+      "type": "concept",
+      "namespace": "infra",
+      "summary": "Every Terraform resource that supports tags carries owner, env and cost_center tags through the shared tags local.",
+      "context": "The shared tags local sets only env and managed_by. owner and cost_center were proposed in review but were not added.",
+      "tags": ["convention", "terraform", "tagging"],
+      "sourcePath": "modules/_shared/tags.tf",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.84
+        },
+        "S3": {
+          "kind": "noul",
+          "p": 0.82
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.02
+        },
+        "S5": {
+          "kind": "score",
+          "score": 2.75,
+          "confidence": 0.75
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-infra",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "conventions/logging",
+      "type": "concept",
+      "namespace": "team",
+      "summary": "Always log with structured fields.",
+      "context": "Logging should be consistent.",
+      "tags": ["convention", "logging"],
+      "sourcePath": null,
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.88
+        },
+        "S3": {
+          "kind": "noul",
+          "p": 0.09
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.3
+        },
+        "S5": {
+          "kind": "score",
+          "score": 0.94,
+          "confidence": 0.86
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "shared",
+          "confidence": 0.98
+        }
+      }
+    },
+    {
+      "id": "conventions/no-any",
+      "type": "concept",
+      "namespace": "web",
+      "summary": "Agreed in review to stop using any; cleaned up the worst offenders.",
+      "context": "The ESLint config for harbor-web lives in .eslintrc.cjs. The import-order rule was also turned on.",
+      "tags": ["convention", "typescript"],
+      "sourcePath": "src/types/api.ts",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.18
+        },
+        "S3": {
+          "kind": "noul",
+          "p": 0.72
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.27
+        },
+        "S5": {
+          "kind": "score",
+          "score": 0.44,
+          "confidence": 0.56
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-web",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "conventions/outbound-retry",
+      "type": "concept",
+      "namespace": "api",
+      "summary": "Outbound HTTP calls retry with backoff.",
+      "context": "This applies to calls made from harbor-api workers to third-party APIs. The web app never retries on its own.",
+      "tags": ["convention", "http", "resilience"],
+      "sourcePath": null,
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.95
+        },
+        "S3": {
+          "kind": "noul",
+          "p": 0.95
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.3
+        },
+        "S5": {
+          "kind": "score",
+          "score": 1.73,
+          "confidence": 0.27
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-api",
+          "confidence": 0.99
+        }
+      }
+    },
+    {
+      "id": "auth/refresh-rotation",
+      "type": "function",
+      "namespace": "auth",
+      "summary": "rotateRefreshToken issues a new refresh token on every use and revokes the whole token family when an already-used token is presented.",
+      "context": "Each refresh token row carries a family id. Presenting a token marked used sets revoked on every row in that family and returns 401.",
+      "tags": ["auth", "tokens"],
+      "sourcePath": "src/auth/refresh.ts",
+      "edges": [
+        {
+          "target": "auth/token-family",
+          "relation": "writes"
+        }
+      ],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.97
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.51
+        },
+        "S5": {
+          "kind": "score",
+          "score": 2.99,
+          "confidence": 0.99
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-api",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "auth/login-logout-bug",
+      "type": "function",
+      "namespace": "auth",
+      "summary": "Fixed the bug in login where users got logged out.",
+      "context": "Root cause: the session cookie was set without SameSite=Lax, so the browser dropped it on the OAuth redirect. Cookie options are now set in one place, src/auth/cookies.ts.",
+      "tags": ["auth", "bugfix"],
+      "sourcePath": "src/auth/login.ts",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.05
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.93
+        },
+        "S5": {
+          "kind": "score",
+          "score": 1.38,
+          "confidence": 0.6
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-api",
+          "confidence": 0.73
+        }
+      }
+    },
+    {
+      "id": "auth/password-hashing",
+      "type": "function",
+      "namespace": "auth",
+      "summary": "Passwords are hashed with bcrypt in hashPassword.",
+      "context": "hashPassword uses argon2id. Older bcrypt hashes are detected by prefix and upgraded to argon2id the next time the user logs in.",
+      "tags": ["auth", "passwords"],
+      "sourcePath": "src/auth/password.ts",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.84
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.02
+        },
+        "S5": {
+          "kind": "score",
+          "score": 2.96,
+          "confidence": 0.96
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-api",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "billing/webhook-tests",
+      "type": "module",
+      "namespace": "billing",
+      "summary": "Updated tests.",
+      "context": "",
+      "tags": ["billing", "tests"],
+      "sourcePath": "src/billing/webhooks/handler.test.ts",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.03
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.04
+        },
+        "S5": {
+          "kind": "score",
+          "score": 0.01,
+          "confidence": 0.99
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-api",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "billing/event-ledger",
+      "type": "class",
+      "namespace": "billing",
+      "summary": "EventLedger makes webhook handling idempotent.",
+      "context": "Each Stripe event id is inserted into webhook_events under a unique constraint. A conflict means the event was already handled, and the handler returns 200 without side effects.",
+      "tags": ["billing", "webhooks", "idempotency"],
+      "sourcePath": "src/billing/webhooks/EventLedger.ts",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.83
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.96
+        },
+        "S5": {
+          "kind": "score",
+          "score": 2.11,
+          "confidence": 0.85
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-api",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "billing/dunning-question",
+      "type": "concept",
+      "namespace": "billing",
+      "summary": "Need to ask Priya whether invoice.finalized should also trigger the dunning email; blocked until she is back on Thursday.",
+      "context": "Left a comment on ticket HB-2291.",
+      "tags": ["billing", "todo"],
+      "sourcePath": null,
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.02
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.09
+        },
+        "S5": {
+          "kind": "score",
+          "score": 0.81,
+          "confidence": 0.19
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-api",
+          "confidence": 0.87
+        }
+      }
+    },
+    {
+      "id": "migrations/plan-id-backfill",
+      "type": "module",
+      "namespace": "migrations",
+      "summary": "Worked on the plan_id backfill migration, ran into lock timeouts, will pick it up again tomorrow.",
+      "context": "Batching the update in small chunks avoided the lock timeout on the subscriptions table in staging.",
+      "tags": ["migrations", "backfill"],
+      "sourcePath": "migrations/20260203101500_backfill_plan_id.sql",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.02
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.4
+        },
+        "S5": {
+          "kind": "score",
+          "score": 0.54,
+          "confidence": 0.46
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-api",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "api/rate-limiting",
+      "type": "class",
+      "namespace": "api",
+      "summary": "Rate limiting is handled.",
+      "context": "There is no rate limiting in harbor-api yet. The RateLimiter class is a stub whose allow method always returns true.",
+      "tags": ["http", "rate-limit"],
+      "sourcePath": "src/http/RateLimiter.ts",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.4
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.05
+        },
+        "S5": {
+          "kind": "score",
+          "score": 1.01,
+          "confidence": 0.94
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-api",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "web/checkout-refactor",
+      "type": "function",
+      "namespace": "web",
+      "summary": "Refactored CheckoutForm and cleaned things up.",
+      "context": "CheckoutForm is now split into AddressStep and PaymentStep. Validation moved to zod schemas in src/features/checkout/schema.ts.",
+      "tags": ["checkout", "refactor"],
+      "sourcePath": "src/features/checkout/CheckoutForm.tsx",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.06
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.88
+        },
+        "S5": {
+          "kind": "score",
+          "score": 1.11,
+          "confidence": 0.06
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-web",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "web/api-client",
+      "type": "module",
+      "namespace": "web",
+      "summary": "apiClient attaches the CSRF token from the harbor_csrf cookie to every mutating request and retries once after a 401 by calling /auth/refresh.",
+      "context": "apiClient does not retry. On a 401 it clears local state and redirects to /login. The CSRF header is X-Harbor-CSRF.",
+      "tags": ["http", "csrf", "auth"],
+      "sourcePath": "src/lib/apiClient.ts",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.89
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.02
+        },
+        "S5": {
+          "kind": "score",
+          "score": 3,
+          "confidence": 1
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-web",
+          "confidence": 0.97
+        }
+      }
+    },
+    {
+      "id": "web/cart-flaky-test",
+      "type": "module",
+      "namespace": "web",
+      "summary": "Fixed the flaky cart test.",
+      "context": "The test awaited a fake timer that was never advanced. It now uses vi.useFakeTimers together with advanceTimersByTime.",
+      "tags": ["tests", "cart"],
+      "sourcePath": "src/features/cart/Cart.test.tsx",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.05
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.94
+        },
+        "S5": {
+          "kind": "score",
+          "score": 1.16,
+          "confidence": 0.05
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-web",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "web/design-tokens",
+      "type": "reference",
+      "namespace": "web",
+      "summary": "Design tokens reference.",
+      "context": "The Figma library 'Harbor UI' is the source of truth. tokens.css is generated by scripts/build-tokens.mjs and must not be edited by hand.",
+      "tags": ["design", "tokens"],
+      "sourcePath": "src/styles/tokens.css",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.49
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.77
+        },
+        "S5": {
+          "kind": "score",
+          "score": 0.43,
+          "confidence": 0.57
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-web",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "web/bundle-size",
+      "type": "concept",
+      "namespace": "web",
+      "summary": "Looked into bundle size, it's mostly fine.",
+      "context": "The main chunk is very large because the charting library is bundled eagerly. Lazy-loading the reports route would cut it substantially and should be done before launch.",
+      "tags": ["performance", "bundle"],
+      "sourcePath": "vite.config.ts",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.18
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.1
+        },
+        "S5": {
+          "kind": "score",
+          "score": 1.02,
+          "confidence": 0.94
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-web",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "web/a11y-audit-todo",
+      "type": "concept",
+      "namespace": "web",
+      "summary": "TODO for Marcus: run the axe audit on the settings pages before the release and file tickets for anything serious.",
+      "context": "The release checklist assigns the axe audit of the settings pages to Marcus. Findings rated serious or worse need a ticket.",
+      "tags": ["accessibility", "todo"],
+      "sourcePath": null,
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.02
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.82
+        },
+        "S5": {
+          "kind": "score",
+          "score": 0.08,
+          "confidence": 0.92
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-web",
+          "confidence": 0.63
+        }
+      }
+    },
+    {
+      "id": "infra/vpc-module",
+      "type": "module",
+      "namespace": "infra",
+      "summary": "The vpc module sets up the subnets and NAT routing for each environment.",
+      "context": "Private and public subnets are created in every availability zone. Staging routes private egress through a single NAT gateway; production has one NAT gateway per zone.",
+      "tags": ["terraform", "networking"],
+      "sourcePath": "modules/vpc/main.tf",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.93
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.88
+        },
+        "S5": {
+          "kind": "score",
+          "score": 2.07,
+          "confidence": 0.92
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-infra",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "infra/deploy-approval",
+      "type": "module",
+      "namespace": "infra",
+      "summary": "Deploys to production require a manual approval in the 'production' GitHub environment; staging deploys run automatically on merge to main.",
+      "context": "In deploy.yml both the staging and the production job run automatically on merge to main. No environment protection rule exists.",
+      "tags": ["ci", "deploy"],
+      "sourcePath": ".github/workflows/deploy.yml",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.87
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.02
+        },
+        "S5": {
+          "kind": "score",
+          "score": 2.81,
+          "confidence": 0.81
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-infra",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "infra/ci-cache-tweak",
+      "type": "module",
+      "namespace": "infra",
+      "summary": "Tweaked CI caching, builds seem faster now.",
+      "context": "The cache key now includes the lockfile hash. restore-keys fall back to the branch prefix.",
+      "tags": ["ci", "cache"],
+      "sourcePath": ".github/workflows/ci.yml",
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.15
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.46
+        },
+        "S5": {
+          "kind": "score",
+          "score": 1.4,
+          "confidence": 0.56
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-infra",
+          "confidence": 0.99
+        }
+      }
+    },
+    {
+      "id": "infra/rotate-staging-password",
+      "type": "concept",
+      "namespace": "infra",
+      "summary": "Remember to rotate the staging database password after the contractor's access ends; Dana said she would handle the vault side.",
+      "context": "",
+      "tags": ["todo", "access"],
+      "sourcePath": null,
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.03
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.02
+        },
+        "S5": {
+          "kind": "score",
+          "score": 0.16,
+          "confidence": 0.84
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "harbor-infra",
+          "confidence": 0.58
+        }
+      }
+    },
+    {
+      "id": "team/request-id",
+      "type": "concept",
+      "namespace": "team",
+      "summary": "A request id created at the edge is forwarded as X-Request-Id from harbor-web through harbor-api and appears in every log line and error envelope, so one id traces a user action across both services.",
+      "context": "The load balancer adds X-Request-Id when it is missing. The web app's apiClient copies it onto outgoing calls, and the API logger and toErrorResponse both include it.",
+      "tags": ["observability", "tracing"],
+      "sourcePath": null,
+      "edges": [
+        {
+          "target": "conventions/error-envelope",
+          "relation": "references"
+        }
+      ],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.94
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.9
+        },
+        "S5": {
+          "kind": "score",
+          "score": 2.96,
+          "confidence": 0.96
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "shared",
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "team/environment-names",
+      "type": "reference",
+      "namespace": "team",
+      "summary": "Environment names are dev, staging and production everywhere: Terraform workspaces, GitHub environments, the API's HARBOR_ENV and the web app's VITE_HARBOR_ENV.",
+      "context": "Terraform workspaces are called dev, stage and prod. The application configs use development, staging and production.",
+      "tags": ["environments", "naming"],
+      "sourcePath": null,
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.93
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.1
+        },
+        "S5": {
+          "kind": "score",
+          "score": 2.98,
+          "confidence": 0.98
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "shared",
+          "confidence": 0.99
+        }
+      }
+    },
+    {
+      "id": "team/on-call-handbook",
+      "type": "reference",
+      "namespace": "team",
+      "summary": "On-call handbook.",
+      "context": "Link: wiki/on-call. Covers the paging policy for API, web and infrastructure incidents.",
+      "tags": ["on-call", "runbook"],
+      "sourcePath": null,
+      "edges": [],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.26
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.68
+        },
+        "S5": {
+          "kind": "score",
+          "score": 0.12,
+          "confidence": 0.88
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "shared",
+          "confidence": 0.97
+        }
+      }
+    },
+    {
+      "id": "team/release-sprint-summary",
+      "type": "composite",
+      "namespace": "team",
+      "summary": "Summary of the release work this sprint: coordinated the API deploy with the web release and updated the infra runbook.",
+      "context": "Release order is infra, then API, then web, because the web build reads the API's OpenAPI spec at build time.",
+      "tags": ["release", "sprint"],
+      "sourcePath": null,
+      "edges": [
+        {
+          "target": "infra/deploy-approval",
+          "relation": "contains"
+        },
+        {
+          "target": "web/api-client",
+          "relation": "contains"
+        }
+      ],
+      "pairOnly": false,
+      "judgments": {
+        "S1": {
+          "kind": "noul",
+          "p": 0.04
+        },
+        "S4": {
+          "kind": "noul",
+          "p": 0.3
+        },
+        "S5": {
+          "kind": "score",
+          "score": 0.55,
+          "confidence": 0.45
+        },
+        "S6": {
+          "kind": "choice",
+          "choice": "shared",
+          "confidence": 0.96
+        }
+      }
+    },
+    {
+      "id": "web/cart-test-timers",
+      "type": "module",
+      "namespace": "web",
+      "summary": "Cart.test.tsx was flaky because it awaited a fake timer that was never advanced; it now calls advanceTimersByTime.",
+      "context": "",
+      "tags": ["web"],
+      "sourcePath": null,
+      "edges": [],
+      "pairOnly": true,
+      "judgments": {}
+    },
+    {
+      "id": "infra/tfstate-backend",
+      "type": "module",
+      "namespace": "infra",
+      "summary": "harbor-infra keeps its tfstate remotely in S3 and uses a DynamoDB table for the state lock.",
+      "context": "",
+      "tags": ["infra"],
+      "sourcePath": null,
+      "edges": [],
+      "pairOnly": true,
+      "judgments": {}
+    },
+    {
+      "id": "auth/password-hashing-old",
+      "type": "function",
+      "namespace": "auth",
+      "summary": "Passwords are hashed with bcrypt in hashPassword.",
+      "context": "",
+      "tags": ["auth"],
+      "sourcePath": null,
+      "edges": [],
+      "pairOnly": true,
+      "judgments": {}
+    },
+    {
+      "id": "infra/ci-runners-hosted",
+      "type": "decision",
+      "namespace": "infra",
+      "summary": "CI jobs run on GitHub-hosted runners.",
+      "context": "",
+      "tags": ["infra"],
+      "sourcePath": null,
+      "edges": [],
+      "pairOnly": true,
+      "judgments": {}
+    }
+  ],
+  "pairs": [
+    {
+      "id": "P01",
+      "a": {
+        "id": "auth/refresh-rotation",
+        "type": "function",
+        "summary": "rotateRefreshToken issues a new refresh token on every use and revokes the whole token family when an already-used token is presented.",
+        "context": "Each refresh token row carries a family id. Presenting a used token revokes every row in that family."
+      },
+      "b": {
+        "id": "auth/single-use-refresh",
+        "type": "concept",
+        "summary": "Refresh tokens are single-use: each refresh returns a fresh token, and replaying an old one invalidates every token descended from the same login.",
+        "context": "Implemented in src/auth/refresh.ts."
+      },
+      "d1": {
+        "score": 1.98,
+        "confidence": 0.97,
+        "probabilities": {
+          "different": 0,
+          "related": 0.02,
+          "same": 0.98
+        }
+      }
+    },
+    {
+      "id": "P02",
+      "a": {
+        "id": "conventions/error-envelope",
+        "type": "concept",
+        "summary": "All harbor-api JSON error responses use the envelope {error: {code, message, requestId}}.",
+        "context": "toErrorResponse builds the envelope."
+      },
+      "b": {
+        "id": "api/error-shape",
+        "type": "concept",
+        "summary": "Errors from the API come back as JSON shaped like {error: {code, message, requestId}}.",
+        "context": "Handlers throw HarborError; the body is produced centrally."
+      },
+      "d1": {
+        "score": 1.94,
+        "confidence": 0.92,
+        "probabilities": {
+          "different": 0,
+          "related": 0.05,
+          "same": 0.95
+        }
+      }
+    },
+    {
+      "id": "P03",
+      "a": {
+        "id": "infra/tf-remote-state",
+        "type": "decision",
+        "summary": "Terraform state lives in an S3 bucket with DynamoDB locking.",
+        "context": "Configured in backend.tf."
+      },
+      "b": {
+        "id": "infra/tfstate-backend",
+        "type": "module",
+        "summary": "harbor-infra keeps its tfstate remotely in S3 and uses a DynamoDB table for the state lock.",
+        "context": ""
+      },
+      "d1": {
+        "score": 1.55,
+        "confidence": 0.33,
+        "probabilities": {
+          "different": 0,
+          "related": 0.44,
+          "same": 0.56
+        }
+      }
+    },
+    {
+      "id": "P04",
+      "a": {
+        "id": "conventions/hooks-location",
+        "type": "concept",
+        "summary": "Custom React hooks in harbor-web live under src/hooks and are named use<Thing>.",
+        "context": ""
+      },
+      "b": {
+        "id": "web/hooks-folder",
+        "type": "concept",
+        "summary": "Custom React hooks in harbor-web are placed in src/hooks and named use<Thing>.",
+        "context": "Example: useCart."
+      },
+      "d1": {
+        "score": 1.87,
+        "confidence": 0.8,
+        "probabilities": {
+          "different": 0,
+          "related": 0.13,
+          "same": 0.87
+        }
+      }
+    },
+    {
+      "id": "P05",
+      "a": {
+        "id": "web/cart-flaky-test",
+        "type": "module",
+        "summary": "Fixed the flaky cart test by advancing the fake timers.",
+        "context": "The test awaited a fake timer that was never advanced."
+      },
+      "b": {
+        "id": "web/cart-test-timers",
+        "type": "module",
+        "summary": "Cart.test.tsx was flaky because it awaited a fake timer that was never advanced; it now calls advanceTimersByTime.",
+        "context": ""
+      },
+      "d1": {
+        "score": 1.96,
+        "confidence": 0.94,
+        "probabilities": {
+          "different": 0,
+          "related": 0.04,
+          "same": 0.96
+        }
+      }
+    },
+    {
+      "id": "P06",
+      "a": {
+        "id": "team/request-id",
+        "type": "concept",
+        "summary": "A request id created at the edge is forwarded as X-Request-Id from harbor-web through harbor-api and appears in every log line and error envelope.",
+        "context": ""
+      },
+      "b": {
+        "id": "team/trace-header",
+        "type": "concept",
+        "summary": "One X-Request-Id value follows a user action from the web app into the API; it is written to all logs and returned inside error bodies.",
+        "context": "The load balancer adds the header when it is missing."
+      },
+      "d1": {
+        "score": 1.69,
+        "confidence": 0.54,
+        "probabilities": {
+          "different": 0,
+          "related": 0.3,
+          "same": 0.7
+        }
+      }
+    },
+    {
+      "id": "P07",
+      "a": {
+        "id": "infra/deploy-approval",
+        "type": "module",
+        "summary": "Deploys to production require a manual approval in the 'production' GitHub environment.",
+        "context": ""
+      },
+      "b": {
+        "id": "infra/prod-gate",
+        "type": "module",
+        "summary": "Nothing ships to prod from deploy.yml until someone approves the run in the production environment gate.",
+        "context": ""
+      },
+      "d1": {
+        "score": 1.87,
+        "confidence": 0.8,
+        "probabilities": {
+          "different": 0,
+          "related": 0.13,
+          "same": 0.87
+        }
+      }
+    },
+    {
+      "id": "P08",
+      "a": {
+        "id": "billing/event-ledger",
+        "type": "class",
+        "summary": "EventLedger makes webhook handling idempotent by inserting each Stripe event id under a unique constraint.",
+        "context": ""
+      },
+      "b": {
+        "id": "billing/duplicate-deliveries",
+        "type": "concept",
+        "summary": "Duplicate Stripe webhook deliveries are ignored: the event id is written to webhook_events with a unique index, and a conflict short-circuits the handler.",
+        "context": "The class that does this is EventLedger."
+      },
+      "d1": {
+        "score": 1.93,
+        "confidence": 0.9,
+        "probabilities": {
+          "different": 0,
+          "related": 0.07,
+          "same": 0.93
+        }
+      }
+    },
+    {
+      "id": "P09",
+      "a": {
+        "id": "auth/access-token-ttl",
+        "type": "concept",
+        "summary": "Access tokens expire after fifteen minutes.",
+        "context": "Set by ACCESS_TOKEN_TTL in src/auth/config.ts."
+      },
+      "b": {
+        "id": "auth/access-token-lifetime",
+        "type": "concept",
+        "summary": "Access tokens expire after one hour.",
+        "context": "Set by ACCESS_TOKEN_TTL in src/auth/config.ts."
+      },
+      "d1": {
+        "score": 1,
+        "confidence": 1,
+        "probabilities": {
+          "different": 0,
+          "related": 1,
+          "same": 0
+        }
+      }
+    },
+    {
+      "id": "P10",
+      "a": {
+        "id": "auth/password-hashing-old",
+        "type": "function",
+        "summary": "Passwords are hashed with bcrypt in hashPassword.",
+        "context": ""
+      },
+      "b": {
+        "id": "auth/password-hashing",
+        "type": "function",
+        "summary": "hashPassword uses argon2id; older bcrypt hashes are upgraded the next time the user logs in.",
+        "context": ""
+      },
+      "d1": {
+        "score": 1,
+        "confidence": 1,
+        "probabilities": {
+          "different": 0,
+          "related": 1,
+          "same": 0
+        }
+      }
+    },
+    {
+      "id": "P11",
+      "a": {
+        "id": "infra/ci-runners-hosted",
+        "type": "decision",
+        "summary": "CI jobs run on GitHub-hosted runners.",
+        "context": ""
+      },
+      "b": {
+        "id": "infra/ci-runners",
+        "type": "decision",
+        "summary": "CI jobs run on self-hosted runners in the build VPC.",
+        "context": "Moved off hosted runners after the minutes bill grew."
+      },
+      "d1": {
+        "score": 1,
+        "confidence": 1,
+        "probabilities": {
+          "different": 0,
+          "related": 1,
+          "same": 0
+        }
+      }
+    },
+    {
+      "id": "P12",
+      "a": {
+        "id": "migrations/tool",
+        "type": "decision",
+        "summary": "Schema migrations use node-pg-migrate.",
+        "context": ""
+      },
+      "b": {
+        "id": "migrations/tool-atlas",
+        "type": "decision",
+        "summary": "Schema migrations are run with Atlas; the node-pg-migrate scripts were removed.",
+        "context": ""
+      },
+      "d1": {
+        "score": 1,
+        "confidence": 1,
+        "probabilities": {
+          "different": 0,
+          "related": 1,
+          "same": 0
+        }
+      }
+    },
+    {
+      "id": "P13",
+      "a": {
+        "id": "billing/webhook-signature",
+        "type": "function",
+        "summary": "The Stripe webhook endpoint rejects any request whose Stripe-Signature header fails verification, before the body is parsed.",
+        "context": ""
+      },
+      "b": {
+        "id": "billing/event-ledger",
+        "type": "class",
+        "summary": "The Stripe webhook endpoint ignores events it has already handled by recording each event id under a unique constraint.",
+        "context": ""
+      },
+      "d1": {
+        "score": 0.28,
+        "confidence": 0.59,
+        "probabilities": {
+          "different": 0.72,
+          "related": 0.28,
+          "same": 0
+        }
+      }
+    },
+    {
+      "id": "P14",
+      "a": {
+        "id": "web/api-client-csrf",
+        "type": "module",
+        "summary": "apiClient sends the CSRF token in the X-Harbor-CSRF header on every mutating request.",
+        "context": ""
+      },
+      "b": {
+        "id": "web/api-client-401",
+        "type": "module",
+        "summary": "On a 401 response apiClient clears local state and redirects to /login.",
+        "context": ""
+      },
+      "d1": {
+        "score": 0.4,
+        "confidence": 0.4,
+        "probabilities": {
+          "different": 0.6,
+          "related": 0.4,
+          "same": 0
+        }
+      }
+    },
+    {
+      "id": "P15",
+      "a": {
+        "id": "infra/vpc-subnets",
+        "type": "module",
+        "summary": "The vpc module creates private and public subnets in every availability zone.",
+        "context": ""
+      },
+      "b": {
+        "id": "infra/vpc-nat",
+        "type": "module",
+        "summary": "The vpc module gives staging a single NAT gateway and production one NAT gateway per zone.",
+        "context": ""
+      },
+      "d1": {
+        "score": 0.64,
+        "confidence": 0.46,
+        "probabilities": {
+          "different": 0.36,
+          "related": 0.64,
+          "same": 0
+        }
+      }
+    },
+    {
+      "id": "P16",
+      "a": {
+        "id": "conventions/outbound-retry",
+        "type": "concept",
+        "summary": "Outbound HTTP calls retry with backoff.",
+        "context": ""
+      },
+      "b": {
+        "id": "billing/stripe-client-retry",
+        "type": "class",
+        "summary": "The Stripe client in harbor-api retries idempotent requests with jittered exponential backoff and gives up after a few attempts.",
+        "context": ""
+      },
+      "d1": {
+        "score": 0.99,
+        "confidence": 0.94,
+        "probabilities": {
+          "different": 0.02,
+          "related": 0.97,
+          "same": 0.01
+        }
+      }
+    },
+    {
+      "id": "P17",
+      "a": {
+        "id": "auth/refresh-rotation",
+        "type": "function",
+        "summary": "rotateRefreshToken issues a new refresh token on every use and revokes the whole token family when an already-used token is presented.",
+        "context": ""
+      },
+      "b": {
+        "id": "infra/vpc-module",
+        "type": "module",
+        "summary": "The vpc module sets up the subnets and NAT routing for each environment.",
+        "context": ""
+      },
+      "d1": {
+        "score": 0,
+        "confidence": 1,
+        "probabilities": {
+          "different": 1,
+          "related": 0,
+          "same": 0
+        }
+      }
+    },
+    {
+      "id": "P18",
+      "a": {
+        "id": "web/csrf-token",
+        "type": "module",
+        "summary": "The CSRF token is read from the harbor_csrf cookie and sent as a request header.",
+        "context": ""
+      },
+      "b": {
+        "id": "web/design-tokens",
+        "type": "reference",
+        "summary": "Design tokens in tokens.css are generated from the Figma library and must not be edited by hand.",
+        "context": ""
+      },
+      "d1": {
+        "score": 0,
+        "confidence": 1,
+        "probabilities": {
+          "different": 1,
+          "related": 0,
+          "same": 0
+        }
+      }
+    },
+    {
+      "id": "P19",
+      "a": {
+        "id": "auth/session-cookie",
+        "type": "function",
+        "summary": "The session cookie is set with SameSite=Lax so it survives the OAuth redirect.",
+        "context": ""
+      },
+      "b": {
+        "id": "web/checkout-validation",
+        "type": "function",
+        "summary": "Checkout form validation uses zod schemas in src/features/checkout/schema.ts.",
+        "context": ""
+      },
+      "d1": {
+        "score": 0,
+        "confidence": 1,
+        "probabilities": {
+          "different": 1,
+          "related": 0,
+          "same": 0
+        }
+      }
+    },
+    {
+      "id": "P20",
+      "a": {
+        "id": "migrations/file-naming",
+        "type": "concept",
+        "summary": "Database migration files are named <timestamp>_<verb>_<object>.sql and are never edited after merge.",
+        "context": ""
+      },
+      "b": {
+        "id": "web/cart-zustand",
+        "type": "decision",
+        "summary": "Migrated cart state to Zustand after discussing with the team.",
+        "context": ""
+      },
+      "d1": {
+        "score": 0,
+        "confidence": 1,
+        "probabilities": {
+          "different": 1,
+          "related": 0,
+          "same": 0
+        }
+      }
+    },
+    {
+      "id": "P21",
+      "a": {
+        "id": "infra/ci-cache-key",
+        "type": "module",
+        "summary": "The CI dependency cache key includes the lockfile hash.",
+        "context": ""
+      },
+      "b": {
+        "id": "web/static-cache-headers",
+        "type": "module",
+        "summary": "Hashed static assets of the web app are served with a long-lived immutable Cache-Control header.",
+        "context": ""
+      },
+      "d1": {
+        "score": 0.02,
+        "confidence": 0.97,
+        "probabilities": {
+          "different": 0.98,
+          "related": 0.02,
+          "same": 0
+        }
+      }
+    },
+    {
+      "id": "P22",
+      "a": {
+        "id": "billing/stripe-key-env",
+        "type": "reference",
+        "summary": "The Stripe API key is read from an environment variable that the deploy workflow injects from the secret store.",
+        "context": ""
+      },
+      "b": {
+        "id": "web/list-keys",
+        "type": "concept",
+        "summary": "React lists in harbor-web use the record id as the key prop, never the array index.",
+        "context": ""
+      },
+      "d1": {
+        "score": 0,
+        "confidence": 1,
+        "probabilities": {
+          "different": 1,
+          "related": 0,
+          "same": 0
+        }
+      }
+    },
+    {
+      "id": "P23",
+      "a": {
+        "id": "team/on-call-handbook",
+        "type": "reference",
+        "summary": "On-call handbook.",
+        "context": "Link: wiki/on-call. Covers the paging policy."
+      },
+      "b": {
+        "id": "web/design-tokens-ref",
+        "type": "reference",
+        "summary": "Design tokens reference.",
+        "context": "Source is the Figma library 'Harbor UI'."
+      },
+      "d1": {
+        "score": 0,
+        "confidence": 1,
+        "probabilities": {
+          "different": 1,
+          "related": 0,
+          "same": 0
+        }
+      }
+    },
+    {
+      "id": "P24",
+      "a": {
+        "id": "api/rate-limiter",
+        "type": "class",
+        "summary": "RateLimiter is a token bucket keyed by API key and backed by Redis.",
+        "context": ""
+      },
+      "b": {
+        "id": "billing/tax-rate",
+        "type": "function",
+        "summary": "Invoice tax rates are looked up from the customer's billing country when the invoice is drafted.",
+        "context": ""
+      },
+      "d1": {
+        "score": 0,
+        "confidence": 1,
+        "probabilities": {
+          "different": 1,
+          "related": 0,
+          "same": 0
+        }
+      }
+    }
+  ],
+  "placement": {
+    "denReview": [
+      "infra/rotate-staging-password",
+      "auth/password-hashing",
+      "web/cart-test-timers",
+      "infra/tfstate-backend",
+      "infra/ci-runners"
+    ],
+    "denAuto": [
+      "billing/webhook-async",
+      "team/three-repos",
+      "infra/vpc-module",
+      "team/request-id",
+      "conventions/error-envelope",
+      "team/feature-flags"
+    ],
+    "targets": {
+      "auth/password-hashing": "auth/password-hashing-old",
+      "infra/ci-runners": "infra/ci-runners-hosted",
+      "web/cart-test-timers": "web/cart-flaky-test",
+      "infra/tfstate-backend": "infra/tf-remote-state"
+    }
+  }
+}
