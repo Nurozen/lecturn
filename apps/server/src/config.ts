@@ -113,6 +113,11 @@ export class ServerConfig extends Context.Service<
      * handler, so a modified client cannot bypass it.
      */
     readonly staveEnabled: boolean;
+    /**
+     * Hack-day memory demo (`LECTURN_MEMORY_DEMO`, default off): advertises the
+     * `memoryDemo` capability and enables the memory.* RPCs and MCP tools.
+     */
+    readonly memoryDemoEnabled?: boolean;
   }
 >()("lecturn/config/ServerConfig") {
   /** @deprecated Import and use `layerTest` from this module. */

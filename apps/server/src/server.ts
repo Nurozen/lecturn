@@ -77,6 +77,7 @@ import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./provider/Layers/ProviderInstanceRegistryHydration.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
+import * as MemoryDemoStore from "./memoryDemo/MemoryDemoStore.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -482,6 +483,9 @@ const StaveRpcRuntimeLayerLive = StaveRpcHandlers.runtimeLayer.pipe(
   ),
 );
 const ThreadNoteLayerLive = ThreadNoteService.layer.pipe(Layer.provide(PersistenceLayerLive));
+// Memory demo store shared by /ws and /mcp. The real layer gates itself on
+// `memoryDemoEnabled` and is the disabled stub when the flag is off.
+const MemoryDemoLayerLive = MemoryDemoStore.layer;
 const DecisionSettingsLayerLive = DecisionSettingsRepository.layer.pipe(
   Layer.provide(PersistenceLayerLive),
 );
@@ -787,6 +791,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   // isolated route harnesses can also supply its dependencies directly.
   Layer.provide(SagaWorkbenchLayerLive),
   Layer.provide(ThreadNoteLayerLive),
+  Layer.provide(MemoryDemoLayerLive),
   Layer.provide(DecisionLayerLive),
   Layer.provide(ContextualLayerLive),
   Layer.provide(PullRequestWatchLayerLive),

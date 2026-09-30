@@ -1,6 +1,8 @@
 import {
   ArrowLeftIcon,
+  BrainIcon,
   ChartNoAxesColumnIcon,
+  FactoryIcon,
   GitPullRequestIcon,
   SettingsIcon,
 } from "lucide-react";
@@ -11,6 +13,7 @@ import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-ro
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
+import { useFirstMemoryDemoEnvironmentId, useMemoryStatus } from "../../state/memoryDemo";
 import { LecturnWordmark } from "../LecturnWordmark";
 import {
   resolveEnvironmentIdentificationPillLabel,
@@ -108,18 +111,35 @@ function SidebarUtilityItem({
   icon,
   label,
   onClick,
+  badgeCount = 0,
 }: {
   icon: ReactNode;
   label: string;
   onClick: () => void;
+  /** Small count over the icon; hidden at 0. */
+  badgeCount?: number;
 }) {
   return (
     <SidebarMenuItem className="shrink-0">
       <Tooltip>
         <TooltipTrigger
           render={
-            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
+            <SidebarMenuButton
+              aria-label={badgeCount > 0 ? `${label} (${badgeCount})` : label}
+              onClick={onClick}
+              size="icon"
+              className="relative overflow-visible"
+            >
               {icon}
+              {badgeCount > 0 ? (
+                <Badge
+                  size="sm"
+                  aria-hidden
+                  className="pointer-events-none absolute -top-1 -right-1 tabular-nums"
+                >
+                  {badgeCount}
+                </Badge>
+              ) : null}
             </SidebarMenuButton>
           }
         />
@@ -141,9 +161,13 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
           ? "project-settings"
           : location.pathname === "/usage"
             ? "usage"
-            : location.pathname === "/pull-requests"
-              ? "pull-requests"
-              : null,
+            : location.pathname === "/factory"
+              ? "factory"
+              : location.pathname === "/pull-requests"
+                ? "pull-requests"
+                : location.pathname === "/memory"
+                  ? "memory"
+                  : null,
   });
   const { environments } = useEnvironments();
   // The page reads every connected server, so one of them offering pull requests is enough for
@@ -151,6 +175,10 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const pullRequestsSupported = environments.some(
     (environment) => environment.serverConfig?.environment.capabilities.pullRequests === true,
   );
+  const memoryEnvironmentId = useFirstMemoryDemoEnvironmentId();
+  const memoryStatus = useMemoryStatus(memoryEnvironmentId);
+  const pendingMemoryNodes =
+    memoryStatus.data?.pending.reduce((total, entry) => total + entry.count, 0) ?? 0;
   const closeMobileSidebar = useCallback(() => {
     if (isMobile) {
       setOpenMobile(false);
@@ -163,9 +191,21 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
       search: readPullRequestListPreferences(),
     });
   }, [closeMobileSidebar, navigate]);
+  const handleMemoryClick = useCallback(() => {
+    closeMobileSidebar();
+    void navigate({
+      to: "/memory",
+      search: memoryEnvironmentId ? { environmentId: memoryEnvironmentId } : {},
+    });
+  }, [closeMobileSidebar, memoryEnvironmentId, navigate]);
   const handleSettingsClick = useCallback(() => {
     closeMobileSidebar();
     void navigate({ to: "/settings" });
+  }, [closeMobileSidebar, navigate]);
+
+  const handleFactoryClick = useCallback(() => {
+    closeMobileSidebar();
+    void navigate({ to: "/factory", search: {} });
   }, [closeMobileSidebar, navigate]);
 
   const handleUsageClick = useCallback(() => {
@@ -200,11 +240,20 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             label="Settings"
             onClick={handleSettingsClick}
           />
+          <SidebarUtilityItem icon={<FactoryIcon />} label="Factory" onClick={handleFactoryClick} />
           {pullRequestsSupported ? (
             <SidebarUtilityItem
               icon={<GitPullRequestIcon />}
               label="Pull Requests"
               onClick={handlePullRequestsClick}
+            />
+          ) : null}
+          {memoryEnvironmentId ? (
+            <SidebarUtilityItem
+              icon={<BrainIcon />}
+              label="Memory"
+              onClick={handleMemoryClick}
+              badgeCount={pendingMemoryNodes}
             />
           ) : null}
           <SidebarUtilityItem
