@@ -17,14 +17,17 @@ Crusoe bills usage to the account that owns the key.
 
 ## Add Crusoe
 
-1. Open **Settings** > **Providers** and select the environment.
-2. Choose **Add provider** (the + button), then choose **Crusoe**.
-3. Keep the label **Crusoe** or enter your own.
-4. On the last step, paste your API key.
-5. Choose **Add instance**.
+Crusoe is always listed in **Settings** > **Providers**, below OpenCode, and starts out disabled.
 
-Add the instance from the web or desktop app. The mobile app cannot add provider instances, but
-once the instance exists you can use Crusoe models from web, desktop, and mobile.
+1. Open **Settings** > **Providers**, select the environment, and select **Crusoe**.
+2. Under **Environment**, paste your API key into `CRUSOE_API_KEY`.
+3. Turn Crusoe on.
+
+To add a second Crusoe account, choose **Add provider** (the + button), choose **Crusoe**, give it
+its own label, and paste that account's key on the last step.
+
+Set Crusoe up from the web or desktop app. The mobile app cannot configure provider instances, but
+once Crusoe is set up you can use its models from web, desktop, and mobile.
 
 ## What the instance contains
 
@@ -36,8 +39,8 @@ The Crusoe instance is an OpenCode instance with two environment variables:
 | `OPENCODE_CONFIG_CONTENT` | `{"enabled_providers":["crusoe"]}` | Limits this instance to Crusoe models only |
 
 Lecturn stores the API key as a secret and never sends it back to clients. You can view and edit
-both variables in the instance's environment variables section. Removing the instance removes the
-key.
+both variables in the instance's environment variables section. Resetting Crusoe, or removing an
+added Crusoe instance, removes the key.
 
 ## Models
 

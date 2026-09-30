@@ -32,12 +32,11 @@ import { ProviderSettingsForm, deriveProviderSettingsFields } from "./ProviderSe
 import { AnimatedHeight } from "../AnimatedHeight";
 import {
   ADD_PROVIDER_WIZARD_STEPS,
-  CRUSOE_PRESET,
-  buildCrusoeProviderInstance,
   resolveWizardNavigation,
   type WizardNavigation,
 } from "./AddProviderInstanceDialog.logic";
 import { AddProviderInstanceWizardSteps } from "./AddProviderInstanceWizardSteps";
+import { CRUSOE_PRESET, buildCrusoeProviderInstance } from "./crusoePreset";
 
 const PROVIDER_ACCENT_SWATCHES = [
   "#2563eb",
