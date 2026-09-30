@@ -67,6 +67,7 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
+import { CRUSOE_PRESET, UNCONFIGURED_CRUSOE_INSTANCE } from "./crusoePreset";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { UsageProviderSettings } from "./UsageProviderSettings";
 import { ProviderSetupSection, readAntigravityAuthMethod } from "./ProviderSetupSection";
@@ -685,6 +686,19 @@ export function EnvironmentProviderSettings({
       if (id === defaultInstanceId) continue;
       rows.push({ instanceId: id, instance, driver: instance.driver, isDefault: false });
     }
+    // Crusoe is an OpenCode preset, but it keeps a standing row like the
+    // built-in drivers. The first edit saves it as a regular instance.
+    if (
+      driver === CRUSOE_PRESET.driver &&
+      settings.providerInstances?.[CRUSOE_PRESET.instanceId] === undefined
+    ) {
+      rows.push({
+        instanceId: CRUSOE_PRESET.instanceId,
+        instance: UNCONFIGURED_CRUSOE_INSTANCE,
+        driver,
+        isDefault: false,
+      });
+    }
   }
   for (const [driver, list] of instancesByDriver) {
     if (visibleDriverKinds.has(driver)) continue;
@@ -825,6 +839,7 @@ export function EnvironmentProviderSettings({
       favorite.provider === row.instanceId ? Result.succeed(favorite.model) : Result.failVoid,
     );
     const resetLabel = driverOption?.label ?? String(row.driver);
+    const isCrusoeSlot = row.instanceId === CRUSOE_PRESET.instanceId;
 
     return (
       <ProviderInstanceCard
@@ -868,7 +883,7 @@ export function EnvironmentProviderSettings({
           );
         }}
         onDelete={
-          mode === "editor" && !row.isDefault
+          mode === "editor" && !row.isDefault && !isCrusoeSlot
             ? () => deleteProviderInstance(row.instanceId)
             : undefined
         }
@@ -877,6 +892,13 @@ export function EnvironmentProviderSettings({
             <SettingResetButton
               label={`${resetLabel} provider settings`}
               onClick={() => resetDefaultInstance(row.driver)}
+            />
+          ) : mode === "editor" &&
+            isCrusoeSlot &&
+            settings.providerInstances?.[row.instanceId] !== undefined ? (
+            <SettingResetButton
+              label={`${CRUSOE_PRESET.label} provider settings`}
+              onClick={() => deleteProviderInstance(row.instanceId)}
             />
           ) : null
         }
