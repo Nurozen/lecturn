@@ -14,7 +14,7 @@ import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hook
 import { cn } from "../../lib/utils";
 import { normalizeProviderAccentColor } from "../../providerInstances";
 import { Button } from "../ui/button";
-import { ACPRegistryIcon, Gemini, PiAgentIcon, type Icon } from "../Icons";
+import { ACPRegistryIcon, CrusoeIcon, Gemini, PiAgentIcon, type Icon } from "../Icons";
 import {
   Dialog,
   DialogDescription,
@@ -36,6 +36,7 @@ import {
   type WizardNavigation,
 } from "./AddProviderInstanceDialog.logic";
 import { AddProviderInstanceWizardSteps } from "./AddProviderInstanceWizardSteps";
+import { CRUSOE_PRESET, buildCrusoeProviderInstance } from "./crusoePreset";
 
 const PROVIDER_ACCENT_SWATCHES = [
   "#2563eb",
@@ -71,6 +72,20 @@ const INSTANCE_ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 const DEFAULT_DRIVER_OPTION = DRIVER_OPTIONS[0]!;
 const EMPTY_CONFIG_DRAFT: Record<string, unknown> = {};
+
+interface DriverChoice {
+  readonly value: string;
+  readonly label: string;
+  readonly icon: Icon;
+  readonly badgeLabel?: string;
+}
+
+// Real drivers plus presets that configure one of them, such as Crusoe on OpenCode.
+const DRIVER_CHOICES: readonly DriverChoice[] = [
+  ...DRIVER_OPTIONS,
+  { value: CRUSOE_PRESET.value, label: CRUSOE_PRESET.label, icon: CrusoeIcon },
+];
+
 interface ComingSoonDriverOption {
   readonly value: ProviderDriverKind;
   readonly label: string;
@@ -128,6 +143,8 @@ export function AddProviderInstanceDialog({
 
   const [wizardStep, setWizardStep] = useState(0);
   const [driver, setDriver] = useState<ProviderDriverKind>(DEFAULT_DRIVER_KIND);
+  const [isCrusoe, setIsCrusoe] = useState(false);
+  const [crusoeApiKey, setCrusoeApiKey] = useState("");
   const [label, setLabel] = useState("");
   const [accentColor, setAccentColor] = useState<string>("");
   const [instanceIdOverride, setInstanceIdOverride] = useState<string | null>(null);
@@ -144,15 +161,19 @@ export function AddProviderInstanceDialog({
   );
 
   const driverOption = DRIVER_OPTION_BY_VALUE[driver] ?? DEFAULT_DRIVER_OPTION;
-  const instanceId = instanceIdOverride ?? deriveInstanceId(driver, label);
+  const choiceLabel = isCrusoe ? CRUSOE_PRESET.label : driverOption.label;
+  const effectiveLabel = label.trim() || (isCrusoe ? CRUSOE_PRESET.label : "");
+  const instanceId = instanceIdOverride ?? deriveInstanceId(driver, effectiveLabel);
   const driverSettingsFields = useMemo(
     () => deriveProviderSettingsFields(driverOption),
     [driverOption],
   );
   const instanceIdError = validateInstanceId(instanceId, existingIds);
   const showInstanceIdError = hasAttemptedSubmit && instanceIdError !== null;
-  const previewLabel = label.trim() || `${driverOption.label} Workspace`;
-  const wizardStepSummaries = [driverOption.label, previewLabel, null] as const;
+  const previewLabel = effectiveLabel || `${driverOption.label} Workspace`;
+  const wizardStepSummaries = [choiceLabel, previewLabel, null] as const;
+  const crusoeApiKeyError =
+    isCrusoe && crusoeApiKey.trim().length === 0 ? "Paste your Crusoe API key." : null;
 
   const configDraft = configByDriver[driver] ?? EMPTY_CONFIG_DRAFT;
   const setConfigDraft = (config: Record<string, unknown> | undefined) => {
@@ -190,13 +211,20 @@ export function AddProviderInstanceDialog({
     const hasConfig = Object.keys(config).length > 0;
     const normalizedAccentColor = normalizeProviderAccentColor(accentColor);
 
-    const nextInstance: ProviderInstanceConfig = {
-      driver,
-      enabled: true,
-      ...(label.trim().length > 0 ? { displayName: label.trim() } : {}),
-      ...(normalizedAccentColor ? { accentColor: normalizedAccentColor } : {}),
-      ...(hasConfig ? { config } : {}),
-    };
+    const nextInstance: ProviderInstanceConfig | null = isCrusoe
+      ? buildCrusoeProviderInstance({
+          apiKey: crusoeApiKey,
+          displayName: effectiveLabel,
+          ...(normalizedAccentColor ? { accentColor: normalizedAccentColor } : {}),
+        })
+      : {
+          driver,
+          enabled: true,
+          ...(label.trim().length > 0 ? { displayName: label.trim() } : {}),
+          ...(normalizedAccentColor ? { accentColor: normalizedAccentColor } : {}),
+          ...(hasConfig ? { config } : {}),
+        };
+    if (nextInstance === null) return;
     // `ProviderInstanceId.make` revalidates the slug; we've already checked
     // it via `validateInstanceId`, but going through the brand constructor
     // keeps the type boundary honest and guards against any future drift in
@@ -211,7 +239,7 @@ export function AddProviderInstanceDialog({
       toastManager.add({
         type: "success",
         title: "Provider instance added",
-        description: `${driverOption.label} instance '${instanceId}' was added.`,
+        description: `${choiceLabel} instance '${instanceId}' was added.`,
       });
       onOpenChange(false);
     } catch (error) {
@@ -251,12 +279,16 @@ export function AddProviderInstanceDialog({
                   Driver
                 </div>
                 <RadioGroup
-                  value={driver}
-                  onValueChange={(value) => setDriver(ProviderDriverKind.make(value))}
+                  value={isCrusoe ? CRUSOE_PRESET.value : driver}
+                  onValueChange={(value) => {
+                    const choseCrusoe = value === CRUSOE_PRESET.value;
+                    setIsCrusoe(choseCrusoe);
+                    setDriver(choseCrusoe ? CRUSOE_PRESET.driver : ProviderDriverKind.make(value));
+                  }}
                   aria-labelledby="add-instance-driver-label"
                   className="grid grid-cols-1 gap-2 sm:grid-cols-2"
                 >
-                  {DRIVER_OPTIONS.map((option) => {
+                  {DRIVER_CHOICES.map((option) => {
                     const IconComponent = option.icon;
                     return (
                       <RadioPrimitive.Root
@@ -313,7 +345,7 @@ export function AddProviderInstanceDialog({
                 <span className="text-xs font-medium text-foreground">Label</span>
                 <Input
                   className="bg-background"
-                  placeholder="e.g. Work"
+                  placeholder={isCrusoe ? CRUSOE_PRESET.label : "e.g. Work"}
                   value={label}
                   onChange={(event) => setLabel(event.target.value)}
                 />
@@ -389,7 +421,28 @@ export function AddProviderInstanceDialog({
                 </span>
               </div>
 
-              {driverSettingsFields.length > 0 ? (
+              {isCrusoe ? (
+                <label className={cn("grid gap-2", wizardStep !== 2 && "hidden")}>
+                  <span className="text-xs font-medium text-foreground">Crusoe API key</span>
+                  <Input
+                    className="bg-background font-mono"
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={crusoeApiKey}
+                    onChange={(event) => setCrusoeApiKey(event.target.value)}
+                    aria-invalid={hasAttemptedSubmit && crusoeApiKeyError !== null}
+                  />
+                  {hasAttemptedSubmit && crusoeApiKeyError !== null ? (
+                    <span className="text-[11px] text-destructive">{crusoeApiKeyError}</span>
+                  ) : (
+                    <span className="text-[11px] text-muted-foreground">
+                      Create one in the Crusoe console under API keys. Stored as a secret; Crusoe
+                      models run through OpenCode.
+                    </span>
+                  )}
+                </label>
+              ) : driverSettingsFields.length > 0 ? (
                 <div className={cn("grid gap-4", wizardStep !== 2 && "hidden")}>
                   <ProviderSettingsForm
                     definition={driverOption}
