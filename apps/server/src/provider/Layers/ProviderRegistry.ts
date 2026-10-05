@@ -121,8 +121,19 @@ const shouldRetainMissingProviderModels = (provider: ServerProvider): boolean =>
   const isPendingInitialProbe =
     provider.enabled && !provider.installed && provider.status === "warning";
   const didInstalledProviderProbeFail = provider.installed && provider.status === "error";
+  // A failed shell or provider detection republishes the previous snapshot as a
+  // warning, and the next attempt republishes it again as detecting, so neither
+  // carries an authoritative inventory.
+  const isDetectionUnresolved =
+    provider.status === "warning" &&
+    (provider.discovery?.status === "detecting" ||
+      provider.discovery?.status === "timed-out" ||
+      provider.discovery?.status === "error");
   return (
-    isPendingAntigravityAuthentication || isPendingInitialProbe || didInstalledProviderProbeFail
+    isPendingAntigravityAuthentication ||
+    isPendingInitialProbe ||
+    didInstalledProviderProbeFail ||
+    isDetectionUnresolved
   );
 };
 

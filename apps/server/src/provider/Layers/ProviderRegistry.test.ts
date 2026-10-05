@@ -829,6 +829,26 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           mergeProviderSnapshot(previousProvider, refreshedProvider).skills,
           previousProvider.skills,
         );
+
+        // A failed detection republishes the emptied snapshot as a warning, and the
+        // next attempt republishes it again as detecting before it probes.
+        const afterRefreshFailure = mergeProviderSnapshot(previousProvider, refreshedProvider);
+        for (const discovery of [
+          { status: "timed-out", phase: "shell" },
+          { status: "detecting", phase: "shell" },
+          { status: "detecting", phase: "provider" },
+        ] as const) {
+          const merged = mergeProviderSnapshot(afterRefreshFailure, {
+            ...refreshedProvider,
+            status: "warning",
+            slashCommands: [],
+            skills: [],
+            discovery,
+          });
+          assert.deepStrictEqual(merged.models, [...previousProvider.models]);
+          assert.deepStrictEqual(merged.slashCommands, previousProvider.slashCommands);
+          assert.deepStrictEqual(merged.skills, previousProvider.skills);
+        }
       });
 
       it("classifies pending, logout, uninstall, and reconnect OpenCode inventories", () => {
@@ -1010,12 +1030,110 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           }
         });
 
+        it("keeps discovered models when detection fails after a failed probe", () => {
+          const timedOutProbe = {
+            ...failedProvider,
+            discovery: { status: "timed-out", phase: "provider" },
+          } satisfies ServerProvider;
+          const afterProbeTimeout = mergeProviderSnapshot(cachedProvider, timedOutProbe);
+          assert.deepStrictEqual(afterProbeTimeout.models, [customModel, ...cachedProvider.models]);
+
+          for (const discovery of [
+            { status: "timed-out", phase: "shell" },
+            { status: "error", phase: "shell" },
+            { status: "timed-out", phase: "provider" },
+            { status: "error", phase: "provider" },
+          ] as const) {
+            // The managed provider republishes its own previous snapshot as a warning.
+            const afterDetectionFailure = mergeProviderSnapshot(afterProbeTimeout, {
+              ...timedOutProbe,
+              checkedAt: "2026-09-04T19:03:00.000Z",
+              status: "warning",
+              discovery,
+            });
+            assert.deepStrictEqual(afterDetectionFailure.models, [
+              customModel,
+              ...cachedProvider.models,
+            ]);
+            assert.deepStrictEqual(
+              mergeProviderSnapshot(afterDetectionFailure, {
+                ...refreshedProvider,
+                discovery: { status: "ready", phase: "provider" },
+              }).models,
+              refreshedProvider.models,
+            );
+          }
+        });
+
+        it("keeps discovered models while detection is retried after a failed detection", () => {
+          const timedOutProbe = {
+            ...failedProvider,
+            discovery: { status: "timed-out", phase: "provider" },
+          } satisfies ServerProvider;
+          const failedDetection = {
+            ...timedOutProbe,
+            checkedAt: "2026-09-04T19:03:00.000Z",
+            status: "warning",
+            discovery: { status: "timed-out", phase: "shell" },
+          } satisfies ServerProvider;
+          const afterDetectionFailure = mergeProviderSnapshot(
+            mergeProviderSnapshot(cachedProvider, timedOutProbe),
+            failedDetection,
+          );
+          assert.deepStrictEqual(afterDetectionFailure.models, [
+            customModel,
+            ...cachedProvider.models,
+          ]);
+
+          for (const phase of ["shell", "provider"] as const) {
+            // The next attempt republishes the failed snapshot as detecting before it probes.
+            const whileDetecting = mergeProviderSnapshot(afterDetectionFailure, {
+              ...failedDetection,
+              discovery: { status: "detecting", phase },
+            });
+            assert.deepStrictEqual(whileDetecting.models, [customModel, ...cachedProvider.models]);
+            assert.deepStrictEqual(
+              mergeProviderSnapshot(whileDetecting, {
+                ...failedDetection,
+                discovery: { status: "error", phase },
+              }).models,
+              [customModel, ...cachedProvider.models],
+            );
+            assert.deepStrictEqual(
+              mergeProviderSnapshot(whileDetecting, {
+                ...refreshedProvider,
+                discovery: { status: "ready", phase: "provider" },
+              }).models,
+              refreshedProvider.models,
+            );
+          }
+        });
+
         it("clears discovered models after sign-out, disable, uninstall, or empty discovery", () => {
           const emptyProvider = { ...refreshedProvider, models: [customModel] };
           const clearedProviders = [
             { ...emptyProvider, status: "error", auth: { status: "unauthenticated" } },
             { ...emptyProvider, status: "disabled", enabled: false },
             { ...emptyProvider, status: "error", installed: false, auth: { status: "unknown" } },
+            {
+              ...emptyProvider,
+              status: "error",
+              installed: false,
+              auth: { status: "unknown" },
+              discovery: { status: "error", phase: "provider" },
+            },
+            {
+              ...emptyProvider,
+              status: "warning",
+              auth: { status: "unauthenticated" },
+              discovery: { status: "timed-out", phase: "shell" },
+            },
+            {
+              ...emptyProvider,
+              status: "warning",
+              auth: { status: "unauthenticated" },
+              discovery: { status: "detecting", phase: "shell" },
+            },
             emptyProvider,
             { ...emptyProvider, models: [] },
           ] satisfies ReadonlyArray<ServerProvider>;
@@ -1104,7 +1222,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           }).pipe(
             Effect.provide(
               ServerConfig.layerTest(process.cwd(), {
-                prefix: "lecturnx-retired-model-cache-",
+                prefix: "lecturn-codex-retired-model-cache-",
               }).pipe(Layer.provideMerge(NodeServices.layer)),
             ),
           ),
@@ -1207,6 +1325,25 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             { ...emptyProvider, status: "disabled", enabled: false },
             { ...emptyProvider, status: "error", enabled: false },
             { ...emptyProvider, status: "error", installed: false, auth: { status: "unknown" } },
+            {
+              ...emptyProvider,
+              status: "error",
+              installed: false,
+              auth: { status: "unknown" },
+              discovery: { status: "error", phase: "provider" },
+            },
+            {
+              ...emptyProvider,
+              status: "warning",
+              auth: { status: "unauthenticated" },
+              discovery: { status: "timed-out", phase: "shell" },
+            },
+            {
+              ...emptyProvider,
+              status: "warning",
+              auth: { status: "unauthenticated" },
+              discovery: { status: "detecting", phase: "shell" },
+            },
             emptyProvider,
           ] satisfies ReadonlyArray<ServerProvider>;
 
