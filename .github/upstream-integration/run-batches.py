@@ -592,8 +592,18 @@ Explain the actual failed job/log evidence; do not use ci_retry to dismiss a sou
             cwd = (repo / check['cwd']).resolve()
             require(cwd == repo or repo in cwd.parents, 'Check cwd escapes worktree')
             require(check['argv'] and all(isinstance(x, str) for x in check['argv']), 'Invalid check command')
-            command(check['argv'], cwd, log=folder / f'{prefix}-check-{index}.log', lock_fd=self.lock_fd,
-                    env=check_env(repo, cwd))
+            log = folder / f'{prefix}-check-{index}.log'
+            first = command(check['argv'], cwd, log=log, lock_fd=self.lock_fd, env=check_env(repo, cwd),
+                            allow_failure=True)
+            if first.returncode:
+                # One retry absorbs load-sensitive timeouts while agents share the machine. The failed
+                # attempt is kept and recorded for the reviewers; a second failure still blocks.
+                failed_log = folder / f'{prefix}-check-{index}.attempt1.log'
+                log.replace(failed_log)
+                command(check['argv'], cwd, log=log, lock_fd=self.lock_fd, env=check_env(repo, cwd))
+                with (folder / f'{prefix}-check-flakes.jsonl').open('a') as flakes:
+                    flakes.write(json.dumps({'index': index, 'argv': check['argv'], 'cwd': check['cwd'],
+                                             'first_exit': first.returncode, 'failed_log': str(failed_log)}) + '\n')
         require(staged_tree(repo, m['expected_head'], m['merge_parent']) == tree, 'Checks changed reviewed tree')
         review_prompt = f"""Fresh independent review. Read AGENTS.md, {folder}/RESOLUTION_GUIDE.md and {folder}/manifest.json.
 You are one bounded leaf reviewer in the controller-orchestrated review process. Inspect source directly; do not launch
@@ -603,6 +613,8 @@ Review entire git diff {m['review_base']} to staged tree {tree}; do not trust bu
 Inspect upstream intent, clean semantic merges, conflict resolutions and fork-only consumers.
 Cover correctness, security, test adequacy, performance, collateral effects and API/migrations; adversarially verify findings.
 Inspect {folder}/{prefix}-builder.json and controller check logs for exact tree. Require focused behavioral tests where applicable.
+Checks that failed once and passed on the controller's single retry are listed in {folder}/{prefix}-check-flakes.jsonl
+(failed attempt logs kept); judge whether each failure is load-related or a real intermittent defect in this change.
 This is staged pre-PR review: hosted CI is expected to be pending and is not a prerequisite for staged approval.
 The controller requires successful hosted CI on the exact head after publication before it can merge.
 Verify before/after evidence applicability, authenticity and accessibility when UI behavior changes; mark ui_evidence_valid false if missing.

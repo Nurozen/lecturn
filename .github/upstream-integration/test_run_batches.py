@@ -547,6 +547,40 @@ class GitSafetyTests(unittest.TestCase):
         self.assertEqual(m['phase'], 'building')
         self.assertIn('add the missing before/after evidence', m['feedback'])
 
+    def flaky_check(self, failures):
+        counter = Path(self.temp.name) / f'flaky-{failures}'
+        code = (f"import pathlib,sys; p=pathlib.Path({str(counter)!r}); n=int(p.read_text()) if p.exists() else 0; "
+                f"p.write_text(str(n+1)); sys.exit(1 if n < {failures} else 0)")
+        return {'argv': [sys.executable, '-c', code], 'cwd': '.'}
+
+    def test_check_failing_once_is_retried_and_recorded(self):
+        runner, m, build, approved = self.staged_review_fixture()
+        build = dict(build, checks=[self.flaky_check(1)])
+        runner.agent = Mock(side_effect=[build, approved, approved])
+        runner.build_review(self.folder, m)
+        self.assertEqual(m['phase'], 'reviewed')
+        flakes = [json.loads(line) for line in (self.folder / 'round-1-check-flakes.jsonl').read_text().splitlines()]
+        self.assertEqual([(f['index'], f['first_exit']) for f in flakes], [(0, 1)])
+        self.assertTrue((self.folder / 'round-1-check-0.attempt1.log').exists())
+        self.assertTrue((self.folder / 'round-1-check-0.log').exists())
+        self.assertIn('check-flakes.jsonl', runner.agent.call_args_list[1].args[3])
+
+    def test_check_failing_twice_still_blocks(self):
+        runner, m, build, approved = self.staged_review_fixture()
+        build = dict(build, checks=[self.flaky_check(2)])
+        runner.agent = Mock(side_effect=[build, approved, approved])
+        with self.assertRaisesRegex(batches.Blocked, 'Command failed'):
+            runner.build_review(self.folder, m)
+        self.assertNotEqual(m['phase'], 'reviewed')
+        self.assertEqual(runner.agent.call_count, 1)
+
+    def test_passing_check_records_no_flake(self):
+        runner, m, build, approved = self.staged_review_fixture()
+        runner.agent = Mock(side_effect=[build, approved, approved])
+        runner.build_review(self.folder, m)
+        self.assertEqual(m['phase'], 'reviewed')
+        self.assertFalse((self.folder / 'round-1-check-flakes.jsonl').exists())
+
     def test_rewritten_accepted_ancestry_is_rejected(self):
         with self.assertRaisesRegex(batches.Blocked, 'Accepted ancestry'):
             batches.check_selection(self.repo, self.base, self.base, self.target, self.target, 10, 100)
