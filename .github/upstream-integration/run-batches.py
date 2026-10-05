@@ -638,6 +638,9 @@ transient infrastructure failure that should be rerun. Otherwise return ci_retry
                 return
             require(review['verdict'] in ('approve', 'changes'), 'Invalid review verdict')
             reviews.append(review)
+        # Who judges UI evidence: every reviewer, except that when the verifier refutes a `changes`
+        # candidate and the holistic review approves, the holistic review speaks for it.
+        evidence_judges = reviews
         if any(review['verdict'] == 'changes' for review in reviews):
             verifier = self.agent(repo, folder, prefix + '-adversarial-verifier', review_prompt +
                 '\nIndependently verify each candidate below against source and baseline. Reject pre-existing/unreachable issues. '
@@ -665,15 +668,16 @@ transient infrastructure failure that should be rerun. Otherwise return ci_retry
                 self.retain_blocked_review(folder, m, prefix + '-holistic', holistic)
                 return
             require(holistic['verdict'] == 'approve', holistic['findings'])
+            evidence_judges = [review for review in reviews if review['verdict'] == 'approve'] + [holistic]
             reviews.append(holistic)
-        gaps = [review for review in reviews if review['ui_evidence_valid'] is not True]
+        gaps = [review for review in evidence_judges if review['ui_evidence_valid'] is not True]
         if gaps:
             # Evidence must satisfy every reviewer; a gap is a bounded repair round (max_rounds still
             # applies), never an approval and never a dead stop.
             m['feedback'] = ('Source approved, but UI evidence was not accepted by every reviewer. Keep the staged '
                              'source unless a real defect is found; add the missing before/after evidence with SHA-256 '
                              'receipts, or state concretely why a change cannot be captured.\n\n'
-                             + '\n\n'.join(review['findings'] for review in gaps))
+                             + '\n\n'.join(review['findings'] for review in gaps if review['findings'].strip()))
             self.save(folder, m)
             return
         m.update(phase='reviewed', tree=tree, build=build, reviews=reviews)

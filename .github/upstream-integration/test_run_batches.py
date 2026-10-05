@@ -521,6 +521,32 @@ class GitSafetyTests(unittest.TestCase):
             runner.build_review(self.folder, m)
         self.assertNotIn('reviews', m)
 
+    def refuted_candidate(self, approved):
+        return dict(approved, verdict='changes', ui_evidence_valid=False, findings='Suspected regression')
+
+    def test_refuted_candidate_cedes_evidence_judgement_to_holistic(self):
+        runner, m, build, approved = self.staged_review_fixture()
+        runner.agent = Mock(side_effect=[build, approved, self.refuted_candidate(approved), approved, approved])
+        runner.build_review(self.folder, m)
+        self.assertEqual(m['phase'], 'reviewed')
+
+    def test_approving_reviewer_evidence_gap_still_counts_on_holistic_path(self):
+        runner, m, build, approved = self.staged_review_fixture()
+        gap = dict(approved, ui_evidence_valid=False, findings='Banner wrap has no before/after pair.')
+        runner.agent = Mock(side_effect=[build, gap, self.refuted_candidate(approved), approved, approved])
+        runner.build_review(self.folder, m)
+        self.assertEqual(m['phase'], 'building')
+        self.assertIn(gap['findings'], m['feedback'])
+        self.assertNotIn('Suspected regression', m['feedback'])
+
+    def test_holistic_evidence_gap_without_findings_still_repairs(self):
+        runner, m, build, approved = self.staged_review_fixture()
+        runner.agent = Mock(side_effect=[build, approved, self.refuted_candidate(approved), approved,
+                                        dict(approved, ui_evidence_valid=False, findings='')])
+        runner.build_review(self.folder, m)
+        self.assertEqual(m['phase'], 'building')
+        self.assertIn('add the missing before/after evidence', m['feedback'])
+
     def test_rewritten_accepted_ancestry_is_rejected(self):
         with self.assertRaisesRegex(batches.Blocked, 'Accepted ancestry'):
             batches.check_selection(self.repo, self.base, self.base, self.target, self.target, 10, 100)
