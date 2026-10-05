@@ -29,6 +29,7 @@ import {
 } from "./model.ts";
 import * as RpcSession from "../rpc/session.ts";
 import { safeErrorLogAttributes } from "../errors/safeLog.ts";
+import { NETWORK_BLOCKING_HINT } from "../errors/network.ts";
 import * as ConnectionWakeups from "./wakeups.ts";
 
 const RETRY_DELAYS_MS = [3_000, 4_000, 8_000, 16_000] as const;
@@ -260,6 +261,12 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
   // `retarget` keeps the environment and the target kind, so only the rest of
   // the target (label, owning account) can differ from the entry given here.
   const currentTarget = () => SubscriptionRef.getUnsafe(currentEntry).target;
+  const setupTimeoutDetail = () => {
+    const target = currentTarget();
+    return `${target.label} did not respond during connection setup.${
+      target._tag === "RelayConnectionTarget" ? ` ${NETWORK_BLOCKING_HINT}` : ""
+    }`;
+  };
 
   const connectivity = yield* Connectivity.Connectivity;
   const driver = yield* ConnectionDriver.ConnectionDriver;
@@ -690,7 +697,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
       } else {
         replacementError = new ConnectionTransientError({
           reason: "timeout",
-          detail: `${currentTarget().label} did not respond during connection setup.`,
+          detail: setupTimeoutDetail(),
         });
       }
 
@@ -773,7 +780,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         failure: {
           error: new ConnectionTransientError({
             reason: "timeout",
-            detail: `${currentTarget().label} did not respond during connection setup.`,
+            detail: setupTimeoutDetail(),
           }),
           attemptSpan: Option.none(),
         },

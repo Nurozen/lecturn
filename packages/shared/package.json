@@ -290,6 +290,10 @@
     "./decisionEvidence": {
       "types": "./src/decisionEvidence.ts",
       "import": "./src/decisionEvidence.ts"
+    },
+    "./hostClassification": {
+      "types": "./src/hostClassification.ts",
+      "import": "./src/hostClassification.ts"
     }
   },
   "scripts": {
