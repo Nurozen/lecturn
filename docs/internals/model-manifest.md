@@ -1,15 +1,17 @@
 # Model manifest
 
-`apps/server/src/provider/model-manifest.json` is bundled for offline startup and fetched from
-`main` at runtime. A remote fetch replaces the in-memory and on-disk cache only after generic
-catalog references and provider-owned adapter data validate. A failed or invalid fetch keeps the
-last successful remote manifest. The bundle is used when no valid remote cache exists, or when
-the bundle's `updatedAt` is later than the cached manifest's, so a release that edits the manifest
-takes effect before the next successful fetch. Bump `updatedAt` whenever you edit the file.
+The [bundled manifest](../../apps/server/src/provider/model-manifest.json) allows
+offline startup; fetching it from `main` lets model metadata change between
+releases. Failed fetches or invalid data preserve the last usable manifest.
+Remote data must pass both catalog-reference validation and the owning provider's
+adapter validation before replacing the cache.
 
-The top-level provider catalog is generic: models contain presentation metadata, aliases, status,
-an optional badge, and a reusable capability profile. The profile and model `adapter` fields are
-opaque until the owning provider validates them with its own allowlisted schema.
+A newer bundle outranks the cached remote manifest by `updatedAt`, so a release can
+correct model data before the next successful fetch. Bump `updatedAt` whenever the
+file changes. Fetch time cannot establish which copy contains the newer edit.
+
+Generic catalog data describes presentation and capabilities. Each provider owns
+its adapter schema and dispatch mappings.
 
 Claude Code discovers models through the Agent SDK initialization response, using the configured
 CLI and account without submitting a prompt. Runtime model IDs, aliases, and reported capabilities
@@ -24,10 +26,10 @@ use the same merged catalog, while custom model identifiers remain opaque.
 
 For supplemental Claude metadata, add an object to `providers.claudeAgent.models` using an existing
 profile where possible. Add or change a profile only when the required capability combination does
-not already exist. Ordinary model-data changes do not require tests or application code changes.
+not already exist.
 
-`currentModels.claudeAgent` is retained as a frozen compatibility field for releases that predate
-catalog discovery. New Claude models do not need to be added there. All `currentModels` lists are compatibility
+`currentModels.claudeAgent` is frozen for releases that predate catalog discovery.
+Do not extend it when adding Claude models. All `currentModels` lists are compatibility
 metadata for older clients; new clients do not interpret absence from a list as legacy.
 
 Runtime-discovered models remain visible by default. Only a matching entry in
@@ -37,23 +39,6 @@ Claude, Codex, and Antigravity discover availability from their runtimes, so new
 a manifest update to appear. Older clients retain their previous classification behavior
 until updated.
 
-Claude model entries support:
-
-- `aliases`, `status`, `badge`, and `profile` for client presentation and selection.
-- `adapter.claudeCode.minVersion` and `maxVersionExclusive` for installed-runtime compatibility.
-- Profile-level effort mappings, model suffixes, and context-window metadata for dispatch.
-
-## Test policy
-
-Changing model data does not require tests. Do not add or update tests for a model slug, display
-name, alias, legacy status, version boundary, badge, or profile assignment. The bundled manifest is
-configuration and is validated by its schema when imported.
-
-Add tests only when implementation behavior changes:
-
-- Fetching, caching, fallback, or schema-version handling changes in the manifest service.
-- Provider-neutral profile resolution gains new semantics.
-- A provider adapter gains a new compatibility or dispatch mapping type.
-
-Resolver tests must use synthetic providers and model names so normal JSON edits never create test
-churn.
+Model data is schema-validated configuration. Tests should cover resolver, cache,
+and adapter semantics with synthetic model names, so adding a model never requires
+tests that repeat the configuration.

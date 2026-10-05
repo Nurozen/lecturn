@@ -9,7 +9,7 @@ optional mobile notifications and Live Activities.
 
 The relay is intentionally not in the hot path for normal Lecturn traffic. After a client connects,
 regular API and WebSocket traffic goes directly between that client and the selected environment.
-See the [Lecturn Connect architecture overview](../../docs/internals/lecturn-connect-auth-flow.html) for the larger system
+See the [Lecturn Connect architecture note](../../docs/internals/lecturn-connect.md) for the larger system
 design.
 
 ## Responsibilities
@@ -167,11 +167,9 @@ and hosted web builds.
 
 See:
 
-- [Lecturn Connect Clerk Setup](../../docs/internals/lecturn-connect.md) for Clerk keys, JWT templates, and sign-up restrictions
-  setup.
+- [Lecturn Connect setup](../../docs/operations/connect-setup.md) for Clerk keys, JWT templates, and sign-up restrictions.
 - [Relay Observability](../../docs/operations/relay-observability.md) for deployment tracing and diagnostics.
-- [Lecturn Connect Architecture Overview](../../docs/internals/lecturn-connect-auth-flow.html) for the full link,
-  connect, endpoint, and notification flows.
+- [Lecturn Connect architecture](../../docs/internals/lecturn-connect.md) for environment linking and trust boundaries.
 
 ## Multi-account push rollout
 

@@ -6,3 +6,6 @@ patches/*.patch -whitespace
 
 # Third-party license texts are stored verbatim (the SIL OFL has trailing spaces).
 licenses/*.txt -whitespace
+# Batch files need CRLF for cmd.exe to parse them reliably.
+*.cmd text eol=crlf
+*.bat text eol=crlf

@@ -246,6 +246,7 @@ import {
   type TransferBudgetRun,
   transferBudgetViolations,
 } from "../integration/TransferBudgetReport.integration.ts";
+import { symlinksSupported } from "@lecturn/shared/testing/symlinks";
 
 const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
@@ -2028,11 +2029,17 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       });
       const beforeOpenPath = path.join(staticDir, "before-open.txt");
       const afterOpenPath = path.join(staticDir, "after-open.txt");
+      const afterOpenSnapshotPath = path.join(staticDir, "after-open-snapshot.txt");
+      const windowsHost = HostProcessPlatform.defaultValue() === "win32";
       const original = "original bytes";
       const replacement = "replacement bytes with a different size";
       for (const filePath of [beforeOpenPath, afterOpenPath]) {
         yield* fileSystem.writeFileString(filePath, original);
         yield* fileSystem.writeFileString(`${filePath}.next`, replacement);
+      }
+      if (windowsHost) {
+        // Windows cannot replace an open destination, so model the race with its original handle.
+        yield* fileSystem.writeFileString(afterOpenSnapshotPath, original);
       }
       const replaced = new Set<string>();
       const replaceOnce = Effect.fnUntraced(function* (filePath: string) {
@@ -2050,7 +2057,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             ),
         open: (filePath, options) =>
           fileSystem
-            .open(filePath, options)
+            .open(
+              filePath === afterOpenPath && windowsHost ? afterOpenSnapshotPath : filePath,
+              options,
+            )
             .pipe(
               Effect.tap(() => (filePath === afterOpenPath ? replaceOnce(filePath) : Effect.void)),
             ),
@@ -8076,7 +8086,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );
 
-  it.effect("preserves structured workspace rpc failures", () =>
+  it.effect.skipIf(!symlinksSupported)("preserves structured workspace rpc failures", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
