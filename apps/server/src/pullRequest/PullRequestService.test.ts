@@ -1010,10 +1010,12 @@ it.effect("refuses an action the host never claimed it could run", () =>
   }),
 );
 
-it.effect("publishes a successful merge for immediate settlement", () =>
+it.effect("publishes a merge for immediate settlement only after host confirmation", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const mergedAt = "2026-09-03T02:00:00.000Z";
+      let state: "open" | "merged" = "open";
+      let confirmationFails = false;
       const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
       const service = yield* makeService({
         projects: [
@@ -1021,7 +1023,17 @@ it.effect("publishes a successful merge for immediate settlement", () =>
         ],
         providers: [
           fakeProvider("github", {
-            runAction: () => TestClock.setTime(Date.parse(mergedAt)),
+            getChangeRequestSummary: () =>
+              confirmationFails
+                ? Effect.fail(
+                    new PullRequestProviderError({
+                      provider: "github",
+                      operation: "getChangeRequestSummary",
+                      reason: "failed",
+                      detail: "HTTP 504",
+                    }),
+                  )
+                : Effect.succeed({ ...changeRequest(1, mergedAt), state }),
           }),
         ],
       });
@@ -1030,6 +1042,13 @@ it.effect("publishes a successful merge for immediate settlement", () =>
         Effect.forkChild({ startImmediately: true }),
       );
 
+      // Queueing succeeds while the host still reports an open PR.
+      yield* service.runAction({ ...reference, action: "merge" });
+      confirmationFails = true;
+      yield* service.runAction({ ...reference, action: "merge" });
+      confirmationFails = false;
+      state = "merged";
+      yield* TestClock.setTime(Date.parse(mergedAt));
       yield* service.runAction({
         ...reference,
         repository: " ACME/WEB ",
@@ -1971,6 +1990,7 @@ it.effect("refuses a merge strategy the host does not offer", () =>
             review: FULL_REVIEW,
             reviewers: FULL_REVIEWERS,
           },
+          getChangeRequestSummary: () => Effect.succeed(changeRequest(1, "2026-07-02T00:00:00Z")),
           runAction: (input) => {
             ranWith = input.mergeMethod ?? "merge";
             return Effect.void;
@@ -4069,6 +4089,8 @@ it.effect(
                 permissions.push(cwd);
                 return hostedChangeRequest("").viewerPermissions;
               }),
+            getChangeRequestSummary: () =>
+              Effect.succeed(changeRequest(42, "2026-07-02T00:00:00Z")),
             runAction: (input) =>
               Effect.sync(() => {
                 writes.push(input);
@@ -4205,6 +4227,8 @@ it.effect(
         "detail:/spaces/task/services/api",
         "permissions:/spaces/task/services/api",
         "merge:/spaces/task/services/api",
+        // The merge is confirmed against the same checkout.
+        "detail:/spaces/task/services/api",
       ]);
     }),
 );
@@ -4330,6 +4354,7 @@ it.effect(
               listed.push(cwd);
               return Effect.succeed({ items: [], truncated: false, continues: false });
             },
+            getChangeRequestSummary: () => Effect.succeed(changeRequest(1, "2026-07-02T00:00:00Z")),
             runAction: ({ cwd }) =>
               Effect.sync(() => {
                 acted.push(cwd);
@@ -4371,6 +4396,7 @@ it.effect("refuses a hostless mutation even when one of the matching hosts is un
       projects: [space],
       providers: [
         fakeProvider("github", {
+          getChangeRequestSummary: () => Effect.succeed(changeRequest(1, "2026-07-02T00:00:00Z")),
           runAction: () =>
             Effect.sync(() => {
               writes += 1;
@@ -4503,6 +4529,7 @@ it.effect("deduplicates normalized editable checkout aliases before selecting PR
             listed.push(repository);
             return Effect.succeed({ items: [], truncated: false, continues: false });
           },
+          getChangeRequestSummary: () => Effect.succeed(changeRequest(1, "2026-07-02T00:00:00Z")),
           runAction: ({ cwd }) =>
             Effect.sync(() => {
               acted.push(cwd);
@@ -4611,6 +4638,9 @@ it.effect("keeps same-named Azure repositories distinct across projects on one h
         "detail:/spaces/task/orders/api",
         "merge:/spaces/task/payments/api",
         "merge:/spaces/task/orders/api",
+        // Each merge is confirmed against its own repository.
+        "detail:/spaces/task/payments/api",
+        "detail:/spaces/task/orders/api",
       ].toSorted(),
     );
   }),
@@ -4653,9 +4683,11 @@ it.effect(
       yield* service.detail(canonical);
       assert.strictEqual(reads, 2);
       yield* service.runAction({ ...legacy, action: "merge" });
+      // The merge confirmation reads the host once without caching.
+      assert.strictEqual(reads, 3);
       yield* service.summary(canonical);
       yield* service.summary(legacy);
-      assert.strictEqual(reads, 4);
+      assert.strictEqual(reads, 5);
     }),
 );
 

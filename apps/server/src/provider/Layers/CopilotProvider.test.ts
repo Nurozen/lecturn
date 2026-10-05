@@ -200,6 +200,38 @@ describe("buildInitialCopilotProviderSnapshot", () => {
       expect(snapshot.conversationFork).toBe("unsupported");
     }),
   );
+
+  it.effect("surfaces a custom model entry's name and capabilities", () =>
+    Effect.gen(function* () {
+      const capabilities = {
+        optionDescriptors: [
+          {
+            id: "effort",
+            label: "Reasoning",
+            type: "select" as const,
+            options: [{ id: "high", label: "High", isDefault: true }],
+          },
+        ],
+      };
+      const snapshot = yield* buildInitialCopilotProviderSnapshot(
+        decodeSettings({
+          enabled: true,
+          customModels: ["my-model", { slug: "named", name: "Named", capabilities }],
+        }),
+      );
+      expect(snapshot.models.map((model) => model.slug)).toEqual(["auto", "my-model", "named"]);
+      expect(snapshot.models.find((model) => model.slug === "my-model")).toMatchObject({
+        name: "my-model",
+        isCustom: true,
+        capabilities: { optionDescriptors: [] },
+      });
+      expect(snapshot.models.find((model) => model.slug === "named")).toMatchObject({
+        name: "Named",
+        isCustom: true,
+        capabilities,
+      });
+    }),
+  );
 });
 
 it.layer(NodeServices.layer)("checkCopilotProviderStatus", (it) => {

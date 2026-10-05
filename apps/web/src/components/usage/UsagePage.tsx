@@ -1,4 +1,5 @@
 import { AccountSurface } from "../AccountSurface";
+import { useAtomValue } from "@effect/atom-react";
 import type { UsageProviderKind } from "@lecturn/contracts";
 import { CheckIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -7,7 +8,7 @@ import type { DailyTotals, HourlyTotals } from "@lecturn/shared/usageMerge";
 
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
-import { usePrimaryEnvironmentId } from "../../state/environments";
+import { environmentPresentations } from "../../state/presentation";
 import { serverEnvironment } from "../../state/server";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -37,6 +38,7 @@ import {
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { UsageLimitsSection } from "./UsageLimits";
+import { UsagePriceOverrides } from "./UsagePriceOverrides";
 import { UsageProviderChart, type UsageChartMetric } from "./UsageProviderChart";
 import { PROVIDER_ORDER, PROVIDER_PRESENTATION, providersWithUsage } from "./usageProviders";
 
@@ -69,7 +71,7 @@ export function UsagePage() {
   const { days: windowDays, window } = windowSelection;
   const isPast24Hours = windowDays === 1;
   const { merged, environments, isPending, isPartial, refresh } = useUsage(window);
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const presentations = useAtomValue(environmentPresentations.presentationsAtom);
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
   });
@@ -115,12 +117,11 @@ export function UsagePage() {
     });
   };
   const refreshWindow = () => {
-    // On Limits the button re-probes every provider (and usage-limit source)
-    // on the primary environment; the live snapshots then flow in over the
-    // config stream, so nothing else needs to move.
     if (showingLimits) {
-      if (primaryEnvironmentId) {
-        void refreshProviders({ environmentId: primaryEnvironmentId, input: {} });
+      for (const [environmentId, presentation] of presentations) {
+        if (presentation.connection.phase === "connected" && presentation.serverConfig !== null) {
+          void refreshProviders({ environmentId, input: {} });
+        }
       }
       return;
     }
@@ -265,6 +266,11 @@ export function UsagePage() {
 
         <ScrollArea className="min-h-0 flex-1">
           <WorkspacePageContainer width="wide">
+            {!showingLimits ? (
+              <div className="flex justify-end">
+                <UsagePriceOverrides usage={environments} />
+              </div>
+            ) : null}
             {showingLimits ? (
               <UsageLimitsSection />
             ) : settling ? (

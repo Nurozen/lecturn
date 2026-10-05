@@ -105,8 +105,7 @@ describe("ssh tunnel scripts", () => {
 
     assert.include(script, "LECTURN_NODE_SCRIPT_PATH=''");
     assert.include(script, 'exec lecturn "$@"');
-    assert.include(script, "exec npx --yes 'lecturn@latest' \"$@\"");
-    assert.include(script, "exec npm exec --yes 'lecturn@latest' -- \"$@\"");
+    assert.include(script, 'exec "$LECTURN_CLI_PATH" "$@"');
     assert.include(script, "could not install 'lecturn@latest'");
     assert.include(script, "require_installed_lecturn_cli npx --yes --package 'lecturn@latest'");
     assert.include(
@@ -144,11 +143,6 @@ describe("ssh tunnel scripts", () => {
       packageSpec: "lecturn@nightly; touch /tmp/lecturn-owned",
     });
 
-    assert.include(script, "exec npx --yes 'lecturn@nightly; touch /tmp/lecturn-owned' \"$@\"");
-    assert.include(
-      script,
-      "exec npm exec --yes 'lecturn@nightly; touch /tmp/lecturn-owned' -- \"$@\"",
-    );
     assert.include(
       script,
       "require_installed_lecturn_cli npx --yes --package 'lecturn@nightly; touch /tmp/lecturn-owned'",

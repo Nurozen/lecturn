@@ -1,6 +1,7 @@
 import * as NodeOS from "node:os";
 
 import {
+  type CustomModelSetting,
   type GithubCopilotSettings,
   type ModelCapabilities,
   type ServerProvider,
@@ -72,7 +73,7 @@ const COPILOT_AUTO_MODEL_ENTRY: ServerProviderModel = {
 };
 
 function copilotModels(
-  customModels: ReadonlyArray<string> | undefined,
+  customModels: ReadonlyArray<CustomModelSetting> | undefined,
   discovered: ReadonlyArray<ServerProviderModel> = [],
 ): ReadonlyArray<ServerProviderModel> {
   return providerModelsFromSettings(
