@@ -8,6 +8,7 @@ import {
   matchesLinkedPullRequestUrl,
   openPullRequestLink,
   parseChangeRequestUrl,
+  pullRequestCandidateUrlFromReferenceAutolink,
   PullRequestLinkOpenError,
   shouldOpenPullRequestExternally,
 } from "./openPullRequestLink";
@@ -128,6 +129,29 @@ describe("changeRequestRepositoryUrl", () => {
         "https://gitlab.example.test/group/pull/123/repo/-/merge_requests/42",
       ),
     ).toBe("https://gitlab.example.test/group/pull/123/repo");
+  });
+});
+
+describe("pullRequestCandidateUrlFromReferenceAutolink", () => {
+  it("turns GitHub's shared issue route into a pull request candidate", () => {
+    expect(
+      pullRequestCandidateUrlFromReferenceAutolink(
+        "https://github.com/Nurozen/lecturn/issues/8600#issuecomment-1",
+      ),
+    ).toBe("https://github.com/Nurozen/lecturn/pull/8600#issuecomment-1");
+  });
+
+  it("does not reinterpret other issue hosts or malformed references", () => {
+    expect(
+      pullRequestCandidateUrlFromReferenceAutolink(
+        "https://gitlab.com/Nurozen/lecturn/-/issues/8600",
+      ),
+    ).toBeNull();
+    expect(
+      pullRequestCandidateUrlFromReferenceAutolink(
+        "https://github.com/Nurozen/lecturn/issues/not-a-number",
+      ),
+    ).toBeNull();
   });
 });
 

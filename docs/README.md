@@ -11,6 +11,7 @@
 - [Forking threads](./user/forking-threads.md)
 - [Importing sessions](./user/importing-sessions.md)
 - [Review usage](./user/usage.md)
+- [Anonymous usage data](./user/telemetry.md)
 - [Customize a project icon](./user/project-settings.md)
 - [Mobile appearance](./user/mobile-appearance.md)
 - [Environment themes](./user/environment-theme.md)

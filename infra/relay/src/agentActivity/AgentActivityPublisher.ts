@@ -69,7 +69,9 @@ export const make = Effect.gen(function* () {
     readonly nowMs: number;
   }) {
     yield* Effect.annotateCurrentSpan({ "user.id": input.deliveryUser.userId });
-    const activeStates = yield* rows.listForUser({ userId: input.deliveryUser.userId });
+    const activeStates = input.deliveryUser.liveActivitiesEnabled
+      ? yield* rows.listForUser({ userId: input.deliveryUser.userId })
+      : [];
     const liveActivityAggregate = input.deliveryUser.liveActivitiesEnabled
       ? makeAggregateState({
           activeStates,

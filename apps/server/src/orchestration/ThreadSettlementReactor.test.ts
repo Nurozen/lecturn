@@ -427,6 +427,7 @@ describe("ThreadSettlementReactor", () => {
         const fixture = yield* makeHarness({
           snapshot: makeSnapshot([
             makeThread("merged-in-app", {
+              latestUserMessageAt: "2026-08-27T00:00:00.000Z",
               linkedPullRequest: {
                 projectId: PROJECT_ID,
                 repository: "owner/repository",
@@ -434,7 +435,10 @@ describe("ThreadSettlementReactor", () => {
                 url: "https://example.test/owner/repository/pull/42",
               },
             }),
-            makeThread("slow-periodic-lookup", { branch: "another-feature" }),
+            makeThread("slow-periodic-lookup", {
+              branch: "another-feature",
+              latestUserMessageAt: "2026-08-27T00:00:00.000Z",
+            }),
           ]),
           branchPullRequest: () =>
             Ref.updateAndGet(branchLookupCount, (count) => count + 1).pipe(
@@ -479,7 +483,12 @@ describe("ThreadSettlementReactor", () => {
           const state = yield* Ref.make<"open" | "merged">("open");
           const mergedThreadSettled = yield* Deferred.make<void>();
           const fixture = yield* makeHarness({
-            snapshot: makeSnapshot([makeThread("branch-thread", { branch: "saved-feature" })]),
+            snapshot: makeSnapshot([
+              makeThread("branch-thread", {
+                branch: "saved-feature",
+                latestUserMessageAt: "2026-08-27T00:00:00.000Z",
+              }),
+            ]),
             branchPullRequest: () =>
               Ref.get(state).pipe(
                 Effect.map((pullRequestState) => ({ state: pullRequestState, updatedAt: NOW })),
@@ -519,6 +528,7 @@ describe("ThreadSettlementReactor", () => {
         const fixture = yield* makeHarness({
           snapshot: makeSnapshot([
             makeThread("merged-in-app", {
+              latestUserMessageAt: "2026-08-27T00:00:00.000Z",
               linkedPullRequest: {
                 projectId: PROJECT_ID,
                 repository: "owner/repository",
@@ -527,6 +537,7 @@ describe("ThreadSettlementReactor", () => {
               },
             }),
             makeThread("unrelated-linked", {
+              latestUserMessageAt: "2026-08-27T00:00:00.000Z",
               linkedPullRequest: {
                 projectId: PROJECT_ID,
                 repository: "owner/repository",
@@ -702,7 +713,10 @@ describe("ThreadSettlementReactor", () => {
         const fixture = yield* makeHarness({
           snapshot: makeSnapshot(
             [
-              makeThread("missing-own-project", { linkedPullRequest }),
+              makeThread("missing-own-project", {
+                latestUserMessageAt: "2026-08-27T00:00:00.000Z",
+                linkedPullRequest,
+              }),
               makeThread("missing-branch-project", { branch: "saved-feature" }),
             ],
             [makeProject(LINKED_PROJECT_ID, "/workspace/linked")],
@@ -929,6 +943,80 @@ describe("Stave saga settlement", () => {
       }).pipe(Effect.provide(harness.layer));
     }),
   );
+});
+
+describe("Stave inactivity settlement", () => {
+  const linkedPullRequest = {
+    projectId: PROJECT_ID,
+    repository: "owner/repository",
+    number: 42,
+    url: "https://github.com/owner/repository/pull/42",
+  };
+  for (const scenario of [
+    { name: "keeps an idle live space active while its PR is open", stave: true, expected: 0 },
+    {
+      name: "keeps an idle live space active while an explicit linked PR is open",
+      stave: true,
+      branch: "merged",
+      linkedOpen: true,
+      expected: 0,
+    },
+    {
+      name: "settles an idle live space that has no PR",
+      stave: true,
+      branch: null,
+      expected: 1,
+    },
+    { name: "settles an idle ordinary thread whose PR is open", stave: false, expected: 1 },
+  ] as const) {
+    it.effect(scenario.name, () =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const project: OrchestrationProjectShell = {
+          ...makeProject(),
+          ...(scenario.stave
+            ? {
+                stave: {
+                  spaceId: "s",
+                  isSaga: false,
+                  repos: [{ name: "repo", path: "repo", mode: "edit" }],
+                  memories: [],
+                  state: "live",
+                  primaryRepoPath: "/workspace/project/repo",
+                  primaryBranch: "stave/s/repo",
+                },
+              }
+            : {}),
+        };
+        const branchState = "branch" in scenario ? scenario.branch : "open";
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot(
+            [
+              makeThread("idle", {
+                branch: "stave/s/repo",
+                ...("linkedOpen" in scenario ? { linkedPullRequest } : {}),
+              }),
+            ],
+            [project],
+          ),
+          // Defaults: settle after three idle days; the thread has been idle for eight.
+          settings: DEFAULT_SERVER_SETTINGS,
+          branchPullRequest: () =>
+            Effect.succeed(
+              branchState === null
+                ? null
+                : { state: branchState, updatedAt: "2026-08-19T00:00:00.000Z" },
+            ),
+        });
+        yield* Effect.gen(function* () {
+          const reactor = yield* ThreadSettlementReactor.ThreadSettlementReactor;
+          yield* startHarness(reactor, fixture.activation, fixture.snapshotReads);
+          assert.strictEqual((yield* Ref.get(fixture.commands)).length, scenario.expected);
+          assert.strictEqual((yield* Ref.get(fixture.branchCalls)).length, 1);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    );
+  }
 });
 
 describe("Stave multi-repo settlement", () => {
