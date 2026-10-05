@@ -2381,6 +2381,21 @@ export const make = Effect.gen(function* () {
     Math.max(turnRefreshEpoch, refEpochs.get(refScope(ref)) ?? 0);
   const refCacheKey = (ref: PullRequestRef) =>
     JSON.stringify([refEpoch(ref), ref.projectId, ref.repository, ref.number, ref.host ?? null]);
+  // Counts belong to a PR, not a filtered page. Background reads and filter changes reuse
+  // them; explicit refreshes, mutations, and turns strand old and in-flight results.
+  const statsCacheKey = (key: string) => JSON.stringify([listingsEpoch, key]);
+  const recentStats = new Map<
+    string,
+    { readonly at: number; readonly value: PullRequestDiffStat }
+  >();
+  const recordStats = (key: string, value: PullRequestDiffStat, at: number) => {
+    recentStats.delete(key);
+    recentStats.set(key, { at, value });
+    if (recentStats.size > REF_EPOCH_CAPACITY) {
+      const oldest = recentStats.keys().next().value;
+      if (oldest !== undefined) recentStats.delete(oldest);
+    }
+  };
   const bumpRefEpoch = (ref: PullRequestRef) => {
     const scope = refScope(ref);
     if (!refEpochs.has(scope) && refEpochs.size >= REF_EPOCH_CAPACITY) {
@@ -2431,13 +2446,15 @@ export const make = Effect.gen(function* () {
   const summary: PullRequestService["Service"]["summary"] = (input, options) => {
     const key = refCacheKey(input);
     const cached = Cache.get(summaryCache, key);
-    if (options?.recoverTransientFailure !== false) {
-      return lastGoodSummary.serveHeld(key, cached, "reuse");
-    }
     const held = lastGoodSummary.peek(key);
-    return held?.state === "merged"
+    return held !== undefined &&
+      (options?.recoverTransientFailure !== false || held.state === "merged")
       ? Effect.succeed(held)
-      : cached.pipe(Effect.tap((value) => lastGoodSummary.record(key, value)));
+      : cached.pipe(
+          Effect.tap((value) =>
+            shouldReplaceHeldSummary(key, value) ? lastGoodSummary.record(key, value) : Effect.void,
+          ),
+        );
   };
 
   // Keys serialize positionally and parse back in the lookup, so the cache is the only holder
@@ -2520,6 +2537,7 @@ export const make = Effect.gen(function* () {
 
   const detailCache = yield* Cache.makeWith(
     (key: string) => {
+      const statsKey = statsCacheKey(key);
       const [, projectId, repository, number, host] = JSON.parse(key) as [
         number,
         string,
@@ -2532,7 +2550,24 @@ export const make = Effect.gen(function* () {
         repository,
         number,
         ...(host === null ? {} : { host }),
-      } as PullRequestRef);
+      } as PullRequestRef).pipe(
+        Effect.tap(
+          Effect.fn("PullRequestService.recordDetailStats")(function* (value: PullRequestDetail) {
+            recordStats(
+              statsKey,
+              {
+                projectId: value.projectId,
+                ...(value.host ? { host: value.host } : {}),
+                repository: value.repository,
+                number: value.number,
+                additions: value.additions,
+                deletions: value.deletions,
+              },
+              yield* Clock.currentTimeMillis,
+            );
+          }),
+        ),
+      );
     },
     {
       capacity: DETAIL_CACHE_CAPACITY,
@@ -2643,6 +2678,9 @@ export const make = Effect.gen(function* () {
       input.cursor ?? null,
       input.commit ?? null,
       input.host ?? null,
+      input.commit === undefined
+        ? (lastGoodSummary.peek(refCacheKey(input))?.updatedAt ?? null)
+        : null,
     ]);
     return staleDiff(key, Cache.get(diffCache, key));
   };
@@ -2651,7 +2689,7 @@ export const make = Effect.gen(function* () {
     (key: string) => {
       const [, refs] = JSON.parse(key) as [
         number,
-        ReadonlyArray<[string, string, number, string | null]>,
+        ReadonlyArray<[string, string, number, string | null, number]>,
       ];
       return listStatsUncached({
         refs: refs.map(([projectId, repository, number, host]) => ({
@@ -2660,27 +2698,59 @@ export const make = Effect.gen(function* () {
           number,
           ...(host === null ? {} : { host }),
         })),
-      } as unknown as PullRequestListStatsInput);
+      } as unknown as PullRequestListStatsInput).pipe(
+        Effect.flatMap((result) =>
+          Clock.currentTimeMillis.pipe(Effect.map((at) => ({ result, at }))),
+        ),
+      );
     },
     {
       capacity: LIST_STATS_CACHE_CAPACITY,
       timeToLive: (exit) => (Exit.isSuccess(exit) ? LIST_STATS_CACHE_TTL : Duration.zero),
     },
   );
-  // The stats read leans on the host's search API — the scarcest limit of them all — so it
-  // shares between clients like every other read. Refs are sorted so one page's worth of rows
-  // is one key however the client assembled them, and the listings epoch rides along so the
-  // refresh that forgets the listing forgets its decorations with it.
-  const listStats: PullRequestService["Service"]["listStats"] = (input) => {
-    if (input.refs.length === 0) return Effect.succeed({ stats: [] });
-    const key = JSON.stringify([
+  const statsBatchKey = (refs: Iterable<PullRequestRef>) =>
+    JSON.stringify([
       listingsEpoch,
-      input.refs
-        .map((ref) => [ref.projectId, ref.repository, ref.number, ref.host ?? null] as const)
+      [...refs]
+        .map(
+          (ref) =>
+            [ref.projectId, ref.repository, ref.number, ref.host ?? null, refEpoch(ref)] as const,
+        )
         .toSorted((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
     ]);
-    return Cache.get(listStatsCache, key);
-  };
+  // Exact batches share in-flight reads; overlapping pages reuse each row already fetched.
+  const listStats: PullRequestService["Service"]["listStats"] = Effect.fn(
+    "PullRequestService.listStats",
+  )(function* (input: PullRequestListStatsInput) {
+    if (input.refs.length === 0) return { stats: [] };
+    const now = yield* Clock.currentTimeMillis;
+    const held: PullRequestDiffStat[] = [];
+    const missing = new Map<string, PullRequestRef>();
+    for (const ref of input.refs) {
+      const key = statsCacheKey(refCacheKey(ref));
+      const cached = recentStats.get(key);
+      if (cached !== undefined && now - cached.at < Duration.toMillis(LIST_STATS_CACHE_TTL)) {
+        held.push(cached.value);
+      } else {
+        missing.set(key, ref);
+      }
+    }
+    if (missing.size === 0) return { stats: held };
+    const key = statsBatchKey(missing.values());
+    const { result, at } = yield* Cache.get(listStatsCache, key);
+    for (const [key, ref] of missing) {
+      const stat = result.stats.find(
+        (stat) =>
+          stat.projectId === ref.projectId &&
+          (ref.host === undefined || stat.host === ref.host.trim().toLowerCase()) &&
+          stat.repository.toLowerCase() === ref.repository.toLowerCase() &&
+          stat.number === ref.number,
+      );
+      if (stat !== undefined) recordStats(key, stat, at);
+    }
+    return { stats: [...held, ...result.stats] };
+  });
 
   const invalidate: PullRequestService["Service"]["invalidate"] = (input) => {
     const reference = input.reference;

@@ -285,6 +285,7 @@ import {
 
 <script>
   import { fetchLatestRelease, RELEASES_URL, type ReleaseAsset } from "../lib/releases";
+  import { startHomeMotion } from "../lib/homeMotion";
 
   type Platform = { os: "mac" | "win" | "linux"; label: string };
 
@@ -350,26 +351,13 @@ import {
 
   init();
 
-  // Marks lean a few pixels toward the pointer, each by its own depth.
+  // Lecturn's page has no endorsement carousel, so the motion runs without one.
   const hero = document.querySelector<HTMLElement>(".hero");
   const field = document.querySelector<HTMLElement>(".hero-float");
-  const fine = window.matchMedia("(pointer: fine) and (prefers-reduced-motion: no-preference)").matches;
-  if (hero && field && fine) {
-    let raf = 0;
-    let nx = 0;
-    let ny = 0;
-    const apply = () => {
-      raf = 0;
-      field.style.setProperty("--px", `${(nx * 18).toFixed(1)}px`);
-      field.style.setProperty("--py", `${(ny * 14).toFixed(1)}px`);
-    };
-    hero.addEventListener("pointermove", (e) => {
-      const r = hero.getBoundingClientRect();
-      nx = ((e.clientX - r.left) / r.width - 0.5) * 2;
-      ny = ((e.clientY - r.top) / r.height - 0.5) * 2;
-      if (!raf) raf = requestAnimationFrame(apply);
-    });
-    hero.addEventListener("pointerleave", () => { nx = 0; ny = 0; if (!raf) raf = requestAnimationFrame(apply); });
+  const endorsements = document.querySelector<HTMLElement>(".endorsement-carousel");
+  const caret = document.querySelector<HTMLElement>(".caret");
+  if (hero && field && caret) {
+    startHomeMotion({ hero, field, endorsements, caret });
   }
 </script>
 
@@ -545,8 +533,8 @@ import {
   /* Floating harness marks. Six points on an ellipse around the hero copy:
      two small at the top, two high and wide, two low and close. Symmetric,
      and none of them touch the screenshot. Each mark flies in from its own
-     side on load, then drifts on its own period, and the whole set leans a
-     few pixels toward the pointer. */
+     side on load, then drifts on its own period while visible, and the whole
+     set leans a few pixels toward the pointer. */
   .hero-float {
     position: absolute;
     inset: 0;
@@ -564,7 +552,7 @@ import {
     height: var(--s);
     margin-left: calc(var(--s) / -2);
     translate: calc(var(--px) * var(--depth)) calc(var(--py) * var(--depth));
-    transition: translate 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
+    transition: translate var(--parallax-duration, 0s) cubic-bezier(0.2, 0.7, 0.2, 1);
   }
 
   .hero-float-card {
@@ -581,6 +569,7 @@ import {
     animation:
       mark-in 1s cubic-bezier(0.2, 0.7, 0.2, 1) var(--d) both,
       mark-drift var(--dur) ease-in-out calc(var(--d) + 1s) infinite;
+    animation-play-state: running, var(--home-motion-state, paused);
   }
 
   .hero-float-card img {
@@ -613,7 +602,7 @@ import {
 
   @media (prefers-reduced-motion: reduce) {
     .hero-float-card { animation: none; transform: rotate(var(--rot)); }
-    .hero-float-mark { transition: none; }
+    .hero-float-mark { translate: none; transition: none; }
   }
 
   @media (max-width: 1180px) {
@@ -1004,6 +993,11 @@ import {
     background: var(--fg);
     margin-left: 4px;
     animation: blink 1s steps(2) infinite;
+    animation-play-state: var(--home-motion-state, paused);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .caret { animation: none; }
   }
 
   .open-pitch {
