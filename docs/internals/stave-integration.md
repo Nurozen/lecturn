@@ -770,7 +770,7 @@ Archived list rows carry `archivedAt` (the entry directory's mtime) and, for sag
 
 - [Glossary](./glossary.md) — Stave space, Saga, Den, Stave operation
 - [Stave spaces (user guide)](../user/stave.md)
-- [Workspace layout](./workspace-layout.md)
+- [Development runbook](../operations/development.md)
 - [Lecturn releases (fork)](../operations/lecturn-release.md)
 
 ## Sagas (Phase 5)

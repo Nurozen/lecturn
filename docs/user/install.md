@@ -1,72 +1,72 @@
 # Install Lecturn
 
-Lecturn is a web and desktop GUI for running coding agents on your machine.
+Lecturn runs coding agents on your computer and lets you control them from its
+desktop, web, or mobile app. Set up the machine where the agents will work first.
 
 ## Requirements
 
-Node.js `^22.16 || ^23.11 || >=24.10` on the machine that runs the Lecturn server.
+Command-line use, SSH hosts, and WSL backends need Node.js 22.16+ (22.x), 23.11+
+(23.x), or 24.10 and later. The native desktop app includes its server runtime.
 
-At least one provider runtime, installed and authenticated. You can install Antigravity from
-Lecturn settings. See [Providers](#providers) below.
+You need an installed, authenticated provider before starting a thread. You can
+launch Lecturn and configure providers afterwards.
 
 ## Choose an installation
 
 Start with the [Lecturn installation guide](./lecturn-installation.md) for desktop downloads,
 mobile access, and runtime distribution. The standalone CLI command is `lecturn`.
 
-If the web or desktop app shows "Lecturn could not load", check your connection and select
-**Reload** to try again.
-
-## Open a project in the desktop app
-
-When the Lecturn desktop app is running on the same machine, open the current directory with:
-
-```bash
-lecturn app
-```
-
-Pass a path to open another directory:
-
-```bash
-lecturn app ../my-project
-```
-
-The command adds the directory as a project when needed, focuses the desktop app, and opens a new
-thread. It does not launch the desktop app, open a browser, or start a Lecturn server. A background
-server does not count as the desktop app. The command also rejects SSH sessions because a remote
-shell cannot focus a local desktop window. The CLI package and the running desktop app must both
-include `lecturn app` support.
-
-## Desktop App
+## Desktop app
 
 Download a Lecturn installer from [GitHub Releases](https://github.com/Nurozen/lecturn/releases).
 
 ### Windows Subsystem for Linux
 
-When the desktop app runs a WSL backend, it installs the matching server runtime into
-`~/.lecturn/wsl-runtime` inside the selected distro. The first launch after installing or updating Lecturn may take a little longer while that release's runtime is extracted. Later launches reuse the
-Linux-local copy so startup does not depend on reading application files through `/mnt/c`. After a
-successful launch, Lecturn keeps the current runtime and one previous runtime for rollback and
-removes older caches automatically. If a cached runtime stops working, Lecturn launches from the
-application files under `/mnt/c` instead and reinstalls the runtime on the next launch.
+Choose a WSL distro in **Settings → Connections** to run agents and projects
+there. Install Node.js and provider CLIs inside that distro. Lecturn installs its
+matching server runtime there automatically; the first launch after an app
+update can take longer.
+
+### Open a project from a terminal
+
+With the desktop app already running on the same machine:
+
+```bash
+lecturn app
+```
+
+This opens a new thread for the current directory, adding the project if needed.
+Pass a path, such as `lecturn app ../my-project`, to open another directory. It requires
+the desktop app, so a standalone server or an SSH session is not enough. If the
+command cannot reach the app, start or update the desktop app and try again.
+
+## Mobile app
+
+The phone connects to a server on another machine. See the
+[Lecturn installation guide](./lecturn-installation.md#iphone-and-ipad) for how to get the mobile app, then follow
+[remote access](./remote-access.md) to link it through Lecturn Connect or a pairing URL.
 
 ## Providers
 
-Lecturn uses provider runtimes but does not bundle them. Install and authenticate each
-provider's CLI, or use Lecturn's managed setup for Antigravity.
+Open **Settings → Providers** in the web or desktop app, select the environment,
+and enable the provider you want. Installation, login, and configuration belong
+to that environment's machine, even when you connect from a phone or another
+computer.
 
-| Provider       | CLI                                                                                                        | Default binary     | Log in with                        |
-| -------------- | ---------------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------- |
-| Codex          | [Codex CLI](https://developers.openai.com/codex/cli)                                                       | `codex`            | `codex login`                      |
-| Claude         | [Claude Code](https://claude.com/product/claude-code)                                                      | `claude`           | `claude auth login`                |
-| Cursor         | [Cursor CLI](https://cursor.com/cli)                                                                       | `cursor-agent`     | `agent login`                      |
-| Grok Build     | [Grok Build CLI](https://x.ai/cli)                                                                         | `grok`             | `grok login`                       |
-| GitHub Copilot | [GitHub Copilot CLI](https://github.com/features/copilot/cli)                                              | `copilot`          | `copilot login`                    |
-| OpenCode       | [OpenCode](https://opencode.ai)                                                                            | `opencode`         | `opencode auth login`              |
-| Antigravity    | [Official ACP agent](https://github.com/agentclientprotocol/registry/blob/main/antigravity-acp/agent.json) | Managed by Lecturn | **Sign in with Google** in Lecturn |
+| Provider       | Install and authenticate                                                                         |
+| -------------- | ------------------------------------------------------------------------------------------------ |
+| Codex          | Install [Codex CLI](https://developers.openai.com/codex/cli), then run `codex login`.            |
+| Claude         | Install [Claude Code](https://claude.com/product/claude-code), then run `claude auth login`.     |
+| Cursor         | Install [Cursor CLI](https://cursor.com/cli), then run `agent login`.                            |
+| Grok Build     | Install [Grok Build CLI](https://x.ai/cli), then run `grok login`.                               |
+| GitHub Copilot | Install [GitHub Copilot CLI](https://github.com/features/copilot/cli), then run `copilot login`. |
+| OpenCode       | Install [OpenCode](https://opencode.ai), then run `opencode auth login`.                         |
+| Antigravity    | Install and sign in with Google from Lecturn's provider settings.                                |
 
-Codex and Claude are on by default. Cursor, Grok Build, GitHub Copilot, OpenCode, and Antigravity
-are off by default. Turn them on in **Settings** > **Providers** when you want to use them.
+Provider CLIs must be on the server's `PATH`. If Lecturn cannot find one, set its
+**Binary path** in provider settings, especially when using a version manager.
+Cursor's executable is `cursor-agent`, although its login command is
+`agent login`. Antigravity can use its managed runtime without a `PATH` entry.
 
 On macOS, Lecturn opens while it loads your shell environment and detects providers in the
 background. Progress appears in the bottom-right corner; settings and navigation remain usable.
@@ -83,46 +83,22 @@ from its current status after reconnecting.
 If a provider cannot start, use the recovery panel to retry or open settings. **Show details**
 keeps the technical error available for troubleshooting.
 
-For Antigravity, select the environment in provider settings, then install and sign in there.
-The runtime and credentials stay on that environment, even when you use a phone or remote
-browser. See [Antigravity setup](./providers-antigravity.md) for Google sign-in, remote callback
-steps, and supported hosts.
-
-Cursor is the one to watch: install Cursor CLI, which provides the `cursor-agent` binary that
-Lecturn looks for, but authenticate with `agent login`, not `cursor-agent login`.
-
 GitHub Copilot needs a Copilot subscription. See [GitHub Copilot](./providers-copilot.md) for
 install options, token sign-in, and organization policy.
 
-Grok models that support adjustable reasoning show a **Reasoning** control beside the model picker.
-The available levels and default come from the installed Grok Build CLI, so they can vary by model
-and CLI version.
+Add another provider instance for a separate account or configuration. Each
+instance can have its own environment variables, such as API keys or a custom
+base URL. Mark secret values as sensitive; after saving, Lecturn does not display
+their original values.
 
-Run CLI login commands on the machine running the Lecturn server, not on the device you browse
-from. Antigravity uses its sign-in controls in Lecturn instead of a CLI login command.
+For provider-specific setup and accounts, see [Codex](./providers-codex.md),
+[Claude](./providers-claude.md), [OpenCode](./providers-opencode.md),
+[GitHub Copilot](./providers-copilot.md), and [Antigravity](./providers-antigravity.md).
 
-### Binary Discovery
+## Next steps
 
-Each provider CLI must be on the server's `PATH`, or have an explicit binary path set in
-**Settings** → the provider instance → **Binary path**. Use the explicit path when a version
-manager or a non-standard install location keeps the CLI off the `PATH` of the shell that
-started Lecturn.
-
-Antigravity can use its managed runtime without a `PATH` entry. Its optional **Binary path**
-overrides the managed runtime and must point to the official ACP executable.
-
-### When Auth Is Needed
-
-Provider auth is required before you start a session with that provider, not before you start
-Lecturn. You can install Lecturn, open it, and add providers afterwards. A provider that is not
-authenticated shows its status and setup instructions in **Settings**.
-
-For multi-account setups, see [Codex](./providers-codex.md), [Claude](./providers-claude.md), and
-[Antigravity](./providers-antigravity.md#accounts-and-removal).
-
-## Next Steps
-
-- [Permission modes](./permission-modes.md): how much Lecturn asks before acting
-- [Remote access](./remote-access.md): connect from a phone, tablet, or another desktop
-- [Keeping Lecturn in sync](./updating.md): client and server version skew
-- [Running in the background](./background-service.md): Linux background service
+- [Working with threads](./thread-sidebar.md): start tasks and organize parallel work.
+- [Permission modes](./permission-modes.md): choose when agents ask before acting.
+- [Remote access](./remote-access.md): connect from another device.
+- [Running in the background](./background-service.md): keep a Linux or macOS host available.
+- [Updating Lecturn](./updating.md): update the app and connected servers.

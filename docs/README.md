@@ -2,45 +2,47 @@
 
 ## Using Lecturn
 
-- [Install and first run](./user/install.md)
+- [Install Lecturn](./user/install.md)
+- [Messages and context](./user/composer.md)
+- [Working with threads](./user/thread-sidebar.md)
 - [Permission modes](./user/permission-modes.md)
+- [Terminal history](./user/terminal.md)
+- [Source control](./user/source-control.md)
+- [Project settings](./user/project-settings.md)
+- [Appearance and themes](./user/appearance.md)
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Thread notes](./user/thread-notes.md)
 - [Decisions](./user/decisions.md)
-- [Organizing threads](./user/thread-sidebar.md)
 - [Forking threads](./user/forking-threads.md)
 - [Importing sessions](./user/importing-sessions.md)
-- [Review usage](./user/usage.md)
-- [Anonymous usage data](./user/telemetry.md)
-- [Customize a project icon](./user/project-settings.md)
-- [Mobile appearance](./user/mobile-appearance.md)
-- [Environment themes](./user/environment-theme.md)
+- [Import browser sessions](./user/browser-import.md)
+- [Usage and limits](./user/usage.md)
+- [Product usage data](./user/telemetry.md)
 - [Teams and company Connect](./user/teams.md)
 - [Remote access](./user/remote-access.md)
-- [Keeping app and server in sync](./user/updating.md)
-- [Source control integrations](./user/source-control.md)
 - [Notifications and Live Activities](./user/notifications-and-live-activities.md)
-- [Background service (Linux)](./user/background-service.md)
-- Providers: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [OpenCode](./user/providers-opencode.md) · [GitHub Copilot](./user/providers-copilot.md) · [Antigravity](./user/providers-antigravity.md)
-
-Mobile app: [apps/mobile/README.md](../apps/mobile/README.md)
+- [Running in the background](./user/background-service.md)
+- [Updating Lecturn](./user/updating.md)
+- Provider guides: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [OpenCode](./user/providers-opencode.md) · [GitHub Copilot](./user/providers-copilot.md) · [Antigravity](./user/providers-antigravity.md)
 
 ---
 
 ## Working on Lecturn
 
-Everything below is for maintainers. Setup lives in the [root README](../README.md);
-policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../AGENTS.md).
+Start with the [development runbook](./operations/development.md) and
+[contribution policy](../CONTRIBUTING.md).
+
+Internal notes preserve architectural decisions, constraints, and implementation traps that the
+source alone does not explain. Most code changes do not need an internal documentation update. Follow the
+[documentation rules](../AGENTS.md#documentation) before adding one.
 
 - [Architecture overview](./internals/overview.md)
-- [Workspace layout](./internals/workspace-layout.md)
 - [Glossary](./internals/glossary.md)
-- [Scripts](./internals/scripts.md)
 - [Connection runtime](./internals/connection-runtime.md)
-- [Voice input](./internals/voice-input.md)
 - [Providers](./internals/providers.md)
 - [Thread notes](./internals/thread-notes.md)
 - [Thread forking](./internals/thread-forking.md)
+- [Model classification](./internals/model-manifest.md)
 - [Remote environments](./internals/remote.md)
 - [Server updates](./internals/server-updates.md)
 - [Resource telemetry](./internals/resource-telemetry.md)
@@ -49,12 +51,17 @@ policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../A
 - [Environment auth](./internals/environment-auth.md)
 - [Lecturn Connect](./internals/lecturn-connect.md)
 - [Teams architecture](./internals/teams.md)
-- [CI gates](./internals/ci.md)
-- [Engineering work artifacts](./internals/work-artifacts.md)
 - [Architecture decision records](./adr/README.md)
+- [Assistant citations](./internals/assistant-citations.md)
+- [Mobile navigation](./internals/mobile-navigation.md)
+- [Mobile development lifecycle](./internals/mobile-development.md)
+- [Terminal runtime](./internals/terminal-runtime.md)
+- [Voice input](./internals/voice-input.md)
 
 ### Runbooks
 
+- [Development and local builds](./operations/development.md)
+- [Lecturn Connect setup](./operations/connect-setup.md)
 - [Release](./operations/release.md)
 - [Observability](./operations/observability.md)
 - [Relay observability](./operations/relay-observability.md)

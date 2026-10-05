@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off - expectations mirror the host path joins the script under test performs.
+import * as NodePath from "node:path";
 import { assert, it } from "@effect/vitest";
 import { PNG } from "pngjs";
 
@@ -170,8 +172,14 @@ it("expands both appearances into independent upload-ready directories", () => {
       directory: showcaseCaptureDirectory("/captures", capture),
     })),
     [
-      { appearance: "light", directory: "/captures/apple/iphone-test/light/lecturn" },
-      { appearance: "dark", directory: "/captures/apple/iphone-test/dark/lecturn" },
+      {
+        appearance: "light",
+        directory: NodePath.join("/captures", "apple", "iphone-test", "light", "lecturn"),
+      },
+      {
+        appearance: "dark",
+        directory: NodePath.join("/captures", "apple", "iphone-test", "dark", "lecturn"),
+      },
     ],
   );
 });
@@ -195,10 +203,10 @@ it("expands themes into independent upload-ready directories per appearance", ()
       showcaseCaptureDirectory("/captures", capture),
     ),
     [
-      "/captures/apple/iphone-test/light/ocean",
-      "/captures/apple/iphone-test/light/ember",
-      "/captures/apple/iphone-test/dark/ocean",
-      "/captures/apple/iphone-test/dark/ember",
+      NodePath.join("/captures", "apple", "iphone-test", "light", "ocean"),
+      NodePath.join("/captures", "apple", "iphone-test", "light", "ember"),
+      NodePath.join("/captures", "apple", "iphone-test", "dark", "ocean"),
+      NodePath.join("/captures", "apple", "iphone-test", "dark", "ember"),
     ],
   );
 });

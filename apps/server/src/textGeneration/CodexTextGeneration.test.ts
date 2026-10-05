@@ -18,6 +18,7 @@ import {
   decisionWriterOutputFixture,
 } from "./decisionWriterTestFixtures.ts";
 import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
+import { writeFakeCli } from "../testUtils/fakeCli.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 const encodeTestJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -30,207 +31,187 @@ const CodexTextGenerationTestLayer = ServerConfig.ServerConfig.layerTest(process
   prefix: "lecturn-codex-text-generation-test-",
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
-function makeFakeCodexBinary(
-  dir: string,
-  input: {
-    output: string;
-    exitCode?: number;
-    stderr?: string;
-    requireImage?: boolean;
-    requireServiceTier?: string;
-    requireReasoningEffort?: string;
-    forbidReasoningEffort?: boolean;
-    requireArg?: string;
-    forbidArg?: string;
-    stdinMustContain?: string;
-    stdinMustNotContain?: string;
-    requireAccountRouting?: boolean;
-    configSnapshot?: object;
-    codexVersion?: string;
-  },
-) {
-  return Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const binDir = path.join(dir, "bin");
-    const codexPath = path.join(binDir, "codex");
-    yield* fs.makeDirectory(binDir, { recursive: true });
+interface FakeCodexInput {
+  output: string;
+  exitCode?: number;
+  stderr?: string;
+  requireImage?: boolean;
+  requireServiceTier?: string;
+  requireReasoningEffort?: string;
+  forbidReasoningEffort?: boolean;
+  requireArg?: string;
+  forbidArg?: string;
+  stdinMustContain?: string;
+  stdinMustNotContain?: string;
+  requireAccountRouting?: boolean;
+  configSnapshot?: object;
+  codexVersion?: string;
+}
 
-    yield* fs.writeFileString(
-      codexPath,
-      [
-        "#!/bin/sh",
-        'case " $* " in *" app-server "*)',
-        `  exec '${process.execPath}' -e 'require("node:readline").createInterface({input:process.stdin}).on("line", line => { const m=JSON.parse(line); const result=m.method==="initialize" ? {userAgent:"lecturn-inference-config/${input.codexVersion ?? "0.155.1"} (test)",codexHome:"/test",platformFamily:"unix",platformOs:"macos"} : ${encodeTestJson(input.configSnapshot ?? { config: { mcp_servers: { sentinel: { enabled: true } } }, layers: [] })}; process.stdout.write(JSON.stringify({id:m.id,result})+"\\n"); });'`,
-        ";; esac",
-        'case " $* " in *" debug models "*)',
-        `  printf '%s\\n' '${encodeTestJson({ models: ["gpt-5.4-mini", "gpt-5.4", "gpt-6-sol"].map((slug) => ({ slug, shell_type: "unified_exec", apply_patch_tool_type: "freeform" })) })}'; exit 0;; esac`,
-        'original_args="$*"',
-        'output_path=""',
-        'seen_image="0"',
-        'seen_service_tier=""',
-        'seen_reasoning_effort=""',
-        'instructions_path=""',
-        'developer_instructions=""',
-        "while [ $# -gt 0 ]; do",
-        '  if [ "$1" = "--image" ]; then',
-        "    shift",
-        '    if [ -n "$1" ]; then',
-        '      seen_image="1"',
-        "    fi",
-        "    shift",
-        "    continue",
-        "  fi",
-        '  if [ "$1" = "--config" ]; then',
-        "    shift",
-        '    case "$1" in',
-        '      model_instructions_file=*) instructions_path="${1#model_instructions_file=}" ;;',
-        '      developer_instructions=*) developer_instructions="$1" ;;',
-        "    esac",
-        '    case "$1" in',
-        "      service_tier=*)",
-        '        seen_service_tier="$1"',
-        "        ;;",
-        "    esac",
-        '    case "$1" in',
-        "      model_reasoning_effort=*)",
-        '        seen_reasoning_effort="$1"',
-        "        ;;",
-        "    esac",
-        "    shift",
-        "    continue",
-        "  fi",
-        '  if [ "$1" = "--output-last-message" ]; then',
-        "    shift",
-        '    output_path="$1"',
-        "    shift",
-        "    continue",
-        "  fi",
-        "  shift",
-        "done",
-        'case " $original_args " in *" --ignore-rules "*)',
-        `  case " $original_args " in *'mcp_servers.sentinel.enabled=false'*) ;; *) echo "MCP not disabled" >&2; exit 23;; esac`,
-        '  case "$PWD" in *lecturn-workflow-inference-*) ;; *) echo "workflow cwd not isolated" >&2; exit 14;; esac',
-        '  case " $original_args " in *" project_doc_max_bytes=0 "*) ;; *) echo "workspace docs enabled" >&2; exit 15;; esac',
-        '  case " $original_args " in *" features.memories=false "*) ;; *) echo "memory enabled" >&2; exit 16;; esac',
-        '  instructions_path="${instructions_path#\\\"}"',
-        '  instructions_path="${instructions_path%\\\"}"',
-        '  test -f "$instructions_path" || { echo "inference instructions missing" >&2; exit 17; }',
-        '  grep -F "Classify only the supplied conversation" "$instructions_path" >/dev/null || exit 18',
-        '  test "$developer_instructions" = \'developer_instructions=""\' || { echo "developer instructions not overridden" >&2; exit 19; }',
-        "esac",
-        ...(input.requireAccountRouting
-          ? [
-              'test "$CODEX_HOME" = "/test/codex-account" || { echo "account home changed" >&2; exit 20; }',
-              'case " $original_args " in *" --profile work "*) ;; *) echo "account profile missing" >&2; exit 21;; esac',
-              'case " $original_args " in *\' model_provider="company" \'*) ;; *) echo "account provider missing" >&2; exit 22;; esac',
-            ]
-          : []),
-        'stdin_content="$(cat)"',
-        ...(input.requireArg !== undefined
-          ? [
-              `case " $original_args " in *" ${input.requireArg} "*) ;; *)`,
-              `  printf "%s\\n" "missing arg: ${input.requireArg}" >&2`,
-              `  exit 8`,
-              "esac",
-            ]
-          : []),
-        ...(input.forbidArg !== undefined
-          ? [
-              `case " $original_args " in *" ${input.forbidArg} "*)`,
-              `  printf "%s\\n" "forbidden arg: ${input.forbidArg}" >&2`,
-              `  exit 9`,
-              "esac",
-            ]
-          : []),
-        ...(input.requireImage
-          ? [
-              'if [ "$seen_image" != "1" ]; then',
-              '  printf "%s\\n" "missing --image input" >&2',
-              `  exit 2`,
-              "fi",
-            ]
-          : []),
-        ...(input.requireServiceTier
-          ? [
-              `if [ "$seen_service_tier" != "service_tier=\\"${input.requireServiceTier}\\"" ]; then`,
-              '  printf "%s\\n" "unexpected service tier config: $seen_service_tier" >&2',
-              `  exit 5`,
-              "fi",
-            ]
-          : []),
-        ...(input.requireReasoningEffort !== undefined
-          ? [
-              `if [ "$seen_reasoning_effort" != "model_reasoning_effort=\\"${input.requireReasoningEffort}\\"" ]; then`,
-              '  printf "%s\\n" "unexpected reasoning effort config: $seen_reasoning_effort" >&2',
-              `  exit 6`,
-              "fi",
-            ]
-          : []),
-        ...(input.forbidReasoningEffort
-          ? [
-              'if [ -n "$seen_reasoning_effort" ]; then',
-              '  printf "%s\\n" "reasoning effort config should be omitted: $seen_reasoning_effort" >&2',
-              `  exit 7`,
-              "fi",
-            ]
-          : []),
-        ...(input.stdinMustContain !== undefined
-          ? [
-              // @effect-diagnostics-next-line preferSchemaOverJson:off
-              `if ! printf "%s" "$stdin_content" | grep -F -- ${JSON.stringify(input.stdinMustContain)} >/dev/null; then`,
-              '  printf "%s\\n" "stdin missing expected content" >&2',
-              `  exit 3`,
-              "fi",
-            ]
-          : []),
-        ...(input.stdinMustNotContain !== undefined
-          ? [
-              // @effect-diagnostics-next-line preferSchemaOverJson:off
-              `if printf "%s" "$stdin_content" | grep -F -- ${JSON.stringify(input.stdinMustNotContain)} >/dev/null; then`,
-              '  printf "%s\\n" "stdin contained forbidden content" >&2',
-              `  exit 4`,
-              "fi",
-            ]
-          : []),
-        ...(input.stderr !== undefined
-          ? [
-              // @effect-diagnostics-next-line preferSchemaOverJson:off
-              `printf "%s\\n" ${JSON.stringify(input.stderr)} >&2`,
-            ]
-          : []),
-        'if [ -n "$output_path" ]; then',
-        "  cat > \"$output_path\" <<'__LECTURN_FAKE_CODEX_OUTPUT__'",
-        input.output,
-        "__LECTURN_FAKE_CODEX_OUTPUT__",
-        "fi",
-        `exit ${input.exitCode ?? 0}`,
+// The stub walks argv the way the shell script it replaced did: `--image`,
+// `--config key=value`, and `--output-last-message <path>` are consumed, the
+// prompt arrives on stdin, and each check exits with its own code so a
+// failing test names the assertion that tripped.
+function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
+  const check = JSON.stringify({
+    requireImage: input.requireImage ?? false,
+    requireServiceTier: input.requireServiceTier ?? null,
+    requireReasoningEffort: input.requireReasoningEffort ?? null,
+    forbidReasoningEffort: input.forbidReasoningEffort ?? false,
+    requireArg: input.requireArg ?? null,
+    forbidArg: input.forbidArg ?? null,
+    stdinMustContain: input.stdinMustContain ?? null,
+    stdinMustNotContain: input.stdinMustNotContain ?? null,
+    stderr: input.stderr ?? null,
+    output: input.output,
+    exitCode: input.exitCode ?? 0,
+    requireAccountRouting: input.requireAccountRouting ?? false,
+    initialize: {
+      userAgent: `lecturn-inference-config/${input.codexVersion ?? "0.155.1"} (test)`,
+      codexHome: "/test",
+      platformFamily: "unix",
+      platformOs: "macos",
+    },
+    configSnapshot: input.configSnapshot ?? {
+      config: { mcp_servers: { sentinel: { enabled: true } } },
+      layers: [],
+    },
+    models: {
+      models: ["gpt-5.4-mini", "gpt-5.4", "gpt-6-sol"].map((slug) => ({
+        slug,
+        shell_type: "unified_exec",
+        apply_patch_tool_type: "freeform",
+      })),
+    },
+  });
+  return Effect.gen(function* () {
+    const path = yield* Path.Path;
+    return writeFakeCli({
+      directory: path.join(dir, "bin"),
+      name: "codex",
+      source: [
+        'import * as NodeFS from "node:fs";',
+        `const check = ${check};`,
+        "const args = process.argv.slice(2);",
+        'const originalArgs = ` ${args.join(" ")} `;',
+        // The app-server and model-catalog probes answer and exit before any
+        // exec argument is inspected, as the shell script's early cases did.
+        'if (originalArgs.includes(" app-server ")) {',
+        '  const { createInterface } = await import("node:readline");',
+        "  const lines = createInterface({ input: process.stdin });",
+        '  lines.on("line", (line) => {',
+        "    const message = JSON.parse(line);",
+        '    const result = message.method === "initialize" ? check.initialize : check.configSnapshot;',
+        '    process.stdout.write(JSON.stringify({ id: message.id, result }) + "\\n");',
+        "  });",
+        '  await new Promise((resolve) => lines.on("close", resolve));',
+        '} else if (originalArgs.includes(" debug models ")) {',
+        '  process.stdout.write(JSON.stringify(check.models) + "\\n");',
+        "} else {",
+        "let outputPath = null;",
+        "let seenImage = false;",
+        'let seenServiceTier = "";',
+        'let seenReasoningEffort = "";',
+        'let instructionsPath = "";',
+        'let developerInstructions = "";',
+        "for (let index = 0; index < args.length; index += 1) {",
+        '  if (args[index] === "--image") {',
+        "    index += 1;",
+        "    if (args[index]) seenImage = true;",
+        '  } else if (args[index] === "--config") {',
+        "    index += 1;",
+        '    const value = args[index] ?? "";',
+        '    if (value.startsWith("service_tier=")) seenServiceTier = value;',
+        '    if (value.startsWith("model_reasoning_effort=")) seenReasoningEffort = value;',
+        '    if (value.startsWith("model_instructions_file=")) {',
+        '      instructionsPath = value.slice("model_instructions_file=".length);',
+        "    }",
+        '    if (value.startsWith("developer_instructions=")) developerInstructions = value;',
+        '  } else if (args[index] === "--output-last-message") {',
+        "    index += 1;",
+        "    outputPath = args[index] ?? null;",
+        "  }",
+        "}",
+        'if (originalArgs.includes(" --ignore-rules ")) {',
+        '  if (!originalArgs.includes("mcp_servers.sentinel.enabled=false")) {',
+        '    fail("MCP not disabled", 23);',
+        "  }",
+        '  if (!process.cwd().includes("lecturn-workflow-inference-")) {',
+        '    fail("workflow cwd not isolated", 14);',
+        "  }",
+        '  if (!originalArgs.includes(" project_doc_max_bytes=0 ")) fail("workspace docs enabled", 15);',
+        '  if (!originalArgs.includes(" features.memories=false ")) fail("memory enabled", 16);',
+        '  const instructionsFile = instructionsPath.replace(/^"/, "").replace(/"$/, "");',
+        "  if (!NodeFS.statSync(instructionsFile, { throwIfNoEntry: false })?.isFile()) {",
+        '    fail("inference instructions missing", 17);',
+        "  }",
+        "  if (",
+        '    !NodeFS.readFileSync(instructionsFile, "utf8").includes(',
+        '      "Classify only the supplied conversation",',
+        "    )",
+        "  ) {",
+        "    process.exit(18);",
+        "  }",
+        "  if (developerInstructions !== 'developer_instructions=\"\"') {",
+        '    fail("developer instructions not overridden", 19);',
+        "  }",
+        "}",
+        "if (check.requireAccountRouting) {",
+        '  if (process.env.CODEX_HOME !== "/test/codex-account") fail("account home changed", 20);',
+        '  if (!originalArgs.includes(" --profile work ")) fail("account profile missing", 21);',
+        "  if (!originalArgs.includes(' model_provider=\"company\" ')) {",
+        '    fail("account provider missing", 22);',
+        "  }",
+        "}",
+        "const chunks = [];",
+        "for await (const chunk of process.stdin) chunks.push(chunk);",
+        'const stdinContent = Buffer.concat(chunks).toString("utf8");',
+        "function fail(message, code) {",
+        '  process.stderr.write(message + "\\n");',
+        "  process.exit(code);",
+        "}",
+        "if (check.requireArg !== null && !originalArgs.includes(` ${check.requireArg} `)) {",
+        '  fail("missing arg: " + check.requireArg, 8);',
+        "}",
+        "if (check.forbidArg !== null && originalArgs.includes(` ${check.forbidArg} `)) {",
+        '  fail("forbidden arg: " + check.forbidArg, 9);',
+        "}",
+        'if (check.requireImage && !seenImage) fail("missing --image input", 2);',
+        "if (",
+        "  check.requireServiceTier !== null &&",
+        '  seenServiceTier !== `service_tier="${check.requireServiceTier}"`',
+        ") {",
+        '  fail("unexpected service tier config: " + seenServiceTier, 5);',
+        "}",
+        "if (",
+        "  check.requireReasoningEffort !== null &&",
+        '  seenReasoningEffort !== `model_reasoning_effort="${check.requireReasoningEffort}"`',
+        ") {",
+        '  fail("unexpected reasoning effort config: " + seenReasoningEffort, 6);',
+        "}",
+        "if (check.forbidReasoningEffort && seenReasoningEffort.length > 0) {",
+        '  fail("reasoning effort config should be omitted: " + seenReasoningEffort, 7);',
+        "}",
+        "if (check.stdinMustContain !== null && !stdinContent.includes(check.stdinMustContain)) {",
+        '  fail("stdin missing expected content", 3);',
+        "}",
+        "if (check.stdinMustNotContain !== null && stdinContent.includes(check.stdinMustNotContain)) {",
+        '  fail("stdin contained forbidden content", 4);',
+        "}",
+        'if (check.stderr !== null) process.stderr.write(check.stderr + "\\n");',
+        'if (outputPath !== null) NodeFS.writeFileSync(outputPath, check.output + "\\n");',
+        "process.exitCode = check.exitCode;",
+        "}",
         "",
       ].join("\n"),
-    );
-    yield* fs.chmod(codexPath, 0o755);
-    return codexPath;
+    });
   });
 }
 
 function withFakeCodexEnv<A, E, R>(
-  input: {
-    output: string;
-    exitCode?: number;
-    stderr?: string;
-    requireImage?: boolean;
-    requireServiceTier?: string;
-    requireReasoningEffort?: string;
-    forbidReasoningEffort?: boolean;
-    requireArg?: string;
-    forbidArg?: string;
-    stdinMustContain?: string;
-    stdinMustNotContain?: string;
+  input: FakeCodexInput & {
     launchArgs?: string;
     homePath?: string;
-    requireAccountRouting?: boolean;
-    configSnapshot?: object;
-    codexVersion?: string;
     environment?: NodeJS.ProcessEnv;
   },
   effectFn: (textGeneration: TextGeneration.TextGeneration["Service"]) => Effect.Effect<A, E, R>,
@@ -570,7 +551,12 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
           body: "",
         }),
         launchArgs: "--enable settings-feature",
-        environment: { LECTURN_CODEX_LAUNCH_ARGS: " --strict-config --listen off " },
+        // The explicit environment replaces the inherited one, and the fake CLI's
+        // launcher still has to find `node` on PATH.
+        environment: {
+          ...process.env,
+          LECTURN_CODEX_LAUNCH_ARGS: " --strict-config --listen off ",
+        },
         requireArg: "--strict-config",
         forbidArg: "settings-feature",
       },

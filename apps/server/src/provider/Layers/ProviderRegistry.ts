@@ -102,23 +102,38 @@ export function upsertProviderWorkspaceSnapshot(
 
 const shouldRetainMissingProviderModels = (provider: ServerProvider): boolean => {
   const isAntigravity = provider.driver === ProviderDriverKind.make("antigravity");
-  if (!isAntigravity && provider.driver !== ProviderDriverKind.make("opencode")) {
+  const isCodex = provider.driver === ProviderDriverKind.make("codex");
+  if (!isAntigravity && !isCodex && provider.driver !== ProviderDriverKind.make("opencode")) {
     return true;
   }
 
-  if (isAntigravity && (!provider.enabled || provider.auth.status === "unauthenticated")) {
+  if (
+    (isAntigravity || isCodex) &&
+    (!provider.enabled || provider.auth.status === "unauthenticated")
+  ) {
     return false;
   }
 
-  // Both drivers replace their inventories after successful catalog discovery.
+  // Successful discovery replaces these inventories so cached retired models disappear.
   // Antigravity's local health check does not authenticate or discover models.
   const isPendingAntigravityAuthentication =
     isAntigravity && provider.status === "warning" && provider.auth.status === "unknown";
   const isPendingInitialProbe =
     provider.enabled && !provider.installed && provider.status === "warning";
   const didInstalledProviderProbeFail = provider.installed && provider.status === "error";
+  // A failed shell or provider detection republishes the previous snapshot as a
+  // warning, and the next attempt republishes it again as detecting, so neither
+  // carries an authoritative inventory.
+  const isDetectionUnresolved =
+    provider.status === "warning" &&
+    (provider.discovery?.status === "detecting" ||
+      provider.discovery?.status === "timed-out" ||
+      provider.discovery?.status === "error");
   return (
-    isPendingAntigravityAuthentication || isPendingInitialProbe || didInstalledProviderProbeFail
+    isPendingAntigravityAuthentication ||
+    isPendingInitialProbe ||
+    didInstalledProviderProbeFail ||
+    isDetectionUnresolved
   );
 };
 

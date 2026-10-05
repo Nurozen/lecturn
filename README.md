@@ -81,7 +81,7 @@ _Forking is available for Codex, Claude, and OpenCode. Cursor, Grok, GitHub Copi
 
 Lecturn Connect links your hosting computers to your account for remote access, managed notifications, and Live Activities. The hosting app must remain running. Local connections, direct pairing, SSH, and Tailscale remain free; managed Connect requires an active subscription, trial, or explicit complimentary access. Connect costs $10/month or $100/year for three managed environments, with a 14-day card-required trial.
 
-Your workspace, in glass. Rounded conversations, floating controls, and translucent project cards keep the celestial backgrounds in view. Choose pearl and copper in light mode or midnight and gold in dark mode. Model and access settings stay within reach, alongside files, terminal, Git, review, and approvals. Accessibility settings can replace transparent materials with solid surfaces. [Explore mobile appearance](./docs/user/mobile-appearance.md).
+Your workspace, in glass. Rounded conversations, floating controls, and translucent project cards keep the celestial backgrounds in view. Choose pearl and copper in light mode or midnight and gold in dark mode. Model and access settings stay within reach, alongside files, terminal, Git, review, and approvals. Accessibility settings can replace transparent materials with solid surfaces. [Explore mobile appearance](./docs/user/appearance.md#mobile-surfaces).
 
 <p align="center">
   <img src="./docs/images/lecturn-mobile-thread.webp" alt="Pearl glass conversation on iPhone with copper message bubbles and model and access controls above the composer." width="32%" />
