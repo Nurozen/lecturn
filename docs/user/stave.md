@@ -49,6 +49,7 @@ make a new space from the app, see [Create a space](#create-a-space).
   its space, including repositories on different hosts. A thread can show a PR for each repo's
   branch in Space Git. Automatic PR-based settlement waits for all editable repos' PRs to
   finish; a single merged PR cannot settle work while another repo's PR remains open or unknown.
+  An open PR in any editable repo also keeps the space's threads from settling by inactivity.
 - **Checkpoints are unavailable.** A space spans several repositories, so per-thread checkpoints
   (and the diff and revert built on them) are off in spaces. Use Git in the editable repo
   instead.

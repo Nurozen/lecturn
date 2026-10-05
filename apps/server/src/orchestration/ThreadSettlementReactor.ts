@@ -225,6 +225,10 @@ export const make = Effect.gen(function* () {
           const pullRequest = sagaMerged
             ? { state: "merged" as const, updatedAt: now }
             : yield* pullRequestFor(group[0]!);
+          // Ordinary threads with an open pull request still settle by
+          // inactivity. A live Stave space does not: settling its threads can
+          // schedule the whole space for archive while a member PR is in review.
+          if (pullRequest?.state === "open" && projects.get(group[0]!.projectId)?.stave) return;
           yield* Effect.forEach(
             group,
             (thread) =>
