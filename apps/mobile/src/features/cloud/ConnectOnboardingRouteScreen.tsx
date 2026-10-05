@@ -127,12 +127,6 @@ function ConfiguredConnectOnboardingRouteScreen(props: { readonly accountId?: st
             accountId={userId ?? undefined}
             connectedCloudEnvironments={connectedCloudEnvironments}
             onReconnectEnvironment={onReconnectEnvironment}
-            onSetupProvider={(params) =>
-              navigation.navigate("SettingsSheet", {
-                screen: "SettingsContent",
-                params: { screen: "SettingsProviderSetup", params },
-              })
-            }
             showHeader={false}
           />
         ) : (
