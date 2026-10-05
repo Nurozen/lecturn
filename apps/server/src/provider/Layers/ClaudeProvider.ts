@@ -341,54 +341,63 @@ const probeClaudeCapabilities = (
 ) => {
   return Effect.gen(function* () {
     const abort = new AbortController();
-    const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
-    const executablePath = yield* resolveClaudeSdkExecutablePath(
-      claudeSettings.binaryPath,
-      claudeEnvironment,
-    );
-    return yield* Effect.tryPromise(async () => {
-      const q = claudeQuery({
-        // Never yield — we only need initialization data, not a conversation.
-        // This prevents any prompt from reaching the Anthropic API.
-        // oxlint-disable-next-line require-yield
-        prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
-          await waitForAbortSignal(abort.signal);
-        })(),
-        options: buildClaudeCapabilitiesProbeQueryOptions({
-          executablePath,
-          abortController: abort,
-          environment: claudeEnvironment,
-          cwd,
-        }),
-      });
-      const init = await q.initializationResult();
-      // Usage is a second control round trip on the same process; a failure
-      // there must not cost the slash commands and account we already have.
-      const usage = await q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET().then(
-        (response) => ({
-          rate_limits_available: response.rate_limits_available,
-          rate_limits: response.rate_limits,
-        }),
-        () => undefined,
+    return yield* Effect.gen(function* () {
+      const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
+      const executablePath = yield* resolveClaudeSdkExecutablePath(
+        claudeSettings.binaryPath,
+        claudeEnvironment,
       );
-      const account = init.account as
-        | {
-            readonly email?: string;
-            readonly subscriptionType?: string;
-            readonly tokenSource?: string;
-            readonly apiProvider?: string;
-          }
-        | undefined;
-      return {
-        models: init.models,
-        email: account?.email,
-        subscriptionType: account?.subscriptionType,
-        tokenSource: account?.tokenSource,
-        apiProvider: account?.apiProvider,
-        slashCommands: parseClaudeInitializationCommands(init.commands),
-        ...(usage ? { usage } : {}),
-      } satisfies ClaudeCapabilitiesProbe;
+      return yield* Effect.tryPromise(async () => {
+        const q = claudeQuery({
+          // Never yield — we only need initialization data, not a conversation.
+          // This prevents any prompt from reaching the Anthropic API.
+          // oxlint-disable-next-line require-yield
+          prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
+            await waitForAbortSignal(abort.signal);
+          })(),
+          options: buildClaudeCapabilitiesProbeQueryOptions({
+            executablePath,
+            abortController: abort,
+            environment: claudeEnvironment,
+            cwd,
+          }),
+        });
+        const init = await q.initializationResult();
+        return { q, init };
+      });
     }).pipe(
+      Effect.timeout(CAPABILITIES_PROBE_TIMEOUT_MS),
+      Effect.flatMap(({ q, init }) =>
+        Effect.gen(function* () {
+          // Usage has its own deadline so a slow optional request cannot discard initialization.
+          const usageResult = yield* Effect.tryPromise(() =>
+            q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(),
+          ).pipe(Effect.timeout(DEFAULT_TIMEOUT_MS), Effect.result);
+          const usage = Result.isSuccess(usageResult)
+            ? {
+                rate_limits_available: usageResult.success.rate_limits_available,
+                rate_limits: usageResult.success.rate_limits,
+              }
+            : undefined;
+          const account = init.account as
+            | {
+                readonly email?: string;
+                readonly subscriptionType?: string;
+                readonly tokenSource?: string;
+                readonly apiProvider?: string;
+              }
+            | undefined;
+          return {
+            models: init.models,
+            email: account?.email,
+            subscriptionType: account?.subscriptionType,
+            tokenSource: account?.tokenSource,
+            apiProvider: account?.apiProvider,
+            slashCommands: parseClaudeInitializationCommands(init.commands),
+            ...(usage ? { usage } : {}),
+          } satisfies ClaudeCapabilitiesProbe;
+        }),
+      ),
       Effect.ensuring(
         Effect.sync(() => {
           if (!abort.signal.aborted) abort.abort();
@@ -396,12 +405,8 @@ const probeClaudeCapabilities = (
       ),
     );
   }).pipe(
-    Effect.timeoutOption(CAPABILITIES_PROBE_TIMEOUT_MS),
     Effect.result,
-    Effect.map((result) => {
-      if (Result.isFailure(result)) return undefined;
-      return Option.isSome(result.success) ? result.success.value : undefined;
-    }),
+    Effect.map((result) => (Result.isSuccess(result) ? result.success : undefined)),
   );
 };
 
