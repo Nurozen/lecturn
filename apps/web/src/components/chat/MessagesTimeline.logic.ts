@@ -1,4 +1,5 @@
 import * as Equal from "effect/Equal";
+import { shallow } from "zustand/vanilla/shallow";
 import { renderCodexDirectivesForCopy } from "@lecturn/client-runtime/codex-markdown-directives";
 import { commandProgramName } from "@lecturn/client-runtime/work-log/command-label";
 import {
@@ -19,6 +20,7 @@ export {
 } from "@lecturn/client-runtime/work-log/presentation";
 import {
   formatDuration,
+  isStreamingMessageTextUpdate,
   workEntryDisplayIndicatesToolFailure,
   workEntryIndicatesToolSuccess,
   workEntryIndicatesToolNeutralStatus,
@@ -551,8 +553,8 @@ function workEntryIsActiveTurnActivity(entry: WorkLogEntry): boolean {
 
 /**
  * Settled turns fold activity before their terminal assistant message behind
- * a "Worked for ..." row. Work that lands after that message stays visible so
- * failed or interrupted turns do not hide their trailing tool-call summary.
+ * a "Worked for ..." row. A single ordinary activity after that message joins
+ * the fold, while larger groups and failures stay visible as a trailing summary.
  */
 function deriveTurnFolds(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
@@ -632,7 +634,11 @@ function deriveTurnFolds(input: {
       }
       const isCompaction =
         entry.kind === "work" && entry.entry.sourceActivityKind === "context-compaction";
-      if (!isCompaction && index > terminalEntryIndex) {
+      const isSingleTrailingActivity =
+        group.entries.length === terminalEntryIndex + 2 &&
+        entry.kind === "work" &&
+        !workEntryDisplayIndicatesToolFailure(entry.entry);
+      if (!isCompaction && index > terminalEntryIndex && !isSingleTrailingActivity) {
         continue;
       }
       // Agent-spawn CTA rows never fold: workflows outlive their launching
@@ -728,11 +734,16 @@ function attachTrailingToolGroupsToAssistant(
     }
 
     let lastTrailingWorkIndex = -1;
+    let trailingFoldIndex = -1;
     let hasTrailingToolGroup = false;
     for (let index = messageIndex + 1; index < rows.length; index += 1) {
       const candidate = rows[index];
       if (!candidate || candidate.kind === "message") {
         break;
+      }
+      if (candidate.kind === "turn-fold" && candidate.turnId === turnId) {
+        trailingFoldIndex = index;
+        continue;
       }
       if (candidate.kind === "work-toggle" && candidate.turnId === turnId) {
         hasTrailingToolGroup = true;
@@ -755,20 +766,23 @@ function attachTrailingToolGroupsToAssistant(
       }
     }
 
+    // The fork anchor is a message, but its inherited trailing tools and footer
+    // belong before the boundary too. Keep subsequent child content after it.
+    // A single trailing activity folds behind its turn's "Worked for" row, so
+    // that row is inherited as well.
+    const divider = rows[messageIndex + 1];
+    const lastInheritedIndex = Math.max(lastTrailingWorkIndex, trailingFoldIndex);
+    if (divider?.kind === "fork-divider" && lastInheritedIndex > messageIndex + 1) {
+      deferredDividerIds.add(divider.id);
+      deferredDividers.set(lastInheritedIndex, divider);
+    }
+
     const lastTrailingRow = rows[lastTrailingWorkIndex];
     if (
       !lastTrailingRow ||
       (lastTrailingRow.kind !== "work" && lastTrailingRow.kind !== "work-toggle")
     ) {
       continue;
-    }
-
-    // The fork anchor is a message, but its inherited trailing tools and footer
-    // belong before the boundary too. Keep subsequent child content after it.
-    const divider = rows[messageIndex + 1];
-    if (divider?.kind === "fork-divider") {
-      deferredDividerIds.add(divider.id);
-      deferredDividers.set(lastTrailingWorkIndex, divider);
     }
     messageRowsWithoutMeta.add(row.id);
     metaRowsAfterIndex.set(lastTrailingWorkIndex, {
@@ -1207,6 +1221,59 @@ export function deriveMessagesTimelineRows(input: {
   }
 
   return attachTrailingToolGroupsToAssistant(nextRows);
+}
+
+type MessagesTimelineRowsInput = Parameters<typeof deriveMessagesTimelineRows>[0];
+
+export interface MessagesTimelineRowsProjection {
+  readonly input: MessagesTimelineRowsInput;
+  readonly rows: MessagesTimelineRow[];
+}
+
+function replaceStreamingMessageRows(
+  input: MessagesTimelineRowsInput,
+  previous: MessagesTimelineRowsProjection,
+): MessagesTimelineRow[] | null {
+  const { timelineEntries: previousEntries, ...previousContext } = previous.input;
+  const { timelineEntries, ...context } = input;
+  if (timelineEntries.length !== previousEntries.length || !shallow(previousContext, context)) {
+    return null;
+  }
+  const replacements = new Map<ChatMessage, ChatMessage>();
+  for (const [index, entry] of timelineEntries.entries()) {
+    const previousEntry = previousEntries[index]!;
+    if (entry === previousEntry) continue;
+    if (
+      entry.kind !== "message" ||
+      previousEntry.kind !== "message" ||
+      entry.id !== previousEntry.id ||
+      entry.createdAt !== previousEntry.createdAt
+    ) {
+      return null;
+    }
+    if (entry.message === previousEntry.message) continue;
+    if (!isStreamingMessageTextUpdate(previousEntry.message, entry.message)) return null;
+    replacements.set(previousEntry.message, entry.message);
+  }
+  if (replacements.size === 0) return previous.rows;
+  return previous.rows.map((row) => {
+    if (row.kind !== "message" && row.kind !== "assistant-meta") return row;
+    const message = replacements.get(row.message);
+    return message ? { ...row, message } : row;
+  });
+}
+
+/** Keep one projection per timeline. Reuse rows only when streaming content changes. */
+export function deriveMessagesTimelineRowsWithState(
+  input: MessagesTimelineRowsInput,
+  previous: MessagesTimelineRowsProjection | null = null,
+): MessagesTimelineRowsProjection {
+  return {
+    input,
+    rows:
+      (previous === null ? null : replaceStreamingMessageRows(input, previous)) ??
+      deriveMessagesTimelineRows(input),
+  };
 }
 
 export function computeStableMessagesTimelineRows(

@@ -1,5 +1,10 @@
 import type { EnvironmentId, ScopedProjectRef } from "@lecturn/contracts";
-import { buildProjectGroups, type ProjectGroupingSettings } from "./logicalProject";
+import {
+  buildProjectGroups,
+  deriveLogicalProjectKeyFromSettings,
+  derivePhysicalProjectKey,
+  type ProjectGroupingSettings,
+} from "./logicalProject";
 import type { Project } from "./types";
 
 export type EnvironmentPresence = "local-only" | "remote-only" | "mixed";
@@ -49,6 +54,22 @@ export function buildPhysicalToLogicalProjectKeyMap(input: {
     }
   }
   return mapping;
+}
+
+/**
+ * Resolves the group key the sidebar and project settings use for a project.
+ * A duplicate row can borrow its repository identity from a sibling, so the
+ * key derived from the project alone is only the fallback.
+ */
+export function resolveLogicalProjectKey(input: {
+  project: Project;
+  logicalKeyByPhysicalKey: ReadonlyMap<string, string>;
+  settings: ProjectGroupingSettings;
+}): string {
+  return (
+    input.logicalKeyByPhysicalKey.get(derivePhysicalProjectKey(input.project)) ??
+    deriveLogicalProjectKeyFromSettings(input.project, input.settings)
+  );
 }
 
 export function buildSidebarProjectSnapshots(input: {

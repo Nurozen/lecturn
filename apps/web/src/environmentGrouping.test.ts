@@ -12,6 +12,7 @@ import {
   buildPhysicalToLogicalProjectKeyMap,
   buildSidebarProjectPickerEntries,
   buildSidebarProjectSnapshots,
+  resolveLogicalProjectKey,
 } from "./sidebarProjectGrouping";
 import { orderItemsByPreferredIds } from "./components/Sidebar.logic";
 import { legacyProjectCwdPreferenceKey } from "./uiStateStore";
@@ -284,6 +285,61 @@ describe("environment grouping", () => {
     expect(
       deriveLogicalProjectKeyFromSettings(staleWithoutRepositoryIdentity, defaultGroupingSettings),
     ).not.toBe(repositoryIdentity.canonicalKey);
+  });
+
+  it("resolves a duplicate project without repository identity to its sibling's group key", () => {
+    // The freshest row is the one the sidebar exposes as the group member, so
+    // it is the active project of a new thread started from that row.
+    const activeDraftProject = makeProject({
+      id: ProjectId.make("project-fresh"),
+      repositoryIdentity: null,
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    });
+    const siblingWithRepositoryIdentity = makeProject({
+      id: ProjectId.make("project-sibling"),
+      repositoryIdentity,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const projects = [activeDraftProject, siblingWithRepositoryIdentity];
+    expect(derivePhysicalProjectKey(activeDraftProject)).toBe(
+      derivePhysicalProjectKey(siblingWithRepositoryIdentity),
+    );
+
+    const projectKey = resolveLogicalProjectKey({
+      project: activeDraftProject,
+      logicalKeyByPhysicalKey: buildPhysicalToLogicalProjectKeyMap({
+        projects,
+        settings: defaultGroupingSettings,
+        primaryEnvironmentId,
+      }),
+      settings: defaultGroupingSettings,
+    });
+
+    expect(projectKey).toBe(repositoryIdentity.canonicalKey);
+    // Project settings looks the group up by this key; the key derived from
+    // the draft's project alone would render "Unavailable project".
+    const groups = buildSidebarProjectSnapshots({
+      projects,
+      settings: defaultGroupingSettings,
+      primaryEnvironmentId,
+      resolveEnvironmentLabel: () => null,
+    });
+    expect(groups.map((group) => group.projectKey)).toEqual([projectKey]);
+    expect(
+      deriveLogicalProjectKeyFromSettings(activeDraftProject, defaultGroupingSettings),
+    ).not.toBe(projectKey);
+  });
+
+  it("falls back to the project's own key when it is missing from the grouping map", () => {
+    const project = makeProject({ repositoryIdentity });
+
+    expect(
+      resolveLogicalProjectKey({
+        project,
+        logicalKeyByPhysicalKey: new Map(),
+        settings: defaultGroupingSettings,
+      }),
+    ).toBe(deriveLogicalProjectKeyFromSettings(project, defaultGroupingSettings));
   });
 
   it("builds one picker entry per logical project and targets the preferred environment", () => {

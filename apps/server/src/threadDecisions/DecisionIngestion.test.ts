@@ -79,6 +79,8 @@ it.layer(SqlitePersistenceMemory)("Decision ingestion", (it) => {
           let firstSnapshot = true;
           const engine = OrchestrationEngineService.of({
             dispatch: () => Effect.die("unused"),
+            readThreadEvents: () => Stream.empty,
+            getThreadReplayStats: () => Effect.die("unused thread replay stats"),
             readEvents: (cursor, limit = 200) => {
               pageLimits.push(limit);
               return Stream.fromIterable(
@@ -126,6 +128,8 @@ it.layer(SqlitePersistenceMemory)("Decision ingestion", (it) => {
       const { jobs } = yield* fixture;
       const engine = OrchestrationEngineService.of({
         dispatch: () => Effect.die("unused"),
+        readThreadEvents: () => Stream.empty,
+        getThreadReplayStats: () => Effect.die("unused thread replay stats"),
         readEvents: () => Stream.empty,
         latestSequence: Effect.succeed(10),
         streamDomainEvents: Stream.empty,
@@ -150,6 +154,8 @@ it.layer(SqlitePersistenceMemory)("Decision ingestion", (it) => {
         );
         const engine = OrchestrationEngineService.of({
           dispatch: () => Effect.die("unused"),
+          readThreadEvents: () => Stream.empty,
+          getThreadReplayStats: () => Effect.die("unused thread replay stats"),
           readEvents: (cursor) => Stream.fromIterable(cursor < 1 ? [event(1)] : []),
           latestSequence: Effect.succeed(1),
           streamDomainEvents: Stream.empty,
