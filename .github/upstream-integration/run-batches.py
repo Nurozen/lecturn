@@ -666,7 +666,16 @@ transient infrastructure failure that should be rerun. Otherwise return ci_retry
                 return
             require(holistic['verdict'] == 'approve', holistic['findings'])
             reviews.append(holistic)
-        require(all(review['ui_evidence_valid'] is True for review in reviews), 'Reviewers did not approve UI evidence applicability')
+        gaps = [review for review in reviews if review['ui_evidence_valid'] is not True]
+        if gaps:
+            # Evidence must satisfy every reviewer; a gap is a bounded repair round (max_rounds still
+            # applies), never an approval and never a dead stop.
+            m['feedback'] = ('Source approved, but UI evidence was not accepted by every reviewer. Keep the staged '
+                             'source unless a real defect is found; add the missing before/after evidence with SHA-256 '
+                             'receipts, or state concretely why a change cannot be captured.\n\n'
+                             + '\n\n'.join(review['findings'] for review in gaps))
+            self.save(folder, m)
+            return
         m.update(phase='reviewed', tree=tree, build=build, reviews=reviews)
         self.save(folder, m)
 

@@ -505,12 +505,20 @@ class GitSafetyTests(unittest.TestCase):
     def test_repair_approval_still_requires_valid_ui_evidence(self):
         runner, m, build, approved = self.staged_review_fixture()
         blocked = dict(approved, verdict='blocked', findings='Upload receipt missing')
-        runner.agent = Mock(side_effect=[build, blocked, build, approved,
-                                        dict(approved, ui_evidence_valid=False)])
+        gap = dict(approved, ui_evidence_valid=False, findings='Server update notice has no before/after pair.')
+        runner.agent = Mock(side_effect=[build, blocked, build, approved, gap, build, approved, gap])
         runner.build_review(self.folder, m)
-        with self.assertRaisesRegex(batches.Blocked, 'UI evidence applicability'):
-            runner.build_review(self.folder, m)
+        runner.build_review(self.folder, m)
+        # An approval with rejected evidence is never accepted; it becomes a repair round with the gap as feedback.
         self.assertEqual(m['phase'], 'building')
+        self.assertNotIn('reviews', m)
+        self.assertIn(gap['findings'], m['feedback'])
+        persisted = json.loads((self.folder / 'manifest.json').read_text())
+        self.assertEqual(persisted['feedback'], m['feedback'])
+        # The existing round limit still bounds repeated evidence gaps.
+        runner.build_review(self.folder, m)
+        with self.assertRaisesRegex(batches.Blocked, 'Repair limit reached'):
+            runner.build_review(self.folder, m)
         self.assertNotIn('reviews', m)
 
     def test_rewritten_accepted_ancestry_is_rejected(self):
