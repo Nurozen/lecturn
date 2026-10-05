@@ -144,22 +144,29 @@ describe("highlightSourceFile", () => {
     vi.resetModules();
     const highlighter = await import("./shikiReviewHighlighter");
     const source = "const answer: number = 42;";
+    // Shiki stops tokenizing a line after 500ms of wall-clock time and emits the rest as one
+    // token. Hold the clock still so a slow cold start cannot truncate the first result.
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(Date.now());
 
-    const highlighted = await highlighter.highlightSourceFile({
-      path: "example.ts",
-      contents: source,
-      theme: "dark",
-    });
+    try {
+      const highlighted = await highlighter.highlightSourceFile({
+        path: "example.ts",
+        contents: source,
+        theme: "dark",
+      });
 
-    expect(
-      highlighted
-        .flat()
-        .map((token) => token.content)
-        .join(""),
-    ).toBe(source);
-    expect(highlighted.flat().some((token) => token.color !== null)).toBe(true);
-    expect(
-      await highlighter.highlightCodeSnippet({ code: source, language: "ts", theme: "dark" }),
-    ).toEqual(highlighted);
+      expect(
+        highlighted
+          .flat()
+          .map((token) => token.content)
+          .join(""),
+      ).toBe(source);
+      expect(highlighted.flat().some((token) => token.color !== null)).toBe(true);
+      expect(
+        await highlighter.highlightCodeSnippet({ code: source, language: "ts", theme: "dark" }),
+      ).toEqual(highlighted);
+    } finally {
+      dateNow.mockRestore();
+    }
   });
 });

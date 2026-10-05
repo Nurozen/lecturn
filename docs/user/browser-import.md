@@ -13,8 +13,8 @@ sites may still require you to sign in again.
 On macOS, Safari is also available. Safari protects its cookies with Full Disk Access rather than
 a keychain, so the import wizard asks you to grant it: **Open System Settings** takes you to the
 right pane, and macOS may ask you to quit and reopen Lecturn before the grant applies. You can
-revoke Full Disk Access after the import is done. Only Safari's primary profile is imported; cookies
-kept by additional Safari profiles are not.
+revoke Full Disk Access after the import is done. If Safari has more than one profile, the wizard
+lists each one under **From**; only the cookies of the profile you choose are copied.
 
 On Windows, import supports Firefox and Helium profiles that use standard profile encryption.
 Other Chromium-based browsers use app-bound encryption and cannot be imported. Partitioned cookies
