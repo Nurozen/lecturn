@@ -309,7 +309,7 @@ function PullRequestsRouteView() {
   const search = Route.useSearch();
   const sort = search.sort ?? "ready";
   const statsPolicy: PullRequestStatsPolicy =
-    sort === "ready" || sort === "largest" || sort === "smallest" ? "eager" : "visible";
+    sort === "largest" || sort === "smallest" ? "eager" : "visible";
   const navigate = useNavigate({ from: Route.fullPath });
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { environments } = useEnvironments();
@@ -878,11 +878,7 @@ function PullRequestsRouteView() {
     } finally {
       setInvalidating(false);
     }
-    refreshList();
-    baselineQuery.refresh();
-    facetQuery.refresh();
-    authoredQuery.refresh();
-    reviewingQuery.refresh();
+    refreshList(true);
     const visible = visibleStatsKeys.current;
     const batches = pullRequestStatsRefreshBatches({
       requestedScope: requestedStatsScope,
@@ -995,7 +991,7 @@ function PullRequestsRouteView() {
         environmentKey,
         scope: scopeKey,
         query: sentQuery,
-        data,
+        data: { ...data, entries: ordered?.key === filterKey ? ordered.entries : data.entries },
         ...(partitions === undefined ? {} : { partitions }),
       };
     });
@@ -1073,7 +1069,7 @@ function PullRequestsRouteView() {
   // `ordered` is declared above, ahead of the snapshot write, but grown here from this round's
   // own answer.
   useEffect(() => {
-    if (!answered) return;
+    if (!answered || listQuery.isPending || (listQuery.error && listQuery.data === null)) return;
     setOrdered((previous) => {
       if (previous === null || previous.key !== filterKey) {
         return {
@@ -1101,7 +1097,15 @@ function PullRequestsRouteView() {
       // reads, so its order stands; a row that moved was updated, and moving is the news.
       return { key: filterKey, entries: rankPullRequestMatches(answered.entries, sentParsed.text) };
     });
-  }, [answered, filterKey, sentCursors, sentParsed.text]);
+  }, [
+    answered,
+    filterKey,
+    sentCursors,
+    sentParsed.text,
+    listQuery.isPending,
+    listQuery.error,
+    listQuery.data,
+  ]);
 
   // Carrying on where the last answer stopped, and only raising the page size for the hosts that
   // could not say where that was.
@@ -1137,11 +1141,20 @@ function PullRequestsRouteView() {
   // re-reads only its own slice, so the rows loaded before it would never see a merge, a close,
   // or a retitle. Going back to a single page long enough to cover everything on screen lets the
   // merge above bring every row up to date in place.
-  const refreshList = () => {
+  const refreshList = (includeRelated = false) => {
+    const related = includeRelated
+      ? [
+          ...baselineTargets,
+          ...facetTargets,
+          ...partitionTargets.authored,
+          ...partitionTargets.reviewing,
+        ]
+      : [];
     if (sentCursors === null) {
-      listQuery.refresh();
+      listQuery.refresh([...listTargets, ...related]);
       return;
     }
+    if (related.length > 0) listQuery.refresh(related);
     const loadedCount = ordered?.key === filterKey ? ordered.entries.length : pageSize;
     setPage({
       key: filterKey,
@@ -1173,9 +1186,7 @@ function PullRequestsRouteView() {
   // host's rate limit.
   useLiveRefresh(
     () => {
-      refreshList();
-      authoredQuery.refresh();
-      reviewingQuery.refresh();
+      refreshList(true);
     },
     { enabled: pullRequestsSupported },
   );
@@ -1265,54 +1276,6 @@ function PullRequestsRouteView() {
   );
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    // A failed page must stop the observer. Retained rows keep the sentinel on screen, so
-    // re-arming it after a failure would ask for the next page again, forever.
-    //
-    // Rows on screen are also what makes reaching the sentinel mean anything: with none, it
-    // sits directly below the empty state and is always in view, so a search that matches
-    // nothing would page through the whole host on its own — one listing of every repository
-    // per step — while the reader looks at an empty page. With nothing to scroll past, the
-    // next page is asked for rather than assumed.
-    if (
-      !sentinel ||
-      entries.length === 0 ||
-      listData?.truncated !== true ||
-      listQuery.isPending ||
-      listQuery.error !== null ||
-      // The rows on screen belong to the previous question, so nothing about them says where
-      // this one carries on from. Growing the page under them would answer neither.
-      showingCarried ||
-      // Asking past the cap is refused, which would strand the list on an error the retry
-      // could never clear, so growth stops here and the rest stays on the host. A continuation
-      // does not grow the page at all, so the cap does not apply to it.
-      (!canContinue && pageSize >= MAX_PAGE_SIZE)
-    ) {
-      return;
-    }
-    const observer = new IntersectionObserver(
-      (observed) => {
-        if (observed.some((entry) => entry.isIntersecting)) {
-          loadMore();
-        }
-      },
-      // Start the next page slightly before the sentinel is on screen.
-      { root: scrollRef.current, rootMargin: "240px" },
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [
-    entries.length,
-    filterKey,
-    canContinue,
-    listData?.truncated,
-    listQuery.error,
-    listQuery.isPending,
-    pageSize,
-    showingCarried,
-  ]);
 
   /**
    * The line counts, asked for once the rows are on screen. On GitHub they are forty per cent of
@@ -1703,7 +1666,7 @@ function PullRequestsRouteView() {
         />
       ) : firstLoad ? (
         <PullRequestListGhost rows={7} />
-      ) : listQuery.error && listData === null ? (
+      ) : listQuery.error && entries.length === 0 ? (
         <PullRequestsUnavailableState error={listQuery.error} onRetry={() => listQuery.refresh()} />
       ) : carriedToNothing ? (
         <PullRequestListGhost rows={7} />
@@ -1783,22 +1746,33 @@ function PullRequestsRouteView() {
         </div>
       )}
 
-      {listQuery.error && listData !== null ? (
+      {listQuery.error && entries.length > 0 ? (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
-          <span>The latest request failed. Showing the last pull requests loaded.</span>
+          <span>{listQuery.error} Showing the last pull requests loaded.</span>
           <Button size="xs" variant="outline" onClick={() => listQuery.refresh()}>
             Retry
           </Button>
         </div>
       ) : null}
       {listData?.truncated && entries.length > 0 ? (
-        <div ref={sentinelRef} className="flex justify-center py-2 text-xs text-muted-foreground">
+        <div className="flex justify-center py-3 text-xs text-muted-foreground">
           {loadingMore ? (
             <span className="flex items-center gap-2">
               <LoaderIcon aria-hidden className="size-3.5 animate-spin" />
-              Loading more
+              {sentCursors === null ? "Updating pull requests" : "Loading more"}
             </span>
-          ) : null}
+          ) : canContinue || pageSize < MAX_PAGE_SIZE ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={loadMore}
+              disabled={listQuery.isPending || showingCarried}
+            >
+              Load more pull requests
+            </Button>
+          ) : (
+            <span>Narrow your search to find more pull requests.</span>
+          )}
         </div>
       ) : null}
     </>
@@ -2066,10 +2040,7 @@ function PullRequestsRouteView() {
               // Merging, closing or reopening changes the row this panel was opened from, so
               // the list behind it is out of date the moment the host takes the action.
               onActed={() => {
-                refreshList();
-                baselineQuery.refresh();
-                authoredQuery.refresh();
-                reviewingQuery.refresh();
+                refreshList(true);
               }}
             />
           </RightPanelTabs>
@@ -2329,7 +2300,7 @@ function PullRequestsColumn({
   }, [condensed]);
 
   return (
-    <AccountSurface className="flex min-h-0 min-w-0 flex-1 flex-col lecturn-page-surface">
+    <AccountSurface className="@container/pr-list flex min-h-0 min-w-0 flex-1 flex-col lecturn-page-surface">
       {/* A closed right panel leaves this column full-width, so the shared header
           reserves native window controls and hosts the controls strip itself: on
           desktop the header is a drag-region, and only a no-drag descendant wins
@@ -2410,8 +2381,10 @@ function PullRequestsColumn({
             content actually passing under the chrome fades. */}
         <WorkspacePageContainer width="expanded" className="gap-4">
           <div className="flex flex-col gap-3">
-            <div ref={inFlowSearchRef} className="flex items-center gap-2">
-              {searchInput}
+            <div ref={inFlowSearchRef} className="flex flex-wrap items-center gap-2">
+              <div className="min-w-0 basis-full @lg/pr-list:basis-0 @lg/pr-list:flex-1">
+                {searchInput}
+              </div>
               {sortMenu}
               {filtersMenu}
               {!condensed ? (
