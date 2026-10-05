@@ -171,6 +171,7 @@ function makeHarness(config?: {
   readonly instanceId?: ProviderInstanceId;
   readonly forkSession?: ClaudeAdapterLiveOptions["forkSession"];
   readonly scopedLimitNames?: ClaudeAdapterLiveOptions["scopedLimitNames"];
+  readonly environment?: ClaudeAdapterLiveOptions["environment"];
 }) {
   const query = new FakeClaudeQuery();
   let createInput:
@@ -184,6 +185,7 @@ function makeHarness(config?: {
     ...(config?.instanceId ? { instanceId: config.instanceId } : {}),
     forkSession: config?.forkSession ?? (async () => ({ sessionId: FORK_CHILD_SESSION_ID })),
     ...(config?.scopedLimitNames ? { scopedLimitNames: config.scopedLimitNames } : {}),
+    ...(config?.environment ? { environment: config.environment } : {}),
     modelCatalog: Effect.succeed(SYNTHETIC_CLAUDE_MODEL_CATALOG),
     createQuery: (input) => {
       createInput = input;
@@ -221,6 +223,20 @@ function makeHarness(config?: {
     query,
     getLastCreateQueryInput: () => createInput,
   };
+}
+
+/** Claude Code 2.1.274+ startup failure result; the pinned SDK types lack `startup_failure_reason`. */
+function makeStartupFailureResult(errors: ReadonlyArray<string>, reason: string): SDKMessage {
+  return {
+    type: "result",
+    subtype: "error_during_execution",
+    is_error: true,
+    errors,
+    startup_failure_reason: reason,
+    stop_reason: null,
+    session_id: "sdk-session-startup-failure",
+    uuid: "result-startup-failure",
+  } as unknown as SDKMessage;
 }
 
 function makeDeterministicRandomService(seed = 0x1234_5678): {
@@ -474,6 +490,36 @@ describe("ClaudeAdapterLive", () => {
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
     );
+  });
+
+  it.effect("opts Claude sessions into startup failure results", () => {
+    const harness = makeHarness({
+      environment: { PATH: "/usr/bin", LECTURN_TEST_MARKER: "kept" },
+    });
+    const explicitHarness = makeHarness({
+      environment: { CLAUDE_CODE_STARTUP_FAILURE_RESULTS: "0" },
+    });
+    const startSession = Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+    }).pipe(Effect.provideService(Random.Random, makeDeterministicRandomService()));
+    return Effect.gen(function* () {
+      yield* startSession.pipe(Effect.provide(harness.layer));
+      const env = harness.getLastCreateQueryInput()?.options.env;
+      assert.equal(env?.CLAUDE_CODE_STARTUP_FAILURE_RESULTS, "1");
+      assert.equal(env?.LECTURN_TEST_MARKER, "kept");
+      assert.equal(env?.PATH, "/usr/bin");
+
+      yield* startSession.pipe(Effect.provide(explicitHarness.layer));
+      assert.equal(
+        explicitHarness.getLastCreateQueryInput()?.options.env?.CLAUDE_CODE_STARTUP_FAILURE_RESULTS,
+        "0",
+      );
+    });
   });
 
   it.effect("loads Claude filesystem settings sources for SDK sessions", () => {
@@ -3407,6 +3453,104 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("reports a Claude startup failure result instead of the generic stream failure", () => {
+    const harness = makeHarness();
+    const cliText = 'Invalid proxy URL in HTTPS_PROXY: "::not-a-url" cannot be parsed as a URL.';
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil((event) => event.type === "session.exited"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "hello",
+        attachments: [],
+      });
+
+      harness.query.emit(makeStartupFailureResult([cliText], "proxy_invalid"));
+      harness.query.fail(new Error(`Claude Code returned an error result: ${cliText}`));
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const runtimeErrors = runtimeEvents.filter((event) => event.type === "runtime.error");
+      assert.deepEqual(
+        runtimeErrors.map((event) => event.type === "runtime.error" && event.payload.message),
+        [cliText],
+      );
+
+      const completed = runtimeEvents.find((event) => event.type === "turn.completed");
+      assert.equal(completed?.type, "turn.completed");
+      if (completed?.type === "turn.completed") {
+        assert.equal(completed.payload.state, "failed");
+        assert.equal(completed.payload.errorMessage, cliText);
+      }
+      assert.isTrue(runtimeEvents.some((event) => event.type === "session.exited"));
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect.each<{
+    errors: ReadonlyArray<string>;
+    reason: string;
+    expectedMessage: string;
+  }>([
+    {
+      errors: ["Gateway sign-in was cancelled"],
+      reason: "gateway_signin_required",
+      expectedMessage: "Gateway sign-in was cancelled",
+    },
+    {
+      errors: [],
+      reason: "cwd_unavailable",
+      expectedMessage: "Claude Code could not start (cwd_unavailable).",
+    },
+  ])("fails startup failure results regardless of their wording ($reason)", (testCase) => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const runtimeEventsFiber = yield* Stream.filter(
+        adapter.streamEvents,
+        (event) => event.type === "runtime.error" || event.type === "turn.completed",
+      ).pipe(Stream.take(2), Stream.runCollect, Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "hello",
+        attachments: [],
+      });
+
+      harness.query.emit(makeStartupFailureResult(testCase.errors, testCase.reason));
+
+      const [runtimeError, completed] = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      assert.equal(runtimeError?.type, "runtime.error");
+      if (runtimeError?.type === "runtime.error") {
+        assert.equal(runtimeError.payload.message, testCase.expectedMessage);
+      }
+      assert.equal(completed?.type, "turn.completed");
+      if (completed?.type === "turn.completed") {
+        assert.equal(completed.payload.state, "failed");
+        assert.equal(completed.payload.errorMessage, testCase.expectedMessage);
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("closes the previous session before replacing an existing thread session", () => {
     const queries: FakeClaudeQuery[] = [];
     const layer = Layer.effect(
@@ -5175,6 +5319,51 @@ describe("ClaudeAdapterLive", () => {
           providerThreadId: durableSessionId,
         });
       }
+
+      const activeSessions = yield* adapter.listSessions();
+      const resumeCursor = activeSessions[0]?.resumeCursor as
+        | {
+            readonly resume?: string;
+          }
+        | undefined;
+      assert.equal(resumeCursor?.resume, durableSessionId);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("keeps the resume cursor when a resumed Claude session fails to start", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const durableSessionId = "550e8400-e29b-41d4-a716-446655440000";
+
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil((event) => event.type === "runtime.error"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: RESUME_THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        resumeCursor: {
+          threadId: RESUME_THREAD_ID,
+          resume: durableSessionId,
+          resumeSessionAt: "assistant-99",
+          turnCount: 3,
+        },
+        runtimeMode: "full-access",
+      });
+
+      // The CLI stamps a fresh session id on the startup-failure result even under --resume.
+      harness.query.emit(
+        makeStartupFailureResult(["Invalid proxy URL in HTTPS_PROXY."], "proxy_invalid"),
+      );
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      assert.isFalse(runtimeEvents.some((event) => event.type === "thread.started"));
 
       const activeSessions = yield* adapter.listSessions();
       const resumeCursor = activeSessions[0]?.resumeCursor as

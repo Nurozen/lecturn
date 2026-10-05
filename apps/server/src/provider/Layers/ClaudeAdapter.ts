@@ -341,6 +341,9 @@ interface ClaudeSessionContext {
   lastKnownTotalProcessedTokens: number | undefined;
   lastAssistantUuid: string | undefined;
   lastThreadStartedId: string | undefined;
+  /** Error already reported from the CLI's startup-failure result; the stream
+   * exit that follows keeps it instead of reporting a generic failure. */
+  startupFailure: string | undefined;
   stopped: boolean;
 }
 
@@ -375,6 +378,11 @@ function isSyntheticClaudeThreadId(value: string): boolean {
 }
 
 function hasDurableClaudeSessionId(message: SDKMessage): boolean {
+  // A startup-failure result names a fresh session that never started, even
+  // under --resume; adopting it would point the resume cursor at nothing.
+  if (message.type === "result") {
+    return resultStartupFailureReason(message) === undefined;
+  }
   if (message.type !== "system") {
     return true;
   }
@@ -447,6 +455,16 @@ function resultErrorsText(result: SDKResultMessage): string {
 }
 
 /**
+ * Known startup failure the CLI stamps on the error result it writes before
+ * exiting (`startup_failure_reason`, Claude Code 2.1.274+, e.g. "proxy_invalid").
+ * Read untyped: the pinned SDK types predate the field.
+ */
+function resultStartupFailureReason(result: SDKResultMessage): string | undefined {
+  const reason = (result as { readonly startup_failure_reason?: unknown }).startup_failure_reason;
+  return typeof reason === "string" && reason.length > 0 ? reason : undefined;
+}
+
+/**
  * First user-facing error from a non-success result. "[ede_diagnostic] ..."
  * entries are CLI-internal telemetry (the CLI hides them from its own UI too),
  * so they must never become the error banner.
@@ -458,6 +476,10 @@ function resultUserFacingError(result: SDKResultMessage): string | undefined {
       : result.errors.find((error) => !error.startsWith("[ede_diagnostic]"));
   if (listed) {
     return listed;
+  }
+  const startupFailureReason = resultStartupFailureReason(result);
+  if (startupFailureReason) {
+    return `Claude Code could not start (${startupFailureReason}).`;
   }
   // Structured failure markers for results whose error list is empty or
   // diagnostic-only: an overloaded API (529) and the terminal reasons the
@@ -1561,7 +1583,10 @@ function isOverloadedResult(result: SDKResultMessage): boolean {
 }
 
 function turnStatusFromResult(result: SDKResultMessage): ProviderRuntimeTurnStatus {
+  // A startup failure's text is the CLI's own explanation; it must not be read
+  // as an interrupt or cancel by the wording heuristics below.
   if (
+    resultStartupFailureReason(result) !== undefined ||
     isOverloadedResult(result) ||
     (result.terminal_reason !== undefined && FAILED_TERMINAL_REASONS.has(result.terminal_reason))
   ) {
@@ -3251,6 +3276,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     yield* completeTurn(context, status, errorMessage, message);
+
+    if (resultStartupFailureReason(message) !== undefined) {
+      context.startupFailure = errorMessage;
+    }
   });
 
   /**
@@ -3929,7 +3958,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     if (Exit.isFailure(exit)) {
-      if (isClaudeInterruptedCause(exit.cause)) {
+      if (context.startupFailure !== undefined) {
+        // The CLI exits right after its startup-failure result, and the SDK
+        // rethrows it (text included, so the interrupt check below could match
+        // it). The specific error is already reported; a generic one here
+        // would replace it as the session's last error.
+        if (context.turnState) {
+          yield* completeTurn(context, "failed", context.startupFailure);
+        }
+      } else if (isClaudeInterruptedCause(exit.cause)) {
         if (context.turnState) {
           yield* completeTurn(context, "interrupted", "Claude runtime interrupted.");
         }
@@ -4654,7 +4691,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         canUseTool,
         onUserDialog,
         supportedDialogKinds: ["resume_return"],
-        env: claudeEnvironment,
+        // Ask the CLI to report known startup failures as a typed error result
+        // instead of stderr alone; an explicit value in the environment wins.
+        env: { CLAUDE_CODE_STARTUP_FAILURE_RESULTS: "1", ...claudeEnvironment },
         additionalDirectories,
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
         ...(mcpSession
@@ -4762,6 +4801,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         lastKnownTotalProcessedTokens: undefined,
         lastAssistantUuid: resumeState?.resumeSessionAt,
         lastThreadStartedId: undefined,
+        startupFailure: undefined,
         stopped: false,
       };
       yield* Ref.set(contextRef, context);
