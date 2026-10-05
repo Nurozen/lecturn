@@ -16,6 +16,8 @@ import {
   RuntimeMode,
   ThreadForkOrigin,
   ThreadForkProviderSource,
+  ThreadImportOrigin,
+  ThreadImportSource,
   ThreadLinkedPullRequest,
   ThreadId,
   TurnId,
@@ -43,6 +45,12 @@ export const ProjectionThread = Schema.Struct({
   // Server-only provider snapshot captured at fork time; never exposed on
   // wire shapes.
   forkSource: Schema.optional(Schema.NullOr(ThreadForkProviderSource)),
+  // Origin of an imported thread; optional so rows written before migration
+  // 053 keep decoding.
+  importedFrom: Schema.optional(Schema.NullOr(ThreadImportOrigin)),
+  // Server-only cursor of the fork an imported thread runs on; never exposed
+  // on wire shapes.
+  importSource: Schema.optional(Schema.NullOr(ThreadImportSource)),
   latestTurnId: Schema.NullOr(TurnId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,

@@ -11,7 +11,7 @@ const OPERATION_LABELS: Record<StaveOperation["kind"], string> = {
   retarget: "Retarget repository",
   archiveSpace: "Archive space",
   destroySpace: "Destroy space",
-  restoreSpace: "Unarchive space",
+  restoreSpace: "Restore space",
   memoryAttach: "Attach memory",
   memoryDetach: "Detach memory",
   createSaga: "Create saga",

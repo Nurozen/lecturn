@@ -43,6 +43,25 @@ it.layer(StaveLifecycleRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceM
           assert.equal(row.leaseEpoch, 1);
         }),
     );
+    it.effect("lists a space's rows only for projects that were not deleted", () =>
+      Effect.gen(function* () {
+        const repo = yield* StaveLifecycleRepository;
+        const sql = yield* SqlClient.SqlClient;
+        for (const [id, deletedAt] of [
+          ["kept-owner", null],
+          ["deleted-owner", base.now],
+        ] as const) {
+          const projectId = ProjectId.make(id);
+          yield* sql`INSERT INTO projection_projects (project_id,title,workspace_root,scripts_json,created_at,updated_at,deleted_at) VALUES (${projectId}, ${id}, ${`/${id}`}, '[]', ${base.now}, ${base.now}, ${deletedAt})`;
+          yield* repo.ensure({ ...base, projectId, spaceId: "listed", workspaceRoot: `/${id}` });
+        }
+        const rows = yield* repo.listActiveBySpaceId("listed");
+        assert.deepEqual(
+          rows.map((row) => row.projectId),
+          ["kept-owner"],
+        );
+      }),
+    );
     it.effect("persists reset intent until the lease owner resets the episode", () =>
       Effect.gen(function* () {
         const repo = yield* StaveLifecycleRepository;

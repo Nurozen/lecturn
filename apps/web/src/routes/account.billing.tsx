@@ -1,3 +1,4 @@
+import { AccountSurface } from "../components/AccountSurface";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { isHostedStaticApp } from "../hostedPairing";
@@ -7,18 +8,20 @@ function BillingRoute() {
   const navigate = useNavigate();
   const { tab } = Route.useSearch();
   return (
-    <main className="lecturn-settings-surface min-h-dvh bg-background">
-      <div aria-hidden="true" className="p-8 font-heading text-xl text-muted-foreground">
-        Lecturn
-      </div>
-      <BillingSettingsDialog
-        open
-        initialTab={tab}
-        onConnections={() => void navigate({ to: "/settings/connections" })}
-        onOpenChange={(open) => {
-          if (!open) void navigate({ to: "/" });
-        }}
-      />
+    <main className="min-h-dvh">
+      <AccountSurface seam={false} className="lecturn-settings-surface min-h-dvh">
+        <div aria-hidden="true" className="p-8 font-heading text-xl text-muted-foreground">
+          Lecturn
+        </div>
+        <BillingSettingsDialog
+          open
+          initialTab={tab}
+          onConnections={() => void navigate({ to: "/settings/connections" })}
+          onOpenChange={(open) => {
+            if (!open) void navigate({ to: "/" });
+          }}
+        />
+      </AccountSurface>
     </main>
   );
 }

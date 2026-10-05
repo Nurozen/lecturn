@@ -27,6 +27,7 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
   buildWorkflowSummaryPrompt,
+  buildContextualSummaryPrompt,
   normalizeWorkflowSummary,
 } from "./TextGenerationPrompts.ts";
 import {
@@ -429,11 +430,48 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       return { summary, stage: generated.stage, confidence: generated.confidence };
     });
 
+  const generateContextualSummary: NonNullable<
+    TextGeneration.TextGeneration["Service"]["generateContextualSummary"]
+  > = Effect.fn("AntigravityTextGeneration.generateContextualSummary")(
+    function* (input) {
+      const { prompt, outputSchema } = yield* Effect.try({
+        try: () => buildContextualSummaryPrompt(input),
+        catch: (cause) =>
+          new TextGenerationError({
+            operation: "generateContextualSummary",
+            detail: "Contextual summary requires bounded evidence text.",
+            cause,
+          }),
+      });
+      const generated = yield* runAntigravityJson({
+        operation: "generateContextualSummary",
+        prompt,
+        outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      const text = generated.text.trim();
+      if (!text)
+        return yield* new TextGenerationError({
+          operation: "generateContextualSummary",
+          detail: "The provider returned an empty Contextual summary.",
+        });
+      return { text };
+    },
+    Effect.mapError(
+      () =>
+        new TextGenerationError({
+          operation: "generateContextualSummary",
+          detail: "Contextual summary generation is unavailable.",
+        }),
+    ),
+  );
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateWorkflowSummary,
+    generateContextualSummary,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

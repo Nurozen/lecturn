@@ -362,6 +362,22 @@ it.layer(NodeServices.layer)("AntigravityTextGeneration", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("uses isolated subscription generation for Contextual display summaries", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture({
+        outputs: ['{"text":"SQLite supports the local cache."}'],
+      });
+      const result = yield* fixture.textGeneration.generateContextualSummary!({
+        cwd: fixture.projectDirectory,
+        modelSelection,
+        message: "Use SQLite for the cache.",
+      });
+      expect(result).toEqual({ text: "SQLite supports the local cache." });
+      expect(fixture.state.workspaces).not.toContain(fixture.projectDirectory);
+      expect(fixture.state.selectedModels).toEqual([modelSelection.model]);
+      yield* fixture.assertCleaned;
+    }).pipe(Effect.scoped),
+  );
   it.effect.each(["tool_call", "tool_call_update"] as const)(
     "aborts on %s even without a permission request",
     (sessionUpdate) =>

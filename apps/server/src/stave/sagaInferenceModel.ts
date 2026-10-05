@@ -1,4 +1,8 @@
-import type { ModelSelection, ProviderDriverKind } from "@lecturn/contracts";
+import {
+  COPILOT_TEXT_GENERATION_MODEL,
+  type ModelSelection,
+  type ProviderDriverKind,
+} from "@lecturn/contracts";
 
 /** Pick a small inference model within the triggering conversation's account. */
 export function resolveSagaInferenceModel(
@@ -13,7 +17,9 @@ export function resolveSagaInferenceModel(
         ? ["claude-sonnet-5"]
         : driverKind === "cursor"
           ? ["composer-2.5", "composer-2"]
-          : [];
+          : driverKind === "githubCopilot"
+            ? [COPILOT_TEXT_GENERATION_MODEL]
+            : [];
   const model = preferences.find((preferred) => models.some((entry) => entry.slug === preferred));
   // OpenCode's provider/model slug selects a downstream account. Grok may use
   // custom model endpoints. Antigravity keeps the account-selected model too.

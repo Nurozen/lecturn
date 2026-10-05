@@ -760,3 +760,123 @@ describe("CodexSessionRuntime collab integration", () => {
     );
   }
 });
+
+describe("CodexSessionRuntime paginated rollback integration", () => {
+  for (const failFork of [false, true]) {
+    it.effect(
+      failFork
+        ? "keeps the original session after fork failure"
+        : "switches subsequent turns to the fork and ignores the discarded branch",
+      () =>
+        Effect.gen(function* () {
+          const replacementThreadId = "rollback-replacement";
+          const lateChild = "late-discarded-child";
+          const script = {
+            rootThreadId: ROOT,
+            turnIds: ["before-rollback", "after-rollback"],
+            notifications: [],
+            notificationsByTurn: [
+              [capturedStartedActivity(), capturedSpawnedThread()],
+              [
+                {
+                  method: "item/agentMessage/delta",
+                  params: {
+                    threadId: ROOT,
+                    turnId: "discarded-turn",
+                    itemId: "discarded-item",
+                    delta: "discarded root text",
+                  },
+                },
+                capturedStartedActivity(),
+                capturedSpawnedThread(lateChild),
+                {
+                  method: "turn/started",
+                  params: {
+                    threadId: lateChild,
+                    turn: { id: "late-turn", status: "inProgress", items: [] },
+                  },
+                },
+              ],
+            ],
+            rollback: {
+              replacementThreadId,
+              turns: ["keep-turn", "drop-turn"].map((id) => ({
+                id,
+                status: "completed",
+                items: [],
+              })),
+              ...(failFork ? { error: "fork failed" } : {}),
+            },
+          };
+          // @effect-diagnostics-next-line preferSchemaOverJson:off
+          NodeFS.writeFileSync(scriptPath, JSON.stringify(script), "utf8");
+          NodeFS.rmSync(`${scriptPath}.requests`, { force: true });
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              NodeFS.rmSync(scriptPath, { force: true });
+              NodeFS.rmSync(`${scriptPath}.requests`, { force: true });
+            }),
+          );
+          const runtime = yield* makeCodexSessionRuntime({
+            threadId: ThreadId.make("thread-rollback-integration"),
+            binaryPath: peerPath,
+            cwd: "/tmp",
+            runtimeMode: "full-access",
+            environment: { ...process.env, LECTURNX_COLLAB_SCRIPT: scriptPath },
+          });
+          const firstCompleted = yield* Deferred.make<void>();
+          const secondCompleted = yield* Deferred.make<void>();
+          const events: ProviderEvent[] = [];
+          yield* runtime.events.pipe(
+            Stream.runForEach((event) =>
+              Effect.gen(function* () {
+                events.push(event);
+                if (event.method === "turn/completed") {
+                  if (event.turnId === "before-rollback")
+                    yield* Deferred.succeed(firstCompleted, undefined);
+                  if (event.turnId === "after-rollback")
+                    yield* Deferred.succeed(secondCompleted, undefined);
+                }
+              }),
+            ),
+            Effect.forkScoped,
+          );
+          yield* runtime.start();
+          yield* runtime.sendTurn({ input: "before rollback" });
+          yield* Deferred.await(firstCompleted);
+          if (failFork) {
+            const error = yield* runtime.rollbackThread(1).pipe(Effect.flip);
+            assert.match(error.message, /fork failed/);
+          } else {
+            const snapshot = yield* runtime.rollbackThread(1);
+            assert.equal(snapshot.threadId, replacementThreadId);
+            assert.deepEqual(
+              snapshot.turns.map((turn) => turn.id),
+              ["keep-turn"],
+            );
+          }
+          const expectedThreadId = failFork ? ROOT : replacementThreadId;
+          assert.deepEqual((yield* runtime.getSession).resumeCursor, {
+            threadId: expectedThreadId,
+          });
+          events.length = 0;
+          const result = yield* runtime.sendTurn({ input: "after rollback" });
+          yield* Deferred.await(secondCompleted);
+          assert.deepEqual(result.resumeCursor, { threadId: expectedThreadId });
+          const starts = readRecordedRequests().filter((call) => call.method === "turn/start");
+          assert.equal(starts.at(-1)?.params.threadId, expectedThreadId);
+          if (!failFork) {
+            assert.equal(
+              events.some((event) => event.textDelta === "discarded root text"),
+              false,
+            );
+            assert.equal(
+              events.some((event) => event.method.startsWith("collabAgent/")),
+              false,
+            );
+          }
+          yield* runtime.close;
+        }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    );
+  }
+});

@@ -1,3 +1,10 @@
+import { CLOUD_LINKED_USER_ID } from "./config.ts";
+import {
+  DeviceRelayReservation,
+  DeviceRelayReservationError,
+  deviceRelayConflict,
+  deviceRelayPublicationBlocked,
+} from "./DeviceRelayReservation.ts";
 import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import * as Deferred from "effect/Deferred";
@@ -33,8 +40,12 @@ const relayClientAvailableLayer = Layer.succeed(
 const runtimeDependencies = (
   spawner: ReturnType<typeof ChildProcessSpawner.make>,
   relayClientLayer = relayClientAvailableLayer,
+  reservation: DeviceRelayReservation["Service"] = {
+    acquire: Effect.succeed({ port: 0, release: async () => {} }),
+  },
 ) =>
   Layer.mergeAll(
+    Layer.succeed(DeviceRelayReservation, reservation),
     Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
     relayClientLayer,
     Layer.mock(ServerSecretStore.ServerSecretStore)({
@@ -45,11 +56,12 @@ const runtimeDependencies = (
 const buildCloudManagedEndpointRuntime = (
   spawner: ReturnType<typeof ChildProcessSpawner.make>,
   relayClientLayer = relayClientAvailableLayer,
+  reservation?: DeviceRelayReservation["Service"],
 ) =>
   Effect.gen(function* () {
     const context = yield* Layer.build(
       ManagedEndpointRuntime.layer.pipe(
-        Layer.provide(runtimeDependencies(spawner, relayClientLayer)),
+        Layer.provide(runtimeDependencies(spawner, relayClientLayer, reservation)),
       ),
     );
     return yield* Effect.service(ManagedEndpointRuntime.CloudManagedEndpointRuntime).pipe(
@@ -485,6 +497,7 @@ describe("CloudManagedEndpointRuntime", () => {
 
   it.effect("reports a missing relay client executable without spawning", () =>
     Effect.gen(function* () {
+      let releases = 0;
       const spawn = vi.fn();
       const spawner = ChildProcessSpawner.make(spawn);
       const runtime = yield* buildCloudManagedEndpointRuntime(
@@ -500,6 +513,14 @@ describe("CloudManagedEndpointRuntime", () => {
             installWithProgress: () => Effect.die("unused"),
           }),
         ),
+        {
+          acquire: Effect.succeed({
+            port: 0,
+            release: async () => {
+              releases++;
+            },
+          }),
+        },
       );
 
       const status = yield* runtime.applyConfig({
@@ -513,6 +534,143 @@ describe("CloudManagedEndpointRuntime", () => {
         reason: "The relay client is not installed.",
       });
       expect(spawn).not.toHaveBeenCalled();
+      expect(releases).toBe(1);
     }),
   );
 });
+
+it.effect(
+  "activity-only publishing reserves the device until unlink and retries a busy lease",
+  () =>
+    Effect.gen(function* () {
+      let occupied = true;
+      let claims = 0;
+      let releases = 0;
+      const reservation: DeviceRelayReservation["Service"] = {
+        acquire: Effect.suspend(() =>
+          occupied
+            ? Effect.fail(
+                new DeviceRelayReservationError({ message: "Other install owns this device" }),
+              )
+            : Effect.sync(() => {
+                claims++;
+                return {
+                  port: 0,
+                  release: async () => {
+                    releases++;
+                  },
+                };
+              }),
+        ),
+      };
+      const runtime = yield* buildCloudManagedEndpointRuntime(
+        ChildProcessSpawner.make(() => Effect.die("activity-only must not spawn")),
+        relayClientAvailableLayer,
+        reservation,
+      );
+      expect(yield* runtime.applyConfig(null, { published: true })).toMatchObject({
+        status: "failed",
+        reason: "Other install owns this device",
+      });
+      occupied = false;
+      expect(yield* runtime.applyConfig(null, { published: true })).toEqual({ status: "disabled" });
+      yield* runtime.applyConfig(null, { published: true });
+      expect(claims).toBe(1);
+      expect(releases).toBe(0);
+      yield* runtime.applyConfig(null);
+      expect(releases).toBe(1);
+      yield* runtime.applyConfig(null, { published: true });
+      expect(claims).toBe(2);
+    }),
+);
+
+it.effect(
+  "a published activity-only install claims the device at startup without breaking local use on conflict",
+  () =>
+    Effect.gen(function* () {
+      const secrets = ServerSecretStore.ServerSecretStore.of({
+        get: (name) =>
+          Effect.succeed(
+            name === CLOUD_LINKED_USER_ID
+              ? Option.some(new TextEncoder().encode("account"))
+              : Option.none(),
+          ),
+        set: () => Effect.die("unused"),
+        create: () => Effect.die("unused"),
+        remove: () => Effect.die("unused"),
+        getOrCreateRandom: () => Effect.die("unused"),
+      });
+      let claims = 0;
+      const context = yield* Layer.build(
+        ManagedEndpointRuntime.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              runtimeDependencies(
+                ChildProcessSpawner.make(() => Effect.die("must not spawn")),
+                relayClientAvailableLayer,
+                {
+                  acquire: Effect.suspend(() => {
+                    claims++;
+                    if (claims > 1) return Effect.succeed({ port: 0, release: async () => {} });
+                    return Effect.fail(
+                      new DeviceRelayReservationError({
+                        message: "Other install owns this device",
+                      }),
+                    );
+                  }),
+                },
+              ),
+              Layer.succeed(ServerSecretStore.ServerSecretStore, secrets),
+            ),
+          ),
+        ),
+      );
+      const runtime = yield* Effect.service(
+        ManagedEndpointRuntime.CloudManagedEndpointRuntime,
+      ).pipe(Effect.provide(context));
+      expect(claims).toBe(1);
+      expect(deviceRelayConflict(secrets)).toBe("Other install owns this device");
+      expect(deviceRelayPublicationBlocked(secrets)).toBe(true);
+      yield* runtime.applyConfig(null, { published: true });
+      expect(claims).toBe(2);
+      expect(deviceRelayConflict(secrets)).toBeNull();
+      expect(deviceRelayPublicationBlocked(secrets)).toBe(false);
+      yield* runtime.applyConfig(null);
+      expect(deviceRelayPublicationBlocked(secrets)).toBe(true);
+    }),
+);
+
+it.effect(
+  "interruption during reservation acquisition releases it when the runtime scope closes",
+  () =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>();
+      const finishAcquire = yield* Deferred.make<void>();
+      let releases = 0;
+      const fiber = yield* Effect.gen(function* () {
+        const runtime = yield* buildCloudManagedEndpointRuntime(
+          ChildProcessSpawner.make(() => Effect.die("must not spawn")),
+          relayClientAvailableLayer,
+          {
+            acquire: Effect.gen(function* () {
+              yield* Deferred.succeed(entered, undefined);
+              yield* Deferred.await(finishAcquire);
+              return {
+                port: 0,
+                release: async () => {
+                  releases++;
+                },
+              };
+            }),
+          },
+        );
+        yield* runtime.applyConfig(null, { published: true });
+      }).pipe(Effect.scoped, Effect.forkChild);
+      yield* Deferred.await(entered);
+      const interrupted = yield* Fiber.interrupt(fiber).pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+      yield* Deferred.succeed(finishAcquire, undefined);
+      yield* Fiber.join(interrupted);
+      expect(releases).toBe(1);
+    }),
+);

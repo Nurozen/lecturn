@@ -12,6 +12,7 @@ import {
 } from "@lecturn/client-runtime/platform";
 import type { PersistedSavedEnvironmentRecord } from "@lecturn/contracts";
 import { fromLenientJson } from "@lecturn/shared/schemaJson";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -20,6 +21,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
@@ -45,6 +47,13 @@ const RuntimeConnectionCatalogDocumentJson = Schema.fromJsonString(
 const encodeRuntimeConnectionCatalogDocumentJson = Schema.encodeEffect(
   RuntimeConnectionCatalogDocumentJson,
 );
+const decodeRuntimeConnectionCatalogDocumentJson = Schema.decodeUnknownEffect(
+  RuntimeConnectionCatalogDocumentJson,
+);
+
+const QUARANTINE_FILE_PREFIX = "connection-catalog.quarantine-";
+const QUARANTINE_FILE_SUFFIX = ".json";
+const MAX_QUARANTINED_CATALOGS = 3;
 
 const DesktopConnectionCatalogStoreWriteOperation = Schema.Literals([
   "create-temporary-file-name",
@@ -52,6 +61,7 @@ const DesktopConnectionCatalogStoreWriteOperation = Schema.Literals([
   "create-directory",
   "write-temporary-file",
   "replace-catalog-file",
+  "quarantine-catalog-file",
 ]);
 
 const DesktopConnectionCatalogStoreMigrationOperation = Schema.Literals([
@@ -419,6 +429,9 @@ export const make = Effect.gen(function* () {
           }),
       ),
     )).replace(/-/g, "");
+    if (!(yield* Ref.get(catalogVerified))) {
+      yield* quarantineUnreadableCatalog(suffix);
+    }
     yield* writeDocument({
       fileSystem,
       path,
@@ -426,6 +439,87 @@ export const make = Effect.gen(function* () {
       document: { version: 1, encryptedCatalog },
       suffix,
     });
+    yield* Ref.set(catalogVerified, true);
+  });
+
+  const pruneQuarantinedCatalogs = Effect.gen(function* () {
+    const directory = path.dirname(catalogPath);
+    const timestamps = (yield* fileSystem.readDirectory(directory))
+      .filter(
+        (name) => name.startsWith(QUARANTINE_FILE_PREFIX) && name.endsWith(QUARANTINE_FILE_SUFFIX),
+      )
+      .map((name) =>
+        Number(name.slice(QUARANTINE_FILE_PREFIX.length, -QUARANTINE_FILE_SUFFIX.length)),
+      )
+      .filter((timestamp) => Number.isSafeInteger(timestamp))
+      .toSorted((left, right) => right - left);
+    for (const timestamp of timestamps.slice(MAX_QUARANTINED_CATALOGS)) {
+      yield* fileSystem.remove(
+        path.join(directory, `${QUARANTINE_FILE_PREFIX}${timestamp}${QUARANTINE_FILE_SUFFIX}`),
+        { force: true },
+      );
+    }
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.logWarning("Could not prune quarantined desktop connection catalogs.", {
+        catalogPath,
+        error,
+      }),
+    ),
+  );
+
+  // The renderer decodes the catalog, so a file it cannot use still reaches
+  // `set` as a plain overwrite. Before the first write of this process, keep a
+  // copy of any existing file this build cannot read, still encrypted as found.
+  const catalogVerified = yield* Ref.make(false);
+  const quarantineUnreadableCatalog = Effect.fn(
+    "desktop.connectionCatalogStore.quarantineUnreadableCatalog",
+  )(function* (suffix: string) {
+    const quarantineError = (cause: unknown) =>
+      new DesktopConnectionCatalogStoreWriteError({
+        operation: "quarantine-catalog-file",
+        path: catalogPath,
+        cause,
+      });
+    const raw = yield* fileSystem
+      .readFileString(catalogPath)
+      .pipe(
+        Effect.catch((error) =>
+          error.reason._tag === "NotFound"
+            ? Effect.succeed<string | null>(null)
+            : Effect.fail(quarantineError(error)),
+        ),
+      );
+    if (raw === null) {
+      return;
+    }
+    const readable = yield* decodeEncryptedConnectionCatalogDocumentJson(raw).pipe(
+      Effect.flatMap((document) => decodeSecretBytes(catalogPath, document.encryptedCatalog)),
+      Effect.flatMap((encryptedCatalog) => safeStorage.decryptString(encryptedCatalog)),
+      Effect.flatMap(decodeRuntimeConnectionCatalogDocumentJson),
+      Effect.as(true),
+      Effect.orElseSucceed(() => false),
+    );
+    if (readable) {
+      return;
+    }
+    const quarantinePath = path.join(
+      path.dirname(catalogPath),
+      `${QUARANTINE_FILE_PREFIX}${yield* Clock.currentTimeMillis}${QUARANTINE_FILE_SUFFIX}`,
+    );
+    const tempPath = `${quarantinePath}.${process.pid}.${suffix}.tmp`;
+    yield* fileSystem
+      .writeFileString(tempPath, raw)
+      .pipe(
+        Effect.andThen(fileSystem.rename(tempPath, quarantinePath)),
+        Effect.mapError(quarantineError),
+        Effect.ensuring(fileSystem.remove(tempPath, { force: true }).pipe(Effect.ignore)),
+      );
+    yield* Effect.logWarning("Quarantined an unreadable desktop connection catalog.", {
+      catalogPath,
+      quarantinePath,
+    });
+    yield* pruneQuarantinedCatalogs;
   });
 
   const migrateLegacyCatalog = Effect.gen(function* () {

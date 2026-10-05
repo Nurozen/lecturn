@@ -255,7 +255,18 @@ function isNpmGlobalCommandPath(commandPath: string): boolean {
   return (
     normalized.includes("/node_modules/.bin/") ||
     normalized.includes("/lib/node_modules/") ||
-    normalized.includes("/npm/node_modules/")
+    // npm's global prefix on Windows, e.g. %APPDATA%\npm\copilot.cmd
+    normalized.includes("/npm/")
+  );
+}
+
+/** True when the command was installed by npm, bun, pnpm, or Vite+ as a global package. */
+export function isNodePackageManagerCommandPath(commandPath: string): boolean {
+  return (
+    isVitePlusGlobalCommandPath(commandPath) ||
+    isBunGlobalCommandPath(commandPath) ||
+    isPnpmGlobalCommandPath(commandPath) ||
+    isNpmGlobalCommandPath(commandPath)
   );
 }
 

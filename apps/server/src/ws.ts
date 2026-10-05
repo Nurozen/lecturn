@@ -1,3 +1,8 @@
+import { ContextualSettings } from "./contextual/ContextualSettings.ts";
+import { ContextualService } from "./contextual/ContextualService.ts";
+import { createManualCloudLinkProof, applyManualCloudRelayConfig } from "./cloud/http.ts";
+import { DecisionService } from "./threadDecisions/DecisionService.ts";
+import { ThreadNoteService } from "./threadNotes/ThreadNoteService.ts";
 import { PullRequestWatchService } from "./pullRequest/PullRequestWatchService.ts";
 import { SagaWorkbenchService } from "./stave/SagaWorkbenchService.ts";
 // @effect-diagnostics nodeBuiltinImport:off - assembleThreadFork mints ids through a synchronous callback, which the Effect Crypto service cannot satisfy
@@ -36,6 +41,7 @@ import {
   type DiscoveredLocalServerList,
   EventId,
   type EditorId,
+  type ExternalSessionImportFailure,
   type FileManagerRevealKind,
   type OrchestrationClientOrigin,
   type OrchestrationCommand,
@@ -49,6 +55,8 @@ import {
   OrchestrationGetSnapshotError,
   OrchestrationSearchThreadsError,
   OrchestrationGetTurnDiffError,
+  OrchestrationPreviewCheckpointRevertError,
+  ORCHESTRATION_REVERT_PREVIEW_MAX_PATHS,
   ORCHESTRATION_WS_METHODS,
   type ProjectId,
   type ProjectEntriesFailure,
@@ -86,7 +94,7 @@ import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { copyClaimedAttachment } from "./attachmentStore.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
-import { resolveThreadWorkspaceCwd } from "./checkpointing/Utils.ts";
+import { resolveThreadWorkspaceCwd, revertTargetCheckpointRef } from "./checkpointing/Utils.ts";
 import * as ServerConfig from "./config.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
@@ -107,6 +115,10 @@ import {
   resolveForkSessionSource,
   type ThreadForkAssemblyFailure,
 } from "./orchestration/threadFork.ts";
+import {
+  buildImportedThreadHistory,
+  type MaterializedThreadImportCommand,
+} from "./orchestration/threadImport.ts";
 import { OrchestrationCommandReceiptRepository } from "./persistence/Services/OrchestrationCommandReceipts.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -119,6 +131,7 @@ import {
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import * as ProviderService from "./provider/Services/ProviderService.ts";
 import * as ProviderSessionDirectory from "./provider/Services/ProviderSessionDirectory.ts";
+import { importExternalSession, listExternalSessions } from "./provider/externalSessions.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
 import { ProviderInstanceRegistry } from "./provider/Services/ProviderInstanceRegistry.ts";
@@ -177,6 +190,24 @@ const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchComma
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
 
+/** Client-facing message for each way an import request can fail to materialize. */
+function describeThreadImportFailure(reason: ExternalSessionImportFailure): string {
+  switch (reason) {
+    case "forking-disabled":
+      return "Thread forking is disabled on this server, and importing a session forks it.";
+    case "provider-unsupported":
+      return "This provider cannot import sessions created outside Lecturn.";
+    case "provider-unavailable":
+      return "The provider to import from is unavailable on this server.";
+    case "session-not-found":
+      return "The session to import no longer exists.";
+    case "unreadable":
+      return "The session to import could not be read.";
+    case "empty-session":
+      return "The session holds no messages to import.";
+  }
+}
+
 /** Client-facing message for each way a fork request can fail to assemble. */
 function describeThreadForkAssemblyFailure(failure: ThreadForkAssemblyFailure): string {
   switch (failure.kind) {
@@ -211,6 +242,35 @@ export const resolveAvailableEditorsForConfig = <A, E, R>(
 export const resolveFileManagerRevealKindForConfig = <E, R>(
   discovery: Effect.Effect<FileManagerRevealKind | undefined, E, R>,
 ) => resolveDiscoveryForConfig(discovery, () => undefined);
+
+/**
+ * Resolves the host discoveries embedded in the server config side by side, so
+ * a loaded host costs one discovery timeout per connect instead of their sum.
+ * Clients abandon a connect whose config snapshot misses their establishment
+ * window (15s) and retry, so serial timeouts kept a busy local server stuck
+ * "reconnecting".
+ */
+export const resolveConfigDiscoveries = <Target, E1, R1, E2, R2, E3, R3>(input: {
+  readonly availableEditors: Effect.Effect<ReadonlyArray<EditorId>, E1, R1>;
+  readonly fileManagerRevealKind: Effect.Effect<FileManagerRevealKind | undefined, E2, R2>;
+  readonly remoteOpenTargets: Effect.Effect<ReadonlyArray<Target>, E3, R3>;
+}) =>
+  Effect.all(
+    [
+      resolveAvailableEditorsForConfig(input.availableEditors),
+      resolveFileManagerRevealKindForConfig(input.fileManagerRevealKind),
+      resolveAvailableEditorsForConfig(input.remoteOpenTargets),
+    ],
+    { concurrency: "unbounded" },
+  ).pipe(
+    Effect.map(([availableEditors, fileManagerRevealKind, remoteOpenTargets]) => ({
+      availableEditors,
+      fileManagerRevealKind: availableEditors.includes("file-manager")
+        ? fileManagerRevealKind
+        : undefined,
+      remoteOpenTargets,
+    })),
+  );
 
 function unexpectedCompatibilityError(error: never): never {
   throw new Error(`Unhandled compatibility error: ${String(error)}`);
@@ -644,6 +704,10 @@ const makeWsRpcLayer = (
       const sourceControlRepositories =
         yield* SourceControlRepositoryService.SourceControlRepositoryService;
       const pullRequests = yield* PullRequestService.PullRequestService;
+      const threadNotes = yield* ThreadNoteService;
+      const threadDecisions = yield* DecisionService;
+      const contextual = yield* ContextualService;
+      const contextualSettings = yield* ContextualSettings;
       const pullRequestWatches = yield* PullRequestWatchService;
       const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
       const sessions = yield* SessionStore.SessionStore;
@@ -1140,6 +1204,14 @@ const makeWsRpcLayer = (
               // terminals and provider sessions under the reused thread id.
               yield* threadDeletionReactor.drainThrough(created.sequence);
               createdThread = true;
+              if (bootstrap.createThread.contextual) {
+                const settings = yield* contextualSettings.thread(command.threadId);
+                yield* contextual.updateThreadSettings({
+                  threadId: command.threadId,
+                  expectedRevision: settings.revision,
+                  ...bootstrap.createThread.contextual,
+                });
+              }
             }
 
             if (bootstrap?.prepareWorktree) {
@@ -1225,6 +1297,42 @@ const makeWsRpcLayer = (
           );
         });
 
+      // Fork and import materializers run side effects before dispatch, so a
+      // client retry has to stop at the engine's command receipt, the recorded
+      // outcome of the first attempt: Some(sequence) when it was accepted, a
+      // failure when it was rejected, None when the command is new.
+      const recordedThreadCommandOutcome = Effect.fnUntraced(function* (command: {
+        readonly type: "thread.fork" | "thread.import";
+        readonly commandId: CommandId;
+        readonly threadId: ThreadId;
+      }) {
+        const receipt = Option.getOrUndefined(
+          yield* commandReceipts
+            .getByCommandId({ commandId: command.commandId })
+            .pipe(
+              Effect.mapError((cause) =>
+                toDispatchCommandError(
+                  cause,
+                  `Failed to read the ${command.type} command's receipt.`,
+                ),
+              ),
+            ),
+        );
+        if (
+          receipt === undefined ||
+          receipt.aggregateKind !== "thread" ||
+          receipt.aggregateId !== command.threadId
+        ) {
+          return Option.none<{ readonly sequence: number }>();
+        }
+        if (receipt.status === "accepted") {
+          return Option.some({ sequence: receipt.resultSequence });
+        }
+        return yield* new OrchestrationDispatchCommandError({
+          message: receipt.error ?? "Previously rejected.",
+        });
+      });
+
       // Server-side materialization of a client fork request: read the source
       // thread, assemble the inherited history (pure, in threadFork.ts), run
       // the compensable side effects (checkpoint ref aliases, attachment file
@@ -1258,29 +1366,10 @@ const makeWsRpcLayer = (
             toDispatchCommandError(cause, "Failed to read the source thread for the fork.");
 
           // A client retry of an already-handled fork must not replay side
-          // effects (ref aliasing, attachment copies) or re-record analytics:
-          // the engine's command receipt is the recorded outcome, so return
-          // it verbatim before touching anything.
-          const priorReceipt = Option.getOrUndefined(
-            yield* commandReceipts
-              .getByCommandId({ commandId: command.commandId })
-              .pipe(
-                Effect.mapError((cause) =>
-                  toDispatchCommandError(cause, "Failed to read the fork command's receipt."),
-                ),
-              ),
-          );
-          if (
-            priorReceipt !== undefined &&
-            priorReceipt.aggregateKind === "thread" &&
-            priorReceipt.aggregateId === command.threadId
-          ) {
-            if (priorReceipt.status === "accepted") {
-              return { sequence: priorReceipt.resultSequence };
-            }
-            return yield* new OrchestrationDispatchCommandError({
-              message: priorReceipt.error ?? "Previously rejected.",
-            });
+          // effects (ref aliasing, attachment copies) or re-record analytics.
+          const recorded = yield* recordedThreadCommandOutcome(command);
+          if (Option.isSome(recorded)) {
+            return recorded.value;
           }
 
           // The side effects below write into the child's checkpoint-ref
@@ -1559,6 +1648,166 @@ const makeWsRpcLayer = (
           );
       };
 
+      // Server-side materialization of a client import request: natively fork
+      // the external session, turn its transcript into thread history (pure,
+      // in threadImport.ts) and dispatch the materialized command. The fork is
+      // the only side effect and cannot be undone here, so every check that
+      // can reject the command runs before it.
+      const dispatchThreadImport = (
+        importCommand: Extract<ClientOrchestrationCommand, { type: "thread.import" }>,
+      ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> => {
+        const importFailure = (reason: ExternalSessionImportFailure, cause?: unknown) =>
+          new OrchestrationDispatchCommandError({
+            message: describeThreadImportFailure(reason),
+            threadImportFailure: reason,
+            ...(cause !== undefined ? { cause } : {}),
+          });
+        const importProgram = Effect.gen(function* () {
+          const importStartedAtMs = yield* Clock.currentTimeMillis;
+          // An import runs on a native fork, so the fork kill-switch covers it.
+          if (!config.threadForkingEnabled) {
+            return yield* importFailure("forking-disabled");
+          }
+          // Server time, as the normalizer stamps on the normal dispatch path.
+          const command = { ...importCommand, createdAt: yield* nowIso };
+
+          const readError = (cause: unknown) =>
+            toDispatchCommandError(cause, "Failed to read the project for the import.");
+
+          // A client retry of an already-handled import must not fork the
+          // external session a second time.
+          const recorded = yield* recordedThreadCommandOutcome(command);
+          if (Option.isSome(recorded)) {
+            return recorded.value;
+          }
+
+          const project = Option.getOrUndefined(
+            yield* projectionSnapshotQuery
+              .getProjectShellById(command.projectId)
+              .pipe(Effect.mapError(readError)),
+          );
+          if (project === undefined) {
+            return yield* new OrchestrationDispatchCommandError({
+              message: "The project to import the session into no longer exists.",
+            });
+          }
+          const existingThread = yield* projectionSnapshotQuery
+            .getThreadShellById(command.threadId)
+            .pipe(Effect.mapError(readError));
+          if (Option.isSome(existingThread)) {
+            return yield* new OrchestrationDispatchCommandError({
+              message: "A thread with the import's id already exists.",
+            });
+          }
+          // The fork's cursor only resumes on the instance that cut it.
+          if (command.modelSelection.instanceId !== command.providerInstanceId) {
+            return yield* new OrchestrationDispatchCommandError({
+              message: "An imported session must run on the provider it was imported from.",
+            });
+          }
+          // Imports skip the normalizer, so the thread-creation worktree rule
+          // is enforced here.
+          yield* staveAdmission
+            .check({
+              projectRoot: project.workspaceRoot,
+              projectId: project.id,
+              intent: "thread.create",
+              worktreePath: command.worktreePath,
+            })
+            .pipe(
+              Effect.mapError(
+                (error) =>
+                  new OrchestrationDispatchCommandError({ message: error.message, cause: error }),
+              ),
+            );
+
+          const imported = yield* importExternalSession({
+            providerInstanceId: command.providerInstanceId,
+            sessionId: command.sessionId,
+            cwd: command.worktreePath ?? project.workspaceRoot,
+            title: command.title,
+          }).pipe(
+            Effect.provideService(ProviderInstanceRegistry, providerInstances),
+            Effect.mapError((error) => importFailure(error.reason, error)),
+          );
+          if (!imported.transcript.some((entry) => entry.kind === "message")) {
+            return yield* importFailure("empty-session");
+          }
+
+          const { history, historyTruncated } = buildImportedThreadHistory({
+            transcript: imported.transcript,
+            createdAt: command.createdAt,
+            mintUuid: () => NodeCrypto.randomUUID(),
+          });
+          const materialized: MaterializedThreadImportCommand = {
+            type: "thread.import",
+            threadId: command.threadId,
+            createdAt: command.createdAt,
+            thread: {
+              projectId: command.projectId,
+              title: imported.threadTitle,
+              modelSelection: command.modelSelection,
+              runtimeMode: command.runtimeMode,
+              interactionMode: command.interactionMode,
+              branch: command.branch,
+              worktreePath: command.worktreePath,
+            },
+            importedFrom: {
+              providerInstanceId: command.providerInstanceId,
+              driverKind: imported.driverKind,
+              sessionId: command.sessionId,
+              cwd: imported.cwd,
+              title: imported.title,
+              importedAt: command.createdAt,
+              historyTruncated,
+            },
+            importSource: {
+              providerInstanceId: command.providerInstanceId,
+              resumeCursor: imported.resumeCursor,
+            },
+            history,
+          };
+
+          // The client's commandId identifies the import, so a retried
+          // request deduplicates through the engine's command receipts.
+          const dispatched = yield* dispatchFromClient({
+            ...materialized,
+            commandId: command.commandId,
+          }).pipe(
+            Effect.mapError((cause) =>
+              toDispatchCommandError(cause, "Failed to dispatch orchestration command"),
+            ),
+          );
+          // Same deletion-cleanup fence as thread.create: the thread may reuse
+          // a previously deleted thread id.
+          yield* threadDeletionReactor.drainThrough(dispatched.sequence);
+
+          yield* analytics.record("client.thread.imported", {
+            ...clientAnalyticsProps,
+            provider: command.providerInstanceId,
+            historyTruncated,
+          });
+          const durationMs = (yield* Clock.currentTimeMillis) - importStartedAtMs;
+          yield* Effect.logInfo("thread import dispatched", {
+            threadId: command.threadId,
+            providerInstanceId: command.providerInstanceId,
+            durationMs,
+            messageCount: history.messages.length,
+            activityCount: history.activities.length,
+            historyTruncated,
+          });
+          return dispatched;
+        });
+
+        return startup
+          .enqueueCommand(importProgram)
+          .pipe(
+            Effect.mapError((cause) =>
+              toDispatchCommandError(cause, "Failed to dispatch orchestration command"),
+            ),
+          );
+      };
+
       const dispatchNormalizedCommand = (
         normalizedCommand: OrchestrationCommand,
       ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> => {
@@ -1596,14 +1845,12 @@ const makeWsRpcLayer = (
         );
         const environment = yield* serverEnvironment.getDescriptor;
         const auth = yield* serverAuth.getDescriptor();
-        const availableEditors: ReadonlyArray<EditorId> = yield* resolveAvailableEditorsForConfig(
-          externalLauncher.resolveAvailableEditors(),
-        );
-        const fileManagerRevealKind = availableEditors.includes("file-manager")
-          ? yield* resolveFileManagerRevealKindForConfig(
-              externalLauncher.resolveFileManagerRevealKind(),
-            )
-          : undefined;
+        const discovered = yield* resolveConfigDiscoveries({
+          availableEditors: externalLauncher.resolveAvailableEditors(),
+          fileManagerRevealKind: externalLauncher.resolveFileManagerRevealKind(),
+          remoteOpenTargets: remoteOpenTargets.resolveTargets(),
+        });
+        const { availableEditors, fileManagerRevealKind } = discovered;
 
         return {
           environment,
@@ -1614,11 +1861,7 @@ const makeWsRpcLayer = (
           issues: keybindingsConfig.issues,
           providers,
           availableEditors,
-          // Same discovery-with-timeout treatment as editors: a slow probe
-          // must not stall server.getConfig, so it degrades to no targets.
-          remoteOpenTargets: yield* resolveAvailableEditorsForConfig(
-            remoteOpenTargets.resolveTargets(),
-          ),
+          remoteOpenTargets: discovered.remoteOpenTargets,
           observability: {
             logsDirectoryPath: config.logsDir,
             localTracingEnabled: true,
@@ -1665,6 +1908,99 @@ const makeWsRpcLayer = (
 
       return WsRpcGroup.of({
         ...staveRpcHandlers,
+        [WS_METHODS.contextualStatus]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualStatus, contextual.status(input)),
+        [WS_METHODS.contextualProjectSettings]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualProjectSettings, contextual.projectSettings(input)),
+        [WS_METHODS.contextualUpdateProjectSettings]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.contextualUpdateProjectSettings,
+            contextual.updateProjectSettings(input),
+          ),
+        [WS_METHODS.contextualUpdateThreadSettings]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.contextualUpdateThreadSettings,
+            contextual.updateThreadSettings(input),
+          ),
+        [WS_METHODS.contextualRefresh]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualRefresh, contextual.refresh(input)),
+        [WS_METHODS.contextualExclude]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualExclude, contextual.exclude(input)),
+        [WS_METHODS.contextualPreparationAction]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.contextualPreparationAction,
+            contextual.preparationAction(input),
+          ),
+        [WS_METHODS.contextualDisclosures]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualDisclosures, contextual.disclosures(input)),
+        [WS_METHODS.contextualConflicts]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualConflicts, contextual.conflicts(input)),
+        [WS_METHODS.contextualResolveConflict]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualResolveConflict, contextual.resolveConflict(input)),
+        [WS_METHODS.contextualGroup]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualGroup, contextual.group(input)),
+        [WS_METHODS.contextualMutateGroup]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualMutateGroup, contextual.mutateGroup(input)),
+        [WS_METHODS.contextualUndoGroup]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualUndoGroup, contextual.undoGroup(input)),
+        [WS_METHODS.contextualSources]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualSources, contextual.sources(input)),
+        [WS_METHODS.contextualConfigureSources]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.contextualConfigureSources,
+            contextual.configureSources(input),
+          ),
+        [WS_METHODS.contextualCaptureStatus]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualCaptureStatus, contextual.captureStatus()),
+        [WS_METHODS.contextualSetCapture]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualSetCapture, contextual.setCapture(input)),
+        [WS_METHODS.contextualInspect]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualInspect, contextual.inspect(input)),
+        [WS_METHODS.contextualEvidence]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualEvidence, contextual.evidence(input)),
+        [WS_METHODS.contextualExport]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualExport, contextual.export(input)),
+        [WS_METHODS.contextualForget]: (input) =>
+          observeRpcEffect(WS_METHODS.contextualForget, contextual.forget(input)),
+        [WS_METHODS.extensionsFundingStatus]: (input) =>
+          observeRpcEffect(WS_METHODS.extensionsFundingStatus, contextual.fundingStatus(input)),
+        [WS_METHODS.extensionsFunding]: (input) =>
+          observeRpcEffect(WS_METHODS.extensionsFunding, contextual.funding(input)),
+        [WS_METHODS.contextualSubscribe]: (input) =>
+          observeRpcStream(WS_METHODS.contextualSubscribe, contextual.subscribe(input)),
+        [WS_METHODS.threadDecisionsFundingStatus]: () =>
+          observeRpcEffect(WS_METHODS.threadDecisionsFundingStatus, threadDecisions.fundingStatus),
+        [WS_METHODS.threadDecisionsFunding]: (input) =>
+          observeRpcEffect(WS_METHODS.threadDecisionsFunding, threadDecisions.funding(input)),
+        [WS_METHODS.threadDecisionsList]: (input) =>
+          observeRpcEffect(WS_METHODS.threadDecisionsList, threadDecisions.list(input)),
+        [WS_METHODS.threadDecisionsGet]: (input) =>
+          observeRpcEffect(WS_METHODS.threadDecisionsGet, threadDecisions.get(input)),
+        [WS_METHODS.threadDecisionsMutate]: (input) =>
+          observeRpcEffect(WS_METHODS.threadDecisionsMutate, threadDecisions.mutate(input)),
+        [WS_METHODS.threadDecisionsSettings]: (input) =>
+          observeRpcEffect(WS_METHODS.threadDecisionsSettings, threadDecisions.settings(input)),
+        [WS_METHODS.threadDecisionsStatus]: (input) =>
+          observeRpcEffect(WS_METHODS.threadDecisionsStatus, threadDecisions.status(input)),
+        [WS_METHODS.threadDecisionsSourceWindow]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.threadDecisionsSourceWindow,
+            threadDecisions.sourceWindow(input),
+          ),
+        [WS_METHODS.threadDecisionsScan]: (input) =>
+          observeRpcEffect(WS_METHODS.threadDecisionsScan, threadDecisions.scan(input)),
+        [WS_METHODS.threadDecisionsExport]: (input) =>
+          observeRpcEffect(WS_METHODS.threadDecisionsExport, threadDecisions.export(input)),
+        [WS_METHODS.threadDecisionsSubscribe]: () =>
+          observeRpcStream(WS_METHODS.threadDecisionsSubscribe, threadDecisions.changes),
+        [WS_METHODS.threadNotesList]: (input) =>
+          observeRpcEffect(WS_METHODS.threadNotesList, threadNotes.list(input)),
+        [WS_METHODS.threadNotesCreate]: (input) =>
+          observeRpcEffect(WS_METHODS.threadNotesCreate, threadNotes.create(input)),
+        [WS_METHODS.threadNotesUpdate]: (input) =>
+          observeRpcEffect(WS_METHODS.threadNotesUpdate, threadNotes.update(input)),
+        [WS_METHODS.threadNotesDelete]: (input) =>
+          observeRpcEffect(WS_METHODS.threadNotesDelete, threadNotes.delete(input)),
         [WS_METHODS.pullRequestWatchList]: (input) =>
           observeRpcEffect(WS_METHODS.pullRequestWatchList, pullRequestWatches.list(input)),
         [WS_METHODS.pullRequestWatchTrack]: (input) =>
@@ -1723,11 +2059,14 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,
             Effect.gen(function* () {
-              // Fork requests are materialized server-side from the source
-              // thread's projections, so they branch off before normalization
-              // (the normalizer rejects raw thread.fork on every transport).
+              // Fork and import requests are materialized server-side, so they
+              // branch off before normalization (the normalizer rejects the
+              // raw client shapes on every transport).
               if (command.type === "thread.fork") {
                 return yield* dispatchThreadFork(command);
+              }
+              if (command.type === "thread.import") {
+                return yield* dispatchThreadImport(command);
               }
               const normalizedCommand = yield* normalizeDispatchCommand(command);
               // Archive removes the thread from the client, so this transport
@@ -1825,6 +2164,77 @@ const makeWsRpcLayer = (
                   }),
               ),
             ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.previewCheckpointRevert]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.previewCheckpointRevert,
+            Effect.gen(function* () {
+              const previewError = (message: string, cause?: unknown) =>
+                new OrchestrationPreviewCheckpointRevertError({
+                  message,
+                  ...(cause !== undefined ? { cause } : {}),
+                });
+
+              const thread = Option.getOrUndefined(
+                yield* projectionSnapshotQuery
+                  .getThreadDetailById(input.threadId)
+                  .pipe(
+                    Effect.mapError((cause) => previewError("Failed to load the thread.", cause)),
+                  ),
+              );
+              if (thread === undefined) {
+                return yield* previewError("The thread no longer exists.");
+              }
+
+              const project = yield* projectionSnapshotQuery
+                .getProjectShellById(thread.projectId)
+                .pipe(
+                  Effect.mapError((cause) => previewError("Failed to load the project.", cause)),
+                );
+
+              const workspaceCwd = resolveThreadWorkspaceCwd({
+                thread,
+                projects: Option.match(project, {
+                  onNone: (): { readonly id: ProjectId; readonly workspaceRoot: string }[] => [],
+                  onSome: (shell) => [shell],
+                }),
+              });
+              const checkpointRef = revertTargetCheckpointRef({
+                threadId: input.threadId,
+                turnCount: input.turnCount,
+                checkpoints: thread.checkpoints,
+              });
+              // The preview is advisory. When the workspace or the target ref
+              // cannot be resolved the revert itself fails with a precise
+              // reason, so report nothing at risk rather than surfacing a
+              // second, less useful error in the confirmation dialog.
+              if (workspaceCwd === undefined || checkpointRef === undefined) {
+                return { removedPaths: [], truncated: false };
+              }
+
+              const deletions = yield* checkpointStore
+                .listRestoreDeletions({
+                  cwd: workspaceCwd,
+                  checkpointRef,
+                  fallbackToHead: input.turnCount === 0,
+                })
+                .pipe(
+                  Effect.mapError((cause) =>
+                    previewError(
+                      "Failed to inspect the workspace for files a revert would delete.",
+                      cause,
+                    ),
+                  ),
+                );
+
+              return {
+                removedPaths: deletions.paths.slice(0, ORCHESTRATION_REVERT_PREVIEW_MAX_PATHS),
+                truncated:
+                  deletions.truncated ||
+                  deletions.paths.length > ORCHESTRATION_REVERT_PREVIEW_MAX_PATHS,
+              };
+            }),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.getFullThreadDiff]: (input) =>
@@ -2480,6 +2890,18 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverGetBackgroundPolicy, backgroundPolicy.snapshot, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.cloudCreateManualLinkProof]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cloudCreateManualLinkProof,
+            createManualCloudLinkProof(input),
+            { "rpc.aggregate": "cloud" },
+          ),
+        [WS_METHODS.cloudApplyManualRelayConfig]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cloudApplyManualRelayConfig,
+            applyManualCloudRelayConfig(input),
+            { "rpc.aggregate": "cloud" },
+          ),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) =>
           observeRpcEffect(WS_METHODS.cloudGetRelayClientStatus, relayClient.resolve, {
             "rpc.aggregate": "cloud",
@@ -2743,6 +3165,22 @@ const makeWsRpcLayer = (
               ),
             ),
             { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.externalSessionsList]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.externalSessionsList,
+            listExternalSessions(input).pipe(
+              Effect.provideService(ProviderInstanceRegistry, providerInstances),
+              Effect.provideService(
+                ProviderSessionDirectory.ProviderSessionDirectory,
+                providerSessionDirectory,
+              ),
+              Effect.provideService(
+                ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+                projectionSnapshotQuery,
+              ),
+            ),
+            { "rpc.aggregate": "provider" },
           ),
         [WS_METHODS.attachmentsCreateUploadUrl]: (input) =>
           observeRpcEffect(WS_METHODS.attachmentsCreateUploadUrl, issueAttachmentUploadUrl(input), {
@@ -3299,6 +3737,10 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         ),
     });
     const pullRequests = yield* PullRequestService.PullRequestService;
+    const threadNotes = yield* ThreadNoteService;
+    const threadDecisions = yield* DecisionService;
+    const contextual = yield* ContextualService;
+    const contextualSettings = yield* ContextualSettings;
     const pullRequestWatches = yield* PullRequestWatchService;
     const staveOperations = yield* StaveOperations.StaveOperations;
     const sagaWorkbench = yield* SagaWorkbenchService;
@@ -3342,6 +3784,10 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
               Layer.provide(Layer.succeed(PullRequestWatchService, pullRequestWatches)),
+              Layer.provide(Layer.succeed(ThreadNoteService, threadNotes)),
+              Layer.provide(Layer.succeed(DecisionService, threadDecisions)),
+              Layer.provide(Layer.succeed(ContextualService, contextual)),
+              Layer.provide(Layer.succeed(ContextualSettings, contextualSettings)),
               // Stave operations outlive the socket that started them, so every
               // connection attaches to the one server-lifetime registry.
               Layer.provide(Layer.succeed(StaveOperations.StaveOperations, staveOperations)),

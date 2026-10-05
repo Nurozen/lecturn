@@ -204,6 +204,11 @@ export const ServerProvider = Schema.Struct({
   conversationFork: Schema.optional(TrimmedNonEmptyString),
   // Hide historical fork points when the provider needs an unavailable native anchor.
   conversationForkRequiresAnchor: Schema.optional(Schema.Boolean),
+  // Whether this instance can list sessions created outside Lecturn (see
+  // `externalSessions.list`). Open string like `conversationFork`: values
+  // today are "supported" | "unsupported", and clients must treat unknown
+  // values (or absence) as unsupported.
+  externalSessions: Schema.optional(TrimmedNonEmptyString),
   supportsConversationRollback: Schema.optional(Schema.Boolean),
   supportsTextGeneration: Schema.optional(Schema.Boolean),
   setup: Schema.optional(

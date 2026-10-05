@@ -1,0 +1,73 @@
+.lecturn-celestial-ornaments {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  color: #c8af7f;
+  mask-image: linear-gradient(to right, #000, #000 140px, transparent 440px);
+}
+
+.lecturn-celestial-instrument {
+  position: absolute;
+  display: block;
+  opacity: 0.29;
+  transform-origin: center;
+  animation: lecturn-instrument-turn 1320s linear infinite;
+}
+
+.lecturn-celestial-astrolabe {
+  width: 430px;
+  height: 430px;
+  left: -170px;
+  top: -140px;
+  animation-duration: 1500s;
+  animation-delay: -110s;
+}
+
+.lecturn-celestial-orrery {
+  width: 190px;
+  height: 190px;
+  left: -25px;
+  top: 42%;
+  opacity: 0.25;
+  animation-duration: 1320s;
+  animation-direction: reverse;
+  animation-delay: -190s;
+}
+
+.lecturn-celestial-compass {
+  width: 300px;
+  height: 300px;
+  left: -85px;
+  bottom: 5%;
+  animation-duration: 1080s;
+  animation-delay: -50s;
+}
+
+@keyframes lecturn-instrument-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 767px) {
+  .lecturn-celestial-ornaments {
+    opacity: 0.6;
+  }
+  .lecturn-celestial-orrery {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lecturn-celestial-instrument {
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .lecturn-celestial-ornaments {
+    display: none;
+  }
+}

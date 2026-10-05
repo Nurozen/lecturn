@@ -1,3 +1,4 @@
+import { AccountSurface } from "../AccountSurface";
 import type { UsageProviderKind } from "@lecturn/contracts";
 import { CheckIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -259,7 +260,7 @@ export function UsagePage() {
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background lecturn-page-surface text-foreground">
+      <AccountSurface className="flex min-h-0 min-w-0 flex-1 flex-col lecturn-page-surface text-foreground">
         <WorkspacePageHeader electron={isElectron}>{topbarContent}</WorkspacePageHeader>
 
         <ScrollArea className="min-h-0 flex-1">
@@ -517,7 +518,7 @@ export function UsagePage() {
             )}
           </WorkspacePageContainer>
         </ScrollArea>
-      </div>
+      </AccountSurface>
     </SidebarInset>
   );
 }

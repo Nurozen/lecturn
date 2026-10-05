@@ -6,17 +6,31 @@ import {
   type DesktopSshEnvironmentTarget,
 } from "@lecturn/contracts";
 import { describe, expect, it } from "@effect/vitest";
+import { vi } from "vite-plus/test";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Stream from "effect/Stream";
+import { AtomRegistry } from "effect/unstable/reactivity";
 
+import { EnvironmentOwnedDataCleanup } from "@lecturn/client-runtime/platform";
+import { ThreadId } from "@lecturn/contracts";
+
+import { knownConnectAccountsAtom } from "../cloud/knownAccounts.ts";
+import { useComposerDraftStore } from "../composerDraftStore.ts";
+import { useTerminalUiStateStore } from "../terminalUiStateStore.ts";
+import { appAtomRegistry } from "../rpc/atomRegistry.ts";
 import {
+  accountsNeedingSignIn,
   canRetainCachedPlatformRegistrationAfterRefreshFailure,
   canReuseCachedPlatformRegistration,
+  environmentOwnedDataCleanupLayer,
   primaryRegistrationToRetainAfterTopologyRead,
   provisionDesktopSshEnvironment,
   readPrimaryEnvironmentTargetResult,
   secondaryRegistrationsToRetainAfterTopologyRead,
   secondaryBearerExpiresAtEpochMs,
   secondaryBearerRefreshAtEpochMs,
+  webCloudSession,
 } from "./platform.ts";
 
 const TARGET: DesktopSshEnvironmentTarget = {
@@ -222,4 +236,91 @@ describe("primary topology cache", () => {
       }),
     ).toBeUndefined();
   });
+});
+
+describe("environment removal cleanup", () => {
+  // View state goes only with a signed-out account, so an environment that is
+  // removed and added back gets its layout again.
+  it.effect("clears the removed environment's drafts and keeps its view state", () =>
+    Effect.gen(function* () {
+      const removed = {
+        environmentId: EnvironmentId.make("environment-b"),
+        threadId: ThreadId.make("t"),
+      };
+      const kept = {
+        environmentId: EnvironmentId.make("environment-a"),
+        threadId: ThreadId.make("t"),
+      };
+      for (const ref of [removed, kept]) {
+        useComposerDraftStore.getState().setPrompt(ref, "draft");
+        useTerminalUiStateStore.getState().setTerminalOpen(ref, true);
+      }
+
+      const cleanup = yield* EnvironmentOwnedDataCleanup;
+      yield* cleanup.clear(removed.environmentId);
+
+      expect(Object.keys(useComposerDraftStore.getState().draftsByThreadKey)).toEqual([
+        "environment-a:t",
+      ]);
+      expect(
+        Object.keys(useTerminalUiStateStore.getState().terminalUiStateByThreadKey).toSorted(),
+      ).toEqual(["environment-a:t", "environment-b:t"]);
+    }).pipe(Effect.provide(environmentOwnedDataCleanupLayer)),
+  );
+});
+
+describe("web cloud session", () => {
+  it.effect("reports the known accounts, expired ones included, and when they are synced", () =>
+    Effect.gen(function* () {
+      appAtomRegistry.set(knownConnectAccountsAtom, {
+        accountIds: ["account-expired"],
+        needsSignIn: [],
+        synced: false,
+      });
+      expect(yield* webCloudSession.knownAccountIds!).toEqual(["account-expired"]);
+      expect(yield* webCloudSession.accountsSynced!).toBe(false);
+
+      appAtomRegistry.set(knownConnectAccountsAtom, {
+        accountIds: ["account-expired", "account-b"],
+        needsSignIn: ["account-expired"],
+        synced: true,
+      });
+      expect(yield* webCloudSession.knownAccountIds!).toEqual(["account-expired", "account-b"]);
+      expect(yield* webCloudSession.accountsSynced!).toBe(true);
+      // Only accounts with a relay session count as signed in.
+      expect(yield* webCloudSession.accountIds).toEqual([]);
+    }),
+  );
+
+  it.effect("wakes the targets of an account that turns out to need sign-in", () =>
+    Effect.gen(function* () {
+      const registry = AtomRegistry.make();
+      registry.set(knownConnectAccountsAtom, {
+        accountIds: ["account-a"],
+        needsSignIn: [],
+        synced: false,
+      });
+      const wakeups = yield* accountsNeedingSignIn(registry).pipe(
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* Effect.promise(() =>
+        vi.waitFor(() => {
+          expect(registry.getNodes().get(knownConnectAccountsAtom)?.listeners.size).toBeGreaterThan(
+            0,
+          );
+        }),
+      );
+      registry.set(knownConnectAccountsAtom, {
+        accountIds: ["account-a", "account-b"],
+        needsSignIn: ["account-a"],
+        synced: true,
+      });
+
+      expect((yield* Fiber.join(wakeups)).map((wakeup) => [...wakeup.accountIds])).toEqual([
+        ["account-a"],
+      ]);
+    }),
+  );
 });

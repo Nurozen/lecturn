@@ -67,6 +67,18 @@ describe("ServerProvider", () => {
     ).toBe("replay");
   });
 
+  it("treats external session support like conversation fork support", () => {
+    expect(decodeServerProvider(baseProviderSnapshot).externalSessions).toBeUndefined();
+    expect(
+      decodeServerProvider({ ...baseProviderSnapshot, externalSessions: "supported" })
+        .externalSessions,
+    ).toBe("supported");
+    // Open string: a future value must not fail the whole provider snapshot.
+    expect(
+      decodeServerProvider({ ...baseProviderSnapshot, externalSessions: "paged" }).externalSessions,
+    ).toBe("paged");
+  });
+
   it("defaults one-click update support when decoding older advisory snapshots", () => {
     const parsed = decodeServerProvider({
       instanceId: "codex",

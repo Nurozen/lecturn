@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
+  ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
   ProjectId,
   TurnId,
   type OrchestrationThreadShell,
 } from "@lecturn/contracts";
-import { resolveAutoSettlementAt } from "./ThreadSettlementPolicy.ts";
+import { resolveAutoSettlementAt, threadHasQueuedTurnStart } from "./ThreadSettlementPolicy.ts";
 
 const NOW = "2026-08-28T12:00:00.000Z";
 const makeThread = (
@@ -173,6 +174,27 @@ describe("resolveAutoSettlementAt", () => {
     expect(
       decide(makeThread({ latestUserMessageAt: "2026-08-28T11:59:00.000Z", latestTurn: null })),
     ).toBe(false);
+  });
+
+  it("does not read an imported user message as a queued start", () => {
+    const thread = makeThread({
+      createdAt: "2026-08-28T11:59:30.000Z",
+      latestUserMessageAt: "2026-08-28T11:59:00.000Z",
+      importedFrom: {
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        driverKind: ProviderDriverKind.make("claudeAgent"),
+        sessionId: "external-session",
+        cwd: "/repo",
+        title: "External session",
+        importedAt: "2026-08-28T11:59:30.000Z",
+        historyTruncated: false,
+      },
+    });
+    expect(threadHasQueuedTurnStart(thread, NOW)).toBe(false);
+    expect(threadHasQueuedTurnStart({ ...thread, importedFrom: null }, NOW)).toBe(true);
+    expect(
+      threadHasQueuedTurnStart({ ...thread, latestUserMessageAt: "2026-08-28T11:59:45.000Z" }, NOW),
+    ).toBe(true);
   });
 
   it("allows a fresh completion to wake snooze before settlement", () => {

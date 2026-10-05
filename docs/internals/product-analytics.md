@@ -60,8 +60,9 @@ Codex uses deltas from its cumulative token totals, and falls back to the
 newest response's `last` usage when no prior total exists or the total was
 reset. Claude uses the final result's per-turn `usage` value and does not use
 cumulative `modelUsage`.
-OpenCode sums unique main-session step totals. Cursor, Grok, and Antigravity
-usage stays `unavailable` until their ACP token fields and scope are verified.
+OpenCode sums unique main-session step totals. Cursor, Grok, Antigravity, and
+GitHub Copilot usage stays `unavailable` until their ACP token fields and scope
+are verified.
 
 The completed event count does not have to match `provider.turn.sent`. For
 example, Claude can emit synthetic turns without a matching send request.

@@ -6,7 +6,43 @@ export type ConnectionWakeup =
   | "application-active"
   | "application-active-probe"
   | "application-active-reconnect"
-  | "credentials-changed";
+  | "credentials-changed"
+  | AccountCredentialsChanged;
+
+/**
+ * Connect accounts that signed in or out. Relay targets owned by another
+ * account keep their connection; the bare "credentials-changed" reason stands
+ * for every account.
+ */
+export interface AccountCredentialsChanged {
+  readonly _tag: "AccountCredentialsChanged";
+  readonly accountIds: ReadonlySet<string>;
+}
+
+export function accountCredentialsChanged(change: {
+  readonly added: ReadonlySet<string>;
+  readonly removed: ReadonlySet<string>;
+}): AccountCredentialsChanged {
+  return {
+    _tag: "AccountCredentialsChanged",
+    accountIds: new Set([...change.added, ...change.removed]),
+  };
+}
+
+/**
+ * Whether a wakeup changes the credentials of a relay target owned by
+ * `accountId`. An untagged target may belong to any account, so every
+ * credentials change applies to it.
+ */
+export function isCredentialsChangeFor(
+  reason: ConnectionWakeup,
+  accountId: string | undefined,
+): boolean {
+  if (typeof reason === "string") {
+    return reason === "credentials-changed";
+  }
+  return accountId === undefined || reason.accountIds.has(accountId);
+}
 
 export function isApplicationActiveWakeup(reason: ConnectionWakeup): boolean {
   return (

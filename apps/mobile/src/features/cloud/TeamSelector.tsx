@@ -12,11 +12,19 @@ import { Pressable, View } from "react-native";
 import { AppText as Text } from "../../components/AppText";
 import { resolveCloudPublicConfig } from "./publicConfig";
 
+import { useConnectAccounts } from "./knownAccounts";
 import { useSessionRelayToken } from "./useSessionRelayToken";
 
 /** Native companion: account selection and access status, without purchase links. */
-export function TeamSelector() {
-  const { userId, sessionId, isSignedIn } = useAuth();
+export function TeamSelector(props: { readonly accountId?: string | null } = {}) {
+  const auth = useAuth();
+  const accounts = useConnectAccounts();
+  const userId = props.accountId === undefined ? auth.userId : props.accountId;
+  const sessionId = auth.sessionId;
+  const isSignedIn =
+    props.accountId === undefined
+      ? auth.isSignedIn
+      : accounts.some((account) => account.accountId === userId && account.signedIn);
   const tokenProvider = useSessionRelayToken({ userId, sessionId, isSignedIn });
   const selected = useSyncExternalStore(
     subscribeTeamSelection,

@@ -26,6 +26,7 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
   buildWorkflowSummaryPrompt,
+  buildContextualSummaryPrompt,
   normalizeWorkflowSummary,
 } from "./TextGenerationPrompts.ts";
 import {
@@ -98,7 +99,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateWorkflowSummary",
+      | "generateWorkflowSummary"
+      | "generateContextualSummary",
     value: unknown,
     detail: string,
   ): Effect.Effect<string, TextGenerationError> =>
@@ -129,7 +131,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateWorkflowSummary";
+      | "generateWorkflowSummary"
+      | "generateContextualSummary";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -184,7 +187,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         : undefined;
 
     const runClaudeCommand = Effect.fn("runClaudeJson.runClaudeCommand")(function* () {
-      const inference = operation === "generateWorkflowSummary";
+      const inference =
+        operation === "generateWorkflowSummary" || operation === "generateContextualSummary";
       const commandCwd = inference
         ? yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-workflow-inference-" }).pipe(
             Effect.mapError(
@@ -437,11 +441,49 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       return { summary, stage: generated.stage, confidence: generated.confidence };
     });
 
+  const generateContextualSummary: NonNullable<
+    TextGeneration.TextGeneration["Service"]["generateContextualSummary"]
+  > = Effect.fn("ClaudeTextGeneration.generateContextualSummary")(
+    function* (input) {
+      const { prompt, outputSchema } = yield* Effect.try({
+        try: () => buildContextualSummaryPrompt(input),
+        catch: (cause) =>
+          new TextGenerationError({
+            operation: "generateContextualSummary",
+            detail: "Contextual summary requires bounded evidence text.",
+            cause,
+          }),
+      });
+      const generated = yield* runClaudeJson({
+        operation: "generateContextualSummary",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      const text = generated.text.trim();
+      if (!text)
+        return yield* new TextGenerationError({
+          operation: "generateContextualSummary",
+          detail: "The provider returned an empty Contextual summary.",
+        });
+      return { text };
+    },
+    Effect.mapError(
+      () =>
+        new TextGenerationError({
+          operation: "generateContextualSummary",
+          detail: "Contextual summary generation is unavailable.",
+        }),
+    ),
+  );
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateWorkflowSummary,
+    generateContextualSummary,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

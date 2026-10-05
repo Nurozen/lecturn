@@ -73,7 +73,8 @@ export const PlanetscaleDatabase = Effect.gen(function* () {
   const runtimeRole = yield* Planetscale.PostgresRole("RelayPostgresRuntimeRole", {
     // A schema migration changes database outputs, not the role identity.
     database: mode === "shared-database" ? RELAY_PRODUCTION_DATABASE_NAME : database,
-    ...(branch ? { branch } : {}),
+    // Resolve the branch identity rather than passing its changing resource object.
+    ...(branch ? { branch: branch.name } : {}),
     inheritedRoles: ["pg_read_all_data", "pg_write_all_data"],
   });
 

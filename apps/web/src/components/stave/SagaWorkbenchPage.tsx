@@ -1,3 +1,4 @@
+import { AccountSurface } from "../AccountSurface";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
@@ -301,7 +302,11 @@ export function SagaWorkbenchPage({
       (member) => member.workflow?.completedAt && member.workflow.evidenceState !== "stale",
     ) ?? [];
   return (
-    <main className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-auto bg-background text-foreground">
+    <AccountSurface
+      as="main"
+      environmentId={environmentId}
+      className="lecturn-page-surface flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-auto text-foreground"
+    >
       <header className="border-b border-border px-6 py-5">
         <Link to="/" className="text-xs text-muted-foreground hover:text-primary">
           Projects
@@ -820,7 +825,7 @@ export function SagaWorkbenchPage({
           </aside>
         </div>
       )}
-    </main>
+    </AccountSurface>
   );
 }
 function Summary({

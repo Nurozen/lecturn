@@ -20,6 +20,39 @@ beforeEach(() => {
 });
 
 describe("rightPanelStore", () => {
+  it("keeps one Notes surface per thread and preserves it without a workspace", () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "notes");
+    store.open(refA, "notes");
+    store.reconcileFileSurfaces(refA, false);
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "notes",
+      surfaces: [{ id: "notes", kind: "notes" }],
+    });
+    store.open(refB, "notes");
+    store.closeSurface(refA, "notes");
+    expect(
+      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refB)?.kind,
+    ).toBe("notes");
+    expect(
+      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
+    ).toBeNull();
+  });
+
+  it("restores persisted Notes surfaces without migrating their identity", () => {
+    const saved = {
+      byThreadKey: {
+        "env-1:thread-A": {
+          isOpen: true,
+          activeSurfaceId: "notes",
+          surfaces: [{ id: "notes", kind: "notes" }],
+        },
+      },
+    };
+    expect(migratePersistedRightPanelState(saved)).toEqual(saved);
+  });
+
   it("drops the legacy singleton terminal surface during migration", () => {
     expect(
       migratePersistedRightPanelState({

@@ -10,6 +10,7 @@ import {
 } from "@lecturn/contracts";
 import {
   activityRowVisualState,
+  withActivityAccountMarks,
   resolveActivityAction,
   boundedActivitySnapshot,
   watchActivityRows,
@@ -451,5 +452,29 @@ describe("settled conversation visibility", () => {
       before,
     );
     expect(boundedActivitySnapshot(settled)).toEqual({ summary: "0 activity items", rows: [] });
+  });
+});
+
+describe("desktop activity account ownership", () => {
+  it("marks only catalog-owned rows and clears a previous owner's mark after sign-out", () => {
+    const rows = watchActivityRows([
+      [EnvironmentId.make("one"), snapshot],
+      [EnvironmentId.make("two"), snapshot],
+    ]);
+    const marks = new Map([["one", { accountId: "user_a", label: "Work", color: "#5599aa" }]]);
+    const marked = withActivityAccountMarks(rows, marks);
+    expect(marked[0]).toMatchObject({
+      accountId: "user_a",
+      accountLabel: "Work",
+      accountColor: "#5599aa",
+    });
+    expect(marked[1]).not.toHaveProperty("accountId");
+    expect(withActivityAccountMarks(marked, new Map())).toEqual(rows);
+    expect(
+      withActivityAccountMarks(
+        marked,
+        new Map([["one", { accountId: "user_b", label: "Personal", color: "#aa55aa" }]]),
+      )[0],
+    ).toMatchObject({ accountId: "user_b", accountLabel: "Personal" });
   });
 });

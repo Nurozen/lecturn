@@ -7,6 +7,7 @@ import {
   type ServerProviderUpdatedPayload,
   type ServerProviderUpdateState,
 } from "@lecturn/contracts";
+import { HostProcessEnvironment } from "@lecturn/shared/hostProcess";
 import { resolveSpawnCommand } from "@lecturn/shared/shell";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -30,6 +31,12 @@ const isServerProviderUpdateError = Schema.is(ServerProviderUpdateError);
 
 const UPDATE_TIMEOUT_MS = 5 * 60_000;
 const UPDATE_OUTPUT_MAX_BYTES = 10_000;
+const UPDATE_FILE_LOCK_STALE_MARGIN_MS = 2 * 60_000;
+const UPDATE_FAILURE_LOG_OUTPUT_MAX_LENGTH = 2_000;
+// The desktop app runs the server under Electron with ELECTRON_RUN_AS_NODE set.
+// Package managers must not inherit it: it leaks into install scripts and any
+// Electron-based tool they launch.
+const UPDATE_ENV_BLOCKLIST = new Set(["ELECTRON_RUN_AS_NODE"]);
 
 export interface ProviderMaintenanceCommandResult {
   readonly stdout: string;
@@ -82,8 +89,18 @@ const runProviderMaintenanceCommandWithSpawner = Effect.fn("ProviderMaintenanceR
         // resolveSpawnCommand finds the real `.cmd` and routes it through the
         // shell. On Linux/macOS (incl. the WSL backend) this is a no-op.
         const resolved = yield* resolveSpawnCommand(input.command, input.args);
+        const hostEnvironment = yield* HostProcessEnvironment;
+        const env = Object.fromEntries(
+          Object.entries(hostEnvironment).filter(([name]) => !UPDATE_ENV_BLOCKLIST.has(name)),
+        );
         const child = yield* input.spawner
-          .spawn(ChildProcess.make(resolved.command, resolved.args, { shell: resolved.shell }))
+          .spawn(
+            ChildProcess.make(resolved.command, resolved.args, {
+              shell: resolved.shell,
+              env,
+              extendEnv: false,
+            }),
+          )
           .pipe(
             Effect.mapError(
               (cause) =>
@@ -213,6 +230,7 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
         provider: ProviderDriverKind.make("unknown"),
         reason: "An update is already running for this provider.",
       }),
+    fileLockStaleAfter: Duration.millis(UPDATE_TIMEOUT_MS + UPDATE_FILE_LOCK_STALE_MARGIN_MS),
   });
 
   const verifyRefreshedProvider = (
@@ -319,7 +337,7 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
     ).pipe(Effect.asVoid);
 
     const runProviderUpdate = Effect.fn("ProviderMaintenanceRunner.runProviderUpdate")(
-      function* () {
+      function* (context: { readonly waited: boolean }) {
         const finish = (state: ServerProviderUpdateState) =>
           setUpdateState(state).pipe(Effect.map((providers) => ({ providers })));
         const startedAtRef = yield* Ref.make<string | null>(null);
@@ -337,9 +355,43 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
               }),
             );
 
+            // Whoever held the lock may have installed this same update (another
+            // Lecturn server sharing the global prefix), so re-probe before
+            // repeating the install.
+            if (context.waited) {
+              const { verifiedProviders } = yield* verifyRefreshedProvider(
+                provider,
+                capabilities,
+                instanceId,
+              );
+              const alreadyCurrent =
+                verifiedProviders.length > 0 &&
+                verifiedProviders.every(
+                  (verifiedProvider) => verifiedProvider.versionAdvisory?.status === "current",
+                );
+              if (alreadyCurrent) {
+                return yield* finish(
+                  makeUpdateState({
+                    status: "succeeded",
+                    startedAt,
+                    finishedAt: yield* nowIso,
+                    message: "Provider is already up to date.",
+                  }),
+                );
+              }
+            }
+
             const result = yield* runMaintenanceCommand(update.executable, update.args);
             const finishedAt = yield* nowIso;
             if (result.timedOut || result.exitCode !== 0) {
+              yield* Effect.logWarning("Provider update command failed", {
+                provider,
+                instanceId,
+                command: update.command,
+                exitCode: result.exitCode,
+                timedOut: result.timedOut,
+                output: commandOutput(result)?.slice(-UPDATE_FAILURE_LOG_OUTPUT_MAX_LENGTH) ?? null,
+              });
               return yield* finish(
                 makeUpdateState({
                   status: "failed",
@@ -401,7 +453,7 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
         targetKey,
         lockKey: update.lockKey,
         onQueued: setQueuedState,
-        run: runProviderUpdate(),
+        run: runProviderUpdate,
       })
       .pipe(
         Effect.mapError((error) =>

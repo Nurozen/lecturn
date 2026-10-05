@@ -44,6 +44,8 @@ import {
 import {
   BUNDLED_CLAUDE_MODEL_CATALOG,
   type ClaudeModelCatalog,
+  type ClaudeRuntimeModelInfo,
+  mergeClaudeRuntimeModelCatalog,
   formatClaudeVersionUpgradeMessage,
   resolveClaudeModelsForVersion,
 } from "../ClaudeModelCatalog.ts";
@@ -57,6 +59,8 @@ export const CLAUDE_PRESENTATION = {
   showInteractionModeToggle: true,
   conversationFork: "native",
   conversationForkRequiresAnchor: true,
+  // The driver turns this off for instances running against a custom home.
+  externalSessions: "supported",
 } as const;
 function toTitleCaseWords(value: string): string {
   const parts: Array<string> = [];
@@ -225,7 +229,8 @@ function nonEmptyProbeString(value: string): string | undefined {
   return candidate ? candidate : undefined;
 }
 
-type ClaudeCapabilitiesProbe = {
+export type ClaudeCapabilitiesProbe = {
+  readonly models?: ReadonlyArray<ClaudeRuntimeModelInfo>;
   readonly email: string | undefined;
   readonly subscriptionType: string | undefined;
   readonly tokenSource: string | undefined;
@@ -334,8 +339,8 @@ const probeClaudeCapabilities = (
   environment?: NodeJS.ProcessEnv,
   cwd?: string,
 ) => {
-  const abort = new AbortController();
   return Effect.gen(function* () {
+    const abort = new AbortController();
     const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
     const executablePath = yield* resolveClaudeSdkExecutablePath(
       claudeSettings.binaryPath,
@@ -375,6 +380,7 @@ const probeClaudeCapabilities = (
           }
         | undefined;
       return {
+        models: init.models,
         email: account?.email,
         subscriptionType: account?.subscriptionType,
         tokenSource: account?.tokenSource,
@@ -382,13 +388,14 @@ const probeClaudeCapabilities = (
         slashCommands: parseClaudeInitializationCommands(init.commands),
         ...(usage ? { usage } : {}),
       } satisfies ClaudeCapabilitiesProbe;
-    });
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          if (!abort.signal.aborted) abort.abort();
+        }),
+      ),
+    );
   }).pipe(
-    Effect.ensuring(
-      Effect.sync(() => {
-        if (!abort.signal.aborted) abort.abort();
-      }),
-    ),
     Effect.timeoutOption(CAPABILITIES_PROBE_TIMEOUT_MS),
     Effect.result,
     Effect.map((result) => {
@@ -414,16 +421,67 @@ const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
   return yield* spawnAndCollect(claudeSettings.binaryPath, command);
 });
 
+/**
+ * Extract `loggedIn` from `claude auth status --json`.
+ *
+ * Returns undefined when the field is missing or the output is not the JSON we
+ * expect, so a changed CLI contract degrades to "unknown" rather than to a
+ * confident wrong answer.
+ */
+export function parseClaudeAuthStatusLoggedIn(stdout: string): boolean | undefined {
+  const trimmed = stdout.trim();
+  if (trimmed.length === 0) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    const loggedIn = (parsed as { readonly loggedIn?: unknown }).loggedIn;
+    return typeof loggedIn === "boolean" ? loggedIn : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Ask the CLI whether it is signed in.
+ *
+ * The capabilities probe cannot answer this. It collapses every failure to
+ * `undefined`, so a logged-out CLI is indistinguishable from one that timed
+ * out or crashed, and the SDK's `AccountInfo` cannot prove a signed-out state
+ * either: every field is optional and `tokenSource: "none"` means OAuth rather
+ * than absent credentials. `claude auth status --json` reports `loggedIn`
+ * explicitly, which is the only unambiguous signal available.
+ *
+ * Exit status is deliberately ignored: the CLI reports a logged-out account on
+ * stdout while exiting non-zero.
+ */
+const probeClaudeLoggedIn = Effect.fn("probeClaudeLoggedIn")(function* (
+  claudeSettings: ClaudeSettings,
+  environment: NodeJS.ProcessEnv,
+) {
+  const result = yield* runClaudeCommand(
+    claudeSettings,
+    ["auth", "status", "--json"],
+    environment,
+  ).pipe(Effect.timeoutOption(DEFAULT_TIMEOUT_MS), Effect.result);
+
+  if (Result.isFailure(result) || Option.isNone(result.success)) {
+    return undefined;
+  }
+  return parseClaudeAuthStatusLoggedIn(result.success.value.stdout);
+});
+
 export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(function* (
   claudeSettings: ClaudeSettings,
   resolveCapabilities?: (
     claudeSettings: ClaudeSettings,
+    version?: string,
   ) => Effect.Effect<ClaudeCapabilitiesProbe | undefined>,
   environment?: NodeJS.ProcessEnv,
   cwd?: string,
   modelCatalog: ClaudeModelCatalog = BUNDLED_CLAUDE_MODEL_CATALOG,
   /** Shared with the adapter so turn events reuse the scoped-bucket names this probe saw. */
   scopedLimitNames?: Ref.Ref<ClaudeScopedLimitNames>,
+  lastRuntimeModels?: () => ReadonlyArray<ClaudeRuntimeModelInfo> | undefined,
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
@@ -482,20 +540,25 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   }
 
   if (Option.isNone(versionProbe.success)) {
-    return buildServerProvider({
-      presentation: CLAUDE_PRESENTATION,
-      enabled: claudeSettings.enabled,
-      checkedAt,
-      models: allModels,
-      probe: {
-        installed: true,
-        version: null,
-        status: "error",
-        auth: { status: "unknown" },
-        message:
-          "Claude Agent CLI is installed but failed to run. Timed out while running command.",
-      },
-    });
+    const message =
+      "Claude Agent CLI is installed but failed to run. Timed out while running command.";
+    return {
+      ...buildServerProvider({
+        presentation: CLAUDE_PRESENTATION,
+        enabled: claudeSettings.enabled,
+        checkedAt,
+        models: allModels,
+        probe: {
+          installed: true,
+          version: null,
+          status: "error",
+          auth: { status: "unknown" },
+          message,
+        },
+      }),
+      // A slow CLI is a timeout, not a failed start.
+      discovery: { status: "timed-out", phase: "provider", message },
+    };
   }
 
   const version = versionProbe.success.value;
@@ -521,21 +584,51 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
+  const capabilities = resolveCapabilities
+    ? yield* resolveCapabilities(claudeSettings, parsedVersion ?? undefined).pipe(
+        Effect.orElseSucceed(() => undefined),
+      )
+    : undefined;
+  const discoveredCatalog = mergeClaudeRuntimeModelCatalog(
+    modelCatalog,
+    capabilities?.models?.length ? capabilities.models : lastRuntimeModels?.(),
+  );
   const models = providerModelsFromSettings(
-    resolveClaudeModelsForVersion(modelCatalog, parsedVersion),
+    resolveClaudeModelsForVersion(discoveredCatalog, parsedVersion),
     claudeSettings.customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
   );
-  const versionUpgradeMessage = formatClaudeVersionUpgradeMessage(modelCatalog, parsedVersion);
-
-  const capabilities = resolveCapabilities
-    ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))
-    : undefined;
+  const versionUpgradeMessage = formatClaudeVersionUpgradeMessage(discoveredCatalog, parsedVersion);
   const skills = yield* discoverClaudeSkills(claudeSettings, cwd, resolvedEnvironment);
   const slashCommands = [COMPACT_SLASH_COMMAND, ...(capabilities?.slashCommands ?? [])];
   const dedupedSlashCommands = dedupeSlashCommands(slashCommands);
 
   if (!capabilities) {
+    // An empty capabilities probe looks identical whether the CLI is logged
+    // out, timed out, or crashed. Ask the CLI directly so a signed-out user
+    // gets an actionable re-auth message instead of a generic "unavailable",
+    // and so `auth.status` can finally report `unauthenticated`. This spawn
+    // only happens on the path where the probe already produced nothing, so
+    // the healthy case pays nothing for it.
+    const loggedIn = yield* probeClaudeLoggedIn(claudeSettings, resolvedEnvironment);
+    if (loggedIn === false) {
+      return buildServerProvider({
+        presentation: CLAUDE_PRESENTATION,
+        enabled: claudeSettings.enabled,
+        checkedAt,
+        models,
+        slashCommands: dedupedSlashCommands,
+        skills,
+        probe: {
+          installed: true,
+          version: parsedVersion,
+          status: "error",
+          auth: { status: "unauthenticated" },
+          message: "Claude Code is not signed in. Run `claude auth login` and try again.",
+        },
+      });
+    }
+
     return buildServerProvider({
       presentation: CLAUDE_PRESENTATION,
       enabled: claudeSettings.enabled,

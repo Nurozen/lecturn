@@ -1,3 +1,4 @@
+import { useSettingsAccountGlass } from "./useSettingsAccountGlass";
 import { StaveCompatibilityNotice, StaveMemoryProviderSupport } from "../stave/StaveCompatibility";
 import { staveOperationUnavailableReason } from "../stave/staveCompatibility.logic";
 import { StaveLifecycleSettings } from "./StaveLifecycleSettings";
@@ -36,9 +37,16 @@ import { summarizeStaveStatus } from "./StaveSettings.logic";
  */
 export function StaveSettingsSection() {
   const primaryServerConfig = useAtomValue(primaryServerConfigAtom);
+  const environmentId = usePrimaryEnvironmentId();
+  const glass = useSettingsAccountGlass(environmentId);
   if (primaryServerConfig?.environment.capabilities.stave === undefined) return null;
   return (
-    <SettingsSection id="stave" title="Stave">
+    <SettingsSection
+      {...glass}
+      id="stave"
+      title="Stave"
+      className="lecturn-account-surface lecturn-project-settings"
+    >
       <StaveEnabledSetting />
       <StaveLifecycleSettings />
       <StaveStatusRow />

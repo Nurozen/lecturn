@@ -27,6 +27,9 @@ export class RelayConnectionTarget extends Schema.TaggedClass<RelayConnectionTar
   "RelayConnectionTarget",
   {
     ...ConnectionTargetBase,
+    // The Connect account that owns this environment. Absent on entries
+    // persisted before accounts were tracked.
+    accountId: Schema.optional(Schema.String),
   },
 ) {}
 

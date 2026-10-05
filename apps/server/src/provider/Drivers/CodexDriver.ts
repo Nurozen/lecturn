@@ -28,6 +28,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
@@ -53,6 +54,8 @@ import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import * as ModelManifest from "../ModelManifest.ts";
 import type { ProviderDriver, ProviderInstance } from "../ProviderDriver.ts";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
+import { makeCodexExternalSessionImporter } from "./CodexExternalSessionImport.ts";
+import { makeCodexExternalSessionsLister } from "./CodexExternalSessions.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
@@ -140,10 +143,13 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         enabled,
         homePath: homeLayout.effectiveHomePath ?? "",
       } satisfies CodexSettings;
-      const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
+      const resolveMaintenanceCapabilities = resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
-      });
+      }).pipe(
+        Effect.provideService(FileSystem.FileSystem, yield* FileSystem.FileSystem),
+        Effect.provideService(Path.Path, yield* Path.Path),
+      );
 
       // `makeCodexAdapter` and `makeCodexTextGeneration` have `never` error
       // channels at construction time — their failure modes are all on the
@@ -180,7 +186,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       );
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<CodexSettings>>({
-        maintenanceCapabilities,
+        resolveMaintenanceCapabilities,
         discovery: {
           waitForShell: !/[\\/]/.test(effectiveConfig.binaryPath?.trim() ?? ""),
           refreshEnvironment: () =>
@@ -197,7 +203,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
               stampIdentity(ModelManifest.applyModelManifest(draft, manifest, DRIVER_KIND)),
           ),
         checkProvider,
-        enrichSnapshot: ({ settings, snapshot, publishSnapshot }) =>
+        enrichSnapshot: ({ settings, snapshot, maintenanceCapabilities, publishSnapshot }) =>
           enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities, {
             enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
           }).pipe(
@@ -243,6 +249,37 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
                   }),
               ),
             );
+
+      // Lists and imports each spawn an app-server, and clients issue lists
+      // concurrently (several clients, or one per search term), so run one at
+      // a time.
+      const externalSessionsSemaphore = yield* Semaphore.make(1);
+      const openExternalSessionsClient = Effect.suspend(() =>
+        withCodexAppServerClient({
+          binaryPath: effectiveConfig.binaryPath,
+          homePath: effectiveConfig.homePath,
+          launchArgs: resolveCodexLaunchArgs(effectiveConfig.launchArgs, processEnv),
+          // Home-level requests; any directory serves, same as the status probe.
+          cwd: process.cwd(),
+          environment: processEnv,
+        }),
+      ).pipe(
+        Effect.map(({ client }) => client),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      );
+      const listCodexExternalSessions = makeCodexExternalSessionsLister({
+        instanceId,
+        openClient: openExternalSessionsClient,
+      });
+      const listExternalSessions: NonNullable<ProviderInstance["listExternalSessions"]> = (input) =>
+        externalSessionsSemaphore.withPermits(1)(listCodexExternalSessions(input));
+      const importCodexExternalSession = makeCodexExternalSessionImporter({
+        instanceId,
+        openClient: openExternalSessionsClient,
+      });
+      const importExternalSession: NonNullable<ProviderInstance["importExternalSession"]> = (
+        input,
+      ) => externalSessionsSemaphore.withPermits(1)(importCodexExternalSession(input));
 
       // Redemption spends something on the user's account. It serialises on
       // the account (instances sharing a Codex home share the credit), keeps
@@ -316,6 +353,8 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         snapshot,
         snapshotForCwd,
         consumeResetCredit,
+        listExternalSessions,
+        importExternalSession,
         adapter,
         textGeneration,
       } satisfies ProviderInstance;

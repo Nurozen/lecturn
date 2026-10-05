@@ -60,10 +60,28 @@ export function addProjectStaveSourceLabel(source: AddProjectStaveSource): strin
 export function addProjectStaveSourceDescription(source: AddProjectStaveSource): string {
   switch (source) {
     case "stave-space":
-      return "Create a Stave space from registered repos and open it";
+      return "Create a Stave space, or add or restore an existing one";
     case "stave-saga":
-      return "Create a Stave saga that groups spaces and open it";
+      return "Create a Stave saga, or add or restore an existing one";
   }
+}
+
+/**
+ * The Stave sources an add-project list offers: none unless the feature gate
+ * passes (capability, enabled, runnable), minus any create the selected
+ * binary reports as unsupported.
+ */
+export function availableAddProjectStaveSources(input: {
+  readonly available: boolean;
+  readonly unsupportedOperations?: ReadonlyArray<string> | undefined;
+}): ReadonlyArray<AddProjectStaveSource> {
+  if (!input.available) return [];
+  return ADD_PROJECT_STAVE_SOURCES.filter(
+    (source) =>
+      !input.unsupportedOperations?.includes(
+        source === "stave-space" ? "createSpace" : "createSaga",
+      ),
+  );
 }
 
 export function canCreateProjectInEnvironment(

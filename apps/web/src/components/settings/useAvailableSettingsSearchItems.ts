@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { AuthAccessWriteScope } from "@lecturn/contracts";
 
+import { knownConnectAccountsAtom } from "~/cloud/knownAccounts";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { isElectron } from "~/env";
 import { desktopWslStateAtom } from "~/state/desktopWslState";
@@ -18,6 +19,7 @@ export function useAvailableSettingsSearchItems() {
   const { environments } = useEnvironments();
   const primarySessionState = usePrimarySessionState();
   const primaryServerConfig = useAtomValue(primaryServerConfigAtom);
+  const hasConnectAccountMenu = useAtomValue(knownConnectAccountsAtom).accountIds.length > 0;
   const desktopWsl = useEnvironmentQuery(isElectron ? desktopWslStateAtom : null);
   const canManageLocalBackend =
     isElectron ||
@@ -44,6 +46,7 @@ export function useAvailableSettingsSearchItems() {
         hasThreadAutoSettlement:
           primaryServerConfig?.environment.capabilities.threadAutoSettlement === true,
         hasStave: primaryServerConfig?.environment.capabilities.stave !== undefined,
+        hasConnectAccountMenu,
         hasStaveLifecycle: primaryServerConfig?.settings.stave.enabled === true,
         hasStaveGrace:
           primaryServerConfig?.settings.stave.enabled === true &&
@@ -58,6 +61,7 @@ export function useAvailableSettingsSearchItems() {
       desktopWsl.data,
       desktopWsl.error,
       environments,
+      hasConnectAccountMenu,
       primaryEnvironmentId,
       primaryServerConfig,
     ],

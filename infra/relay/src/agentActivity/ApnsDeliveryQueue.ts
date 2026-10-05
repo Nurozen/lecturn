@@ -64,6 +64,7 @@ export class ApnsDeliveryQueue extends Context.Service<
       readonly apsEnvironment?: "sandbox" | "production" | null;
       readonly aggregate: ApnsDeliveryJobPayload["aggregate"];
       readonly alert?: ApnsDeliveryJobPayload["alert"];
+      readonly alertEvents?: ApnsDeliveryJobPayload["alertEvents"];
     }) => Effect.Effect<RelayDeliveryResult, ApnsDeliveryQueueError>;
     readonly enqueuePushNotification: (input: {
       readonly userId: string;
@@ -86,6 +87,7 @@ export const make = Effect.gen(function* () {
       function* (input) {
         yield* Effect.annotateCurrentSpan({
           "relay.mobile.device_id": input.deviceId,
+          "user.id": input.userId,
           "relay.delivery.kind": input.kind,
         });
         const now = yield* DateTime.now;
@@ -143,6 +145,7 @@ export const make = Effect.gen(function* () {
       function* (input) {
         yield* Effect.annotateCurrentSpan({
           "relay.mobile.device_id": input.deviceId,
+          "user.id": input.userId,
           "relay.delivery.kind": "push_notification",
           "relay.environment_id": input.notification.environmentId,
           "relay.thread_id": input.notification.threadId,
@@ -170,7 +173,10 @@ export const make = Effect.gen(function* () {
           bundleId: input.bundleId,
           apsEnvironment: input.apsEnvironment,
           aggregate: null,
-          notification: sanitizeApnsNotificationPayload(input.notification),
+          notification: {
+            ...sanitizeApnsNotificationPayload(input.notification),
+            accountId: input.userId,
+          },
           jobId,
           createdAt: DateTime.formatIso(now),
           expiresAt: expiresAtForJob(now.epochMilliseconds),

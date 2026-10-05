@@ -71,6 +71,83 @@ const lightEnvironment = {
 } as const;
 
 describe("AgentActivity widget layout", () => {
+  it("tints legacy opaque backgrounds without recoloring the brand", () => {
+    const teal = AgentActivity(
+      { ...props, iosMajorVersion: 18, accountColor: "#14b8a6" },
+      environment as never,
+    );
+    const violet = AgentActivity(
+      { ...props, iosMajorVersion: 18, accountColor: "#8b5cf6" },
+      environment as never,
+    );
+    expect(JSON.stringify(teal.banner)).toContain('"activityBackgroundTint":"#0a3e43"');
+    expect(JSON.stringify(violet.banner)).toContain('"activityBackgroundTint":"#272757"');
+    expect(teal.compactLeading).toEqual(violet.compactLeading);
+    expect(JSON.stringify(teal.expandedLeading)).toContain('"background":"#0a3e43"');
+    expect(JSON.stringify(violet.expandedBottom)).toContain('"background":"#272757"');
+  });
+  it("uses account color only for the system glass background, preserving brand foregrounds", () => {
+    const unowned = AgentActivity({ ...props, iosMajorVersion: 26 }, environment as never);
+    const owned = AgentActivity(
+      { ...props, iosMajorVersion: 26, accountColor: "#14b8a6" },
+      environment as never,
+    );
+    // Only the host background changes: logo, title, rows, and compact islands
+    // must keep exactly the same brand/semantic colors.
+    expect(JSON.stringify(owned.banner).replaceAll("#14b8a640", "#00000000")).toBe(
+      JSON.stringify(unowned.banner),
+    );
+    expect(owned.compactLeading).toEqual(unowned.compactLeading);
+    expect(owned.compactTrailing).toEqual(unowned.compactTrailing);
+    expect(owned.minimal).toEqual(unowned.minimal);
+    for (const surface of [owned.expandedLeading, owned.expandedBottom]) {
+      expect(JSON.stringify(surface)).toContain('"background":"#14b8a640"');
+      expect(JSON.stringify(surface).replaceAll('"background":"#14b8a640"', "")).not.toContain(
+        "#14b8a6",
+      );
+    }
+  });
+
+  it.each([undefined, "red", "#abc", "#12345678", "invalid"])(
+    "uses the system background when account color %s is not a six-digit hex color",
+    (accountColor) => {
+      const layout = AgentActivity(
+        { ...props, iosMajorVersion: 26, accountColor },
+        environment as never,
+      );
+      expect(JSON.stringify(layout.banner)).toContain('"activityBackgroundTint":"#00000000"');
+    },
+  );
+
+  it.each(["light", "dark"] as const)(
+    "preserves activity text in the iOS 26 glass layout in %s appearance",
+    (colorScheme) => {
+      for (const isLuminanceReduced of [false, true]) {
+        const layout = AgentActivity(
+          {
+            ...props,
+            iosMajorVersion: 26,
+            accountLabel: "Work",
+            accountColor: "#14b8a6",
+            activities: [makeRow({ threadTitle: "Review changes" })],
+          },
+          { colorScheme, isLuminanceReduced } as never,
+        );
+        expect(JSON.stringify(layout.banner)).toContain("Review changes");
+        expect(JSON.stringify(layout.bannerSmall)).toContain("Review changes");
+        expect(JSON.stringify(layout.expandedBottom)).toContain("Review changes");
+        for (const surface of [layout.banner, layout.bannerSmall, layout.expandedBottom]) {
+          const serialized = JSON.stringify(surface);
+          expect(serialized).not.toContain('"glassEffect"');
+        }
+        expect(JSON.stringify(layout.banner)).toContain('"activityBackgroundTint":"#14b8a640"');
+        expect(JSON.stringify(layout.bannerSmall)).toContain(
+          '"activityBackgroundTint":"#14b8a640"',
+        );
+      }
+    },
+  );
+
   it("tints each row by its own phase on the branded dark surface", () => {
     const layout = AgentActivity(
       {

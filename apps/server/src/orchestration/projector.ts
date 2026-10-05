@@ -35,6 +35,7 @@ import {
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
   ThreadForkedPayload,
+  ThreadImportedPayload,
 } from "./Schemas.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
@@ -403,6 +404,7 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             forkedFrom: payload.forkedFrom,
+            ...(payload.importedFrom != null ? { importedFrom: payload.importedFrom } : {}),
             linkedPullRequest: payload.linkedPullRequest ?? null,
             latestTurn,
             proposedPlans,
@@ -410,6 +412,20 @@ export function projectEvent(
           }),
         };
       });
+
+    // Like thread.forked, only summary state is projected: the imported
+    // message and activity bodies live in the SQL projections. There are no
+    // turns to inherit, so latestTurn stays null.
+    case "thread.imported":
+      return decodeForEvent(ThreadImportedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            importedFrom: payload.importedFrom,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
 
     case "thread.deleted":
       return decodeForEvent(ThreadDeletedPayload, event.payload, event.type, "payload").pipe(

@@ -70,7 +70,7 @@ describe("mobile themes", () => {
     expect(readDefaultMobileThemeVariables("light")["--color-screen"]).toBe("#f4eddf");
     expect(readDefaultMobileThemeVariables("dark")["--color-screen"]).toBe("#061522");
     expect(readDefaultMobileThemeVariables("light")["--color-user-bubble-skill-foreground"]).toBe(
-      "#ffe1b1",
+      "#984e29",
     );
   });
 
@@ -197,6 +197,11 @@ describe("mobile themes", () => {
         expect(
           contrastRatio(variables["--color-md-user-code-text"], codeSurface),
           `${appearance}: inline code on ${surface}`,
+        ).toBeGreaterThanOrEqual(4.5);
+        const fenceSurface = compositeOver(variables["--color-md-user-fence-bg"], surface);
+        expect(
+          contrastRatio(variables["--color-md-user-fence-text"], fenceSurface),
+          `${appearance}: fenced code on ${surface}`,
         ).toBeGreaterThanOrEqual(4.5);
       }
     }

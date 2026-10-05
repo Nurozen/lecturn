@@ -388,6 +388,7 @@ export const resolveServerConfig = (
       desktopTelemetryControlFd,
       resourceMonitorPath,
       stavePath,
+      ...(bootstrap?.extensions ? { extensions: bootstrap.extensions } : {}),
       autoBootstrapProjectFromCwd,
       logWebSocketEvents,
       tailscaleServeEnabled,

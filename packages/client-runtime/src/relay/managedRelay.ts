@@ -298,7 +298,8 @@ export class ManagedRelayClient extends Context.Service<
     readonly getAgentActivitySnapshot: (input: {
       readonly clerkToken: string;
     }) => Effect.Effect<RelayAgentActivitySnapshotResponse, ManagedRelayClientError>;
-    readonly resetTokenCache: Effect.Effect<void>;
+    /** Drops cached relay access tokens: one account's when given, otherwise all of them. */
+    readonly resetTokenCache: (accountId?: string) => Effect.Effect<void>;
   }
 >()("@lecturn/client-runtime/relay/managedRelay/ManagedRelayClient") {}
 
@@ -422,9 +423,8 @@ function disabledManagedRelayClient(relayUrl: string): ManagedRelayClient["Servi
     unregisterDevice: unavailable("clientRuntime.managedRelay.unregisterDevice"),
     registerLiveActivity: unavailable("clientRuntime.managedRelay.registerLiveActivity"),
     getAgentActivitySnapshot: unavailable("clientRuntime.managedRelay.getAgentActivitySnapshot"),
-    resetTokenCache: Effect.void.pipe(
-      Effect.withSpan("clientRuntime.managedRelay.resetTokenCache"),
-    ),
+    resetTokenCache: () =>
+      Effect.void.pipe(Effect.withSpan("clientRuntime.managedRelay.resetTokenCache")),
   });
 }
 
@@ -932,11 +932,23 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
       Effect.withSpan("clientRuntime.managedRelay.registerLiveActivity"),
       withRelayClientTracing,
     ),
-    resetTokenCache: SynchronizedRef.set(cachedTokens, []).pipe(
-      Effect.andThen(options.accessTokenStore ? options.accessTokenStore.clear : Effect.void),
-      Effect.withSpan("clientRuntime.managedRelay.resetTokenCache"),
-      withRelayClientTracing,
-    ),
+    resetTokenCache: (accountId) =>
+      (accountId === undefined
+        ? SynchronizedRef.set(cachedTokens, []).pipe(
+            Effect.andThen(options.accessTokenStore ? options.accessTokenStore.clear : Effect.void),
+          )
+        : // Write the other accounts' tokens back: `clear` would sign them out of the relay too.
+          SynchronizedRef.updateEffect(cachedTokens, (tokens) => {
+            const nextTokens = tokens.filter((token) => token.accountId !== accountId);
+            if (nextTokens.length === tokens.length) {
+              return Effect.succeed(tokens);
+            }
+            const store = options.accessTokenStore;
+            return (
+              store ? (nextTokens.length === 0 ? store.clear : store.save(nextTokens)) : Effect.void
+            ).pipe(Effect.as(nextTokens));
+          })
+      ).pipe(Effect.withSpan("clientRuntime.managedRelay.resetTokenCache"), withRelayClientTracing),
   });
 });
 

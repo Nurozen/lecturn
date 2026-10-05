@@ -18,13 +18,13 @@ there, never in the client.
 ┌──────────────────▼─────────────────────────────┐
 │ apps/server                                    │
 │  orchestration engine (event-sourced)          │
-│  provider driver registry (6 built-in drivers) │
+│  provider driver registry (7 built-in drivers) │
 │  checkpointing, VCS, terminals, filesystem     │
 └──────────────────┬─────────────────────────────┘
                    │ per-driver transport
 ┌──────────────────▼─────────────────────────────┐
 │ Agent CLIs: Codex, Claude, Cursor, Grok,       │
-│ OpenCode, Antigravity                          │
+│ GitHub Copilot, OpenCode, Antigravity          │
 └────────────────────────────────────────────────┘
 ```
 
@@ -134,8 +134,8 @@ build production behavior on receipts.
 
 ## Provider drivers
 
-Six drivers ship built in, registered in [`builtInDrivers.ts`][drivers] as `BUILT_IN_DRIVERS`:
-Codex, Claude, Cursor, Grok, OpenCode, and Antigravity. A driver declares its kind and config schema and creates a
+Seven drivers ship built in, registered in [`builtInDrivers.ts`][drivers] as `BUILT_IN_DRIVERS`:
+Codex, Claude, Cursor, Grok, GitHub Copilot, OpenCode, and Antigravity. A driver declares its kind and config schema and creates a
 scoped adapter; `ProviderInstanceRegistry` owns live instances and `ProviderAdapterRegistry` resolves
 an instance to its adapter, so `ProviderService` routes session and turn operations without knowing
 which agent is behind them. See [providers.md](./providers.md).
@@ -148,6 +148,14 @@ captures state as hidden Git refs through the VCS driver's checkpoint operations
 baseline capture, completed-turn capture, diff projection, and reverting both the workspace and the
 provider conversation. The storage contract is `VcsCheckpointOps` in
 [`VcsDriver.ts`](../../apps/server/src/vcs/VcsDriver.ts), implemented for Git in the same directory.
+
+Revert checks that the target checkpoint exists before changing provider history, then rolls back
+the provider before restoring files. A provider rejection leaves files and the visible conversation
+unchanged. These operations are not atomic across the provider and filesystem: a filesystem error
+after successful provider rollback is still reported as a failed revert.
+Revert does not require a live provider session. Workspace lookup prefers the live session cwd,
+then its persisted binding cwd, then the thread worktree or project root. Provider rollback recovers
+a stopped session from its persisted resume state.
 
 ## Startup
 

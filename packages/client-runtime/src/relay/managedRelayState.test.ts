@@ -20,11 +20,15 @@ import {
   createManagedRelaySession,
   deregisterManagedRelayEnvironment,
   managedRelayAccountChanges,
+  managedRelayAccountIds,
   type ManagedRelayQueryEvent,
   ManagedRelaySessionError,
   managedRelaySessionAtom,
+  managedRelaySessionsAtom,
   readManagedRelaySnapshotState,
+  setManagedRelayPrimaryAccount,
   setManagedRelaySession,
+  syncManagedRelaySessions,
   waitForManagedRelayClerkToken,
 } from "./managedRelayState.ts";
 
@@ -85,7 +89,7 @@ function createClient(overrides?: Partial<ManagedRelay.ManagedRelayClient["Servi
     unregisterDevice: () => Effect.die("unused"),
     registerLiveActivity: () => Effect.die("unused"),
     getAgentActivitySnapshot: () => Effect.die("unused"),
-    resetTokenCache: Effect.void,
+    resetTokenCache: () => Effect.void,
     ...overrides,
   });
 }
@@ -109,6 +113,10 @@ function setSession() {
   });
 }
 
+function account(accountId: string) {
+  return { accountId, readClerkToken: () => Promise.resolve(`clerk-token:${accountId}`) };
+}
+
 function clerkToken(expiresAtSeconds: number): string {
   const encode = (value: unknown) =>
     btoa(JSON.stringify(value)).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
@@ -118,37 +126,41 @@ function clerkToken(expiresAtSeconds: number): string {
 describe("createManagedRelayQueryManager", () => {
   afterEach(resetRegistry);
 
-  it.effect("waits for the current cloud session before reading its token", () =>
+  it.effect("waits for an account's cloud session before reading its token", () =>
     Effect.gen(function* () {
-      const tokenFiber = yield* waitForManagedRelayClerkToken(registry).pipe(Effect.forkChild);
+      const tokenFiber = yield* waitForManagedRelayClerkToken(registry, "account-b").pipe(
+        Effect.forkChild,
+      );
 
-      setSession();
+      syncManagedRelaySessions(registry, [account("account-a")]);
+      syncManagedRelaySessions(registry, [account("account-a"), account("account-b")]);
 
-      expect(yield* Fiber.join(tokenFiber)).toBe("clerk-token");
-      expect(registry.getNodes().get(managedRelaySessionAtom)?.listeners.size).toBe(0);
+      expect(yield* Fiber.join(tokenFiber)).toBe("clerk-token:account-b");
+      expect(registry.getNodes().get(managedRelaySessionsAtom)?.listeners.size).toBe(0);
     }),
   );
 
-  it.effect("deregisters an environment through the current Clerk session", () =>
+  it.effect("deregisters an environment through the owning account, primary or not", () =>
     Effect.gen(function* () {
       const unlinkEnvironment = vi.fn(() => Effect.succeed({ ok: true }));
-      setSession();
+      syncManagedRelaySessions(registry, [account("account-a"), account("account-b")]);
+      setManagedRelayPrimaryAccount(registry, "account-a");
 
       yield* deregisterManagedRelayEnvironment(registry, {
-        accountId: "account-1",
+        accountId: "account-b",
         environmentId: environment.environmentId,
       }).pipe(
         Effect.provideService(ManagedRelay.ManagedRelayClient, createClient({ unlinkEnvironment })),
       );
 
       expect(unlinkEnvironment).toHaveBeenCalledWith({
-        clerkToken: "clerk-token",
+        clerkToken: "clerk-token:account-b",
         environmentId: environment.environmentId,
       });
     }),
   );
 
-  it.effect("rejects deregistration after the account changes", () =>
+  it.effect("rejects deregistration for an account that is not signed in", () =>
     Effect.gen(function* () {
       const unlinkEnvironment = vi.fn(() => Effect.succeed({ ok: true }));
       setSession();
@@ -218,6 +230,39 @@ describe("createManagedRelayQueryManager", () => {
     }),
   );
 
+  it("holds two accounts and keeps an unchanged account's session across a sync", () => {
+    syncManagedRelaySessions(registry, [account("account-a")]);
+    const sessionA = registry.get(managedRelaySessionsAtom).get("account-a");
+
+    syncManagedRelaySessions(registry, [account("account-a"), account("account-b")]);
+    const sessions = registry.get(managedRelaySessionsAtom);
+    expect([...sessions.keys()]).toEqual(["account-a", "account-b"]);
+    // Reconnect leases and queries hold the session object, so it must survive.
+    expect(sessions.get("account-a")).toBe(sessionA);
+
+    syncManagedRelaySessions(registry, [account("account-a"), account("account-b")]);
+    expect(registry.get(managedRelaySessionsAtom)).toBe(sessions);
+
+    syncManagedRelaySessions(registry, [account("account-a")]);
+    expect([...registry.get(managedRelaySessionsAtom).keys()]).toEqual(["account-a"]);
+    expect(registry.get(managedRelaySessionsAtom).get("account-a")).toBe(sessionA);
+  });
+
+  it("resolves the primary session to the designated account, else the first one", () => {
+    expect(registry.get(managedRelaySessionAtom)).toBeNull();
+
+    syncManagedRelaySessions(registry, [account("account-a"), account("account-b")]);
+    expect(registry.get(managedRelaySessionAtom)?.accountId).toBe("account-a");
+    expect(managedRelayAccountIds(registry)).toEqual(["account-a", "account-b"]);
+
+    setManagedRelayPrimaryAccount(registry, "account-b");
+    expect(registry.get(managedRelaySessionAtom)?.accountId).toBe("account-b");
+    expect(managedRelayAccountIds(registry)).toEqual(["account-b", "account-a"]);
+
+    syncManagedRelaySessions(registry, [account("account-a")]);
+    expect(registry.get(managedRelaySessionAtom)?.accountId).toBe("account-a");
+  });
+
   it.effect("does not pin a refreshed session to an older pending token read", () =>
     Effect.gen(function* () {
       let resolveFirst!: (token: string) => void;
@@ -243,7 +288,7 @@ describe("createManagedRelayQueryManager", () => {
     }),
   );
 
-  it.effect("emits credential changes only when the managed relay account changes", () =>
+  it.effect("emits the accounts added and removed, and nothing for a token refresh", () =>
     Effect.gen(function* () {
       setManagedRelaySession(registry, {
         accountId: "account-1",
@@ -256,7 +301,7 @@ describe("createManagedRelayQueryManager", () => {
       );
       yield* Effect.promise(() =>
         vi.waitFor(() => {
-          expect(registry.getNodes().get(managedRelaySessionAtom)?.listeners.size).toBeGreaterThan(
+          expect(registry.getNodes().get(managedRelaySessionsAtom)?.listeners.size).toBeGreaterThan(
             0,
           );
         }),
@@ -272,7 +317,10 @@ describe("createManagedRelayQueryManager", () => {
       });
       setManagedRelaySession(registry, null);
 
-      expect(Array.from(yield* Fiber.join(changes))).toEqual(["account-2", null]);
+      expect(Array.from(yield* Fiber.join(changes))).toEqual([
+        { added: new Set(["account-2"]), removed: new Set(["account-1"]) },
+        { added: new Set(), removed: new Set(["account-2"]) },
+      ]);
     }),
   );
 

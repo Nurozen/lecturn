@@ -365,6 +365,11 @@ class GitSafetyTests(unittest.TestCase):
         self.assertEqual(batches.grok_result(log), {'a': 1})
         self.assertEqual(batches.grok_analysis(log), 'review')
 
+    def test_commit_bypasses_repo_hooks(self):
+        source = Path(__file__).with_name('run-batches.py').read_text()
+        self.assertIn("git(repo, 'commit', '--no-verify', '-m'", source)
+        self.assertNotIn("git(repo, 'commit', '-m'", source)
+
     def test_agent_result_requires_successful_result_event(self):
         log = self.folder / 'x.events.log'
         success = {'type': 'result', 'subtype': 'success', 'is_error': False,

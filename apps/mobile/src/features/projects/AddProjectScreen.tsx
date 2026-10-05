@@ -1,7 +1,11 @@
+import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
+import { GlassCard } from "../../components/GlassCard";
 import {
   addProjectRemoteSourceLabel,
   addProjectRemoteSourcePathHint,
   addProjectRemoteSourceProvider,
+  addProjectStaveSourceDescription,
+  addProjectStaveSourceLabel,
   buildAddProjectRemoteSourceReadiness,
   buildProjectCreateCommand,
   canCreateProjectInEnvironment,
@@ -16,6 +20,10 @@ import {
   sortAddProjectProviderSources,
   type AddProjectRemoteSource,
 } from "@lecturn/client-runtime/operations/projects";
+import {
+  IMPORT_FOLDER_SOURCE_DESCRIPTION,
+  importFolderSourceLabel,
+} from "@lecturn/client-runtime/external-session-import";
 import {
   connectionStatusText,
   type EnvironmentConnectionPhase,
@@ -54,6 +62,7 @@ import { filesystemEnvironment } from "../../state/filesystem";
 import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
 import { sourceControlEnvironment } from "../../state/sourceControl";
+import { useStaveCreateSources } from "../../state/stave";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
 import { EnvironmentMachineSymbol } from "../../components/EnvironmentMachineSymbol";
 import { ErrorBanner } from "../../components/ErrorBanner";
@@ -66,6 +75,7 @@ import {
   useRemoteEnvironmentRuntime,
   useSavedRemoteConnections,
 } from "../../state/use-remote-environment-registry";
+import { useThreadImportAvailability } from "../threads/use-import-thread";
 import { resolveAddProjectEnvironment } from "./AddProjectScreen.logic";
 
 interface EnvironmentOption {
@@ -93,7 +103,7 @@ function platformFromOs(os: string | null | undefined): string {
   return "";
 }
 
-function errorMessage(error: unknown): string {
+export function errorMessage(error: unknown): string {
   return error instanceof Error && error.message.trim().length > 0
     ? error.message
     : "An error occurred.";
@@ -118,7 +128,7 @@ function sourceFromParam(value: string | string[] | undefined): AddProjectRemote
   return "url";
 }
 
-function SectionTitle(props: { readonly children: string }) {
+export function SectionTitle(props: { readonly children: string }) {
   return (
     <Text className="px-1 text-2xs font-lecturn-bold tracking-[0.7px] uppercase text-foreground-muted">
       {props.children}
@@ -126,7 +136,7 @@ function SectionTitle(props: { readonly children: string }) {
   );
 }
 
-function AddProjectShell(props: { readonly children: ReactNode }) {
+export function AddProjectShell(props: { readonly children: ReactNode }) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -136,6 +146,7 @@ function AddProjectShell(props: { readonly children: ReactNode }) {
     // "header" sibling, coercing the ScrollView to zero height (blank sheet
     // as soon as the sheet re-lays-out, e.g. when the keyboard opens).
     <View collapsable={false} className="flex-1 bg-sheet">
+      <ArcaneBackdrop emphasis="sidebar" />
       <ScrollView
         keyboardShouldPersistTaps="handled"
         contentInsetAdjustmentBehavior="automatic"
@@ -152,11 +163,11 @@ function AddProjectShell(props: { readonly children: ReactNode }) {
   );
 }
 
-function ListSection(props: { readonly children: ReactNode }) {
-  return <View className="overflow-hidden rounded-[24px] bg-card">{props.children}</View>;
+export function ListSection(props: { readonly children: ReactNode }) {
+  return <GlassCard radius={24}>{props.children}</GlassCard>;
 }
 
-function ListRow(props: {
+export function ListRow(props: {
   readonly title: string;
   readonly subtitle?: string | null;
   readonly icon: ReactNode;
@@ -171,7 +182,7 @@ function ListRow(props: {
       disabled={props.disabled}
       onPress={props.onPress}
       className={cn(
-        "bg-card px-3.5 py-2.5 active:opacity-70",
+        "px-3.5 py-2.5 active:opacity-70",
         !props.isFirst && "border-t border-border-subtle",
         props.disabled && "opacity-[0.45]",
       )}
@@ -209,7 +220,7 @@ function ListRow(props: {
   );
 }
 
-function PrimaryActionButton(props: {
+export function PrimaryActionButton(props: {
   readonly label: string;
   readonly disabled?: boolean;
   readonly loading?: boolean;
@@ -396,11 +407,11 @@ function useSelectedEnvironment(): {
   };
 }
 
-function EmptyEnvironmentState() {
+export function EmptyEnvironmentState() {
   const navigation = useNavigation();
 
   return (
-    <View className="items-center gap-3 rounded-2xl bg-card px-5 py-8">
+    <GlassCard radius={20} className="items-center gap-3 px-5 py-8">
       <Text className="text-center text-lg font-lecturn-bold">Environment unavailable</Text>
       <Text className="text-center text-sm leading-normal text-foreground-muted">
         Start or reconnect an environment before adding a project.
@@ -411,7 +422,7 @@ function EmptyEnvironmentState() {
       >
         <Text className="text-sm font-lecturn-bold text-primary-foreground">Add environment</Text>
       </Pressable>
-    </View>
+    </GlassCard>
   );
 }
 
@@ -475,6 +486,10 @@ export function AddProjectSourceScreen() {
   const readiness = useMemo(
     () => buildAddProjectRemoteSourceReadiness(discoveryState.data),
     [discoveryState.data],
+  );
+  const staveSources = useStaveCreateSources(selectedEnvironment?.environmentId ?? null);
+  const importAvailability = useThreadImportAvailability(
+    selectedEnvironment?.environmentId ?? null,
   );
 
   return (
@@ -565,6 +580,60 @@ export function AddProjectSourceScreen() {
               ),
             )}
           </ListSection>
+          {importAvailability.available ? (
+            <ListSection>
+              <ListRow
+                title={importFolderSourceLabel(
+                  importAvailability.providers.map((provider) => provider.driver),
+                )}
+                subtitle={IMPORT_FOLDER_SOURCE_DESCRIPTION}
+                icon={
+                  <SymbolView
+                    name="clock"
+                    size={17}
+                    tintColorClassName={"accent-icon"}
+                    type="monochrome"
+                  />
+                }
+                isFirst
+                onPress={() =>
+                  navigation.dispatch(
+                    StackActions.push("AddProjectImportFolders", {
+                      environmentId: selectedEnvironment.environmentId,
+                    }),
+                  )
+                }
+              />
+            </ListSection>
+          ) : null}
+          {staveSources.length > 0 ? (
+            <ListSection>
+              {staveSources.map((source, index) => (
+                <ListRow
+                  key={source}
+                  title={addProjectStaveSourceLabel(source)}
+                  subtitle={addProjectStaveSourceDescription(source)}
+                  icon={
+                    <SymbolView
+                      name={source === "stave-space" ? "cube" : "square.grid.2x2"}
+                      size={17}
+                      tintColorClassName={"accent-icon"}
+                      type="monochrome"
+                    />
+                  }
+                  isFirst={index === 0}
+                  onPress={() =>
+                    navigation.dispatch(
+                      StackActions.push(
+                        source === "stave-space" ? "AddProjectStaveSpace" : "AddProjectStaveSaga",
+                        { environmentId: selectedEnvironment.environmentId },
+                      ),
+                    )
+                  }
+                />
+              ))}
+            </ListSection>
+          ) : null}
           {discoveryState.isPending ? (
             <ActivityIndicator colorClassName={"accent-icon-muted"} />
           ) : null}
@@ -574,9 +643,45 @@ export function AddProjectSourceScreen() {
   );
 }
 
+/**
+ * Dispatches `project.create` for a folder and resolves to the new project's
+ * id with the command result. Callers own the existing-project check and where
+ * to go next.
+ */
+export function useDispatchProjectCreate() {
+  const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
+  return useCallback(
+    async (input: {
+      readonly environmentId: EnvironmentId;
+      readonly workspaceRoot: string;
+      /** Defaults to the folder name; a Stave space passes its id. */
+      readonly title?: string;
+      /** Defaults to true; a folder picked from existing sessions must already exist. */
+      readonly createWorkspaceRootIfMissing?: boolean;
+    }) => {
+      const projectId = ProjectId.make(uuidv4());
+      const result = await createProject({
+        environmentId: input.environmentId,
+        input: buildProjectCreateCommand({
+          commandId: CommandId.make(uuidv4()),
+          projectId,
+          workspaceRoot: input.workspaceRoot,
+          createdAt: new Date().toISOString(),
+          ...(input.title === undefined ? {} : { title: input.title }),
+          ...(input.createWorkspaceRootIfMissing === undefined
+            ? {}
+            : { createWorkspaceRootIfMissing: input.createWorkspaceRootIfMissing }),
+        }),
+      });
+      return { projectId, result };
+    },
+    [createProject],
+  );
+}
+
 function useCreateProject(environment: EnvironmentOption | null) {
   const navigation = useNavigation();
-  const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
+  const dispatchProjectCreate = useDispatchProjectCreate();
   const projects = useProjects();
 
   return useCallback(
@@ -608,16 +713,9 @@ function useCreateProject(environment: EnvironmentOption | null) {
         return;
       }
 
-      const projectId = ProjectId.make(uuidv4());
-      const command = buildProjectCreateCommand({
-        commandId: CommandId.make(uuidv4()),
-        projectId,
-        workspaceRoot,
-        createdAt: new Date().toISOString(),
-      });
-      const result = await createProject({
+      const { projectId, result } = await dispatchProjectCreate({
         environmentId: environment.environmentId,
-        input: command,
+        workspaceRoot,
       });
       if (AsyncResult.isFailure(result)) {
         return result;
@@ -639,11 +737,11 @@ function useCreateProject(environment: EnvironmentOption | null) {
       );
       return result;
     },
-    [createProject, environment, projects, navigation],
+    [dispatchProjectCreate, environment, projects, navigation],
   );
 }
 
-function useEnvironmentFromParam(
+export function useEnvironmentFromParam(
   environmentIdParam: string | string[] | undefined,
 ): EnvironmentOption | null {
   const environmentOptions = useEnvironmentOptions();
@@ -967,12 +1065,12 @@ export function AddProjectDestinationScreen(props: {
     <AddProjectShell>
       {error ? <ErrorBanner message={error} /> : null}
       {repositoryTitle ? (
-        <View className="rounded-[24px] bg-card px-4 py-3">
+        <GlassCard radius={24} className="px-4 py-3">
           <Text className="text-base font-lecturn-bold">{repositoryTitle}</Text>
           <Text className="mt-0.5 text-xs text-foreground-muted" numberOfLines={2}>
             {remoteUrl}
           </Text>
-        </View>
+        </GlassCard>
       ) : null}
       {environment ? (
         <>

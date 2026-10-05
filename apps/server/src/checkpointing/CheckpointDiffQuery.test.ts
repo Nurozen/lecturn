@@ -65,6 +65,7 @@ describe("CheckpointDiffQuery.layer", () => {
           isGitRepository: () => Effect.succeed(true),
           captureCheckpoint: () => Effect.void,
           hasCheckpointRef: () => Effect.succeed(namespace !== "mixed"),
+          listRestoreDeletions: () => Effect.succeed({ paths: [], truncated: false }),
           restoreCheckpoint: () => Effect.succeed(true),
           diffCheckpoints: ({ fromCheckpointRef, toCheckpointRef, cwd, ignoreWhitespace }) =>
             Effect.sync(() => {
@@ -141,6 +142,8 @@ describe("CheckpointDiffQuery.layer", () => {
               listThreadActivitiesById: () => Effect.succeed([]),
               listThreadTurnsById: () => Effect.succeed([]),
               getThreadForkContextById: () => Effect.succeed(Option.none()),
+              getThreadImportSourceById: () => Effect.succeed(Option.none()),
+              listThreadImportSources: () => Effect.succeed([]),
               listThreadIdsByWorktreePath: () => Effect.succeed([]),
               searchThreads: () => Effect.succeed({ matches: [] }),
             }),
@@ -204,6 +207,7 @@ describe("CheckpointDiffQuery.layer", () => {
           isGitRepository: () => Effect.succeed(true),
           captureCheckpoint: () => Effect.void,
           hasCheckpointRef: () => Effect.succeed(true),
+          listRestoreDeletions: () => Effect.succeed({ paths: [], truncated: false }),
           restoreCheckpoint: () => Effect.succeed(true),
           diffCheckpoints: ({ fromCheckpointRef, toCheckpointRef, cwd, ignoreWhitespace }) =>
             Effect.sync(() => {
@@ -255,6 +259,8 @@ describe("CheckpointDiffQuery.layer", () => {
               listThreadActivitiesById: () => Effect.succeed([]),
               listThreadTurnsById: () => Effect.succeed([]),
               getThreadForkContextById: () => Effect.succeed(Option.none()),
+              getThreadImportSourceById: () => Effect.succeed(Option.none()),
+              listThreadImportSources: () => Effect.succeed([]),
               listThreadIdsByWorktreePath: () => Effect.succeed([]),
               searchThreads: () => Effect.succeed({ matches: [] }),
             }),
@@ -312,6 +318,7 @@ describe("CheckpointDiffQuery.layer", () => {
         isGitRepository: () => Effect.succeed(true),
         captureCheckpoint: () => Effect.void,
         hasCheckpointRef: () => Effect.succeed(true),
+        listRestoreDeletions: () => Effect.succeed({ paths: [], truncated: false }),
         restoreCheckpoint: () => Effect.succeed(true),
         diffCheckpoints: ({ ignoreWhitespace }) =>
           Effect.sync(() => {
@@ -353,6 +360,8 @@ describe("CheckpointDiffQuery.layer", () => {
             listThreadActivitiesById: () => Effect.succeed([]),
             listThreadTurnsById: () => Effect.succeed([]),
             getThreadForkContextById: () => Effect.succeed(Option.none()),
+            getThreadImportSourceById: () => Effect.succeed(Option.none()),
+            listThreadImportSources: () => Effect.succeed([]),
             listThreadIdsByWorktreePath: () => Effect.succeed([]),
             searchThreads: () => Effect.succeed({ matches: [] }),
           }),
@@ -396,6 +405,7 @@ describe("CheckpointDiffQuery.layer", () => {
             hasCheckpointRefCallCount += 1;
             return true;
           }),
+        listRestoreDeletions: () => Effect.succeed({ paths: [], truncated: false }),
         restoreCheckpoint: () => Effect.succeed(true),
         diffCheckpoints: () => Effect.succeed("diff patch"),
         deleteCheckpointRefs: () => Effect.void,
@@ -433,6 +443,8 @@ describe("CheckpointDiffQuery.layer", () => {
             listThreadActivitiesById: () => Effect.succeed([]),
             listThreadTurnsById: () => Effect.succeed([]),
             getThreadForkContextById: () => Effect.succeed(Option.none()),
+            getThreadImportSourceById: () => Effect.succeed(Option.none()),
+            listThreadImportSources: () => Effect.succeed([]),
             listThreadIdsByWorktreePath: () => Effect.succeed([]),
             searchThreads: () => Effect.succeed({ matches: [] }),
           }),
@@ -461,6 +473,7 @@ describe("CheckpointDiffQuery.layer", () => {
         isGitRepository: () => Effect.succeed(true),
         captureCheckpoint: () => Effect.void,
         hasCheckpointRef: () => Effect.succeed(true),
+        listRestoreDeletions: () => Effect.succeed({ paths: [], truncated: false }),
         restoreCheckpoint: () => Effect.succeed(true),
         diffCheckpoints: () => Effect.succeed(""),
         deleteCheckpointRefs: () => Effect.void,
@@ -498,6 +511,8 @@ describe("CheckpointDiffQuery.layer", () => {
             listThreadActivitiesById: () => Effect.succeed([]),
             listThreadTurnsById: () => Effect.succeed([]),
             getThreadForkContextById: () => Effect.succeed(Option.none()),
+            getThreadImportSourceById: () => Effect.succeed(Option.none()),
+            listThreadImportSources: () => Effect.succeed([]),
             listThreadIdsByWorktreePath: () => Effect.succeed([]),
             searchThreads: () => Effect.succeed({ matches: [] }),
           }),

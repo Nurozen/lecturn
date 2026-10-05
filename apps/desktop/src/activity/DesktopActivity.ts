@@ -1,9 +1,11 @@
+// @effect-diagnostics globalTimers:off -- This Electron shell has no Effect runtime; one interval polls idle time only while an alert is held.
 import {
   BrowserWindow,
   Menu,
   Tray,
   ipcMain,
   nativeImage,
+  powerMonitor,
   screen,
   systemPreferences,
   type IpcMainInvokeEvent,
@@ -11,6 +13,7 @@ import {
 import Store from "electron-store";
 import * as Schema from "effect/Schema";
 import {
+  ActivityVisualState,
   DesktopActivityActionSchema,
   DesktopActivitySnapshotSchema,
   type DesktopActivitySnapshot,
@@ -26,6 +29,12 @@ import {
 } from "./geometry.ts";
 import { nextActivityMode, isViewedActivityThread, type ActivityMode } from "./interaction.ts";
 import { isPublishedActivityAction, isTrustedActivitySender } from "./policy.ts";
+import {
+  ActivityAttentionGate,
+  isUserPresent,
+  isCurrentActivityAnnouncement,
+  type ActivityPanelSnapshot,
+} from "./presence.ts";
 
 const decodeSnapshot = Schema.decodeUnknownSync(DesktopActivitySnapshotSchema);
 const decodeAction = Schema.decodeUnknownSync(DesktopActivityActionSchema);
@@ -41,6 +50,18 @@ const decodeInteraction = Schema.decodeUnknownSync(
   ]),
 );
 const decodeBoolean = Schema.decodeUnknownSync(Schema.Boolean);
+const decodeChange = Schema.decodeUnknownSync(
+  Schema.Struct({
+    revision: Schema.Number,
+    change: Schema.Struct({
+      rowId: Schema.String,
+      state: ActivityVisualState,
+      label: Schema.String,
+      check: Schema.optionalKey(Schema.Struct({ name: Schema.String, status: Schema.String })),
+    }),
+  }),
+);
+const PRESENCE_POLL_MS = 5_000;
 
 /** A Mac-owned display surface. Only the existing authenticated renderer can publish work
  * or receive commands. The isolated panel has no general DesktopBridge or network access. */
@@ -69,6 +90,7 @@ export function installDesktopActivity(
   let disposed = false;
   let manuallyShown = false;
   let preserveNextPanelBlur = false;
+  let revision = 0;
   let snapshot: DesktopActivitySnapshot = {
     summary: "Lecturn activity",
     rows: [],
@@ -96,14 +118,47 @@ export function installDesktopActivity(
     )
       throw new Error("Untrusted activity sender.");
   };
-  const snapshotForPanel = (): DesktopActivitySnapshot => {
-    if (!main.isDestroyed() && main.isVisible() && main.isFocused()) return snapshot;
+  const snapshotForPanel = (): ActivityPanelSnapshot => {
+    if (!main.isDestroyed() && main.isVisible() && main.isFocused())
+      return { ...snapshot, revision };
     const { viewedThread: _viewedThread, ...backgroundSnapshot } = snapshot;
-    return backgroundSnapshot;
+    return { ...backgroundSnapshot, revision };
   };
   const sendSnapshot = () => {
+    revision += 1;
     if (!disposed && ready && panel && !panel.isDestroyed())
       panel.webContents.send(Channels.ACTIVITY_SNAPSHOT, snapshotForPanel());
+  };
+  const attention = new ActivityAttentionGate();
+  let presencePoll: ReturnType<typeof setInterval> | undefined;
+  const present = () =>
+    !main.isDestroyed() &&
+    isUserPresent({
+      visible: main.isVisible(),
+      focused: main.isFocused(),
+      idleSeconds: powerMonitor.getSystemIdleTime(),
+    });
+  /** Idle has no event, so poll, but only while an alert is actually being held. */
+  const syncPresencePoll = () => {
+    if (attention.holding && !disposed)
+      presencePoll ??= setInterval(releaseAttention, PRESENCE_POLL_MS);
+    else {
+      clearInterval(presencePoll);
+      presencePoll = undefined;
+    }
+  };
+  /** Fires the alert the panel was told to hold, once the user has looked away. */
+  const releaseAttention = () => {
+    if (!attention.holding || present()) return;
+    // The unfiltered snapshot: blur has already hidden the viewed thread from the panel.
+    const change = attention.release(snapshot);
+    syncPresencePoll();
+    if (change && enabled && !disposed && ready && panel && !panel.isDestroyed())
+      panel.webContents.send(Channels.ACTIVITY_ANNOUNCE, { change, revision });
+  };
+  const presenceChanged = () => {
+    sendSnapshot();
+    releaseAttention();
   };
   const place = (animate: unknown = false) => {
     if (disposed || main.isDestroyed()) return;
@@ -260,6 +315,8 @@ export function installDesktopActivity(
     if (!main.isDestroyed()) main.webContents.send(Channels.ACTIVITY_ENABLED_CHANGED, enabled);
     mode = "collapsed";
     manuallyShown = false;
+    attention.clear();
+    syncPresencePoll();
     if (panel && !panel.isDestroyed()) {
       panel.setFocusable(false);
       panel.webContents.send(Channels.ACTIVITY_MODE, mode);
@@ -276,6 +333,8 @@ export function installDesktopActivity(
         if (decoded.rows.length > 200 || JSON.stringify(decoded).length > 1_000_000)
           throw new Error("Activity snapshot is too large.");
         snapshot = decoded;
+        attention.observe(snapshot);
+        syncPresencePoll();
         sendSnapshot();
       },
     ],
@@ -345,6 +404,20 @@ export function installDesktopActivity(
       },
     ],
     [
+      Channels.ACTIVITY_ANNOUNCE,
+      (event, value) => {
+        trusted(event, panel, panelUrl);
+        const announcement = decodeChange(value);
+        const { change } = announcement;
+        if (change.label.length > 400) throw new Error("Invalid activity change.");
+        if (!enabled || !isCurrentActivityAnnouncement(announcement, snapshotForPanel()))
+          return false;
+        const fire = attention.offer(change, present());
+        syncPresencePoll();
+        return fire;
+      },
+    ],
+    [
       Channels.ACTIVITY_ENABLED,
       (event) => {
         trusted(event, main, options.applicationUrl);
@@ -363,6 +436,8 @@ export function installDesktopActivity(
   for (const [channel, handler] of handlers) ipcMain.handle(channel, handler);
   const clear = () => {
     if (disposed) return;
+    attention.clear();
+    syncPresencePoll();
     snapshot = { summary: "Lecturn is reconnecting…", rows: [], readyEnvironmentIds: [] };
     sendSnapshot();
   };
@@ -373,8 +448,8 @@ export function installDesktopActivity(
   screen.on("display-metrics-changed", place);
   main.on("move", place);
   main.on("focus", sendSnapshot);
-  main.on("blur", sendSnapshot);
-  main.on("hide", sendSnapshot);
+  main.on("blur", presenceChanged);
+  main.on("hide", presenceChanged);
   updateMenu();
   place();
   return () => {
@@ -386,8 +461,10 @@ export function installDesktopActivity(
     screen.removeListener("display-metrics-changed", place);
     main.removeListener("move", place);
     main.removeListener("focus", sendSnapshot);
-    main.removeListener("blur", sendSnapshot);
-    main.removeListener("hide", sendSnapshot);
+    main.removeListener("blur", presenceChanged);
+    main.removeListener("hide", presenceChanged);
+    attention.clear();
+    syncPresencePoll();
     mainContents.removeListener("did-start-loading", clear);
     mainContents.removeListener("render-process-gone", clear);
     const closingPanel = panel;

@@ -1,11 +1,18 @@
+import { accountByEnvironmentIdAtom } from "../cloud/connectAccounts";
+import { useRevealActiveThread } from "./sidebar/useRevealActiveThread";
+import { useSidebarAccountStyle } from "./sidebar/useSidebarAccountStyle";
+import "./sidebar/account-glass.css";
+import { SidebarHierarchyPanel } from "./sidebar/SidebarHierarchyPanel";
 import { StaveLifecycleBadge } from "./stave/StaveLifecycleBadge";
 import { useSagaSidebarTree } from "./stave/useSagaSidebarTree";
+import { withoutArchivedStaveProjects } from "@lecturn/client-runtime/state/stave-archive";
 import {
   flattenSagaSidebarTree,
   staveSagaMemberBadges,
   threadsForSagaProject,
 } from "./stave/staveSaga.logic";
 import { StaveConfirmDialog } from "./stave/StaveConfirmDialog";
+import { readStaveSpaceLifecycleMenuEntry } from "./stave/staveSpaceLifecycle";
 import { openStaveWizard } from "../staveWizard";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { serverEnvironment } from "../state/server";
@@ -46,7 +53,7 @@ import {
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { useAtomValue } from "@effect/atom-react";
-import { autoAnimate } from "@formkit/auto-animate";
+import { autoAnimate, type AnimationController } from "@formkit/auto-animate";
 import React, { useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -197,6 +204,7 @@ import {
 } from "./ui/sidebar";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { openCommandPalette } from "../commandPaletteBus";
+import { readCanImportSessions } from "./ImportSessionPalette";
 import {
   archiveSelectedThreadEntries,
   buildMultiSelectThreadContextMenuItems,
@@ -219,6 +227,11 @@ import {
 } from "./Sidebar.logic";
 import { sortThreads } from "../lib/threadSort";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import {
+  namedSnapshotsPerAccount,
+  projectKeyMapPerAccount,
+  useSidebarSegmentation,
+} from "./sidebar/accountProjectGroups";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { CommandDialogTrigger } from "./ui/command";
@@ -247,7 +260,7 @@ const SIDEBAR_THREAD_SORT_LABELS: Record<SidebarThreadSortOrder, string> = {
   created_at: "Created at",
 };
 const SIDEBAR_LIST_ANIMATION_OPTIONS = {
-  duration: 180,
+  duration: 400,
   easing: "ease-out",
 } as const;
 const EMPTY_THREAD_JUMP_LABELS = new Map<string, string>();
@@ -377,6 +390,7 @@ interface SidebarThreadRowProps {
 }
 
 export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
+  const sidebarAccountStyle = useSidebarAccountStyle();
   const {
     orderedProjectThreadKeys,
     isActive,
@@ -405,8 +419,10 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
+  const threadAccountId = useAtomValue(accountByEnvironmentIdAtom).get(thread.environmentId);
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(isActive);
   const [borderRow, setBorderRow] = useState<HTMLElement | null>(null);
+  useRevealActiveThread(borderRow, isActive);
   const [borderVisible, setBorderVisible] = useState(false);
   const attachRow = useCallback(
     (node: HTMLElement | null) => {
@@ -767,6 +783,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
       ref={attachRow}
       className="w-full"
       data-thread-item
+      style={sidebarAccountStyle([thread.environmentId])}
       onMouseLeave={handleMouseLeave}
       onBlurCapture={handleBlurCapture}
     >
@@ -774,6 +791,11 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         render={rowButtonRender}
         size="sm"
         isActive={isActive}
+        data-lecturn-thread-surface
+        data-thread-project={`${thread.environmentId}:${thread.projectId}`}
+        data-thread-account={threadAccountId}
+        data-thread-active={isActive || undefined}
+        data-account-selected={isActive || isSelected || undefined}
         data-testid={`thread-row-${thread.id}`}
         className={`${resolveThreadRowClassName({
           isActive,
@@ -833,7 +855,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               <TooltipTrigger
                 render={
                   <span
-                    className="min-w-0 flex-1 truncate text-sm"
+                    className="lecturn-thread-title min-w-0 flex-1 truncate text-sm"
                     data-testid={`thread-title-${thread.id}`}
                   >
                     {thread.title}
@@ -1093,22 +1115,22 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   const showLessButtonRender = useMemo(() => <button type="button" />, []);
 
   return (
-    <SidebarMenuSub
-      ref={attachThreadListAutoAnimateRef}
-      className="mx-0.5 my-0 w-full translate-x-0 gap-0.5 overflow-hidden border-l-0 px-1 py-0 sm:mx-1 sm:px-1.5"
-    >
-      {shouldShowThreadPanel && showEmptyThreadState ? (
-        <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
-          <div
-            data-thread-selection-safe
-            className="flex h-8 w-full translate-x-0 items-center px-2 text-left text-xs text-sidebar-muted-foreground/75"
-          >
-            <span>No threads yet</span>
-          </div>
-        </SidebarMenuSubItem>
-      ) : null}
-      {shouldShowThreadPanel &&
-        renderedThreads.map((thread) => {
+    <SidebarHierarchyPanel open={shouldShowThreadPanel}>
+      <SidebarMenuSub
+        ref={attachThreadListAutoAnimateRef}
+        className="mx-0.5 my-0 w-full translate-x-0 gap-0.5 overflow-hidden border-l-0 px-1 py-0 sm:mx-1 sm:px-1.5"
+      >
+        {showEmptyThreadState ? (
+          <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
+            <div
+              data-thread-selection-safe
+              className="flex h-8 w-full translate-x-0 items-center px-2 text-left text-xs text-sidebar-muted-foreground/75"
+            >
+              <span>No threads yet</span>
+            </div>
+          </SidebarMenuSubItem>
+        ) : null}
+        {renderedThreads.map((thread) => {
           const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
           return (
             <SidebarThreadRow
@@ -1142,40 +1164,41 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
           );
         })}
 
-      {projectExpanded && hasOverflowingThreads && !isThreadListExpanded && (
-        <SidebarMenuSubItem className="w-full">
-          <SidebarMenuSubButton
-            render={showMoreButtonRender}
-            data-thread-selection-safe
-            size="sm"
-            className="h-8 w-full translate-x-0 justify-start px-2 text-left text-xs text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-            onClick={() => {
-              expandThreadListForProject(projectKey);
-            }}
-          >
-            <span className="flex min-w-0 flex-1 items-center gap-2">
-              {hiddenThreadStatus && <ThreadStatusLabel status={hiddenThreadStatus} compact />}
-              <span>Show more</span>
-            </span>
-          </SidebarMenuSubButton>
-        </SidebarMenuSubItem>
-      )}
-      {projectExpanded && hasOverflowingThreads && isThreadListExpanded && (
-        <SidebarMenuSubItem className="w-full">
-          <SidebarMenuSubButton
-            render={showLessButtonRender}
-            data-thread-selection-safe
-            size="sm"
-            className="h-8 w-full translate-x-0 justify-start px-2 text-left text-xs text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-            onClick={() => {
-              collapseThreadListForProject(projectKey);
-            }}
-          >
-            <span>Show less</span>
-          </SidebarMenuSubButton>
-        </SidebarMenuSubItem>
-      )}
-    </SidebarMenuSub>
+        {projectExpanded && hasOverflowingThreads && !isThreadListExpanded && (
+          <SidebarMenuSubItem className="w-full">
+            <SidebarMenuSubButton
+              render={showMoreButtonRender}
+              data-thread-selection-safe
+              size="sm"
+              className="h-8 w-full translate-x-0 justify-start px-2 text-left text-xs text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+              onClick={() => {
+                expandThreadListForProject(projectKey);
+              }}
+            >
+              <span className="flex min-w-0 flex-1 items-center gap-2">
+                {hiddenThreadStatus && <ThreadStatusLabel status={hiddenThreadStatus} compact />}
+                <span>Show more</span>
+              </span>
+            </SidebarMenuSubButton>
+          </SidebarMenuSubItem>
+        )}
+        {projectExpanded && hasOverflowingThreads && isThreadListExpanded && (
+          <SidebarMenuSubItem className="w-full">
+            <SidebarMenuSubButton
+              render={showLessButtonRender}
+              data-thread-selection-safe
+              size="sm"
+              className="h-8 w-full translate-x-0 justify-start px-2 text-left text-xs text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+              onClick={() => {
+                collapseThreadListForProject(projectKey);
+              }}
+            >
+              <span>Show less</span>
+            </SidebarMenuSubButton>
+          </SidebarMenuSubItem>
+        )}
+      </SidebarMenuSub>
+    </SidebarHierarchyPanel>
   );
 });
 
@@ -1232,6 +1255,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const [sagaConfirmation, setSagaConfirmation] = useState<{
     member: SidebarProjectGroupMember;
     operation: StaveOperation;
+    title: string;
   } | null>(null);
   const deleteProject = useAtomCommand(projectEnvironment.delete, {
     reportFailure: false,
@@ -1464,7 +1488,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         hiddenThreads.map((thread) => resolveProjectThreadStatus(thread)),
       ),
       renderedThreads,
-      showEmptyThreadState: projectExpanded && visibleProjectThreads.length === 0,
+      showEmptyThreadState: visibleProjectThreads.length === 0,
       shouldShowThreadPanel: projectExpanded || pinnedCollapsedThread !== null,
     };
   }, [
@@ -1756,7 +1780,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
         const actionHandlers = new Map<string, () => Promise<void> | void>();
         const makeLeaf = (
-          action: "rename" | "grouping" | "copy-path" | "delete",
+          action: "import-session" | "rename" | "grouping" | "copy-path" | "delete",
           member: SidebarProjectGroupMember,
           options?: {
             destructive?: boolean;
@@ -1766,6 +1790,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           const id = `${action}:${member.physicalProjectKey}`;
           actionHandlers.set(id, () => {
             switch (action) {
+              case "import-session":
+                openCommandPalette({
+                  open: "import-session",
+                  projectRef: scopeProjectRef(member.environmentId, member.id),
+                });
+                return;
               case "rename":
                 openProjectRenameDialog(member);
                 return;
@@ -1789,7 +1819,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         };
 
         const buildTargetedItem = (
-          action: "rename" | "grouping" | "copy-path" | "delete",
+          action: "import-session" | "rename" | "grouping" | "copy-path" | "delete",
           label: string,
           options?: {
             destructive?: boolean;
@@ -1844,8 +1874,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           );
           const disabled =
             !staveFeatureAvailable({ config, settings: config.settings, status }) ||
-            !member.stave.createdAt ||
-            member.stave.state === "archived";
+            !member.stave.createdAt;
           actionHandlers.set(addId, () =>
             openStaveWizard({
               environmentId: member.environmentId,
@@ -1857,6 +1886,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             if (member.stave?.createdAt)
               setSagaConfirmation({
                 member,
+                title: "Archive saga",
                 operation: {
                   kind: "sagaArchive",
                   sagaRoot: member.workspaceRoot,
@@ -1871,9 +1901,32 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             { id: archiveId, label: `Archive saga${suffix}`, disabled },
           ];
         });
+        // Stave spaces archive with the same confirmation as space settings.
+        const spaceItems: ContextMenuItem<string>[] = project.memberProjects.flatMap((member) => {
+          const entry = readStaveSpaceLifecycleMenuEntry(member);
+          if (!entry) return [];
+          const id = `stave-space-lifecycle:${member.physicalProjectKey}`;
+          actionHandlers.set(id, () => {
+            if (!entry.disabled)
+              setSagaConfirmation({ member, title: entry.title, operation: entry.operation });
+          });
+          const suffix =
+            project.memberProjects.length > 1
+              ? ` (${member.environmentLabel ?? member.workspaceRoot})`
+              : "";
+          return [{ id, label: `${entry.title}${suffix}`, disabled: entry.disabled }];
+        });
         const clicked = await api.contextMenu.show(
           [
             ...sagaItems,
+            ...(project.memberProjects.some((member) => readCanImportSessions(member.environmentId))
+              ? [
+                  buildTargetedItem("import-session", "Import session…", {
+                    isDisabled: (member) => !readCanImportSessions(member.environmentId),
+                  }),
+                ]
+              : []),
+            ...spaceItems,
             buildTargetedItem("rename", "Rename"),
             buildTargetedItem("grouping", "Group into..."),
             buildTargetedItem("copy-path", "Copy Path"),
@@ -2142,11 +2195,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           api.contextMenu.show(
             project.memberProjects.map((member) => ({
               id: member.physicalProjectKey,
-              label:
-                member.stave?.state === "archived"
-                  ? `${formatProjectMemberActionLabel(member, project.groupedProjectCount)} — Unarchive to start a thread`
-                  : formatProjectMemberActionLabel(member, project.groupedProjectCount),
-              disabled: member.stave?.state === "archived",
+              label: formatProjectMemberActionLabel(member, project.groupedProjectCount),
             })),
             {
               x: event.clientX,
@@ -2478,7 +2527,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
   return (
     <>
-      <div className="group/project-header relative">
+      <div className="lecturn-project-header group/project-header relative">
         {project.stave?.isSaga ? (
           <div className="flex items-center gap-1 pr-8">
             {isManualProjectSorting && dragHandleProps ? (
@@ -2501,7 +2550,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               aria-expanded={projectExpanded}
               onClick={handleProjectButtonClick}
             >
-              <ChevronRightIcon className={`size-3.5 ${projectExpanded ? "rotate-90" : ""}`} />
+              <ChevronRightIcon
+                className={`size-3.5 lecturn-hierarchy-chevron ${projectExpanded ? "rotate-90" : ""}`}
+              />
             </button>
             <button
               type="button"
@@ -2557,6 +2608,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.attributes : {})}
               {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.listeners : {})}
               onPointerDownCapture={handleProjectButtonPointerDownCapture}
+              aria-expanded={projectExpanded}
               onClick={handleProjectButtonClick}
               onKeyDown={handleProjectButtonKeyDown}
               onContextMenu={handleProjectButtonContextMenu}
@@ -2584,7 +2636,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 </Tooltip>
               ) : (
                 <ChevronRightIcon
-                  className={`-ml-0.5 size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 ${
+                  className={`-ml-0.5 size-3.5 shrink-0 text-muted-foreground/70 lecturn-hierarchy-chevron ${
                     projectExpanded ? "rotate-90" : ""
                   }`}
                 />
@@ -2650,14 +2702,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               <div className="pointer-events-none absolute top-[calc(50%+1px)] right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
                 <button
                   type="button"
-                  aria-label={
-                    project.memberProjects.every((member) => member.stave?.state === "archived")
-                      ? "Unarchive to start a thread"
-                      : `Create new thread in ${project.displayName}`
-                  }
-                  disabled={project.memberProjects.every(
-                    (member) => member.stave?.state === "archived",
-                  )}
+                  aria-label={`Create new thread in ${project.displayName}`}
                   data-testid="new-thread-button"
                   className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
                   onClick={handleCreateThreadClick}
@@ -2668,11 +2713,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             }
           />
           <TooltipPopup side="top">
-            {project.memberProjects.every((member) => member.stave?.state === "archived")
-              ? "Unarchive to start a thread"
-              : newThreadShortcutLabel
-                ? `New thread (${newThreadShortcutLabel})`
-                : "New thread"}
+            {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
           </TooltipPopup>
         </Tooltip>
       </div>
@@ -2723,7 +2764,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         <StaveConfirmDialog
           environmentId={sagaConfirmation.member.environmentId}
           operation={sagaConfirmation.operation}
-          title="Archive saga"
+          title={sagaConfirmation.title}
           onClose={() => setSagaConfirmation(null)}
           onFinished={() => {}}
         />
@@ -3125,7 +3166,7 @@ interface SidebarProjectsContentProps {
   dragInProgressRef: React.RefObject<boolean>;
   suppressProjectClickAfterDragRef: React.RefObject<boolean>;
   suppressProjectClickForContextMenuRef: React.RefObject<boolean>;
-  attachProjectListAutoAnimateRef: (node: HTMLElement | null) => void;
+  attachProjectListAutoAnimateRef: (node: HTMLElement | null) => void | (() => void);
   projectsLength: number;
 }
 
@@ -3192,11 +3233,13 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     [updateSettings],
   );
 
+  const sidebarAccountStyle = useSidebarAccountStyle();
   const renderProject = (
     project: SidebarProjectSnapshot,
     dragHandleProps: SortableProjectHandleProps | null,
   ) => (
     <div
+      style={sidebarAccountStyle(project.memberProjects.map((member) => member.environmentId))}
       className={
         nestedProjectKeys.has(project.projectKey)
           ? "lecturn-hierarchy-branch lecturn-hierarchy-branch-last pl-7"
@@ -3237,7 +3280,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
   );
   return (
     <SidebarContent
-      className="gap-0"
+      className="lecturn-sidebar-tree gap-0"
       fixedHeader={
         // Lifted above the stage backdrop, whose fade bleeds below the
         // header and would otherwise paint across the search row's outline.
@@ -3330,7 +3373,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
             onDragEnd={handleProjectDragEnd}
             onDragCancel={handleProjectDragCancel}
           >
-            <SidebarMenu>
+            <SidebarMenu ref={attachProjectListAutoAnimateRef} className="lecturn-local-enclosure">
               <SortableContext
                 items={sortedProjects
                   .filter((project) => !nestedProjectKeys.has(project.projectKey))
@@ -3352,7 +3395,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
             </SidebarMenu>
           </DndContext>
         ) : (
-          <SidebarMenu ref={attachProjectListAutoAnimateRef}>
+          <SidebarMenu ref={attachProjectListAutoAnimateRef} className="lecturn-local-enclosure">
             {sortedProjects.map((project) => (
               <SidebarMenuItem key={project.projectKey} className="rounded-md">
                 {renderProject(project, null)}
@@ -3450,16 +3493,20 @@ export default function LegacySidebar() {
     });
   }, [projectOrder, projects]);
 
+  const segmentation = useSidebarSegmentation();
   // Build a mapping from physical project key → logical project key for
   // cross-environment grouping.  Projects that share a repositoryIdentity
   // canonicalKey are treated as one logical project in the sidebar.
   const physicalToLogicalKey = useMemo(() => {
-    return buildPhysicalToLogicalProjectKeyMap({
+    return projectKeyMapPerAccount(
+      segmentation,
+      buildPhysicalToLogicalProjectKeyMap,
+    )({
       projects: orderedProjects,
       settings: projectGroupingSettings,
       primaryEnvironmentId,
     });
-  }, [orderedProjects, projectGroupingSettings, primaryEnvironmentId]);
+  }, [orderedProjects, projectGroupingSettings, primaryEnvironmentId, segmentation]);
   const projectPhysicalKeyByScopedRef = useMemo(
     () =>
       new Map(
@@ -3471,9 +3518,19 @@ export default function LegacySidebar() {
     [orderedProjects],
   );
 
+  // Archived Stave spaces (and so their threads) leave the sidebar; they come
+  // back through New project → Stave. The order above keeps them, so a manual
+  // reorder does not forget where they sat.
+  const listedProjects = useMemo(
+    () => withoutArchivedStaveProjects(orderedProjects),
+    [orderedProjects],
+  );
   const sidebarProjects = useMemo<SidebarProjectSnapshot[]>(() => {
-    return buildSidebarProjectSnapshots({
-      projects: orderedProjects,
+    return namedSnapshotsPerAccount(
+      segmentation,
+      buildSidebarProjectSnapshots,
+    )({
+      projects: listedProjects,
       settings: projectGroupingSettings,
       primaryEnvironmentId,
       resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
@@ -3482,9 +3539,10 @@ export default function LegacySidebar() {
   }, [
     environmentLabelById,
     desktopLocalEnvironmentIds,
-    orderedProjects,
+    listedProjects,
     projectGroupingSettings,
     primaryEnvironmentId,
+    segmentation,
   ]);
 
   const sidebarProjectByKey = useMemo(
@@ -3569,28 +3627,67 @@ export default function LegacySidebar() {
     return closestCorners(args);
   }, []);
 
+  const projectListAnimationsRef = useRef(new Map<HTMLElement, AnimationController>());
+  const projectListResumeFrameRef = useRef<number | null>(null);
+  const resumeProjectListAnimation = useCallback(() => {
+    if (projectListResumeFrameRef.current !== null) {
+      cancelAnimationFrame(projectListResumeFrameRef.current);
+    }
+    // Let the drop's DOM reorder and MutationObserver run with animation disabled.
+    // DnD owns row transforms until the completed drop has committed.
+    projectListResumeFrameRef.current = requestAnimationFrame(() => {
+      projectListResumeFrameRef.current = null;
+      if (
+        !dragInProgressRef.current &&
+        !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ) {
+        for (const controller of projectListAnimationsRef.current.values()) controller.enable();
+      }
+    });
+  }, []);
+  useEffect(
+    () => () => {
+      if (projectListResumeFrameRef.current !== null) {
+        cancelAnimationFrame(projectListResumeFrameRef.current);
+      }
+    },
+    [],
+  );
+
   const handleProjectDragStart = useCallback(
     (_event: DragStartEvent) => {
       if (sidebarProjectSortOrder !== "manual") {
         return;
       }
       dragInProgressRef.current = true;
+      // disable() also cancels in-flight autoAnimate transforms before DnD moves rows.
+      for (const controller of projectListAnimationsRef.current.values()) controller.disable();
       suppressProjectClickAfterDragRef.current = true;
     },
     [sidebarProjectSortOrder],
   );
 
-  const handleProjectDragCancel = useCallback((_event: DragCancelEvent) => {
-    dragInProgressRef.current = false;
-  }, []);
+  const handleProjectDragCancel = useCallback(
+    (_event: DragCancelEvent) => {
+      dragInProgressRef.current = false;
+      resumeProjectListAnimation();
+    },
+    [resumeProjectListAnimation],
+  );
 
-  const animatedProjectListsRef = useRef(new WeakSet<HTMLElement>());
   const attachProjectListAutoAnimateRef = useCallback((node: HTMLElement | null) => {
-    if (!node || animatedProjectListsRef.current.has(node)) {
-      return;
-    }
-    autoAnimate(node, SIDEBAR_LIST_ANIMATION_OPTIONS);
-    animatedProjectListsRef.current.add(node);
+    if (!node) return;
+    const controllers = projectListAnimationsRef.current;
+    const controller = controllers.get(node) ?? autoAnimate(node, SIDEBAR_LIST_ANIMATION_OPTIONS);
+    controllers.set(node, controller);
+    if (dragInProgressRef.current) controller.disable();
+    // Every account owns a list. React 19 runs this cleanup for this node only,
+    // so detaching one account cannot destroy another account's animations.
+    return () => {
+      if (controllers.get(node) !== controller) return;
+      controller.destroy?.();
+      controllers.delete(node);
+    };
   }, []);
 
   const animatedThreadListsRef = useRef(new WeakSet<HTMLElement>());
@@ -3676,6 +3773,7 @@ export default function LegacySidebar() {
 
   const handleProjectDragEnd = useCallback(
     (event: DragEndEvent) => {
+      resumeProjectListAnimation();
       if (sidebarProjectSortOrder !== "manual") {
         dragInProgressRef.current = false;
         return;
@@ -3692,7 +3790,13 @@ export default function LegacySidebar() {
       const overMemberKeys = overProject.memberProjects.map((member) => member.physicalProjectKey);
       reorderProjects(orderedProjects.map(getProjectOrderKey), activeMemberKeys, overMemberKeys);
     },
-    [orderedProjects, sidebarProjectSortOrder, reorderProjects, navigationProjects],
+    [
+      orderedProjects,
+      sidebarProjectSortOrder,
+      reorderProjects,
+      navigationProjects,
+      resumeProjectListAnimation,
+    ],
   );
 
   const isManualProjectSorting = sidebarProjectSortOrder === "manual";
@@ -4060,7 +4164,7 @@ export default function LegacySidebar() {
         suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
         suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
         attachProjectListAutoAnimateRef={attachProjectListAutoAnimateRef}
-        projectsLength={projects.length}
+        projectsLength={listedProjects.length}
       />
       <SidebarChromeFooter />
     </>

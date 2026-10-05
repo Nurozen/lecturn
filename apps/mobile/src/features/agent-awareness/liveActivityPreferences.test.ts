@@ -57,9 +57,9 @@ const testLayer = Layer.mergeAll(
       clearSavedConnection: () => Effect.void,
       loadOrCreateAgentAwarenessDeviceId: Effect.succeed("device-1"),
       loadAgentAwarenessDeviceId: Effect.succeed("device-1"),
-      loadAgentAwarenessRegistrationRecord: Effect.succeed(null),
+      loadAgentAwarenessRegistrationRecord: () => Effect.succeed(null),
       saveAgentAwarenessRegistrationRecord: () => Effect.void,
-      clearAgentAwarenessRegistrationRecord: Effect.void,
+      clearAgentAwarenessRegistrationRecord: () => Effect.void,
       loadRecentThreadShortcuts: Effect.succeed([]),
       saveRecentThreadShortcuts: () => Effect.void,
     }),
@@ -111,7 +111,7 @@ describe("liveActivityPreferences", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
-  it.effect("keeps local preferences refreshable when signed out", () =>
+  it.effect("uses environment-owner credentials even when the active account has no token", () =>
     Effect.gen(function* () {
       yield* setLiveActivityUpdatesEnabled({
         enabled: false,
@@ -123,7 +123,11 @@ describe("liveActivityPreferences", () => {
       expect(updateAgentAwarenessRegistrationPreferences).toHaveBeenCalledWith({
         liveActivitiesEnabled: false,
       });
-      expect(linkEnvironmentToCloudWithPreference).not.toHaveBeenCalled();
+      expect(linkEnvironmentToCloudWithPreference).toHaveBeenCalledWith({
+        clerkToken: "",
+        connection,
+        liveActivitiesEnabled: false,
+      });
     }).pipe(Effect.provide(testLayer)),
   );
 

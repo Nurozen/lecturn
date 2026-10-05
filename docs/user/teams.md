@@ -8,6 +8,8 @@ Open account settings in the hosted Lecturn web app, then select **Teams**. Desk
 
 Returning from checkout does not itself activate access. Use **Refresh team status** while payment confirmation arrives. Invite teammates by email, then assign seats explicitly after they join. An invitation or company membership alone does not consume a paid seat or grant Connect access. The owner also needs an assigned seat to use company Connect.
 
+When several Connect accounts are available, choose the account at the top of account settings before selecting a company. The company list and saved funding choice belong to that account. Changing accounts never grants access to another account's companies or environments.
+
 ## Roles and seats
 
 The owner manages billing and administrator roles. Owners and administrators can invite members, assign or revoke seats, review the company environment inventory, and set company policies. Members can see their own company access without seeing administrative inventory or billing details.

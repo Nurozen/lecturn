@@ -1,3 +1,4 @@
+import { useAccountSections } from "./useAccountSections";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
@@ -6,7 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Platform, useWindowDimensions } from "react-native";
 
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
-import { useProjects, useThreadShells } from "../../state/entities";
+import { useListedProjects, useListedThreadShells } from "../../state/entities";
 import { usePendingNewTasks } from "../../state/use-pending-new-tasks";
 import { useWorkspaceState } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
@@ -27,10 +28,11 @@ import { getConnectionAwareBrandHeaderOptions } from "./WorkspaceConnectionTitle
 /* ─── Route screen ───────────────────────────────────────────────────── */
 
 export function HomeRouteScreen() {
+  const accountSections = useAccountSections();
   const { width: windowWidth } = useWindowDimensions();
   const { layout } = useAdaptiveWorkspaceLayout();
-  const projects = useProjects();
-  const threads = useThreadShells();
+  const projects = useListedProjects();
+  const threads = useListedThreadShells();
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const navigation = useNavigation();
@@ -100,6 +102,7 @@ export function HomeRouteScreen() {
   const projectFilterOptions = useMemo(
     () =>
       buildHomeProjectScopes({
+        accountSections,
         projects,
         environmentId: selectedEnvironmentId,
         projectGroupingMode: listOptions.projectGroupingMode,
@@ -107,7 +110,7 @@ export function HomeRouteScreen() {
         key: scope.key,
         label: scope.title,
       })),
-    [listOptions.projectGroupingMode, projects, selectedEnvironmentId],
+    [accountSections, listOptions.projectGroupingMode, projects, selectedEnvironmentId],
   );
   useEffect(() => {
     if (

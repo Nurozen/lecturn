@@ -17,6 +17,13 @@ export function providerDetectionLabel(provider: ServerProvider): string {
   }
 }
 
+/** Recovery guidance under a failed detection label. */
+export function providerDetectionHint(provider: ServerProvider): string {
+  return provider.discovery?.status === "timed-out"
+    ? "Detection took too long, which can happen when this machine is busy. Retry, or check the executable path in provider settings."
+    : "Retry detection or configure the executable path in provider settings. Check that the project folder still exists.";
+}
+
 export function providerDetectionSendBlock(
   provider: ServerProvider | null | undefined,
 ): string | null {
@@ -33,7 +40,7 @@ export function providerDetectionSendBlock(
 
 export function isProviderExecutableError(error: string): boolean {
   // ENOENT by itself can describe a missing project directory or user file.
-  return /Provider detection (?:is still running|did not finish successfully)|Failed to spawn (?:Codex App Server|.*provider|Claude)|spawn\s+(?:[^\n]*[/\\])?(?:codex|claude|cursor(?:-agent)?|agent|grok|opencode|antigravity)(?:\.(?:exe|cmd))?\s+ENOENT/i.test(
+  return /Provider detection (?:is still running|did not finish successfully)|Failed to spawn (?:Codex App Server|.*provider|Claude)|spawn\s+(?:[^\n]*[/\\])?(?:codex|claude|cursor(?:-agent)?|agent|grok|copilot|opencode|antigravity)(?:\.(?:exe|cmd))?\s+ENOENT/i.test(
     error,
   );
 }

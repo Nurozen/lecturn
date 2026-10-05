@@ -150,6 +150,24 @@ export class ManagedEndpointProvider extends Context.Service<
       readonly origin: RelayManagedEndpointOrigin;
     }) => Effect.Effect<ManagedEndpointProvisioningResult, ManagedEndpointProviderError>;
     /**
+     * Repoints an already provisioned tunnel at the environment's current
+     * loopback origin. Environments call this at boot because their local port
+     * can change between launches while the tunnel keeps the origin captured at
+     * link time. Upkeep only: it never creates tunnels, DNS records, or
+     * reservations. Resolves to whether a tunnel's ingress was rewritten.
+     */
+    readonly syncOrigin: (input: {
+      readonly userId: string;
+      readonly environmentId: string;
+      readonly origin: RelayManagedEndpointOrigin;
+    }) => Effect.Effect<
+      boolean,
+      | ManagedAccess.ManagedAccessUnavailable
+      | ManagedEndpointAllocations.ManagedEndpointAllocationPersistenceError
+      | ManagedEndpointOriginNotAllowed
+      | ManagedEndpointProvisioningFailed
+    >;
+    /**
      * Captures the allocation generation owned by an unlink before its link
      * revocation commits. Passing this target to `deprovision` prevents a
      * concurrent relink from having its newer allocation torn down.
@@ -335,6 +353,26 @@ function formatOriginService(origin: RelayManagedEndpointOrigin): string {
     ? `[${origin.localHttpHost.replace(/^\[(.*)\]$/u, "$1")}]`
     : origin.localHttpHost;
   return `http://${host}:${origin.localHttpPort}`;
+}
+
+/**
+ * The ingress both `provision` and `syncOrigin` write. Gateway allocations are
+ * reached through their origin hostname and present the public hostname as the
+ * Host header; legacy allocations are reached on the public hostname directly.
+ */
+function managedEndpointIngress(input: {
+  readonly hostname: string;
+  readonly origin: RelayManagedEndpointOrigin;
+  readonly gatewayMapping: Pick<GatewayEnrollmentMapping, "originHostname"> | null;
+}) {
+  return [
+    {
+      hostname: input.gatewayMapping?.originHostname ?? input.hostname,
+      service: formatOriginService(input.origin),
+      ...(input.gatewayMapping ? { originRequest: { httpHostHeader: input.hostname } } : {}),
+    },
+    { service: "http_status:404" },
+  ];
 }
 
 function normalizeHostname(hostname: string): string {
@@ -858,6 +896,67 @@ export const make = Effect.gen(function* () {
       // re-records the fresh id.
       return true;
     }),
+    syncOrigin: Effect.fn("relay.managed_endpoint_provider.sync_origin")(function* (input) {
+      yield* Effect.annotateCurrentSpan({
+        "relay.user_id": input.userId,
+        "relay.environment_id": input.environmentId,
+        "relay.managed_endpoint.origin_host": input.origin.localHttpHost,
+        "relay.managed_endpoint.origin_port": input.origin.localHttpPort,
+      });
+      if (!isLoopbackOrigin(input.origin)) {
+        return yield* new ManagedEndpointOriginNotAllowed({
+          userId: input.userId,
+          environmentId: input.environmentId,
+          host: input.origin.localHttpHost,
+          port: input.origin.localHttpPort,
+        });
+      }
+      const allocation = yield* allocations.get({
+        userId: input.userId,
+        environmentId: input.environmentId,
+      });
+      const tunnelId = allocation?.tunnelId ?? null;
+      if (allocation === null || tunnelId === null) {
+        return false;
+      }
+      const { hostname, tunnelName } = allocation;
+      let gatewayMapping: GatewayEnrollmentMapping | null = null;
+      if (isGatewayHostname(hostname)) {
+        gatewayMapping = gateway
+          ? yield* gateway.get({ userId: input.userId, environmentId: input.environmentId })
+          : null;
+        // Without a live mapping the origin hostname is unknown; leave the
+        // tunnel alone rather than write a legacy ingress onto a gateway tunnel.
+        if (gatewayMapping === null || gatewayMapping.deleting) {
+          return false;
+        }
+      }
+      // `release` deletes the tunnel but keeps its id on the allocation, so a
+      // missing tunnel means there is nothing to repoint until the next provision.
+      return yield* tunnels
+        .putConfiguration(tunnelId, {
+          ingress: managedEndpointIngress({ hostname, origin: input.origin, gatewayMapping }),
+        })
+        .pipe(
+          Effect.as(true),
+          Effect.catchTags({
+            ManagedEndpointTunnelClientError: (cause) =>
+              isNotFoundCause(cause.cause)
+                ? Effect.succeed(false)
+                : Effect.fail(
+                    new ManagedEndpointProvisioningFailed({
+                      userId: input.userId,
+                      environmentId: input.environmentId,
+                      stage: "configure-tunnel",
+                      hostname,
+                      tunnelName,
+                      tunnelId,
+                      cause,
+                    }),
+                  ),
+          }),
+        );
+    }),
     provision: Effect.fn("relay.managed_endpoint_provider.provision")(function* (input) {
       yield* Effect.annotateCurrentSpan({
         "relay.user_id": input.userId,
@@ -1081,14 +1180,7 @@ export const make = Effect.gen(function* () {
 
       yield* tunnels
         .putConfiguration(tunnel.id, {
-          ingress: [
-            {
-              hostname: gatewayMapping?.originHostname ?? hostname,
-              service: formatOriginService(input.origin),
-              ...(gatewayMapping ? { originRequest: { httpHostHeader: hostname } } : {}),
-            },
-            { service: "http_status:404" },
-          ],
+          ingress: managedEndpointIngress({ hostname, origin: input.origin, gatewayMapping }),
         })
         .pipe(
           Effect.mapError(

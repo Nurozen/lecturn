@@ -34,6 +34,18 @@ When you set this field, Lecturn points Claude Code at that directory with the
 `CLAUDE_CONFIG_DIR` environment variable. It does not change `HOME`, so your system keychain and
 the rest of your environment stay as they are.
 
+## Available Models
+
+Lecturn reads available models and their supported options from your installed Claude Code runtime.
+New models can appear without a Lecturn catalog update. Your existing Claude Code subscription
+login works for discovery; an API key is not required, and discovery does not send a chat prompt.
+
+After updating Claude Code, refresh the Claude provider in Settings to check its model list again.
+Each Claude provider uses its own account and configuration. If discovery is temporarily unavailable,
+Lecturn keeps the last model list discovered for that CLI version and falls back to its built-in
+catalog when no previous list is available. You can still add custom model identifiers for routers
+and other Claude-compatible setups.
+
 ## Reduce Context Usage
 
 In Settings, open your Claude provider and set **Auto-compact after** to a token count between

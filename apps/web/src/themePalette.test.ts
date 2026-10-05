@@ -5,6 +5,8 @@ import {
   applyThemeColorPreview,
   applyThemePalette,
   getThemeColorsForMode,
+  getAppliedThemeColors,
+  subscribeToAppliedThemeColors,
   getThemeDefinition,
   getThemeModes,
   getThemePreviewSidebarArtwork,
@@ -364,7 +366,7 @@ describe("theme files", () => {
     const unsubscribe = subscribeToThemePreview(listener);
     vi.stubGlobal("document", {
       documentElement: {
-        classList: { toggle: vi.fn() },
+        classList: { toggle: vi.fn(), contains: () => false },
         dataset: {},
         style: { removeProperty: vi.fn(), setProperty: vi.fn() },
       },
@@ -378,6 +380,31 @@ describe("theme files", () => {
     expect(getThemePreviewSidebarArtwork()).toBeNull();
     expect(listener).toHaveBeenCalledTimes(2);
 
+    unsubscribe();
+    vi.unstubAllGlobals();
+  });
+
+  it("publishes palette changes for live tint including previews and restoration", () => {
+    vi.stubGlobal("document", {
+      documentElement: {
+        classList: { toggle: vi.fn(), contains: () => false },
+        dataset: {},
+        style: { removeProperty: vi.fn(), setProperty: vi.fn() },
+      },
+    });
+    const listener = vi.fn();
+    const unsubscribe = subscribeToAppliedThemeColors(listener);
+    applyThemePalette("ocean", "dark");
+    expect(getAppliedThemeColors()).toEqual(getThemeColorsForMode(OCEAN_THEME, "dark"));
+    const preview = { ...LECTURN_CHAT_THEME.colors, canvas: "#ffffff" };
+    applyThemeColorPreview(preview, "light");
+    expect(getAppliedThemeColors()).toEqual(preview);
+    const calls = listener.mock.calls.length;
+    applyThemeColorPreview(preview, "light");
+    expect(listener).toHaveBeenCalledTimes(calls);
+    applyThemePalette("system", "dark");
+    expect(getAppliedThemeColors()).toEqual(getStandardThemeColors("dark"));
+    expect(listener).toHaveBeenCalledTimes(calls + 1);
     unsubscribe();
     vi.unstubAllGlobals();
   });

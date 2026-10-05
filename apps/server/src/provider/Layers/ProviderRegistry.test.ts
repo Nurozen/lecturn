@@ -22,7 +22,6 @@ import {
   ProviderInstanceId,
   ServerSettings,
   type ServerProvider,
-  type ServerProviderSlashCommand,
   type ServerSettings as ContractServerSettings,
 } from "@lecturn/contracts";
 import * as PlatformError from "effect/PlatformError";
@@ -33,7 +32,7 @@ import { createModelCapabilities } from "@lecturn/shared/model";
 import { applyServerSettingsPatch } from "@lecturn/shared/serverSettings";
 
 import { checkCodexProviderStatus, type CodexAppServerProviderSnapshot } from "./CodexProvider.ts";
-import { checkClaudeProviderStatus } from "./ClaudeProvider.ts";
+import { checkClaudeProviderStatus, type ClaudeCapabilitiesProbe } from "./ClaudeProvider.ts";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { AntigravityInstallation } from "../AntigravityInstallation.ts";
 import * as ModelManifest from "../ModelManifest.ts";
@@ -108,6 +107,7 @@ const BackgroundPolicyAlwaysRunLayer = Layer.mock(BackgroundPolicy.BackgroundPol
   hasDemand: () => Effect.succeed(true),
   shouldRunScopeWork: () => Effect.succeed(true),
   shouldRunOpportunisticWork: Effect.succeed(true),
+  isUserPresent: Effect.succeed(false),
 });
 
 function selectDescriptor(
@@ -134,13 +134,7 @@ function booleanDescriptor(id: string, label: string) {
   };
 }
 
-type TestClaudeCapabilities = {
-  readonly email: string | undefined;
-  readonly subscriptionType: string | undefined;
-  readonly tokenSource: string | undefined;
-  readonly apiProvider: string | undefined;
-  readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>;
-};
+type TestClaudeCapabilities = ClaudeCapabilitiesProbe;
 
 function claudeCapabilities(overrides: Partial<TestClaudeCapabilities> = {}) {
   return () =>
@@ -475,6 +469,24 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         }),
       );
 
+      it.effect("reports a slow app-server probe as a detection timeout", () =>
+        Effect.gen(function* () {
+          const check = yield* checkCodexProviderStatus(
+            defaultCodexSettings,
+            () => Effect.never,
+          ).pipe(Effect.forkChild);
+          yield* TestClock.adjust("10 seconds");
+          const status = yield* Fiber.join(check);
+
+          assert.strictEqual(status.installed, true);
+          assert.deepStrictEqual(status.discovery, {
+            status: "timed-out",
+            phase: "provider",
+            message: "Timed out while checking Codex app-server provider status.",
+          });
+        }),
+      );
+
       it.effect("returns an Amazon Bedrock label for codex Bedrock auth", () =>
         Effect.gen(function* () {
           const status = yield* checkCodexProviderStatus(defaultCodexSettings, () =>
@@ -530,6 +542,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             status.message,
             "Timed out while checking Codex app-server provider status.",
           );
+          assert.strictEqual(status.discovery?.status, "timed-out");
           assert.strictEqual(yield* Ref.get(killCalls), 1);
         }),
       );
@@ -2338,6 +2351,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                 "claudeAgent",
                 "codex",
                 "cursor",
+                "githubCopilot",
                 "grok",
                 "opencode",
               ]);
@@ -2368,6 +2382,60 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
     // ── checkClaudeProviderStatus tests ──────────────────────────
 
     describe("checkClaudeProviderStatus", () => {
+      it.effect("lists future runtime models and their options without a manifest entry", () =>
+        Effect.gen(function* () {
+          let probedVersion: string | undefined;
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            (_settings, version) => {
+              probedVersion = version;
+              return claudeCapabilities({
+                tokenSource: "oauth",
+                subscriptionType: "max",
+                models: [
+                  {
+                    value: "future",
+                    resolvedModel: "claude-test-next[1m]",
+                    displayName: "Future model",
+                    description: "Discovered from the installed CLI",
+                    supportsEffort: true,
+                    supportedEffortLevels: ["low", "high"],
+                    supportsFastMode: true,
+                  },
+                ],
+              })();
+            },
+          );
+          assert.equal(probedVersion, "2.9.0");
+          const model = status.models.find((model) => model.slug === "claude-test-next[1m]");
+          assert.ok(model);
+          assert.equal(model.isCustom, false);
+          assert.equal(model.isLegacy, undefined);
+          const effort = model.capabilities?.optionDescriptors?.find(
+            (option) => option.id === "effort",
+          );
+          assert.equal(effort?.type, "select");
+          if (effort?.type === "select") {
+            assert.deepEqual(
+              effort.options.map((option) => option.id),
+              ["low", "high"],
+            );
+          }
+          assert.ok(
+            model.capabilities?.optionDescriptors?.some((option) => option.id === "fastMode"),
+          );
+          assert.equal(status.auth.status, "authenticated");
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              if (args.join(" ") === "--version")
+                return { stdout: "2.9.0 (Claude Code)\n", stderr: "", code: 0 };
+              throw new Error(`Unexpected args: ${args.join(" ")}`);
+            }),
+          ),
+        ),
+      );
+
       it.effect("returns ready when claude is installed and authenticated", () =>
         Effect.gen(function* () {
           const status = yield* checkClaudeProviderStatus(
@@ -2696,12 +2764,46 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         );
       });
 
-      it.effect("returns warning when the Claude initialization result is unavailable", () =>
+      // An empty initialization result looks the same whether the CLI is logged
+      // out, timed out, or crashed, so the auth verdict comes from asking the
+      // CLI directly rather than from the absence of capabilities.
+      it.effect("reports unauthenticated when the CLI says it is not signed in", () =>
         Effect.gen(function* () {
           const status = yield* checkClaudeProviderStatus(
             defaultClaudeSettings,
             noClaudeCapabilities,
           );
+          assert.strictEqual(status.installed, true);
+          assert.strictEqual(status.auth.status, "unauthenticated");
+          assert.strictEqual(status.status, "error");
+          assert.strictEqual(
+            status.message,
+            "Claude Code is not signed in. Run `claude auth login` and try again.",
+          );
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+              // The CLI reports a logged-out account on stdout while exiting
+              // non-zero, so the verdict must not depend on the exit status.
+              if (joined === "auth status --json")
+                return { stdout: '{"loggedIn":false}\n', stderr: "", code: 1 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      it.effect("stays unknown when the auth probe cannot answer", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            noClaudeCapabilities,
+          );
+          // Unparseable output must never be read as "logged out"; accusing a
+          // signed-in user of needing to re-authenticate is worse than saying
+          // nothing.
           assert.strictEqual(status.status, "warning");
           assert.strictEqual(status.installed, true);
           assert.strictEqual(status.auth.status, "unknown");
@@ -2714,11 +2816,34 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             mockSpawnerLayer((args) => {
               const joined = args.join(" ");
               if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
-              if (joined === "auth status")
+              if (joined === "auth status --json")
+                return { stdout: "not json at all\n", stderr: "", code: 1 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      it.effect("stays unknown when the CLI reports it is still signed in", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            noClaudeCapabilities,
+          );
+          // Credentials are fine, so the probe failed for some other reason and
+          // the provider must not be marked unauthenticated.
+          assert.strictEqual(status.auth.status, "unknown");
+          assert.strictEqual(status.status, "warning");
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+              if (joined === "auth status --json")
                 return {
-                  stdout: '{"loggedIn":false}\n',
+                  stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
                   stderr: "",
-                  code: 1,
+                  code: 0,
                 };
               throw new Error(`Unexpected args: ${joined}`);
             }),

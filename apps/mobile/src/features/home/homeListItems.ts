@@ -1,4 +1,10 @@
 import {
+  accountForEnvironment,
+  accountAttention,
+  type AccountSectionContext,
+} from "./accountSections";
+import type { MobileConnectAccount } from "../cloud/knownAccounts";
+import {
   buildSagaProjectTree,
   derivePhysicalProjectKey,
   type SagaProjectIndexEntry,
@@ -69,7 +75,16 @@ export interface HomeShowMoreListItem {
   readonly canShowLess: boolean;
 }
 
+export interface HomeAccountHeaderListItem {
+  readonly type: "account-header";
+  readonly key: string;
+  readonly account: MobileConnectAccount | null;
+  readonly attention: string;
+  readonly collapsed: boolean;
+  readonly depth?: number;
+}
 export type HomeListItem =
+  | HomeAccountHeaderListItem
   | HomeHeaderListItem
   | HomePendingTaskListItem
   | HomeThreadListItem
@@ -112,6 +127,16 @@ export function nextGroupDisplayState(
 export function homeListItemsAreEqual(previous: HomeListItem, item: HomeListItem): boolean {
   if (previous.depth !== item.depth) return false;
   switch (item.type) {
+    case "account-header":
+      return (
+        previous.type === "account-header" &&
+        previous.key === item.key &&
+        previous.account?.label === item.account?.label &&
+        previous.account?.preset === item.account?.preset &&
+        previous.account?.signedIn === item.account?.signedIn &&
+        previous.attention === item.attention &&
+        previous.collapsed === item.collapsed
+      );
     case "v2-settled-shelf":
       return (
         previous.type === "v2-settled-shelf" &&
@@ -235,6 +260,7 @@ function homeHierarchy(input: {
 }
 
 export function buildHomeListLayout(input: {
+  readonly accountSections?: AccountSectionContext | undefined;
   readonly groups: ReadonlyArray<HomeThreadGroup>;
   readonly displayStates: ReadonlyMap<string, HomeGroupDisplayState>;
   /**
@@ -243,6 +269,25 @@ export function buildHomeListLayout(input: {
   readonly showAllThreads?: boolean;
   readonly sagaIndex?: ReadonlyArray<SagaProjectIndexEntry>;
 }): HomeListLayout {
+  if (input.accountSections) {
+    const context = input.accountSections;
+    const items = [...context.accounts, null].flatMap((account): HomeListItem[] => {
+      const groups = input.groups.filter(
+        (group) =>
+          accountForEnvironment(context, group.representative.environmentId) ===
+          (account?.accountId ?? null),
+      );
+      if (!account && groups.length === 0) return [];
+      const header = makeAccountHeader(account, groups, input.displayStates, input.showAllThreads);
+      return [
+        header,
+        ...(header.collapsed
+          ? []
+          : buildHomeListLayout({ ...input, accountSections: undefined, groups }).items),
+      ];
+    });
+    return { items, stickyHeaderIndices: [] };
+  }
   const items: HomeListItem[] = [];
   const stickyHeaderIndices: number[] = [];
 
@@ -370,13 +415,18 @@ export function buildHomeListLayout(input: {
   return { items, stickyHeaderIndices };
 }
 
-export type HomeHierarchyV2Item = (ThreadListV2ListItem | HomeHeaderListItem) & {
+export type HomeHierarchyV2Item = (
+  | ThreadListV2ListItem
+  | HomeHeaderListItem
+  | HomeAccountHeaderListItem
+) & {
   readonly depth?: number;
   readonly settledBranch?: boolean;
 };
 
 /** Keep each project and saga in one tree; settled history belongs to its owning project. */
 export function buildHomeHierarchyV2Items(input: {
+  readonly accountSections?: AccountSectionContext | undefined;
   readonly groups: ReadonlyArray<HomeThreadGroup>;
   readonly items: ReadonlyArray<ThreadListV2ListItem>;
   readonly sagaIndex?: ReadonlyArray<SagaProjectIndexEntry>;
@@ -384,6 +434,36 @@ export function buildHomeHierarchyV2Items(input: {
   readonly searching?: boolean;
   readonly selectedThreadKey?: string | null;
 }): HomeHierarchyV2Item[] {
+  if (input.accountSections) {
+    const context = input.accountSections;
+    const sections = [...context.accounts, null].flatMap((account): HomeHierarchyV2Item[] => {
+      const accountId = account?.accountId ?? null;
+      const groups = input.groups.filter(
+        (group) => accountForEnvironment(context, group.representative.environmentId) === accountId,
+      );
+      const items = input.items.filter((item) => {
+        const environmentId =
+          item.type === "v2-thread"
+            ? item.item.thread.environmentId
+            : item.type === "v2-pending"
+              ? item.pendingTask.message.environmentId
+              : undefined;
+        return (
+          environmentId !== undefined && accountForEnvironment(context, environmentId) === accountId
+        );
+      });
+      if (!account && groups.length === 0 && items.length === 0) return [];
+      const header = makeAccountHeader(account, groups, input.displayStates, input.searching);
+      return [
+        header,
+        ...(header.collapsed
+          ? []
+          : buildHomeHierarchyV2Items({ ...input, accountSections: undefined, groups, items })),
+      ];
+    });
+    // Shelf expansion is a device preference; retain its control while rows remain account-scoped.
+    return [...input.items.filter((item) => item.type === "v2-snoozed-shelf"), ...sections];
+  }
   const { groupsByKey, tree } = homeHierarchy(input);
   const groupByProject = new Map(
     [...groupsByKey.values()].flatMap((group) =>
@@ -483,4 +563,20 @@ export function buildHomeHierarchyV2Items(input: {
   result.push(...ungrouped);
 
   return result;
+}
+
+function makeAccountHeader(
+  account: MobileConnectAccount | null,
+  groups: ReadonlyArray<HomeThreadGroup>,
+  states: ReadonlyMap<string, HomeGroupDisplayState>,
+  searching?: boolean,
+): HomeAccountHeaderListItem {
+  const key = `connect-account:${account?.accountId ?? "direct"}`;
+  return {
+    type: "account-header",
+    key,
+    account,
+    attention: accountAttention(groups.flatMap((group) => group.threads)),
+    collapsed: !searching && !!states.get(key)?.collapsed,
+  };
 }

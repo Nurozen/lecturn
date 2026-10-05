@@ -5,6 +5,8 @@ import type {
   ModelSelection,
   OrchestrationProjectShell,
   ProjectId,
+  ProviderInteractionMode,
+  RuntimeMode,
   ScopedProjectRef,
   ThreadEnvMode,
 } from "@lecturn/contracts";
@@ -83,6 +85,31 @@ export function resolveNewThreadModelSelectionOverride(input: {
     input.projectDefaultSelection ??
     (input.carrySourceDraftId === input.destinationDraftId ? null : input.carrySelection)
   );
+}
+
+interface ThreadModeSource {
+  readonly runtimeMode?: RuntimeMode | null | undefined;
+  readonly interactionMode?: ProviderInteractionMode | null | undefined;
+}
+
+/**
+ * The runtime and interaction mode a thread created from the viewed thread
+ * carries over. Each mode resolves independently: the composer's override
+ * (what the user currently sees in the controls) first, then the persisted
+ * thread, then the draft. Null means there is nothing to carry and the caller
+ * falls back to its own default.
+ */
+export function resolveCarriedThreadModes(sources: {
+  readonly composer: ThreadModeSource | null | undefined;
+  readonly shell: ThreadModeSource | null | undefined;
+  readonly draft: ThreadModeSource | null | undefined;
+}): { runtimeMode: RuntimeMode | null; interactionMode: ProviderInteractionMode | null } {
+  const { composer, shell, draft } = sources;
+  return {
+    runtimeMode: composer?.runtimeMode ?? shell?.runtimeMode ?? draft?.runtimeMode ?? null,
+    interactionMode:
+      composer?.interactionMode ?? shell?.interactionMode ?? draft?.interactionMode ?? null,
+  };
 }
 
 export function hasExplicitComposerModelSelection(

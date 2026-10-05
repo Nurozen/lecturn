@@ -1,3 +1,7 @@
+import {
+  ContextualDraftSchema,
+  type ContextualDraft,
+} from "../features/contextual/contextualDraft";
 import { useAtomValue } from "@effect/atom-react";
 import {
   ModelSelection as ModelSelectionSchema,
@@ -52,6 +56,7 @@ export class ComposerDraftPersistenceError extends Schema.TaggedErrorClass<Compo
 }
 
 export interface ComposerDraft {
+  readonly contextual?: ContextualDraft;
   readonly text: string;
   readonly attachments: ReadonlyArray<DraftComposerAttachment>;
   readonly importedShareIds?: ReadonlyArray<string>;
@@ -76,7 +81,7 @@ export interface ComposerDraftWorkspaceSelection {
 
 export type ComposerDraftSettingsUpdate = Pick<
   ComposerDraft,
-  "modelSelection" | "runtimeMode" | "interactionMode" | "workspaceSelection"
+  "modelSelection" | "runtimeMode" | "interactionMode" | "workspaceSelection" | "contextual"
 >;
 
 const ComposerDraftWorkspaceSelectionSchema = Schema.Struct({
@@ -87,6 +92,7 @@ const ComposerDraftWorkspaceSelectionSchema = Schema.Struct({
 });
 
 const ComposerDraftSchema = Schema.Struct({
+  contextual: Schema.optional(ContextualDraftSchema),
   text: Schema.String,
   attachments: Schema.Array(DraftComposerAttachmentSchema),
   importedShareIds: Schema.optional(Schema.Array(Schema.String)),
@@ -183,7 +189,8 @@ function isEmptyDraft(draft: ComposerDraft): boolean {
     draft.modelSelection === undefined &&
     draft.runtimeMode === undefined &&
     draft.interactionMode === undefined &&
-    draft.workspaceSelection === undefined
+    draft.workspaceSelection === undefined &&
+    draft.contextual === undefined
   );
 }
 
@@ -212,7 +219,8 @@ export function decodePersistedComposerState(value: unknown): {
               draft.attachments.length === 0 &&
               draft.runtimeMode === undefined &&
               draft.interactionMode === undefined &&
-              draft.workspaceSelection === undefined
+              draft.workspaceSelection === undefined &&
+              draft.contextual === undefined
                 ? { ...draft, modelSelection: undefined }
                 : draft,
             ] as const,
@@ -710,6 +718,8 @@ export async function removeDeliveredCloudQueuedMessage(
         (editor.runtimeMode !== undefined && editor.runtimeMode !== message.runtimeMode) ||
         (editor.interactionMode !== undefined &&
           editor.interactionMode !== message.interactionMode) ||
+        (editor.contextual !== undefined &&
+          JSON.stringify(editor.contextual) !== JSON.stringify(message.creation?.contextual)) ||
         (editor.workspaceSelection !== undefined &&
           (editor.workspaceSelection.mode !== message.creation?.workspaceMode ||
             editor.workspaceSelection.branch !== message.creation?.branch ||
@@ -1206,7 +1216,8 @@ export function sameComposerDraftState(a: ComposerDraft, b: ComposerDraft): bool
     a.modelSelection === b.modelSelection &&
     a.runtimeMode === b.runtimeMode &&
     a.interactionMode === b.interactionMode &&
-    a.workspaceSelection === b.workspaceSelection
+    a.workspaceSelection === b.workspaceSelection &&
+    a.contextual === b.contextual
   );
 }
 
@@ -1239,7 +1250,12 @@ export function undoComposerDraftMergeState(
   // A setting still holding the merge's value is the merge's doing: restore
   // the snapshot's. One the user changed since the merge stays theirs.
   const undoSetting = <
-    K extends "modelSelection" | "runtimeMode" | "interactionMode" | "workspaceSelection",
+    K extends
+      | "modelSelection"
+      | "runtimeMode"
+      | "interactionMode"
+      | "workspaceSelection"
+      | "contextual",
   >(
     key: K,
   ): ComposerDraft[K] => (existing[key] === merged[key] ? snapshot[key] : existing[key]);
@@ -1259,6 +1275,7 @@ export function undoComposerDraftMergeState(
     runtimeMode: undoSetting("runtimeMode"),
     interactionMode: undoSetting("interactionMode"),
     workspaceSelection: undoSetting("workspaceSelection"),
+    contextual: undoSetting("contextual"),
   };
   if (isEmptyDraft(draft)) {
     const next = { ...current };

@@ -1,18 +1,28 @@
 import { useUser } from "@clerk/react";
+import { useAtomValue } from "@effect/atom-react";
 import { ExternalLinkIcon, RadioTowerIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
+import { connectAccountProfilesAtom } from "../../cloud/connectAccounts";
+import { useAccountEmailWhenSeveral } from "../../cloud/useAccountEmailWhenSeveral";
 import { configuredHostedAppUrl } from "../../hostedPairing";
 import { Button } from "../ui/button";
 
 export function ConnectSubscriptionGate({
+  accountId,
   onRefresh,
   preserveChoices = true,
 }: {
+  /** The account that needs access. Clerk's active account when left out. */
+  readonly accountId?: string | null | undefined;
   readonly onRefresh: () => Promise<boolean>;
   readonly preserveChoices?: boolean;
 }) {
   const titleId = useId();
   const { user } = useUser();
+  const profiles = useAtomValue(connectAccountProfilesAtom);
+  const chosen = accountId != null && accountId !== user?.id ? accountId : null;
+  const namedAccount = useAccountEmailWhenSeveral(chosen ?? user?.id);
+  const email = chosen ? profiles.get(chosen)?.email : user?.primaryEmailAddress?.emailAddress;
   const [actionError, setActionError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const billingUrl = new URL("/account/billing", configuredHostedAppUrl()).href;
@@ -37,7 +47,7 @@ export function ConnectSubscriptionGate({
         <RadioTowerIcon className="size-4 text-primary" aria-hidden /> Connect your devices
       </h3>
       <p className="text-sm text-muted-foreground">
-        Your account needs Connect access before publishing.{" "}
+        {namedAccount ?? "Your account"} needs Connect access before publishing.{" "}
         {preserveChoices
           ? "Your choices above are saved while you set up your plan."
           : "After setting up your plan, enable the Connect features you want below."}
@@ -52,8 +62,8 @@ export function ConnectSubscriptionGate({
         automatically until canceled.
       </p>
       <p className="text-xs">
-        Use {user?.primaryEmailAddress?.emailAddress ?? "the same Lecturn account"} in your browser.
-        You can choose or manage your plan there.
+        Use {email ?? "the same Lecturn account"} in your browser. You can choose or manage your
+        plan there.
       </p>
       <div className="flex flex-wrap gap-2">
         <a

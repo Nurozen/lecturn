@@ -1,6 +1,7 @@
 import { pipe } from "effect/Function";
 import * as Arr from "effect/Array";
 import * as O from "effect/Order";
+import { isImportedHistoryRow } from "@lecturn/contracts";
 import type {
   MessageId,
   OrchestrationCheckpointSummary,
@@ -621,7 +622,12 @@ function reduceThreadDetailEvent(
       );
 
       const retainedTurnIds = new Set(Arr.map(checkpoints, (entry) => entry.turnId));
-      const messages = retainMessagesAfterRevert(thread.messages, retainedTurnIds);
+      const latestCheckpoint = checkpoints.at(-1) ?? null;
+      const messages = retainMessagesAfterRevert(
+        thread,
+        retainedTurnIds,
+        latestCheckpoint?.completedAt ?? null,
+      );
       const proposedPlans = pipe(
         thread.proposedPlans,
         Arr.filter((plan) => plan.turnId === null || retainedTurnIds.has(plan.turnId)),
@@ -630,7 +636,6 @@ function reduceThreadDetailEvent(
         thread.activities,
         Arr.filter((activity) => activity.turnId === null || retainedTurnIds.has(activity.turnId)),
       );
-      const latestCheckpoint = checkpoints.at(-1) ?? null;
 
       return {
         kind: "updated",
@@ -812,17 +817,25 @@ function rebindCheckpointAssistantMessage(
 }
 
 function retainMessagesAfterRevert(
-  messages: ReadonlyArray<OrchestrationMessage>,
+  thread: Pick<OrchestrationThread, "messages" | "importedFrom">,
   retainedTurnIds: ReadonlySet<string>,
+  retainedThrough: string | null,
 ): OrchestrationMessage[] {
-  // Keep messages that belong to a retained turn, plus system messages and
-  // messages without a turn binding (pre-turn-0 user messages).
-  return Arr.filter(messages, (message) => {
-    if (message.role === "system") {
+  // Keep messages that belong to a retained turn, plus system messages. User
+  // messages never carry a turn id, so they are kept by position: only those
+  // sent before the latest retained checkpoint completed started a retained
+  // turn. The server prunes the same way; keeping every unbound user message
+  // would leave reverted prompts on screen with no reply and no revert arrow.
+  // Imported history predates every turn, so no revert reaches it.
+  return Arr.filter(thread.messages, (message) => {
+    if (message.role === "system" || isImportedHistoryRow(thread, message)) {
       return true;
     }
     if (message.turnId === null) {
-      return true;
+      return (
+        message.role !== "user" ||
+        (retainedThrough !== null && message.createdAt <= retainedThrough)
+      );
     }
     return retainedTurnIds.has(message.turnId);
   });

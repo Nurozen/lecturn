@@ -4,6 +4,7 @@ import {
   EventId,
   MessageId,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
   TurnId,
@@ -263,6 +264,27 @@ it.layer(NodeServices.layer)("decider thread.fork", (it) => {
         // Inherited from the read model's source thread, not the command.
         linkedPullRequest,
       });
+    }),
+  );
+
+  it.effect("passes the materialized import origin onto thread.forked", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedReadModel;
+      const importedFrom = {
+        providerInstanceId: modelSelection.instanceId,
+        driverKind: ProviderDriverKind.make("codex"),
+        sessionId: "external-session",
+        cwd: "/repo",
+        title: "External session",
+        importedAt: "2026-01-01T00:00:00.000Z",
+        historyTruncated: false,
+      };
+      const result = yield* decideOrchestrationCommand({
+        command: makeForkCommand({ importedFrom }),
+        readModel,
+      });
+      const forked = (Array.isArray(result) ? result : [result])[1];
+      expect(forked?.payload).toMatchObject({ importedFrom });
     }),
   );
 

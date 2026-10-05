@@ -1,3 +1,4 @@
+import { accountForEnvironment, type AccountSectionContext } from "./accountSections";
 import type { EnvironmentId, SidebarThreadSortOrder } from "@lecturn/contracts";
 
 import type { HomeProjectSortOrder } from "./homeThreadList";
@@ -24,7 +25,7 @@ type HomeListFilterMenuAction = {
 type HomeListFilterMenuSubmenu = {
   readonly type: "submenu";
   readonly title: string;
-  readonly items: HomeListFilterMenuAction[];
+  readonly items: Array<HomeListFilterMenuAction | HomeListFilterMenuSubmenu>;
 };
 
 export interface HomeListFilterMenu {
@@ -33,6 +34,8 @@ export interface HomeListFilterMenu {
 }
 
 export function buildHomeListFilterMenu(props: {
+  readonly accountSections?: AccountSectionContext | undefined;
+  readonly accountAttention?: ReadonlyMap<string, string> | undefined;
   readonly environments: ReadonlyArray<HomeListFilterMenuEnvironment>;
   readonly projects: ReadonlyArray<HomeListFilterMenuProject>;
   readonly selectedEnvironmentId: EnvironmentId | null;
@@ -61,15 +64,33 @@ export function buildHomeListFilterMenu(props: {
         state: props.selectedEnvironmentId === null ? "on" : "off",
         onPress: () => props.onEnvironmentChange(null),
       },
-      ...props.environments.map((environment) => ({
-        type: "action" as const,
-        title: environment.label,
-        state:
-          props.selectedEnvironmentId === environment.environmentId
-            ? ("on" as const)
-            : ("off" as const),
-        onPress: () => props.onEnvironmentChange(environment.environmentId),
-      })),
+      ...(props.accountSections
+        ? groupAccountFilterEnvironments(
+            props.environments,
+            props.accountSections,
+            props.accountAttention,
+          ).map((group) => ({
+            type: "submenu" as const,
+            title: group.label,
+            items: group.environments.map((environment) => ({
+              type: "action" as const,
+              title: environment.label,
+              state:
+                props.selectedEnvironmentId === environment.environmentId
+                  ? ("on" as const)
+                  : ("off" as const),
+              onPress: () => props.onEnvironmentChange(environment.environmentId),
+            })),
+          }))
+        : props.environments.map((environment) => ({
+            type: "action" as const,
+            title: environment.label,
+            state:
+              props.selectedEnvironmentId === environment.environmentId
+                ? ("on" as const)
+                : ("off" as const),
+            onPress: () => props.onEnvironmentChange(environment.environmentId),
+          }))),
     ],
   });
 
@@ -124,4 +145,28 @@ export function buildHomeListFilterMenu(props: {
     title: "Thread list options",
     items,
   };
+}
+
+export function groupAccountFilterEnvironments(
+  environments: ReadonlyArray<HomeListFilterMenuEnvironment>,
+  context: AccountSectionContext,
+  attention?: ReadonlyMap<string, string>,
+) {
+  return [...context.accounts, null]
+    .map((account) => ({
+      id: account?.accountId ?? "direct",
+      label: [
+        account?.label ?? "Direct connections",
+        account && !account.signedIn ? "Sign in again" : "",
+        account ? attention?.get(account.accountId) : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      environments: environments.filter(
+        (environment) =>
+          accountForEnvironment(context, environment.environmentId) ===
+          (account?.accountId ?? null),
+      ),
+    }))
+    .filter((group) => group.environments.length > 0);
 }

@@ -29,6 +29,7 @@ import {
   type CodexSettings,
   type CursorSettings,
   type GrokSettings,
+  type GithubCopilotSettings,
   type OpenCodeSettings,
   ProviderDriverKind,
   type ProviderInstanceConfigMap,
@@ -49,6 +50,7 @@ import { ClaudeDriver } from "../Drivers/ClaudeDriver.ts";
 import { CodexDriver } from "../Drivers/CodexDriver.ts";
 import { CursorDriver } from "../Drivers/CursorDriver.ts";
 import { GrokDriver } from "../Drivers/GrokDriver.ts";
+import { CopilotDriver } from "../Drivers/CopilotDriver.ts";
 import { OpenCodeDriver } from "../Drivers/OpenCodeDriver.ts";
 import * as ModelManifest from "../ModelManifest.ts";
 import * as StaveMemoryWiring from "../../stave/StaveMemoryWiring.ts";
@@ -93,6 +95,7 @@ const BackgroundPolicyAlwaysRunLayer = Layer.mock(BackgroundPolicy.BackgroundPol
   hasDemand: () => Effect.succeed(true),
   shouldRunScopeWork: () => Effect.succeed(true),
   shouldRunOpportunisticWork: Effect.succeed(true),
+  isUserPresent: Effect.succeed(false),
 });
 
 const makeCodexConfig = (overrides: Partial<CodexSettings>): CodexSettings => ({
@@ -126,6 +129,13 @@ const makeCursorConfig = (overrides: Partial<CursorSettings>): CursorSettings =>
 const makeGrokConfig = (overrides: Partial<GrokSettings>): GrokSettings => ({
   enabled: false,
   binaryPath: "grok",
+  customModels: [],
+  ...overrides,
+});
+
+const makeCopilotConfig = (overrides: Partial<GithubCopilotSettings>): GithubCopilotSettings => ({
+  enabled: false,
+  binaryPath: "copilot",
   customModels: [],
   ...overrides,
 });
@@ -209,6 +219,25 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
       expect(personal!.adapter).not.toBe(work!.adapter);
       expect(personal!.textGeneration).not.toBe(work!.textGeneration);
       expect(personal!.snapshot).not.toBe(work!.snapshot);
+      expect(personal!.configurationFingerprint).toMatch(/^[a-f0-9]{64}$/);
+      expect(personal!.configurationFingerprint).not.toBe(work!.configurationFingerprint);
+      const restarted = yield* makeProviderInstanceRegistry({ drivers: [CodexDriver], configMap });
+      expect((yield* restarted.registry.getInstance(personalId))!.configurationFingerprint).toBe(
+        personal!.configurationFingerprint,
+      );
+      const changed = yield* makeProviderInstanceRegistry({
+        drivers: [CodexDriver],
+        configMap: {
+          ...configMap,
+          [personalId]: {
+            ...configMap[personalId]!,
+            environment: [{ name: "WRITER_ACCOUNT", value: "other", sensitive: false }],
+          },
+        },
+      });
+      expect((yield* changed.registry.getInstance(personalId))!.configurationFingerprint).not.toBe(
+        personal!.configurationFingerprint,
+      );
 
       // Snapshots identify themselves by instanceId + driver — this is
       // what makes per-instance routing distinguishable downstream.
@@ -335,12 +364,14 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
       const claudeId = ProviderInstanceId.make("claude_default");
       const cursorId = ProviderInstanceId.make("cursor_default");
       const grokId = ProviderInstanceId.make("grok_default");
+      const copilotId = ProviderInstanceId.make("copilot_default");
       const openCodeId = ProviderInstanceId.make("opencode_default");
 
       const codexDriverKind = ProviderDriverKind.make("codex");
       const claudeDriverKind = ProviderDriverKind.make("claudeAgent");
       const cursorDriverKind = ProviderDriverKind.make("cursor");
       const grokDriverKind = ProviderDriverKind.make("grok");
+      const copilotDriverKind = ProviderDriverKind.make("githubCopilot");
       const openCodeDriverKind = ProviderDriverKind.make("opencode");
 
       const configMap: ProviderInstanceConfigMap = {
@@ -371,6 +402,12 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
           enabled: false,
           config: makeGrokConfig({}),
         },
+        [copilotId]: {
+          driver: copilotDriverKind,
+          displayName: "GitHub Copilot",
+          enabled: false,
+          config: makeCopilotConfig({}),
+        },
         [openCodeId]: {
           driver: openCodeDriverKind,
           displayName: "OpenCode",
@@ -380,7 +417,14 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
       };
 
       const { registry } = yield* makeProviderInstanceRegistry<BuiltInDriversEnv>({
-        drivers: [CodexDriver, ClaudeDriver, CursorDriver, GrokDriver, OpenCodeDriver],
+        drivers: [
+          CodexDriver,
+          ClaudeDriver,
+          CursorDriver,
+          GrokDriver,
+          CopilotDriver,
+          OpenCodeDriver,
+        ],
         configMap,
       });
 
@@ -390,9 +434,9 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
       expect(unavailable).toEqual([]);
 
       const instances = yield* registry.listInstances;
-      expect(instances).toHaveLength(5);
+      expect(instances).toHaveLength(6);
       expect(instances.map((instance) => instance.instanceId).toSorted()).toEqual(
-        [codexId, claudeId, cursorId, grokId, openCodeId].toSorted(),
+        [codexId, claudeId, cursorId, grokId, copilotId, openCodeId].toSorted(),
       );
 
       // Instance lookup by id resolves each instance to its own bundle —
@@ -402,16 +446,19 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
       const claude = yield* registry.getInstance(claudeId);
       const cursor = yield* registry.getInstance(cursorId);
       const grok = yield* registry.getInstance(grokId);
+      const copilot = yield* registry.getInstance(copilotId);
       const openCode = yield* registry.getInstance(openCodeId);
       expect(codex?.driverKind).toBe(codexDriverKind);
       expect(claude?.driverKind).toBe(claudeDriverKind);
       expect(cursor?.driverKind).toBe(cursorDriverKind);
       expect(grok?.driverKind).toBe(grokDriverKind);
+      expect(copilot?.driverKind).toBe(copilotDriverKind);
       expect(openCode?.driverKind).toBe(openCodeDriverKind);
       expect(codex?.displayName).toBe("Codex");
       expect(claude?.displayName).toBe("Claude");
       expect(cursor?.displayName).toBe("Cursor");
       expect(grok?.displayName).toBe("Grok");
+      expect(copilot?.displayName).toBe("GitHub Copilot");
       expect(openCode?.displayName).toBe("OpenCode");
 
       // Every instance owns its own set of closures — no sharing across
@@ -424,6 +471,7 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
         claude!.adapter,
         cursor!.adapter,
         grok!.adapter,
+        copilot!.adapter,
         openCode!.adapter,
       ];
       expect(new Set(adapters).size).toBe(adapters.length);
@@ -432,6 +480,7 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
         claude!.textGeneration,
         cursor!.textGeneration,
         grok!.textGeneration,
+        copilot!.textGeneration,
         openCode!.textGeneration,
       ];
       expect(new Set(textGenerations).size).toBe(textGenerations.length);
@@ -440,6 +489,7 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
         claude!.snapshot,
         cursor!.snapshot,
         grok!.snapshot,
+        copilot!.snapshot,
         openCode!.snapshot,
       ];
       expect(new Set(snapshots).size).toBe(snapshots.length);
@@ -475,6 +525,14 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
       expect(grokSnapshot.driver).toBe(grokDriverKind);
       expect(grokSnapshot.enabled).toBe(false);
       expect(grokSnapshot.continuation?.groupKey).toBe(`${grokDriverKind}:instance:${grokId}`);
+
+      const copilotSnapshot = yield* copilot!.snapshot.getSnapshot;
+      expect(copilotSnapshot.instanceId).toBe(copilotId);
+      expect(copilotSnapshot.driver).toBe(copilotDriverKind);
+      expect(copilotSnapshot.enabled).toBe(false);
+      expect(copilotSnapshot.continuation?.groupKey).toBe(
+        `${copilotDriverKind}:instance:${copilotId}`,
+      );
 
       const openCodeSnapshot = yield* openCode!.snapshot.getSnapshot;
       expect(openCodeSnapshot.instanceId).toBe(openCodeId);

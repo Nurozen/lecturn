@@ -31,3 +31,7 @@ These are application-level controls on company-funded environments, not an MDM 
 The shared relay client lives in `packages/client-runtime/src/relay/teams.ts`; core domain schemas are in `packages/contracts/src/relayTeams.ts`. Hosted web renders `TeamsAccount` management. Desktop and locally hosted web render a browser handoff because mutation origins are restricted to the hosted app; `TeamSelector` remains available for funding on every surface. Mobile uses a native selector without purchase controls. Async UI responses are guarded against account/context changes. The account billing route supports `?tab=teams` for Stripe returns.
 
 See the [user guide](../user/teams.md), [operations runbook](../operations/teams.md), and [environment authentication](environment-auth.md).
+
+## Multiple signed-in identities
+
+Client account selectors choose a Clerk user, not a company. Each identity retains its own selected company, entitlement queries, environment catalog ownership, and token reader. Labels and tint presets are user-writable presentation metadata and never authorize a company action. An environment still has one owning identity and one funding decision.

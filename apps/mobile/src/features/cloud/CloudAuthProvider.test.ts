@@ -1,13 +1,14 @@
-import { managedRelaySessionAtom } from "@lecturn/client-runtime/relay";
+import { managedRelaySessionAtom, setManagedRelaySession } from "@lecturn/client-runtime/relay";
+import * as Exit from "effect/Exit";
+import { type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { appAtomRegistry } from "../../state/atom-registry";
-import { activateCloudRelayAccount, deactivateCloudRelayAccount } from "./CloudAuthProvider";
+import { deactivateCloudRelayAccount } from "./CloudAuthProvider";
 import { setAgentAwarenessRelayTokenProvider } from "../agent-awareness/remoteRegistration";
 
 vi.mock("@clerk/expo", () => ({
-  ClerkProvider: vi.fn(),
-  useAuth: vi.fn(),
+  ClerkProvider: (props: { children: ReactNode }) => props.children,
 }));
 
 vi.mock("@clerk/expo/token-cache", () => ({
@@ -16,7 +17,7 @@ vi.mock("@clerk/expo/token-cache", () => ({
 
 vi.mock("../../lib/runtime", () => ({
   runtime: {
-    runPromiseExit: vi.fn(),
+    runPromiseExit: vi.fn(async () => Exit.void),
   },
 }));
 
@@ -26,6 +27,9 @@ vi.mock("../../connection/catalog", () => ({
   },
 }));
 
+vi.mock("./MultiAccountCloudAuthBridge", () => ({
+  MultiAccountCloudAuthBridge: (props: { readonly children: ReactNode }) => props.children,
+}));
 vi.mock("./cloud-drafts", () => ({ removeCloudEnvironments: {} }));
 vi.mock("../../state/use-composer-drafts", () => ({
   getComposerCloudAccountId: vi.fn(async () => null),
@@ -41,6 +45,7 @@ vi.mock("./publicConfig", () => ({
 }));
 
 vi.mock("../agent-awareness/remoteRegistration", () => ({
+  releaseAgentAwarenessRelayTokenProvider: vi.fn(),
   setAgentAwarenessRelayTokenProvider: vi.fn(),
   unregisterAgentAwarenessDeviceForCurrentUser: vi.fn(),
 }));
@@ -53,7 +58,10 @@ afterEach(() => {
 describe("CloudAuthProvider relay account isolation", () => {
   it("clears relay and agent-awareness credentials before cleanup can fail", async () => {
     const tokenProvider = async () => "account-1-token";
-    activateCloudRelayAccount("account-1", tokenProvider);
+    setManagedRelaySession(appAtomRegistry, {
+      accountId: "account-1",
+      readClerkToken: tokenProvider,
+    });
     expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-1");
 
     deactivateCloudRelayAccount();

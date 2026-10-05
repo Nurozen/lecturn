@@ -1,4 +1,9 @@
+import { ContextualProjectSettings } from "../contextual/ContextualProjectSettings";
+import { AccountSurface } from "../AccountSurface";
+import { accountByEnvironmentIdAtom } from "../../cloud/connectAccounts";
+import "./project-settings-glass.css";
 import { StaveLifecycleNotice } from "../stave/StaveLifecycleNotice";
+import { useStaveArchiveLanding } from "../stave/staveSpaceLifecycle";
 import { prepareStaveProjectDeletion } from "../../lib/staveProjectDeletion";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -17,6 +22,7 @@ import {
 } from "../../logicalProject";
 import type {
   ContextMenuItem,
+  EnvironmentId,
   ModelSelection,
   ProjectIconOverride,
   ProviderDriverKind,
@@ -25,6 +31,7 @@ import type {
   ThreadEnvMode,
 } from "@lecturn/contracts";
 import { resolveEnvModeLabel } from "../BranchToolbar.logic";
+import { snapshotsOfAccountScope, useProjectAccountScope } from "../sidebar/accountProjectGroups";
 import { createModelSelection } from "@lecturn/shared/model";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@lecturn/shared/keybindings";
 import { useCanGoBack, useNavigate } from "@tanstack/react-router";
@@ -137,8 +144,13 @@ export const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, st
   separate: "Keep separate",
 };
 
-/** Logical project groups for the settings page, sorted by display name. */
-export function useSettingsProjectGroups(): SidebarProjectSnapshot[] {
+/**
+ * Logical project groups for the settings page, sorted by display name. An
+ * account-scoped `projectKey`, as a segmented sidebar links with, narrows them
+ * to that account's projects.
+ */
+export function useSettingsProjectGroups(projectKey = ""): SidebarProjectSnapshot[] {
+  const accountScope = useProjectAccountScope(projectKey);
   const projects = useProjects();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -152,13 +164,16 @@ export function useSettingsProjectGroups(): SidebarProjectSnapshot[] {
   );
   return useMemo(
     () =>
-      buildSidebarProjectSnapshots({
+      snapshotsOfAccountScope(
+        accountScope,
+        buildSidebarProjectSnapshots,
+      )({
         projects,
         settings: projectGroupingSettings,
         primaryEnvironmentId,
         resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
       }).sort((a, b) => a.displayName.localeCompare(b.displayName)),
-    [environmentLabelById, primaryEnvironmentId, projectGroupingSettings, projects],
+    [accountScope, environmentLabelById, primaryEnvironmentId, projectGroupingSettings, projects],
   );
 }
 
@@ -167,6 +182,16 @@ function memberKey(member: { environmentId: string; id: string }): string {
 }
 
 export function ProjectSettingsPage({ projectKey }: { projectKey: string }) {
+  const groups = useSettingsProjectGroups(projectKey);
+  const owners = useAtomValue(accountByEnvironmentIdAtom);
+  const selected = groups.find((group) => group.projectKey === projectKey);
+  const selectedOwners = new Set(
+    selected?.memberProjects.map((member) => owners.get(member.environmentId)),
+  );
+  // A combined group can span accounts. It remains neutral until an operation
+  // targets a physical checkout; individual Stave editors carry that owner.
+  const environmentId = selectedOwners.size === 1 ? selected?.environmentId : undefined;
+
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
   const navigateBackWithinApp = useCallback(() => {
@@ -194,18 +219,22 @@ export function ProjectSettingsPage({ projectKey }: { projectKey: string }) {
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
+      <AccountSurface
+        environmentId={environmentId ?? null}
+        className="lecturn-settings-surface lecturn-project-settings flex min-h-0 min-w-0 flex-1 flex-col text-foreground"
+      >
         <WorkspacePageHeader electron={isElectron}>
           <ProjectSettingsBreadcrumb projectKey={projectKey} />
         </WorkspacePageHeader>
         <ProjectSettingsPanel projectKey={projectKey} />
-      </div>
+      </AccountSurface>
     </SidebarInset>
   );
 }
 
 function ProjectSettingsBreadcrumb({ projectKey }: { projectKey: string }) {
-  const groups = useSettingsProjectGroups();
+  const groups = useSettingsProjectGroups(projectKey);
+  const accountEmail = useProjectAccountScope(projectKey)?.email;
   const navigate = useNavigate();
   const selected = groups.find((group) => group.projectKey === projectKey) ?? null;
   const openProjectMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -243,7 +272,10 @@ function ProjectSettingsBreadcrumb({ projectKey }: { projectKey: string }) {
             onClick={openProjectMenu}
             className="group/project-title inline-flex min-w-0 max-w-64 cursor-pointer items-center gap-1 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <span className="min-w-0 truncate">{selected.displayName}</span>
+            <span className="min-w-0 truncate">
+              {selected.displayName}
+              {accountEmail ? ` · ${accountEmail}` : null}
+            </span>
             <ChevronDownIcon
               aria-hidden
               className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/project-title:opacity-100 group-focus-visible/project-title:opacity-100"
@@ -258,31 +290,53 @@ function ProjectSettingsBreadcrumb({ projectKey }: { projectKey: string }) {
 }
 
 export function ProjectSettingsPanel({ projectKey }: { projectKey: string }) {
-  const groups = useSettingsProjectGroups();
+  const groups = useSettingsProjectGroups(projectKey);
   const navigate = useNavigate();
 
   const selected = groups.find((group) => group.projectKey === projectKey) ?? null;
 
+  const landAfterArchive = useStaveArchiveLanding();
+
   // Remember the members of the last rendered group so a grouping-rule change
   // (which changes the group key) can follow the project to its new group.
-  const lastSelectionRef = useRef<{ key: string; memberKeys: string[] } | null>(null);
+  const lastSelectionRef = useRef<{
+    key: string;
+    memberKeys: string[];
+    memberIds: string[];
+    sagaMember: { environmentId: EnvironmentId; sagaId: string } | null;
+  } | null>(null);
   useEffect(() => {
     if (!selected) return;
+    const sagaMember = selected.memberProjects.find((member) => member.stave?.memberOf);
     lastSelectionRef.current = {
       key: selected.projectKey,
       memberKeys: selected.memberProjects.map((member) => member.physicalProjectKey),
+      memberIds: selected.memberProjects.map(memberKey),
+      sagaMember: sagaMember?.stave?.memberOf
+        ? { environmentId: sagaMember.environmentId, sagaId: sagaMember.stave.memberOf }
+        : null,
     };
   }, [selected]);
 
-  // A grouping-rule change replaces the group key mid-visit; follow the
-  // project to its new key instead of parking on the not-found state.
+  // A grouping-rule change or a Stave restore (which moves the workspace
+  // root) replaces the group key mid-visit; follow the project to its new key.
+  // A project that was archived or removed is done with, so leave instead of
+  // parking on the not-found state: an archived saga member for its saga's
+  // board (as the archive confirmation does), anything else for home.
   useEffect(() => {
     if (selected !== null) return;
     const last = lastSelectionRef.current;
     if (last?.key !== projectKey) return;
-    const successor = groups.find((group) =>
-      group.memberProjects.some((member) => last.memberKeys.includes(member.physicalProjectKey)),
-    );
+    const successor =
+      groups.find((group) =>
+        group.memberProjects.some((member) => last.memberKeys.includes(member.physicalProjectKey)),
+      ) ??
+      groups.find((group) =>
+        group.memberProjects.some(
+          (member) =>
+            last.memberIds.includes(memberKey(member)) && member.stave?.state !== "archived",
+        ),
+      );
     if (successor) {
       void navigate({
         to: "/projects/$projectKey",
@@ -290,8 +344,17 @@ export function ProjectSettingsPanel({ projectKey }: { projectKey: string }) {
         replace: true,
         hashScrollIntoView: false,
       });
+    } else if (groups.length > 0) {
+      const archived = groups.some((group) =>
+        group.memberProjects.some(
+          (member) =>
+            last.memberIds.includes(memberKey(member)) && member.stave?.state === "archived",
+        ),
+      );
+      if (archived && last.sagaMember) landAfterArchive(last.sagaMember);
+      else void navigate({ to: "/", replace: true });
     }
-  }, [groups, navigate, projectKey, selected]);
+  }, [groups, landAfterArchive, navigate, projectKey, selected]);
 
   if (!selected) {
     return (
@@ -830,7 +893,34 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   return (
     <>
       <SettingsPageContainer width="wide" className="gap-8">
+        <ContextualProjectSettings
+          environmentId={selectedCheckout.environmentId}
+          projectId={selectedCheckout.id}
+        />
         <SettingsSection title="Project">
+          {selectedServerConfig?.environment.capabilities.threadDecisions === true ? (
+            <SettingsRow
+              title="Decisions"
+              description={`Review decisions and configure tracking in ${selectedCheckoutLabel}.`}
+              control={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    void navigate({
+                      to: "/decisions/$environmentId/$projectId",
+                      params: {
+                        environmentId: selectedCheckout.environmentId,
+                        projectId: selectedCheckout.id,
+                      },
+                    })
+                  }
+                >
+                  Open decisions
+                </Button>
+              }
+            />
+          ) : null}
           <SettingsRow
             title="Name"
             description="The shared name for this project group in the sidebar and thread lists."

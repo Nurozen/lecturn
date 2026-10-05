@@ -1,3 +1,4 @@
+import { useSettingsAccountGlass } from "../settings/useSettingsAccountGlass";
 import type {
   EnvironmentId,
   StaveOperation,
@@ -17,6 +18,11 @@ import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogFooter } from "../ui/dialog";
 import { StaveConfirmDialog } from "./StaveConfirmDialog";
+import {
+  staveArchiveSpaceConfirmation,
+  useStaveArchiveLanding,
+  type StaveSpaceConfirmation,
+} from "./staveSpaceLifecycle";
 
 type Editor = { kind: "add" } | { kind: "retarget"; repo: StaveRepoEntry } | { kind: "memory" };
 
@@ -33,10 +39,8 @@ export function StaveSpaceActions({
   onFinished: () => void;
 }) {
   const [editor, setEditor] = useState<Editor | null>(null);
-  const [confirmation, setConfirmation] = useState<{
-    title: string;
-    operation: StaveOperation;
-  } | null>(null);
+  const [confirmation, setConfirmation] = useState<StaveSpaceConfirmation | null>(null);
+  const landAfterArchive = useStaveArchiveLanding();
   const [referencesOnly, setReferencesOnly] = useState(false);
   const scope = { workspaceRoot, expectedManifestCreatedAt: stave.createdAt };
   const bound = stave.createdAt !== undefined;
@@ -56,25 +60,9 @@ export function StaveSpaceActions({
         </p>
       ) : null}
       {archived ? (
-        <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
-          <p className="text-sm text-muted-foreground">
-            Unarchive this space to start a thread or edit its repos.
-          </p>
-          <Button
-            size="sm"
-            disabled={!bound || !stave.archiveBasename || unsupported("restoreSpace")}
-            onClick={() => {
-              if (stave.archiveBasename)
-                confirm("Unarchive space", {
-                  kind: "restoreSpace",
-                  ...scope,
-                  from: stave.archiveBasename,
-                });
-            }}
-          >
-            Unarchive
-          </Button>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          This space is archived. Restore it from New project → Stave.
+        </p>
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-2">
@@ -199,14 +187,7 @@ export function StaveSpaceActions({
                 size="sm"
                 variant="outline"
                 disabled={!bound || unsupported("archiveSpace")}
-                onClick={() =>
-                  confirm("Archive space", {
-                    kind: "archiveSpace",
-                    ...scope,
-                    force: false,
-                    memory: "keep",
-                  })
-                }
+                onClick={() => setConfirmation(staveArchiveSpaceConfirmation(workspaceRoot, stave))}
               >
                 Archive space
               </Button>
@@ -249,7 +230,14 @@ export function StaveSpaceActions({
           title={confirmation.title}
           operation={confirmation.operation}
           onClose={() => setConfirmation(null)}
-          onFinished={onFinished}
+          // Archive leaves this page the way the sidebar entry does; other edits
+          // stay on the space and keep the result open.
+          onFinished={
+            confirmation.operation.kind === "archiveSpace"
+              ? () => landAfterArchive({ environmentId, sagaId: confirmation.sagaId })
+              : onFinished
+          }
+          closeOnFinish={confirmation.operation.kind === "archiveSpace"}
         />
       ) : null}
     </div>
@@ -271,6 +259,7 @@ function SpaceEditDialog({
   onClose: () => void;
   onReview: (operation: StaveOperation, title: string) => void;
 }) {
+  const glass = useSettingsAccountGlass(environmentId);
   const repos = useEnvironmentQuery(
     editor.kind === "add" ? staveRepos({ environmentId, input: {} }) : null,
   );
@@ -303,7 +292,10 @@ function SpaceEditDialog({
         if (!open) onClose();
       }}
     >
-      <DialogPopup className="max-w-md">
+      <DialogPopup
+        {...glass}
+        className="lecturn-account-surface lecturn-project-settings-dialog max-w-md"
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>

@@ -1,3 +1,6 @@
+import * as Extensions from "./extensions.ts";
+import * as Contextual from "./contextual.ts";
+import * as Decisions from "./relayDecisions.ts";
 import * as Context from "effect/Context";
 import * as Schema from "effect/Schema";
 import * as HttpApi from "effect/unstable/httpapi/HttpApi";
@@ -43,8 +46,13 @@ export type RelayAgentAwarenessPreferences = typeof RelayAgentAwarenessPreferenc
 export const RelayApnsEnvironment = Schema.Literals(["sandbox", "production"]);
 export type RelayApnsEnvironment = typeof RelayApnsEnvironment.Type;
 
+const RelayDeviceAccountIds = Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(5));
+
 export const RelayDeviceRegistrationRequest = Schema.Struct({
   deviceId: TrimmedNonEmptyString,
+  deviceAccountIds: Schema.optional(RelayDeviceAccountIds),
+  accountLabel: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(80))),
+  accountColor: Schema.optional(Schema.String.check(Schema.isPattern(/^#[0-9a-fA-F]{6}$/))),
   label: TrimmedNonEmptyString,
   platform: RelayAgentAwarenessPlatform,
   iosMajorVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(18)),
@@ -87,6 +95,7 @@ export const RelayListDevicesResponse = Schema.Struct({
 export type RelayListDevicesResponse = typeof RelayListDevicesResponse.Type;
 
 export const RelayLiveActivityRegistrationRequest = Schema.Struct({
+  deviceAccountIds: Schema.optional(RelayDeviceAccountIds),
   deviceId: TrimmedNonEmptyString,
   activityPushToken: TrimmedNonEmptyString,
 });
@@ -150,6 +159,10 @@ export const RelayAgentActivityAggregateRow = Schema.Struct({
 export type RelayAgentActivityAggregateRow = typeof RelayAgentActivityAggregateRow.Type;
 
 export const RelayAgentActivityAggregateState = Schema.Struct({
+  accountId: Schema.optional(TrimmedNonEmptyString),
+  accountLabel: Schema.optional(TrimmedNonEmptyString),
+  accountColor: Schema.optional(Schema.String),
+  iosMajorVersion: Schema.optional(Schema.Int),
   title: TrimmedNonEmptyString,
   subtitle: TrimmedNonEmptyString,
   activeCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -233,6 +246,10 @@ export const RelayAgentActivityPublishRequest = Schema.Struct({
   }),
   proof: TrimmedNonEmptyString.annotate({
     description: "Environment-signed JWT covering this published activity state.",
+  }),
+  userPresent: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "True while the user is focused on and actively using a client of this environment. The relay updates state silently instead of ringing devices.",
   }),
 }).annotate({ description: "Publishes a signed agent-awareness update from an environment." });
 export type RelayAgentActivityPublishRequest = typeof RelayAgentActivityPublishRequest.Type;
@@ -607,6 +624,8 @@ const RelayAgentActivityPublishErrors = [
   RelayInternalError,
 ] as const;
 
+const RelayManagedEndpointOriginSyncErrors = [RelayAuthInvalidError, RelayInternalError] as const;
+
 export class RelayClientPrincipal extends Context.Service<
   RelayClientPrincipal,
   {
@@ -772,6 +791,7 @@ export const RelayAuthorizationServerMetadata = Schema.Struct({
 });
 
 export const RelayProtectedResourceMetadata = Schema.Struct({
+  capabilities: Schema.optional(Schema.Struct({ multiAccountPush: Schema.Boolean })),
   resource: TrimmedNonEmptyString,
   authorization_servers: Schema.Array(TrimmedNonEmptyString),
   scopes_supported: Schema.Array(RelayDpopAccessTokenScope),
@@ -910,6 +930,21 @@ export const RelayPublishResponse = Schema.Struct({
   deliveries: Schema.Array(RelayDeliveryResult),
 });
 export type RelayPublishResponse = typeof RelayPublishResponse.Type;
+
+export const RelayManagedEndpointOriginSyncRequest = Schema.Struct({
+  origin: RelayManagedEndpointOrigin,
+});
+export type RelayManagedEndpointOriginSyncRequest =
+  typeof RelayManagedEndpointOriginSyncRequest.Type;
+
+// `updatedTunnels` is 0 when the environment has no provisioned managed tunnel
+// (publish-only links, or a tunnel released on shutdown).
+export const RelayManagedEndpointOriginSyncResponse = Schema.Struct({
+  ok: Schema.Boolean,
+  updatedTunnels: Schema.Int,
+});
+export type RelayManagedEndpointOriginSyncResponse =
+  typeof RelayManagedEndpointOriginSyncResponse.Type;
 
 export const RelayHealthResponse = Schema.Struct({
   ok: Schema.Boolean,
@@ -1118,9 +1153,214 @@ export const RelayServerGroup = HttpApiGroup.make("server")
         error: RelayAgentActivityPublishErrors,
       },
     ).annotate(OpenApi.Summary, "Publish agent activity"),
+    // A managed tunnel forwards to the loopback origin captured at link time.
+    // Environments call this at boot so a changed local port does not strand
+    // the tunnel on a dead origin until someone relinks.
+    HttpApiEndpoint.put(
+      "syncManagedEndpointOrigin",
+      "/v1/environments/:environmentId/managed-endpoint-origin",
+      {
+        params: Schema.Struct({ environmentId: EnvironmentId }),
+        payload: RelayManagedEndpointOriginSyncRequest,
+        success: RelayManagedEndpointOriginSyncResponse,
+        error: RelayManagedEndpointOriginSyncErrors,
+      },
+    ).annotate(OpenApi.Summary, "Sync the managed endpoint's local origin"),
   )
-  .annotate(OpenApi.Description, "Environment-authenticated activity publication.")
+  .annotate(
+    OpenApi.Description,
+    "Environment-authenticated activity publication and endpoint upkeep.",
+  )
   .middleware(RelayEnvironmentAuth);
+
+const extensionHttpErrors = [400, 401, 403, 409, 410, 429, 503].map((status) =>
+  Schema.Struct({
+    code: Extensions.ExtensionEvaluationError.fields.code,
+    message: Extensions.ExtensionEvaluationError.fields.message,
+  }).annotate({ httpApiStatus: status }),
+);
+const extensionHttpHeaders = Schema.Struct({ authorization: TrimmedNonEmptyString });
+export const RelayExtensionsGroup = HttpApiGroup.make("extensions")
+  .add(
+    HttpApiEndpoint.get("status", "/v1/extensions/status", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionServiceStatus,
+    }),
+    HttpApiEndpoint.post("challenge", "/v1/extensions/funding/challenge", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingChallengeResult,
+      payload: Extensions.ExtensionFundingChallengeRequest,
+    }),
+    HttpApiEndpoint.get("approvalInfo", "/v1/extensions/funding/approval", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingApprovalInfo,
+      query: Extensions.ExtensionFundingApprovalRequest,
+    }),
+    HttpApiEndpoint.post("approve", "/v1/extensions/funding/approve", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingApprovalResult,
+      payload: Extensions.ExtensionFundingApprovalRequest,
+    }),
+    HttpApiEndpoint.get("observe", "/v1/extensions/funding/observe", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingObserveResult,
+      query: Extensions.ExtensionFundingObserveRequest,
+    }),
+    HttpApiEndpoint.post("cancel", "/v1/extensions/funding/cancel", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingCancelResult,
+      payload: Extensions.ExtensionFundingCancelRequest,
+    }),
+    HttpApiEndpoint.post("redeem", "/v1/extensions/funding/redeem", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingRedeemResult,
+      payload: Extensions.ExtensionFundingRedeemRequest,
+    }),
+    HttpApiEndpoint.get("fundingStatus", "/v1/extensions/funding/status", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingStatusResult,
+      query: Extensions.ExtensionFundingStatusRequest,
+    }),
+    HttpApiEndpoint.post("revoke", "/v1/extensions/funding/revoke", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingRevokeResult,
+      payload: Extensions.ExtensionFundingRevokeRequest,
+    }),
+    HttpApiEndpoint.get("accountStatus", "/v1/extensions/funding/account-status", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingStatusResult,
+      query: Extensions.ExtensionFundingStatusRequest,
+    }),
+    HttpApiEndpoint.get("accountList", "/v1/extensions/funding/account-list", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingAccountListResult,
+      query: Extensions.ExtensionFundingAccountListRequest,
+    }),
+    HttpApiEndpoint.post("accountRevoke", "/v1/extensions/funding/account-revoke", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionFundingRevokeResult,
+      payload: Extensions.ExtensionFundingRevokeRequest,
+    }),
+    HttpApiEndpoint.get("evaluationStatus", "/v1/extensions/evaluation/status", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Extensions.ExtensionEvaluationStatusResult,
+      query: Extensions.ExtensionEvaluationStatusRequest,
+    }),
+    HttpApiEndpoint.post("evaluate", "/v1/extensions/evaluate", {
+      payload: Contextual.ContextualEvaluationRequest,
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Contextual.ContextualEvaluationResult,
+    }),
+    HttpApiEndpoint.post("conflicts", "/v1/extensions/conflicts", {
+      payload: Contextual.ContextualConflictCheckRequest,
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Contextual.ContextualConflictCheckResult,
+    }),
+    HttpApiEndpoint.post("equivalence", "/v1/extensions/equivalence", {
+      payload: Contextual.ContextualEquivalenceCheckRequest,
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Contextual.ContextualEquivalenceCheckResult,
+    }),
+    HttpApiEndpoint.post("decisions", "/v1/extensions/decisions", {
+      payload: Decisions.DecisionEvaluationRequest,
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionEvaluationResult,
+    }),
+  )
+  .annotate(
+    OpenApi.Description,
+    "Paid extensions with independent feature consent and one shared membership allowance. Account endpoints use Clerk bearer tokens; host endpoints use environment credentials.",
+  );
+
+export const RelayDecisionsGroup = HttpApiGroup.make("decisions")
+  .add(
+    HttpApiEndpoint.get("status", "/v1/decisions/status", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.RelayDecisionsStatus,
+    }),
+    HttpApiEndpoint.post("evaluate", "/v1/decisions/evaluate", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionEvaluationResult,
+      payload: Decisions.DecisionEvaluationRequest,
+    }),
+    HttpApiEndpoint.post("challenge", "/v1/decisions/funding/challenge", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionFundingChallengeResult,
+      payload: Decisions.DecisionFundingChallengeRequest,
+    }),
+    HttpApiEndpoint.post("approve", "/v1/decisions/funding/approve", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionFundingApprovalResult,
+      payload: Decisions.DecisionFundingApprovalRequest,
+    }),
+    HttpApiEndpoint.get("approvalInfo", "/v1/decisions/funding/approval", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionFundingApprovalInfo,
+      query: Decisions.DecisionFundingApprovalRequest,
+    }),
+    HttpApiEndpoint.get("fundingStatus", "/v1/decisions/funding/status", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionFundingStatusResult,
+      query: Decisions.DecisionFundingStatusRequest,
+    }),
+    HttpApiEndpoint.get("accountStatus", "/v1/decisions/funding/account-status", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionFundingStatusResult,
+      query: Decisions.DecisionFundingStatusRequest,
+    }),
+    HttpApiEndpoint.get("accountList", "/v1/decisions/funding/account-list", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionFundingAccountListResult,
+      query: Decisions.DecisionFundingAccountListRequest,
+    }),
+    HttpApiEndpoint.post("accountRevoke", "/v1/decisions/funding/account-revoke", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionFundingRevokeResult,
+      payload: Decisions.DecisionFundingRevokeRequest,
+    }),
+    HttpApiEndpoint.post("redeem", "/v1/decisions/funding/redeem", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionFundingRedeemResult,
+      payload: Decisions.DecisionFundingRedeemRequest,
+    }),
+    HttpApiEndpoint.post("revoke", "/v1/decisions/funding/revoke", {
+      headers: extensionHttpHeaders,
+      error: extensionHttpErrors,
+      success: Decisions.DecisionFundingRevokeResult,
+      payload: Decisions.DecisionFundingRevokeRequest,
+    }),
+  )
+  .annotate(
+    OpenApi.Description,
+    "Legacy Decisions compatibility endpoints. These always select the Decisions feature and share the Extensions allowance.",
+  );
 
 export const RelayApi = HttpApi.make("RelayApi")
   .add(
@@ -1131,6 +1371,8 @@ export const RelayApi = HttpApi.make("RelayApi")
     RelayTokenGroup,
     RelayDpopClientGroup,
     RelayServerGroup,
+    RelayExtensionsGroup,
+    RelayDecisionsGroup,
   )
   .annotate(OpenApi.Title, "Lecturn Relay API")
   .annotate(OpenApi.Version, "1.0.0")

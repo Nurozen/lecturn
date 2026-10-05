@@ -55,26 +55,30 @@ application files under `/mnt/c` instead and reinstalls the runtime on the next 
 Lecturn uses provider runtimes but does not bundle them. Install and authenticate each
 provider's CLI, or use Lecturn's managed setup for Antigravity.
 
-| Provider    | CLI                                                                                                        | Default binary     | Log in with                        |
-| ----------- | ---------------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------- |
-| Codex       | [Codex CLI](https://developers.openai.com/codex/cli)                                                       | `codex`            | `codex login`                      |
-| Claude      | [Claude Code](https://claude.com/product/claude-code)                                                      | `claude`           | `claude auth login`                |
-| Cursor      | [Cursor CLI](https://cursor.com/cli)                                                                       | `cursor-agent`     | `agent login`                      |
-| Grok Build  | [Grok Build CLI](https://x.ai/cli)                                                                         | `grok`             | `grok login`                       |
-| OpenCode    | [OpenCode](https://opencode.ai)                                                                            | `opencode`         | `opencode auth login`              |
-| Antigravity | [Official ACP agent](https://github.com/agentclientprotocol/registry/blob/main/antigravity-acp/agent.json) | Managed by Lecturn | **Sign in with Google** in Lecturn |
+| Provider       | CLI                                                                                                        | Default binary     | Log in with                        |
+| -------------- | ---------------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------- |
+| Codex          | [Codex CLI](https://developers.openai.com/codex/cli)                                                       | `codex`            | `codex login`                      |
+| Claude         | [Claude Code](https://claude.com/product/claude-code)                                                      | `claude`           | `claude auth login`                |
+| Cursor         | [Cursor CLI](https://cursor.com/cli)                                                                       | `cursor-agent`     | `agent login`                      |
+| Grok Build     | [Grok Build CLI](https://x.ai/cli)                                                                         | `grok`             | `grok login`                       |
+| GitHub Copilot | [GitHub Copilot CLI](https://github.com/features/copilot/cli)                                              | `copilot`          | `copilot login`                    |
+| OpenCode       | [OpenCode](https://opencode.ai)                                                                            | `opencode`         | `opencode auth login`              |
+| Antigravity    | [Official ACP agent](https://github.com/agentclientprotocol/registry/blob/main/antigravity-acp/agent.json) | Managed by Lecturn | **Sign in with Google** in Lecturn |
 
-Codex and Claude are on by default. Cursor, Grok Build, OpenCode, and Antigravity are off by
-default. Turn them on in **Settings** > **Providers** when you want to use them.
+Codex and Claude are on by default. Cursor, Grok Build, GitHub Copilot, OpenCode, and Antigravity
+are off by default. Turn them on in **Settings** > **Providers** when you want to use them.
 
 On macOS, Lecturn opens while it loads your shell environment and detects providers in the
 background. Progress appears in the bottom-right corner; settings and navigation remain usable.
 Shell loading and provider detection each allow up to 15 seconds. If detection times out, the
-indicator turns grey with a retry button and a link to that provider's settings. You can retry
-without restarting, or configure an explicit executable path to bypass shell discovery. New
-turns wait for their provider to be ready; existing running turns continue. Brief connection
-interruptions do not restart provider detection. The progress indicator is hidden while an
-environment is disconnected and resumes from its current status after reconnecting.
+indicator turns grey with a retry button and a link to that provider's settings. Lecturn also
+retries on its own, waiting a little longer each time (up to a minute), so detection recovers
+once a busy machine frees up. A provider that was already detected stays usable through one
+slow background check. You can retry without restarting, or configure an explicit
+executable path to bypass shell discovery. New turns wait for their provider to be ready;
+existing running turns continue. Brief connection interruptions do not restart provider
+detection. The progress indicator is hidden while an environment is disconnected and resumes
+from its current status after reconnecting.
 
 If a provider cannot start, use the recovery panel to retry or open settings. **Show details**
 keeps the technical error available for troubleshooting.
@@ -86,6 +90,9 @@ steps, and supported hosts.
 
 Cursor is the one to watch: install Cursor CLI, which provides the `cursor-agent` binary that
 Lecturn looks for, but authenticate with `agent login`, not `cursor-agent login`.
+
+GitHub Copilot needs a Copilot subscription. See [GitHub Copilot](./providers-copilot.md) for
+install options, token sign-in, and organization policy.
 
 Grok models that support adjustable reasoning show a **Reasoning** control beside the model picker.
 The available levels and default come from the installed Grok Build CLI, so they can vary by model

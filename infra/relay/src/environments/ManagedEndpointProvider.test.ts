@@ -1308,6 +1308,162 @@ describe("ManagedEndpointProvider", () => {
       }
     }).pipe(Effect.provide(providerLayer(makeTunnelClient(), dnsClient)));
   });
+
+  it.effect("repoints an existing tunnel at the environment's new local port", () => {
+    const tunnelCalls: TunnelCall[] = [];
+    const dnsCalls: DnsCall[] = [];
+    const allocationCalls: AllocationCall[] = [];
+
+    return Effect.gen(function* () {
+      const hostname = expectedManagedHostname("env_ABC");
+      const provider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
+      const input = { userId: "user_ABC", environmentId: "env_ABC" };
+      yield* provider.provision({
+        ...input,
+        origin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
+      });
+      const tunnelCallsAfterProvision = tunnelCalls.length;
+      const dnsCallsAfterProvision = dnsCalls.length;
+      const allocationCallsAfterProvision = allocationCalls.length;
+
+      expect(
+        yield* provider.syncOrigin({
+          ...input,
+          origin: { localHttpHost: "127.0.0.1", localHttpPort: 3774 },
+        }),
+      ).toBe(true);
+
+      expect(tunnelCalls.slice(tunnelCallsAfterProvision)).toEqual([
+        {
+          operation: "putConfiguration",
+          input: {
+            tunnelId: "tunnel-id",
+            tunnelConfig: {
+              ingress: [
+                { hostname, service: "http://127.0.0.1:3774" },
+                { service: "http_status:404" },
+              ],
+            },
+          },
+        },
+      ]);
+      expect(dnsCalls).toHaveLength(dnsCallsAfterProvision);
+      expect(
+        allocationCalls.slice(allocationCallsAfterProvision).map((call) => call.operation),
+      ).toEqual(["get"]);
+    }).pipe(
+      Effect.provide(
+        providerLayer(
+          makeTunnelClient(tunnelCalls),
+          makeDnsClient(dnsCalls),
+          makeAllocations(allocationCalls),
+        ),
+      ),
+    );
+  });
+
+  it.effect("does not touch Cloudflare when syncing an environment without a tunnel", () => {
+    const tunnelCalls: TunnelCall[] = [];
+    const dnsCalls: DnsCall[] = [];
+    const allocationCalls: AllocationCall[] = [];
+
+    return Effect.gen(function* () {
+      const provider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
+      expect(
+        yield* provider.syncOrigin({
+          userId: "user_ABC",
+          environmentId: "env_ABC",
+          origin: { localHttpHost: "127.0.0.1", localHttpPort: 3774 },
+        }),
+      ).toBe(false);
+      expect(tunnelCalls).toHaveLength(0);
+      expect(dnsCalls).toHaveLength(0);
+      expect(allocationCalls.map((call) => call.operation)).toEqual(["get"]);
+    }).pipe(
+      Effect.provide(
+        providerLayer(
+          makeTunnelClient(tunnelCalls),
+          makeDnsClient(dnsCalls),
+          makeAllocations(allocationCalls),
+        ),
+      ),
+    );
+  });
+
+  it.effect("reports nothing to sync when the recorded tunnel was released", () =>
+    Effect.gen(function* () {
+      const provider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
+      yield* provider.provision({
+        userId: "user_ABC",
+        environmentId: "env_ABC",
+        origin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
+      });
+      expect(
+        yield* provider.syncOrigin({
+          userId: "user_ABC",
+          environmentId: "env_ABC",
+          origin: { localHttpHost: "127.0.0.1", localHttpPort: 3774 },
+        }),
+      ).toBe(false);
+    }).pipe(
+      Effect.provide(
+        providerLayer(
+          ManagedEndpointProvider.ManagedEndpointTunnelClient.of({
+            ...makeTunnelClient(),
+            putConfiguration: (tunnelId, tunnelConfig) =>
+              tunnelConfig.ingress[0]?.service === "http://127.0.0.1:3774"
+                ? Effect.fail(
+                    new ManagedEndpointProvider.ManagedEndpointTunnelClientError({
+                      operation: "put-configuration",
+                      tunnelId,
+                      cause: { status: 404 },
+                    }),
+                  )
+                : Effect.void,
+          }),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("rejects syncing a non-loopback origin before calling Cloudflare", () => {
+    const tunnelCalls: TunnelCall[] = [];
+    const allocationCalls: AllocationCall[] = [];
+
+    return Effect.gen(function* () {
+      const provider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
+      const input = { userId: "user_ABC", environmentId: "env_ABC" };
+      yield* provider.provision({
+        ...input,
+        origin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
+      });
+      const tunnelCallsAfterProvision = tunnelCalls.length;
+      const allocationCallsAfterProvision = allocationCalls.length;
+
+      const error = yield* Effect.flip(
+        provider.syncOrigin({
+          ...input,
+          origin: { localHttpHost: "192.168.1.10", localHttpPort: 3773 },
+        }),
+      );
+
+      expect(error).toMatchObject({
+        _tag: "ManagedEndpointOriginNotAllowed",
+        host: "192.168.1.10",
+        port: 3773,
+      });
+      expect(tunnelCalls).toHaveLength(tunnelCallsAfterProvision);
+      expect(allocationCalls).toHaveLength(allocationCallsAfterProvision);
+    }).pipe(
+      Effect.provide(
+        providerLayer(
+          makeTunnelClient(tunnelCalls),
+          makeDnsClient(),
+          makeAllocations(allocationCalls),
+        ),
+      ),
+    );
+  });
 });
 
 const provisionInput = {
@@ -1887,6 +2043,114 @@ describe("managed gateway enrollment", () => {
       );
     },
   );
+
+  it.effect("syncs a gateway tunnel's origin without changing its gateway routing", () => {
+    const tunnelCalls: TunnelCall[] = [];
+    const events: string[] = [];
+    const gateway = makeGatewayEnrollment(events);
+
+    return Effect.gen(function* () {
+      const provider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
+      yield* provider.provision(provisionInput);
+      const provisioned = tunnelCalls.find((call) => call.operation === "putConfiguration");
+      const tunnelCallsAfterProvision = tunnelCalls.length;
+      const eventsAfterProvision = events.length;
+      const mapping = gateway.mapping();
+
+      expect(
+        yield* provider.syncOrigin({
+          ...provisionInput,
+          origin: { localHttpHost: "127.0.0.1", localHttpPort: 3774 },
+        }),
+      ).toBe(true);
+
+      expect(tunnelCalls.slice(tunnelCallsAfterProvision)).toEqual([
+        {
+          operation: "putConfiguration",
+          input: {
+            tunnelId: "tunnel-id",
+            tunnelConfig: {
+              ingress: [
+                {
+                  hostname: mapping?.originHostname,
+                  service: "http://127.0.0.1:3774",
+                  originRequest: { httpHostHeader: mapping?.publicHostname },
+                },
+                { service: "http_status:404" },
+              ],
+            },
+          },
+        },
+      ]);
+      expect(mapping?.originHostname).toBeDefined();
+      expect(provisioned?.input).toEqual({
+        tunnelId: "tunnel-id",
+        tunnelConfig: {
+          ingress: [
+            {
+              hostname: mapping?.originHostname,
+              service: "http://127.0.0.1:3773",
+              originRequest: { httpHostHeader: mapping?.publicHostname },
+            },
+            { service: "http_status:404" },
+          ],
+        },
+      });
+      // Upkeep must not re-register or advance the enrollment.
+      expect(events).toHaveLength(eventsAfterProvision);
+      expect(gateway.mapping()).toEqual(mapping);
+    }).pipe(
+      Effect.provide(
+        providerLayer(
+          makeTunnelClient(tunnelCalls),
+          makeGatewayDnsClient(),
+          makeAllocations(),
+          undefined,
+          undefined,
+          undefined,
+          gateway.service,
+        ),
+      ),
+    );
+  });
+
+  it.effect("leaves a gateway tunnel alone while its enrollment is being removed", () => {
+    const tunnelCalls: TunnelCall[] = [];
+    const gateway = makeGatewayEnrollment();
+    let deleting = false;
+
+    return Effect.gen(function* () {
+      const provider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
+      yield* provider.provision(provisionInput);
+      const tunnelCallsAfterProvision = tunnelCalls.length;
+      deleting = true;
+
+      expect(yield* provider.syncOrigin(provisionInput)).toBe(false);
+      expect(tunnelCalls).toHaveLength(tunnelCallsAfterProvision);
+    }).pipe(
+      Effect.provide(
+        providerLayer(
+          makeTunnelClient(tunnelCalls),
+          makeGatewayDnsClient(),
+          makeAllocations(),
+          undefined,
+          undefined,
+          undefined,
+          {
+            ...gateway.service,
+            get: (identity) =>
+              gateway.service
+                .get(identity)
+                .pipe(
+                  Effect.map((mapping) =>
+                    mapping && deleting ? { ...mapping, deleting } : mapping,
+                  ),
+                ),
+          },
+        ),
+      ),
+    );
+  });
 });
 it.effect("denies unpaid provision before Cloudflare is touched", () => {
   const calls: TunnelCall[] = [];

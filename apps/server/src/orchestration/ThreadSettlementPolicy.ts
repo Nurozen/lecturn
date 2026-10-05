@@ -1,4 +1,4 @@
-import type { OrchestrationThreadShell } from "@lecturn/contracts";
+import { isImportedHistoryRow, type OrchestrationThreadShell } from "@lecturn/contracts";
 
 export interface SettlementPullRequest {
   readonly state: "open" | "closed" | "merged";
@@ -24,12 +24,19 @@ function latestTimestamp(values: ReadonlyArray<string | null | undefined>): stri
 
 /** A recent user message stays queued until a turn adopts its timestamp.
  * Absolute age bounds client clock skew in both directions and stops stale
- * pre-adoption data from blocking the thread forever. */
+ * pre-adoption data from blocking the thread forever. An imported user
+ * message was never sent here, so it queues nothing. */
 export function threadHasQueuedTurnStart(
-  thread: Pick<OrchestrationThreadShell, "latestUserMessageAt" | "latestTurn" | "session">,
+  thread: Pick<
+    OrchestrationThreadShell,
+    "latestUserMessageAt" | "latestTurn" | "session" | "importedFrom"
+  >,
   now: string,
 ): boolean {
   if (thread.latestUserMessageAt === null || thread.session?.status === "error") return false;
+  if (isImportedHistoryRow(thread, { turnId: null, createdAt: thread.latestUserMessageAt })) {
+    return false;
+  }
   const messageAt = Date.parse(thread.latestUserMessageAt);
   const age = Date.parse(now) - messageAt;
   if (Number.isNaN(age) || Math.abs(age) > QUEUED_TURN_START_GRACE_MS) return false;

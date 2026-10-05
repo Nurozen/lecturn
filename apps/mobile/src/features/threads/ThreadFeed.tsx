@@ -1,3 +1,4 @@
+import { ContextualMessageDisclosure } from "../contextual/ContextualMessageDisclosure";
 import * as Haptics from "expo-haptics";
 import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
 import { useViewabilityAmount, type LegendListRef } from "@legendapp/list/react-native";
@@ -8,6 +9,7 @@ import type {
   EnvironmentId,
   MessageId,
   ThreadId,
+  ThreadImportOrigin,
   TurnId,
 } from "@lecturn/contracts";
 import { renderAssistantCitationsAsText } from "@lecturn/shared/assistantCitations";
@@ -78,6 +80,10 @@ import Animated, {
   LinearTransition,
   ReduceMotion,
   type SharedValue,
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  cancelAnimation,
 } from "react-native-reanimated";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { IOS_NAV_BAR_HEIGHT } from "../../lib/layoutMetrics";
@@ -98,6 +104,8 @@ import {
 
 import { AppText as Text } from "../../components/AppText";
 import { GlassCard } from "../../components/GlassCard";
+import { useGlassAccessibility } from "../../lib/useGlassAccessibility";
+import { themeColorWithAlpha } from "../../lib/mobileTheme";
 import { VideoPreviewModal, type VideoPreviewSource } from "../../components/VideoPreviewModal";
 import { VideoAttachmentTile } from "../../components/VideoAttachmentTile";
 import { MediaVideoPlayer } from "../../components/MediaVideoPlayer";
@@ -141,8 +149,10 @@ import {
   resolveMarkdownLinkPresentation,
 } from "@lecturn/mobile-markdown-text/links";
 import {
+  deriveTerminalAssistantMessageIds,
   deriveThreadFeedPresentation,
   isContextCompactionActivityGroup,
+  shouldShowImportTruncatedNote,
   type ThreadFeedEntry,
   type ThreadFeedLatestTurn,
 } from "../../lib/threadActivity";
@@ -206,6 +216,10 @@ function formatMessageTime(input: string): string {
 // Fixed heights mirror renderFeedEntry's classNames and are only used while
 // text fits at the current font settings. Larger accessibility text is measured.
 const TURN_FOLD_HEIGHT = 42; // min-h-11 (38.5) + mb-1 (3.5), with the mobile 14px rem
+// text-xs line box (17) + py-1 (7) + mb-3 (10.5), with the mobile 14px rem.
+// One divider exists per thread, so LegendList never forms a running average
+// for its item type and would otherwise carry the list estimate for it.
+const IMPORT_DIVIDER_HEIGHT = 34.5;
 const THREAD_FEED_LAYOUT_TRANSITION = LinearTransition.duration(THREAD_DISCLOSURE_TRANSITION_MS);
 // Let neighboring rows move out of the new rows' space before showing their text.
 const THREAD_FEED_DISCLOSURE_ENTER_TRANSITION = FadeIn.delay(
@@ -229,6 +243,8 @@ export interface ThreadFeedProps {
   readonly contentPresentation: ThreadContentPresentation;
   readonly agentLabel: string;
   readonly latestTurn: ThreadFeedLatestTurn | null;
+  /** Set when the thread was created from a session made outside Lecturn. */
+  readonly importedFrom?: ThreadImportOrigin | null;
   readonly activeWorkStartedAt: string | null;
   readonly listRef: RefObject<LegendListRef | null>;
   readonly freeze: SharedValue<boolean>;
@@ -1306,7 +1322,10 @@ function useMarkdownStyles(
 
 function renderFeedEntry(
   info: { item: ThreadFeedEntry; index: number },
-  props: Pick<ThreadFeedProps, "environmentId" | "onUseArtifactTemplate" | "skills"> & {
+  props: Pick<
+    ThreadFeedProps,
+    "environmentId" | "threadId" | "onUseArtifactTemplate" | "skills"
+  > & {
     readonly copiedRowId: string | null;
     readonly expandedWorkRows: Record<string, boolean>;
     readonly workRowSizing: ReturnType<typeof deriveThreadWorkLogSizing>;
@@ -1316,7 +1335,7 @@ function renderFeedEntry(
     readonly onCopyWorkRow: (rowId: string, value: string) => void;
     readonly onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
     readonly onToggleWorkRow: (rowId: string, anchorKey: string) => void;
-    readonly onToggleTurnFold: (turnId: TurnId) => void;
+    readonly onToggleTurnFold: (foldKey: string) => void;
     readonly onPressPreview: (source: FilePreviewSource) => void;
     readonly onPressVideo: (attachment: ChatFileAttachment, sourceIdentifier: string) => void;
     readonly markdownLinkHandlers: MarkdownLinkHandlers;
@@ -1334,12 +1353,28 @@ function renderFeedEntry(
   const entry = info.item;
   const { markdownStyles, iconSubtleColor, userBubbleColor } = props;
 
+  if (entry.type === "import-divider") {
+    return (
+      <View
+        accessible
+        accessibilityLabel={entry.label}
+        className="mb-3 flex-row items-center gap-3 px-1 py-1"
+      >
+        <View className="h-px flex-1 bg-adaptive-neutral-200-a80-white-a8" />
+        <Text className="shrink-0 font-lecturn-medium text-xs text-foreground-muted">
+          {entry.label}
+        </Text>
+        <View className="h-px flex-1 bg-adaptive-neutral-200-a80-white-a8" />
+      </View>
+    );
+  }
+
   if (entry.type === "turn-fold") {
     return (
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded: entry.expanded }}
-        onPress={() => props.onToggleTurnFold(entry.turnId)}
+        onPress={() => props.onToggleTurnFold(entry.foldKey)}
         hitSlop={4}
         className="mb-1 min-h-11 flex-row items-center gap-2 border-b border-adaptive-neutral-200-a80-white-a8 px-2"
         style={{
@@ -1440,8 +1475,7 @@ function renderFeedEntry(
             : {})}
         >
           <GlassCard
-            tone="accent"
-            sheen="subtle"
+            sheen="regular"
             radius={22}
             className="min-w-0 gap-2 px-4 py-3"
             style={{
@@ -1488,6 +1522,11 @@ function renderFeedEntry(
               );
             })}
           </GlassCard>
+          <ContextualMessageDisclosure
+            environmentId={props.environmentId}
+            threadId={props.threadId}
+            messageId={message.id}
+          />
           <View className="mt-1 flex-row items-center justify-end gap-1 pr-0.5">
             <Text className="font-lecturn-medium text-xs tabular-nums text-adaptive-neutral-600-400">
               {timestampLabel}
@@ -1935,14 +1974,14 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     readonly copiedRowId: string | null;
     readonly expandedWorkGroups: Record<string, boolean>;
     readonly expandedWorkRows: Record<string, boolean>;
-    readonly expandedTurnIds: ReadonlySet<TurnId>;
+    readonly expandedFoldKeys: ReadonlySet<string>;
   }>({
     copiedRowId: null,
     expandedWorkGroups: {},
     expandedWorkRows: {},
-    expandedTurnIds: new Set(),
+    expandedFoldKeys: new Set(),
   });
-  const { copiedRowId, expandedWorkGroups, expandedWorkRows, expandedTurnIds } = interactionState;
+  const { copiedRowId, expandedWorkGroups, expandedWorkRows, expandedFoldKeys } = interactionState;
   const [expandedFile, setExpandedFile] = useState<FilePreviewSource | null>(null);
   const [expandedVideo, setExpandedVideo] = useState<VideoPreviewSource | null>(null);
   useEffect(() => {
@@ -1982,7 +2021,10 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
 
   const theme = useUniwindTheme();
   const iconSubtleColor = theme["--color-icon-subtle"];
-  const userBubbleColor = theme["--color-user-bubble"];
+  const opaque = useGlassAccessibility();
+  const userBubbleColor = opaque
+    ? theme["--color-user-bubble"]
+    : themeColorWithAlpha(theme["--color-user-bubble"], 0.9);
   const onMarkdownLinkPress = useCallback(
     (href: string) => {
       const presentation = resolveMarkdownLinkPresentation(href);
@@ -2345,15 +2387,17 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       deriveThreadFeedPresentation(
         props.feed,
         props.latestTurn,
-        expandedTurnIds,
+        expandedFoldKeys,
         expandedWorkGroupIds,
         props.activeWorkStartedAt,
+        props.importedFrom ?? null,
       ),
     [
-      expandedTurnIds,
+      expandedFoldKeys,
       expandedWorkGroupIds,
       props.activeWorkStartedAt,
       props.feed,
+      props.importedFrom,
       props.latestTurn,
     ],
   );
@@ -2362,6 +2406,26 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   // current overlay height before the scroll integration's next reaction;
   // on Android the declarative contentInset floor covers this same window.
   const listMountKey = `${feedThreadKey}:${props.feed.length === 0 ? "empty" : "filled"}`;
+  const [loadedListKey, setLoadedListKey] = useState<string | null>(null);
+  const [hasRevealed, setHasRevealed] = useState(false);
+  const revealOpacity = useSharedValue(0);
+  const revealStyle = useAnimatedStyle(() => ({ opacity: revealOpacity.value }));
+  const handleInitialListLoad = useCallback(() => setLoadedListKey(listMountKey), [listMountKey]);
+  useEffect(() => {
+    if (
+      hasRevealed ||
+      props.contentPresentation.kind !== "ready" ||
+      loadedListKey !== listMountKey
+    ) {
+      return;
+    }
+    // A keyed thread reveals once, after data and the list's initial placement
+    // are ready. Streaming, pagination and reconnects never restart this fade.
+    setHasRevealed(true);
+    revealOpacity.set(withTiming(1, { duration: 140, reduceMotion: ReduceMotion.System }));
+  }, [hasRevealed, listMountKey, loadedListKey, props.contentPresentation.kind, revealOpacity]);
+  useEffect(() => () => cancelAnimation(revealOpacity), [revealOpacity]);
+
   useLayoutEffect(() => {
     const bottom = props.contentInsetEndAdjustment.value;
     if (bottom > 0) {
@@ -2379,15 +2443,21 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       ),
     [presentedFeed, props.anchorMessageId, anchorTopInset],
   );
-  const terminalAssistantMessageIds = useMemo(() => {
-    const terminalIdsByTurn = new Map<TurnId, string>();
-    for (const entry of props.feed) {
-      if (entry.type === "message" && entry.message.role === "assistant" && entry.message.turnId) {
-        terminalIdsByTurn.set(entry.message.turnId, entry.message.id);
-      }
-    }
-    return new Set(terminalIdsByTurn.values());
-  }, [props.feed]);
+  const terminalAssistantMessageIds = useMemo(
+    () => deriveTerminalAssistantMessageIds(props.feed, props.importedFrom ?? null),
+    [props.feed, props.importedFrom],
+  );
+  // Shares the header slot with "Load earlier turns", so the note only appears
+  // once the oldest page is loaded and never adds a row to the list.
+  const showImportTruncatedNote = useMemo(
+    () =>
+      shouldShowImportTruncatedNote({
+        importedFrom: props.importedFrom ?? null,
+        hasOlderTurns: props.loadEarlier != null,
+        firstMessage: props.feed.find((entry) => entry.type === "message")?.message,
+      }),
+    [props.feed, props.importedFrom, props.loadEarlier],
+  );
   const unsettledTurnId =
     props.latestTurn &&
     (props.latestTurn.completedAt === null || props.latestTurn.state === "running")
@@ -2405,18 +2475,18 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         const interruptedTurnId = props.latestTurn.turnId;
         setInteractionState((current) => ({
           ...current,
-          expandedTurnIds: new Set(current.expandedTurnIds).add(interruptedTurnId),
+          expandedFoldKeys: new Set(current.expandedFoldKeys).add(interruptedTurnId),
         }));
       }
       return;
     }
     setInteractionState((current) => {
-      if (!current.expandedTurnIds.has(previous.turnId)) {
+      if (!current.expandedFoldKeys.has(previous.turnId)) {
         return current;
       }
-      const next = new Set(current.expandedTurnIds);
+      const next = new Set(current.expandedFoldKeys);
       next.delete(previous.turnId);
-      return { ...current, expandedTurnIds: next };
+      return { ...current, expandedFoldKeys: next };
     });
   }, [props.latestTurn]);
 
@@ -2473,7 +2543,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     if (disclosureAnchorKeyRef.current !== null) {
       settleDisclosureAfterLayout();
     }
-  }, [expandedTurnIds, expandedWorkGroups, expandedWorkRows, settleDisclosureAfterLayout]);
+  }, [expandedFoldKeys, expandedWorkGroups, expandedWorkRows, settleDisclosureAfterLayout]);
 
   const handleItemSizeChanged = useCallback(() => {
     if (disclosureAnchorKeyRef.current !== null) {
@@ -2541,16 +2611,16 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   );
 
   const onToggleTurnFold = useCallback(
-    (turnId: TurnId) => {
-      suspendEndScrollMaintenanceForDisclosure(`turn-fold:${turnId}`);
+    (foldKey: string) => {
+      suspendEndScrollMaintenanceForDisclosure(`turn-fold:${foldKey}`);
       setInteractionState((current) => {
-        const next = new Set(current.expandedTurnIds);
-        if (next.has(turnId)) {
-          next.delete(turnId);
+        const next = new Set(current.expandedFoldKeys);
+        if (next.has(foldKey)) {
+          next.delete(foldKey);
         } else {
-          next.add(turnId);
+          next.add(foldKey);
         }
-        return { ...current, expandedTurnIds: next };
+        return { ...current, expandedFoldKeys: next };
       });
     },
     [suspendEndScrollMaintenanceForDisclosure],
@@ -2584,6 +2654,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       switch (entry.type) {
         case "turn-fold":
           return TURN_FOLD_HEIGHT;
+        case "import-divider":
+          return IMPORT_DIVIDER_HEIGHT;
         case "work-toggle":
           return WORK_GROUP_TOGGLE_HEIGHT;
         case "activity-group":
@@ -2612,6 +2684,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       >
         <ThreadMediaVisibility>
           {renderFeedEntry(info, {
+            threadId: props.threadId,
             environmentId: props.environmentId,
             copiedRowId,
             expandedWorkRows,
@@ -2664,6 +2737,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       onToggleWorkGroup,
       onToggleWorkRow,
       props.environmentId,
+      props.threadId,
       props.onUseArtifactTemplate,
       props.skills,
       renderMarkdownImage,
@@ -2686,8 +2760,15 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   return (
     <>
       <View className="flex-1" onLayout={handleViewportLayout}>
-        <View className="flex-1">
+        <Animated.View
+          className="flex-1"
+          style={revealStyle}
+          pointerEvents={hasRevealed ? "auto" : "none"}
+          accessibilityElementsHidden={!hasRevealed}
+          importantForAccessibility={hasRevealed ? "auto" : "no-hide-descendants"}
+        >
           <KeyboardAwareLegendList
+            onLoad={handleInitialListLoad}
             ref={props.listRef}
             // The empty↔filled key remounts the list when messages first
             // arrive. LegendList's maintainScrollAtEnd calls scrollToEnd(),
@@ -2822,6 +2903,12 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
                     </Text>
                   </Pressable>
                 ) : null}
+                {showImportTruncatedNote ? (
+                  <Text className="px-4 py-2 text-center text-xs text-foreground-secondary">
+                    Earlier messages from this session aren&apos;t shown. The model still has the
+                    full session.
+                  </Text>
+                ) : null}
               </>
             }
             contentContainerStyle={{
@@ -2829,7 +2916,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
               paddingHorizontal: contentHorizontalPadding,
             }}
           />
-        </View>
+        </Animated.View>
         {props.feed.length === 0 &&
         props.activeWorkStartedAt === null &&
         props.contentPresentation.kind === "ready" ? (

@@ -1,4 +1,6 @@
+import { themeColorWithAlpha } from "../../lib/mobileTheme";
 import { GlassCard } from "../../components/GlassCard";
+import { useGlassPalette } from "../../lib/useGlassPalette";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -38,6 +40,7 @@ import {
   type ThreadListV2Status,
 } from "./threadListV2";
 import { ThreadSearchMatchExcerpt } from "./thread-search-match";
+import { ThreadHierarchyChevron } from "./thread-list-items";
 
 /**
  * Thread List v2 renders one virtualized native list: frosted cards for
@@ -141,12 +144,11 @@ export const ThreadListV2SnoozedShelfHeader = memo(function ThreadListV2SnoozedS
           {props.expanded ? "Snoozed" : `Snoozed (${props.count})`}
         </Text>
         <View className="h-px flex-1 bg-adaptive-blue-500-a20-blue-400-a15" />
-        <SymbolView
-          name="chevron.down"
+        <ThreadHierarchyChevron
+          direction="down"
+          expanded={props.expanded}
           size={10}
           tintColor={colorScheme === "dark" ? SNOOZE_ACCENT_DARK : SNOOZE_ACCENT_LIGHT}
-          type="monochrome"
-          style={{ transform: [{ rotate: props.expanded ? "180deg" : "0deg" }] }}
         />
       </GlassCard>
     </Pressable>
@@ -178,13 +180,7 @@ export const ThreadListV2SettledShelfHeader = memo(function ThreadListV2SettledS
           {props.expanded ? "Settled" : `Settled (${props.count})`}
         </Text>
         <View className="h-px flex-1 bg-border" />
-        <SymbolView
-          name="chevron.down"
-          size={10}
-          tintColorClassName={"accent-foreground-muted"}
-          type="monochrome"
-          style={{ transform: [{ rotate: props.expanded ? "180deg" : "0deg" }] }}
-        />
+        <ThreadHierarchyChevron direction="down" expanded={props.expanded} size={10} />
       </GlassCard>
     </Pressable>
   );
@@ -417,7 +413,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const pr = useThreadPr(thread, prProject);
 
   const theme = useUniwindTheme();
-  const screenColor = theme["--color-screen"];
+  const glass = useGlassPalette();
   const selectedBackgroundColor = theme["--color-card"];
   const sidebarPane = props.pane === "sidebar";
   const selected = props.selected === true;
@@ -708,14 +704,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const cardContent = (
     <>
       <View className="flex-row items-center gap-1.5">
-        {selected ? (
-          <View
-            accessible={false}
-            pointerEvents="none"
-            className="h-6 w-1 rounded-full bg-primary"
-          />
-        ) : null}
-
         {props.project && !props.nested ? (
           <ProjectFavicon
             environmentId={thread.environmentId}
@@ -843,9 +831,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           onSelectThread(thread);
         }}
         style={({ pressed }) => ({
-          backgroundColor: selected ? selectedBackgroundColor : screenColor,
+          backgroundColor:
+            pressed && !glass.opaque ? themeColorWithAlpha(glass.accent, 0.12) : "transparent",
           borderRadius: SIDEBAR_V2_ROW_RADIUS,
-          opacity: pressed ? 0.7 : 1,
+          opacity: pressed ? 0.9 : 1,
         })}
       >
         <GlassCard
@@ -872,9 +861,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           onSelectThread(thread);
         }}
         style={({ pressed }) => ({
-          backgroundColor: selected ? selectedBackgroundColor : screenColor,
+          backgroundColor:
+            pressed && !glass.opaque ? themeColorWithAlpha(glass.accent, 0.12) : "transparent",
           borderRadius: SIDEBAR_V2_ROW_RADIUS,
-          opacity: pressed ? 0.7 : 1,
+          opacity: pressed ? 0.9 : 1,
         })}
       >
         <GlassCard tone={selected ? "accent" : "default"} radius={SIDEBAR_V2_ROW_RADIUS}>
@@ -885,13 +875,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               sidebarPane ? "px-3" : "px-5",
             )}
           >
-            {selected ? (
-              <View
-                accessible={false}
-                pointerEvents="none"
-                className="h-6 w-1 rounded-full bg-primary"
-              />
-            ) : null}
             <SymbolView
               name={snoozedRow ? "moon.zzz" : "checkmark.circle"}
               size={16}

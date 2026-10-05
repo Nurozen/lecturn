@@ -8,6 +8,7 @@ import {
   ProviderInstanceId,
   type ServerProvider,
   ThreadId,
+  type ThreadImportOrigin,
   TurnId,
   type ScopedThreadRef,
 } from "@lecturn/contracts";
@@ -62,7 +63,12 @@ import {
 import {
   buildForkTitle,
   buildForkTurnIdByMessageId,
+  buildImportChip,
+  deriveLockedProvider,
+  deriveUnsentImportInstanceId,
   resolveForkDisabledReason,
+  resolveThreadHistoryDividers,
+  shouldShowImportTruncatedNote,
   waitForThreadShell,
 } from "./ChatView.logic";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -721,6 +727,215 @@ describe("buildThreadTurnInterruptInput", () => {
   });
 });
 
+function makeImportOrigin(overrides: Partial<ThreadImportOrigin> = {}): ThreadImportOrigin {
+  return {
+    providerInstanceId: ProviderInstanceId.make("claude_work"),
+    driverKind: ProviderDriverKind.make("claudeAgent"),
+    sessionId: "external-session-1",
+    cwd: "/repo/app",
+    title: "Fix the login flow",
+    importedAt: "2026-03-28T12:00:00.000Z",
+    historyTruncated: false,
+    ...overrides,
+  };
+}
+
+function makeMessage(
+  id: string,
+  createdAt: string,
+  overrides: Partial<Thread["messages"][number]> = {},
+): Thread["messages"][number] {
+  return {
+    id: MessageId.make(id),
+    role: "user",
+    text: id,
+    turnId: null,
+    createdAt,
+    updatedAt: createdAt,
+    streaming: false,
+    ...overrides,
+  };
+}
+
+const forkOrigin = {
+  threadId: ThreadId.make("parent-thread"),
+  turnId: TurnId.make("parent-turn"),
+  messageId: MessageId.make("parent-message"),
+  turnCount: 1,
+  forkedAt: "2026-03-28T14:00:00.000Z",
+};
+
+describe("imported thread provider lock", () => {
+  const importedFrom = makeImportOrigin();
+  const importedMessages = [makeMessage("imported-1", "2026-03-28T11:00:00.000Z")];
+  const modelSelection = { instanceId: importedFrom.providerInstanceId, model: "claude-sonnet-5" };
+  const lock = (thread: Thread) =>
+    deriveLockedProvider({
+      thread,
+      selectedProvider: null,
+      threadProvider: thread.modelSelection.instanceId,
+    });
+
+  it("pins an unsent import to the instance it was imported with", () => {
+    const thread = makeThread({ importedFrom, messages: importedMessages, modelSelection });
+
+    expect(deriveUnsentImportInstanceId(thread)).toBe(importedFrom.providerInstanceId);
+    // The driver comes from the import, not from the custom instance id.
+    expect(lock(thread)).toBe("claudeAgent");
+  });
+
+  it("hands the lock to the session once the first message is sent", () => {
+    const thread = makeThread({
+      importedFrom,
+      messages: importedMessages,
+      modelSelection,
+      session: {
+        ...readySession,
+        providerName: "claudeAgent",
+        providerInstanceId: importedFrom.providerInstanceId,
+      },
+    });
+
+    expect(deriveUnsentImportInstanceId(thread)).toBeNull();
+    expect(lock(thread)).toBe("claudeAgent");
+  });
+
+  it("does not pin a fork of an import, which starts from its parent's session", () => {
+    const thread = makeThread({
+      importedFrom,
+      forkedFrom: forkOrigin,
+      messages: importedMessages,
+      modelSelection,
+    });
+
+    expect(deriveUnsentImportInstanceId(thread)).toBeNull();
+  });
+
+  it("leaves ordinary threads alone", () => {
+    expect(deriveUnsentImportInstanceId(makeThread())).toBeNull();
+    expect(lock(makeThread())).toBeNull();
+  });
+});
+
+describe("resolveThreadHistoryDividers", () => {
+  const importedFrom = makeImportOrigin();
+  const imported = [
+    makeMessage("imported-user", "2026-03-28T11:00:00.000Z"),
+    makeMessage("imported-answer", "2026-03-28T11:00:01.000Z", { role: "assistant" }),
+  ];
+  const firstNewMessage = makeMessage("first-new", "2026-03-28T13:00:00.000Z");
+
+  it("marks the end of the timeline on an unsent import", () => {
+    const dividers = resolveThreadHistoryDividers(makeThread({ importedFrom, messages: imported }));
+
+    expect(dividers.forkAfterMessageId).toBeNull();
+    expect(dividers.importDivider?.beforeMessageId).toBeNull();
+    expect(dividers.importDivider?.label).toMatch(/^Imported from Claude Code · .*2026/);
+  });
+
+  it("moves above the first message sent from Lecturn", () => {
+    const dividers = resolveThreadHistoryDividers(
+      makeThread({ importedFrom, messages: [...imported, firstNewMessage] }),
+    );
+
+    expect(dividers.importDivider?.beforeMessageId).toBe(firstNewMessage.id);
+  });
+
+  it("keeps both lines on a fork of an import, import first", () => {
+    const parentAnswer = makeMessage("parent-answer", "2026-03-28T13:00:05.000Z", {
+      role: "assistant",
+    });
+    const childMessage = makeMessage("child-message", "2026-03-28T15:00:00.000Z");
+    const dividers = resolveThreadHistoryDividers(
+      makeThread({
+        importedFrom,
+        forkedFrom: forkOrigin,
+        createdAt: forkOrigin.forkedAt,
+        messages: [...imported, firstNewMessage, parentAnswer, childMessage],
+      }),
+    );
+
+    expect(dividers.importDivider?.beforeMessageId).toBe(firstNewMessage.id);
+    expect(dividers.forkAfterMessageId).toBe(parentAnswer.id);
+  });
+
+  it("marks only the fork point on a plain fork, and nothing on an ordinary thread", () => {
+    const inherited = makeMessage("inherited", "2026-03-28T13:00:00.000Z");
+    expect(
+      resolveThreadHistoryDividers(
+        makeThread({
+          forkedFrom: forkOrigin,
+          createdAt: forkOrigin.forkedAt,
+          messages: [inherited, makeMessage("child", "2026-03-28T15:00:00.000Z")],
+        }),
+      ),
+    ).toEqual({ forkAfterMessageId: inherited.id, importDivider: null });
+    expect(resolveThreadHistoryDividers(makeThread({ messages: [inherited] }))).toEqual({
+      forkAfterMessageId: null,
+      importDivider: null,
+    });
+  });
+
+  it("draws no import line when the loaded window starts after the imported history", () => {
+    const dividers = resolveThreadHistoryDividers(
+      makeThread({ importedFrom, messages: [firstNewMessage] }),
+    );
+
+    expect(dividers.importDivider).toBeNull();
+  });
+});
+
+describe("shouldShowImportTruncatedNote", () => {
+  const importedFrom = makeImportOrigin({ historyTruncated: true });
+  const firstMessage = makeMessage("imported-user", "2026-03-28T11:00:00.000Z");
+
+  it("shows once the oldest page of a truncated import is loaded", () => {
+    expect(
+      shouldShowImportTruncatedNote({ importedFrom, hasOlderTurns: false, firstMessage }),
+    ).toBe(true);
+  });
+
+  it("stays hidden while older pages remain, before messages load, or when nothing was cut", () => {
+    expect(shouldShowImportTruncatedNote({ importedFrom, hasOlderTurns: true, firstMessage })).toBe(
+      false,
+    );
+    expect(
+      shouldShowImportTruncatedNote({
+        importedFrom,
+        hasOlderTurns: false,
+        firstMessage: undefined,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowImportTruncatedNote({
+        importedFrom: makeImportOrigin(),
+        hasOlderTurns: false,
+        firstMessage,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowImportTruncatedNote({ importedFrom: null, hasOlderTurns: false, firstMessage }),
+    ).toBe(false);
+  });
+});
+
+describe("buildImportChip", () => {
+  it("names the source product and the original session, with the folder in the tooltip", () => {
+    const chip = buildImportChip(makeImportOrigin());
+
+    expect(chip.label).toBe("Imported from Claude Code · Fix the login flow");
+    expect(chip.tooltip).toContain("/repo/app");
+    expect(chip.tooltip).toContain("2026");
+  });
+
+  it("drops the separator for an untitled session", () => {
+    expect(
+      buildImportChip(makeImportOrigin({ driverKind: ProviderDriverKind.make("codex"), title: "" }))
+        .label,
+    ).toBe("Imported from Codex");
+  });
+});
+
 describe("resolveComposerProviderSelection", () => {
   const catalogModels: ServerProvider["models"] = [
     { slug: "gemini-pro", name: "Gemini Pro", isCustom: false, capabilities: null },
@@ -928,6 +1143,22 @@ describe("resolveComposerProviderSelection", () => {
 
     expect(selection.selectedProviderEntry).toBeUndefined();
   });
+
+  it("keeps an unsent import on its own instance even when another shares its continuation group", () => {
+    const continuation = { groupKey: "claude:home:/Users/me/.claude" };
+    const defaultEntry = entry("claudeAgent", "claudeAgent", { continuation });
+    const workEntry = entry("claudeAgent", "claude_work", { continuation });
+    const selection = resolveComposerProviderSelection({
+      entries: [defaultEntry, workEntry],
+      // The composer's sticky pick points at the other instance.
+      candidateInstanceIds: [defaultEntry.instanceId, workEntry.instanceId],
+      lockedProvider: ProviderDriverKind.make("claudeAgent"),
+      lockedInstanceId: workEntry.instanceId,
+      requireExactInstance: true,
+    });
+
+    expect(selection.selectedProviderEntry?.instanceId).toBe(workEntry.instanceId);
+  });
 });
 
 describe("resolveComposerInteractionMode", () => {
@@ -1028,6 +1259,47 @@ describe("buildRevertTurnCountByUserMessageId", () => {
         timelineEntries,
         turnDiffSummaryByAssistantMessageId,
         inferredCheckpointTurnCountByTurnId: {},
+      }),
+    ).toEqual(new Map([[userMessageId, 0]]));
+  });
+
+  it("never offers rewind on an imported message, even when a checkpointed reply follows it", () => {
+    // A turn can start without a user message (a background wake-up), so the
+    // first checkpointed reply can directly follow the import's last message.
+    const importedUserMessageId = MessageId.make("imported-user-message");
+    const importedAt = "2026-03-28T00:00:00.000Z";
+    const importedEntry = {
+      id: importedUserMessageId,
+      kind: "message",
+      createdAt: importedAt,
+      message: {
+        id: importedUserMessageId,
+        role: "user",
+        text: "Asked in the terminal",
+        turnId: null,
+        createdAt: importedAt,
+        updatedAt: importedAt,
+        streaming: false,
+      },
+    } satisfies TimelineEntry;
+    const input = {
+      supportsConversationRollback: true,
+      turnDiffSummaryByAssistantMessageId,
+      inferredCheckpointTurnCountByTurnId: {},
+    };
+
+    expect(
+      buildRevertTurnCountByUserMessageId({
+        ...input,
+        timelineEntries: [importedEntry, ...timelineEntries.slice(1)],
+        importedFrom: makeImportOrigin({ importedAt }),
+      }).size,
+    ).toBe(0);
+    expect(
+      buildRevertTurnCountByUserMessageId({
+        ...input,
+        timelineEntries: [importedEntry, ...timelineEntries],
+        importedFrom: makeImportOrigin({ importedAt }),
       }),
     ).toEqual(new Map([[userMessageId, 0]]));
   });

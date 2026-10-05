@@ -1,3 +1,5 @@
+import type { ManagedEndpointDeprovisionTarget } from "../environments/ManagedEndpointProvider.ts";
+import type { PersonalPaidFacts } from "../billing/BillingStore.ts";
 import { sql } from "drizzle-orm";
 import type {
   RelayAgentActivityAggregateState,
@@ -18,12 +20,27 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 
+// Identity of one push-notification event: a thread in a given phase + status.
+// Deliberately timestamp-free so heartbeat republishes map to the same event.
+export interface NotifiedPushEvent {
+  readonly environmentId: string;
+  readonly threadId: string;
+  readonly phase: string;
+  readonly status: string;
+  // The ring is still owed: a Live Activity update showed this event silently
+  // because the user was present at a client, which consumed the transition a
+  // later alert would have keyed on. Absent on events that already rang.
+  readonly deferred?: true;
+}
+
 export const relayMobileDevices = pgTable(
   "relay_mobile_devices",
   {
     userId: varchar("user_id", { length: 255 }).notNull(),
     deviceId: varchar("device_id", { length: 255 }).notNull(),
     label: text("label").notNull().default("iOS device"),
+    accountLabel: text("account_label"),
+    accountColor: varchar("account_color", { length: 7 }),
     platform: varchar("platform", { length: 16 }).notNull().$type<"ios">(),
     iosMajorVersion: integer("ios_major_version").notNull(),
     appVersion: varchar("app_version", { length: 64 }),
@@ -32,13 +49,22 @@ export const relayMobileDevices = pgTable(
     pushToken: text("push_token"),
     pushToStartToken: text("push_to_start_token"),
     preferencesJson: jsonb("preferences_json").notNull().$type<RelayAgentAwarenessPreferences>(),
+    // Push-notification events already rung on this device, so republishes of
+    // an unchanged state stay silent, plus Live Activity rings deferred while
+    // the user was present. Null until the first entry is written.
+    notifiedPushEventsJson: jsonb("notified_push_events_json").$type<
+      ReadonlyArray<NotifiedPushEvent>
+    >(),
     createdAt: varchar("created_at", { length: 64 }).notNull(),
     updatedAt: varchar("updated_at", { length: 64 }).notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.userId, table.deviceId] }),
-    uniqueIndex("idx_relay_mobile_devices_push_token").on(table.pushToken),
-    uniqueIndex("idx_relay_mobile_devices_push_to_start_token").on(table.pushToStartToken),
+    uniqueIndex("idx_relay_mobile_devices_push_token").on(table.userId, table.pushToken),
+    uniqueIndex("idx_relay_mobile_devices_push_to_start_token").on(
+      table.userId,
+      table.pushToStartToken,
+    ),
   ],
 );
 
@@ -58,7 +84,10 @@ export const relayLiveActivities = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.userId, table.deviceId] }),
-    uniqueIndex("idx_relay_live_activities_activity_push_token").on(table.activityPushToken),
+    uniqueIndex("idx_relay_live_activities_activity_push_token").on(
+      table.userId,
+      table.activityPushToken,
+    ),
   ],
 );
 
@@ -203,6 +232,8 @@ export const relayBillingAccounts = pgTable("relay_billing_accounts", {
   leaseUntil: bigint("lease_until", { mode: "number" }).notNull().default(0),
   reconcileAfter: bigint("reconcile_after", { mode: "number" }).notNull().default(0),
   state: jsonb("state").notNull().default({}),
+  paidFacts: jsonb("paid_facts").$type<PersonalPaidFacts>(),
+  decisionsAccountLabel: text("decisions_account_label"),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 });
 
@@ -435,4 +466,303 @@ export const relayTeamAudit = pgTable(
 export const relayTeamDeletedUsers = pgTable("relay_team_deleted_users", {
   userId: text("user_id").primaryKey(),
   deletedAt: bigint("deleted_at", { mode: "number" }).notNull(),
+});
+
+/** Serializes token claims across users, including concurrent first registration. */
+export const relayPushTokenOwners = pgTable(
+  "relay_push_token_owners",
+  {
+    kind: text("kind").notNull(),
+    token: text("token").notNull(),
+    deviceId: varchar("device_id", { length: 255 }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.kind, table.token] })],
+);
+
+export const relayEnvironmentLinkOwners = pgTable("relay_environment_link_owners", {
+  legacyCleanupPending: boolean("legacy_cleanup_pending").notNull().default(false),
+  environmentId: varchar("environment_id", { length: 191 }).primaryKey(),
+});
+export const relayEnvironmentLinkCleanup = pgTable(
+  "relay_environment_link_cleanup",
+  {
+    userId: varchar("user_id", { length: 191 }).notNull(),
+    environmentId: varchar("environment_id", { length: 191 }).notNull(),
+    target: jsonb("target").$type<ManagedEndpointDeprovisionTarget | null>(),
+    organizationId: text("organization_id"),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.environmentId] })],
+);
+
+/** Decisions funding is separate from account links and Connect grants. */
+export const relayDecisionFunding = pgTable(
+  "relay_decision_funding",
+  {
+    featureId: text("feature_id").notNull().default("decisions"),
+    environmentId: text("environment_id").primaryKey(),
+    publicKey: text("public_key").notNull(),
+    generation: integer("generation").notNull().default(0),
+    payerId: text("payer_id"),
+    state: text("state").notNull().default("unfunded"),
+  },
+  (table) => [
+    check(
+      "relay_decision_funding_feature_id_check",
+      sql`${table.featureId} IN ('decisions','contextual')`,
+    ),
+    index("relay_decision_funding_payer").on(table.payerId),
+    check("relay_decision_funding_state", sql`${table.state} IN ('unfunded','active','revoked')`),
+    check("relay_decision_funding_generation", sql`${table.generation} >= 0`),
+  ],
+);
+export const relayDecisionFundingChallenges = pgTable(
+  "relay_decision_funding_challenges",
+  {
+    featureId: text("feature_id").notNull().default("decisions"),
+    id: text("id").primaryKey(),
+    environmentId: text("environment_id")
+      .notNull()
+      .references(() => relayDecisionFunding.environmentId),
+    publicKey: text("public_key").notNull(),
+    generation: integer("generation").notNull(),
+    expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
+    payerId: text("payer_id"),
+    redeemedGeneration: integer("redeemed_generation"),
+    canceled: boolean("canceled").notNull().default(false),
+    revoked: boolean("revoked").notNull().default(false),
+  },
+  (table) => [
+    check(
+      "relay_decision_funding_challenges_feature_id_check",
+      sql`${table.featureId} IN ('decisions','contextual')`,
+    ),
+    index("relay_decision_challenges_environment").on(table.environmentId),
+  ],
+);
+export const relayDecisionGrants = pgTable(
+  "relay_decision_grants",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => relayBillingAccounts.userId),
+    startsAt: bigint("starts_at", { mode: "number" }).notNull(),
+    endsAt: bigint("ends_at", { mode: "number" }).notNull(),
+    monthlyInputTokens: bigint("monthly_input_tokens", { mode: "number" }).notNull(),
+    operator: text("operator").notNull(),
+    reason: text("reason").notNull(),
+    revokedAt: bigint("revoked_at", { mode: "number" }),
+  },
+  (table) => [
+    index("relay_decision_grants_user").on(table.userId),
+    check(
+      "relay_decision_grants_window",
+      sql`${table.startsAt} > 0 AND ${table.endsAt} > ${table.startsAt}`,
+    ),
+    check(
+      "relay_decision_grants_allowance",
+      sql`${table.monthlyInputTokens} > 0 AND ${table.monthlyInputTokens} <= 9007199254740991`,
+    ),
+  ],
+);
+
+/** Content-free, durable metering. Request identities remain tombstones after result expiry. */
+export const relayDecisionUsageAccounts = pgTable(
+  "relay_decision_usage_accounts",
+  {
+    payerId: text("payer_id").primaryKey(),
+    exposureNano: bigint("exposure_nano", { mode: "number" }).notNull().default(0),
+  },
+  (table) => [check("decision_usage_account_exposure", sql`${table.exposureNano} >= 0`)],
+);
+export const relayDecisionUsageWindows = pgTable(
+  "relay_decision_usage_windows",
+  {
+    limitInputTokens: bigint("limit_input_tokens", { mode: "number" }),
+    poolBasis: text("pool_basis"),
+    payerId: text("payer_id").notNull(),
+    windowStart: bigint("window_start", { mode: "number" }).notNull(),
+    windowEnd: bigint("window_end", { mode: "number" }).notNull(),
+    usedInputTokens: bigint("used_input_tokens", { mode: "number" }).notNull().default(0),
+    reservedInputTokens: bigint("reserved_input_tokens", { mode: "number" }).notNull().default(0),
+  },
+  (table) => [
+    check(
+      "relay_decision_usage_windows_pool_basis_check",
+      sql`${table.poolBasis} IN ('subscription','grant')`,
+    ),
+    primaryKey({ columns: [table.payerId, table.windowStart] }),
+    check(
+      "decision_usage_window_counts",
+      sql`${table.usedInputTokens} >= 0 AND ${table.reservedInputTokens} >= 0`,
+    ),
+  ],
+);
+export const relayDecisionUsageRuns = pgTable(
+  "relay_decision_usage_runs",
+  {
+    featureId: text("feature_id").notNull().default("decisions"),
+    payerId: text("payer_id").notNull(),
+    runId: text("run_id").notNull(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    spentNano: bigint("spent_nano", { mode: "number" }).notNull().default(0),
+  },
+  (table) => [
+    check(
+      "relay_decision_usage_runs_feature_id_check",
+      sql`${table.featureId} IN ('decisions','contextual')`,
+    ),
+    primaryKey({ columns: [table.payerId, table.runId] }),
+    check("decision_usage_run_counts", sql`${table.attemptCount} >= 0 AND ${table.spentNano} >= 0`),
+  ],
+);
+export const relayDecisionUsageRequests = pgTable(
+  "relay_decision_usage_requests",
+  {
+    legacyFingerprint: text("legacy_fingerprint"),
+    backend: text("backend").notNull().default("legacy"),
+    featureId: text("feature_id").notNull().default("decisions"),
+    payerId: text("payer_id").notNull(),
+    requestId: text("request_id").notNull(),
+    environmentId: text("environment_id").notNull(),
+    publicKey: text("public_key").notNull(),
+    credentialId: text("credential_id").notNull(),
+    fundingGeneration: integer("funding_generation").notNull(),
+    runId: text("run_id").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    model: text("model").notNull(),
+    templateVersion: text("template_version").notNull(),
+    windowStart: bigint("window_start", { mode: "number" }).notNull(),
+    windowEnd: bigint("window_end", { mode: "number" }).notNull(),
+    holdTokens: bigint("hold_tokens", { mode: "number" }).notNull().default(0),
+    debitedInputTokens: bigint("debited_input_tokens", { mode: "number" }).notNull().default(0),
+    status: text("status").notNull().default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    activeAttemptId: text("active_attempt_id"),
+    resultJson: jsonb("result_json"),
+    qualificationId: text("qualification_id"),
+    resultExpiresAt: bigint("result_expires_at", { mode: "number" }),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    check(
+      "relay_decision_usage_requests_feature_id_check",
+      sql`${table.featureId} IN ('decisions','contextual')`,
+    ),
+    check(
+      "decision_usage_qualification",
+      sql`${table.qualificationId} IS NULL OR (${table.templateVersion}='decisions-equivalence-v1' AND ${table.backend}='private-evaluator' AND length(${table.qualificationId}) BETWEEN 1 AND 256 AND btrim(${table.qualificationId})=${table.qualificationId})`,
+    ),
+    primaryKey({ columns: [table.payerId, table.requestId] }),
+    check(
+      "decision_usage_request_status",
+      sql`${table.status} IN ('pending','unknown','succeeded','failed','expired')`,
+    ),
+    check(
+      "decision_usage_request_counts",
+      sql`${table.holdTokens} >= 0 AND ${table.debitedInputTokens} >= 0 AND ${table.attemptCount} >= 0`,
+    ),
+  ],
+);
+export const relayDecisionUsageAttempts = pgTable(
+  "relay_decision_usage_attempts",
+  {
+    nextCheckAt: bigint("next_check_at", { mode: "number" }).notNull().default(0),
+    policyVersion: text("policy_version").notNull().default("decisions-v1"),
+    requestFingerprint: text("request_fingerprint").notNull().default(""),
+    backend: text("backend").notNull().default("legacy"),
+    featureId: text("feature_id").notNull().default("decisions"),
+    id: text("id").primaryKey(),
+    payerId: text("payer_id").notNull(),
+    requestId: text("request_id").notNull(),
+    runId: text("run_id").notNull(),
+    environmentId: text("environment_id").notNull(),
+    windowStart: bigint("window_start", { mode: "number" }).notNull(),
+    holdNano: bigint("hold_nano", { mode: "number" }).notNull(),
+    priceNano: bigint("price_nano", { mode: "number" }).notNull(),
+    status: text("status").notNull(),
+    deadline: bigint("deadline", { mode: "number" }).notNull(),
+    actualTokens: bigint("actual_tokens", { mode: "number" }),
+    costNano: bigint("cost_nano", { mode: "number" }),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    index("relay_extension_attempt_recovery")
+      .on(table.featureId, table.backend, table.nextCheckAt, table.id)
+      .where(
+        sql`${table.costNano} IS NULL AND ${table.status} IN ('dispatched','unknown','expired')`,
+      ),
+    index("relay_extension_attempt_unresolved")
+      .on(table.environmentId, table.createdAt)
+      .where(sql`${table.backend}='private-evaluator' AND ${table.costNano} IS NULL`),
+    check(
+      "relay_decision_usage_attempts_feature_id_check",
+      sql`${table.featureId} IN ('decisions','contextual')`,
+    ),
+    index("decision_usage_attempt_account").on(table.payerId, table.createdAt),
+    index("decision_usage_attempt_reconcile").on(table.status, table.deadline),
+    index("decision_usage_attempt_environment").on(table.environmentId, table.status),
+    check(
+      "decision_usage_attempt_status",
+      sql`${table.status} IN ('admitted','dispatched','unknown','succeeded','failed','expired','late')`,
+    ),
+  ],
+);
+export const relayDecisionUsageControl = pgTable(
+  "relay_decision_usage_control",
+  {
+    id: integer("id").primaryKey(),
+    exposureNano: bigint("exposure_nano", { mode: "number" }).notNull().default(0),
+    anomaly: boolean("anomaly").notNull().default(false),
+  },
+  (table) => [
+    check("decision_usage_control_id", sql`${table.id}=1`),
+    check("decision_usage_control_exposure", sql`${table.exposureNano} >= 0`),
+  ],
+);
+
+/** Compatibility shape; controlled promotion widens keys only after old workers retire. */
+export const relayExtensionsSchema = pgTable(
+  "relay_extensions_schema",
+  {
+    id: integer("id").primaryKey(),
+    phase: integer("phase").notNull().default(0),
+    minimumReservationEpoch: integer("minimum_reservation_epoch").notNull().default(0),
+    compatibilityDeployments: integer("compatibility_deployments").notNull().default(0),
+    rollbackFloor: text("rollback_floor"),
+  },
+  (table) => [
+    check("relay_extensions_schema_id_check", sql`${table.id}=1`),
+    check("relay_extensions_schema_phase_check", sql`${table.phase} IN (0,1)`),
+  ],
+);
+export const relayExtensionAdmissionGrants = pgTable(
+  "relay_extension_admission_grants",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => relayBillingAccounts.userId),
+    featureId: text("feature_id").notNull(),
+    startsAt: bigint("starts_at", { mode: "number" }).notNull(),
+    endsAt: bigint("ends_at", { mode: "number" }).notNull(),
+    revokedAt: bigint("revoked_at", { mode: "number" }),
+    operator: text("operator").notNull(),
+    reason: text("reason").notNull(),
+  },
+  (table) => [
+    check(
+      "relay_extension_admission_grants_feature_id_check",
+      sql`${table.featureId} IN ('decisions','contextual')`,
+    ),
+    check("relay_extension_admission_grants_check", sql`${table.endsAt} > ${table.startsAt}`),
+  ],
+);
+
+export const relayExtensionsEvaluatorCleanup = pgTable("relay_extensions_evaluator_cleanup", {
+  environmentId: text("environment_id").primaryKey(),
+  minimumAdmissibilityEpoch: bigint("minimum_admissibility_epoch", { mode: "number" })
+    .notNull()
+    .default(0),
+  nextCheckAt: bigint("next_check_at", { mode: "number" }).notNull().default(0),
 });

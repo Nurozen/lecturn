@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   resolveThreadActionProjectRef,
   hasExplicitComposerModelSelection,
+  resolveCarriedThreadModes,
   resolveNewDraftStartFromOrigin,
   resolveNewThreadEnvModeSources,
   resolveNewThreadModelSelectionOverride,
@@ -212,6 +213,32 @@ describe("resolveNewThreadEnvModeSources", () => {
       forcedMode: undefined,
       projectSetting: undefined,
       consultProjectFile: false,
+    });
+  });
+});
+
+describe("resolveCarriedThreadModes", () => {
+  it("prefers the composer override, then the thread, then the draft, per mode", () => {
+    expect(
+      resolveCarriedThreadModes({
+        composer: { runtimeMode: "approval-required", interactionMode: null },
+        shell: { runtimeMode: "full-access", interactionMode: "plan" },
+        draft: null,
+      }),
+    ).toEqual({ runtimeMode: "approval-required", interactionMode: "plan" });
+    expect(
+      resolveCarriedThreadModes({
+        composer: null,
+        shell: null,
+        draft: { runtimeMode: "approval-required", interactionMode: "plan" },
+      }),
+    ).toEqual({ runtimeMode: "approval-required", interactionMode: "plan" });
+  });
+
+  it("carries nothing when no thread is being viewed, leaving the default to the caller", () => {
+    expect(resolveCarriedThreadModes({ composer: null, shell: null, draft: null })).toEqual({
+      runtimeMode: null,
+      interactionMode: null,
     });
   });
 });

@@ -1,0 +1,2 @@
+ALTER TABLE "relay_decision_usage_requests" ADD COLUMN "qualification_id" text;--> statement-breakpoint
+ALTER TABLE "relay_decision_usage_requests" ADD CONSTRAINT "decision_usage_qualification" CHECK ("qualification_id" IS NULL OR ("template_version"='decisions-equivalence-v1' AND "backend"='private-evaluator' AND length("qualification_id") BETWEEN 1 AND 256 AND btrim("qualification_id")="qualification_id"));

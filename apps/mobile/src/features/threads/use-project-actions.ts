@@ -1,3 +1,4 @@
+import { contextualBootstrap, type ContextualDraft } from "../contextual/contextualDraft";
 import { useCallback } from "react";
 
 import { scopeThreadRef } from "@lecturn/client-runtime/environment";
@@ -34,6 +35,7 @@ export function useCreateProjectThread() {
   return useCallback(
     async (input: {
       readonly project: EnvironmentProject;
+      readonly contextual?: ContextualDraft;
       readonly modelSelection: ModelSelection;
       readonly envMode: "local" | "worktree";
       readonly branch: string | null;
@@ -131,6 +133,10 @@ export function useCreateProjectThread() {
       const result = await startTurn({
         environmentId: input.project.environmentId,
         input: buildProjectThreadStartTurnInput({
+          ...contextualBootstrap(
+            serverConfig?.environment.capabilities.contextual === true,
+            input.contextual,
+          ),
           projectId: input.project.id,
           projectCwd: input.project.workspaceRoot,
           threadId: metadata.threadId,

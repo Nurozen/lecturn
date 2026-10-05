@@ -11,7 +11,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
-import { ChevronDownIcon, GitForkIcon } from "lucide-react";
+import { ChevronDownIcon, GitForkIcon, ImportIcon } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   memo,
@@ -24,6 +24,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import GitActionsControl from "../GitActionsControl";
+import { buildImportChip } from "../ChatView.logic";
 import { isTrailingDoubleClick } from "../Sidebar.logic";
 import { type DraftId } from "~/composerDraftStore";
 import { Button } from "../ui/button";
@@ -206,6 +207,13 @@ export const ChatHeader = memo(function ChatHeader({
     const turnSuffix = forkedFrom.turnCount > 0 ? ` · after turn ${forkedFrom.turnCount}` : "";
     return `Forked from ${origin}${turnSuffix}`;
   }, [forkedFrom, parentShell]);
+  // A fork of an imported thread shows only the fork chip: the parent thread
+  // is the nearer origin, and it carries the import chip itself.
+  const importedFrom = forkedFrom === null ? (threadShell?.importedFrom ?? null) : null;
+  const importChip = useMemo(
+    () => (importedFrom === null ? null : buildImportChip(importedFrom)),
+    [importedFrom],
+  );
   const navigate = useNavigate();
   const openParentThread = useCallback(() => {
     if (parentThreadRef === null) return;
@@ -450,6 +458,22 @@ export const ChatHeader = memo(function ChatHeader({
                 <span className="min-w-0 truncate">{forkChipLabel}</span>
               </TooltipTrigger>
               <TooltipPopup side="top">{forkChipLabel}</TooltipPopup>
+            </Tooltip>
+          ) : importChip !== null ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span
+                    tabIndex={0}
+                    aria-label={importChip.label}
+                    className="ml-2 inline-flex h-5 max-w-48 shrink-0 items-center gap-1 rounded-full border border-border/70 px-1.5 text-[11px] text-muted-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                }
+              >
+                <ImportIcon aria-hidden className="size-3 shrink-0" />
+                <span className="min-w-0 truncate">{importChip.label}</span>
+              </TooltipTrigger>
+              <TooltipPopup side="top">{importChip.tooltip}</TooltipPopup>
             </Tooltip>
           ) : null}
         </WorkspaceBreadcrumbItem>

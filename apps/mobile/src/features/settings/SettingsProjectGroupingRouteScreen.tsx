@@ -1,3 +1,5 @@
+import { useGlassPalette } from "../../lib/useGlassPalette";
+import { themeColorWithAlpha } from "../../lib/mobileTheme";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useNavigation } from "@react-navigation/native";
@@ -42,6 +44,7 @@ const GROUPING_OPTIONS: ReadonlyArray<{
 
 export function SettingsProjectGroupingRouteScreen() {
   const navigation = useNavigation();
+  const glass = useGlassPalette();
   const nestSagas = useSidebarNestSagas();
   const insets = useSafeAreaInsets();
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
@@ -78,6 +81,12 @@ export function SettingsProjectGroupingRouteScreen() {
               }}
               disabled={!preferencesReady}
               onPress={() => savePreferences(mobileProjectGroupingModePatch(option.mode))}
+              style={({ pressed }) => ({
+                backgroundColor: pressed
+                  ? themeColorWithAlpha(glass.accent, glass.dark ? 0.12 : 0.07)
+                  : "transparent",
+                opacity: preferencesReady ? 1 : 0.5,
+              })}
               className={
                 index === 0
                   ? "flex-row items-center gap-4 p-4"
@@ -85,7 +94,7 @@ export function SettingsProjectGroupingRouteScreen() {
               }
             >
               <View className="min-w-0 flex-1 gap-1">
-                <Text className="text-lg text-foreground">{option.label}</Text>
+                <Text className="text-base text-foreground">{option.label}</Text>
                 <Text className="text-sm leading-normal text-foreground-muted">
                   {option.description}
                 </Text>
@@ -94,7 +103,7 @@ export function SettingsProjectGroupingRouteScreen() {
                 <SymbolView
                   name="checkmark"
                   size={18}
-                  tintColorClassName={"accent-icon"}
+                  tintColor={glass.accent}
                   type="monochrome"
                   weight="semibold"
                 />
@@ -108,10 +117,16 @@ export function SettingsProjectGroupingRouteScreen() {
             accessibilityState={{ checked: nestSagas, disabled: !preferencesReady }}
             disabled={!preferencesReady}
             onPress={() => savePreferences({ sidebarNestSagas: !nestSagas })}
+            style={({ pressed }) => ({
+              backgroundColor: pressed
+                ? themeColorWithAlpha(glass.accent, glass.dark ? 0.12 : 0.07)
+                : "transparent",
+              opacity: preferencesReady ? 1 : 0.5,
+            })}
             className="flex-row items-center gap-4 p-4"
           >
             <View className="min-w-0 flex-1 gap-1">
-              <Text className="text-lg text-foreground">Nest saga members</Text>
+              <Text className="text-base text-foreground">Nest saga members</Text>
               <Text className="text-sm text-foreground-muted">
                 Use dependency order in the tablet sidebar and legacy list.
               </Text>

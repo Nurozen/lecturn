@@ -1,3 +1,11 @@
+import { DecisionRelations } from "./threadDecisions/DecisionRelations.ts";
+import { ContextualService } from "./contextual/ContextualService.ts";
+import { ExtensionsCloudClient } from "./extensions/ExtensionsCloudClient.ts";
+import { ContextualTurnQueue } from "./orchestration/ContextualTurnQueue.ts";
+import { DecisionCloudClient } from "./threadDecisions/DecisionCloudClient.ts";
+import * as Schedule from "effect/Schedule";
+import { DecisionIngestion } from "./threadDecisions/DecisionIngestion.ts";
+import { DecisionWorker } from "./threadDecisions/DecisionWorker.ts";
 import { PullRequestWatchDiscovery } from "./pullRequest/PullRequestWatchDiscovery.ts";
 import { PullRequestWatchService } from "./pullRequest/PullRequestWatchService.ts";
 import {
@@ -440,6 +448,7 @@ export const clearProviderSessionContinuationMarkers = (threadIds: ReadonlyArray
   }).pipe(Effect.mapError(toServerUpdateThreadContinuationError));
 
 export const reconcileProviderSessions = Effect.gen(function* () {
+  const contextualQueue = yield* Effect.serviceOption(ContextualTurnQueue);
   const crypto = yield* Crypto.Crypto;
   const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
   const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
@@ -538,6 +547,7 @@ export const reconcileProviderSessions = Effect.gen(function* () {
     if (
       Option.isSome(binding) &&
       continuationMarked &&
+      !(Option.isSome(contextualQueue) && (yield* contextualQueue.value.head(thread.id))) &&
       thread.archivedAt === null &&
       thread.deletedAt === null
     ) {
@@ -768,6 +778,46 @@ export const make = (options?: StartupOptions) =>
         Effect.gen(function* () {
           yield* orchestrationReactor.start().pipe(Scope.provide(reactorScope));
           yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope));
+          const decisionCloud = yield* Effect.serviceOption(DecisionCloudClient);
+          if (Option.isSome(decisionCloud))
+            yield* forkParked(
+              decisionCloud.value.refreshFunding.pipe(Effect.repeat(Schedule.spaced("1 minute"))),
+            ).pipe(Scope.provide(reactorScope));
+          const extensionsCloud = yield* Effect.serviceOption(ExtensionsCloudClient);
+          const contextual = yield* Effect.serviceOption(ContextualService);
+          if (Option.isSome(extensionsCloud))
+            yield* forkParked(
+              extensionsCloud.value.reconcilePending.pipe(
+                Effect.repeat(Schedule.spaced("5 seconds")),
+              ),
+            ).pipe(Scope.provide(reactorScope));
+          if (Option.isSome(contextual))
+            yield* forkParked(
+              contextual.value
+                .maintainCapture()
+                .pipe(Effect.ignore, Effect.repeat(Schedule.spaced("2 minutes"))),
+            ).pipe(Scope.provide(reactorScope));
+          const decisionRelations = yield* Effect.serviceOption(DecisionRelations);
+          if (Option.isSome(decisionRelations))
+            yield* forkParked(
+              decisionRelations.value.drive.pipe(
+                Effect.ignore,
+                Effect.repeat(Schedule.spaced("2 minutes")),
+              ),
+            ).pipe(Scope.provide(reactorScope));
+          const decisionIngestion = yield* Effect.serviceOption(DecisionIngestion);
+          const decisionWorker = yield* Effect.serviceOption(DecisionWorker);
+          if (Option.isSome(decisionIngestion) && Option.isSome(decisionWorker))
+            yield* forkParked(
+              decisionIngestion.value.start.pipe(
+                Effect.catch(() =>
+                  Effect.logError(
+                    "Decision history recovery is waiting; saved decisions remain available.",
+                  ),
+                ),
+                Effect.andThen(decisionWorker.value.start),
+              ),
+            ).pipe(Scope.provide(reactorScope));
           const watches = yield* Effect.serviceOption(PullRequestWatchService);
           if (Option.isSome(watches)) yield* watches.value.start.pipe(Scope.provide(reactorScope));
           const discovery = yield* Effect.serviceOption(PullRequestWatchDiscovery);

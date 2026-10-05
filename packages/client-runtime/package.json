@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./state/threadNotes": {
+      "types": "./src/state/threadNotes.ts",
+      "default": "./src/state/threadNotes.ts"
+    },
     "./state/activityContext": {
       "types": "./src/state/activityContext.ts",
       "default": "./src/state/activityContext.ts"
@@ -34,6 +38,14 @@
     "./markdown-links": {
       "types": "./src/markdownLinks.ts",
       "default": "./src/markdownLinks.ts"
+    },
+    "./external-session-import": {
+      "types": "./src/externalSessionImport.ts",
+      "default": "./src/externalSessionImport.ts"
+    },
+    "./stave-repo-filter": {
+      "types": "./src/staveRepoFilter.ts",
+      "default": "./src/staveRepoFilter.ts"
     },
     "./media-reference": {
       "types": "./src/mediaReference.ts",
@@ -111,6 +123,10 @@
       "types": "./src/state/entities.ts",
       "default": "./src/state/entities.ts"
     },
+    "./state/externalSessions": {
+      "types": "./src/state/externalSessions.ts",
+      "default": "./src/state/externalSessions.ts"
+    },
     "./state/filesystem": {
       "types": "./src/state/filesystem.ts",
       "default": "./src/state/filesystem.ts"
@@ -187,9 +203,21 @@
       "types": "./src/state/stave.ts",
       "default": "./src/state/stave.ts"
     },
+    "./state/stave-archive": {
+      "types": "./src/state/staveArchive.ts",
+      "default": "./src/state/staveArchive.ts"
+    },
     "./state/stave-operation": {
       "types": "./src/state/staveOperation.ts",
       "default": "./src/state/staveOperation.ts"
+    },
+    "./state/stave-operation-progress": {
+      "types": "./src/state/staveOperationProgress.ts",
+      "default": "./src/state/staveOperationProgress.ts"
+    },
+    "./state/stave-space-wizard": {
+      "types": "./src/state/staveSpaceWizard.ts",
+      "default": "./src/state/staveSpaceWizard.ts"
     },
     "./state/source-control": {
       "types": "./src/state/sourceControl.ts",
@@ -250,6 +278,14 @@
     "./state/pullRequestHandoff": {
       "types": "./src/state/pullRequestHandoff.ts",
       "default": "./src/state/pullRequestHandoff.ts"
+    },
+    "./state/threadDecisions": {
+      "types": "./src/state/threadDecisions.ts",
+      "default": "./src/state/threadDecisions.ts"
+    },
+    "./state/contextual": {
+      "types": "./src/state/contextual.ts",
+      "default": "./src/state/contextual.ts"
     }
   },
   "scripts": {

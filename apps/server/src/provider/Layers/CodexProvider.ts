@@ -58,6 +58,7 @@ export const CODEX_PRESENTATION = {
   displayName: "Codex",
   showInteractionModeToggle: true,
   conversationFork: "native",
+  externalSessions: "supported",
 } as const;
 
 export interface CodexAppServerProviderSnapshot {
@@ -326,10 +327,17 @@ const requestAllCodexModels = Effect.fn("requestAllCodexModels")(function* (
   return models;
 });
 
+/**
+ * The client name Lecturn sends in `initialize`. Codex records it as the
+ * `originator` of every thread Lecturn starts, which is how the external
+ * session lister tells Lecturn's own threads from the desktop apps'.
+ */
+export const LECTURN_CODEX_CLIENT_NAME = "lecturn_desktop";
+
 export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
   return {
     clientInfo: {
-      name: "lecturn_desktop",
+      name: LECTURN_CODEX_CLIENT_NAME,
       title: "Lecturn Desktop",
       version: packageJson.version,
     },
@@ -632,20 +640,25 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   }
 
   if (Option.isNone(probeResult.success)) {
-    return buildServerProvider({
-      presentation: CODEX_PRESENTATION,
-      enabled: codexSettings.enabled,
-      checkedAt,
-      models: emptyModels,
-      skills: [],
-      probe: {
-        installed: true,
-        version: null,
-        status: "error",
-        auth: { status: "unknown" },
-        message: "Timed out while checking Codex app-server provider status.",
-      },
-    });
+    const message = "Timed out while checking Codex app-server provider status.";
+    return {
+      ...buildServerProvider({
+        presentation: CODEX_PRESENTATION,
+        enabled: codexSettings.enabled,
+        checkedAt,
+        models: emptyModels,
+        skills: [],
+        probe: {
+          installed: true,
+          version: null,
+          status: "error",
+          auth: { status: "unknown" },
+          message,
+        },
+      }),
+      // A slow app-server is a timeout, not a failed start.
+      discovery: { status: "timed-out", phase: "provider", message },
+    };
   }
 
   const snapshot = probeResult.success.value;

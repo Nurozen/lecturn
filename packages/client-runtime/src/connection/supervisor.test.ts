@@ -53,6 +53,11 @@ const RELAY_ENTRY: ConnectionCatalogEntry = {
   profile: Option.none(),
 };
 
+const RETAGGED_RELAY_ENTRY: ConnectionCatalogEntry = {
+  target: new RelayConnectionTarget({ ...RELAY_TARGET, accountId: "account-a" }),
+  profile: Option.none(),
+};
+
 const PREPARED_CONNECTION: PreparedConnection = {
   environmentId: TARGET.environmentId,
   label: TARGET.label,
@@ -569,6 +574,248 @@ describe("EnvironmentSupervisor", () => {
       yield* supervisor.retryNow;
       yield* awaitState(supervisor.state, (state) => state.phase === "connected");
       expect(yield* Ref.get(harness.prepareCount)).toBe(2);
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("parks an unresolved relay account until the target is retagged", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        prepare: (_attempt, target) =>
+          target._tag === "RelayConnectionTarget" && target.accountId === "account-a"
+            ? Effect.succeed(PREPARED_CONNECTION)
+            : Effect.fail(blocked("Could not tell which account owns this environment.")),
+      });
+      const supervisor = yield* EnvironmentSupervisor.make(RELAY_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(Effect.provide(harness.dependencies));
+
+      yield* awaitState(supervisor.state, (state) => state.phase === "blocked");
+      yield* TestClock.adjust("1 hour");
+      expect(yield* Ref.get(harness.prepareCount)).toBe(1);
+
+      yield* supervisor.retarget(RETAGGED_RELAY_ENTRY);
+      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+      expect(yield* Ref.get(harness.prepareCount)).toBe(2);
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("keeps a live session when its target is retagged", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const supervisor = yield* EnvironmentSupervisor.make(RELAY_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(Effect.provide(harness.dependencies));
+
+      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+      yield* supervisor.retarget(RETAGGED_RELAY_ENTRY);
+      // Long enough for a teardown and a reconnect to have run if one had started.
+      yield* TestClock.adjust("1 minute");
+
+      expect(yield* Ref.get(harness.sessionCount)).toBe(1);
+      expect(yield* Ref.get(harness.releaseCount)).toBe(0);
+      expect(yield* SubscriptionRef.get(supervisor.state)).toMatchObject({
+        phase: "connected",
+        generation: 1,
+      });
+      expect(supervisor.target).toBe(RETAGGED_RELAY_ENTRY.target);
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("uses the retagged target for the reconnect after a live session closes", () =>
+    Effect.gen(function* () {
+      const targets: Array<ConnectionTarget> = [];
+      const harness = yield* makeHarness({
+        prepare: (_attempt, target) =>
+          Effect.sync(() => {
+            targets.push(target);
+            return PREPARED_CONNECTION;
+          }),
+      });
+      const supervisor = yield* EnvironmentSupervisor.make(RELAY_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(Effect.provide(harness.dependencies));
+
+      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+      yield* supervisor.retarget(RETAGGED_RELAY_ENTRY);
+      yield* harness.closeLatestSession();
+      yield* awaitState(supervisor.state, (state) => state.phase === "backoff");
+      yield* TestClock.adjust("3 seconds");
+      yield* awaitState(
+        supervisor.state,
+        (state) => state.phase === "connected" && state.generation === 2,
+      );
+
+      expect(targets).toEqual([RELAY_TARGET, RETAGGED_RELAY_ENTRY.target]);
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("restarts an in-flight attempt with the retagged target", () =>
+    Effect.gen(function* () {
+      const firstAttemptStarted = yield* Deferred.make<void>();
+      const targets: Array<ConnectionTarget> = [];
+      const harness = yield* makeHarness({
+        prepare: (_attempt, target) =>
+          Effect.sync(() => {
+            targets.push(target);
+            return PREPARED_CONNECTION;
+          }),
+        ready: (attempt) =>
+          attempt === 1
+            ? Deferred.succeed(firstAttemptStarted, undefined).pipe(Effect.andThen(Effect.never))
+            : Effect.void,
+      });
+      const supervisor = yield* EnvironmentSupervisor.make(RELAY_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(Effect.provide(harness.dependencies));
+
+      yield* Deferred.await(firstAttemptStarted);
+      yield* supervisor.retarget(RETAGGED_RELAY_ENTRY);
+      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+
+      expect(targets).toEqual([RELAY_TARGET, RETAGGED_RELAY_ENTRY.target]);
+      expect(yield* Ref.get(harness.releaseCount)).toBe(1);
+    }),
+  );
+
+  it.effect("does not interrupt an in-flight attempt for an equal entry", () =>
+    Effect.gen(function* () {
+      const firstAttemptStarted = yield* Deferred.make<void>();
+      const releaseFirstAttempt = yield* Deferred.make<void>();
+      const harness = yield* makeHarness({
+        ready: (attempt) =>
+          attempt === 1
+            ? Deferred.succeed(firstAttemptStarted, undefined).pipe(
+                Effect.andThen(Deferred.await(releaseFirstAttempt)),
+              )
+            : Effect.void,
+      });
+      const supervisor = yield* EnvironmentSupervisor.make(RELAY_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(Effect.provide(harness.dependencies));
+
+      yield* Deferred.await(firstAttemptStarted);
+      yield* supervisor.retarget({
+        target: new RelayConnectionTarget({ ...RELAY_TARGET }),
+        profile: Option.none(),
+      });
+      yield* TestClock.adjust("1 second");
+      expect(yield* Ref.get(harness.releaseCount)).toBe(0);
+
+      yield* Deferred.succeed(releaseFirstAttempt, undefined);
+      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+      expect(yield* Ref.get(harness.sessionCount)).toBe(1);
+      expect(supervisor.target).toBe(RELAY_TARGET);
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("starts a fresh backoff sequence when retagged during backoff", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        prepare: () => Effect.fail(transient()),
+      });
+      const supervisor = yield* EnvironmentSupervisor.make(RELAY_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(Effect.provide(harness.dependencies));
+
+      yield* awaitState(
+        supervisor.state,
+        (state) => state.phase === "backoff" && state.attempt === 1,
+      );
+      yield* TestClock.adjust("3 seconds");
+      yield* eventuallyState(
+        supervisor.state,
+        (state) => state.phase === "backoff" && state.attempt === 2,
+      );
+
+      yield* supervisor.retarget(RETAGGED_RELAY_ENTRY);
+      yield* eventuallyState(
+        supervisor.state,
+        (state) => state.phase === "backoff" && state.attempt === 1,
+      );
+      expect(yield* Ref.get(harness.prepareCount)).toBe(3);
+
+      yield* TestClock.adjust("2999 millis");
+      expect(yield* Ref.get(harness.prepareCount)).toBe(3);
+      yield* TestClock.adjust("1 milli");
+      yield* eventuallyState(
+        supervisor.state,
+        (state) => state.phase === "backoff" && state.attempt === 2,
+      );
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("refuses a retarget to another environment or target kind", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        prepare: () => Effect.fail(blocked()),
+      });
+      const supervisor = yield* EnvironmentSupervisor.make(RELAY_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(Effect.provide(harness.dependencies));
+
+      yield* awaitState(supervisor.state, (state) => state.phase === "blocked");
+      yield* supervisor.retarget({
+        ...RELAY_ENTRY,
+        target: new RelayConnectionTarget({
+          ...RELAY_TARGET,
+          environmentId: EnvironmentId.make("environment-2"),
+        }),
+      });
+      yield* supervisor.retarget(TARGET_ENTRY);
+      yield* TestClock.adjust("1 minute");
+
+      expect(yield* Ref.get(harness.prepareCount)).toBe(1);
+      expect((yield* SubscriptionRef.get(supervisor.state)).phase).toBe("blocked");
+      expect(supervisor.target).toBe(RELAY_TARGET);
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("rebuilds a pending replacement session when the target is retagged", () =>
+    Effect.gen(function* () {
+      const tokenLifetimeMs = DPOP_ACCESS_TOKEN_REFRESH_SKEW_MS * 2;
+      const replacementStarted = yield* Deferred.make<void>();
+      const targets: Array<ConnectionTarget> = [];
+      const harness = yield* makeHarness({
+        prepare: (attempt, target) =>
+          Effect.sync(() => {
+            targets.push(target);
+            return {
+              ...PREPARED_CONNECTION,
+              target: RELAY_TARGET,
+              httpAuthorization: {
+                _tag: "Dpop" as const,
+                accessToken: `access-token-${attempt}`,
+                expiresAtEpochMs: tokenLifetimeMs * attempt,
+              },
+            };
+          }),
+        ready: (attempt) =>
+          attempt === 2
+            ? Deferred.succeed(replacementStarted, undefined).pipe(Effect.andThen(Effect.never))
+            : Effect.void,
+      });
+      const supervisor = yield* EnvironmentSupervisor.make(RELAY_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(Effect.provide(harness.dependencies));
+
+      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+      yield* TestClock.adjust(DPOP_ACCESS_TOKEN_REFRESH_SKEW_MS);
+      yield* Deferred.await(replacementStarted);
+
+      yield* supervisor.retarget(RETAGGED_RELAY_ENTRY);
+      yield* awaitState(
+        supervisor.state,
+        (state) => state.phase === "connected" && state.generation === 2,
+      );
+
+      expect(targets).toEqual([RELAY_TARGET, RELAY_TARGET, RETAGGED_RELAY_ENTRY.target]);
+      expect(
+        Option.getOrThrow(yield* SubscriptionRef.get(supervisor.prepared)).httpAuthorization,
+      ).toMatchObject({ accessToken: "access-token-3" });
+      // The stale candidate, then the session the new one replaced.
+      yield* TestClock.adjust("1 second");
+      expect(yield* Ref.get(harness.releaseCount)).toBe(2);
+      expect(yield* Ref.get(harness.sessionCount)).toBe(3);
     }).pipe(Effect.provide(TestClock.layer())),
   );
 
@@ -1329,6 +1576,56 @@ describe("EnvironmentSupervisor", () => {
 
       expect(yield* Ref.get(harness.prepareCount)).toBe(2);
       expect(yield* Ref.get(harness.sessionCount)).toBe(1);
+    }),
+  );
+
+  it.effect("keeps an account's relay lease when another account signs in", () =>
+    Effect.gen(function* () {
+      const probedLease = yield* Deferred.make<number>();
+      const harness = yield* makeHarness({
+        probe: (attempt) => Deferred.succeed(probedLease, attempt).pipe(Effect.asVoid),
+      });
+      const supervisor = yield* EnvironmentSupervisor.make(RETAGGED_RELAY_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(Effect.provide(harness.dependencies));
+      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+
+      // Wakeups arrive in order, so the probe landing on the first lease shows
+      // that account B's sign-in before it restarted nothing.
+      yield* harness.wake(
+        ConnectionWakeups.accountCredentialsChanged({
+          added: new Set(["account-b"]),
+          removed: new Set(),
+        }),
+      );
+      yield* harness.wake("application-active-probe");
+
+      expect(yield* Deferred.await(probedLease)).toBe(1);
+      expect(yield* Ref.get(harness.prepareCount)).toBe(1);
+      expect(yield* Ref.get(harness.releaseCount)).toBe(0);
+    }),
+  );
+
+  it.effect("restarts an untagged relay lease when any account changes", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const supervisor = yield* EnvironmentSupervisor.make(RELAY_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(Effect.provide(harness.dependencies));
+      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+
+      yield* harness.wake(
+        ConnectionWakeups.accountCredentialsChanged({
+          added: new Set(["account-b"]),
+          removed: new Set(),
+        }),
+      );
+      yield* awaitState(
+        supervisor.state,
+        (state) => state.phase === "connected" && state.generation === 2,
+      );
+
+      expect(yield* Ref.get(harness.prepareCount)).toBe(2);
     }),
   );
 

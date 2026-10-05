@@ -1,3 +1,4 @@
+import { withoutArchivedStaveProjects } from "@lecturn/client-runtime/state/stave-archive";
 import type { DraftId } from "~/composerDraftStore";
 import { useComposerDraftStore } from "~/composerDraftStore";
 import type { ScopedProjectRef } from "@lecturn/contracts";
@@ -63,7 +64,7 @@ export function DraftHeroHeadline({
     () =>
       sortLogicalProjectsForSidebar(
         buildSidebarProjectSnapshots({
-          projects,
+          projects: withoutArchivedStaveProjects(projects),
           settings: projectGroupingSettings,
           primaryEnvironmentId,
           resolveEnvironmentLabel: (environmentId) =>

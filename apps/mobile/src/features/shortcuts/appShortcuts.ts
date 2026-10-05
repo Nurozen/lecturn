@@ -133,3 +133,12 @@ export function buildShortcutActions(recents: ReadonlyArray<RecentThreadShortcut
     })),
   ];
 }
+
+/** Removed environments must disappear from both the launcher and persisted recents. */
+export function filterRecentThreadShortcuts(
+  recents: ReadonlyArray<RecentThreadShortcut>,
+  environmentIds: ReadonlySet<string>,
+): ReadonlyArray<RecentThreadShortcut> {
+  const filtered = recents.filter((entry) => environmentIds.has(entry.environmentId));
+  return filtered.length === recents.length ? recents : filtered;
+}

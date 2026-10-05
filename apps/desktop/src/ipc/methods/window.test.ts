@@ -1,4 +1,8 @@
 import { assert, describe, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
+import * as PlatformError from "effect/PlatformError";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -14,6 +18,7 @@ import {
   getLocalEnvironmentBootstraps,
   getWindowFullscreenState,
   pickProjectFavicon,
+  saveTextFile,
 } from "./window.ts";
 
 const readyWslConfig: DesktopBackendManager.DesktopBackendStartConfig = {
@@ -186,4 +191,124 @@ describe("pickProjectFavicon", () => {
       ]);
     }),
   );
+});
+
+describe("saveTextFile", () => {
+  it.effect("writes only the selected path and reports success after the write completes", () =>
+    Effect.gen(function* () {
+      const writing = yield* Deferred.make<void>();
+      const finish = yield* Deferred.make<void>();
+      const writeFileString = vi.fn((path: string, content: string) =>
+        Effect.gen(function* () {
+          assert.strictEqual(path, "/chosen/export.md");
+          assert.strictEqual(content, "# Exact decision\nraw citation");
+          yield* Deferred.succeed(writing, undefined);
+          yield* Deferred.await(finish);
+        }),
+      );
+      const dialog = vi.fn(() => Effect.succeed(Option.some("/chosen/export.md")));
+      const fiber = yield* saveTextFile
+        .handler({ format: "markdown", content: "# Exact decision\nraw citation" })
+        .pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              Layer.mock(ElectronDialog.ElectronDialog)({ saveFile: dialog }),
+              Layer.mock(ElectronWindow.ElectronWindow)({
+                focusedMainOrFirst: Effect.succeed(Option.none()),
+              }),
+              FileSystem.layerNoop({ writeFileString }),
+            ),
+          ),
+          Effect.forkChild,
+        );
+      yield* Deferred.await(writing);
+      assert.isUndefined(fiber.pollUnsafe());
+      yield* Deferred.succeed(finish, undefined);
+      assert.deepEqual(yield* Fiber.join(fiber), {
+        status: "saved",
+        filePath: "/chosen/export.md",
+      });
+      assert.strictEqual(dialog.mock.calls.length, 1);
+    }),
+  );
+  it.effect("cancel writes nothing", () =>
+    Effect.gen(function* () {
+      const writeFileString = vi.fn(() => Effect.void);
+      const result = yield* saveTextFile.handler({ format: "json", content: "{}" }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.mock(ElectronDialog.ElectronDialog)({
+              saveFile: () => Effect.succeed(Option.none()),
+            }),
+            Layer.mock(ElectronWindow.ElectronWindow)({
+              focusedMainOrFirst: Effect.succeed(Option.none()),
+            }),
+            FileSystem.layerNoop({ writeFileString }),
+          ),
+        ),
+      );
+      assert.deepEqual(result, { status: "canceled" });
+      assert.strictEqual(writeFileString.mock.calls.length, 0);
+    }),
+  );
+  it.effect("write failure returns error without exposing content or native error", () =>
+    Effect.gen(function* () {
+      const result = yield* saveTextFile
+        .handler({ format: "json", content: "private sentinel" })
+        .pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              Layer.mock(ElectronDialog.ElectronDialog)({
+                saveFile: () => Effect.succeed(Option.some("/chosen/export.json")),
+              }),
+              Layer.mock(ElectronWindow.ElectronWindow)({
+                focusedMainOrFirst: Effect.succeed(Option.none()),
+              }),
+              FileSystem.layerNoop({
+                writeFileString: () =>
+                  Effect.fail(
+                    new PlatformError.PlatformError(
+                      new PlatformError.SystemError({
+                        _tag: "PermissionDenied",
+                        module: "FileSystem",
+                        method: "writeFileString",
+                        description: "private sentinel",
+                      }),
+                    ),
+                  ),
+              }),
+            ),
+          ),
+        );
+      assert.strictEqual(result.status, "error");
+      assert.deepEqual(result, {
+        status: "error",
+        message: "Could not save the export. Choose a writable destination and try again.",
+      });
+    }),
+  );
+  for (const input of [
+    { format: "html", content: "text" },
+    { format: "markdown", content: "text", path: "/arbitrary/path" },
+    { format: "json", content: "x".repeat(32 * 1024 * 1024 + 1) },
+  ]) {
+    it.effect("rejects invalid export input before opening a dialog", () =>
+      Effect.gen(function* () {
+        const dialog = vi.fn(() => Effect.succeed(Option.none<string>()));
+        const result = yield* saveTextFile.handler(input).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              Layer.mock(ElectronDialog.ElectronDialog)({ saveFile: dialog }),
+              Layer.mock(ElectronWindow.ElectronWindow)({
+                focusedMainOrFirst: Effect.succeed(Option.none()),
+              }),
+              FileSystem.layerNoop({}),
+            ),
+          ),
+        );
+        assert.strictEqual(result.status, "error");
+        assert.strictEqual(dialog.mock.calls.length, 0);
+      }),
+    );
+  }
 });

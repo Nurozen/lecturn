@@ -1,10 +1,11 @@
+import { GlassCard } from "../../components/GlassCard";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import { useNavigation } from "@react-navigation/native";
 import { SymbolView } from "../../components/AppSymbol";
 import type { EnvironmentId } from "@lecturn/contracts";
 import { useCallback, useState } from "react";
-import { Platform, ScrollView, View } from "react-native";
+import { Platform, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/AppText";
@@ -103,6 +104,7 @@ export function SettingsEnvironmentsRouteScreen() {
       ) : (
         <NativeHeaderToolbar placement="right">
           <NativeHeaderToolbar.Button
+            accessibilityLabel="Add environment"
             icon="plus"
             onPress={() =>
               navigation.navigate("SettingsSheet", {
@@ -125,7 +127,7 @@ export function SettingsEnvironmentsRouteScreen() {
         }}
       >
         {hasLocalEnvironments ? (
-          <View collapsable={false} className="overflow-hidden rounded-[24px] bg-card/55">
+          <GlassCard collapsable={false} radius={24}>
             {localEnvironments.map((environment, index) => (
               <View
                 key={environment.environmentId}
@@ -148,12 +150,9 @@ export function SettingsEnvironmentsRouteScreen() {
                 />
               </View>
             ))}
-          </View>
+          </GlassCard>
         ) : (
-          <View
-            collapsable={false}
-            className="items-center gap-3 rounded-[24px] bg-card/55 px-6 py-8"
-          >
+          <GlassCard collapsable={false} radius={24} className="items-center gap-3 px-6 py-8">
             <View className="h-12 w-12 items-center justify-center rounded-[16px] bg-subtle">
               <SymbolView
                 name="point.3.connected.trianglepath.dotted"
@@ -163,10 +162,22 @@ export function SettingsEnvironmentsRouteScreen() {
               />
             </View>
             <Text className="text-center text-sm leading-normal text-foreground-muted">
-              No environments connected yet.{"\n"}Tap{" "}
-              <Text className="font-lecturn-bold text-foreground">+</Text> to add one.
+              No environments connected yet.
             </Text>
-          </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Add environment"
+              className="min-h-11 items-center justify-center rounded-xl bg-subtle px-5 py-3"
+              onPress={() =>
+                navigation.navigate("SettingsSheet", {
+                  screen: "SettingsContent",
+                  params: { screen: "SettingsEnvironmentNew" },
+                })
+              }
+            >
+              <Text className="font-lecturn-bold text-foreground">Add environment</Text>
+            </Pressable>
+          </GlassCard>
         )}
 
         {/* Always mounted: already-connected relay environments must stay

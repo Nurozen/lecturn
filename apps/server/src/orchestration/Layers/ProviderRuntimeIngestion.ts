@@ -1,3 +1,4 @@
+import { ContextualLifecycle } from "../ContextualLifecycle.ts";
 import {
   ApprovalRequestId,
   type AssistantDeliveryMode,
@@ -948,6 +949,7 @@ export function runtimeEventToActivities(
 }
 
 const make = Effect.gen(function* () {
+  const contextualLifecycle = yield* Effect.serviceOption(ContextualLifecycle);
   const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
   const threadPlanProgress = yield* ThreadPlanProgressService;
   const crypto = yield* Crypto.Crypto;
@@ -1566,6 +1568,14 @@ const make = Effect.gen(function* () {
 
       const thread = yield* resolveThreadRuntimeContext(event.threadId);
       if (!thread) return;
+      if (Option.isSome(contextualLifecycle))
+        yield* contextualLifecycle.value.observe(event).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Contextual context boundary unavailable", {
+              cause: Cause.pretty(cause),
+            }),
+          ),
+        );
 
       let loadedThreadDetail: OrchestrationThread | null | undefined;
       const getLoadedThreadDetail = () =>

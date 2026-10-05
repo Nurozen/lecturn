@@ -1,4 +1,4 @@
-import { ASSISTANT_CITATION_MAX_COMMENT_LENGTH, type AssistantCitation } from "@lecturn/contracts";
+import { ASSISTANT_CITATION_MAX_COMMENT_LENGTH } from "@lecturn/contracts";
 import { useState, type Ref } from "react";
 
 import { Button } from "../ui/button";
@@ -10,7 +10,7 @@ export function AssistantCitationCommentEditor({
   onSubmitAndSend,
   onCancel,
 }: {
-  citation: AssistantCitation;
+  citation: { comment?: string | null | undefined };
   inputRef?: Ref<HTMLTextAreaElement>;
   onSubmit: (comment: string) => boolean;
   onSubmitAndSend?: (comment: string) => boolean;
@@ -45,7 +45,11 @@ export function AssistantCitationCommentEditor({
       <textarea
         ref={inputRef}
         aria-label="Comment on selected text"
-        aria-description="Enter to save the citation comment; Command/Ctrl+Enter to save and send; Shift+Enter for a new line."
+        aria-description={
+          onSubmitAndSend
+            ? "Enter to save; Command/Ctrl+Enter to save and send; Shift+Enter for a new line."
+            : "Enter to save; Shift+Enter for a new line."
+        }
         aria-invalid={commentTooLong || undefined}
         placeholder="Add an optional comment..."
         rows={2}

@@ -475,15 +475,15 @@ scopes in `apps/server/src/auth/RpcAuthorization.ts`. Every method below runs `r
 (kill switch, `settings.stave.enabled`, runnable binary); read failures are recorded in
 `StaveRpcRuntime.lastFailure` and mapped to `StaveCommandError`.
 
-| Method                                                          | Scope                           | Serves                                                                                                                                                               |
-| --------------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `stave.listRepos`                                               | `AuthOrchestrationReadScope`    | `repos list --json` → `StaveRepoRow[]`                                                                                                                               |
-| `stave.listSpaces { includeArchived }`                          | `AuthOrchestrationReadScope`    | `space list --json` (+ `--archived` rows appended) → `StaveSpaceListRow[]`, incl. v0.4 identity (`logicalId`, `archiveBasename`, `manifestCreatedAt`) and `memories` |
-| `stave.listSagas`                                               | `AuthOrchestrationReadScope`    | `saga list --json` → `StaveSagaListRow[]`                                                                                                                            |
-| `stave.memoryProviders`                                         | `AuthOrchestrationReadScope`    | `memory providers --json` → `StaveMemoryProvider[]`                                                                                                                  |
-| `stave.dryRun { operation }`                                    | `AuthOrchestrationReadScope`    | `StaveOperations.dryRun` → `StaveDryRunPlan { dryRun: true, plan[] }`                                                                                                |
-| `stave.runOperation { operationId, afterSequence?, operation }` | `AuthOrchestrationOperateScope` | stream of `StaveProgressEvent` (`StaveOperations.run`)                                                                                                               |
-| `stave.observeOperation { operationId, afterSequence? }`        | `AuthOrchestrationReadScope`    | stream of `StaveProgressEvent` (`StaveOperations.observe`); watching is a read                                                                                       |
+| Method                                                          | Scope                           | Serves                                                                                                                                                                                                                |
+| --------------------------------------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stave.listRepos`                                               | `AuthOrchestrationReadScope`    | `repos list --json` → `StaveRepoRow[]`                                                                                                                                                                                |
+| `stave.listSpaces { includeArchived }`                          | `AuthOrchestrationReadScope`    | `space list --json` (+ `--archived` rows appended) → `StaveSpaceListRow[]`, incl. v0.4 identity (`logicalId`, `archiveBasename`, `manifestCreatedAt`), `memories`, and for archived rows `archivedAt` / `sagaMembers` |
+| `stave.listSagas`                                               | `AuthOrchestrationReadScope`    | `saga list --json` → `StaveSagaListRow[]`                                                                                                                                                                             |
+| `stave.memoryProviders`                                         | `AuthOrchestrationReadScope`    | `memory providers --json` → `StaveMemoryProvider[]`                                                                                                                                                                   |
+| `stave.dryRun { operation }`                                    | `AuthOrchestrationReadScope`    | `StaveOperations.dryRun` → `StaveDryRunPlan { dryRun: true, plan[] }`                                                                                                                                                 |
+| `stave.runOperation { operationId, afterSequence?, operation }` | `AuthOrchestrationOperateScope` | stream of `StaveProgressEvent` (`StaveOperations.run`)                                                                                                                                                                |
+| `stave.observeOperation { operationId, afterSequence? }`        | `AuthOrchestrationReadScope`    | stream of `StaveProgressEvent` (`StaveOperations.observe`); watching is a read                                                                                                                                        |
 
 Stream errors are `StaveUnavailableError | StaveNotSpaceError | StaveOperationRejectedError`
 (plus authorization); a Stave failure _inside_ a running operation is a `failed` event, never a
@@ -537,7 +537,7 @@ disconnectReason? }`; each phase keeps `commandLine?`, `startedAt`, `finishedAt?
   returns nothing unless `available`; `CommandPalette.tsx` feeds it
   `useStaveFeatureAvailable(addProjectEnvironmentId).available` and launches the bus with the
   chosen kind.
-- `apps/web/src/components/stave/staveSpaceWizard.logic.ts` holds every rule of the wizard, so
+- `packages/client-runtime/src/state/staveSpaceWizard.ts` holds every rule of the wizard (shared with mobile), so
   the dialog and step components only render. Steps `identity → repos → memory → saga → review →
 progress`, with `memory` present only when some `stave.memoryProviders` row is `available`
   (`wizardSteps`). `validateSpaceId`: charset via `isValidStaveSpaceId`, a live row (`id` or
@@ -562,7 +562,7 @@ progress`, with `memory` present only when some `stave.memoryProviders` row is `
   `StaveOperationProgress.tsx` renders one operation from `staveOperations.stateAtom` — every
   phase with its command line, retained output and duration, a **Reattach** button while the
   state is `disconnected` (manual, `staveOperations.reattach`), and the nested **Remove partial
-  space** operation on a failed create. Its rules live in `staveOperationProgress.logic.ts`:
+  space** operation on a failed create. Its rules live in `packages/client-runtime/src/state/staveOperationProgress.ts`:
   `phaseStatus` (`running | done | failed | interrupted`, where `interrupted` is an open phase of
   a disconnected operation), `removePartialSpaceAvailability` (available only with a manifest
   stamp; otherwise a hint that nothing was created), `outputRuns` (consecutive lines of one
@@ -724,7 +724,13 @@ provider and terminal sessions, then reconcile live and archived roots after the
 A shared `StaveRuntimeFence` rejects new starts and drains admitted starts under every participant
 root before session enumeration. Provider start/resume and terminal open/restart participate;
 the fence remains held through teardown, including descendant and canonical aliases.
-Restore always uses the exact archive basename. Symlink aliases and nested active projects
+Restore always uses the exact archive basename. A restore whose archive root has no active
+project adopts one first: the newest non-deleted project whose lifecycle row records the same
+space id and manifest stamp (`listActiveBySpaceId`), re-rooted onto the archive when its recorded
+root no longer exists, else a new project created on the archive root. The restore result
+(`StaveRestoreSpaceResult`) carries that `projectId` and the shell `sequence` after
+reconciliation moved it to the live root, so clients open it the way they open a created space.
+Symlink aliases and nested active projects
 are refused at pre-flight. Reconciliation uses the full manifest timestamp rather than an id
 alone; unreadable or ambiguous matches remain repairable refusals. No operation writes Stave's
 manifest directly or automatically forces a failed command.
@@ -734,14 +740,31 @@ entry points request it immediately before confirmation. The prompt names the sa
 dependent ordering edges, then sets `staveSagaRemoveConfirmed` on the delete command. A failed
 or older-server read never authorizes roster changes. Explicit destroy has a separate
 `sagaRemoveConfirmed` payload field and a combined removal confirmation after `saga_member`.
+`archiveSpace` carries the same field. The web sets it only when the space reports `memberOf`
+(space settings, the sidebar space menu, and lifecycle `archiveNow`; archive retries fall back to
+the row's recorded consent), so a non-member archive never scans saga rosters: the dry run
+lists `saga remove` plans ahead of a described archive step, and the run removes the space from
+every saga roster (refreshing each saga root) before `space archive`. Without the field a member
+still gets Stave's own `saga_member` refusal.
 
 `StaveSpaceActions` and `StaveConfirmDialog` supply edits, per-mode removal, sync, retarget,
-memory fate, archive/destroy, and Unarchive. Confirmation is tied to the exact payload whose
+memory fate, and archive/destroy. Confirmation is tied to the exact payload whose
 dry-run plan is displayed. Only coded dirty/dependent refusals offer Force, with a second
 plan and confirmation. The dialog is scoped to environment, root, and incarnation. Its progress
-uses the existing replayable operation consumer. New-thread affordances explain that archived
-spaces must be restored; mobile restores remain a web/desktop action. Setup now invokes the
-existing server operation directly and refreshes status when it completes.
+uses the existing replayable operation consumer. Setup invokes the existing server operation
+directly and refreshes status when it completes.
+
+Archived projects (`stave.state === "archived"`, derived from an `.archive/` parent) are hidden
+from project lists and pickers on web and mobile; their threads stay in the database. The way
+back is New project → Stave → Existing space/saga, which lists `stave.listSpaces
+{ includeArchived: true }` rows that are not visible projects. The shared logic lives in
+`client-runtime/state/staveArchive.ts`: row filtering and labels, the restore plan (a saga
+restores its own archive, then each rostered member's newest matching archive), undo after an
+archive (the toast re-reads the list and restores the entries the archive result names), and
+permanent delete. Stave only destroys live spaces, so delete restores the entry and then runs
+the ordinary `destroySpace` (or a reviewed `sagaDestroy`, refused while any member is live).
+Archived list rows carry `archivedAt` (the entry directory's mtime) and, for sagas,
+`sagaMembers` read from the archived manifest.
 
 ## Related
 

@@ -15,6 +15,7 @@ import {
   Files,
   GitPullRequest,
   Globe2,
+  NotebookPen,
   Plus,
   TerminalSquare,
   Volume2,
@@ -63,6 +64,7 @@ import { FaviconImage } from "./preview/PreviewFaviconIcon";
 import { previewBridge } from "./preview/previewBridge";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { resolvePullRequestState } from "./pullRequest/pullRequestPresentation";
+import "./right-panel-glass.css";
 
 interface RightPanelTabsProps {
   mode: PreviewPanelMode;
@@ -105,6 +107,9 @@ interface RightPanelTabsProps {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddAgents: () => void;
+  onAddNotes?: (() => void) | undefined;
+  /** Omit on older servers; notes are not offered without the capability. */
+  notesAvailable?: boolean | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -142,6 +147,24 @@ const SURFACE_DISABLED_REASONS = {
   pullRequest: "This thread's branch has no pull request yet.",
   agents: "Agents are only available from a thread.",
 } as const;
+
+/** Capability and a live thread action are both required, including for shortcuts. */
+export function notesSurfaceAction(
+  available: boolean | undefined,
+  onClick: (() => void) | undefined,
+) {
+  if (!available || !onClick) return null;
+  return {
+    label: "Notes",
+    description: "Save passages and ideas across this project.",
+    icon: NotebookPen,
+    shortcut: "N",
+    available: true,
+    disabledReason: "Notes require a connected, supported thread.",
+    onClick,
+    badgeCount: 0,
+  } as const;
+}
 
 /** Overlays that must win over the launcher's letter shortcuts. */
 const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
@@ -300,6 +323,9 @@ function RightPanelEmptyState(props: {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddAgents: () => void;
+  onAddNotes?: (() => void) | undefined;
+  /** Omit on older servers; notes are not offered without the capability. */
+  notesAvailable?: boolean | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -311,6 +337,7 @@ function RightPanelEmptyState(props: {
   // -1 means no highlight: it only appears on hover or arrow use.
   const [highlight, setHighlight] = useState(-1);
 
+  const notesAction = notesSurfaceAction(props.notesAvailable, props.onAddNotes);
   const actions = [
     {
       label: "Browser",
@@ -372,6 +399,7 @@ function RightPanelEmptyState(props: {
       onClick: props.onAddAgents,
       badgeCount: props.liveAgentCount,
     },
+    ...(notesAction ? [notesAction] : []),
   ] as const;
 
   type SurfaceAction = (typeof actions)[number];
@@ -457,9 +485,8 @@ function RightPanelEmptyState(props: {
     );
   };
 
-  const cardShellClass =
-    "rounded-lg border border-border/80 bg-card dark:border-transparent dark:shadow-none dark:inset-ring-1 dark:inset-ring-white/5";
-  const highlightedCardClass = "bg-accent/60 dark:inset-ring-white/20";
+  const cardShellClass = "lecturn-panel-tile rounded-xl border";
+  const highlightedCardClass = "lecturn-panel-tile-highlighted";
 
   return (
     <div
@@ -469,20 +496,20 @@ function RightPanelEmptyState(props: {
       aria-label="Open a surface"
       data-surface-launcher-keys={availableActions.map((action) => action.shortcut).join("")}
       className={cn(
-        "flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 pt-6 outline-none",
+        "lecturn-panel-launcher flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 pt-6 outline-none",
         // The panel topbar sits above this container; matching bottom padding
         // keeps the cards centered against the full panel, not the leftover.
         "pb-[calc(var(--workspace-topbar-height)+--spacing(6))]",
       )}
     >
       <div className="relative w-full max-w-lg">
-        <div className="absolute inset-x-0 bottom-full mb-5 text-center">
+        <div className="mb-5 text-center">
           <h3 className="font-medium text-foreground text-sm">Open a surface</h3>
           <p className="mt-1 text-muted-foreground text-xs">
             Choose what to show in the right panel.
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-3">
           {actions.map((action) =>
             action.available ? (
               // The card is itself a button, so the profile chooser sits beside
@@ -506,7 +533,7 @@ function RightPanelEmptyState(props: {
                     // Full height: the wrapper is the grid item that stretches
                     // to the row, so the button must fill it to stay level with
                     // its neighbour and keep the chooser anchored inside.
-                    "relative flex h-full w-full cursor-pointer flex-col items-start p-4 text-left transition group-hover:border-border group-hover:bg-accent/60",
+                    "relative flex h-full w-full cursor-pointer flex-col items-start p-4 text-left",
                     cardShellClass,
                     isHighlighted(action) && highlightedCardClass,
                   )}
@@ -543,7 +570,7 @@ function RightPanelEmptyState(props: {
                       align="end"
                       side="bottom"
                       sideOffset={6}
-                      className="min-w-40 max-w-56"
+                      className="lecturn-panel-menu min-w-40 max-w-56"
                     >
                       {props.browserProfiles.map((profile) => (
                         <MenuItem
@@ -605,6 +632,8 @@ function surfaceTitle(
       return `#${surface.number}`;
     case "agents":
       return "Agents";
+    case "notes":
+      return "Notes";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -686,6 +715,8 @@ function SurfaceIcon({
       );
     case "agents":
       return <Bot className="size-3 shrink-0" />;
+    case "notes":
+      return <NotebookPen className="size-3 shrink-0" />;
   }
 }
 
@@ -767,6 +798,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     });
   }, []);
 
+  const notesAction = notesSurfaceAction(props.notesAvailable, props.onAddNotes);
   const addSurfaceActions = [
     {
       label: "Browser",
@@ -816,6 +848,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       disabledReason: SURFACE_DISABLED_REASONS.agents,
       onClick: props.onAddAgents,
     },
+    ...(notesAction ? [notesAction] : []),
   ] as const;
 
   const handleAddSurfaceMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -986,7 +1019,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     >
       <div
         className={cn(
-          "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-1 pl-2",
+          "lecturn-panel-tabbar flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-1 pl-2",
           // The sheet overlays from the viewport top, so its tab bar keeps
           // the titlebar's height: a compact row re-centers the layout
           // controls a few pixels higher and the cluster jumps on open.
@@ -1029,7 +1062,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   onAuxClick={(event) => handleTabAuxClick(event, surface)}
                   onContextMenu={(event) => void handleTabContextMenu(event, surface)}
                   className={cn(
-                    "cursor-pointer group/tab flex h-6 max-w-36 shrink-0 items-center gap-0.5 rounded-md pr-2 pl-1.5 text-xs",
+                    "lecturn-panel-tab cursor-pointer group/tab flex h-7 max-w-36 shrink-0 items-center gap-0.5 rounded-lg pr-2 pl-1.5 text-xs",
                     ownsDesktopTitleBar && "[-webkit-app-region:no-drag]",
                     active
                       ? "bg-accent text-foreground"
@@ -1118,7 +1151,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   align="start"
                   side="bottom"
                   sideOffset={6}
-                  className="min-w-44"
+                  className="lecturn-panel-menu min-w-44"
                   onKeyDownCapture={handleAddSurfaceMenuKeyDown}
                 >
                   {addSurfaceActions.map((action) => {
@@ -1159,7 +1192,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                             and run to 48 characters, which would otherwise widen
                             the popup to fit-content and wrap.
                           */}
-                          <MenuSubPopup className="min-w-40 max-w-56">
+                          <MenuSubPopup className="lecturn-panel-menu min-w-40 max-w-56">
                             {browserProfiles.map((profile) => (
                               <MenuItem
                                 key={profile.id}
@@ -1253,6 +1286,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddFiles={props.onAddFiles}
             onAddPullRequest={props.onAddPullRequest}
             onAddAgents={props.onAddAgents}
+            onAddNotes={props.onAddNotes}
+            notesAvailable={props.notesAvailable}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}

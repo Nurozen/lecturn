@@ -1,3 +1,6 @@
+import { contextualDraftKey, useContextualDrafts } from "../state/contextualDrafts";
+import { NotesPanel } from "./NotesPanel";
+import { AccountSurface } from "./AccountSurface";
 import { RepositoryPullRequestOverview } from "./pullRequest/RepositoryPullRequestOverview";
 import { useStaveGitSelection } from "./stave/staveGitSelection";
 import {
@@ -304,6 +307,7 @@ import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { SettledThreadMetadata } from "./chat/SettledThreadMetadata";
 import { createPageScrollController, type PageScrollKey } from "./chat/pageScrollController";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
+import { DraftImportSessionLink } from "./chat/DraftImportSessionLink";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
@@ -387,6 +391,9 @@ import {
   PullRequestDialogState,
   cloneComposerImageForRetry,
   deriveLockedProvider,
+  deriveUnsentImportInstanceId,
+  resolveThreadHistoryDividers,
+  shouldShowImportTruncatedNote,
   readFileAsDataUrl,
   resolveFileAttachmentUrl,
   reconcileMountedTerminalThreadIds,
@@ -638,6 +645,9 @@ function formatOutgoingPrompt(params: {
   const promptEffort = resolvePromptInjectedEffort(caps, params.effort);
   return applyClaudePromptEffortPrefix(params.text, promptEffort);
 }
+/** Names enough at-risk files to be convincing without turning the dialog into a file listing. */
+const REVERT_DELETION_PREVIEW_LIMIT = 10;
+
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
 
@@ -1422,6 +1432,9 @@ export default function ChatView(props: ChatViewProps) {
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
     reportFailure: false,
   });
+  const previewCheckpointRevert = useAtomCommand(threadEnvironment.previewCheckpointRevert, {
+    reportFailure: false,
+  });
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
   const closePreview = useAtomCommand(previewEnvironment.close, "preview close");
   const { environments } = useEnvironments();
@@ -1549,6 +1562,7 @@ export default function ChatView(props: ChatViewProps) {
   const [restingComposerControlsVisible, setRestingComposerControlsVisible] = useState(false);
   const citeAssistantText = useCallback(
     (citation: AssistantCitation, sourceAnchor: AssistantCitationSourceAnchor) => {
+      if (sourceAnchor.source.dataset.citationSourceRole === "user") return false;
       const inserted = composerRef.current?.citeAssistantText(citation, sourceAnchor) ?? false;
       if (!inserted) {
         toastManager.add({
@@ -2259,12 +2273,15 @@ export default function ChatView(props: ChatViewProps) {
     selectedProvider: selectedProviderByThreadId,
     threadProvider,
   });
+  const unsentImportInstanceId = deriveUnsentImportInstanceId(activeThread);
   // Once a thread selects an environment, never substitute the primary
   // environment's config while the selected environment is still loading.
   const serverConfig = activeThread
     ? (activeEnvironment?.serverConfig ?? null)
     : (primaryEnvironment?.serverConfig ?? null);
   const pullRequestsCapabilityKnown = serverConfig !== null;
+  const notesAvailable =
+    isServerThread && serverConfig?.environment.capabilities.threadNotes === true;
   const supportsPullRequests = serverConfig?.environment.capabilities.pullRequests === true;
   const attachmentEnvironmentConfig = environmentById.get(environmentId)?.serverConfig ?? null;
   const attachmentUploadsCapabilityKnown = attachmentEnvironmentConfig !== null;
@@ -2492,7 +2509,10 @@ export default function ChatView(props: ChatViewProps) {
         ],
         lockedProvider,
         lockedInstanceId:
-          activeThread?.session?.providerInstanceId ?? activeThread?.modelSelection.instanceId,
+          unsentImportInstanceId ??
+          activeThread?.session?.providerInstanceId ??
+          activeThread?.modelSelection.instanceId,
+        requireExactInstance: unsentImportInstanceId !== null,
       }),
     [
       activeProject?.defaultModelSelection?.instanceId,
@@ -2501,6 +2521,7 @@ export default function ChatView(props: ChatViewProps) {
       lockedProvider,
       providerInstanceEntries,
       selectedProviderByThreadId,
+      unsentImportInstanceId,
     ],
   );
   const selectedProvider = selectedProviderEntry?.driverKind ?? requestedDriverKind;
@@ -2987,8 +3008,10 @@ export default function ChatView(props: ChatViewProps) {
         timelineEntries,
         turnDiffSummaryByAssistantMessageId,
         inferredCheckpointTurnCountByTurnId,
+        importedFrom: activeThread?.importedFrom,
       }),
     [
+      activeThread?.importedFrom,
       supportsConversationRollback,
       inferredCheckpointTurnCountByTurnId,
       timelineEntries,
@@ -3044,22 +3067,23 @@ export default function ChatView(props: ChatViewProps) {
     timelineEntries,
     turnDiffSummaryByAssistantMessageId,
   ]);
-  // Anchor for the "forked here" divider: the last inherited message. Copied
-  // rows carry child-minted ids (`forkedFrom.messageId` stays parent-side) but
-  // keep timestamps that precede the child's creation, so the fork time
-  // separates inherited history from post-fork conversation.
-  const forkDividerAfterMessageId = useMemo(() => {
-    if (!activeThread || activeThread.forkedFrom == null) {
-      return null;
-    }
-    let lastInherited: MessageId | null = null;
-    for (const message of activeThread.messages) {
-      if (message.createdAt <= activeThread.createdAt) {
-        lastInherited = message.id;
-      }
-    }
-    return lastInherited;
-  }, [activeThread]);
+  const historyDividers = useMemo(() => resolveThreadHistoryDividers(activeThread), [activeThread]);
+  const forkDividerAfterMessageId = historyDividers.forkAfterMessageId;
+  // Rebuilt only when its content changes: the timeline derives rows from it.
+  const importDividerLabel = historyDividers.importDivider?.label ?? null;
+  const importDividerBeforeMessageId = historyDividers.importDivider?.beforeMessageId ?? null;
+  const importDivider = useMemo(
+    () =>
+      importDividerLabel === null
+        ? null
+        : { label: importDividerLabel, beforeMessageId: importDividerBeforeMessageId },
+    [importDividerBeforeMessageId, importDividerLabel],
+  );
+  const importHistoryTruncated = shouldShowImportTruncatedNote({
+    importedFrom: activeThread?.importedFrom,
+    hasOlderTurns: loadEarlierTurns !== null,
+    firstMessage: activeThread?.messages[0],
+  });
   const forkWarning =
     activeThread?.session?.status === "running"
       ? "Shares files with an agent that is still working"
@@ -4996,13 +5020,21 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     if (!activeThread?.id || terminalUiState.terminalOpen) return;
+    // Browsing existing conversations should retain the resting glass composer.
+    // Empty threads still focus immediately, and explicit focus shortcuts work as before.
+    if (settings.composerCollapseOnBlur && activeThread.messages.length > 0) return;
     const frame = window.requestAnimationFrame(() => {
       focusComposer();
     });
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [activeThread?.id, focusComposer, terminalUiState.terminalOpen]);
+  }, [
+    activeThread?.id,
+    focusComposer,
+    terminalUiState.terminalOpen,
+    settings.composerCollapseOnBlur,
+  ]);
 
   useEffect(() => {
     if (!activeThread?.id) return;
@@ -6141,10 +6173,35 @@ export default function ChatView(props: ChatViewProps) {
         setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
         return;
       }
+      // Reverting runs `git clean`, which deletes untracked files the target
+      // checkpoint cannot restore. Those have no git object behind them, so
+      // the loss is permanent and has to be named before the user agrees to it.
+      const preview = await previewCheckpointRevert({
+        environmentId,
+        input: { threadId: activeThread.id, turnCount },
+      });
+      const removedPaths = preview._tag === "Success" ? (preview.value.removedPaths ?? []) : [];
+      const removedTruncated = preview._tag === "Success" && preview.value.truncated;
+      const deletionWarning =
+        removedPaths.length === 0
+          ? []
+          : [
+              "",
+              removedPaths.length === 1
+                ? "This will also permanently delete 1 untracked file:"
+                : `This will also permanently delete ${removedPaths.length} untracked files:`,
+              ...removedPaths.slice(0, REVERT_DELETION_PREVIEW_LIMIT).map((path) => `  ${path}`),
+              ...(removedPaths.length > REVERT_DELETION_PREVIEW_LIMIT || removedTruncated
+                ? ["  …and more"]
+                : []),
+            ];
+
       const confirmed = await localApi.dialogs.confirm(
         [
           `Revert this thread to checkpoint ${turnCount}?`,
           "This will discard newer messages and turn diffs in this thread.",
+          ...deletionWarning,
+          "",
           "This action cannot be undone.",
         ].join("\n"),
         { variant: "destructive" },
@@ -6176,6 +6233,7 @@ export default function ChatView(props: ChatViewProps) {
       activeEnvironmentUnavailable,
       activeEnvironmentUnavailableLabel,
       environmentId,
+      previewCheckpointRevert,
       isConnecting,
       isRevertingCheckpoint,
       isSendBusy,
@@ -6823,6 +6881,17 @@ export default function ChatView(props: ChatViewProps) {
                 ? {
                     createThread: {
                       projectId: activeProject.id,
+                      ...(draftId &&
+                      useContextualDrafts.getState().choices[
+                        contextualDraftKey(environmentId, activeProject.id, draftId)
+                      ]
+                        ? {
+                            contextual:
+                              useContextualDrafts.getState().choices[
+                                contextualDraftKey(environmentId, activeProject.id, draftId)
+                              ]!,
+                          }
+                        : {}),
                       title,
                       modelSelection: threadCreateModelSelection,
                       runtimeMode,
@@ -6878,6 +6947,10 @@ export default function ChatView(props: ChatViewProps) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
+        if (draftId && isLocalDraftThread)
+          useContextualDrafts
+            .getState()
+            .set(contextualDraftKey(environmentId, activeProject.id, draftId), null);
         if (turnUsesAttachmentUploads) {
           releaseDraftAttachments(composerAttachmentsSnapshot);
         }
@@ -7531,6 +7604,11 @@ export default function ChatView(props: ChatViewProps) {
         scheduleComposerFocus();
         return;
       }
+      // An unsent import only resumes on the instance it was imported with.
+      if (unsentImportInstanceId !== null && instanceId !== unsentImportInstanceId) {
+        scheduleComposerFocus();
+        return;
+      }
       if (lockedProvider !== null && activeThread.session?.providerInstanceId) {
         const currentEntry = providerStatuses.find(
           (snapshot) => snapshot.instanceId === activeThread.session?.providerInstanceId,
@@ -7590,6 +7668,7 @@ export default function ChatView(props: ChatViewProps) {
       setStickyComposerModelSelection,
       providerStatuses,
       settings,
+      unsentImportInstanceId,
     ],
   );
   const onEnvModeChange = useCallback(
@@ -7839,6 +7918,14 @@ export default function ChatView(props: ChatViewProps) {
           ? { onStateChange: handlePullRequestTabStatusChange }
           : {})}
       />
+    ) : renderedRightPanelSurface?.kind === "notes" ? (
+      notesAvailable ? (
+        <NotesPanel key={activeThreadKey} threadRef={activeThreadRef} />
+      ) : (
+        <div className="p-4 text-sm text-muted-foreground">
+          Notes require an updated environment.
+        </div>
+      )
     ) : renderedRightPanelSurface?.kind === "agents" ? (
       <AgentsPanel
         model={agentPanelModel}
@@ -7899,7 +7986,15 @@ export default function ChatView(props: ChatViewProps) {
   });
 
   return (
-    <div className="lecturn-chat-surface relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+    <AccountSurface
+      environmentId={props.environmentId}
+      projectKey={
+        activeThread ? `${activeThread.environmentId}:${activeThread.projectId}` : undefined
+      }
+      animate
+      data-chat-has-messages={!isDraftHeroState || undefined}
+      className="lecturn-chat-surface relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+    >
       {rightPanelControlsAtRoot ? panelLayoutControls : null}
       <div
         className={cn(
@@ -8016,7 +8111,10 @@ export default function ChatView(props: ChatViewProps) {
               />
             </div>
             {/* Messages Wrapper */}
-            <div className="relative flex min-h-0 flex-1 flex-col">
+            <div
+              className="relative flex min-h-0 flex-1 flex-col"
+              data-timeline-loading={threadDetailLoading || undefined}
+            >
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
                 citationRequest={citationRequest}
@@ -8024,7 +8122,7 @@ export default function ChatView(props: ChatViewProps) {
                 onCiteAssistantText={citeAssistantText}
                 agentPanelModel={agentPanelModel}
                 onOpenAgents={addAgentsSurface}
-                key={activeThread.id}
+                key={activeThreadKey}
                 isWorking={isWorking}
                 isPreparingWorktree={isPreparingWorktree}
                 isCompacting={isCompacting}
@@ -8044,6 +8142,8 @@ export default function ChatView(props: ChatViewProps) {
                 forkWarning={forkWarning}
                 revertDisabledReason={revertDisabledReason}
                 forkDividerAfterMessageId={forkDividerAfterMessageId}
+                importDivider={importDivider}
+                importHistoryTruncated={importHistoryTruncated}
                 onUseArtifactTemplate={useArtifactTemplate}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
@@ -8188,6 +8288,7 @@ export default function ChatView(props: ChatViewProps) {
                               routeKind={routeKind}
                               routeThreadRef={routeThreadRef}
                               draftId={draftId}
+                              {...(activeProject ? { contextualProjectId: activeProject.id } : {})}
                               activeThreadId={activeThreadId}
                               activeThreadEnvironmentId={activeThread?.environmentId}
                               activeThread={activeThread}
@@ -8336,6 +8437,12 @@ export default function ChatView(props: ChatViewProps) {
                       className="h-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(env(safe-area-inset-bottom)+1.25rem)]"
                     />
                   </div>
+                  {/* After the composer so it follows the prompt in tab order. */}
+                  {isDraftHeroState && activeProjectRef && activeProject ? (
+                    <div className="absolute inset-x-0 top-full z-0">
+                      <DraftImportSessionLink projectRef={activeProjectRef} />
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -8445,6 +8552,8 @@ export default function ChatView(props: ChatViewProps) {
           onAddDiff={addDiffSurface}
           onAddFiles={addFilesSurface}
           onAddPullRequest={addPullRequestSurface}
+          onAddNotes={() => useRightPanelStore.getState().open(activeThreadRef, "notes")}
+          notesAvailable={notesAvailable}
           onAddAgents={addAgentsSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           terminalAvailable={activeProject !== null}
@@ -8495,6 +8604,8 @@ export default function ChatView(props: ChatViewProps) {
             onAddDiff={addDiffSurface}
             onAddFiles={addFilesSurface}
             onAddPullRequest={addPullRequestSurface}
+            onAddNotes={() => useRightPanelStore.getState().open(activeThreadRef, "notes")}
+            notesAvailable={notesAvailable}
             onAddAgents={addAgentsSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             terminalAvailable={activeProject !== null}
@@ -8516,6 +8627,6 @@ export default function ChatView(props: ChatViewProps) {
           onClose={closeExpandedImage}
         />
       )}
-    </div>
+    </AccountSurface>
   );
 }

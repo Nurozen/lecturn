@@ -3,6 +3,7 @@ import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Equal from "effect/Equal";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -45,6 +46,7 @@ type SupervisorSignal =
   | { readonly _tag: "ConnectRequested" }
   | { readonly _tag: "DisconnectRequested" }
   | { readonly _tag: "RetryRequested" }
+  | { readonly _tag: "Retargeted" }
   | { readonly _tag: "NetworkChanged"; readonly network: NetworkStatus }
   | { readonly _tag: "Wakeup"; readonly reason: ConnectionWakeups.ConnectionWakeup };
 
@@ -93,6 +95,7 @@ type EstablishmentEvent =
 type ReplacementPreparationEvent =
   | { readonly _tag: "Completed"; readonly exit: Exit.Exit<ScopedConnection, TracedAttemptFailure> }
   | { readonly _tag: "TimedOut" }
+  | { readonly _tag: "Retargeted" }
   | { readonly _tag: "AuthorizationExpired" };
 
 type ConnectedLeaseEvent =
@@ -229,19 +232,34 @@ export class EnvironmentSupervisor extends Context.Service<
   }
 >()("@lecturn/client-runtime/connection/supervisor/EnvironmentSupervisor") {}
 
+/** What the owner of a supervisor holds: the service plus controls its consumers do not get. */
+export type EnvironmentSupervisorHandle = EnvironmentSupervisor["Service"] & {
+  /**
+   * Swaps the catalog entry used by later attempts, for example when a relay
+   * target gains its owning account. A live connection is kept; a blocked,
+   * backing-off, or in-flight attempt starts over with the new entry and a
+   * fresh retry ladder. An entry equal to the current one changes nothing, and
+   * one for another environment or target kind is refused.
+   */
+  readonly retarget: (entry: ConnectionCatalogEntry) => Effect.Effect<void>;
+};
+
 export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
   entry: ConnectionCatalogEntry,
   options?: EnvironmentSupervisorOptions,
 ): Effect.fn.Return<
-  EnvironmentSupervisor["Service"],
+  EnvironmentSupervisorHandle,
   never,
   | Connectivity.Connectivity
   | ConnectionDriver.ConnectionDriver
   | Scope.Scope
   | ConnectionWakeups.ConnectionWakeups
 > {
-  const target = entry.target;
-  yield* annotateTarget(target);
+  yield* annotateTarget(entry.target);
+  const currentEntry = yield* SubscriptionRef.make(entry);
+  // `retarget` keeps the environment and the target kind, so only the rest of
+  // the target (label, owning account) can differ from the entry given here.
+  const currentTarget = () => SubscriptionRef.getUnsafe(currentEntry).target;
 
   const connectivity = yield* Connectivity.Connectivity;
   const driver = yield* ConnectionDriver.ConnectionDriver;
@@ -282,13 +300,13 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     yield* Queue.offer(signals, next);
   });
 
-  const logManagedRelayAccountChange = Effect.logInfo(
-    "Managed relay account changed; restarting the environment connection.",
-  ).pipe(
-    Effect.annotateLogs({
-      "environment.id": target.environmentId,
-      "environment.label": target.label,
-    }),
+  const logManagedRelayAccountChange = Effect.suspend(() =>
+    Effect.logInfo("Managed relay account changed; restarting the environment connection.").pipe(
+      Effect.annotateLogs({
+        "environment.id": currentTarget().environmentId,
+        "environment.label": currentTarget().label,
+      }),
+    ),
   );
 
   const reportProgress = Effect.fn("EnvironmentSupervisor.reportProgress")(function* (
@@ -306,12 +324,13 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
   });
 
   const establishConnection = Effect.fnUntraced(function* (
+    attemptEntry: ConnectionCatalogEntry,
     attempt: number,
     generation: number,
     lastFailure: ConnectionAttemptError | null,
     publishProgress: boolean,
   ) {
-    return yield* driver.connect(entry, (progress) =>
+    return yield* driver.connect(attemptEntry, (progress) =>
       publishProgress ? reportProgress(attempt, generation, lastFailure, progress) : Effect.void,
     );
   });
@@ -322,13 +341,14 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
       ConnectionAttemptError,
       Scope.Scope
     >,
+    attemptEntry: ConnectionCatalogEntry,
     attempt: number,
     generation: number,
     pendingRetry: Option.Option<PendingRetryTrace>,
   ) => {
     const traced = Effect.gen(function* () {
       const attemptSpan = yield* Effect.currentSpan.pipe(Effect.orDie);
-      yield* annotateTarget(target);
+      yield* annotateTarget(attemptEntry.target);
       yield* Effect.annotateCurrentSpan({
         "connection.attempt": attempt,
         "connection.generation": generation,
@@ -359,21 +379,29 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
   };
 
   const establishTracedConnection = Effect.fnUntraced(function* (
+    attemptEntry: ConnectionCatalogEntry,
     attempt: number,
     generation: number,
     lastFailure: ConnectionAttemptError | null,
     pendingRetry: Option.Option<PendingRetryTrace>,
     publishProgress: boolean,
   ) {
-    if (target._tag === "RelayConnectionTarget") {
+    if (attemptEntry.target._tag === "RelayConnectionTarget") {
       return yield* traceRelayEstablishment(
-        establishConnection(attempt, generation, lastFailure, publishProgress),
+        establishConnection(attemptEntry, attempt, generation, lastFailure, publishProgress),
+        attemptEntry,
         attempt,
         generation,
         pendingRetry,
       );
     }
-    return yield* establishConnection(attempt, generation, lastFailure, publishProgress).pipe(
+    return yield* establishConnection(
+      attemptEntry,
+      attempt,
+      generation,
+      lastFailure,
+      publishProgress,
+    ).pipe(
       Effect.map((lease) => ({
         attemptSpan: Option.none<Tracer.Span>(),
         lease,
@@ -386,6 +414,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
   });
 
   const forkScopedTracedConnection = Effect.fnUntraced(function* (
+    attemptEntry: ConnectionCatalogEntry,
     attempt: number,
     generation: number,
     lastFailure: ConnectionAttemptError | null,
@@ -398,6 +427,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         const connectionScope = yield* Scope.fork(parentScope, "sequential");
         const fiber = yield* restore(
           establishTracedConnection(
+            attemptEntry,
             attempt,
             generation,
             lastFailure,
@@ -423,6 +453,8 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         case "DisconnectRequested":
         case "RetryRequested":
           return false;
+        case "Retargeted":
+          return true;
         case "NetworkChanged":
           if (next.network === "offline") {
             return false;
@@ -440,7 +472,10 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
             // original setup timeout before the app can become usable again.
             return true;
           }
-          if (next.reason === "credentials-changed" && target._tag === "RelayConnectionTarget") {
+          if (
+            next.reason === "credentials-changed" &&
+            currentTarget()._tag === "RelayConnectionTarget"
+          ) {
             yield* logManagedRelayAccountChange;
             return false;
           }
@@ -464,7 +499,10 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
           }
           break;
         case "Wakeup":
-          if (next.reason === "credentials-changed" && target._tag === "RelayConnectionTarget") {
+          if (
+            next.reason === "credentials-changed" &&
+            currentTarget()._tag === "RelayConnectionTarget"
+          ) {
             yield* logManagedRelayAccountChange;
             return false;
           }
@@ -485,7 +523,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
                   Effect.fail(
                     new ConnectionTransientError({
                       reason: "timeout",
-                      detail: `${target.label} did not respond to a connection health check.`,
+                      detail: `${currentTarget().label} did not respond to a connection health check.`,
                     }),
                   ),
               }),
@@ -525,19 +563,23 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
                   }
                   if (
                     probeEvent.signal.reason === "credentials-changed" &&
-                    target._tag === "RelayConnectionTarget"
+                    currentTarget()._tag === "RelayConnectionTarget"
                   ) {
                     yield* Fiber.interrupt(probe);
                     return false;
                   }
                   break;
                 case "ConnectRequested":
+                case "Retargeted":
                   break;
               }
             }
           }
           break;
         case "ConnectRequested":
+          break;
+        case "Retargeted":
+          // The live lease stays; `prepareReplacement` picks up the new entry.
           break;
       }
     }
@@ -586,7 +628,9 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
 
     let failureCount = 0;
     for (;;) {
+      const candidateEntry = yield* SubscriptionRef.get(currentEntry);
       const candidate = yield* forkScopedTracedConnection(
+        candidateEntry,
         failureCount + 1,
         generation,
         null,
@@ -603,14 +647,28 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         Effect.sleep(CONNECTION_ESTABLISHMENT_TIMEOUT).pipe(
           Effect.as<ReplacementPreparationEvent>({ _tag: "TimedOut" }),
         ),
+        SubscriptionRef.changes(currentEntry).pipe(
+          Stream.filter((latest) => latest !== candidateEntry),
+          Stream.runHead,
+          Effect.as<ReplacementPreparationEvent>({ _tag: "Retargeted" }),
+        ),
       ]);
+      // A candidate built from a replaced entry would carry the previous
+      // owner's credentials for another token lifetime, so it is never installed.
+      const retargeted =
+        replacement._tag === "Retargeted" ||
+        (yield* SubscriptionRef.get(currentEntry)) !== candidateEntry;
 
       if (replacement._tag !== "Completed") {
         yield* Fiber.interrupt(candidate.fiber);
         yield* Fiber.await(candidate.fiber);
         yield* Scope.close(candidate.scope, Exit.void).pipe(Effect.ignore);
-      } else if (Exit.isFailure(replacement.exit)) {
+      } else if (retargeted || Exit.isFailure(replacement.exit)) {
         yield* Scope.close(candidate.scope, Exit.void).pipe(Effect.ignore);
+      }
+      if (retargeted) {
+        failureCount = 0;
+        continue;
       }
       if (replacement._tag === "AuthorizationExpired") {
         return Option.none<ScopedConnection>();
@@ -632,7 +690,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
       } else {
         replacementError = new ConnectionTransientError({
           reason: "timeout",
-          detail: `${target.label} did not respond during connection setup.`,
+          detail: `${currentTarget().label} did not respond during connection setup.`,
         });
       }
 
@@ -665,6 +723,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     const initialGeneration = previousGeneration + 1;
     yield* SubscriptionRef.set(prepared, Option.none());
     const initial = yield* forkScopedTracedConnection(
+      yield* SubscriptionRef.get(currentEntry),
       attempt,
       initialGeneration,
       lastFailure,
@@ -714,7 +773,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         failure: {
           error: new ConnectionTransientError({
             reason: "timeout",
-            detail: `${target.label} did not respond during connection setup.`,
+            detail: `${currentTarget().label} did not respond during connection setup.`,
           }),
           attemptSpan: Option.none(),
         },
@@ -724,13 +783,19 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
       const isUnexpectedDefect =
         !Cause.hasInterruptsOnly(establishment.exit.cause) &&
         !establishment.exit.cause.reasons.some(Cause.isFailReason);
-      const outcome = failureFromExit(target, establishment.exit, false, previousGeneration, false);
+      const outcome = failureFromExit(
+        currentTarget(),
+        establishment.exit,
+        false,
+        previousGeneration,
+        false,
+      );
       if (isUnexpectedDefect) {
         const defect = establishment.exit.cause.reasons.find(Cause.isDieReason)?.defect;
         yield* Effect.logError("Connection attempt failed with an unexpected defect.").pipe(
           Effect.annotateLogs({
-            "environment.id": target.environmentId,
-            "environment.label": target.label,
+            "environment.id": currentTarget().environmentId,
+            "environment.label": currentTarget().label,
             "cause.reason_count": establishment.exit.cause.reasons.length,
             ...safeErrorLogAttributes(defect),
           }),
@@ -784,10 +849,22 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
             resetRetry: connectedEvent.exit.value,
           } satisfies AttemptOutcome;
         }
-        return failureFromExit(target, connectedEvent.exit, true, activeGeneration, stable);
+        return failureFromExit(
+          currentTarget(),
+          connectedEvent.exit,
+          true,
+          activeGeneration,
+          stable,
+        );
       }
       if (Exit.isFailure(connectedEvent.exit)) {
-        return failureFromExit(target, connectedEvent.exit, true, activeGeneration, stable);
+        return failureFromExit(
+          currentTarget(),
+          connectedEvent.exit,
+          true,
+          activeGeneration,
+          stable,
+        );
       }
       if (Option.isNone(connectedEvent.exit.value)) {
         return {
@@ -844,6 +921,8 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
           switch (next._tag) {
             case "Wakeup":
               return ConnectionWakeups.isApplicationActiveWakeup(next.reason);
+            case "Retargeted":
+              return true;
             case "ConnectRequested":
             case "DisconnectRequested":
             case "RetryRequested":
@@ -855,9 +934,12 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     );
   });
 
+  // True when the signal should also restart the retry ladder.
   const waitForSignal = Queue.take(signals).pipe(
     Effect.map(
-      (next) => next._tag === "Wakeup" && ConnectionWakeups.isApplicationActiveWakeup(next.reason),
+      (next) =>
+        next._tag === "Retargeted" ||
+        (next._tag === "Wakeup" && ConnectionWakeups.isApplicationActiveWakeup(next.reason)),
     ),
   );
 
@@ -988,7 +1070,17 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     Effect.forkScoped,
   );
   yield* wakeups.changes.pipe(
-    Stream.runForEach((reason) => signal({ _tag: "Wakeup", reason })),
+    Stream.runForEach((reason) => {
+      if (typeof reason === "string") {
+        return signal({ _tag: "Wakeup", reason });
+      }
+      // Another account signing in or out leaves this target's lease alone.
+      const target = currentTarget();
+      return target._tag === "RelayConnectionTarget" &&
+        !ConnectionWakeups.isCredentialsChangeFor(reason, target.accountId)
+        ? Effect.void
+        : signal({ _tag: "Wakeup", reason: "credentials-changed" });
+    }),
     Effect.forkScoped,
   );
   yield* run().pipe(Effect.forkScoped);
@@ -1014,17 +1106,48 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     Effect.withSpan("EnvironmentSupervisor.retryNow"),
   );
 
+  const retarget = Effect.fn("EnvironmentSupervisor.retarget")(function* (
+    next: ConnectionCatalogEntry,
+  ) {
+    const current = yield* SubscriptionRef.get(currentEntry);
+    if (Equal.equals(current, next)) {
+      return;
+    }
+    if (
+      next.target.environmentId !== current.target.environmentId ||
+      next.target._tag !== current.target._tag
+    ) {
+      // Consumers key their state on the environment and the target kind.
+      return yield* Effect.logError(
+        "Refused to retarget a supervisor to another environment or target kind.",
+      ).pipe(
+        Effect.annotateLogs({
+          "environment.id": current.target.environmentId,
+          "environment.target.kind": current.target._tag,
+          "retarget.environment.id": next.target.environmentId,
+          "retarget.target.kind": next.target._tag,
+        }),
+      );
+    }
+    yield* SubscriptionRef.set(currentEntry, next);
+    yield* signal({ _tag: "Retargeted" });
+  });
+
   yield* Effect.addFinalizer(() => Queue.shutdown(signals).pipe(Effect.andThen(clearLease)));
 
-  return EnvironmentSupervisor.of({
-    target,
+  return {
+    // Read on access, so a retagged target is what consumers see.
+    get target() {
+      return currentTarget();
+    },
     state,
     session,
     prepared,
     connect,
     disconnect,
     retryNow,
-  });
+    retarget,
+  };
 });
 
 export const layer = (

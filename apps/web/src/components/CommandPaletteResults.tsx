@@ -85,10 +85,23 @@ interface CommandPaletteResultsProps {
   highlightedItemValue?: string | null;
   isActionsOnly: boolean;
   keybindings: ResolvedKeybindingsConfig;
+  /** Static muted lines shown above the results; they scroll with the list. */
+  notes?: ReadonlyArray<string>;
   onExecuteItem: (item: CommandPaletteActionItem | CommandPaletteSubmenuItem) => void;
 }
 
+function CommandPaletteNotes(props: { notes: ReadonlyArray<string> }) {
+  return (
+    <div className="flex flex-col gap-1 px-[9px] pt-1 pb-2 text-muted-foreground/70 text-xs">
+      {props.notes.map((note) => (
+        <p key={note}>{note}</p>
+      ))}
+    </div>
+  );
+}
+
 export function CommandPaletteResults(props: CommandPaletteResultsProps) {
+  const notes = props.notes !== undefined && props.notes.length > 0 ? props.notes : null;
   if (props.groups.length === 0) {
     return (
       <div className="py-10 text-center text-sm text-muted-foreground">
@@ -102,6 +115,7 @@ export function CommandPaletteResults(props: CommandPaletteResultsProps) {
 
   return (
     <CommandList>
+      {notes ? <CommandPaletteNotes notes={notes} /> : null}
       {props.groups.map((group) => (
         <CommandGroup items={group.items} key={group.value}>
           <CommandGroupLabel className="ps-[9px]">{group.label}</CommandGroupLabel>

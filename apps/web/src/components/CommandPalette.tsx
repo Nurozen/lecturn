@@ -1,4 +1,13 @@
-"use client";
+import { contextualDraftKey, useContextualDrafts } from "../state/contextualDrafts";
+import { randomUUID } from "../lib/utils";
+import {
+  contextualEnvironment,
+  useContextualAccess,
+  useContextualAvailable,
+} from "../state/contextual";
+("use client");
+
+import { useServerConfigs } from "../state/entities";
 
 import {
   scopedThreadKey,
@@ -32,6 +41,7 @@ import {
   type EnvironmentMachineKind,
   type FilesystemBrowseResult,
   type ProjectId,
+  type ScopedProjectRef,
   type SourceControlDiscoveryResult,
   type SourceControlProviderKind,
   type SourceControlRepositoryInfo,
@@ -48,6 +58,7 @@ import {
   FolderIcon,
   FolderPlusIcon,
   GitForkIcon,
+  ImportIcon,
   LayersIcon,
   LinkIcon,
   MessageSquareIcon,
@@ -146,10 +157,27 @@ import {
   reduceCommandPaletteUiState,
   type SearchOverlayMode,
 } from "./CommandPalette.logic";
+import { useConnectAccountPaletteItems } from "./clerk/useConnectAccountPaletteItems";
 import { orderItemsByPreferredIds, sortLogicalProjectsForSidebar } from "./Sidebar.logic";
+import { withoutArchivedStaveProjectThreads } from "./stave/listedProjects.logic";
+import { useListedProjects } from "./stave/useListedProjects";
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { CommandPaletteContent } from "./CommandPaletteContent";
 import { CommandPaletteResults } from "./CommandPaletteResults";
+import { IMPORT_FOLDER_VIEW_VALUE, IMPORT_SESSION_VIEW_VALUE } from "./ImportSessionPalette.logic";
+import {
+  type ImportSessionScope,
+  readCanImportSessions,
+  readImportCapableDriverKinds,
+  useImportFolderPalette,
+  useImportSessionPalette,
+} from "./ImportSessionPalette";
+import { openImportFolderSessions } from "../importFolderSessions";
+import {
+  type ExternalSessionFolder,
+  IMPORT_FOLDER_SOURCE_DESCRIPTION,
+  importFolderSourceLabel,
+} from "@lecturn/client-runtime/external-session-import";
 import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon } from "./Icons";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectFavicon } from "./ProjectFavicon";
@@ -419,6 +447,10 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   );
   const openAddProject = useCallback(() => dispatch({ _tag: "OpenAddProject" }), []);
   const openNewThreadIn = useCallback(() => dispatch({ _tag: "OpenNewThreadIn" }), []);
+  const openImportSession = useCallback(
+    (projectRef: ScopedProjectRef) => dispatch({ _tag: "OpenImportSession", projectRef }),
+    [],
+  );
   const clearOpenIntent = useCallback(() => dispatch({ _tag: "ClearOpenIntent" }), []);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { theme, themeHalves, resolvedTheme } = useTheme();
@@ -489,7 +521,9 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   useEffect(
     () =>
       onOpenCommandPalette((detail) => {
-        if (detail.open === "new-thread-in") {
+        if (detail.open === "import-session") {
+          openImportSession(detail.projectRef);
+        } else if (detail.open === "new-thread-in") {
           openNewThreadIn();
         } else if (detail.open === "add-project") {
           openAddProject();
@@ -497,7 +531,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           setOpen(true);
         }
       }),
-    [openAddProject, openNewThreadIn, setOpen],
+    [openAddProject, openImportSession, openNewThreadIn, setOpen],
   );
 
   return (
@@ -607,7 +641,48 @@ function OpenCommandPaletteDialog(props: {
     useHandleNewThread();
   const { forkThreadAtLatestTurn } = useForkThread();
   const projects = useProjects();
+  // Pickers and thread lists leave out archived Stave spaces; they come back
+  // through New project → Stave. Path lookups (add, import) keep every project.
+  const { projects: listedProjects, archivedProjectKeys } = useListedProjects();
+  const decisionConfigs = useServerConfigs();
   const changeRequestSnapshotByKey = useAtomValue(ThreadPr.threadChangeRequestSnapshotsAtom);
+  const contextualTargetEnvironment =
+    activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
+  const contextualAvailable = useContextualAvailable(contextualTargetEnvironment);
+  const contextualAccess = useContextualAccess(contextualTargetEnvironment);
+  const contextualRoute = useParams({
+    strict: false,
+    select: (params) => resolveThreadRouteTarget(params),
+  });
+  const draftContextualKey =
+    contextualRoute?.kind === "draft" && activeDraftThread
+      ? contextualDraftKey(
+          activeDraftThread.environmentId,
+          activeDraftThread.projectId,
+          contextualRoute.draftId,
+        )
+      : null;
+  const draftContextualChoice = useContextualDrafts((state) =>
+    draftContextualKey ? state.choices[draftContextualKey] : undefined,
+  );
+  const draftContextualSettings = useEnvironmentQuery(
+    contextualAvailable && activeDraftThread && draftContextualKey
+      ? contextualEnvironment.projectSettings({
+          environmentId: activeDraftThread.environmentId,
+          input: { projectId: activeDraftThread.projectId },
+        })
+      : null,
+  );
+  const contextualStatus = useEnvironmentQuery(
+    activeThread && contextualAvailable
+      ? contextualEnvironment.status({
+          environmentId: activeThread.environmentId,
+          input: { threadId: activeThread.id },
+        })
+      : null,
+  );
+  const contextualToggle = useAtomCommand(contextualEnvironment.updateThreadSettings);
+  const contextualRefresh = useAtomCommand(contextualEnvironment.refresh);
   const activeThreadProject = useProject(
     activeThread === null
       ? null
@@ -689,6 +764,19 @@ function OpenCommandPaletteDialog(props: {
   }, [environments, primaryEnvironmentId, providers]);
   const [viewStack, setViewStack] = useState<CommandPaletteView[]>([]);
   const currentView = viewStack.at(-1) ?? null;
+  // The import view's groups are live, so the stack holds a marker group and
+  // the scope lives here; it only applies while that marker is on top.
+  const [importSessionScope, setImportSessionScope] = useState<ImportSessionScope | null>(null);
+  const isImportSessionView = currentView?.groups[0]?.value === IMPORT_SESSION_VIEW_VALUE;
+  // Same marker scheme for the add-project "From Claude Code or Codex" folder list.
+  const [importFolderEnvironmentId, setImportFolderEnvironmentId] = useState<EnvironmentId | null>(
+    null,
+  );
+  const isImportFolderView = currentView?.groups[0]?.value === IMPORT_FOLDER_VIEW_VALUE;
+  const toggleImportSessionAllFolders = useCallback(() => {
+    setHighlightedItemValue(null);
+    setImportSessionScope((scope) => (scope ? { ...scope, allFolders: !scope.allFolders } : scope));
+  }, []);
   const environmentIds = useMemo(
     () =>
       environments
@@ -764,7 +852,7 @@ function OpenCommandPaletteDialog(props: {
   const orderedProjects = useMemo(
     () =>
       orderItemsByPreferredIds({
-        items: projects,
+        items: listedProjects,
         preferredIds: projectOrder,
         getId: getProjectOrderKey,
         getPreferenceIds: (project) => [
@@ -772,12 +860,13 @@ function OpenCommandPaletteDialog(props: {
           legacyProjectCwdPreferenceKey(project.workspaceRoot),
         ],
       }),
-    [projectOrder, projects],
+    [projectOrder, listedProjects],
   );
   const unsortedProjectGroups = useMemo(
     () =>
       buildSidebarProjectSnapshots({
-        projects: clientSettings.sidebarProjectSortOrder === "manual" ? orderedProjects : projects,
+        projects:
+          clientSettings.sidebarProjectSortOrder === "manual" ? orderedProjects : listedProjects,
         settings: projectGroupingSettings,
         primaryEnvironmentId,
         resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
@@ -785,10 +874,10 @@ function OpenCommandPaletteDialog(props: {
     [
       clientSettings.sidebarProjectSortOrder,
       environmentLabelById,
+      listedProjects,
       orderedProjects,
       primaryEnvironmentId,
       projectGroupingSettings,
-      projects,
     ],
   );
   const projectGroups = useMemo(
@@ -1183,10 +1272,14 @@ function OpenCommandPaletteDialog(props: {
     ],
   );
 
+  const listedThreads = useMemo(
+    () => withoutArchivedStaveProjectThreads(threads, archivedProjectKeys),
+    [archivedProjectKeys, threads],
+  );
   const allThreadItems = useMemo(
     () =>
       buildThreadActionItems({
-        threads,
+        threads: listedThreads,
         ...(activeThreadId ? { activeThreadId } : {}),
         projectTitleById,
         sortOrder: clientSettings.sidebarThreadSortOrder,
@@ -1252,10 +1345,73 @@ function OpenCommandPaletteDialog(props: {
       providerEntryByEnvironmentAndInstanceId,
       threadContentMatchByKey,
       threadSearchQuery,
-      threads,
+      listedThreads,
     ],
   );
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
+  const importSession = useImportSessionPalette({
+    scope: isImportSessionView ? importSessionScope : null,
+    projects,
+    threads,
+    onToggleAllFolders: toggleImportSessionAllFolders,
+  });
+
+  // Adds the folder as a project unless one is already rooted there, then
+  // hands off to the multi-select import dialog. The ref rejects a second pick
+  // while the first folder's project is still being added.
+  const pickingImportFolderRef = useRef(false);
+  const pickImportFolder = useCallback(
+    async (folder: ExternalSessionFolder<Project>): Promise<void> => {
+      const environmentId = importFolderEnvironmentId;
+      if (environmentId === null || pickingImportFolderRef.current) return;
+      let projectId = folder.project?.id ?? null;
+      if (projectId === null) {
+        pickingImportFolderRef.current = true;
+        const outcome = await addProjectAndOpenThread({
+          environmentId,
+          workspaceRoot: folder.cwd,
+          createWorkspaceRootIfMissing: false,
+          projects,
+          threads,
+          sidebarThreadSortOrder: clientSettings.sidebarThreadSortOrder,
+          createProject,
+          navigate,
+          handleNewThread,
+        }).finally(() => {
+          pickingImportFolderRef.current = false;
+        });
+        if (outcome.status === "interrupted") return;
+        if (outcome.status === "failed") {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to add project",
+              description: errorMessage(outcome.error),
+            }),
+          );
+          return;
+        }
+        projectId = outcome.projectId;
+      }
+      setOpen(false);
+      openImportFolderSessions({ environmentId, projectId, folder: folder.cwd });
+    },
+    [
+      clientSettings.sidebarThreadSortOrder,
+      createProject,
+      handleNewThread,
+      importFolderEnvironmentId,
+      navigate,
+      projects,
+      setOpen,
+      threads,
+    ],
+  );
+  const importFolder = useImportFolderPalette({
+    environmentId: isImportFolderView ? importFolderEnvironmentId : null,
+    projects,
+    onPickFolder: pickImportFolder,
+  });
 
   const pushPaletteView = useCallback(
     (view: CommandPaletteView): void => {
@@ -1272,6 +1428,17 @@ function OpenCommandPaletteDialog(props: {
       setQuery(view.initialQuery ?? "");
     },
     [browseNavigation],
+  );
+
+  const openImportSessionView = useCallback(
+    (projectRef: ScopedProjectRef): void => {
+      setImportSessionScope({ projectRef, allFolders: false });
+      pushPaletteView({
+        addonIcon: <ImportIcon className={ADDON_ICON_CLASS} />,
+        groups: [{ value: IMPORT_SESSION_VIEW_VALUE, label: "Sessions", items: [] }],
+      });
+    },
+    [pushPaletteView],
   );
 
   function pushView(item: CommandPaletteSubmenuItem): void {
@@ -1372,6 +1539,26 @@ function OpenCommandPaletteDialog(props: {
         },
       ];
 
+      const importDriverKinds = readImportCapableDriverKinds(environmentId);
+      if (importDriverKinds.length > 0) {
+        sourceItems.push({
+          kind: "action",
+          value: `action:add-project:${environmentId}:agent-sessions`,
+          searchTerms: ["import", "sessions", "claude", "codex", "agent", "history", "continue"],
+          title: importFolderSourceLabel(importDriverKinds),
+          description: IMPORT_FOLDER_SOURCE_DESCRIPTION,
+          icon: <ImportIcon className={ITEM_ICON_CLASS} />,
+          keepOpen: true,
+          run: async () => {
+            setImportFolderEnvironmentId(environmentId);
+            pushPaletteView({
+              addonIcon: <ImportIcon className={ADDON_ICON_CLASS} />,
+              groups: [{ value: IMPORT_FOLDER_VIEW_VALUE, label: "Folders", items: [] }],
+            });
+          },
+        });
+      }
+
       sourceItems.push(
         ...buildStaveAddProjectItems({
           environmentId,
@@ -1466,6 +1653,7 @@ function OpenCommandPaletteDialog(props: {
     },
     [
       openSourceControlSettings,
+      pushPaletteView,
       setOpen,
       startAddProjectBrowse,
       startAddProjectClone,
@@ -1618,9 +1806,128 @@ function OpenCommandPaletteDialog(props: {
     pushPaletteView,
   ]);
 
+  useLayoutEffect(() => {
+    if (openIntent?.kind !== "import-session") {
+      return;
+    }
+    clearOpenIntent();
+    setAddProjectCloneFlow(null);
+    setViewStack([]);
+    openImportSessionView(openIntent.projectRef);
+  }, [clearOpenIntent, openImportSessionView, openIntent]);
+
+  const connectAccountItems = useConnectAccountPaletteItems();
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
-  if (projects.length > 0) {
+  if (
+    draftContextualKey &&
+    contextualAvailable &&
+    contextualAccess.operate &&
+    draftContextualSettings.data
+  ) {
+    const key = draftContextualKey,
+      settings = draftContextualSettings.data;
+    const enabled = draftContextualChoice?.enabled ?? settings.defaultEnabled;
+    actionItems.push({
+      kind: "action",
+      value: "action:contextual-draft-toggle",
+      title: `Contextual: turn ${enabled ? "off" : "on"} for this new thread`,
+      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+      searchTerms: ["contextual", "context", "slack", "sources"],
+      run: () => {
+        useContextualDrafts.getState().set(key, {
+          enabled: !enabled,
+          sourceIds: draftContextualChoice?.sourceIds ?? settings.sourceIds,
+        });
+        return Promise.resolve();
+      },
+    });
+  }
+  if (activeThread && contextualAvailable && contextualAccess.operate && contextualStatus.data) {
+    const targetThread = activeThread;
+    const settings = contextualStatus.data.thread;
+    actionItems.push({
+      kind: "action",
+      value: "action:contextual-toggle",
+      title: `Contextual: turn ${settings.enabled ? "off" : "on"} for this thread`,
+      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+      searchTerms: ["context", "sources", "slack", "contextual"],
+      run: async () => {
+        await contextualToggle({
+          environmentId: targetThread.environmentId,
+          input: {
+            threadId: targetThread.id,
+            expectedRevision: settings.revision,
+            enabled: !settings.enabled,
+            sourceIds: settings.sourceIds,
+          },
+        });
+      },
+    });
+    if (settings.enabled)
+      actionItems.push({
+        kind: "action",
+        value: "action:contextual-refresh",
+        title: "Refresh context for next message",
+        icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+        searchTerms: ["contextual", "restore", "context"],
+        run: async () => {
+          await contextualRefresh({
+            environmentId: targetThread.environmentId,
+            input: {
+              threadId: targetThread.id,
+              expectedRevision: settings.revision,
+              actionId: randomUUID(),
+            },
+          });
+        },
+      });
+  }
+  if (contextualTargetEnvironment && contextualAvailable) {
+    const environmentId = contextualTargetEnvironment;
+    actionItems.push({
+      kind: "action",
+      value: "action:contextual-settings",
+      title: "Contextual sources and collection…",
+      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+      searchTerms: ["contextual", "sources", "slack", "funding", "collection"],
+      run: () => navigate({ to: "/contextual/$environmentId", params: { environmentId } }),
+    });
+  }
+  const decisionProjects = listedProjects.filter(
+    (project) =>
+      decisionConfigs.get(project.environmentId)?.environment.capabilities.threadDecisions === true,
+  );
+  if (decisionProjects.length)
+    actionItems.push({
+      kind: "submenu",
+      value: "action:project-decisions",
+      addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
+      searchTerms: ["decisions", "notes", "tracking", "project"],
+      title: "Project decisions…",
+      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+      groups: [
+        {
+          value: "decisions",
+          label: "Projects",
+          items: decisionProjects.map((project) => ({
+            kind: "action",
+            value: `decisions:${project.environmentId}:${project.id}`,
+            title: project.title,
+            icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+            searchTerms: [project.title, project.workspaceRoot],
+            description: project.workspaceRoot,
+            run: () =>
+              navigate({
+                to: "/decisions/$environmentId/$projectId",
+                params: { environmentId: project.environmentId, projectId: project.id },
+              }),
+          })),
+        },
+      ],
+    });
+
+  if (listedProjects.length > 0) {
     const activeProjectTitle =
       projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
       (currentProjectId ? (projectTitleById.get(currentProjectId) ?? null) : null);
@@ -1692,6 +1999,37 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "chat.fork",
       run: async () => {
         await forkThreadAtLatestTurn(forkThreadRef);
+      },
+    });
+  }
+
+  // Imports land in the same contextual project "New thread" targets. Shown
+  // only where an import can succeed: the environment forks threads and at
+  // least one provider instance lists external sessions.
+  if (contextualProjectRef && readCanImportSessions(contextualProjectRef.environmentId)) {
+    const importProjectRef = contextualProjectRef;
+    const importProjectTitle = projectGroupByTargetKey.get(
+      `${importProjectRef.environmentId}:${importProjectRef.projectId}`,
+    )?.displayName;
+    actionItems.push({
+      kind: "action",
+      value: "action:import-session",
+      searchTerms: [
+        "import session",
+        "import",
+        "continue",
+        "resume",
+        "claude",
+        "codex",
+        "cli",
+        "history",
+      ],
+      title: "Import session…",
+      ...(importProjectTitle ? { description: importProjectTitle } : {}),
+      icon: <ImportIcon className={ITEM_ICON_CLASS} />,
+      keepOpen: true,
+      run: async () => {
+        openImportSessionView(importProjectRef);
       },
     });
   }
@@ -1833,6 +2171,8 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
+  actionItems.push(...connectAccountItems);
+
   const rootGroups = buildRootGroups({ actionItems, recentThreadItems });
   const settingsSearchItems: CommandPaletteActionItem[] = searchSettings(
     deferredQuery,
@@ -1863,7 +2203,11 @@ function OpenCommandPaletteDialog(props: {
           addProjectEnvironmentId,
           buildAddProjectRemoteSourceReadiness(sourceControlDiscovery.data),
         )
-      : (currentView?.groups ?? rootGroups);
+      : isImportSessionView
+        ? importSession.sessionGroups
+        : isImportFolderView
+          ? importFolder.folderGroups
+          : (currentView?.groups ?? rootGroups);
 
   const filteredGroups = filterCommandPaletteGroups({
     activeGroups,
@@ -2219,7 +2563,17 @@ function OpenCommandPaletteDialog(props: {
     displayedGroups = relativePathNeedsActiveProject ? [] : cloneDestinationBrowseGroups;
   } else if (isBrowsing) {
     displayedGroups = relativePathNeedsActiveProject ? [] : browseGroups;
+  } else if (isImportSessionView) {
+    // The folder toggle sits outside the search filter so a query that
+    // matches nothing still offers the wider list.
+    displayedGroups = [...filteredGroups, ...importSession.trailingGroups];
   }
+  // The folder toggle keeps the list non-empty, so the usual empty state never
+  // renders for a query that matches no session; say it in the notes instead.
+  const importSessionNotes =
+    filteredGroups.length === 0 && importSession.sessionGroups.length > 0
+      ? ["No matching sessions.", ...importSession.notes]
+      : importSession.notes;
 
   const inputPlaceholder =
     remoteProjectInputPlaceholder(addProjectCloneFlow) ??
@@ -2650,6 +3004,8 @@ function OpenCommandPaletteDialog(props: {
         isActionsOnly={isActionsOnly}
         keybindings={keybindings}
         onExecuteItem={executeItem}
+        {...(isImportSessionView && !isBrowsing ? { notes: importSessionNotes } : {})}
+        {...(isImportFolderView && !isBrowsing ? { notes: importFolder.notes } : {})}
         {...(addProjectCloneFlow?.step === "repository"
           ? {
               emptyStateMessage:
@@ -2665,9 +3021,13 @@ function OpenCommandPaletteDialog(props: {
                 ? {
                     emptyStateMessage: "Press Enter to create this folder and add it as a project.",
                   }
-                : threadSearch.isPending
-                  ? { emptyStateMessage: "Searching thread messages…" }
-                  : {})}
+                : isImportSessionView && importSession.isLoading
+                  ? { emptyStateMessage: "Loading sessions…" }
+                  : isImportFolderView && importFolder.isLoading
+                    ? { emptyStateMessage: "Loading folders…" }
+                    : threadSearch.isPending
+                      ? { emptyStateMessage: "Searching thread messages…" }
+                      : {})}
       />
     </CommandPaletteContent>
   );

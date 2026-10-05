@@ -1,3 +1,7 @@
+import {
+  decisionWriterInputFixture,
+  decisionWriterOutputFixture,
+} from "./decisionWriterTestFixtures.ts";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as PubSub from "effect/PubSub";
@@ -61,6 +65,87 @@ const makeStubRegistry = (
 };
 
 describe("makeTextGenerationFromRegistry", () => {
+  it.effect("routes decision preflight and generation only to the exact enabled instance", () =>
+    Effect.gen(function* () {
+      const input = { ...decisionWriterInputFixture, cwd: process.cwd() };
+      const calls: unknown[] = [];
+      const instance = makeStubInstance(
+        input.modelSelection.instanceId,
+        makeStubTextGeneration({
+          checkDecisionWriter: (value) => {
+            calls.push(value.modelSelection);
+            return Effect.succeed({ supported: true, reason: null });
+          },
+          generateDecisionNotes: (value) => {
+            calls.push(value);
+            return Effect.succeed(decisionWriterOutputFixture);
+          },
+        }),
+      );
+      const service = TextGeneration.makeTextGenerationFromRegistry(makeStubRegistry([instance]));
+      expect(yield* service.checkDecisionWriter(input)).toEqual({ supported: true, reason: null });
+      expect(yield* service.generateDecisionNotes(input)).toEqual(decisionWriterOutputFixture);
+      expect(calls).toEqual([input.modelSelection, input]);
+      const disabled = TextGeneration.makeTextGenerationFromRegistry(
+        makeStubRegistry([{ ...instance, enabled: false }]),
+      );
+      expect((yield* disabled.checkDecisionWriter(input).pipe(Effect.flip)).detail).toContain(
+        "No enabled provider",
+      );
+      expect(calls).toHaveLength(2);
+    }),
+  );
+  it.effect("fails closed when the selected adapter lacks isolated decision writing", () =>
+    Effect.gen(function* () {
+      const input = { ...decisionWriterInputFixture, cwd: process.cwd() };
+      const service = TextGeneration.makeTextGenerationFromRegistry(
+        makeStubRegistry([
+          makeStubInstance(input.modelSelection.instanceId, makeStubTextGeneration({})),
+        ]),
+      );
+      expect((yield* service.checkDecisionWriter(input)).supported).toBe(false);
+      expect((yield* service.generateDecisionNotes(input).pipe(Effect.flip)).detail).toContain(
+        "does not support isolated Decisions",
+      );
+    }),
+  );
+  it.effect(
+    "routes display summaries to the configured instance and fails closed on unsupported adapters",
+    () =>
+      Effect.gen(function* () {
+        const id = ProviderInstanceId.make("display-summary-provider");
+        const input = {
+          cwd: "/",
+          message: "Original evidence",
+          modelSelection: { instanceId: id, model: "selected-model" },
+        };
+        let calls = 0;
+        const service = TextGeneration.makeTextGenerationFromRegistry(
+          makeStubRegistry([
+            makeStubInstance(
+              id,
+              makeStubTextGeneration({
+                generateContextualSummary: (received) => {
+                  calls++;
+                  expect(received).toEqual(input);
+                  return Effect.succeed({ text: "A display summary" });
+                },
+              }),
+            ),
+          ]),
+        );
+        expect(yield* service.generateContextualSummary(input)).toEqual({
+          text: "A display summary",
+        });
+        expect(calls).toBe(1);
+        const unsupported = TextGeneration.makeTextGenerationFromRegistry(
+          makeStubRegistry([makeStubInstance(id, makeStubTextGeneration({}))]),
+        );
+        expect(
+          (yield* unsupported.generateContextualSummary(input).pipe(Effect.flip)).detail,
+        ).toContain("does not support isolated");
+      }),
+  );
   it.effect("routes workflow summaries through the selected provider instance", () =>
     Effect.gen(function* () {
       const id = ProviderInstanceId.make("summary-provider");

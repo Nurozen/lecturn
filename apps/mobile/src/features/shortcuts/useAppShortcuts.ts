@@ -1,3 +1,5 @@
+import { useAtomValue } from "@effect/atom-react";
+import { environmentCatalog } from "../../connection/catalog";
 import * as QuickActions from "expo-quick-actions";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Platform } from "react-native";
@@ -10,6 +12,7 @@ import {
 } from "../../persistence/imperative";
 import { useThreadShell } from "../../state/entities";
 import {
+  filterRecentThreadShortcuts,
   activeThreadRef,
   buildShortcutActions,
   shortcutHref,
@@ -54,6 +57,7 @@ function useShortcutNavigation(): void {
 }
 
 function useRecentThreadShortcutSync(state: NavigationState): void {
+  const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
   // Launcher shortcuts are Android-only. A null ref on iOS keeps this hook
   // (mounted in the root stack layout) from subscribing the root to the
   // active thread's shell, which would re-render every screen on each
@@ -99,12 +103,26 @@ function useRecentThreadShortcutSync(state: NavigationState): void {
     };
   }, []);
 
+  useEffect(() => {
+    if (!catalog.isReady) return;
+    setRecents((current) =>
+      current === null
+        ? null
+        : filterRecentThreadShortcuts(current, new Set(catalog.entries.keys())),
+    );
+  }, [catalog]);
   const loaded = recents !== null;
   const environmentId = threadRef?.environmentId ?? null;
   const threadId = threadRef?.threadId ?? null;
   const title = threadShell?.title ?? "";
   useEffect(() => {
-    if (!loaded || environmentId === null || threadId === null) {
+    if (
+      !loaded ||
+      environmentId === null ||
+      threadId === null ||
+      !catalog.isReady ||
+      !catalog.entries.has(environmentId)
+    ) {
       return;
     }
 
@@ -120,7 +138,7 @@ function useRecentThreadShortcutSync(state: NavigationState): void {
       }
       return next;
     });
-  }, [loaded, environmentId, threadId, title]);
+  }, [loaded, environmentId, threadId, title, catalog]);
 
   useEffect(() => {
     if (recents === null) {

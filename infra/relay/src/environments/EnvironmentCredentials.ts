@@ -1,3 +1,4 @@
+import { DecisionsService } from "../decisions/DecisionsService.ts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -84,6 +85,7 @@ export class EnvironmentCredentials extends Context.Service<
 const make = Effect.gen(function* () {
   const db = yield* RelayDb.RelayDb;
   const crypto = yield* Crypto.Crypto;
+  const decisions = yield* Effect.serviceOption(DecisionsService);
   const hashToken = (token: string) =>
     crypto
       .digest("SHA-256", new TextEncoder().encode(token))
@@ -282,6 +284,18 @@ const make = Effect.gen(function* () {
               }),
           ),
         );
+      if (rows.length > 0 && Option.isSome(decisions))
+        yield* decisions.value.funding
+          .revokeEnvironment(input.environmentId, input.environmentPublicKey)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new EnvironmentCredentialRevokePersistenceError({
+                  environmentId: input.environmentId,
+                  cause,
+                }),
+            ),
+          );
       return rows.length > 0;
     }),
   });

@@ -3,6 +3,7 @@ import type { NavigationState } from "@react-navigation/native";
 
 import type { RecentThreadShortcut } from "../../persistence/imperative";
 import {
+  filterRecentThreadShortcuts,
   activeThreadRef,
   buildShortcutActions,
   MAX_RECENT_THREAD_SHORTCUTS,
@@ -151,5 +152,18 @@ describe("launcher shortcut ids", () => {
     const a = buildShortcutActions([{ environmentId: "a-b", threadId: "c", title: "x" }]);
     const b = buildShortcutActions([{ environmentId: "a", threadId: "b-c", title: "x" }]);
     expect(a[1]?.id).not.toBe(b[1]?.id);
+  });
+});
+
+describe("account sign-out shortcut cleanup", () => {
+  it("removes only recents owned by removed environments", () => {
+    const current = [thread("a"), thread("b"), thread("local")];
+    expect(filterRecentThreadShortcuts(current, new Set(["env-a", "env-local"]))).toEqual([
+      current[0],
+      current[2],
+    ]);
+    expect(filterRecentThreadShortcuts(current, new Set(["env-a", "env-b", "env-local"]))).toBe(
+      current,
+    );
   });
 });

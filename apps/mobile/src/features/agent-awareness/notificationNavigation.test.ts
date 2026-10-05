@@ -177,3 +177,47 @@ describe("routeAgentNotificationResponseOnce", () => {
     expect(navigations).toEqual(["/threads/env/thread"]);
   });
 });
+
+describe("account notification routing", () => {
+  it("opens the owning account and expands it without changing active-account routing", () => {
+    const navigate = vi.fn();
+    const expandAccount = vi.fn();
+    routeAgentNotificationResponseOnce({
+      handledResponseIds: new Set(),
+      response: responseWithData({ accountId: "b", environmentId: "env-b", threadId: "thread" }),
+      navigate,
+      accountContext: {
+        signedInAccountIds: ["a", "b"],
+        accountByEnvironmentId: new Map([["env-b", "b"]]),
+        requestSignIn: vi.fn(),
+        expandAccount,
+      },
+    });
+    expect(expandAccount).toHaveBeenCalledWith("b");
+    expect(navigate).toHaveBeenCalledWith("/threads/env-b/thread?accountId=b");
+  });
+  it("asks the named account to sign in and never opens another owner's thread", () => {
+    const navigate = vi.fn();
+    const requestSignIn = vi.fn();
+    const context = {
+      signedInAccountIds: ["a"],
+      accountByEnvironmentId: new Map([["env-a", "a"]]),
+      requestSignIn,
+    };
+    routeAgentNotificationResponseOnce({
+      handledResponseIds: new Set(),
+      response: responseWithData({ accountId: "b", environmentId: "env-a", threadId: "thread" }),
+      navigate,
+      accountContext: context,
+    });
+    expect(requestSignIn).toHaveBeenCalledWith("b");
+    expect(navigate).not.toHaveBeenCalled();
+    routeAgentNotificationResponseOnce({
+      handledResponseIds: new Set(),
+      response: responseWithData({ accountId: "b", environmentId: "env-a", threadId: "thread" }),
+      navigate,
+      accountContext: { ...context, signedInAccountIds: ["a", "b"] },
+    });
+    expect(navigate).not.toHaveBeenCalled();
+  });
+});

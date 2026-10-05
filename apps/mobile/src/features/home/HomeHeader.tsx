@@ -1,3 +1,4 @@
+import { useAccountSections, useAccountAttention } from "./useAccountSections";
 import type { EnvironmentId, SidebarThreadSortOrder } from "@lecturn/contracts";
 import type { MenuAction } from "@react-native-menu/menu";
 import Constants from "expo-constants";
@@ -24,6 +25,7 @@ import type { HomeProjectSortOrder } from "./homeThreadList";
 import { WorkspaceConnectionTitle } from "./WorkspaceConnectionTitle";
 import {
   buildHomeListFilterMenu,
+  groupAccountFilterEnvironments,
   type HomeListFilterMenuEnvironment,
   type HomeListFilterMenuProject,
 } from "./home-list-filter-menu";
@@ -66,6 +68,8 @@ function checkedMenuState(checked: boolean) {
 }
 
 function AndroidHomeHeader(props: HomeHeaderProps) {
+  const accountSections = useAccountSections();
+  const attention = useAccountAttention(accountSections);
   const insets = useSafeAreaInsets();
   const stageLabel = resolveMobileStageLabel(Constants.expoConfig?.extra?.appVariant);
   // Thread List v2 lays the list out in fixed creation order, so the
@@ -86,11 +90,25 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
             title: "All environments",
             state: checkedMenuState(props.selectedEnvironmentId === null),
           },
-          ...props.environments.map((environment) => ({
-            id: `environment:${environment.environmentId}`,
-            title: environment.label,
-            state: checkedMenuState(props.selectedEnvironmentId === environment.environmentId),
-          })),
+          ...(accountSections
+            ? groupAccountFilterEnvironments(props.environments, accountSections, attention).map(
+                (group) => ({
+                  id: `account:${group.id}`,
+                  title: group.label,
+                  subactions: group.environments.map((environment) => ({
+                    id: `environment:${environment.environmentId}`,
+                    title: environment.label,
+                    state: checkedMenuState(
+                      props.selectedEnvironmentId === environment.environmentId,
+                    ),
+                  })),
+                }),
+              )
+            : props.environments.map((environment) => ({
+                id: `environment:${environment.environmentId}`,
+                title: environment.label,
+                state: checkedMenuState(props.selectedEnvironmentId === environment.environmentId),
+              }))),
         ],
       },
       ...(props.projects.length === 0
@@ -137,6 +155,8 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
           ] satisfies MenuAction[])),
     ],
     [
+      accountSections,
+      attention,
       props.environments,
       props.projectSortOrder,
       props.projects,
@@ -309,6 +329,8 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
 }
 
 function IosHomeHeader(props: HomeHeaderProps) {
+  const accountSections = useAccountSections();
+  const attention = useAccountAttention(accountSections);
   const searchBarRef = useRef<SearchBarCommands>(null);
   const iconColor = useUniwindTheme()["--color-icon"];
   // Thread List v2 lays the list out in fixed creation order, so the
@@ -324,6 +346,8 @@ function IosHomeHeader(props: HomeHeaderProps) {
   }, []);
   useHardwareKeyboardCommand("focusSearch", focusSearch);
   const filterMenu = buildHomeListFilterMenu({
+    accountSections,
+    accountAttention: attention,
     ...props,
     listOrganization: !threadListV2Enabled,
   });

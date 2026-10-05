@@ -375,6 +375,8 @@ export const EnvironmentCloudRelayConfigResult = Schema.Struct({
 export type EnvironmentCloudRelayConfigResult = typeof EnvironmentCloudRelayConfigResult.Type;
 
 export const EnvironmentCloudLinkStateResult = Schema.Struct({
+  // Another Lecturn installation currently holds this physical device's relay.
+  deviceRelayConflict: Schema.optional(Schema.NullOr(Schema.String)),
   organizationId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   linked: Schema.Boolean,
   cloudUserId: Schema.NullOr(Schema.String),

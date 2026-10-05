@@ -1,5 +1,6 @@
+import { useAtomValue } from "@effect/atom-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 
 import ChatView from "../components/ChatView";
 import { threadHasStarted } from "../components/ChatView.logic";
@@ -15,6 +16,12 @@ import {
 } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { environmentShell } from "../state/shell";
+import { resolveAccountGone, signedOutEnvironmentsAtom } from "../cloud/accountGone";
+import { openThreadEnvironmentIdAtom } from "../cloud/accountPicker";
+import { environmentCatalog } from "../connection/catalog";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+
+const AccountGoneNotice = lazy(() => import("../components/clerk/AccountGoneNotice"));
 
 function ChatThreadRouteView() {
   const navigate = useNavigate();
@@ -42,7 +49,15 @@ function ChatThreadRouteView() {
     }
     return store.hasDraftThreadsInEnvironment(threadRef.environmentId);
   });
+  const signedOutEnvironments = useAtomValue(signedOutEnvironmentsAtom);
+  const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
+  const accountGone = resolveAccountGone({
+    environmentId: threadRef?.environmentId ?? null,
+    signedOutEnvironments,
+    environmentInCatalog: threadRef !== null && catalog.entries.has(threadRef.environmentId),
+  });
   const renderState = resolveThreadRouteRenderState({
+    accountGone: accountGone !== null,
     bootstrapComplete,
     serverThreadShellExists: serverThreadShell !== null,
     serverThreadDetailExists: serverThreadDetail !== null,
@@ -67,6 +82,14 @@ function ChatThreadRouteView() {
     }
   }, [bootstrapComplete, environmentHasAnyThreads, navigate, renderState, threadRef]);
 
+  // Settings replaces this route, so its account pickers default to the thread left behind.
+  const openEnvironmentId = threadRef?.environmentId ?? null;
+  useEffect(() => {
+    if (openEnvironmentId !== null) {
+      appAtomRegistry.set(openThreadEnvironmentIdAtom, openEnvironmentId);
+    }
+  }, [openEnvironmentId]);
+
   useEffect(() => {
     if (!threadRef || !serverThreadStarted || !draftThread) {
       return;
@@ -80,6 +103,11 @@ function ChatThreadRouteView() {
 
   return (
     <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
+      {accountGone !== null ? (
+        <Suspense fallback={null}>
+          <AccountGoneNotice account={accountGone} />
+        </Suspense>
+      ) : null}
       {renderState === "ready" || (renderState === "loading" && serverThreadShell !== null) ? (
         <ChatView
           environmentId={threadRef.environmentId}

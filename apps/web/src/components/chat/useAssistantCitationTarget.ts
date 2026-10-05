@@ -1,5 +1,5 @@
 import type { LegendListRef } from "@legendapp/list/react";
-import type { TurnId } from "@lecturn/contracts";
+import type { MessageId, TurnId } from "@lecturn/contracts";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { TimelineEntry } from "../../session-logic";
 import type { MessagesTimelineRow } from "./MessagesTimeline.logic";
@@ -12,6 +12,19 @@ export interface CitationHistoryPage {
   readonly onLoadEarlier: () => void;
 }
 
+/** Rendering the expanded user body must commit before navigation can measure it. */
+export function citationSourceReadiness(input: {
+  role: string;
+  userExpanded: boolean;
+  rowPresent: boolean;
+  listReady: boolean;
+}): "unsupported" | "expand-user" | "expand-turn" | "wait" | "ready" {
+  if (input.role !== "assistant" && input.role !== "user") return "unsupported";
+  if (input.role === "user" && !input.userExpanded) return "expand-user";
+  if (!input.rowPresent) return "expand-turn";
+  return input.listReady ? "ready" : "wait";
+}
+
 /** Fetch, unfold, and mount the source before its measured quote owns scrolling. */
 export function useAssistantCitationTarget({
   request,
@@ -22,6 +35,8 @@ export function useAssistantCitationTarget({
   historyLoading,
   loadEarlier,
   onExpandTurn,
+  expandedUserMessages,
+  onExpandUserMessage,
   onManualNavigation,
 }: {
   request: AssistantCitationRequest | null;
@@ -32,6 +47,8 @@ export function useAssistantCitationTarget({
   historyLoading: boolean;
   loadEarlier: CitationHistoryPage | null;
   onExpandTurn: (turnId: TurnId) => void;
+  expandedUserMessages: ReadonlySet<MessageId>;
+  onExpandUserMessage: (messageId: MessageId) => void;
   onManualNavigation: () => void;
 }) {
   const [ready, setReady] = useState<AssistantCitationTarget | null>(null);
@@ -93,7 +110,7 @@ export function useAssistantCitationTarget({
         const cursor = loadEarlier.cursor ?? entries[0]?.id ?? "first";
         if (navigation.requestedPages.has(cursor) || navigation.requestedPages.size >= 20) {
           fail(
-            "Could not load the cited response",
+            "Could not load the selected message",
             "Load earlier turns, then click the citation to try again. Your saved quote is unchanged.",
           );
           return;
@@ -103,26 +120,38 @@ export function useAssistantCitationTarget({
         return;
       }
       fail(
-        "The cited response is unavailable",
+        "The selected message is unavailable",
         "It may have been removed. The selected text is still saved in your citation.",
       );
       return;
     }
-    if (source.kind !== "message" || source.message.role !== "assistant") {
-      fail(
-        "The citation does not refer to an assistant response",
-        "The selected text is still saved in your citation.",
-      );
-      return;
+    if (source.kind !== "message") return;
+    const readiness = citationSourceReadiness({
+      role: source.message.role,
+      userExpanded: expandedUserMessages.has(source.message.id),
+      rowPresent: rows.some(
+        (row) => row.kind === "message" && row.message.id === source.message.id,
+      ),
+      listReady: listLoaded && listRef.current !== null,
+    });
+    switch (readiness) {
+      case "unsupported":
+        fail(
+          "The saved selection does not refer to a chat message",
+          "The selected text is still saved in your citation.",
+        );
+        return;
+      case "expand-user":
+        onExpandUserMessage(source.message.id);
+        return;
+      case "expand-turn":
+        if (source.message.turnId) onExpandTurn(source.message.turnId);
+        return;
+      case "wait":
+        return;
+      case "ready":
+        setReady(navigation.target);
     }
-    const index = rows.findIndex(
-      (row) => row.kind === "message" && row.message.id === navigation.target.citation.messageId,
-    );
-    if (index < 0) {
-      if (source.message.turnId) onExpandTurn(source.message.turnId);
-      return;
-    }
-    if (listLoaded && listRef.current) setReady(navigation.target);
   }, [
     entries,
     historyLoading,
@@ -130,6 +159,8 @@ export function useAssistantCitationTarget({
     listRef,
     loadEarlier,
     onExpandTurn,
+    expandedUserMessages,
+    onExpandUserMessage,
     onManualNavigation,
     request,
     rows,

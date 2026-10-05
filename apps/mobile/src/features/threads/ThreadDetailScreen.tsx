@@ -1,3 +1,5 @@
+import { ContextualPreparationNotice } from "../contextual/ContextualControls";
+import { AccountTintScope } from "../../lib/AccountTintScope";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { buildModelOptions } from "../../lib/modelOptions";
 import {
@@ -295,6 +297,15 @@ const USER_INPUT_TOGGLE_TIMING = {
 };
 
 export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: ThreadDetailScreenProps) {
+  return (
+    <AccountTintScope environmentId={props.environmentId}>
+      <ThreadDetailScreenContent {...props} />
+    </AccountTintScope>
+  );
+});
+const ThreadDetailScreenContent = memo(function ThreadDetailScreenContent(
+  props: ThreadDetailScreenProps,
+) {
   const insets = useSafeAreaInsets();
   const settled = props.selectedThread.settledOverride === "settled";
   const { unsettleThread } = useThreadListActions();
@@ -711,7 +722,10 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
       resolveThreadFeedSubmissionAnchor({
         currentAnchorMessageId: anchorMessageId,
         submittedMessageId: messageId,
-        hasStartedTurn: props.selectedThread.latestTurn !== null,
+        // An imported thread opens with history and no turn of its own, so it
+        // is never the empty thread the anchor is for.
+        hasStartedTurn:
+          props.selectedThread.latestTurn !== null || props.selectedThread.importedFrom != null,
         hasUserMessage,
         queuedMessageCount: props.selectedThreadQueueCount,
       }),
@@ -722,6 +736,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     anchorMessageId,
     props.onSendMessage,
     settled,
+    props.selectedThread.importedFrom,
     props.selectedThread.latestTurn,
     props.selectedThreadQueueCount,
     selectedThreadFeed,
@@ -791,7 +806,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
 
   return (
     <View className="flex-1">
-      <ArcaneBackdrop />
+      <ArcaneBackdrop transitionKey={`${props.environmentId}:${props.selectedThread.projectId}`} />
       {showContent ? (
         <View
           className="flex-1"
@@ -809,6 +824,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
             contentPresentation={props.contentPresentation}
             agentLabel={agentLabel}
             latestTurn={props.selectedThread.latestTurn}
+            importedFrom={props.selectedThread.importedFrom ?? null}
             activeWorkStartedAt={props.activeWorkStartedAt}
             listRef={listRef}
             freeze={freeze}
@@ -977,6 +993,10 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                   settled || activeUserInputRequestId !== null ? { display: "none" } : undefined
                 }
               >
+                <ContextualPreparationNotice
+                  environmentId={props.environmentId}
+                  threadId={props.selectedThread.id}
+                />
                 <ThreadComposer
                   editorRef={composerEditorRef}
                   draftMessage={props.draftMessage}

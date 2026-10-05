@@ -32,6 +32,7 @@
  *
  * @module provider/Layers/ProviderInstanceRegistryLive
  */
+import * as NodeCrypto from "node:crypto";
 import {
   defaultInstanceIdForDriver,
   providerInstanceConfigEnabledFlag,
@@ -83,6 +84,7 @@ interface RegistryState {
   readonly unavailable: Ref.Ref<ReadonlyMap<ProviderInstanceId, ServerProvider>>;
   readonly changes: PubSub.PubSub<void>;
 }
+const encodeConfiguration = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 /**
  * Structural equality on `ProviderInstanceConfig` envelopes. Used by
@@ -203,10 +205,25 @@ const buildEntry = <R>(input: {
       };
     }
 
+    const configurationJson = yield* encodeConfiguration({
+      driver: entry.driver,
+      config: typedConfig,
+      environment: entry.environment ?? [],
+      enabled: resolveEntryEnabled(entry, typedConfig),
+    }).pipe(Effect.orElseSucceed(() => null));
     return {
       kind: "live" as const,
       live: {
-        instance: createResult.success,
+        instance: {
+          ...createResult.success,
+          ...(configurationJson === null
+            ? {}
+            : {
+                configurationFingerprint: NodeCrypto.createHash("sha256")
+                  .update(configurationJson)
+                  .digest("hex"),
+              }),
+        },
         scope: childScope,
         entry,
       },

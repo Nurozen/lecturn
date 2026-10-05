@@ -1,3 +1,4 @@
+import { DecisionsService } from "../decisions/DecisionsService.ts";
 import { createClerkClient, verifyToken } from "@clerk/backend";
 import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
@@ -26,6 +27,7 @@ import {
   relayNotFoundRoute,
   relayDpopFailureReason,
   revokeEnvironmentLinkRecord,
+  syncManagedEndpointOriginRecord,
   traceRelayHttpRequestWith,
   unlinkEnvironmentRecord,
   verifyRelayClientBearerToken,
@@ -191,6 +193,8 @@ function relayUnlinkTestLayer(input?: {
   readonly revokeCredential?: EnvironmentCredentials.EnvironmentCredentials["Service"]["revokeForEnvironmentPublicKey"];
   readonly prepareDeprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["prepareDeprovision"];
   readonly deprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["deprovision"];
+  readonly listUsersForEnvironment?: EnvironmentLinks.EnvironmentLinks["Service"]["listUsersForEnvironment"];
+  readonly syncOrigin?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["syncOrigin"];
 }) {
   return Layer.mergeAll(
     Layer.succeed(
@@ -203,7 +207,8 @@ function relayUnlinkTestLayer(input?: {
       EnvironmentLinks.EnvironmentLinks,
       EnvironmentLinks.EnvironmentLinks.of({
         upsert: () => Effect.die("unused upsert"),
-        listUsersForEnvironment: () => Effect.die("unused listUsersForEnvironment"),
+        listUsersForEnvironment:
+          input?.listUsersForEnvironment ?? (() => Effect.die("unused listUsersForEnvironment")),
         listDeliveryUsersForEnvironment: () => Effect.die("unused listDeliveryUsersForEnvironment"),
         listPublicKeysForEnvironment: () => Effect.die("unused listPublicKeysForEnvironment"),
         listForUser: () => Effect.die("unused listForUser"),
@@ -226,6 +231,7 @@ function relayUnlinkTestLayer(input?: {
         prepareDeprovision: input?.prepareDeprovision ?? (() => Effect.succeed(null)),
         deprovision: input?.deprovision ?? (() => Effect.void),
         release: () => Effect.die("unused release"),
+        syncOrigin: input?.syncOrigin ?? (() => Effect.die("unused syncOrigin")),
       }),
     ),
   );
@@ -244,6 +250,48 @@ const linkedEnvironmentRecord = {
 } as const;
 
 describe("relay environment unlink", () => {
+  it.effect("revokes Decisions funding within the same unlink transaction", () => {
+    const events: string[] = [];
+    return Effect.gen(function* () {
+      yield* revokeEnvironmentLinkRecord({
+        userId: "payer",
+        environmentId: "environment",
+        environmentPublicKey: "key",
+      });
+      expect(events).toEqual(["transaction", "link", "funding", "credential"]);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          relayUnlinkTestLayer({
+            withTransaction: (effect) => {
+              events.push("transaction");
+              return effect;
+            },
+            revokeForUser: () =>
+              Effect.sync(() => {
+                events.push("link");
+                return true;
+              }),
+            revokeCredential: () =>
+              Effect.sync(() => {
+                events.push("credential");
+                return true;
+              }),
+          }),
+          Layer.succeed(DecisionsService, {
+            funding: {
+              revokeEnvironment: (id: string, key: string) =>
+                Effect.sync(() => {
+                  expect([id, key]).toEqual(["environment", "key"]);
+                  events.push("funding");
+                }),
+            },
+          } as unknown as DecisionsService["Service"]),
+        ),
+      ),
+    );
+  });
+
   it.effect("revokes the link and its credentials in one database transaction", () => {
     const calls: Array<string> = [];
     return Effect.gen(function* () {
@@ -421,6 +469,56 @@ describe("relay environment unlink", () => {
   });
 });
 
+describe("relay managed endpoint origin sync", () => {
+  it.effect("syncs every owner linked with the environment key, including silenced ones", () => {
+    const lookups: Array<unknown> = [];
+    const synced: Array<unknown> = [];
+    return Effect.gen(function* () {
+      expect(
+        yield* syncManagedEndpointOriginRecord({
+          environmentId: "environment-1",
+          environmentPublicKey: "public-key",
+          origin: { localHttpHost: "127.0.0.1", localHttpPort: 3774 },
+        }),
+      ).toEqual({ ok: true, updatedTunnels: 1 });
+      expect(lookups).toEqual([
+        {
+          environmentId: "environment-1",
+          environmentPublicKey: "public-key",
+          includeAllLinkedUsers: true,
+        },
+      ]);
+      expect(synced).toEqual([
+        {
+          userId: "user-with-tunnel",
+          environmentId: "environment-1",
+          origin: { localHttpHost: "127.0.0.1", localHttpPort: 3774 },
+        },
+        {
+          userId: "user-publish-only",
+          environmentId: "environment-1",
+          origin: { localHttpHost: "127.0.0.1", localHttpPort: 3774 },
+        },
+      ]);
+    }).pipe(
+      Effect.provide(
+        relayUnlinkTestLayer({
+          listUsersForEnvironment: (input) =>
+            Effect.sync(() => {
+              lookups.push(input);
+              return ["user-with-tunnel", "user-publish-only"];
+            }),
+          syncOrigin: (input) =>
+            Effect.sync(() => {
+              synced.push(input);
+              return input.userId === "user-with-tunnel";
+            }),
+        }),
+      ),
+    );
+  });
+});
+
 describe("relay request tracing", () => {
   it.effect(
     "does not parent endpoint spans to an ambient parent captured while building handlers",
@@ -578,6 +676,26 @@ describe("relay routing fallback", () => {
 
 for (const [method, path, origin, preflightMethod, expectedOrigin] of [
   ["GET", "/v1/billing/status", "lecturn://app", "", "lecturn://app"],
+  [
+    "OPTIONS",
+    "/v1/extensions/status",
+    "https://lecturn.cloudgatherer.net",
+    "GET",
+    "https://lecturn.cloudgatherer.net",
+  ],
+  [
+    "OPTIONS",
+    "/v1/extensions/funding/approve",
+    "https://lecturn.cloudgatherer.net",
+    "POST",
+    "https://lecturn.cloudgatherer.net",
+  ],
+  ["GET", "/v1/extensions/status", "lecturn://app", "", "lecturn://app"],
+  ["OPTIONS", "/v1/extensions/funding/account-revoke", "lecturn://app", "POST", "lecturn://app"],
+  ["POST", "/v1/extensions/funding/account-revoke", "lecturn://app", "", "lecturn://app"],
+  ["OPTIONS", "/v1/extensions/funding/approve", "lecturn://app", "POST", undefined],
+  ["OPTIONS", "/v1/extensions/status", "https://untrusted.example", "GET", undefined],
+  ["GET", "/v1/extensions/status", "https://untrusted.example", "", undefined],
   ["OPTIONS", "/v1/billing/status", "lecturn://app", "GET", "lecturn://app"],
   ["OPTIONS", "/v1/billing/status", "lecturn://app", "POST", undefined],
   ["POST", "/v1/billing/checkout", "lecturn://app", "", undefined],
@@ -608,7 +726,7 @@ for (const [method, path, origin, preflightMethod, expectedOrigin] of [
       expect(response.headers["access-control-allow-origin"]).toBe(expectedOrigin);
       if (method === "OPTIONS") expect(response.status).toBe(expectedOrigin ? 204 : 403);
       if (origin === "lecturn://app" && expectedOrigin && method === "OPTIONS") {
-        expect(response.headers["access-control-allow-methods"]).toBe("GET,OPTIONS");
+        expect(response.headers["access-control-allow-methods"]).toBe(`${preflightMethod},OPTIONS`);
         expect(response.headers["access-control-allow-headers"]).toContain("authorization");
       }
     }).pipe(Effect.scoped),

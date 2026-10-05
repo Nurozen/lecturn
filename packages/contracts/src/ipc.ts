@@ -446,6 +446,19 @@ export interface PickFolderOptions {
   targetEnvironmentId?: string;
 }
 
+/** Desktop exports choose their destination only through the native Save dialog. */
+export const DesktopSaveTextFileInputSchema = Schema.Struct({
+  format: Schema.Literals(["markdown", "json"]),
+  content: Schema.String.check(Schema.isMaxLength(32 * 1024 * 1024)),
+});
+export type DesktopSaveTextFileInput = typeof DesktopSaveTextFileInputSchema.Type;
+export const DesktopSaveTextFileResultSchema = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("saved"), filePath: Schema.String }),
+  Schema.Struct({ status: Schema.Literal("canceled") }),
+  Schema.Struct({ status: Schema.Literal("error"), message: Schema.String }),
+]);
+export type DesktopSaveTextFileResult = typeof DesktopSaveTextFileResultSchema.Type;
+
 export const PickFolderOptionsSchema = Schema.Struct({
   initialPath: Schema.optionalKey(Schema.NullOr(Schema.String)),
   targetEnvironmentId: Schema.optionalKey(Schema.String),
@@ -1088,6 +1101,9 @@ export const ActivityVisualState = Schema.Literals([
 ]);
 export type ActivityVisualState = typeof ActivityVisualState.Type;
 export const DesktopActivityRowSchema = Schema.Struct({
+  accountId: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
+  accountLabel: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(80))),
+  accountColor: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^#[0-9a-fA-F]{6}$/))),
   userPromptAt: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(100))),
   userSettled: Schema.optionalKey(Schema.Boolean),
   userStopped: Schema.optionalKey(Schema.Boolean),
@@ -1223,6 +1239,7 @@ export interface DesktopBridge {
    * web callers fall back to a plain file input.
    */
   pickThemeFiles?: () => Promise<readonly PickedThemeFile[] | null>;
+  saveTextFile?: (input: DesktopSaveTextFileInput) => Promise<DesktopSaveTextFileResult>;
   setTheme: (theme: DesktopTheme) => Promise<void>;
   showContextMenu: <T extends string>(
     items: readonly ContextMenuItem<T>[],

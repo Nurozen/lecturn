@@ -21,6 +21,7 @@ import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
 import * as FileSystem from "effect/FileSystem";
@@ -29,6 +30,19 @@ import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as Semaphore from "effect/Semaphore";
+import * as TxRef from "effect/TxRef";
+import { ContextualTurnQueue, type ContextualQueuedTurn } from "../ContextualTurnQueue.ts";
+import {
+  ContextualTurnCoordinator,
+  type ContextualTurnDecision,
+} from "../ContextualTurnCoordinator.ts";
+import { ContextualNotifications } from "../../contextual/ContextualNotifications.ts";
+import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
+import {
+  providerContextIdForSession,
+  getContextualProviderCapabilities,
+} from "../../provider/ContextualCapabilities.ts";
 import { makeDrainableWorker } from "@lecturn/shared/DrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
@@ -351,6 +365,10 @@ function buildGeneratedWorktreeBranchName(raw: string): string {
 }
 
 const make = Effect.gen(function* () {
+  const contextualQueue = yield* Effect.serviceOption(ContextualTurnQueue);
+  const contextualCoordinator = yield* Effect.serviceOption(ContextualTurnCoordinator);
+  const contextualNotifications = yield* Effect.serviceOption(ContextualNotifications);
+  const contextualProjectionTurns = yield* Effect.serviceOption(ProjectionTurnRepository);
   const crypto = yield* Crypto.Crypto;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
@@ -680,6 +698,35 @@ const make = Effect.gen(function* () {
     };
   });
 
+  // An imported thread runs on a native fork of the external session that was
+  // cut at import time, so its first provider session plainly resumes that
+  // fork's cursor. Once the thread has a binding of its own the persisted
+  // cursor takes over. A cursor is only meaningful to the instance that
+  // minted it, so a first send on any other instance fails: starting cold
+  // would bind a session that knows nothing of the history the thread shows.
+  const resolveImportStartOptions = Effect.fnUntraced(function* (
+    threadId: ThreadId,
+    providerInstanceId: ProviderInstanceId,
+  ) {
+    const importSource = Option.getOrUndefined(
+      yield* projectionSnapshotQuery.getThreadImportSourceById(threadId),
+    );
+    if (
+      importSource === undefined ||
+      Option.isSome(yield* providerSessionDirectory.getBinding(threadId))
+    ) {
+      return undefined;
+    }
+    if (importSource.providerInstanceId !== providerInstanceId) {
+      return yield* new ProviderAdapterRequestError({
+        provider: providerErrorLabelFromInstanceHint({ instanceId: String(providerInstanceId) }),
+        method: "thread.turn.start",
+        detail: `Thread '${threadId}' was imported on provider instance '${importSource.providerInstanceId}' and cannot start on '${providerInstanceId}'; the imported session only continues on the instance it was imported with. Switch back to it to send.`,
+      });
+    }
+    return { resumeCursor: importSource.resumeCursor };
+  });
+
   const ensureSessionForThread = Effect.fn("ensureSessionForThread")(function* (
     threadId: ThreadId,
     createdAt: string,
@@ -941,7 +988,10 @@ const make = Effect.gen(function* () {
       return restartedSession.threadId;
     }
 
-    const startedSession = yield* startProviderSession(yield* resolveForkStartOptions(threadId));
+    const startedSession = yield* startProviderSession(
+      (yield* resolveForkStartOptions(threadId)) ??
+        (yield* resolveImportStartOptions(threadId, desiredInstanceId)),
+    );
     yield* bindSessionToThread(startedSession);
     return startedSession.threadId;
   });
@@ -1291,9 +1341,10 @@ const make = Effect.gen(function* () {
 
   const processTurnStartRequested = Effect.fn("processTurnStartRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
+    queued?: ContextualQueuedTurn,
   ) {
     const key = turnStartKeyForEvent(event);
-    if (yield* hasHandledTurnStartRecently(key)) {
+    if (!queued && (yield* hasHandledTurnStartRecently(key))) {
       return;
     }
 
@@ -1301,6 +1352,7 @@ const make = Effect.gen(function* () {
     if (!thread) {
       return;
     }
+    if (queued && (thread.deletedAt !== null || thread.archivedAt !== null)) return;
     const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
     if (!message || message.role !== "user") {
       yield* appendProviderFailureActivity({
@@ -1418,34 +1470,6 @@ const make = Effect.gen(function* () {
       (thread.forkedFrom != null &&
         userMessages.filter((entry) => Date.parse(entry.createdAt) > threadCreatedAtMs).length ===
           1);
-    if (isFirstUserMessageTurn && !isCompactCommand) {
-      const project = yield* resolveProject(thread.projectId);
-      const generationCwd =
-        resolveThreadWorkspaceCwd({
-          thread,
-          projects: project ? [project] : [],
-        }) ?? process.cwd();
-      const generationInput = {
-        messageText: assistantCitationsToPlainText(message.text),
-        ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
-        ...(event.payload.titleSeed !== undefined ? { titleSeed: event.payload.titleSeed } : {}),
-      };
-
-      yield* maybeGenerateAndRenameWorktreeBranchForFirstTurn({
-        threadId: event.payload.threadId,
-        branch: thread.branch,
-        worktreePath: thread.worktreePath,
-        ...generationInput,
-      }).pipe(Effect.forkScoped);
-
-      if (canReplaceThreadTitle(thread.title, event.payload.titleSeed)) {
-        yield* maybeGenerateThreadTitleForFirstTurn({
-          threadId: event.payload.threadId,
-          cwd: generationCwd,
-          ...generationInput,
-        }).pipe(Effect.forkScoped);
-      }
-    }
 
     let compactionSessionEnsured = false;
     const handleCompactionFailure = (cause: Cause.Cause<unknown>) => {
@@ -1539,6 +1563,80 @@ const make = Effect.gen(function* () {
         "Wait for context compaction to finish before sending another message.",
       );
     }
+    let contextualDecision: ContextualTurnDecision = {
+      action: "send",
+      preparation: null,
+      packet: null,
+    };
+    if (queued && Option.isSome(contextualCoordinator)) {
+      const instanceId =
+        event.payload.modelSelection?.instanceId ?? thread.modelSelection.instanceId;
+      const instance = yield* providerService.getInstanceInfo(instanceId);
+      const sessions = yield* providerService.listSessions();
+      const live = sessions.find((session) => session.threadId === thread.id);
+      // Existing running/queued sessions cannot accept a new evidence packet.
+      if (
+        queued.preparationId ||
+        queued.state === "held" ||
+        (getContextualProviderCapabilities(instance.driverKind).delivery !== "unsupported" &&
+          live?.status !== "running")
+      ) {
+        const messageIndex = thread.messages.findIndex((entry) => entry.id === message.id);
+        contextualDecision = yield* contextualCoordinator.value.prepare(queued, {
+          threadId: thread.id,
+          submissionId: event.eventId,
+          messageId: message.id,
+          providerInstanceId: instanceId,
+          newestMessage: message.text,
+          recentContext: thread.messages
+            .slice(0, messageIndex)
+            .slice(-12)
+            .map((entry) => `${entry.role}: ${entry.text}`)
+            .join("\n\n"),
+        });
+        if (contextualDecision.action === "hold") return;
+        if (contextualDecision.action === "cancel") {
+          if (Option.isSome(contextualQueue))
+            yield* contextualQueue.value.finish(thread.id, event.eventId, "canceled");
+          return;
+        }
+      }
+    }
+    if (queued && Option.isSome(contextualQueue)) {
+      // A stop can commit while the independent preparation worker is awaiting evaluation.
+      // Check before session creation; begin() also fences cancellation at dispatch admission.
+      const current = yield* contextualQueue.value.head(thread.id);
+      if (current?.event.eventId !== event.eventId) return;
+    }
+    if (isFirstUserMessageTurn && !isCompactCommand) {
+      const project = yield* resolveProject(thread.projectId);
+      const generationCwd =
+        resolveThreadWorkspaceCwd({
+          thread,
+          projects: project ? [project] : [],
+        }) ?? process.cwd();
+      const generationInput = {
+        messageText: assistantCitationsToPlainText(message.text),
+        ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+        ...(event.payload.titleSeed !== undefined ? { titleSeed: event.payload.titleSeed } : {}),
+      };
+
+      yield* maybeGenerateAndRenameWorktreeBranchForFirstTurn({
+        threadId: event.payload.threadId,
+        branch: thread.branch,
+        worktreePath: thread.worktreePath,
+        ...generationInput,
+      }).pipe(Effect.forkScoped);
+
+      if (canReplaceThreadTitle(thread.title, event.payload.titleSeed)) {
+        yield* maybeGenerateThreadTitleForFirstTurn({
+          threadId: event.payload.threadId,
+          cwd: generationCwd,
+          ...generationInput,
+        }).pipe(Effect.forkScoped);
+      }
+    }
+
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
       messageText: message.text,
@@ -1557,9 +1655,62 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    yield* providerService
-      .sendTurn(sendTurnRequest.value)
-      .pipe(Effect.asVoid, Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
+    if (queued && Option.isSome(contextualCoordinator) && Option.isSome(contextualQueue)) {
+      const queue = contextualQueue.value;
+      const coordinator = contextualCoordinator.value;
+      const binding = yield* providerSessionDirectory.getBinding(thread.id);
+      const contextId = Option.isSome(binding)
+        ? providerContextIdForSession(binding.value.provider, binding.value.resumeCursor)
+        : null;
+      const contextualEvidence = yield* coordinator.begin(
+        queued,
+        contextualDecision.action === "send"
+          ? contextualDecision
+          : { action: "send", preparation: null, packet: null },
+        contextId,
+      );
+      if (Option.isSome(contextualProjectionTurns))
+        yield* contextualProjectionTurns.value.replacePendingTurnStart({
+          threadId: thread.id,
+          messageId: message.id,
+          sourceProposedPlanThreadId: event.payload.sourceProposedPlan?.threadId ?? null,
+          sourceProposedPlanId: event.payload.sourceProposedPlan?.planId ?? null,
+          requestedAt: event.payload.createdAt,
+        });
+      const dispatched = yield* Deferred.make<void>();
+      let admissionFinished = false;
+      const finishAdmission = (state: "done" | "unknown") =>
+        Effect.gen(function* () {
+          if (admissionFinished) return;
+          yield* queue.finish(thread.id, event.eventId, state);
+          admissionFinished = true;
+          yield* Deferred.succeed(dispatched, undefined);
+        }).pipe(Effect.uninterruptible);
+      // ACP sendTurn resolves when the entire prompt settles. Release the FIFO
+      // worker only after its native request is registered, while retaining the
+      // scoped lifecycle to observe receipts and report later failures.
+      yield* providerService
+        .sendTurn(
+          { ...sendTurnRequest.value, ...(contextualEvidence ? { contextualEvidence } : {}) },
+          coordinator.observe,
+          finishAdmission("done").pipe(Effect.orDie),
+        )
+        .pipe(
+          Effect.tap((result) =>
+            result.contextualReceipt ? coordinator.observe(result.contextualReceipt) : Effect.void,
+          ),
+          Effect.tap(() => finishAdmission("done")),
+          Effect.catchCause((cause) =>
+            finishAdmission("unknown").pipe(Effect.andThen(recoverTurnStartFailure(cause))),
+          ),
+          Effect.ensuring(Deferred.succeed(dispatched, undefined)),
+          Effect.forkScoped,
+        );
+      yield* Deferred.await(dispatched);
+    } else
+      yield* providerService
+        .sendTurn(sendTurnRequest.value)
+        .pipe(Effect.asVoid, Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
@@ -1748,6 +1899,7 @@ const make = Effect.gen(function* () {
   const processSessionStopRequested = Effect.fn("processSessionStopRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.session-stop-requested" }>,
   ) {
+    if (Option.isSome(contextualNotifications)) yield* contextualNotifications.value.publish;
     const thread = yield* resolveThread(event.payload.threadId);
     if (!thread) {
       return;
@@ -1809,6 +1961,81 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const contextualWorkers = new Set<ThreadId>();
+  const contextualOutstanding = yield* TxRef.make(0);
+  const contextualDirty = new Set<ThreadId>();
+  const contextualConcurrency = yield* Semaphore.make(4);
+  const wakeContextualThread = (threadId: ThreadId) =>
+    Effect.gen(function* () {
+      if (Option.isNone(contextualQueue) || Option.isNone(contextualCoordinator)) return;
+      if (contextualWorkers.has(threadId)) {
+        contextualDirty.add(threadId);
+        return;
+      }
+      contextualWorkers.add(threadId);
+      yield* TxRef.update(contextualOutstanding, (n) => n + 1);
+      const queue = contextualQueue.value;
+      yield* Effect.gen(function* () {
+        do {
+          contextualDirty.delete(threadId);
+          let next = yield* queue.head(threadId);
+          while (next) {
+            if (next.state === "dispatching") {
+              yield* appendProviderFailureActivity({
+                threadId,
+                kind: "provider.turn.start.failed",
+                summary: "Provider turn delivery could not be confirmed",
+                detail:
+                  "The server restarted during dispatch. Check the conversation before sending this message again.",
+                turnId: null,
+                createdAt: next.event.payload.createdAt,
+                requestId: next.event.payload.messageId,
+              });
+              yield* queue.finish(threadId, next.event.eventId, "unknown");
+            } else {
+              yield* processTurnStartRequested(next.event, next);
+              const remaining = yield* queue.head(threadId);
+              if (remaining?.event.eventId === next.event.eventId) {
+                if (remaining.state === "held") break;
+                // Commands, missing threads, and failed session starts are terminal for this submission.
+                yield* queue.finish(threadId, next.event.eventId, "canceled");
+              }
+            }
+            next = yield* queue.head(threadId);
+          }
+        } while (contextualDirty.has(threadId));
+      }).pipe(
+        contextualConcurrency.withPermit,
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Contextual queued turn failed", {
+            threadId,
+            cause: Cause.pretty(cause),
+          }),
+        ),
+        Effect.ensuring(
+          Effect.sync(() => {
+            contextualWorkers.delete(threadId);
+            contextualDirty.delete(threadId);
+          }).pipe(Effect.andThen(TxRef.update(contextualOutstanding, (n) => n - 1))),
+        ),
+        Effect.forkScoped,
+      );
+    });
+  const wakePendingContextual = Effect.gen(function* () {
+    if (Option.isNone(contextualQueue)) return;
+    let after = "";
+    while (true) {
+      const page = yield* contextualQueue.value.pendingThreads(after);
+      for (const threadId of page) yield* wakeContextualThread(threadId);
+      if (page.length < 128) return;
+      after = page[page.length - 1]!;
+    }
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("Contextual queue wakeup failed", { cause: Cause.pretty(cause) }),
+    ),
+  );
+
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (
     event: ProviderIntentEvent,
   ) {
@@ -1838,7 +2065,9 @@ const make = Effect.gen(function* () {
         return;
       }
       case "thread.turn-start-requested":
-        yield* processTurnStartRequested(event);
+        if (Option.isSome(contextualQueue) && (yield* contextualQueue.value.contains(event)))
+          yield* wakeContextualThread(event.payload.threadId);
+        else yield* processTurnStartRequested(event);
         return;
       case "thread.turn-interrupt-requested":
         yield* processTurnInterruptRequested(event);
@@ -1919,6 +2148,20 @@ const make = Effect.gen(function* () {
     const domainEvents = yield* orchestrationEngine.subscribeDomainEvents;
     yield* forkParked(Stream.runForEach(domainEvents, processEvent));
 
+    if (Option.isSome(contextualCoordinator))
+      yield* contextualCoordinator.value
+        .recover()
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Contextual recovery failed", { cause: Cause.pretty(cause) }),
+          ),
+        );
+    if (Option.isSome(contextualNotifications))
+      yield* forkParked(
+        Stream.runForEach(contextualNotifications.value.changes, () => wakePendingContextual),
+      );
+    yield* forkParked(wakePendingContextual);
+
     // The domain event stream is hot, so work pending before this reactor
     // starts cannot be resumed. Correlated completions only clear the request
     // captured here, leaving any newer request untouched.
@@ -1949,6 +2192,10 @@ const make = Effect.gen(function* () {
     start,
     drain: Effect.gen(function* () {
       yield* worker.drain;
+      yield* TxRef.get(contextualOutstanding).pipe(
+        Effect.tap((n) => (n > 0 ? Effect.txRetry : Effect.void)),
+        Effect.tx,
+      );
       yield* threadTitleRegenerationWorker.drain;
     }),
   } satisfies ProviderCommandReactorShape;

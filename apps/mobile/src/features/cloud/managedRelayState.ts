@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   createManagedRelayQueryManager,
   managedRelaySessionAtom,
+  managedRelaySessionsAtom,
   readManagedRelaySnapshotState,
 } from "@lecturn/client-runtime/relay";
 import type { RelayClientEnvironmentRecord } from "@lecturn/contracts/relay";
@@ -23,9 +24,9 @@ const EMPTY_ENVIRONMENTS_ATOM = Atom.make(
   AsyncResult.success<ReadonlyArray<RelayClientEnvironmentRecord>>([]),
 ).pipe(Atom.keepAlive, Atom.withLabel("managed-relay:mobile:environments:null"));
 
-export function useManagedRelayEnvironments() {
+export function useManagedRelayEnvironments(selectedAccountId?: string) {
   const session = useAtomValue(managedRelaySessionAtom);
-  const accountId = session?.accountId ?? null;
+  const accountId = selectedAccountId ?? session?.accountId ?? null;
   const atom = accountId
     ? managedRelayQueryManager.environmentsAtom(accountId)
     : EMPTY_ENVIRONMENTS_ATOM;
@@ -53,8 +54,7 @@ export function useManagedRelayEnvironments() {
 }
 
 export function refreshManagedRelayEnvironments(): void {
-  const session = appAtomRegistry.get(managedRelaySessionAtom);
-  if (session) {
-    managedRelayQueryManager.refreshEnvironments(appAtomRegistry, session.accountId);
+  for (const accountId of appAtomRegistry.get(managedRelaySessionsAtom).keys()) {
+    managedRelayQueryManager.refreshEnvironments(appAtomRegistry, accountId);
   }
 }

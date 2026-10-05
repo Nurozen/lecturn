@@ -30,13 +30,16 @@ export function StaveLifecycleNotice({
   const settings = useEnvironmentSettings(environmentId);
   const feature = useStaveFeatureAvailable(environmentId);
   const [operation, setOperation] = useState<StaveLifecycleActionOperation | null>(null);
-  const archive = lifecycleOperation({
+  const archiveNow = lifecycleOperation({
     projectId,
     workspaceRoot,
     createdAt: stave.createdAt,
     action: "archiveNow",
     policy: settings.stave.lifecycle,
   });
+  // A saga member leaves its saga as part of the reviewed archive.
+  const archive =
+    archiveNow && stave.memberOf ? { ...archiveNow, sagaRemoveConfirmed: true } : archiveNow;
   const keep = lifecycleOperation({
     projectId,
     workspaceRoot,
@@ -99,7 +102,13 @@ export function StaveLifecycleNotice({
           environmentId={environmentId}
           operation={operation}
           lifecycleIsSaga={stave.isSaga}
-          title={operation.action === "keep" ? "Keep space" : "Archive space"}
+          title={
+            operation.action === "keep"
+              ? "Keep space"
+              : stave.memberOf
+                ? `Archive space and leave saga ${stave.memberOf}`
+                : "Archive space"
+          }
           onClose={() => setOperation(null)}
           onFinished={() => {}}
         />

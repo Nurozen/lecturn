@@ -136,6 +136,8 @@ export default defineConfig({
           // React Native gradient strings require resolved palette colors.
           "apps/mobile/src/components/GlassCard.tsx",
           "apps/mobile/src/components/GlassSurface.tsx",
+          // Shared resolved colors for native glass, SVG strokes, and gradients.
+          "apps/mobile/src/lib/useGlassPalette.ts",
           "apps/mobile/src/features/archive/ArchivedThreadsScreen.tsx",
           "apps/mobile/src/features/connection/ConnectionsNewRouteScreen.tsx",
           "apps/mobile/src/features/files/FileMarkdownPreview.tsx",

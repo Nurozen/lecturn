@@ -3,6 +3,8 @@ import {
   DesktopAppBrandingSchema,
   DesktopEnvironmentBootstrapSchema,
   DesktopThemeSchema,
+  DesktopSaveTextFileInputSchema,
+  type DesktopSaveTextFileResult,
   EDITORS,
   EditorId,
   PickedThemeFileSchema,
@@ -56,6 +58,48 @@ function toWebSocketBaseUrl(httpBaseUrl: URL): string {
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   return url.href;
 }
+
+const decodeSaveTextFileInput = Schema.decodeUnknownEffect(DesktopSaveTextFileInputSchema, {
+  onExcessProperty: "error",
+});
+
+/** No renderer-supplied paths: the native Save dialog grants the destination. */
+export const saveTextFile = {
+  channel: IpcChannels.SAVE_TEXT_FILE_CHANNEL,
+  handler: (raw: unknown) =>
+    Effect.gen(function* () {
+      const input = yield* decodeSaveTextFileInput(raw).pipe(
+        Effect.mapError(() => "invalid-input" as const),
+      );
+      const dialog = yield* ElectronDialog.ElectronDialog;
+      const electronWindow = yield* ElectronWindow.ElectronWindow;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const selected = yield* dialog.saveFile({
+        owner: yield* electronWindow.focusedMainOrFirst,
+        defaultPath: input.format === "json" ? "decisions.json" : "decisions.md",
+        filters: [
+          {
+            name: input.format === "json" ? "JSON" : "Markdown",
+            extensions: [input.format === "json" ? "json" : "md"],
+          },
+        ],
+      });
+      if (Option.isNone(selected))
+        return { status: "canceled" } satisfies DesktopSaveTextFileResult;
+      yield* fileSystem.writeFileString(selected.value, input.content);
+      return { status: "saved", filePath: selected.value } satisfies DesktopSaveTextFileResult;
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed({
+          status: "error",
+          message:
+            error === "invalid-input"
+              ? "Invalid or oversized export request. Choose a smaller Markdown or JSON export."
+              : "Could not save the export. Choose a writable destination and try again.",
+        } satisfies DesktopSaveTextFileResult),
+      ),
+    ),
+};
 
 export const getAppBranding = DesktopIpc.makeSyncIpcMethod({
   channel: IpcChannels.GET_APP_BRANDING_CHANNEL,

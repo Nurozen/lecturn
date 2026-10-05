@@ -1,3 +1,5 @@
+import { ContextualRouteScreen } from "./features/contextual/ContextualRouteScreen";
+import { DecisionsRouteScreen } from "./features/decisions/DecisionsRouteScreen";
 import {
   createPathConfigForStaticNavigation,
   getPathFromState,
@@ -36,9 +38,15 @@ import { ConnectionsRouteScreen } from "./features/connection/ConnectionsRouteSc
 import { ConnectionsNewRouteScreen } from "./features/connection/ConnectionsNewRouteScreen";
 import { HomeRouteScreen } from "./features/home/HomeRouteScreen";
 import { AddProjectDestinationRoute } from "./features/projects/AddProjectDestinationRoute";
+import {
+  AddProjectImportFoldersRoute,
+  AddProjectImportSessionsRoute,
+} from "./features/projects/AddProjectImportRoute";
 import { AddProjectLocalRoute } from "./features/projects/AddProjectLocalRoute";
 import { AddProjectRepositoryRoute } from "./features/projects/AddProjectRepositoryRoute";
 import { AddProjectSourceRoute } from "./features/projects/AddProjectSourceRoute";
+import { ImportSessionPickerRouteScreen } from "./features/threads/ImportSessionPickerScreen";
+import { AddStaveSagaRoute, AddStaveSpaceRoute } from "./features/projects/AddStaveProjectRoute";
 import { NewTaskDraftRouteScreen } from "./features/threads/NewTaskDraftRouteScreen";
 import {
   NewTaskBranchPickerRouteScreen,
@@ -53,6 +61,7 @@ import { NewTaskFlowProvider } from "./features/threads/new-task-flow-provider";
 import { NewTaskRouteScreen } from "./features/threads/NewTaskRouteScreen";
 import { SettingsAppearanceRouteScreen } from "./features/settings/SettingsAppearanceRouteScreen";
 import { SettingsClientStorageRouteScreen } from "./features/settings/SettingsClientStorageRouteScreen";
+import { SettingsAddAccountRouteScreen } from "./features/settings/SettingsAddAccountRouteScreen";
 import { SettingsAuthRouteScreen } from "./features/settings/SettingsAuthRouteScreen";
 import { SettingsEnvironmentsRouteScreen } from "./features/settings/SettingsEnvironmentsRouteScreen";
 import { SettingsLegalRouteScreen } from "./features/settings/SettingsLegalRouteScreen";
@@ -228,6 +237,10 @@ const SettingsSheetStack = createNativeStackNavigator({
       screen: SettingsAuthRouteScreen,
       linking: "auth",
     }),
+    SettingsAddAccount: createNativeStackScreen({
+      screen: SettingsAddAccountRouteScreen,
+      linking: "add-account",
+    }),
     SettingsWaitlist: createNativeStackScreen({
       // Keep the old deep link working after the Connect GA launch.
       screen: SettingsAuthRouteScreen,
@@ -290,6 +303,13 @@ const NewTaskSheetStack = createNativeStackNavigator({
         title: "Branch",
       },
     }),
+    NewTaskImportSession: createNativeStackScreen({
+      screen: ImportSessionPickerRouteScreen,
+      linking: "draft/import-session",
+      options: {
+        title: "Import session",
+      },
+    }),
     ThreadSettings: createNativeStackScreen({
       screen: NewTaskThreadSettingsRouteScreen,
       linking: "draft/settings",
@@ -323,6 +343,26 @@ const NewTaskSheetStack = createNativeStackNavigator({
     AddProjectLocal: createNativeStackScreen({
       screen: AddProjectLocalRoute,
       linking: "add-project/local",
+    }),
+    AddProjectImportFolders: createNativeStackScreen({
+      screen: AddProjectImportFoldersRoute,
+      linking: "add-project/import",
+      options: { title: "Choose folder" },
+    }),
+    AddProjectImportSessions: createNativeStackScreen({
+      screen: AddProjectImportSessionsRoute,
+      linking: "add-project/import/sessions",
+      options: { title: "Import sessions" },
+    }),
+    AddProjectStaveSpace: createNativeStackScreen({
+      screen: AddStaveSpaceRoute,
+      linking: "add-project/stave-space",
+      options: { title: "New Stave Space" },
+    }),
+    AddProjectStaveSaga: createNativeStackScreen({
+      screen: AddStaveSagaRoute,
+      linking: "add-project/stave-saga",
+      options: { title: "New Stave Saga" },
     }),
   },
 });
@@ -470,6 +510,16 @@ export const RootStack = createNativeStackNavigator({
         headerBackVisible: false,
         ...getCompactBrandHeaderOptions(),
       },
+    }),
+    Contextual: createNativeStackScreen({
+      screen: ContextualRouteScreen,
+      linking: "contextual/:environmentId",
+      options: { ...SOLID_HEADER_OPTIONS, title: "Contextual" },
+    }),
+    Decisions: createNativeStackScreen({
+      screen: DecisionsRouteScreen,
+      linking: "decisions/:environmentId/:projectId",
+      options: { ...SOLID_HEADER_OPTIONS, title: "Decisions" },
     }),
     PullRequestWatch: createNativeStackScreen({
       screen: PullRequestWatchRouteScreen,

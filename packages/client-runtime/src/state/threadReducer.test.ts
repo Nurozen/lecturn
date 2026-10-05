@@ -6,6 +6,7 @@ import {
   EventId,
   MessageId,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
   TurnId,
@@ -1347,6 +1348,129 @@ describe("applyThreadDetailEvent", () => {
         expect(result.thread.messages).toHaveLength(2);
         expect(result.thread.latestTurn?.turnId).toBe("turn-1");
       }
+    });
+
+    describe("user messages", () => {
+      const message = (
+        id: string,
+        role: "user" | "assistant",
+        turn: string | null,
+        createdAt: string,
+      ): OrchestrationThread["messages"][number] => ({
+        id: MessageId.make(id),
+        role,
+        text: id,
+        turnId: turn === null ? null : TurnId.make(turn),
+        streaming: false,
+        createdAt,
+        updatedAt: createdAt,
+      });
+      const checkpoint = (
+        turn: string,
+        count: number,
+        assistantMessageId: string,
+        completedAt: string,
+      ): OrchestrationThread["checkpoints"][number] => ({
+        turnId: TurnId.make(turn),
+        checkpointTurnCount: count,
+        checkpointRef: CheckpointRef.make(`ref-${count}`),
+        status: "ready",
+        files: [],
+        assistantMessageId: MessageId.make(assistantMessageId),
+        completedAt,
+      });
+      // Three completed turns. User messages carry no turn id, as on the wire.
+      const threeTurnThread: OrchestrationThread = {
+        ...baseThread,
+        messages: [
+          message("user-1", "user", null, "2026-04-01T01:00:00.000Z"),
+          message("asst-1", "assistant", "turn-1", "2026-04-01T01:30:00.000Z"),
+          message("user-2", "user", null, "2026-04-01T02:00:00.000Z"),
+          message("asst-2", "assistant", "turn-2", "2026-04-01T02:30:00.000Z"),
+          message("user-3", "user", null, "2026-04-01T03:00:00.000Z"),
+          message("asst-3", "assistant", "turn-3", "2026-04-01T03:30:00.000Z"),
+        ],
+        checkpoints: [
+          checkpoint("turn-1", 1, "asst-1", "2026-04-01T01:30:00.000Z"),
+          checkpoint("turn-2", 2, "asst-2", "2026-04-01T02:30:00.000Z"),
+          checkpoint("turn-3", 3, "asst-3", "2026-04-01T03:30:00.000Z"),
+        ],
+      };
+      const revertTo = (thread: OrchestrationThread, turnCount: number) =>
+        applyThreadDetailEvent(thread, {
+          ...baseEventFields,
+          sequence: 14,
+          occurredAt: "2026-04-01T04:00:00.000Z",
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          type: "thread.reverted",
+          payload: { threadId: ThreadId.make("thread-1"), turnCount },
+        });
+
+      it("drops the user messages of reverted turns", () => {
+        const result = revertTo(threeTurnThread, 1);
+        if (result.kind !== "updated") throw new Error("Expected revert");
+        expect(result.thread.messages.map((entry) => entry.id)).toEqual(["user-1", "asst-1"]);
+      });
+
+      it("drops every user message when reverting to turn 0", () => {
+        const result = revertTo(threeTurnThread, 0);
+        if (result.kind !== "updated") throw new Error("Expected revert");
+        expect(result.thread.messages).toEqual([]);
+      });
+
+      it("keeps imported history, user messages included, through a revert to turn 0", () => {
+        // Imported rows carry no turn id and predate importedAt. Shaped like a
+        // fork of an imported thread cut after turn 1: the origin is inherited
+        // and the child's createdAt is newer than the parent's turnless user-1,
+        // which must still go with its turn.
+        const importedThread: OrchestrationThread = {
+          ...threeTurnThread,
+          createdAt: "2026-04-01T01:45:00.000Z",
+          importedFrom: {
+            providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+            driverKind: ProviderDriverKind.make("claudeAgent"),
+            sessionId: "external-session",
+            cwd: "/repo",
+            title: "External session",
+            importedAt: "2026-04-01T00:30:00.000Z",
+            historyTruncated: false,
+          },
+          messages: [
+            message("imported-user", "user", null, "2026-03-31T10:00:00.000Z"),
+            message("imported-asst", "assistant", null, "2026-03-31T10:00:01.000Z"),
+            ...threeTurnThread.messages,
+          ],
+        };
+        const toFirstTurn = revertTo(importedThread, 1);
+        if (toFirstTurn.kind !== "updated") throw new Error("Expected revert");
+        expect(toFirstTurn.thread.messages.map((entry) => entry.id)).toEqual([
+          "imported-user",
+          "imported-asst",
+          "user-1",
+          "asst-1",
+        ]);
+        const toStart = revertTo(importedThread, 0);
+        if (toStart.kind !== "updated") throw new Error("Expected revert");
+        expect(toStart.thread.messages.map((entry) => entry.id)).toEqual([
+          "imported-user",
+          "imported-asst",
+        ]);
+      });
+
+      it("keeps earlier turns intact across a second revert", () => {
+        const first = revertTo(threeTurnThread, 2);
+        if (first.kind !== "updated") throw new Error("Expected revert");
+        expect(first.thread.messages.map((entry) => entry.id)).toEqual([
+          "user-1",
+          "asst-1",
+          "user-2",
+          "asst-2",
+        ]);
+        const second = revertTo(first.thread, 1);
+        if (second.kind !== "updated") throw new Error("Expected revert");
+        expect(second.thread.messages.map((entry) => entry.id)).toEqual(["user-1", "asst-1"]);
+      });
     });
   });
 

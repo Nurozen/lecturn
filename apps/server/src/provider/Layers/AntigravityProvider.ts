@@ -35,6 +35,7 @@ export const ANTIGRAVITY_PRESENTATION = {
   showInteractionModeToggle: false,
   conversationFork: "unsupported",
   conversationForkRequiresAnchor: false,
+  externalSessions: "unsupported",
 } as const;
 
 const EMPTY_MODEL_CAPABILITIES = createModelCapabilities({ optionDescriptors: [] });
@@ -242,12 +243,13 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
 
   const managed = yield* makeManagedServerProvider({
     ...(options.discovery ? { discovery: options.discovery } : {}),
-    maintenanceCapabilities:
+    resolveMaintenanceCapabilities: Effect.succeed(
       options.maintenanceCapabilities ??
-      makeManualOnlyProviderMaintenanceCapabilities({
-        provider: ProviderDriverKind.make("antigravity"),
-        packageName: null,
-      }),
+        makeManualOnlyProviderMaintenanceCapabilities({
+          provider: ProviderDriverKind.make("antigravity"),
+          packageName: null,
+        }),
+    ),
     getSettings: Effect.succeed(settings),
     streamSettings: Stream.empty,
     haveSettingsChanged: () => false,

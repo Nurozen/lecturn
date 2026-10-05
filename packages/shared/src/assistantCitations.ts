@@ -52,6 +52,8 @@ export function formatAssistantCitationHref(citation: AssistantCitation): string
     suffix: citation.suffix,
   });
   if (citation.comment !== undefined) query.set("comment", citation.comment);
+  if (citation.coordinateSpace !== undefined)
+    query.set("coordinateSpace", citation.coordinateSpace);
   return `${CITATION_HREF_PREFIX}${path}?${query}`;
 }
 
@@ -75,8 +77,10 @@ export function parseAssistantCitationHref(href: string): AssistantCitation | nu
     }
     const requiredKeys = ["text", "start", "end", "prefix", "suffix"];
     const comment = url.searchParams.get("comment");
+    const coordinateSpace = url.searchParams.get("coordinateSpace");
     if (
-      url.searchParams.size !== requiredKeys.length + (comment === null ? 0 : 1) ||
+      url.searchParams.size !==
+        requiredKeys.length + (comment === null ? 0 : 1) + (coordinateSpace === null ? 0 : 1) ||
       requiredKeys.some((key) => url.searchParams.getAll(key).length !== 1)
     ) {
       return null;
@@ -96,6 +100,7 @@ export function parseAssistantCitationHref(href: string): AssistantCitation | nu
         prefix: url.searchParams.get("prefix"),
         suffix: url.searchParams.get("suffix"),
         ...(comment === null ? {} : { comment }),
+        ...(coordinateSpace === null ? {} : { coordinateSpace }),
       }),
     );
   } catch {

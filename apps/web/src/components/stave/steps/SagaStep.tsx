@@ -8,7 +8,7 @@ import {
   type StaveSpaceWizardState,
   type StaveWizardContext,
   toggleAfterMember,
-} from "../staveSpaceWizard.logic";
+} from "@lecturn/client-runtime/state/stave-space-wizard";
 
 const NONE = "__none__";
 

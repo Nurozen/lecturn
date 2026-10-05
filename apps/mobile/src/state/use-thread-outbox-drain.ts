@@ -1,3 +1,4 @@
+import { contextualBootstrap } from "../features/contextual/contextualDraft";
 import { useAtomValue } from "@effect/atom-react";
 import type {
   EnvironmentProject,
@@ -393,6 +394,9 @@ export async function restoreRejectedQueuedMessage(
       ...(queuedMessage.interactionMode ? { interactionMode: queuedMessage.interactionMode } : {}),
       ...(queuedMessage.creation
         ? {
+            ...(queuedMessage.creation.contextual
+              ? { contextual: queuedMessage.creation.contextual }
+              : {}),
             workspaceSelection: {
               mode: queuedMessage.creation.workspaceMode,
               branch: queuedMessage.creation.branch,
@@ -725,7 +729,9 @@ export function useThreadOutboxDrain(): void {
       // A forked thread keeps its minted "<parent> (fork)" title until its
       // first turn; sending that title as the seed lets the server swap in a
       // generated title once the turn completes, while a user rename (which
-      // drops the suffix) keeps the title untouched.
+      // drops the suffix) keeps the title untouched. An imported thread sends
+      // no seed: its title comes from the external session, and the server's
+      // retitle gate replaces a title only when a seed matches it.
       const targetThread = findThread(
         appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
         queuedMessage,
@@ -879,6 +885,10 @@ export function useThreadOutboxDrain(): void {
       const deliveryResult = await startTurn({
         environmentId: queuedMessage.environmentId,
         input: buildProjectThreadStartTurnInput({
+          ...contextualBootstrap(
+            currentConfig.environment.capabilities.contextual === true,
+            creation.contextual,
+          ),
           projectId: creation.projectId,
           projectCwd,
           threadId: queuedMessage.threadId,

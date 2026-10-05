@@ -5,8 +5,11 @@
 - [Install and first run](./user/install.md)
 - [Permission modes](./user/permission-modes.md)
 - [Keyboard shortcuts](./user/keybindings.md)
+- [Thread notes](./user/thread-notes.md)
+- [Decisions](./user/decisions.md)
 - [Organizing threads](./user/thread-sidebar.md)
 - [Forking threads](./user/forking-threads.md)
+- [Importing sessions](./user/importing-sessions.md)
 - [Review usage](./user/usage.md)
 - [Anonymous usage data](./user/telemetry.md)
 - [Customize a project icon](./user/project-settings.md)
@@ -18,7 +21,7 @@
 - [Source control integrations](./user/source-control.md)
 - [Notifications and Live Activities](./user/notifications-and-live-activities.md)
 - [Background service (Linux)](./user/background-service.md)
-- Providers: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [OpenCode](./user/providers-opencode.md) · [Antigravity](./user/providers-antigravity.md)
+- Providers: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [OpenCode](./user/providers-opencode.md) · [GitHub Copilot](./user/providers-copilot.md) · [Antigravity](./user/providers-antigravity.md)
 
 Mobile app: [apps/mobile/README.md](../apps/mobile/README.md)
 
@@ -36,6 +39,7 @@ policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../A
 - [Connection runtime](./internals/connection-runtime.md)
 - [Voice input](./internals/voice-input.md)
 - [Providers](./internals/providers.md)
+- [Thread notes](./internals/thread-notes.md)
 - [Thread forking](./internals/thread-forking.md)
 - [Remote environments](./internals/remote.md)
 - [Server updates](./internals/server-updates.md)
@@ -47,6 +51,7 @@ policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../A
 - [Teams architecture](./internals/teams.md)
 - [CI gates](./internals/ci.md)
 - [Engineering work artifacts](./internals/work-artifacts.md)
+- [Architecture decision records](./adr/README.md)
 
 ### Runbooks
 
@@ -55,3 +60,7 @@ policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../A
 - [Relay observability](./operations/relay-observability.md)
 - [Teams operations](./operations/teams.md)
 - [Mobile app store screenshots](./operations/mobile-app-store-screenshots.md)
+
+- [Decisions operations](./operations/decisions.md)
+
+- [Thread Decisions architecture](internals/thread-decisions.md)

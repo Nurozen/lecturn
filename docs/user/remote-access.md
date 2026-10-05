@@ -292,6 +292,12 @@ controls remain in **Settings** → **Connections** on web and desktop or **Sett
 
 ### Signing out and switching your Connect account
 
+Signing out removes that account's Connect environments from this client, together with their drafts and cached threads. Signing in as a different account does the same for the previous account.
+
+If your session expires without a sign-out, your Connect environments stay in your list, disconnected, along with their drafts and cached threads. Sign in again with the same account to reconnect them.
+
+The signed-in account belongs to the app you are using. The hosted web app, the desktop app, and a locally served web app each keep their own. A locally served web app keeps a separate one for each port it is served on, so signing in on one port does not sign you in on another.
+
 Desktop sign-out asks for confirmation before unpublishing this computer. Confirming stops its remote Connect access, notifications and Live Activities, then signs out. Your local projects and conversations stay on the computer. If cleanup fails, Lecturn keeps you signed in and offers a retry.
 
 Browser sign-out affects that client only; it does not unpublish a remote computer you are viewing.
@@ -301,3 +307,9 @@ After signing out on desktop, sign in with the new account and run Connect setup
 If this computer was already published to another account, the sign-out dialog explains that it will stop the local relay, while the previous account may retain an offline registration. Sign in to the previous account to remove that registration. Lecturn does not revoke another account's registration using your current account.
 
 You can also stop publication explicitly from **Settings → Connections → Unlink environment** while signed in to the account that published it.
+
+## Separate Connect identities
+
+When multiple Connect accounts are available, add them from the account menu on web or desktop, or **Settings → Connect accounts** on mobile. Each account retains its own environments, subscription, and team selection. Labels and colors help distinguish accounts across devices. Directly paired environments remain separate from Connect accounts.
+
+Signing out of one account removes its saved Connect access on that client without signing out your other accounts. An expired sign-in keeps an account section visible so you can restore access. Adding an account does not share a computer with another person or grant that account access to another account's environment.

@@ -56,6 +56,7 @@ export const CURSOR_PRESENTATION = {
   badgeLabel: "Early Access",
   showInteractionModeToggle: true,
   conversationFork: "unsupported",
+  externalSessions: "unsupported",
 } as const;
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],

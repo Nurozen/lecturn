@@ -94,4 +94,48 @@ describe("mobile connection catalog storage", () => {
       expect(memory.values.has(LEGACY_CONNECTIONS_KEY)).toBe(false);
     }),
   );
+
+  it.effect("round-trips a relay target and token tagged with an accountId", () =>
+    Effect.gen(function* () {
+      const tagged = {
+        schemaVersion: 1,
+        targets: [
+          {
+            _tag: "RelayConnectionTarget",
+            environmentId: "environment-1",
+            label: "Remote",
+            accountId: "user_a",
+          },
+        ],
+        profiles: [],
+        credentials: [],
+        remoteDpopTokens: [
+          {
+            environmentId: "environment-1",
+            label: "Remote",
+            endpoint: {
+              httpBaseUrl: "https://remote.example.test",
+              wsBaseUrl: "wss://remote.example.test",
+              providerKind: "cloudflare_tunnel",
+            },
+            accessToken: "dpop-token",
+            expiresAtEpochMs: 1_000_000,
+            dpopThumbprint: "thumbprint",
+            accountId: "user_a",
+          },
+        ],
+      };
+      const memory = makeStorage({ [CONNECTION_CATALOG_KEY]: JSON.stringify(tagged) });
+      const catalog = yield* make().pipe(
+        Effect.provideService(MobileSecureStorage, memory.storage),
+      );
+
+      const document = yield* catalog.read;
+      expect(document.targets[0]).toMatchObject({ accountId: "user_a" });
+      expect(document.remoteDpopTokens[0]?.accountId).toBe("user_a");
+
+      yield* catalog.update((current) => ({ ...current }));
+      expect(JSON.parse(memory.values.get(CONNECTION_CATALOG_KEY)!)).toEqual(tagged);
+    }),
+  );
 });

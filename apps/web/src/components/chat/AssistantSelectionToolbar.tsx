@@ -4,7 +4,7 @@ import {
   type AssistantCitation,
   type ScopedThreadRef,
 } from "@lecturn/contracts";
-import { QuoteIcon } from "lucide-react";
+import { NotebookPenIcon, QuoteIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -17,22 +17,36 @@ import {
   type SelectionActionPoint,
 } from "~/lib/selectionActions";
 import { Button } from "../ui/button";
+import { AssistantCitationCommentEditor } from "./AssistantCitationCommentEditor";
+import { observeAssistantCitationCommentSource } from "./AssistantCitationSource";
+
+export interface ThreadNoteSelection {
+  citation: AssistantCitation;
+  sourceAnchor: AssistantCitationSourceAnchor;
+  role: "user" | "assistant";
+}
+
+export function selectionSourceRole(source: HTMLElement): "user" | "assistant" {
+  return source.dataset.citationSourceRole === "user" ? "user" : "assistant";
+}
 
 export function AssistantSelectionToolbar({
   viewport,
   threadRef,
   onCite,
+  onSaveNote,
 }: {
   viewport: HTMLElement | null;
   threadRef: ScopedThreadRef;
-  onCite: (citation: AssistantCitation, sourceAnchor: AssistantCitationSourceAnchor) => boolean;
+  onCite?:
+    | ((citation: AssistantCitation, sourceAnchor: AssistantCitationSourceAnchor) => boolean)
+    | undefined;
+  onSaveNote?: ((selection: ThreadNoteSelection) => void) | undefined;
 }) {
-  const [selection, setSelection] = useState<{
-    citation: AssistantCitation;
-    position: SelectionActionPoint;
-    sourceAnchor: AssistantCitationSourceAnchor;
-  } | null>(null);
-  const toolbarRef = useRef<HTMLButtonElement>(null);
+  const [selection, setSelection] = useState<
+    (ThreadNoteSelection & { position: SelectionActionPoint }) | null
+  >(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const actionsRef = useRef<ReturnType<typeof observeSelectionActions> | null>(null);
 
   useLayoutEffect(() => {
@@ -47,10 +61,14 @@ export function AssistantSelectionToolbar({
     if (!viewport) return;
     const clear = () => setSelection(null);
     const update = (pointer: SelectionActionPoint | null) => {
-      const nativeSelection = window.getSelection();
-      const captured = captureAssistantTextSelection(viewport, nativeSelection);
+      const captured = captureAssistantTextSelection(viewport, window.getSelection());
       const messageId = captured?.source.dataset.assistantCitationSource;
       if (!captured || !messageId) {
+        clear();
+        return;
+      }
+      const role = selectionSourceRole(captured.source);
+      if (!onSaveNote && (role === "user" || !onCite)) {
         clear();
         return;
       }
@@ -62,6 +80,7 @@ export function AssistantSelectionToolbar({
       }
       const rects = captured.range.getClientRects();
       setSelection({
+        role,
         sourceAnchor: { source: captured.source, range: captured.range, viewport },
         citation: {
           version: 1,
@@ -96,13 +115,13 @@ export function AssistantSelectionToolbar({
         event.defaultPrevented ||
         !toolbar ||
         toolbar.contains(event.target as Node)
-      ) {
+      )
         return;
-      }
-      if (toolbar.disabled) return;
+      const button = toolbar.querySelector<HTMLButtonElement>("button:not(:disabled)");
+      if (!button) return;
       event.preventDefault();
       event.stopPropagation();
-      toolbar.focus({ preventScroll: true });
+      button.focus({ preventScroll: true });
     };
     document.addEventListener("keydown", focusActions, true);
     document.addEventListener("selectionchange", actions.selectionChanged);
@@ -112,7 +131,7 @@ export function AssistantSelectionToolbar({
       actions.dispose();
       actionsRef.current = null;
     };
-  }, [threadRef, viewport]);
+  }, [threadRef, viewport, onCite, onSaveNote]);
 
   if (!selection) return null;
   const tooLong = selection.citation.text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH;
@@ -120,24 +139,12 @@ export function AssistantSelectionToolbar({
     actionsRef.current?.cancel();
     setSelection(null);
   };
-  const cite = () => {
-    if (tooLong || !onCite(selection.citation, selection.sourceAnchor)) return false;
-    window.getSelection()?.removeAllRanges();
-    dismiss();
-    return true;
-  };
   return createPortal(
-    <Button
+    <div
       ref={toolbarRef}
-      type="button"
-      size="xs"
-      variant="glass"
-      disabled={tooLong}
-      aria-label={tooLong ? "Selection is too long to cite" : "Cite selection in composer"}
-      className="fixed z-50 max-w-[calc(100vw-1rem)] rounded-full px-2.5"
+      className="fixed z-50 flex max-w-[calc(100vw-1rem)] gap-1 rounded-full border border-border p-1 shadow-lg surface-glass"
       style={{ left: selection.position.x, top: selection.position.y }}
       onPointerDown={(event) => event.preventDefault()}
-      onClick={cite}
       onKeyDown={(event) => {
         event.stopPropagation();
         if (event.key === "Escape" && !event.nativeEvent.isComposing) {
@@ -146,9 +153,112 @@ export function AssistantSelectionToolbar({
         }
       }}
     >
-      <QuoteIcon aria-hidden="true" className="size-3.5" />
-      {tooLong ? "Shorten selection" : "Cite"}
-    </Button>,
+      {selection.role === "assistant" && onCite ? (
+        <Button
+          type="button"
+          size="xs"
+          variant="glass"
+          disabled={tooLong}
+          aria-label={tooLong ? "Selection is too long to cite" : "Cite selection in composer"}
+          className="rounded-full px-2.5"
+          onClick={() => {
+            if (tooLong || !onCite(selection.citation, selection.sourceAnchor)) return;
+            window.getSelection()?.removeAllRanges();
+            dismiss();
+          }}
+        >
+          <QuoteIcon aria-hidden="true" className="size-3.5" />
+          {tooLong ? "Shorten selection" : "Cite"}
+        </Button>
+      ) : null}
+      {onSaveNote ? (
+        <Button
+          type="button"
+          size="xs"
+          variant="glass"
+          disabled={tooLong}
+          aria-label={tooLong ? "Selection is too long to save" : "Save selection as a note"}
+          className="rounded-full px-2.5"
+          onClick={() => {
+            if (tooLong) return;
+            onSaveNote({
+              ...selection,
+              sourceAnchor: {
+                ...selection.sourceAnchor,
+                range: selection.sourceAnchor.range.cloneRange(),
+              },
+            });
+            window.getSelection()?.removeAllRanges();
+            dismiss();
+          }}
+        >
+          <NotebookPenIcon aria-hidden="true" className="size-3.5" />
+          {tooLong ? "Shorten selection" : "Save note"}
+        </Button>
+      ) : null}
+    </div>,
+    document.body,
+  );
+}
+
+/** Owned by the timeline, so dismissing the selection toolbar does not close the editor. */
+export function ThreadNoteSelectionEditor({
+  selection,
+  onSave,
+  onCancel,
+}: {
+  selection: ThreadNoteSelection;
+  onSave: (comment: string) => void;
+  onCancel: () => void;
+}) {
+  const editorRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const rects = selection.sourceAnchor.range.getClientRects();
+    const rect =
+      rects.item(rects.length - 1) ?? selection.sourceAnchor.range.getBoundingClientRect();
+    const bounds = editor.getBoundingClientRect();
+    editor.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - bounds.width - 8))}px`;
+    editor.style.top = `${Math.max(8, Math.min(rect.bottom + 8, window.innerHeight - bounds.height - 8))}px`;
+    inputRef.current?.focus({ preventScroll: true });
+  }, [selection]);
+  useEffect(
+    () =>
+      observeAssistantCitationCommentSource({
+        anchor: selection.sourceAnchor,
+        citation: selection.citation,
+        onUnavailable: onCancel,
+      }),
+    [selection, onCancel],
+  );
+  useEffect(() => {
+    const outside = (event: PointerEvent) => {
+      if (!editorRef.current?.contains(event.target as Node)) onCancel();
+    };
+    document.addEventListener("pointerdown", outside);
+    return () => document.removeEventListener("pointerdown", outside);
+  }, [onCancel]);
+  return createPortal(
+    <div
+      ref={editorRef}
+      role="dialog"
+      data-slot="popover-popup"
+      aria-label="Save thread note"
+      className="fixed z-50 w-80 max-w-[calc(100vw-1rem)] rounded-xl border border-border p-3 shadow-xl surface-glass"
+    >
+      <p className="mb-2 text-sm font-medium">Save note</p>
+      <AssistantCitationCommentEditor
+        citation={{}}
+        inputRef={inputRef}
+        onSubmit={(comment) => {
+          onSave(comment);
+          return true;
+        }}
+        onCancel={onCancel}
+      />
+    </div>,
     document.body,
   );
 }

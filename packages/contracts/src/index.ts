@@ -30,6 +30,7 @@ export * from "./lecturnProjectFile.ts";
 export * from "./editor.ts";
 export * from "./project.ts";
 export * from "./filesystem.ts";
+export * from "./externalSessions.ts";
 export * from "./assets.ts";
 export * from "./review.ts";
 export * from "./browserImport.ts";
@@ -47,3 +48,16 @@ export * from "./pullRequestWatch.ts";
 
 export { RelayPullRequestActivity } from "./relay.ts";
 export * from "./relayTeams.ts";
+
+export * from "./threadNotes.ts";
+export * from "./threadDecisions.ts";
+export * from "./relayDecisions.ts";
+
+export * from "./manualCloudLink.ts";
+
+export * from "./contextual.ts";
+export * from "./contextualRpc.ts";
+export * from "./extensionsHelper.ts";
+export * from "./extensions.ts";
+
+export * from "./extensionsEvaluator.ts";

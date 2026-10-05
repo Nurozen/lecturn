@@ -32,8 +32,13 @@ export function readPreparedConnection(environmentId: EnvironmentId) {
  * environment's `/api/auth/session` endpoint. `data` stays populated across
  * SWR revalidations; `isPending` is only meaningful before the first resolve.
  */
-export function useEnvironmentSessionState(environmentId: EnvironmentId) {
-  const result = useAtomValue(environmentSession.sessionStateAtom(environmentId));
+const EMPTY_SESSION_ATOM = Atom.make(AsyncResult.initial<never, never>(false));
+export function useEnvironmentSessionState(environmentId: EnvironmentId | null) {
+  const result = useAtomValue(
+    environmentId === null
+      ? EMPTY_SESSION_ATOM
+      : environmentSession.sessionStateAtom(environmentId),
+  );
   return {
     data: Option.getOrNull(AsyncResult.value(result)),
     hasError: result._tag === "Failure",

@@ -5,7 +5,10 @@ import { Badge } from "../../ui/badge";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { Label } from "../../ui/label";
-import { memorySuggestions, type StaveWizardContext } from "../staveSpaceWizard.logic";
+import {
+  memorySuggestions,
+  type StaveWizardContext,
+} from "@lecturn/client-runtime/state/stave-space-wizard";
 
 /**
  * Memory specs to attach: free text plus the dens the listed spaces already

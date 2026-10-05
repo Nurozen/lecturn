@@ -1,3 +1,4 @@
+import { GlassCard } from "../../components/GlassCard";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { useNavigation } from "@react-navigation/native";
 import type { DailyTotals, MergedUsage } from "@lecturn/shared/usageMerge";
@@ -158,7 +159,7 @@ function SegmentedControl<Value extends number | string>(props: {
   readonly onSelect: (value: Value) => void;
 }) {
   return (
-    <View className="flex-row overflow-hidden rounded-full border-continuous bg-card">
+    <GlassCard radius={28} className="flex-row p-1">
       {props.options.map((option) => {
         const active = option.value === props.selected;
         return (
@@ -185,7 +186,7 @@ function SegmentedControl<Value extends number | string>(props: {
           </Pressable>
         );
       })}
-    </View>
+    </GlassCard>
   );
 }
 
@@ -206,7 +207,7 @@ function ChartCard(props: {
   const hasActivity = props.daily.some((period) => period.totalTokens > 0);
 
   return (
-    <View className="gap-4 rounded-[24px] border-continuous bg-card p-4">
+    <GlassCard radius={24} className="gap-4 p-4">
       <View className="flex-row items-start justify-between gap-3">
         <View className="min-w-0 flex-1 gap-0.5">
           <Text className="text-sm text-foreground-muted">
@@ -262,7 +263,7 @@ function ChartCard(props: {
             : formatDayShort(props.untilDay)}
         </Text>
       </View>
-    </View>
+    </GlassCard>
   );
 }
 
@@ -481,7 +482,7 @@ function UsageCoverageNotice(props: {
   }
 
   return (
-    <View className="gap-1 rounded-[16px] border-continuous bg-card px-4 py-3">
+    <GlassCard radius={16} className="gap-1 px-4 py-3">
       {props.isPartial ? (
         <Text className="text-sm text-foreground-muted">
           Some environments are still reporting. Totals are partial.
@@ -503,6 +504,6 @@ function UsageCoverageNotice(props: {
           {duplicateSources.join(", ")}
         </Text>
       ) : null}
-    </View>
+    </GlassCard>
   );
 }

@@ -55,7 +55,7 @@ describe("Stave confirmation safety", () => {
         force: false,
         memory: "keep",
       }),
-    ).toContain("Unarchive restores");
+    ).toContain("Restore it from New project → Stave");
   });
   it("describes owned versus shared memory destruction", () => {
     expect(

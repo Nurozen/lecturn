@@ -194,6 +194,7 @@ function ProviderSettingsPlaceholder({
     <SettingsSection {...searchableSetting("providers")} variant="plain">
       {deviceTabs}
       <div
+        data-slot="settings-section-card"
         className={cn(
           providerCardClassName,
           providerCardHeightClassName,
@@ -1034,7 +1035,10 @@ export function EnvironmentProviderSettings({
       >
         {deviceTabs}
         {readOnly ? (
-          <div className={cn(providerCardClassName, "overflow-hidden")}>
+          <div
+            data-slot="settings-section-card"
+            className={cn(providerCardClassName, "overflow-hidden")}
+          >
             <SettingsRow
               title="Limited permissions"
               description={`This session can view ${environmentLabel}'s providers but can't change their settings.`}
@@ -1042,6 +1046,7 @@ export function EnvironmentProviderSettings({
           </div>
         ) : null}
         <div
+          data-slot="settings-section-card"
           className={cn(
             providerCardClassName,
             providerCardHeightClassName,

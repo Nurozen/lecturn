@@ -1,10 +1,11 @@
+import { prepareContextualDispatch } from "../ContextualDispatch.ts";
 import {
   ApprovalRequestId,
   DEFAULT_MODEL,
   EventId,
   ProviderDriverKind,
   ProviderItemId,
-  type ProviderInstanceId,
+  ProviderInstanceId,
   type ProviderApprovalDecision,
   type ProviderApprovalOption,
   type ProviderEvent,
@@ -28,6 +29,7 @@ import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
@@ -182,7 +184,10 @@ export interface CodexSessionRuntimeOptions {
   readonly appServerArgs?: ReadonlyArray<string>;
 }
 
-export interface CodexSessionRuntimeSendTurnInput {
+export interface CodexSessionRuntimeSendTurnInput extends Pick<
+  import("../Services/ProviderAdapter.ts").ProviderAdapterSendTurnInput,
+  "contextualEvidence" | "onContextualReceipt"
+> {
   readonly input?: string;
   readonly attachments?: ReadonlyArray<{
     readonly type: "image";
@@ -690,14 +695,18 @@ export function isRecoverableThreadResumeError(error: unknown): boolean {
   return RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS.some((snippet) => message.includes(snippet));
 }
 
-type CodexThreadOpenResponse =
-  | CodexRpc.ClientRequestResponsesByMethod["thread/start"]
-  | CodexRpc.ClientRequestResponsesByMethod["thread/resume"]
-  | CodexRpc.ClientRequestResponsesByMethod["thread/fork"];
+const CodexThreadOpenResponse = Schema.Struct({
+  thread: Schema.Struct({ id: Schema.String }),
+  cwd: Schema.String,
+  model: Schema.String,
+});
+type CodexThreadOpenResponse = typeof CodexThreadOpenResponse.Type;
+const decodeCodexThreadOpenResponse = Schema.decodeUnknownEffect(CodexThreadOpenResponse);
 
 type CodexThreadOpenMethod = "thread/start" | "thread/resume" | "thread/fork";
 
 interface CodexThreadOpenClient {
+  readonly raw: Pick<CodexClient.CodexAppServerClient["Service"]["raw"], "request">;
   readonly request: <M extends CodexThreadOpenMethod>(
     method: M,
     payload: CodexRpc.ClientRequestParamsByMethod[M],
@@ -722,6 +731,27 @@ export const openCodexThread = (input: {
     model: input.requestedModel,
     serviceTier: input.serviceTier,
   });
+  // The generated request encoder predates excludeTurns. Read only the
+  // metadata needed to open a session; paginated history is loaded separately.
+  const openStoredThread = (
+    method: "thread/resume" | "thread/fork",
+    params: CodexRpc.ClientRequestParamsByMethod[typeof method],
+  ) =>
+    input.client.raw
+      .request(method, { ...params, excludeTurns: true })
+      .pipe(
+        Effect.flatMap((response) =>
+          decodeCodexThreadOpenResponse(response).pipe(
+            Effect.mapError((error) =>
+              CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
+                "decode-response-payload",
+                error,
+                { method },
+              ),
+            ),
+          ),
+        ),
+      );
 
   if (fork !== undefined) {
     // `thread/fork` types `ephemeral` as a plain boolean while thread/start
@@ -730,7 +760,7 @@ export const openCodexThread = (input: {
     // Unlike resume there is no thread/start fallback here: a fork that
     // silently degraded into a fresh thread would drop the source
     // conversation while reporting success, so failures propagate.
-    return input.client.request("thread/fork", {
+    return openStoredThread("thread/fork", {
       threadId: fork.sourceThreadId,
       ...(fork.lastTurnId !== null ? { lastTurnId: fork.lastTurnId } : {}),
       ...forkStartParams,
@@ -741,23 +771,170 @@ export const openCodexThread = (input: {
     return input.client.request("thread/start", startParams);
   }
 
-  return input.client
-    .request("thread/resume", {
-      threadId: resumeThreadId,
-      ...startParams,
-    })
-    .pipe(
-      Effect.catchIf(isRecoverableThreadResumeError, (error) =>
-        Effect.logWarning("codex app-server thread resume fell back to fresh start", {
-          threadId: input.threadId,
-          requestedRuntimeMode: input.runtimeMode,
-          resumeThreadId,
-          recoverable: true,
-          cause: error,
-        }).pipe(Effect.andThen(input.client.request("thread/start", startParams))),
+  return openStoredThread("thread/resume", {
+    threadId: resumeThreadId,
+    ...startParams,
+  }).pipe(
+    Effect.catchIf(isRecoverableThreadResumeError, (error) =>
+      Effect.logWarning("codex app-server thread resume fell back to fresh start", {
+        threadId: input.threadId,
+        requestedRuntimeMode: input.runtimeMode,
+        resumeThreadId,
+        recoverable: true,
+        cause: error,
+      }).pipe(Effect.andThen(input.client.request("thread/start", startParams))),
+    ),
+  );
+};
+
+// These fields and the turns endpoint are newer than the generated bindings.
+const CodexThreadMetadata = Schema.Struct({
+  thread: Schema.Struct({
+    id: Schema.String,
+    historyMode: Schema.optionalKey(Schema.NullOr(Schema.Literals(["legacy", "paginated"]))),
+  }),
+});
+const CodexTurnsPage = Schema.Struct({
+  data: Schema.Array(EffectCodexSchema.V2ThreadReadResponse__Turn),
+  nextCursor: Schema.optionalKey(Schema.NullOr(Schema.String)),
+});
+const decodeCodexThreadMetadata = Schema.decodeUnknownEffect(CodexThreadMetadata);
+const decodeCodexTurnsPage = Schema.decodeUnknownEffect(CodexTurnsPage);
+type CodexHistoryClient = Pick<CodexClient.CodexAppServerClient["Service"], "request"> & {
+  readonly raw: Pick<CodexClient.CodexAppServerClient["Service"]["raw"], "request">;
+};
+
+const readCodexThreadMetadata = Effect.fn("readCodexThreadMetadata")(function* (
+  client: CodexHistoryClient,
+  threadId: string,
+) {
+  const response = yield* client.raw.request("thread/read", { threadId, includeTurns: false });
+  return yield* decodeCodexThreadMetadata(response).pipe(
+    Effect.mapError((error) =>
+      CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
+        "decode-response-payload",
+        error,
+        { method: "thread/read" },
+      ),
+    ),
+  );
+});
+
+const readCodexPaginatedThread = Effect.fn("readCodexPaginatedThread")(function* (
+  client: CodexHistoryClient,
+  threadId: string,
+) {
+  const turns: CodexThreadTurnSnapshot[] = [];
+  const cursors = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const response = yield* client.raw.request("thread/turns/list", {
+      threadId,
+      itemsView: "full",
+      sortDirection: "asc",
+      limit: 100,
+      ...(cursor ? { cursor } : {}),
+    });
+    const page = yield* decodeCodexTurnsPage(response).pipe(
+      Effect.mapError((error) =>
+        CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
+          "decode-response-payload",
+          error,
+          { method: "thread/turns/list" },
+        ),
       ),
     );
-};
+    turns.push(...page.data.map((turn) => ({ id: TurnId.make(turn.id), items: turn.items })));
+    cursor = page.nextCursor ?? undefined;
+    if (cursor !== undefined) {
+      if (cursors.has(cursor)) {
+        return yield* CodexErrors.CodexAppServerRequestError.invalidParams(
+          "Codex returned a repeated thread history cursor.",
+        );
+      }
+      cursors.add(cursor);
+    }
+  } while (cursor !== undefined);
+  return { threadId, turns } satisfies CodexThreadSnapshot;
+});
+
+export const readCodexThreadSnapshot = Effect.fn("readCodexThreadSnapshot")(function* (
+  client: CodexHistoryClient,
+  threadId: string,
+) {
+  const metadata = yield* readCodexThreadMetadata(client, threadId);
+  if (metadata.thread.historyMode === "paginated") {
+    return yield* readCodexPaginatedThread(client, threadId);
+  }
+  return parseThreadSnapshot(
+    yield* client.request("thread/read", { threadId, includeTurns: true }),
+  );
+});
+
+export const rollbackCodexThread = Effect.fn("rollbackCodexThread")(function* (input: {
+  readonly client: CodexHistoryClient;
+  readonly threadId: string;
+  readonly numTurns: number;
+  readonly cwd: string;
+  readonly runtimeMode: RuntimeMode;
+  readonly model: string | undefined;
+  readonly serviceTier: CodexServiceTier | undefined;
+}) {
+  const { client, threadId, numTurns } = input;
+  if (!Number.isInteger(numTurns) || numTurns < 1) {
+    return yield* CodexErrors.CodexAppServerRequestError.invalidParams(
+      "Rollback requires a positive integer number of turns.",
+    );
+  }
+  const metadata = yield* readCodexThreadMetadata(client, threadId);
+  if (metadata.thread.historyMode !== "paginated") {
+    const legacy = yield* client.request("thread/rollback", { threadId, numTurns }).pipe(
+      Effect.map((response) => parseThreadSnapshot(response)),
+      Effect.catchIf(
+        (error) => error.message === "paginated threads do not support thread/rollback",
+        () => Effect.succeed(undefined),
+      ),
+    );
+    if (legacy !== undefined) return legacy;
+  }
+  const snapshot = yield* readCodexPaginatedThread(client, threadId);
+  if (numTurns > snapshot.turns.length) {
+    return yield* CodexErrors.CodexAppServerRequestError.invalidParams(
+      "Cannot roll back more turns than the Codex thread contains.",
+    );
+  }
+  const retainedTurns = snapshot.turns.slice(0, snapshot.turns.length - numTurns);
+  const lastTurn = retainedTurns.at(-1);
+  const startParams = buildThreadStartParams({
+    cwd: input.cwd,
+    runtimeMode: input.runtimeMode,
+    model: input.model,
+    serviceTier: input.serviceTier,
+  });
+  const { ephemeral: _ephemeral, ...forkParams } = startParams;
+  const opened = lastTurn
+    ? yield* client.raw
+        .request("thread/fork", {
+          ...forkParams,
+          threadId,
+          lastTurnId: lastTurn.id,
+          excludeTurns: true,
+        })
+        .pipe(
+          Effect.flatMap(decodeCodexThreadMetadata),
+          Effect.catchTag("SchemaError", (error) =>
+            Effect.fail(
+              CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
+                "decode-response-payload",
+                error,
+                { method: "thread/fork" },
+              ),
+            ),
+          ),
+        )
+    : yield* client.request("thread/start", startParams);
+  return { threadId: opened.thread.id, turns: retainedTurns } satisfies CodexThreadSnapshot;
+});
 
 function readNotificationThreadId(notification: CodexServerNotification): string | undefined {
   switch (notification.method) {
@@ -1181,6 +1358,64 @@ function parseThreadSnapshot(
   };
 }
 
+/** The same native request boundary used by the runtime; transport is injected for conformance tests. */
+export const dispatchCodexContextualTurn = Effect.fn("dispatchCodexContextualTurn")(
+  function* (options: {
+    readonly input: CodexSessionRuntimeSendTurnInput;
+    readonly threadId: ThreadId;
+    readonly providerThreadId: string;
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly runtimeMode: RuntimeMode;
+    readonly normalizedModel: string | undefined;
+    readonly browserToolsAvailable: boolean;
+    readonly readActiveTurnId: Effect.Effect<TurnId | undefined>;
+    readonly request: (
+      params: EffectCodexSchema.V2TurnStartParams,
+    ) => Effect.Effect<unknown, CodexSessionRuntimeError>;
+  }) {
+    const { input, providerThreadId, normalizedModel } = options;
+    const beforeDispatch = yield* options.readActiveTurnId;
+    const contextual = prepareContextualDispatch(
+      { ...input, threadId: options.threadId },
+      beforeDispatch ? "provider-queued" : "fresh",
+      options.providerInstanceId,
+      providerThreadId,
+    );
+    const prompt = [input.input, contextual.text].filter(Boolean).join("\n\n");
+    const params = yield* buildTurnStartParams({
+      threadId: providerThreadId,
+      runtimeMode: options.runtimeMode,
+      ...(prompt ? { prompt } : {}),
+      ...(input.attachments ? { attachments: input.attachments } : {}),
+      ...(normalizedModel ? { model: normalizedModel } : {}),
+      ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
+      ...(input.effort ? { effort: input.effort } : {}),
+      ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
+      browserToolsAvailable: options.browserToolsAvailable,
+    });
+    yield* contextual.receipt("unknown", null, null);
+    const rawResponse = yield* options.request(params);
+    const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(
+      Effect.mapError((error) =>
+        CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
+          "decode-response-payload",
+          error,
+          { method: "turn/start" },
+        ),
+      ),
+    );
+    const turnId = TurnId.make(response.turn.id);
+    const atAck = yield* options.readActiveTurnId;
+    const contextualReceipt = yield* contextual.receipt(
+      "accepted",
+      turnId,
+      `codex:${providerThreadId}:${response.turn.id}`,
+      beforeDispatch || (atAck && atAck !== turnId) ? "provider-queued" : "fresh",
+    );
+    return { turnId, contextualReceipt };
+  },
+);
+
 export const makeCodexSessionRuntime = (
   options: CodexSessionRuntimeOptions,
 ): Effect.Effect<
@@ -1193,6 +1428,7 @@ export const makeCodexSessionRuntime = (
     const runtimeScope = yield* Scope.Scope;
     const crypto = yield* Crypto.Crypto;
     const events = yield* Queue.unbounded<ProviderEvent>();
+    const retiredProviderThreadIds = new Set<string>();
     const pendingApprovalsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingApproval>());
     const approvalCorrelationsRef = yield* Ref.make(new Map<string, ApprovalCorrelation>());
     const pendingUserInputsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingUserInput>());
@@ -1265,6 +1501,7 @@ export const makeCodexSessionRuntime = (
       updatedAt: sessionCreatedAt,
     } satisfies ProviderSession;
     const sessionRef = yield* Ref.make<ProviderSession>(initialSession);
+    const turnDispatchLock = yield* Semaphore.make(1);
     const offerEvent = (event: ProviderEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
 
     const emitEvent = (event: Omit<ProviderEvent, "id" | "provider" | "createdAt">) =>
@@ -1748,6 +1985,17 @@ export const makeCodexSessionRuntime = (
 
     const handleRawNotification = (notification: CodexServerNotification) =>
       Effect.gen(function* () {
+        const notificationThreadId = readNotificationThreadId(notification);
+        if (notification.method === "thread/started") {
+          const thread = notification.params.thread;
+          const parentId = readThreadSpawnSource(thread)?.parentThreadId ?? thread.parentThreadId;
+          if (parentId && retiredProviderThreadIds.has(parentId)) {
+            retiredProviderThreadIds.add(thread.id);
+          }
+        }
+        if (notificationThreadId && retiredProviderThreadIds.has(notificationThreadId)) {
+          return;
+        }
         const isMemoryConsolidationNotification =
           suppressMemoryConsolidationNotification(notification);
 
@@ -2340,31 +2588,19 @@ export const makeCodexSessionRuntime = (
           const normalizedModel = normalizeCodexModelSlug(
             input.model ?? (yield* Ref.get(sessionRef)).model,
           );
-          const params = yield* buildTurnStartParams({
-            threadId: providerThreadId,
+          const { turnId, contextualReceipt } = yield* dispatchCodexContextualTurn({
+            input,
+            threadId: options.threadId,
+            providerThreadId,
+            providerInstanceId: options.providerInstanceId ?? ProviderInstanceId.make("codex"),
             runtimeMode: options.runtimeMode,
-            ...(input.input ? { prompt: input.input } : {}),
-            ...(input.attachments ? { attachments: input.attachments } : {}),
-            ...(normalizedModel ? { model: normalizedModel } : {}),
-            ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
-            ...(input.effort ? { effort: input.effort } : {}),
-            ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
-            // Derived from the session's own MCP configuration rather than the
-            // setting, so the prompt describes the tools this turn actually
-            // has even if the setting changed after the session started.
+            normalizedModel,
             browserToolsAvailable: hasT3BrowserMcpServer(options.appServerArgs),
-          });
-          const rawResponse = yield* client.raw.request("turn/start", params);
-          const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(
-            Effect.mapError((error) =>
-              CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
-                "decode-response-payload",
-                error,
-                { method: "turn/start" },
-              ),
+            readActiveTurnId: Ref.get(sessionRef).pipe(
+              Effect.map((session) => session.activeTurnId),
             ),
-          );
-          const turnId = TurnId.make(response.turn.id);
+            request: (params) => client.raw.request("turn/start", params),
+          });
           yield* updateSession(sessionRef, (session) => ({
             status: "running",
             // Codex accepts follow-ups while the current turn is still
@@ -2380,8 +2616,9 @@ export const makeCodexSessionRuntime = (
             ...(resumedProviderThreadId
               ? { resumeCursor: { threadId: resumedProviderThreadId } }
               : {}),
+            ...(contextualReceipt ? { contextualReceipt } : {}),
           } satisfies ProviderTurnStartResult;
-        }),
+        }).pipe(turnDispatchLock.withPermit),
       interruptTurn: (turnId) =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;
@@ -2415,26 +2652,43 @@ export const makeCodexSessionRuntime = (
             turnId: effectiveTurnId,
           });
         }),
-      readThread: Effect.gen(function* () {
-        const providerThreadId = yield* readProviderThreadId;
-        const response = yield* client.request("thread/read", {
-          threadId: providerThreadId,
-          includeTurns: true,
-        });
-        return parseThreadSnapshot(response);
-      }),
+      readThread: readProviderThreadId.pipe(
+        Effect.flatMap((threadId) => readCodexThreadSnapshot(client, threadId)),
+      ),
       rollbackThread: (numTurns) =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;
-          const response = yield* client.request("thread/rollback", {
+          const session = yield* Ref.get(sessionRef);
+          const snapshot = yield* rollbackCodexThread({
+            client,
             threadId: providerThreadId,
             numTurns,
+            cwd: session.cwd ?? options.cwd,
+            runtimeMode: options.runtimeMode,
+            model: normalizeCodexModelSlug(session.model),
+            serviceTier: options.serviceTier,
           });
+          if (snapshot.threadId !== providerThreadId) {
+            retiredProviderThreadIds.add(providerThreadId);
+            for (const childId of (yield* Ref.get(collabChildAgentsRef)).keys()) {
+              retiredProviderThreadIds.add(childId);
+            }
+            for (const childId of (yield* Ref.get(collabReceiverTurnsRef)).keys()) {
+              retiredProviderThreadIds.add(childId);
+            }
+            for (const childId of (yield* Ref.get(collabChildLiveTurnsRef)).keys()) {
+              retiredProviderThreadIds.add(childId);
+            }
+            yield* Ref.set(collabChildAgentsRef, new Map());
+            yield* Ref.set(collabReceiverTurnsRef, new Map());
+            yield* Ref.set(collabChildMetadataRef, new Map());
+          }
           yield* updateSession(sessionRef, {
             status: "ready",
             activeTurnId: undefined,
+            resumeCursor: { threadId: snapshot.threadId },
           });
-          return parseThreadSnapshot(response);
+          return snapshot;
         }),
       uploadFeedback: (reason) =>
         Effect.gen(function* () {

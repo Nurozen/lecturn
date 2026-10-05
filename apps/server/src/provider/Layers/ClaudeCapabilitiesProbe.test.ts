@@ -88,7 +88,7 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
           "      agents: [],",
           '      output_style: "default",',
           '      available_output_styles: ["default"],',
-          "      models: [],",
+          '      models: [{ value: "opus[1m]", resolvedModel: "claude-future[1m]", displayName: "Future model", description: "Runtime model", supportsEffort: true, supportedEffortLevels: ["low", "high"], supportsFastMode: true }],',
           '      account: { email: "dev@example.com", subscriptionType: "pro", tokenSource: "oauth" },',
           "    });",
           "  }",
@@ -109,7 +109,7 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
       );
       yield* fs.chmod(executablePath, 0o755);
 
-      const capabilities = yield* probeClaudeCapabilities(
+      const probe = probeClaudeCapabilities(
         decodeClaudeSettings({ binaryPath: executablePath }),
         {
           ...process.env,
@@ -119,7 +119,22 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
         workspaceCwd,
       );
 
+      const capabilities = yield* probe;
+      assert.ok(capabilities);
+      // The driver reuses this Effect after TTL expiry and explicit refresh.
+      assert.deepEqual(yield* probe, capabilities);
       assert.deepEqual(capabilities, {
+        models: [
+          {
+            value: "opus[1m]",
+            resolvedModel: "claude-future[1m]",
+            displayName: "Future model",
+            description: "Runtime model",
+            supportsEffort: true,
+            supportedEffortLevels: ["low", "high"],
+            supportsFastMode: true,
+          },
+        ],
         email: "dev@example.com",
         subscriptionType: "pro",
         tokenSource: "oauth",

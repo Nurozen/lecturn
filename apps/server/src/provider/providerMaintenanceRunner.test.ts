@@ -1,3 +1,5 @@
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
+import * as NodePath from "@effect/platform-node/NodePath";
 import { describe, it, assert } from "@effect/vitest";
 import {
   ProviderDriverKind,
@@ -7,20 +9,30 @@ import {
 } from "@lecturn/contracts";
 import { ServerProviderUpdateError } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
+import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { HostProcessEnvironment, HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import { SpawnExecutableResolution } from "@lecturn/shared/shell";
 
 import { ProviderRegistry, type ProviderRegistryShape } from "./Services/ProviderRegistry.ts";
+import {
+  makeProviderMaintenanceCommandCoordinator,
+  ProviderMaintenanceLockDirectory,
+} from "./providerMaintenanceCommandCoordinator.ts";
 import * as ProviderMaintenanceRunner from "./providerMaintenanceRunner.ts";
 import {
   makeProviderMaintenanceCapabilities,
@@ -204,19 +216,37 @@ function makeRegistry(
   });
 }
 
+// Only the file system and path services: NodeServices would also bring the
+// real ChildProcessSpawner, and these tests must never run a real update.
+const FileLockServices = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer);
+
+// Each test locks inside its own temp directory so it never contends with the
+// Lecturn servers running on the host.
+const makeLockDirectory = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  return yield* fileSystem.makeTempDirectoryScoped({
+    prefix: "lecturn-provider-maintenance-test-",
+  });
+}).pipe(Effect.provide(FileLockServices));
+
 const makeTestRunner = (registry: ProviderRegistryShape) =>
-  Effect.service(ProviderMaintenanceRunner.ProviderMaintenanceRunner).pipe(
-    Effect.provide(
-      ProviderMaintenanceRunner.layer.pipe(
-        Layer.provide(
-          Layer.mergeAll(
-            Layer.succeed(ProviderRegistry, registry),
-            Layer.succeed(ProviderVersionCache, new Map()),
+  Effect.gen(function* () {
+    const lockDirectory = yield* makeLockDirectory;
+    return yield* Effect.service(ProviderMaintenanceRunner.ProviderMaintenanceRunner).pipe(
+      Effect.provide(
+        ProviderMaintenanceRunner.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.succeed(ProviderRegistry, registry),
+              Layer.succeed(ProviderVersionCache, new Map()),
+              Layer.succeed(ProviderMaintenanceLockDirectory, lockDirectory),
+              FileLockServices,
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  });
 
 describe("providerMaintenanceRunner", () => {
   it.effect("runs the allowlisted provider update command and records success", () => {
@@ -668,6 +698,105 @@ describe("providerMaintenanceRunner", () => {
       ),
   );
 
+  it.effect("skips the install when a queued update finds the provider already current", () => {
+    const firstStartedLatch: { resolve: () => void } = { resolve: () => {} };
+    const releaseFirstLatch: { resolve: () => void } = { resolve: () => {} };
+    const firstStarted = new Promise<void>((resolve) => {
+      firstStartedLatch.resolve = resolve;
+    });
+    const releaseFirst = new Promise<void>((resolve) => {
+      releaseFirstLatch.resolve = resolve;
+    });
+    const calls: Array<string> = [];
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry([
+        baseProvider,
+        { ...baseOpenCodeProvider, version: "9.9.9" },
+      ]);
+      const updater = yield* makeTestRunner(registry);
+
+      const first = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
+      yield* Effect.promise(() => firstStarted);
+      const second = yield* updater.updateProvider(OPENCODE_DRIVER).pipe(Effect.forkScoped);
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const queuedStatus = (yield* registry.getProviders).find(
+          (provider) => provider.instanceId === OPENCODE_INSTANCE_ID,
+        )?.updateState?.status;
+        if (queuedStatus === "queued") {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+
+      releaseFirstLatch.resolve();
+      yield* Fiber.join(first);
+      const result = yield* Fiber.join(second);
+
+      const updateState = result.providers.find(
+        (provider) => provider.instanceId === OPENCODE_INSTANCE_ID,
+      )?.updateState;
+      assert.strictEqual(updateState?.status, "succeeded");
+      assert.strictEqual(updateState?.message, "Provider is already up to date.");
+      assert.deepStrictEqual(calls, ["install -g @openai/codex@latest"]);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          NonWindowsPlatform,
+          latestVersionHttpClient("9.9.9"),
+          mockSpawnerLayer((_command, args) => {
+            calls.push(args.join(" "));
+            firstStartedLatch.resolve();
+            return {
+              stdout: "updated",
+              exitCode: Effect.promise(() => releaseFirst).pipe(
+                Effect.as(ChildProcessSpawner.ExitCode(0)),
+              ),
+            };
+          }),
+        ),
+      ),
+    );
+  });
+
+  it.effect("does not pass ELECTRON_RUN_AS_NODE to the update command", () => {
+    const environments: Array<Record<string, string | undefined> | undefined> = [];
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry(baseProvider);
+      const runner = yield* makeTestRunner(registry);
+
+      yield* runner.updateProvider(CODEX_DRIVER);
+
+      assert.deepStrictEqual(environments, [{ PATH: "/usr/bin" }]);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          NonWindowsPlatform,
+          Layer.succeed(HostProcessEnvironment, {
+            PATH: "/usr/bin",
+            ELECTRON_RUN_AS_NODE: "1",
+          }),
+          latestVersionHttpClient("0.0.0"),
+          Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make((command) => {
+              const childProcess = command as unknown as {
+                readonly options: {
+                  readonly env?: Record<string, string | undefined>;
+                  readonly extendEnv?: boolean;
+                };
+              };
+              // Without `extendEnv: false` the spawner would merge the host
+              // environment back in and undo the stripping.
+              assert.strictEqual(childProcess.options.extendEnv, false);
+              environments.push(childProcess.options.env);
+              return Effect.succeed(mockHandle({ stdout: "updated" }));
+            }),
+          ),
+        ),
+      ),
+    );
+  });
+
   it.effect("resolves npm to a .cmd shim and routes through the shell on win32", () => {
     const captured: Array<{
       readonly command: string;
@@ -729,4 +858,123 @@ describe("providerMaintenanceRunner", () => {
       ),
     );
   });
+});
+
+describe("providerMaintenanceCommandCoordinator", () => {
+  const DEAD_PROCESS_ID = 2 ** 31 - 1;
+  const STALE_AFTER = Duration.minutes(7);
+  const lockOwner = (pid: number) =>
+    `{"pid":${pid},"token":"abandoned","acquiredAt":"2026-04-10T00:00:00.000Z"}`;
+
+  const makeCoordinator = (lockDirectory: string) =>
+    makeProviderMaintenanceCommandCoordinator({
+      makeAlreadyRunningError: () => "already-running" as const,
+      fileLockStaleAfter: STALE_AFTER,
+    }).pipe(Effect.provideService(ProviderMaintenanceLockDirectory, lockDirectory));
+
+  const lockFilePath = (lockDirectory: string) =>
+    Effect.map(Path.Path, (path) =>
+      path.join(lockDirectory, "lecturn-provider-maintenance-npm-global.lock"),
+    );
+
+  // The waiter polls with real file system calls between clock sleeps, so keep
+  // advancing the test clock until it gets through.
+  const advanceClockUntilDone = <A, E>(fiber: Fiber.Fiber<A, E>) =>
+    Effect.raceFirst(
+      Fiber.join(fiber),
+      TestClock.adjust("1 second").pipe(
+        Effect.andThen(Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)))),
+        Effect.forever,
+      ),
+    );
+
+  it.effect("serializes the same lock key across coordinators sharing a lock directory", () =>
+    Effect.gen(function* () {
+      const lockDirectory = yield* makeLockDirectory;
+      const firstCoordinator = yield* makeCoordinator(lockDirectory);
+      const secondCoordinator = yield* makeCoordinator(lockDirectory);
+      const firstRunning = yield* Deferred.make<void>();
+      const releaseFirst = yield* Deferred.make<void>();
+      const events: Array<string> = [];
+
+      const first = yield* firstCoordinator
+        .withCommandLock({
+          targetKey: "instance:codex",
+          lockKey: "npm-global",
+          run: ({ waited }) =>
+            Effect.gen(function* () {
+              events.push(`first start waited=${waited}`);
+              yield* Deferred.succeed(firstRunning, undefined);
+              yield* Deferred.await(releaseFirst);
+              events.push("first end");
+            }),
+        })
+        .pipe(Effect.forkScoped);
+      yield* Deferred.await(firstRunning);
+
+      const second = yield* secondCoordinator
+        .withCommandLock({
+          targetKey: "instance:codex",
+          lockKey: "npm-global",
+          run: ({ waited }) => Effect.sync(() => events.push(`second start waited=${waited}`)),
+        })
+        .pipe(Effect.forkScoped);
+      yield* TestClock.adjust("5 seconds");
+      assert.deepStrictEqual(events, ["first start waited=false"]);
+
+      yield* Deferred.succeed(releaseFirst, undefined);
+      yield* Fiber.join(first);
+      yield* advanceClockUntilDone(second);
+
+      assert.deepStrictEqual(events, [
+        "first start waited=false",
+        "first end",
+        "second start waited=true",
+      ]);
+      const fileSystem = yield* FileSystem.FileSystem;
+      assert.strictEqual(yield* fileSystem.exists(yield* lockFilePath(lockDirectory)), false);
+    }).pipe(Effect.provide(FileLockServices)),
+  );
+
+  it.effect("takes over a lock file left behind by a dead process", () =>
+    Effect.gen(function* () {
+      const lockDirectory = yield* makeLockDirectory;
+      const fileSystem = yield* FileSystem.FileSystem;
+      yield* fileSystem.writeFileString(
+        yield* lockFilePath(lockDirectory),
+        lockOwner(DEAD_PROCESS_ID),
+      );
+      const coordinator = yield* makeCoordinator(lockDirectory);
+
+      const waited = yield* coordinator.withCommandLock({
+        targetKey: "instance:codex",
+        lockKey: "npm-global",
+        run: (context) => Effect.succeed(context.waited),
+      });
+
+      assert.strictEqual(waited, false);
+    }).pipe(Effect.provide(FileLockServices)),
+  );
+
+  it.effect("takes over a lock file older than the stale window", () =>
+    Effect.gen(function* () {
+      const lockDirectory = yield* makeLockDirectory;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const lockPath = yield* lockFilePath(lockDirectory);
+      // A live pid, so only the file's age can mark it stale.
+      yield* fileSystem.writeFileString(lockPath, lockOwner(process.pid));
+      const lockInfo = yield* fileSystem.stat(lockPath);
+      const writtenAt = Option.getOrThrow(lockInfo.mtime).getTime();
+      yield* TestClock.setTime(writtenAt + Duration.toMillis(STALE_AFTER) + 1);
+      const coordinator = yield* makeCoordinator(lockDirectory);
+
+      const ran = yield* coordinator.withCommandLock({
+        targetKey: "instance:codex",
+        lockKey: "npm-global",
+        run: () => Effect.succeed(true),
+      });
+
+      assert.strictEqual(ran, true);
+    }).pipe(Effect.provide(FileLockServices)),
+  );
 });

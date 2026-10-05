@@ -16,6 +16,7 @@ import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SettingsSourceControlRouteImport } from './routes/settings.source-control'
+import { Route as SettingsRelayRouteImport } from './routes/settings.relay'
 import { Route as SettingsProvidersRouteImport } from './routes/settings.providers'
 import { Route as SettingsKeybindingsRouteImport } from './routes/settings.keybindings'
 import { Route as SettingsIntegrationsRouteImport } from './routes/settings.integrations'
@@ -25,9 +26,13 @@ import { Route as SettingsConnectionsRouteImport } from './routes/settings.conne
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
 import { Route as ProjectsProjectKeyRouteImport } from './routes/projects.$projectKey'
+import { Route as ContextualEnvironmentIdRouteImport } from './routes/contextual.$environmentId'
 import { Route as ConnectCallbackRouteImport } from './routes/connect_.callback'
 import { Route as AccountBillingRouteImport } from './routes/account.billing'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
+import { Route as ExtensionsFundingApproveRouteImport } from './routes/extensions.funding.approve'
+import { Route as DecisionsFundingApproveRouteImport } from './routes/decisions.funding.approve'
+import { Route as DecisionsEnvironmentIdProjectIdRouteImport } from './routes/decisions.$environmentId.$projectId'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
 import { Route as ChatSagasEnvironmentIdProjectIdRouteImport } from './routes/_chat.sagas.$environmentId.$projectId'
@@ -64,6 +69,11 @@ const ChatIndexRoute = ChatIndexRouteImport.update({
 const SettingsSourceControlRoute = SettingsSourceControlRouteImport.update({
   id: '/source-control',
   path: '/source-control',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsRelayRoute = SettingsRelayRouteImport.update({
+  id: '/relay',
+  path: '/relay',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsProvidersRoute = SettingsProvidersRouteImport.update({
@@ -111,6 +121,11 @@ const ProjectsProjectKeyRoute = ProjectsProjectKeyRouteImport.update({
   path: '/projects/$projectKey',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ContextualEnvironmentIdRoute = ContextualEnvironmentIdRouteImport.update({
+  id: '/contextual/$environmentId',
+  path: '/contextual/$environmentId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConnectCallbackRoute = ConnectCallbackRouteImport.update({
   id: '/connect_/callback',
   path: '/connect/callback',
@@ -126,6 +141,23 @@ const ChatPullRequestsRoute = ChatPullRequestsRouteImport.update({
   path: '/pull-requests',
   getParentRoute: () => ChatRoute,
 } as any)
+const ExtensionsFundingApproveRoute =
+  ExtensionsFundingApproveRouteImport.update({
+    id: '/extensions/funding/approve',
+    path: '/extensions/funding/approve',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const DecisionsFundingApproveRoute = DecisionsFundingApproveRouteImport.update({
+  id: '/decisions/funding/approve',
+  path: '/decisions/funding/approve',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DecisionsEnvironmentIdProjectIdRoute =
+  DecisionsEnvironmentIdProjectIdRouteImport.update({
+    id: '/decisions/$environmentId/$projectId',
+    path: '/decisions/$environmentId/$projectId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ChatDraftDraftIdRoute = ChatDraftDraftIdRouteImport.update({
   id: '/draft/$draftId',
   path: '/draft/$draftId',
@@ -153,6 +185,7 @@ export interface FileRoutesByFullPath {
   '/pull-requests': typeof ChatPullRequestsRoute
   '/account/billing': typeof AccountBillingRoute
   '/connect/callback': typeof ConnectCallbackRoute
+  '/contextual/$environmentId': typeof ContextualEnvironmentIdRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
@@ -162,9 +195,13 @@ export interface FileRoutesByFullPath {
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
   '/settings/providers': typeof SettingsProvidersRoute
+  '/settings/relay': typeof SettingsRelayRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/decisions/$environmentId/$projectId': typeof DecisionsEnvironmentIdProjectIdRoute
+  '/decisions/funding/approve': typeof DecisionsFundingApproveRoute
+  '/extensions/funding/approve': typeof ExtensionsFundingApproveRoute
   '/sagas/$environmentId/$projectId': typeof ChatSagasEnvironmentIdProjectIdRoute
 }
 export interface FileRoutesByTo {
@@ -175,6 +212,7 @@ export interface FileRoutesByTo {
   '/pull-requests': typeof ChatPullRequestsRoute
   '/account/billing': typeof AccountBillingRoute
   '/connect/callback': typeof ConnectCallbackRoute
+  '/contextual/$environmentId': typeof ContextualEnvironmentIdRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
@@ -184,10 +222,14 @@ export interface FileRoutesByTo {
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
   '/settings/providers': typeof SettingsProvidersRoute
+  '/settings/relay': typeof SettingsRelayRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/': typeof ChatIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/decisions/$environmentId/$projectId': typeof DecisionsEnvironmentIdProjectIdRoute
+  '/decisions/funding/approve': typeof DecisionsFundingApproveRoute
+  '/extensions/funding/approve': typeof ExtensionsFundingApproveRoute
   '/sagas/$environmentId/$projectId': typeof ChatSagasEnvironmentIdProjectIdRoute
 }
 export interface FileRoutesById {
@@ -200,6 +242,7 @@ export interface FileRoutesById {
   '/_chat/pull-requests': typeof ChatPullRequestsRoute
   '/account/billing': typeof AccountBillingRoute
   '/connect_/callback': typeof ConnectCallbackRoute
+  '/contextual/$environmentId': typeof ContextualEnvironmentIdRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
@@ -209,10 +252,14 @@ export interface FileRoutesById {
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
   '/settings/providers': typeof SettingsProvidersRoute
+  '/settings/relay': typeof SettingsRelayRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/_chat/': typeof ChatIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/decisions/$environmentId/$projectId': typeof DecisionsEnvironmentIdProjectIdRoute
+  '/decisions/funding/approve': typeof DecisionsFundingApproveRoute
+  '/extensions/funding/approve': typeof ExtensionsFundingApproveRoute
   '/_chat/sagas/$environmentId/$projectId': typeof ChatSagasEnvironmentIdProjectIdRoute
 }
 export interface FileRouteTypes {
@@ -226,6 +273,7 @@ export interface FileRouteTypes {
     | '/pull-requests'
     | '/account/billing'
     | '/connect/callback'
+    | '/contextual/$environmentId'
     | '/projects/$projectKey'
     | '/settings/appearance'
     | '/settings/archived'
@@ -235,9 +283,13 @@ export interface FileRouteTypes {
     | '/settings/integrations'
     | '/settings/keybindings'
     | '/settings/providers'
+    | '/settings/relay'
     | '/settings/source-control'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/decisions/$environmentId/$projectId'
+    | '/decisions/funding/approve'
+    | '/extensions/funding/approve'
     | '/sagas/$environmentId/$projectId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -248,6 +300,7 @@ export interface FileRouteTypes {
     | '/pull-requests'
     | '/account/billing'
     | '/connect/callback'
+    | '/contextual/$environmentId'
     | '/projects/$projectKey'
     | '/settings/appearance'
     | '/settings/archived'
@@ -257,10 +310,14 @@ export interface FileRouteTypes {
     | '/settings/integrations'
     | '/settings/keybindings'
     | '/settings/providers'
+    | '/settings/relay'
     | '/settings/source-control'
     | '/'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/decisions/$environmentId/$projectId'
+    | '/decisions/funding/approve'
+    | '/extensions/funding/approve'
     | '/sagas/$environmentId/$projectId'
   id:
     | '__root__'
@@ -272,6 +329,7 @@ export interface FileRouteTypes {
     | '/_chat/pull-requests'
     | '/account/billing'
     | '/connect_/callback'
+    | '/contextual/$environmentId'
     | '/projects/$projectKey'
     | '/settings/appearance'
     | '/settings/archived'
@@ -281,10 +339,14 @@ export interface FileRouteTypes {
     | '/settings/integrations'
     | '/settings/keybindings'
     | '/settings/providers'
+    | '/settings/relay'
     | '/settings/source-control'
     | '/_chat/'
     | '/_chat/$environmentId/$threadId'
     | '/_chat/draft/$draftId'
+    | '/decisions/$environmentId/$projectId'
+    | '/decisions/funding/approve'
+    | '/extensions/funding/approve'
     | '/_chat/sagas/$environmentId/$projectId'
   fileRoutesById: FileRoutesById
 }
@@ -296,7 +358,11 @@ export interface RootRouteChildren {
   UsageRoute: typeof UsageRoute
   AccountBillingRoute: typeof AccountBillingRoute
   ConnectCallbackRoute: typeof ConnectCallbackRoute
+  ContextualEnvironmentIdRoute: typeof ContextualEnvironmentIdRoute
   ProjectsProjectKeyRoute: typeof ProjectsProjectKeyRoute
+  DecisionsEnvironmentIdProjectIdRoute: typeof DecisionsEnvironmentIdProjectIdRoute
+  DecisionsFundingApproveRoute: typeof DecisionsFundingApproveRoute
+  ExtensionsFundingApproveRoute: typeof ExtensionsFundingApproveRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -348,6 +414,13 @@ declare module '@tanstack/react-router' {
       path: '/source-control'
       fullPath: '/settings/source-control'
       preLoaderRoute: typeof SettingsSourceControlRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/relay': {
+      id: '/settings/relay'
+      path: '/relay'
+      fullPath: '/settings/relay'
+      preLoaderRoute: typeof SettingsRelayRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/providers': {
@@ -413,6 +486,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsProjectKeyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/contextual/$environmentId': {
+      id: '/contextual/$environmentId'
+      path: '/contextual/$environmentId'
+      fullPath: '/contextual/$environmentId'
+      preLoaderRoute: typeof ContextualEnvironmentIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/connect_/callback': {
       id: '/connect_/callback'
       path: '/connect/callback'
@@ -433,6 +513,27 @@ declare module '@tanstack/react-router' {
       fullPath: '/pull-requests'
       preLoaderRoute: typeof ChatPullRequestsRouteImport
       parentRoute: typeof ChatRoute
+    }
+    '/extensions/funding/approve': {
+      id: '/extensions/funding/approve'
+      path: '/extensions/funding/approve'
+      fullPath: '/extensions/funding/approve'
+      preLoaderRoute: typeof ExtensionsFundingApproveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/decisions/funding/approve': {
+      id: '/decisions/funding/approve'
+      path: '/decisions/funding/approve'
+      fullPath: '/decisions/funding/approve'
+      preLoaderRoute: typeof DecisionsFundingApproveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/decisions/$environmentId/$projectId': {
+      id: '/decisions/$environmentId/$projectId'
+      path: '/decisions/$environmentId/$projectId'
+      fullPath: '/decisions/$environmentId/$projectId'
+      preLoaderRoute: typeof DecisionsEnvironmentIdProjectIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_chat/draft/$draftId': {
       id: '/_chat/draft/$draftId'
@@ -485,6 +586,7 @@ interface SettingsRouteChildren {
   SettingsIntegrationsRoute: typeof SettingsIntegrationsRoute
   SettingsKeybindingsRoute: typeof SettingsKeybindingsRoute
   SettingsProvidersRoute: typeof SettingsProvidersRoute
+  SettingsRelayRoute: typeof SettingsRelayRoute
   SettingsSourceControlRoute: typeof SettingsSourceControlRoute
 }
 
@@ -497,6 +599,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsIntegrationsRoute: SettingsIntegrationsRoute,
   SettingsKeybindingsRoute: SettingsKeybindingsRoute,
   SettingsProvidersRoute: SettingsProvidersRoute,
+  SettingsRelayRoute: SettingsRelayRoute,
   SettingsSourceControlRoute: SettingsSourceControlRoute,
 }
 
@@ -512,7 +615,11 @@ const rootRouteChildren: RootRouteChildren = {
   UsageRoute: UsageRoute,
   AccountBillingRoute: AccountBillingRoute,
   ConnectCallbackRoute: ConnectCallbackRoute,
+  ContextualEnvironmentIdRoute: ContextualEnvironmentIdRoute,
   ProjectsProjectKeyRoute: ProjectsProjectKeyRoute,
+  DecisionsEnvironmentIdProjectIdRoute: DecisionsEnvironmentIdProjectIdRoute,
+  DecisionsFundingApproveRoute: DecisionsFundingApproveRoute,
+  ExtensionsFundingApproveRoute: ExtensionsFundingApproveRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

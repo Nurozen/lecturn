@@ -208,7 +208,7 @@ const RESULTS: { readonly [K in StaveOperationKind]: Record<string, unknown> } =
     memory: "destroy",
     notes: [],
   },
-  restoreSpace: spaceMutation,
+  restoreSpace: { ...spaceMutation, projectId: "project-1", sequence: 13 },
   removePartialSpace: {
     spaceId: "ticket-42",
     spacePath: ROOT,
@@ -317,6 +317,12 @@ describe("StaveOperationResult", () => {
       Exit.isFailure(decodeResultExit({ kind: "archiveSpace", result: RESULTS.destroySpace })),
     ).toBe(true);
     expect(Exit.isFailure(decodeResultExit({ kind: "createSpace", result: RESULTS.addRepo }))).toBe(
+      true,
+    );
+  });
+
+  it("reads a restore result from a server that predates project reuse", () => {
+    expect(Exit.isSuccess(decodeResultExit({ kind: "restoreSpace", result: spaceMutation }))).toBe(
       true,
     );
   });

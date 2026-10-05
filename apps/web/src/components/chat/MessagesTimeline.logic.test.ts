@@ -122,6 +122,20 @@ describe("work entry labels", () => {
     );
   });
 
+  it("labels a file change by its workspace-relative file rather than raw tool input", () => {
+    const claudeEdit = {
+      ...entry,
+      itemType: "file_change" as const,
+      detail: 'Edit: {"file_path":"/repo/src/app.ts","old_string":"a","new_string":"b"}',
+      changedFiles: ["/repo/src/app.ts"],
+    };
+    expect(workEntryDisplayLabel(claudeEdit, "/repo")).toBe("repo/src/app.ts");
+    // Without a known file, the detail is still the best label available.
+    expect(workEntryDisplayLabel({ ...claudeEdit, changedFiles: [] }, "/repo")).toBe(
+      claudeEdit.detail,
+    );
+  });
+
   it("keeps command summaries compact without replacing the full command in expanded rows", () => {
     const commandEntry = { ...entry, command: "vp test run", detail: "All tests passed" };
     expect(liveWorkEntryLabel(commandEntry, undefined, true)).toBe("Running vp");
@@ -1016,6 +1030,67 @@ describe("deriveMessagesTimelineRows", () => {
       forkDividerAfterMessageId: null,
     });
     expect(noAnchorRows.some((row) => row.kind === "fork-divider")).toBe(false);
+  });
+
+  it("keeps an import's trailing tool activity above its divider", () => {
+    const message = (id: string, role: "user" | "assistant", createdAt: string) => ({
+      id: `${id}-entry`,
+      kind: "message" as const,
+      createdAt,
+      message: {
+        id: id as never,
+        role,
+        text: id,
+        turnId: null,
+        createdAt,
+        updatedAt: createdAt,
+        streaming: false,
+      },
+    });
+    const importedTool = {
+      id: "imported-tool-entry",
+      kind: "work" as const,
+      createdAt: "2026-01-01T00:00:02Z",
+      entry: {
+        id: "imported-tool",
+        createdAt: "2026-01-01T00:00:02Z",
+        label: "Ran tests",
+        tone: "tool" as const,
+      },
+    };
+    // The session was interrupted mid-work: its last row is a tool summary.
+    const imported = [message("imported-user", "user", "2026-01-01T00:00:00Z"), importedTool];
+    const baseInput = {
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    };
+
+    const unsentRows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: imported,
+      importDivider: { label: "Imported from Codex · Jan 1, 2026", beforeMessageId: null },
+    });
+    expect(unsentRows.at(-1)).toMatchObject({
+      kind: "fork-divider",
+      label: "Imported from Codex · Jan 1, 2026",
+    });
+    expect(unsentRows).toHaveLength(3);
+
+    const sentRows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [...imported, message("first-new", "user", "2026-01-02T00:00:00Z")],
+      importDivider: {
+        label: "Imported from Codex · Jan 1, 2026",
+        beforeMessageId: "first-new" as never,
+      },
+    });
+    expect(sentRows.map((row) => row.id).slice(-2)).toEqual([
+      "import-divider-row",
+      "first-new-entry",
+    ]);
+    expect(sentRows).toHaveLength(4);
   });
 
   it("folds the first assistant message and settled work before the terminal response", () => {

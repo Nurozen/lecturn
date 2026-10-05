@@ -1,3 +1,4 @@
+import { prepareContextualDispatch } from "../ContextualDispatch.ts";
 /**
  * ClaudeAdapterLive - Scoped live implementation for the Claude Agent provider adapter.
  *
@@ -142,6 +143,9 @@ type PromptQueueItem =
   | {
       readonly type: "terminate";
     };
+
+/** The fields the content-block extractors read, shared by live SDK messages and stored transcripts. */
+type ClaudeMessageLike = { readonly type: string; readonly message?: unknown };
 
 interface ClaudeResumeState {
   readonly threadId?: ThreadId;
@@ -814,7 +818,15 @@ function asRuntimeRequestId(value: ApprovalRequestId): RuntimeRequestId {
   return RuntimeRequestId.make(value);
 }
 
-function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undefined {
+/**
+ * Resume state for a session `forkClaudeSession` just wrote. Doubles as the
+ * persisted resume cursor of a thread that has not started its session yet.
+ */
+export function claudeForkResumeState(forkSessionId: string): ClaudeResumeState {
+  return { resume: forkSessionId, turnCount: 0 };
+}
+
+export function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undefined {
   if (!resumeCursor || typeof resumeCursor !== "object") {
     return undefined;
   }
@@ -865,7 +877,7 @@ function readToolImagePath(toolName: string, input: Record<string, unknown>): st
   return path.length > 0 && isWorkspaceImagePreviewPath(path) ? path : undefined;
 }
 
-function classifyToolItemType(
+export function classifyToolItemType(
   toolName: string,
   input: Record<string, unknown> = {},
 ): CanonicalItemType {
@@ -1356,7 +1368,7 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
   return `${toolName}: ${serialized.slice(0, 397)}...`;
 }
 
-function titleForTool(itemType: CanonicalItemType): string {
+export function titleForTool(itemType: CanonicalItemType): string {
   switch (itemType) {
     case "command_execution":
       return "Command run";
@@ -1587,7 +1599,7 @@ function nativeProviderRefs(
   return {};
 }
 
-function extractAssistantTextBlocks(message: SDKMessage): Array<string> {
+export function extractAssistantTextBlocks(message: ClaudeMessageLike): Array<string> {
   if (message.type !== "assistant") {
     return [];
   }
@@ -4137,7 +4149,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             })
           : undefined;
       const resumeState = forkedSession
-        ? { resume: forkedSession.sessionId, turnCount: 0 }
+        ? claudeForkResumeState(forkedSession.sessionId)
         : readClaudeResumeState(input.resumeCursor);
       const threadId = input.threadId;
       const existingResumeSessionId = resumeState?.resume;
@@ -4952,6 +4964,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       ),
     });
 
+    // Local SDK queue admission is not native per-message acceptance.
+    const contextualReceipt = yield* prepareContextualDispatch(
+      input,
+      "skipped",
+      boundInstanceId,
+    ).receipt("rejected", null, null);
     yield* Queue.offer(context.promptQueue, {
       type: "message",
       message,
@@ -4960,6 +4978,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     return {
       threadId: context.session.threadId,
       turnId,
+      ...(contextualReceipt ? { contextualReceipt } : {}),
       ...(context.session.resumeCursor !== undefined
         ? { resumeCursor: context.session.resumeCursor }
         : {}),

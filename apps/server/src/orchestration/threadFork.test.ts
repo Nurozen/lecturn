@@ -704,6 +704,38 @@ describe("assembleThreadFork", () => {
     expect(activitySummaries).not.toContain("queued after fork");
   });
 
+  it("carries the import origin only when the child keeps imported rows", () => {
+    const importedFrom = {
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      driverKind: ProviderDriverKind.make("codex"),
+      sessionId: "external-session",
+      cwd: "/repo",
+      title: "External session",
+      importedAt: t(0),
+      historyTruncated: false,
+    };
+    // The pre-turn draft is stamped at importedAt, so it counts as imported.
+    const inherited = assembleThreadFork(makeInput({ source: { ...sourceThread, importedFrom } }));
+    assertOk(inherited);
+    expect(inherited.command.importedFrom).toEqual(importedFrom);
+
+    // Every turnless row is newer than the import: nothing imported rides along.
+    const none = assembleThreadFork(
+      makeInput({
+        source: {
+          ...sourceThread,
+          importedFrom: { ...importedFrom, importedAt: "2026-04-30T00:00:00.000Z" },
+        },
+      }),
+    );
+    assertOk(none);
+    expect(none.command).not.toHaveProperty("importedFrom");
+
+    const plain = assembleThreadFork(makeInput());
+    assertOk(plain);
+    expect(plain.command).not.toHaveProperty("importedFrom");
+  });
+
   it("leaves open async questions with the source and copies answered ones", () => {
     const question = { id: "q1", header: "Scope", question: "Which scope?", options: [] };
     const answeredRequest = {

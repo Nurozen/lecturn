@@ -92,7 +92,7 @@ function hasOpenBlockingRequest(thread: {
 
 /** Apply the shared shell-level rule to the detailed command read model. */
 function hasQueuedTurnStartForThread(
-  thread: Pick<OrchestrationThread, "messages" | "latestTurn" | "session">,
+  thread: Pick<OrchestrationThread, "messages" | "latestTurn" | "session" | "importedFrom">,
   now: string,
 ): boolean {
   let latestUserMessageAt: string | null = null;
@@ -110,6 +110,7 @@ function hasQueuedTurnStartForThread(
       latestUserMessageAt: Number.isFinite(latestUserMessageAtMs) ? latestUserMessageAt : null,
       latestTurn: thread.latestTurn,
       session: thread.session,
+      importedFrom: thread.importedFrom,
     },
     now,
   );
@@ -1204,11 +1205,28 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.checkpoint.revert": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      // The client disables the revert control while a turn is in flight, but a
+      // click can still race the reactor and a command can be dispatched
+      // directly. Restoring the worktree underneath an agent that is still
+      // writing to it corrupts the tree, so the invariant has to hold here too.
+      //
+      // Only unambiguous state counts. A queued-but-unstarted turn deliberately
+      // does not block: nothing is writing yet, and `threadHasQueuedTurnStart`
+      // is a time-windowed settlement heuristic, so using it as a safety gate
+      // would reject legitimate reverts on a guess.
+      const sessionComingAlive =
+        thread.session?.status === "starting" || thread.session?.status === "running";
+      if (sessionComingAlive || thread.latestTurn?.state === "running") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `thread ${command.threadId} has a turn in flight; interrupt it before reverting checkpoints`,
+        });
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -1571,6 +1589,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           forkedFrom: command.forkedFrom,
           forkSource: command.forkSource,
+          ...(command.contextualMessageIdMap
+            ? { contextualMessageIdMap: command.contextualMessageIdMap }
+            : {}),
+          ...(command.importedFrom != null ? { importedFrom: command.importedFrom } : {}),
           history: command.history,
           // Inherited from the read model's source thread; the materialized
           // command carries no linked pull request of its own.
@@ -1578,6 +1600,65 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       };
       return [threadCreatedEvent, threadForkedEvent];
+    }
+
+    case "thread.import": {
+      // Same belt as thread.fork: only the ws dispatcher materializes an
+      // import (forking the external session and reading its history).
+      if (!("history" in command) || command.history === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "thread.import must be materialized by the server",
+        });
+      }
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: command.thread.projectId,
+      });
+      yield* requireThreadAbsent({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const threadCreatedEvent: Omit<OrchestrationEvent, "sequence"> = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.created",
+        payload: {
+          threadId: command.threadId,
+          projectId: command.thread.projectId,
+          title: command.thread.title,
+          modelSelection: command.thread.modelSelection,
+          runtimeMode: command.thread.runtimeMode,
+          interactionMode: command.thread.interactionMode,
+          branch: command.thread.branch,
+          worktreePath: command.thread.worktreePath,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+      const threadImportedEvent: Omit<OrchestrationEvent, "sequence"> = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        causationEventId: threadCreatedEvent.eventId,
+        type: "thread.imported",
+        payload: {
+          threadId: command.threadId,
+          importedFrom: command.importedFrom,
+          importSource: command.importSource,
+          history: command.history,
+        },
+      };
+      return [threadCreatedEvent, threadImportedEvent];
     }
 
     default: {

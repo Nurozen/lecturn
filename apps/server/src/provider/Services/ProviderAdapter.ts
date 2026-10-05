@@ -9,6 +9,7 @@
  */
 import type {
   ApprovalRequestId,
+  ContextualDeliveryReceipt,
   ProviderApprovalDecision,
   ProviderDriverKind,
   ProviderUserInputAnswers,
@@ -25,6 +26,22 @@ import type {
 import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
 
+/** Internal observer: errors before dispatch stop sending; failures after native proof
+ * are swallowed by the adapter and the receipt remains in its return value. */
+/** Awaited before native dispatch: a failed durable write aborts the send.
+ * After native proof, observer failure is contained; the accepted receipt is
+ * also returned for reconciliation and must never trigger an automatic resend.
+ * Callbacks may arrive after sendTurn returns (OpenCode native message echo).
+ * Metadata only: evidence body never enters this callback or runtime events.
+ */
+export type ProviderContextualReceiptObserver = (
+  receipt: ContextualDeliveryReceipt,
+) => Effect.Effect<void, Error>;
+export type ProviderAdapterSendTurnInput = ProviderSendTurnInput & {
+  readonly onContextualReceipt?: ProviderContextualReceiptObserver;
+  /** Settles after the native prompt is registered, before a long-running turn completes. */
+  readonly onDispatch?: Effect.Effect<void>;
+};
 export type ProviderSessionModelSwitchMode = "in-session" | "unsupported";
 
 export type ProviderConversationForkMode = "native" | "unsupported";
@@ -82,7 +99,7 @@ export interface ProviderAdapterShape<TError> {
    * Send a turn to an active provider session.
    */
   readonly sendTurn: (
-    input: ProviderSendTurnInput,
+    input: ProviderAdapterSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, TError>;
 
   readonly compactThread?: (

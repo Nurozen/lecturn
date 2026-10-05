@@ -1,3 +1,4 @@
+import type { ProviderContextualReceiptObserver } from "./ProviderAdapter.ts";
 /**
  * ProviderService - Service interface for provider sessions, turns, and checkpoints.
  *
@@ -52,6 +53,8 @@ export interface ProviderServiceShape {
    */
   readonly sendTurn: (
     input: ProviderSendTurnInput,
+    onContextualReceipt?: ProviderContextualReceiptObserver,
+    onDispatch?: Effect.Effect<void>,
   ) => Effect.Effect<ProviderTurnStartResult, ProviderServiceError>;
 
   readonly compactThread: (

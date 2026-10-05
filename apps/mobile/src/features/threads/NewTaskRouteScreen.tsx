@@ -15,7 +15,7 @@ import { cn } from "../../lib/cn";
 import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { AppText as Text } from "../../components/AppText";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
-import { useProjects } from "../../state/entities";
+import { useListedProjects } from "../../state/entities";
 import type { WorkspaceState } from "../../state/workspaceModel";
 import { useWorkspaceState } from "../../state/workspace";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
@@ -83,7 +83,7 @@ function deriveProjectEmptyState(catalogState: WorkspaceState): {
 }
 
 export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRouteParams | undefined>) {
-  const projects = useProjects();
+  const projects = useListedProjects();
   const { projectScopes, selectedEnvironmentId, setProject } = useNewTaskFlow();
   const { state: catalogState } = useWorkspaceState();
   const navigation = useNavigation();
@@ -279,15 +279,8 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
                   className={cn(scopeIndex > 0 && "border-t border-border-subtle")}
                 >
                   <Pressable
-                    disabled={
-                      reservedDestinationProject !== null ||
-                      selectionTarget.stave?.state === "archived"
-                    }
-                    accessibilityState={{
-                      disabled:
-                        reservedDestinationProject !== null ||
-                        selectionTarget.stave?.state === "archived",
-                    }}
+                    disabled={reservedDestinationProject !== null}
+                    accessibilityState={{ disabled: reservedDestinationProject !== null }}
                     onPress={() => void selectProject(selectionTarget)}
                     className="flex-row items-center gap-3 bg-card px-4 py-3.5"
                   >
@@ -310,9 +303,6 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
                           {scope.representative.stave.spaceId}
                           {scope.representative.stave.kind && !scope.representative.stave.isSaga
                             ? ` · ${scope.representative.stave.kind}`
-                            : ""}
-                          {scope.representative.stave.state === "archived"
-                            ? " · Unarchive to start a thread"
                             : ""}
                         </Text>
                       ) : null}

@@ -1,4 +1,11 @@
-import { MessageId, ProjectId, ThreadId, TurnId, ProviderInstanceId } from "@lecturn/contracts";
+import {
+  MessageId,
+  ProjectId,
+  ProviderDriverKind,
+  ThreadId,
+  TurnId,
+  ProviderInstanceId,
+} from "@lecturn/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -321,6 +328,66 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       const cleared = yield* threads.getById({ threadId: ThreadId.make("thread-fork-child") });
       assert.strictEqual(Option.getOrNull(cleared)?.forkedFrom, null);
       assert.strictEqual(Option.getOrNull(cleared)?.forkSource, null);
+    }),
+  );
+
+  it.effect("round-trips the import origin and source through the thread row", () =>
+    Effect.gen(function* () {
+      const threads = yield* ProjectionThreadRepository;
+      const instanceId = ProviderInstanceId.make("claudeAgent");
+      const importedFrom = {
+        providerInstanceId: instanceId,
+        driverKind: ProviderDriverKind.make("claudeAgent"),
+        sessionId: "external-session-1",
+        cwd: "/workspace",
+        title: "External session",
+        importedAt: "2026-03-24T00:00:00.000Z",
+        historyTruncated: true,
+      };
+      const importSource = {
+        providerInstanceId: instanceId,
+        resumeCursor: { resume: "forked-session-1" },
+      };
+      const threadId = ThreadId.make("thread-imported");
+
+      yield* threads.upsert({
+        threadId,
+        projectId: ProjectId.make("project-import"),
+        title: "Imported",
+        modelSelection: { instanceId, model: "claude-sonnet-4-5" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        importedFrom,
+        importSource,
+        latestTurnId: null,
+        createdAt: "2026-03-24T00:00:00.000Z",
+        updatedAt: "2026-03-24T00:00:00.000Z",
+        archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
+        unsettledAt: null,
+        snoozedUntil: null,
+        snoozedAt: null,
+        pinnedAt: null,
+        latestUserMessageAt: null,
+        pendingApprovalCount: 0,
+        pendingUserInputCount: 0,
+        hasActionableProposedPlan: 0,
+        deletedAt: null,
+      });
+
+      const row = Option.getOrNull(yield* threads.getById({ threadId }));
+      if (row === null) return yield* Effect.die("Expected imported thread row to exist.");
+      assert.deepStrictEqual(row.importedFrom, importedFrom);
+      assert.deepStrictEqual(row.importSource, importSource);
+
+      // An unrelated rewrite of the row (every later thread event) keeps both.
+      yield* threads.upsert({ ...row, title: "Renamed" });
+      const renamed = Option.getOrNull(yield* threads.getById({ threadId }));
+      assert.deepStrictEqual(renamed?.importedFrom, importedFrom);
+      assert.deepStrictEqual(renamed?.importSource, importSource);
     }),
   );
 

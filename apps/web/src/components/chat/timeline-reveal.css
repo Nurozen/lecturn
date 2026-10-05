@@ -1,0 +1,22 @@
+/* A new keyed thread stays visually quiet through virtualization/initial scroll.
+   Readiness changes only once: streaming and ordinary rerenders never replay it. */
+.lecturn-timeline-reveal {
+  opacity: 0;
+}
+.lecturn-timeline-reveal[data-timeline-ready] {
+  opacity: 1;
+  animation: lecturn-timeline-enter 140ms ease-out both;
+}
+@keyframes lecturn-timeline-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lecturn-timeline-reveal[data-timeline-ready] {
+    animation: none;
+  }
+}

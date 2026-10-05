@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // @effect-diagnostics nodeBuiltinImport:off - Node's typed junction API avoids Windows symlink privileges while keeping the probe isolated.
 
+import { resolveExtensionsBinary } from "../apps/server/src/extensions/ExtensionsBinary.ts";
 import { LECTURN_LEGAL_NOTICES } from "@lecturn/shared/legalNotices";
 
 import * as NodeFSP from "node:fs/promises";
@@ -162,7 +163,18 @@ const PLATFORM_CONFIG: Record<typeof BuildPlatform.Type, PlatformConfig> = {
   },
 };
 
+const decodeReviewExtensionsManifest = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      binary: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/)),
+      sha256: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+      fixtureRoot: Schema.optionalKey(Schema.String),
+    }),
+  ),
+);
+
 interface BuildCliInput {
+  readonly extensionsResources?: Option.Option<string>;
   readonly platform: Option.Option<typeof BuildPlatform.Type>;
   readonly target: Option.Option<string>;
   readonly arch: Option.Option<typeof BuildArch.Type>;
@@ -968,6 +980,7 @@ const resolvePythonForNodeGyp = Effect.fn("resolvePythonForNodeGyp")(function* (
 });
 
 interface ResolvedBuildOptions {
+  readonly extensionsResources?: string;
   readonly platform: typeof BuildPlatform.Type;
   readonly target: string;
   readonly arch: typeof BuildArch.Type;
@@ -1762,6 +1775,9 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
   const allowMissingStave = resolveBooleanFlag(input.allowMissingStave, env.allowMissingStave);
 
   return {
+    ...(input.extensionsResources && Option.isSome(input.extensionsResources)
+      ? { extensionsResources: input.extensionsResources.value }
+      : {}),
     platform,
     target,
     arch,
@@ -2801,6 +2817,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   // the resource is then dropped so electron-builder never copies an empty
   // resources/stave directory.
   staveBundled = true,
+  extensionsBundled = false,
 ) {
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
@@ -2819,6 +2836,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     // app.asar.unpacked. Windows additionally ships the server tree as the
     // hand-packed server.asar sidecar (see WINDOWS_SERVER_ASAR_RESOURCE).
     extraResources: [
+      ...(extensionsBundled
+        ? [{ from: "apps/desktop/prod-resources/extensions", to: "extensions" }]
+        : []),
       ...DESKTOP_EXTRA_RESOURCES.filter(
         (resource) => staveBundled || resource !== STAVE_EXTRA_RESOURCE,
       ),
@@ -3946,6 +3966,56 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     arch: options.arch,
     verbose: options.verbose,
   });
+  if (options.extensionsResources) {
+    if (options.platform !== "mac")
+      return yield* Effect.die("Extensions artifacts currently support macOS only.");
+    const reviewPath = path.join(options.extensionsResources, "review.json");
+    const review = yield* fs.exists(reviewPath);
+    if (review && !isDesktopPreviewVersion(appVersion))
+      return yield* Effect.die("Review helper artifacts cannot be included in release builds.");
+    const destination = path.join(stageResourcesDir, "extensions");
+    yield* fs.makeDirectory(destination, { recursive: true });
+    if (review) {
+      const manifest = yield* fs
+        .readFileString(reviewPath)
+        .pipe(Effect.flatMap(decodeReviewExtensionsManifest));
+      const binary = path.join(options.extensionsResources, manifest.binary);
+      yield* Effect.promise(() =>
+        resolveExtensionsBinary({
+          platform: "darwin",
+          architecture: options.arch,
+          bundledRoot: options.extensionsResources!,
+          reviewBinary: { path: binary, sha256: manifest.sha256 },
+        }),
+      );
+      yield* fs.copyFile(binary, path.join(destination, manifest.binary));
+      yield* fs.copyFile(reviewPath, path.join(destination, "review.json"));
+    } else
+      for (const architecture of options.arch === "universal" ? ["arm64", "x64"] : [options.arch]) {
+        const verified = yield* Effect.promise(() =>
+          resolveExtensionsBinary({
+            platform: "darwin",
+            architecture,
+            bundledRoot: options.extensionsResources!,
+          }),
+        );
+        if (!verified)
+          return yield* Effect.die(
+            "Requested extensions artifact is missing a verified architecture.",
+          );
+        const target = path.join(destination, `darwin-${architecture}`);
+        yield* fs.makeDirectory(target, { recursive: true });
+        yield* fs.copyFile(verified.path, path.join(target, "lecturn-extensions-helper"));
+        yield* fs.copyFile(
+          path.join(options.extensionsResources, `darwin-${architecture}`, "manifest.json"),
+          path.join(target, "manifest.json"),
+        );
+      }
+    for (const name of ["LICENSE.txt", "NOTICE.txt"]) {
+      const source = path.join(options.extensionsResources, name);
+      if (yield* fs.exists(source)) yield* fs.copyFile(source, path.join(destination, name));
+    }
+  }
   const stave = yield* stageStave({
     stageResourcesDir,
     platform: options.platform,
@@ -4069,6 +4139,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       bundlesWslRuntime({ arch: options.arch, prebuildPath: options.wslPrebuild }),
       options.arch,
       stave.staged,
+      options.extensionsResources !== undefined,
     ),
     dependencies: stageDependencies,
     devDependencies: {
@@ -4326,6 +4397,12 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
   wslPrebuild: Flag.string("wsl-prebuild").pipe(
     Flag.withDescription(
       "Path to a prebuilt Linux node-pty (pty.node) for the target arch, staged for the WSL backend (env: LECTURN_DESKTOP_WSL_PREBUILD).",
+    ),
+    Flag.optional,
+  ),
+  extensionsResources: Flag.string("extensions-resources").pipe(
+    Flag.withDescription(
+      "Trusted private helper artifacts directory; omitted for community builds.",
     ),
     Flag.optional,
   ),

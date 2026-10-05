@@ -46,6 +46,7 @@ import {
   StaveOperationRejectedError,
   type StaveOperationResult,
   type StaveProgressEvent,
+  type StaveProjectInfo,
   type StaveProgressOutputStream,
   type StaveRegisterRepoOperation,
   type StaveRemovePartialSpaceOperation,
@@ -729,7 +730,11 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       }
     });
 
-  const createProject = (spacePath: string, title: string) =>
+  const createProject = (
+    spacePath: string,
+    title: string,
+    failure = "The space was created but the project could not be",
+  ) =>
     Effect.gen(function* () {
       const projectId = ProjectId.make(NodeCrypto.randomUUID());
       const command = yield* normalizeDispatchCommand({
@@ -747,7 +752,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       return { projectId, sequence };
     }).pipe(
       Effect.mapError((cause) =>
-        refuse("unknown", `The space was created but the project could not be: ${cause.message}`, {
+        refuse("unknown", `${failure}: ${cause.message}`, {
           spacePath,
         }),
       ),
@@ -1206,6 +1211,31 @@ export const make = Effect.fn("StaveOperations.make")(function* (
       return found;
     });
 
+  /**
+   * A confirmed member archive/destroy runs `saga remove` first. Without it the
+   * operation would quiesce sessions and then fail, so it is refused up front.
+   */
+  const requireSagaRemove = (
+    operation: SpaceOperation,
+    spaceId: string,
+    createdAt: string | undefined,
+  ) =>
+    Effect.gen(function* () {
+      if (
+        (operation.kind !== "archiveSpace" && operation.kind !== "destroySpace") ||
+        operation.sagaRemoveConfirmed !== true ||
+        createdAt === undefined ||
+        (yield* cli.supports("saga remove")) ||
+        (yield* membership(spaceId, createdAt)).length === 0
+      )
+        return;
+      return yield* refuse(
+        "unsupported_feature",
+        `The selected Stave binary does not support saga remove, so this saga member cannot leave its saga before being ${operation.kind === "archiveSpace" ? "archived" : "deleted"}. Update Stave or choose another binary.`,
+        { missing: ["saga remove"] },
+      );
+    });
+
   const deleteProject = (projectId: ProjectId) =>
     engine
       .dispatch({
@@ -1215,6 +1245,54 @@ export const make = Effect.fn("StaveOperations.make")(function* (
         force: true,
       })
       .pipe(Effect.mapError(asRefusal), Effect.asVoid);
+
+  /**
+   * A restore picked from the archive list may have no project on the archive
+   * root. Reuse the project that last owned this incarnation (so its threads
+   * come back) when its recorded root is gone, else create one on the archive
+   * root. The restore's reconciliation then moves it to the live root.
+   */
+  const adoptArchiveProject = (workspaceRoot: string, info: StaveProjectInfo) =>
+    Effect.gen(function* () {
+      const createdAt = info.createdAt;
+      const rows =
+        createdAt === undefined
+          ? []
+          : yield* lifecycle.listActiveBySpaceId(info.spaceId).pipe(Effect.mapError(asRefusal));
+      for (const row of rows) {
+        if (
+          row.manifestCreatedAt === null ||
+          createdAt === undefined ||
+          !sameManifestIncarnation(row.manifestCreatedAt, createdAt)
+        )
+          continue;
+        const owner = yield* snapshotQuery
+          .getProjectShellById(row.projectId)
+          .pipe(Effect.mapError(asRefusal));
+        if (Option.isNone(owner) || (yield* pathEntryExists(owner.value.workspaceRoot))) continue;
+        const root = yield* workspacePaths
+          .normalizeWorkspaceRoot(workspaceRoot)
+          .pipe(Effect.mapError(asRefusal));
+        yield* engine
+          .dispatch(
+            {
+              type: "project.meta.update",
+              commandId: CommandId.make(`server:stave:adopt:${NodeCrypto.randomUUID()}`),
+              projectId: owner.value.id,
+              workspaceRoot: root,
+            },
+            { staveReconciliation: true },
+          )
+          .pipe(Effect.mapError(asRefusal));
+        return owner.value.id;
+      }
+      const created = yield* createProject(
+        workspaceRoot,
+        info.spaceId,
+        "The archive could not get a project to restore into",
+      );
+      return created.projectId;
+    });
 
   type LifecycleRow = StaveLifecycleRow;
   const reconcileRow = (row: LifecycleRow) =>
@@ -1412,6 +1490,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
             "saga_space",
             "Use Archive saga or Destroy saga to review all member spaces.",
           );
+        yield* requireSagaRemove(operation, id, info.createdAt);
         const isLifecycle =
           operation.kind === "archiveSpace" ||
           operation.kind === "destroySpace" ||
@@ -1424,12 +1503,16 @@ export const make = Effect.fn("StaveOperations.make")(function* (
         let lease: LifecycleRow | undefined;
         let removedEdges: unknown = null;
         if (isLifecycle) {
-          if (Option.isNone(project) && durableTarget === undefined)
-            return yield* refuse(
-              "invalid_arguments",
-              "Lifecycle operations require an active project.",
-            );
-          const projectId = durableTarget?.projectId ?? Option.getOrThrow(project).id;
+          const projectId =
+            durableTarget?.projectId ??
+            (Option.isSome(project)
+              ? project.value.id
+              : operation.kind === "restoreSpace"
+                ? yield* adoptArchiveProject(operation.workspaceRoot, info)
+                : yield* refuse(
+                    "invalid_arguments",
+                    "Lifecycle operations require an active project.",
+                  ));
           if (
             durableTarget !== undefined &&
             Option.isSome(project) &&
@@ -1643,6 +1726,20 @@ export const make = Effect.fn("StaveOperations.make")(function* (
               break;
             }
             case "archiveSpace": {
+              // A saga member leaves its roster first, so one reviewed archive
+              // replaces the separate "remove from saga" step.
+              if (operation.sagaRemoveConfirmed === true && info.createdAt !== undefined) {
+                for (const member of yield* membership(id, info.createdAt)) {
+                  const removal = { sagaId: member.sagaId, spaceId: id };
+                  yield* invoke(
+                    entry,
+                    "saga remove",
+                    buildStaveArgv.sagaRemove(removal),
+                    (stream) => cli.sagaRemove(removal, stream),
+                    notesUnlessPlan,
+                  ).pipe(Effect.ensuring(afterMutation(member.sagaRoot)));
+                }
+              }
               const input = { ...operation, id };
               const result = yield* invoke(
                 entry,
@@ -1699,7 +1796,11 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                 notesUnlessPlan,
               );
               if (isStaveDryRunPlan(result)) return yield* unexpectedPlan("space restore");
-              outcome = { kind: operation.kind, result };
+              // `sequence` is stamped once reconciliation has moved the project.
+              outcome = {
+                kind: operation.kind,
+                result: { ...result, projectId: lease!.projectId, sequence: 0 },
+              };
               break;
             }
             case "destroySpace": {
@@ -1805,6 +1906,13 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           }
           if (lease !== undefined && operation.kind !== "destroySpace") {
             yield* patch(yield* reconcileRow(lease));
+          }
+          if (outcome.kind === "restoreSpace") {
+            const shell = yield* snapshotQuery.getShellSnapshot().pipe(Effect.mapError(asRefusal));
+            outcome = {
+              ...outcome,
+              result: { ...outcome.result, sequence: shell.snapshotSequence },
+            };
           }
           return outcome;
         });
@@ -2764,6 +2872,7 @@ export const make = Effect.fn("StaveOperations.make")(function* (
               workspaceRoot: operation.workspaceRoot,
               ...scope,
               memory: operation.memory as "keep" | "contribute",
+              sagaRemoveConfirmed: operation.sagaRemoveConfirmed ?? row.sagaRemoveConfirmed,
             }
           : {
               kind: "destroySpace" as const,
@@ -3296,6 +3405,20 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                 stderrTail: null,
                 verb: STAVE_OPERATION_VERB[operation.kind],
               });
+            yield* requireSagaRemove(operation, info.spaceId, info.createdAt).pipe(
+              Effect.mapError((error) =>
+                error._tag === "StaveError"
+                  ? error
+                  : new StaveError({
+                      code: error.code,
+                      message: error.message,
+                      details: error.details,
+                      exitCode: null,
+                      stderrTail: null,
+                      verb: STAVE_OPERATION_VERB[operation.kind],
+                    }),
+              ),
+            );
             switch (operation.kind) {
               case "addRepo":
                 return yield* cli
@@ -3309,10 +3432,42 @@ export const make = Effect.fn("StaveOperations.make")(function* (
                 return yield* cli
                   .spaceRetarget({ ...operation, id: info.spaceId, dryRun: true })
                   .pipe(Effect.flatMap((value) => expectPlan("space retarget", value)));
-              case "archiveSpace":
+              case "archiveSpace": {
+                if (operation.sagaRemoveConfirmed === true && info.createdAt !== undefined) {
+                  const memberships = yield* membership(info.spaceId, info.createdAt).pipe(
+                    Effect.mapError(
+                      (error) =>
+                        new StaveError({
+                          code: error.code,
+                          message: error.message,
+                          details: error.details,
+                          exitCode: null,
+                          stderrTail: null,
+                          verb: "space archive",
+                        }),
+                    ),
+                  );
+                  // Stave refuses to plan a member's archive, so the archive step is described.
+                  if (memberships.length > 0) {
+                    const plan: Array<string> = [];
+                    for (const member of memberships) {
+                      plan.push(`Leave saga '${member.sagaId}'.`);
+                      const removal = yield* cli
+                        .sagaRemove({ sagaId: member.sagaId, spaceId: info.spaceId, dryRun: true })
+                        .pipe(Effect.flatMap((value) => expectPlan("saga remove", value)));
+                      plan.push(...removal.plan);
+                    }
+                    plan.push(
+                      `Then archive space '${info.spaceId}' with memory=${operation.memory}${operation.force ? " (forced)" : ""}.`,
+                      "Archive guards are checked after leaving the saga. A refusal leaves the space live and outside the saga.",
+                    );
+                    return { dryRun: true as const, plan };
+                  }
+                }
                 return yield* cli
                   .spaceArchive({ ...operation, id: info.spaceId, dryRun: true })
                   .pipe(Effect.flatMap((value) => expectPlan("space archive", value)));
+              }
               case "restoreSpace":
                 return yield* cli
                   .spaceRestore({ ...operation, id: info.spaceId, dryRun: true })

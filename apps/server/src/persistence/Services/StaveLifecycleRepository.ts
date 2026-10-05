@@ -74,6 +74,8 @@ type Result<A> = Effect.Effect<A, ProjectionRepositoryError>;
 export interface StaveLifecycleRepositoryShape {
   readonly getByProjectId: (projectId: ProjectId) => Result<Option.Option<StaveLifecycleRow>>;
   readonly getByWorkspaceRoot: (workspaceRoot: string) => Result<Option.Option<StaveLifecycleRow>>;
+  /** Rows of non-deleted projects that last recorded `spaceId`, newest first. */
+  readonly listActiveBySpaceId: (spaceId: string) => Result<ReadonlyArray<StaveLifecycleRow>>;
   readonly listPending: () => Result<ReadonlyArray<StaveLifecycleRow>>;
   readonly listDeletedCleanups: () => Result<ReadonlyArray<StaveLifecycleRow>>;
   readonly isProjectDeleted: (projectId: ProjectId) => Result<boolean>;

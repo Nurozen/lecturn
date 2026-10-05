@@ -1,3 +1,4 @@
+import { prepareContextualDispatch } from "../ContextualDispatch.ts";
 import {
   EventId,
   type OpenCodeSettings,
@@ -255,6 +256,7 @@ interface OpenCodeIdleReconciliation {
 }
 
 interface OpenCodePromptAdmission {
+  readonly contextualAcceptance?: Effect.Effect<void>;
   readonly generation: number;
   readonly turnId: TurnId;
   readonly messageId: string;
@@ -1417,6 +1419,7 @@ export function makeOpenCodeAdapter(
             const message = Option.isSome(response) ? response.value.data : undefined;
             if (message?.info.id === promptAdmission.messageId && message.info.role === "user") {
               promptAdmission.messageObserved = true;
+              yield* promptAdmission.contextualAcceptance ?? Effect.void;
               context.messageRoleById.set(promptAdmission.messageId, "user");
             }
           }
@@ -2358,6 +2361,14 @@ export function makeOpenCodeAdapter(
             promptAdmission?.messageId === event.properties.info.id
           ) {
             promptAdmission.messageObserved = true;
+            if (
+              !promptAdmission.cancelled &&
+              context.promptGeneration === promptAdmission.generation &&
+              context.activeTurnId === promptAdmission.turnId &&
+              !(yield* Ref.get(context.stopped))
+            ) {
+              yield* promptAdmission.contextualAcceptance ?? Effect.void;
+            }
             if (promptAdmission.accepted) {
               const idle = promptAdmission.idleDuringAdmission;
               context.awaitingBusyAfterInterruption = false;
@@ -3287,7 +3298,25 @@ export function makeOpenCodeAdapter(
             : undefined;
           context.pendingIdleReconciliation = undefined;
           const promptGeneration = context.promptGeneration + 1;
+          const contextual = prepareContextualDispatch(
+            input,
+            steeringTurnId ? "steered" : "fresh",
+            boundInstanceId,
+            context.openCodeSessionId,
+          );
+          let contextualReceipt: import("@lecturn/contracts").ContextualDeliveryReceipt | undefined;
+          const contextualAcceptance = contextual
+            .receipt("accepted", turnId, `opencode:${context.openCodeSessionId}:${messageId}`)
+            .pipe(
+              Effect.tap((receipt) =>
+                Effect.sync(() => {
+                  contextualReceipt = receipt;
+                }),
+              ),
+              Effect.asVoid,
+            );
           const promptAdmission: OpenCodePromptAdmission = {
+            contextualAcceptance,
             generation: promptGeneration,
             turnId,
             messageId,
@@ -3351,6 +3380,7 @@ export function makeOpenCodeAdapter(
             return yield* Effect.interrupt;
           }
 
+          contextualReceipt = yield* contextual.receipt("unknown", turnId, null);
           let promptTimedOut = false;
           const promptEffect = runOpenCodeSdk("session.promptAsync", (signal) =>
             context.client.session.promptAsync(
@@ -3365,7 +3395,11 @@ export function makeOpenCodeAdapter(
                   harness: "OpenCode",
                   model: `${parsedModel.providerID}/${parsedModel.modelID}`,
                 }),
-                parts: [...(text ? [{ type: "text" as const, text }] : []), ...fileParts],
+                parts: [
+                  ...(text ? [{ type: "text" as const, text }] : []),
+                  ...(contextual.text ? [{ type: "text" as const, text: contextual.text }] : []),
+                  ...fileParts,
+                ],
               },
               { signal },
             ),
@@ -3518,6 +3552,7 @@ export function makeOpenCodeAdapter(
             return yield* Effect.interrupt;
           }
           promptAdmission.accepted = true;
+          if (promptAdmission.messageObserved) yield* contextualAcceptance;
           yield* Deferred.succeed(promptAdmission.acceptance, undefined).pipe(Effect.ignore);
           if (
             context.promptAdmission === promptAdmission &&
@@ -3561,6 +3596,7 @@ export function makeOpenCodeAdapter(
           return {
             threadId: input.threadId,
             turnId,
+            ...(contextualReceipt ? { contextualReceipt } : {}),
             // Re-surface the durable cursor on every turn so the persisted binding
             // is refreshed alongside last-seen/runtime state (mirrors Grok/Codex).
             ...(context.session.resumeCursor !== undefined

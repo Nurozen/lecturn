@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vite-plus/test";
-import { DEFAULT_UNIFIED_SETTINGS, ProjectId } from "@lecturn/contracts";
+import {
+  DEFAULT_UNIFIED_SETTINGS,
+  EnvironmentId,
+  ProjectId,
+  type StaveProjectInfo,
+} from "@lecturn/contracts";
 import {
   lifecycleNoticeDescription,
   lifecycleNoticeLabel,
   lifecycleOperation,
+  staveArchiveLandingSaga,
 } from "./staveLifecycle.logic";
 import { canForceStaveOperation, staveOperationLossCopy } from "./staveConfirm.logic";
 
@@ -99,5 +105,43 @@ describe("lifecycle notices", () => {
     ).toBe("Nested project prevents archive.");
     expect(lifecycleNoticeLabel({})).toBeNull();
     expect(lifecycleNoticeLabel({ kind: "pending_cleanup" })).toBe("Cleanup pending");
+  });
+});
+
+describe("archive landing", () => {
+  const local = EnvironmentId.make("local");
+  const remote = EnvironmentId.make("remote");
+  const stave = (info: Partial<StaveProjectInfo>): StaveProjectInfo => ({
+    spaceId: "space",
+    isSaga: false,
+    repos: [],
+    memories: [],
+    state: "live",
+    ...info,
+  });
+  const saga = {
+    id: "saga",
+    environmentId: local,
+    stave: stave({ spaceId: "trip", isSaga: true }),
+  };
+  const projects = [
+    { id: "other-env", environmentId: remote, stave: stave({ spaceId: "trip", isSaga: true }) },
+    { id: "space", environmentId: local, stave: stave({ spaceId: "trip" }) },
+    saga,
+    { id: "plain", environmentId: local, stave: null },
+  ];
+
+  it("returns to the live saga the space left, in its own environment", () => {
+    expect(staveArchiveLandingSaga(projects, { environmentId: local, sagaId: "trip" })).toBe(saga);
+  });
+  it("lands home without a saga, or when that saga is archived or not loaded", () => {
+    expect(staveArchiveLandingSaga(projects, { environmentId: local })).toBeNull();
+    expect(staveArchiveLandingSaga(projects, { environmentId: local, sagaId: "gone" })).toBeNull();
+    expect(
+      staveArchiveLandingSaga([{ ...saga, stave: { ...saga.stave, state: "archived" as const } }], {
+        environmentId: local,
+        sagaId: "trip",
+      }),
+    ).toBeNull();
   });
 });

@@ -1,3 +1,8 @@
+import { useAtomValue } from "@effect/atom-react";
+import { environmentCatalog } from "../../connection/catalog";
+import { connectAccountsReadyAtom, useConnectAccounts } from "../cloud/knownAccounts";
+import { expandMobileAccountSection } from "../home/accountSectionExpansion";
+import { resolveThreadAccountRoute } from "./threadAccountRoute";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import {
   StackActions,
@@ -27,6 +32,7 @@ import {
 } from "../../components/AndroidScreenHeader";
 import { LoadingScreen } from "../../components/LoadingScreen";
 import { scopedThreadKey } from "../../lib/scopedEntities";
+import { buildThreadImportLabel } from "../../lib/threadActivity";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { connectionTone } from "../connection/connectionTone";
 
@@ -104,6 +110,7 @@ function OpeningThreadLoadingScreen() {
 }
 
 type ThreadRouteScreenRouteProps = StaticScreenProps<{
+  readonly accountId?: string;
   readonly environmentId: string;
   readonly threadId: string;
 }>;
@@ -134,6 +141,48 @@ function ThreadUnavailableScreen() {
 }
 
 export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
+  return <AccountScopedThreadRouteScreen {...props} />;
+}
+function AccountScopedThreadRouteScreen(props: ThreadRouteScreenProps) {
+  const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
+  const accountsReady = useAtomValue(connectAccountsReadyAtom);
+  const accounts = useConnectAccounts();
+  const navigation = useNavigation();
+  const target = [...catalog.entries.values()].find(
+    (entry) => entry.target.environmentId === props.route.params.environmentId,
+  )?.target;
+  const decision = resolveThreadAccountRoute({
+    catalogReady: catalog.isReady,
+    accountsReady,
+    target,
+    requestedAccountId: props.route.params.accountId,
+    accounts,
+  });
+  const owner = decision.kind === "ready" ? decision.accountId : null;
+  useEffect(() => {
+    if (owner) expandMobileAccountSection(owner);
+  }, [owner]);
+  if (decision.kind === "loading") return <OpeningThreadLoadingScreen />;
+  if (decision.kind === "unavailable") return <ThreadUnavailableScreen />;
+  if (decision.kind === "sign-in")
+    return (
+      <View className="flex-1 justify-center bg-screen p-5">
+        <EmptyState
+          title="Sign in again"
+          detail="Sign in to this thread's Connect account to continue."
+          actionLabel="Sign in again"
+          onAction={() =>
+            navigation.navigate("SettingsSheet", {
+              screen: "SettingsAddAccount",
+              params: { accountId: decision.accountId },
+            })
+          }
+        />
+      </View>
+    );
+  return <ConnectedThreadRouteScreen {...props} />;
+}
+function ConnectedThreadRouteScreen(props: ThreadRouteScreenProps) {
   const { state: workspaceState } = useWorkspaceState();
   const { connectionState } = useRemoteConnectionStatus();
   const { selectedThread } = useThreadSelection();
@@ -318,10 +367,17 @@ function ThreadRouteContent(
     );
     return parent !== undefined ? `Forked from ${parent.title}` : "Forked from another thread";
   }, [selectedThread, threadShells]);
+  // A fork of an imported thread keeps both origins; the fork is the nearer
+  // one, so it is the one the subtitle names.
+  const originLabel =
+    forkedFromLabel ??
+    (selectedThread?.importedFrom != null
+      ? buildThreadImportLabel(selectedThread.importedFrom)
+      : null);
   const headerSubtitle = [
     selectedThreadProject?.title ?? null,
     selectedEnvironmentConnection?.environmentLabel ?? null,
-    forkedFromLabel,
+    originLabel,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -749,7 +805,7 @@ function ThreadRouteContent(
   }, [forkThread, navigation, selectedThread]);
   const threadActionsHeaderItem = useMemo(
     () =>
-      forkSupported
+      forkSupported || serverConfig?.environment.capabilities.threadDecisions === true
         ? {
             accessibilityLabel: "Thread actions",
             icon: { name: "ellipsis.circle", type: "sfSymbol" as const },
@@ -757,14 +813,33 @@ function ThreadRouteContent(
             label: "Thread",
             menu: {
               items: [
-                {
-                  description: "Start a new thread with this history",
-                  disabled: !forkAvailable,
-                  icon: { name: "arrow.triangle.branch", type: "sfSymbol" as const },
-                  label: "Fork thread",
-                  onPress: () => void handleForkCurrentThread(),
-                  type: "action" as const,
-                },
+                ...(serverConfig?.environment.capabilities.threadDecisions === true &&
+                selectedThread
+                  ? [
+                      {
+                        label: "Decisions",
+                        type: "action" as const,
+                        onPress: () =>
+                          navigation.navigate("Decisions", {
+                            environmentId: selectedThread.environmentId,
+                            projectId: selectedThread.projectId,
+                            threadId: selectedThread.id,
+                          }),
+                      },
+                    ]
+                  : []),
+                ...(forkSupported
+                  ? [
+                      {
+                        description: "Start a new thread with this history",
+                        disabled: !forkAvailable,
+                        icon: { name: "arrow.triangle.branch", type: "sfSymbol" as const },
+                        label: "Fork thread",
+                        onPress: () => void handleForkCurrentThread(),
+                        type: "action" as const,
+                      },
+                    ]
+                  : []),
               ],
               title: "Thread",
             },
@@ -773,7 +848,14 @@ function ThreadRouteContent(
             variant: "plain" as const,
           }
         : null,
-    [forkAvailable, forkSupported, handleForkCurrentThread],
+    [
+      forkAvailable,
+      forkSupported,
+      handleForkCurrentThread,
+      serverConfig,
+      selectedThread,
+      navigation,
+    ],
   );
   const splitRightHeaderItems = useMemo<NativeHeaderItems>(
     () =>

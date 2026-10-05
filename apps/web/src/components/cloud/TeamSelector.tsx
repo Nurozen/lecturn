@@ -1,37 +1,37 @@
 import { useAuth } from "@clerk/react";
-import {
-  createTeamsClient,
-  selectTeam,
-  selectedTeam,
-  subscribeTeamSelection,
-} from "@lecturn/client-runtime/relay";
+import { selectTeam, selectedTeam, subscribeTeamSelection } from "@lecturn/client-runtime/relay";
 import type { RelayTeamOrganization } from "@lecturn/contracts";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { resolveCloudPublicConfig, resolveRelayClerkTokenOptions } from "../../cloud/publicConfig";
+import { createAccountTeamsClient } from "../../cloud/accountRelayClients";
 
-export function useTeamClient() {
-  const { getToken } = useAuth();
-  return useMemo(
-    () =>
-      createTeamsClient({
-        relayUrl: resolveCloudPublicConfig().relayUrl ?? "",
-        getToken: () => getToken(resolveRelayClerkTokenOptions()),
-      }),
-    [getToken],
-  );
+/**
+ * The account a teams surface acts as: the one its picker chose, or Clerk's
+ * active account when none is given. A chosen account always has a session.
+ */
+function useTeamAccount(accountId: string | null | undefined) {
+  const { userId, isSignedIn } = useAuth();
+  return accountId === undefined || accountId === userId
+    ? { userId, isSignedIn }
+    : { userId: accountId, isSignedIn: accountId !== null };
 }
-export function useSelectedTeam() {
-  const { userId } = useAuth();
+export function useTeamClient(accountId?: string | null | undefined) {
+  const { userId } = useTeamAccount(accountId);
+  return useMemo(() => createAccountTeamsClient(userId), [userId]);
+}
+export function useSelectedTeam(accountId?: string | null | undefined) {
+  const { userId } = useTeamAccount(accountId);
   return useSyncExternalStore(
     subscribeTeamSelection,
     () => selectedTeam(userId),
     () => null,
   );
 }
-export function TeamSelector() {
-  const { userId, isSignedIn } = useAuth();
-  const client = useTeamClient();
-  const selected = useSelectedTeam();
+export function TeamSelector({
+  accountId,
+}: { readonly accountId?: string | null | undefined } = {}) {
+  const { userId, isSignedIn } = useTeamAccount(accountId);
+  const client = useTeamClient(accountId);
+  const selected = useSelectedTeam(accountId);
   const [result, setResult] = useState<{
     userId: string;
     organizations: readonly RelayTeamOrganization[];

@@ -24,6 +24,7 @@ import { relayManagedEnvironmentIds } from "./environmentSections";
 
 export interface RelayEnvironmentView {
   readonly environment: RelayClientEnvironmentRecord;
+  readonly accountId?: string;
   readonly availability: "checking" | "online" | "offline" | "error";
   readonly status: RelayEnvironmentStatusResponse | null;
   readonly error: string | null;
@@ -33,6 +34,7 @@ export interface RelayEnvironmentView {
 export function useConnectionController() {
   const { environments } = useEnvironments();
   const discovery = useAtomValue(relayEnvironmentDiscovery.stateValueAtom);
+  const discoveryAccounts = useAtomValue(relayEnvironmentDiscovery.accountStatesValueAtom);
   const connectPairingUrlMutation = useAtomCommand(connectPairingUrlAtom, {
     reportFailure: false,
   });
@@ -57,12 +59,15 @@ export function useConnectionController() {
     () =>
       [...discovery.environments.values()].map((entry) => ({
         environment: entry.environment,
+        accountId: [...discoveryAccounts].find(([, state]) =>
+          state.environments.has(entry.environment.environmentId),
+        )?.[0],
         availability: entry.availability,
         status: Option.getOrNull(entry.status),
         error: Option.getOrNull(entry.error)?.message ?? null,
         traceId: Option.getOrNull(entry.error)?.traceId ?? null,
       })),
-    [discovery.environments],
+    [discovery.environments, discoveryAccounts],
   );
   const availableRelayEnvironments = useMemo(
     () => relayEnvironments.filter((entry) => !registeredIds.has(entry.environment.environmentId)),
@@ -80,10 +85,13 @@ export function useConnectionController() {
           target: new RelayConnectionTarget({
             environmentId: environment.environmentId,
             label: environment.label,
+            accountId: [...discoveryAccounts].find(([, state]) =>
+              state.environments.has(environment.environmentId),
+            )?.[0],
           }),
         }),
       ),
-    [registerEnvironment],
+    [registerEnvironment, discoveryAccounts],
   );
   const removeEnvironment = useCallback(
     (environmentId: EnvironmentId) => removeEnvironmentMutation(environmentId),

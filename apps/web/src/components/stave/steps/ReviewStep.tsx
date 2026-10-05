@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { staveDryRun } from "../../../state/stave";
 import { useAtomCommand } from "../../../state/use-atom-command";
 import { Button } from "../../ui/button";
-import { reviewCommandLines } from "../staveSpaceWizard.logic";
+import { reviewCommandLines } from "@lecturn/client-runtime/state/stave-space-wizard";
 
 type DryRunResult =
   | { readonly status: "ok"; readonly plan: ReadonlyArray<string> }

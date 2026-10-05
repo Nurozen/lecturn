@@ -1,5 +1,8 @@
 import * as NodeCrypto from "node:crypto";
 import {
+  ManualCloudLinkError,
+  type ManualCloudLinkProofInput,
+  type ManualCloudRelayConfigInput,
   AuthRelayReadScope,
   AuthRelayWriteScope,
   AuthStandardClientScopes,
@@ -28,6 +31,8 @@ import {
   RelayEnvironmentLinkProofPayload,
   RelayLinkProofRequest,
   RelayManagedEndpointOrigin,
+  type RelayManagedEndpointOriginSyncRequest,
+  RelayManagedEndpointOriginSyncResponse,
   RelayOkResponse,
 } from "@lecturn/contracts/relay";
 import { withRelayClientTracing } from "@lecturn/shared/relayTracing";
@@ -50,8 +55,9 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as HttpEffect from "effect/unstable/http/HttpEffect";
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
@@ -72,6 +78,7 @@ import {
   CLOUD_LINKED_ORGANIZATION_ID,
   CLOUD_MINT_PUBLIC_KEY,
   encodeEndpointRuntimeConfigJson,
+  decodeRuntimeConfig,
   PUBLISH_AGENT_ACTIVITY_SECRET,
   RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
   RELAY_ISSUER_SECRET,
@@ -85,6 +92,7 @@ import {
 } from "./CliState.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
 import { getOrCreateEnvironmentKeyPairFromSecretStore } from "./environmentKeys.ts";
+import { deviceRelayConflict, deviceRelayPublicationBlocked } from "./DeviceRelayReservation.ts";
 import { traceRelayRequest } from "./traceRelayRequest.ts";
 import { filterRelayResponse, relayRequestError } from "./relayResponse.ts";
 
@@ -364,6 +372,28 @@ interface CloudHttpDependencies {
   readonly httpClient: HttpClient.HttpClient;
 }
 
+// HTTP handlers and CLI reconciliation share this store instance. Lock the
+// complete ownership/configuration mutation, not just the connector process.
+// Different Lecturn homes have separate stores and remain independent.
+const cloudLinkMutationLocks = new WeakMap<
+  ServerSecretStore.ServerSecretStore["Service"],
+  Semaphore.Semaphore
+>();
+
+function withCloudLinkMutation<A, E, R>(
+  secrets: ServerSecretStore.ServerSecretStore["Service"],
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> {
+  return Effect.suspend(() => {
+    let lock = cloudLinkMutationLocks.get(secrets);
+    if (!lock) {
+      lock = Semaphore.makeUnsafe(1);
+      cloudLinkMutationLocks.set(secrets, lock);
+    }
+    return lock.withPermits(1)(effect.pipe(Effect.uninterruptible));
+  });
+}
+
 const cloudHttpDependencies = Effect.gen(function* () {
   return {
     secrets: yield* ServerSecretStore.ServerSecretStore,
@@ -380,7 +410,6 @@ const makeCloudLinkProof = Effect.fn("environment.cloud.makeLinkProof")(function
   request: RelayLinkProofRequest,
   requestUrl: string,
 ) {
-  const keyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(dependencies.secrets);
   if (
     !isSupportedLinkProviderKind(request) ||
     !isAllowedEndpointOrigin({
@@ -392,6 +421,14 @@ const makeCloudLinkProof = Effect.fn("environment.cloud.makeLinkProof")(function
       message: "Invalid managed endpoint origin.",
     });
   }
+  return yield* signCloudLinkProof(dependencies, request);
+});
+
+const signCloudLinkProof = Effect.fn("environment.cloud.signLinkProof")(function* (
+  dependencies: CloudHttpDependencies,
+  request: RelayLinkProofRequest,
+) {
+  const keyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(dependencies.secrets);
   const now = yield* DateTime.now;
   const expiresAt = DateTime.add(now, { minutes: 5 });
   const nowSeconds = Math.floor(now.epochMilliseconds / 1_000);
@@ -453,56 +490,186 @@ const cloudLinkProofHandler = Effect.fn("environment.cloud.linkProof")(
   ),
 );
 
-const applyCloudRelayConfig = Effect.fn("environment.cloud.applyRelayConfig")(function* (
-  dependencies: CloudHttpDependencies,
-  payload: RelayEnvironmentConfigRequest,
-) {
-  yield* validateRelayConfigPayload(payload);
-  yield* validateLinkedCloudUser({
-    secrets: dependencies.secrets,
-    cloudUserId: payload.cloudUserId,
-  });
-  yield* validateCloudMintPublicKey(payload.cloudMintPublicKey);
-  const endpointRuntimeStatus = yield* dependencies.endpointRuntime.applyConfig(
-    payload.endpointRuntime,
-  );
-  const ok =
-    endpointRuntimeStatus.status === "disabled" || endpointRuntimeStatus.status === "running";
-  if (!ok) {
-    return yield* new EnvironmentCloudEndpointUnavailableError({
-      message: "Managed endpoint runtime could not be started.",
-      endpointRuntimeStatus,
+export const applyCloudRelayConfig = Effect.fn("environment.cloud.applyRelayConfig")(
+  function* (
+    dependencies: Pick<CloudHttpDependencies, "secrets" | "endpointRuntime">,
+    payload: RelayEnvironmentConfigRequest,
+  ) {
+    yield* validateRelayConfigPayload(payload);
+    yield* validateLinkedCloudUser({
+      secrets: dependencies.secrets,
+      cloudUserId: payload.cloudUserId,
     });
-  }
-
-  yield* dependencies.secrets.set(RELAY_URL_SECRET, stringToBytes(payload.relayUrl));
-  yield* dependencies.secrets.set(
-    RELAY_ISSUER_SECRET,
-    stringToBytes(payload.relayIssuer ?? payload.relayUrl),
-  );
-  yield* dependencies.secrets.set(CLOUD_LINKED_USER_ID, stringToBytes(payload.cloudUserId));
-  if (payload.organizationId)
-    yield* dependencies.secrets.set(
+    yield* validateCloudMintPublicKey(payload.cloudMintPublicKey);
+    const configKeys = [
+      RELAY_URL_SECRET,
+      RELAY_ISSUER_SECRET,
+      CLOUD_LINKED_USER_ID,
       CLOUD_LINKED_ORGANIZATION_ID,
-      stringToBytes(payload.organizationId),
-    );
-  else yield* dependencies.secrets.remove(CLOUD_LINKED_ORGANIZATION_ID);
-  yield* dependencies.secrets.set(
-    RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
-    stringToBytes(payload.environmentCredential),
-  );
-  yield* dependencies.secrets.set(CLOUD_MINT_PUBLIC_KEY, stringToBytes(payload.cloudMintPublicKey));
-  if (payload.endpointRuntime) {
-    const endpointRuntimeJson = yield* encodeEndpointRuntimeConfigJson(payload.endpointRuntime);
-    yield* dependencies.secrets.set(
+      RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
+      CLOUD_MINT_PUBLIC_KEY,
       CLOUD_ENDPOINT_RUNTIME_CONFIG,
-      stringToBytes(endpointRuntimeJson),
+    ] as const;
+    const previous = new Map(
+      yield* Effect.all(
+        configKeys.map((key) =>
+          dependencies.secrets.get(key).pipe(Effect.map((value) => [key, value] as const)),
+        ),
+      ),
     );
-  } else {
-    yield* dependencies.secrets.remove(CLOUD_ENDPOINT_RUNTIME_CONFIG);
+    const previousOwner = previous.get(CLOUD_LINKED_USER_ID)!;
+    const previousRuntime = previous.get(CLOUD_ENDPOINT_RUNTIME_CONFIG)!;
+    const previousConfig = Option.isSome(previousRuntime)
+      ? Option.getOrNull(decodeRuntimeConfig(bytesToString(previousRuntime.value)))
+      : null;
+    const endpointRuntimeStatus = yield* dependencies.endpointRuntime.applyConfig(
+      payload.endpointRuntime,
+      { published: true },
+    );
+    const ok =
+      endpointRuntimeStatus.status === "disabled" || endpointRuntimeStatus.status === "running";
+    if (!ok) {
+      return yield* new EnvironmentCloudEndpointUnavailableError({
+        message:
+          endpointRuntimeStatus.status === "failed"
+            ? endpointRuntimeStatus.reason
+            : "Managed endpoint runtime could not be started.",
+        endpointRuntimeStatus,
+      });
+    }
+
+    yield* Effect.gen(function* () {
+      yield* dependencies.secrets.set(RELAY_URL_SECRET, stringToBytes(payload.relayUrl));
+      yield* dependencies.secrets.set(
+        RELAY_ISSUER_SECRET,
+        stringToBytes(payload.relayIssuer ?? payload.relayUrl),
+      );
+      yield* dependencies.secrets.set(CLOUD_LINKED_USER_ID, stringToBytes(payload.cloudUserId));
+      if (payload.organizationId)
+        yield* dependencies.secrets.set(
+          CLOUD_LINKED_ORGANIZATION_ID,
+          stringToBytes(payload.organizationId),
+        );
+      else yield* dependencies.secrets.remove(CLOUD_LINKED_ORGANIZATION_ID);
+      yield* dependencies.secrets.set(
+        RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
+        stringToBytes(payload.environmentCredential),
+      );
+      yield* dependencies.secrets.set(
+        CLOUD_MINT_PUBLIC_KEY,
+        stringToBytes(payload.cloudMintPublicKey),
+      );
+      if (payload.endpointRuntime) {
+        const endpointRuntimeJson = yield* encodeEndpointRuntimeConfigJson(payload.endpointRuntime);
+        yield* dependencies.secrets.set(
+          CLOUD_ENDPOINT_RUNTIME_CONFIG,
+          stringToBytes(endpointRuntimeJson),
+        );
+      } else {
+        yield* dependencies.secrets.remove(CLOUD_ENDPOINT_RUNTIME_CONFIG);
+      }
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.gen(function* () {
+          // Restore prior credentials/configuration if persistence fails after the
+          // connector has started. A first publish must not strand a device lease.
+          yield* Effect.all(
+            configKeys.map((key) => {
+              const value = previous.get(key)!;
+              return (
+                Option.isSome(value)
+                  ? dependencies.secrets.set(key, value.value)
+                  : dependencies.secrets.remove(key)
+              ).pipe(Effect.ignore);
+            }),
+          );
+          yield* dependencies.endpointRuntime.applyConfig(previousConfig, {
+            published: Option.isSome(previousOwner),
+          });
+          return yield* Effect.failCause(cause);
+        }),
+      ),
+    );
+    return { ok, endpointRuntimeStatus } satisfies EnvironmentCloudRelayConfigResult;
+  },
+  (effect, dependencies) => withCloudLinkMutation(dependencies.secrets, effect),
+);
+
+/** No request/forwarded authority is trusted here: RPC auth fixes the host identity. */
+export function validateManualCloudLinkEndpoint(input: ManualCloudLinkProofInput): boolean {
+  try {
+    const http = new URL(input.endpoint.httpBaseUrl),
+      ws = new URL(input.endpoint.wsBaseUrl);
+    return (
+      input.endpoint.providerKind === "manual" &&
+      ["http:", "https:"].includes(http.protocol) &&
+      ws.protocol === (http.protocol === "https:" ? "wss:" : "ws:") &&
+      http.host === ws.host &&
+      !http.username &&
+      !http.password &&
+      !ws.username &&
+      !ws.password &&
+      !http.search &&
+      !http.hash &&
+      !ws.search &&
+      !ws.hash &&
+      isSecureRelayUrl(input.relayIssuer)
+    );
+  } catch {
+    return false;
   }
-  return { ok, endpointRuntimeStatus } satisfies EnvironmentCloudRelayConfigResult;
-});
+}
+export const createManualCloudLinkProof = Effect.fn("environment.cloud.createManualLinkProof")(
+  function* (input: ManualCloudLinkProofInput) {
+    const dependencies = yield* cloudHttpDependencies;
+    const descriptor = yield* dependencies.environment.getDescriptor;
+    if (input.environmentId !== descriptor.environmentId || !validateManualCloudLinkEndpoint(input))
+      return yield* new ManualCloudLinkError({
+        message: "The selected environment or manual endpoint does not match this link request.",
+      });
+    if ((yield* readCloudLinkState(dependencies)).linked)
+      return { environmentId: descriptor.environmentId, proof: null };
+    const config = yield* ServerConfig.ServerConfig;
+    const server = yield* Effect.serviceOption(HttpServer.HttpServer);
+    const address = Option.isSome(server) ? server.value.address : null;
+    const port =
+      address && typeof address !== "string" && "port" in address ? address.port : config.port;
+    if (port < 1)
+      return yield* new ManualCloudLinkError({
+        message: "The environment listener is not ready for cloud registration.",
+      });
+    const proof = yield* signCloudLinkProof(dependencies, {
+      challenge: input.challenge,
+      relayIssuer: input.relayIssuer,
+      endpoint: input.endpoint,
+      origin: { localHttpHost: "127.0.0.1", localHttpPort: port },
+    });
+    return { environmentId: descriptor.environmentId, proof };
+  },
+  Effect.mapError(
+    () =>
+      new ManualCloudLinkError({
+        message: "Could not prepare this environment’s manual cloud link.",
+      }),
+  ),
+);
+export const applyManualCloudRelayConfig = Effect.fn("environment.cloud.applyManualRelayConfig")(
+  function* (input: ManualCloudRelayConfigInput) {
+    const dependencies = yield* cloudHttpDependencies;
+    const descriptor = yield* dependencies.environment.getDescriptor;
+    if (input.environmentId !== descriptor.environmentId || input.endpointRuntime !== null)
+      return yield* new ManualCloudLinkError({
+        message: "The cloud configuration does not match this manual environment link.",
+      });
+    return yield* applyCloudRelayConfig(dependencies, input);
+  },
+  Effect.mapError(
+    () =>
+      new ManualCloudLinkError({
+        message: "Could not configure this environment’s manual cloud link.",
+      }),
+  ),
+);
 
 const cloudRelayConfigHandler = Effect.fn("environment.cloud.relayConfig")(
   function* (dependencies: CloudHttpDependencies, payload: RelayEnvironmentConfigRequest) {
@@ -543,6 +710,8 @@ const relayClientRequest = <A>(
 
 const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesiredLinkWith")(
   function* (dependencies: CloudHttpDependencies, localOrigin: string) {
+    const conflict = deviceRelayConflict(dependencies.secrets);
+    if (conflict) return yield* new EnvironmentHttpConflictError({ message: conflict });
     const localUrl = yield* Effect.try({
       try: () => new URL(localOrigin),
       catch: () =>
@@ -679,6 +848,7 @@ export const releaseManagedTunnelOnShutdown = Effect.fn(
   "environment.cloud.releaseManagedTunnelOnShutdown",
 )(function* () {
   const dependencies = yield* cloudHttpDependencies;
+  if (deviceRelayPublicationBlocked(dependencies.secrets)) return false;
   // Only a managed link stores a runtime config; publish-only links have no
   // tunnel to release.
   const runtimeConfig = yield* dependencies.secrets.get(CLOUD_ENDPOINT_RUNTIME_CONFIG);
@@ -717,8 +887,8 @@ export const releaseManagedTunnelOnShutdown = Effect.fn(
     return false;
   }
   const environmentId = yield* dependencies.environment.getEnvironmentId;
-  // Stop the local connector before the relay deletes the tunnel it serves.
-  yield* dependencies.endpointRuntime.applyConfig(null);
+  // Keep the device reservation through remote deletion; release at scope shutdown.
+  yield* dependencies.endpointRuntime.applyConfig(null, { published: true });
   const response = yield* HttpClientRequest.delete(
     `${bytesToString(relayUrl.value)}/v1/client/environment-links/${encodeURIComponent(environmentId)}/tunnel`,
   ).pipe(
@@ -750,6 +920,59 @@ export const releaseManagedTunnelOnShutdown = Effect.fn(
   return true;
 });
 
+// A managed tunnel forwards to the loopback origin the relay recorded at link
+// time, but the local port can change between launches (the desktop app scans
+// for a free one). Call this once the server is listening so the tunnel follows
+// the port. Authenticated by the stored environment credential, so it also
+// covers links installed from a web/mobile client, which have no CLI token.
+// Resolves to whether the relay repointed a tunnel.
+export const syncManagedEndpointOrigin = Effect.fn("environment.cloud.syncManagedEndpointOrigin")(
+  function* (localOrigin: string) {
+    const dependencies = yield* cloudHttpDependencies;
+    if (deviceRelayPublicationBlocked(dependencies.secrets)) return false;
+    // The link belongs to the relay it was installed against, so target the
+    // persisted URL rather than the currently configured one.
+    const [runtimeConfig, relayUrl, environmentCredential] = yield* Effect.all([
+      dependencies.secrets.get(CLOUD_ENDPOINT_RUNTIME_CONFIG),
+      dependencies.secrets.get(RELAY_URL_SECRET),
+      dependencies.secrets.get(RELAY_ENVIRONMENT_CREDENTIAL_SECRET),
+    ]);
+    if (
+      Option.isNone(runtimeConfig) ||
+      Option.isNone(relayUrl) ||
+      Option.isNone(environmentCredential)
+    ) {
+      return false;
+    }
+    const localUrl = new URL(localOrigin);
+    const environmentId = yield* dependencies.environment.getEnvironmentId;
+    const response = yield* HttpClientRequest.put(
+      `${bytesToString(relayUrl.value)}/v1/environments/${encodeURIComponent(environmentId)}/managed-endpoint-origin`,
+    ).pipe(
+      HttpClientRequest.bearerToken(bytesToString(environmentCredential.value)),
+      HttpClientRequest.bodyJson({
+        origin: {
+          localHttpHost: localUrl.hostname,
+          localHttpPort: endpointRequestPort(localUrl),
+        },
+      } satisfies RelayManagedEndpointOriginSyncRequest),
+      Effect.flatMap(dependencies.httpClient.execute),
+      withRelayClientTracing,
+    );
+    // A relay that predates this endpoint answers 404. Retrying cannot help,
+    // and the link keeps working as long as the port did not move.
+    if (response.status === 404) {
+      yield* Effect.logDebug("Lecturn Connect relay does not support managed endpoint origin sync");
+      return false;
+    }
+    const result = yield* filterRelayResponse(response).pipe(
+      Effect.flatMap(HttpClientResponse.schemaBodyJson(RelayManagedEndpointOriginSyncResponse)),
+    );
+    return result.updatedTunnels > 0;
+  },
+  Effect.mapError(relayRequestError),
+);
+
 const readCloudLinkState = Effect.fn("environment.cloud.readLinkState")(function* (
   dependencies: CloudHttpDependencies,
 ) {
@@ -773,6 +996,7 @@ const readCloudLinkState = Effect.fn("environment.cloud.readLinkState")(function
   );
   return {
     linked: Option.isSome(cloudUserId),
+    deviceRelayConflict: deviceRelayConflict(dependencies.secrets),
     organizationId: Option.isSome(organizationId) ? bytesToString(organizationId.value) : null,
     cloudUserId: Option.isSome(cloudUserId) ? bytesToString(cloudUserId.value) : null,
     relayUrl: Option.isSome(relayUrl) ? bytesToString(relayUrl.value) : null,
@@ -797,9 +1021,10 @@ const cloudLinkStateHandler = Effect.fn("environment.cloud.linkState")(
   ),
 );
 
-const cloudUnlinkHandler = Effect.fn("environment.cloud.unlink")(
-  function* (dependencies: CloudHttpDependencies) {
-    yield* requireEnvironmentScope(AuthRelayWriteScope);
+export const unlinkCloudRelayConfig = Effect.fn("environment.cloud.unlinkConfig")(
+  function* (dependencies: Pick<CloudHttpDependencies, "secrets" | "endpointRuntime">) {
+    const conflict = deviceRelayConflict(dependencies.secrets);
+    if (conflict) return yield* new EnvironmentHttpConflictError({ message: conflict });
     const endpointRuntimeStatus = yield* dependencies.endpointRuntime.applyConfig(null);
     yield* Effect.all(
       [
@@ -817,6 +1042,14 @@ const cloudUnlinkHandler = Effect.fn("environment.cloud.unlink")(
     yield* setCliDesiredCloudLink(false);
     return { ok: true, endpointRuntimeStatus } satisfies EnvironmentCloudRelayConfigResult;
   },
+  (effect, dependencies) => withCloudLinkMutation(dependencies.secrets, effect),
+);
+
+const cloudUnlinkHandler = Effect.fn("environment.cloud.unlink")(
+  function* (dependencies: CloudHttpDependencies) {
+    yield* requireEnvironmentScope(AuthRelayWriteScope);
+    return yield* unlinkCloudRelayConfig(dependencies);
+  },
   Effect.catchIf(
     ServerSecretStore.isSecretStoreError,
     failEnvironmentCloudInternalError("Could not remove environment relay configuration."),
@@ -829,6 +1062,8 @@ const cloudPreferencesHandler = Effect.fn("environment.cloud.preferences")(
     payload: { readonly publishAgentActivity: boolean },
   ) {
     yield* requireEnvironmentScope(AuthRelayWriteScope);
+    const conflict = deviceRelayConflict(dependencies.secrets);
+    if (conflict) return yield* new EnvironmentHttpConflictError({ message: conflict });
     yield* dependencies.secrets.set(
       PUBLISH_AGENT_ACTIVITY_SECRET,
       stringToBytes(String(payload.publishAgentActivity)),

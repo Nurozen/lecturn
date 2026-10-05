@@ -54,6 +54,7 @@ export function mergeEnvironmentThread(
     branch: shell.branch,
     worktreePath: shell.worktreePath,
     forkedFrom: shell.forkedFrom,
+    importedFrom: shell.importedFrom,
     latestTurn: shell.latestTurn,
     createdAt: shell.createdAt,
     updatedAt: shell.updatedAt,

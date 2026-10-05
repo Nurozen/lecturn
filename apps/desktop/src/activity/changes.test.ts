@@ -111,6 +111,7 @@ describe("semantic activity changes", () => {
       rowId: "pr-1",
       state: "complete",
       label: "Web passed",
+      check: { name: "Web", status: "success" },
     });
   });
   it("compares duplicated job names as multisets and ignores description or order changes", () => {
@@ -133,7 +134,12 @@ describe("semantic activity changes", () => {
         [pr([{ name: "Tests", status: "pending" }])],
         [pr([{ name: "Tests", status: "cancelled" }])],
       ),
-    ).toEqual({ rowId: "pr-1", state: "idle", label: "Tests cancelled" });
+    ).toEqual({
+      rowId: "pr-1",
+      state: "idle",
+      label: "Tests cancelled",
+      check: { name: "Tests", status: "cancelled" },
+    });
   });
   it("selects one urgent change ahead of completed jobs or newly active work", () => {
     const before = pr([

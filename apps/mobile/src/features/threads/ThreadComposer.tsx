@@ -1,3 +1,4 @@
+import { ContextualThreadControl } from "../contextual/ContextualControls";
 import { useAtomValue } from "@effect/atom-react";
 import type {
   EnvironmentId,
@@ -50,6 +51,7 @@ import {
 import { VideoPreviewModal, type VideoPreviewSource } from "../../components/VideoPreviewModal";
 import { GlassSurface } from "../../components/GlassSurface";
 import { GlassCard } from "../../components/GlassCard";
+import { useGlassPalette } from "../../lib/useGlassPalette";
 import { SymbolView } from "../../components/AppSymbol";
 import { RUNTIME_MODE_CHOICES } from "./thread-settings-options";
 import { ComposerEditor, type ComposerEditorHandle } from "../../components/ComposerEditor";
@@ -92,16 +94,16 @@ import {
 } from "./use-thread-settings-sheet-presentation";
 
 /**
- * Height of the collapsed composer (metadata + pill + padding, excluding safe-area inset).
+ * Height of the collapsed composer (pill + inset settings drawer + padding, excluding safe area).
  * Exported so the parent can compute feed overlap / content insets.
  */
-export const COMPOSER_COLLAPSED_CHROME = 112;
+export const COMPOSER_COLLAPSED_CHROME = 102;
 
 /**
- * Height of the expanded composer (metadata + card + toolbar + padding, excluding safe-area inset).
+ * Height of the expanded composer (card + toolbar + inset drawer + padding, excluding safe area).
  * Used by the parent to compute the larger feed bottom inset when the composer is focused.
  */
-export const COMPOSER_EXPANDED_CHROME = 208;
+export const COMPOSER_EXPANDED_CHROME = 198;
 
 export interface ThreadComposerProps {
   readonly draftMessage: string;
@@ -165,6 +167,7 @@ export function ComposerSurface(props: {
   /** Morphs between the compact and expanded composer layouts. */
   readonly animateLayout?: boolean;
 }) {
+  const palette = useGlassPalette();
   const targetBorderRadius =
     typeof props.style.borderRadius === "number" ? props.style.borderRadius : 0;
   const animatedBorderRadius = useSharedValue(targetBorderRadius);
@@ -207,7 +210,10 @@ export function ComposerSurface(props: {
         pointerEvents="none"
         tintColor="transparent"
         layout={layoutTransition}
-        style={[{ position: "absolute", inset: 0 }, animatedShapeStyle]}
+        style={[
+          { position: "absolute", inset: 0, borderWidth: 1, borderColor: palette.edge },
+          animatedShapeStyle,
+        ]}
       >
         {null}
       </AnimatedGlassSurface>
@@ -491,27 +497,36 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     [currentModelOption?.capabilities, currentModelSelection.options],
   );
   const settingsOwnerId = composerOwnerKey;
+  const updateModelSelection = props.onUpdateModelSelection;
   const settingsRouteSession = useMemo<ExistingThreadSettingsRouteSession>(
     () => ({
       ownerId: settingsOwnerId,
+      contextualControl: (
+        <ContextualThreadControl
+          environmentId={props.environmentId}
+          threadId={props.selectedThread.id}
+        />
+      ),
       environmentId: props.environmentId,
       providerInstanceId: currentModelSelection.instanceId,
       providerGroups: threadProviderGroups,
       selectedModel: currentModelSelection,
-      onSelectModel: (option) => props.onUpdateModelSelection(option.selection),
+      onSelectModel: (option) => updateModelSelection(option.selection),
       optionDescriptors: providerOptionDescriptors,
       onUpdateOptionSelections: (options) =>
-        props.onUpdateModelSelection({ ...currentModelSelection, options }),
+        updateModelSelection({ ...currentModelSelection, options }),
       runtimeMode: currentRuntimeMode,
       onUpdateRuntimeMode: props.onUpdateRuntimeMode,
     }),
     [
       currentModelSelection,
       currentRuntimeMode,
-      props.onUpdateModelSelection,
+      updateModelSelection,
       props.onUpdateRuntimeMode,
       providerOptionDescriptors,
       settingsOwnerId,
+      props.environmentId,
+      props.selectedThread.id,
       threadProviderGroups,
     ],
   );
@@ -600,44 +615,6 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
             <Text className="text-xs text-foreground">Model unavailable. Open model settings.</Text>
           </Pressable>
         ) : null}
-
-        <GlassCard radius={19} className="mb-2">
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={[
-              "Model and reasoning settings",
-              currentModelOption?.label ?? currentModelSelection.model,
-              ...providerOptionValueLabels(providerOptionDescriptors),
-              RUNTIME_MODE_CHOICES.find((choice) => choice.mode === currentRuntimeMode)?.label ??
-                currentRuntimeMode,
-              props.selectedThread.interactionMode === "plan" ? "Plan mode" : "Chat mode",
-            ].join(", ")}
-            onPress={openSettings}
-            disabled={voiceInput.isBusy}
-            accessibilityState={{ disabled: voiceInput.isBusy }}
-            style={{ minHeight: 44, opacity: voiceInput.isBusy ? 0.6 : 1 }}
-            className="flex-row items-center gap-2 px-3 active:opacity-70"
-          >
-            <ProviderIcon provider={currentModelOption?.providerDriver} size={17} />
-            <Text
-              className="shrink text-xs font-lecturn-medium text-foreground"
-              numberOfLines={1}
-              style={{ maxWidth: "38%" }}
-            >
-              {currentModelOption?.label ?? currentModelSelection.model}
-            </Text>
-            <View className="h-3.5 w-px bg-border" />
-            <Text className="min-w-0 flex-1 text-xs text-foreground-muted" numberOfLines={1}>
-              {[
-                ...providerOptionValueLabels(providerOptionDescriptors),
-                RUNTIME_MODE_CHOICES.find((choice) => choice.mode === currentRuntimeMode)?.label ??
-                  currentRuntimeMode,
-                ...(props.selectedThread.interactionMode === "plan" ? ["Plan"] : []),
-              ].join(" · ")}
-            </Text>
-            <SymbolView name="chevron.right" size={11} tintColorClassName="accent-icon-muted" />
-          </Pressable>
-        </GlassCard>
 
         <ComposerSurface
           style={
@@ -819,6 +796,11 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                   />
                 ) : (
                   <View className="min-w-0 flex-1 flex-row items-center justify-between">
+                    <ContextualThreadControl
+                      compact
+                      environmentId={props.environmentId}
+                      threadId={props.selectedThread.id}
+                    />
                     <ComposerAttachmentButton
                       supportsFiles={Boolean(
                         props.serverConfig?.environment.capabilities.fileAttachments,
@@ -858,6 +840,52 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
             </ComposerDictationToolbar>
           </Animated.View>
         </ComposerSurface>
+        <GlassCard
+          radius={19}
+          style={{
+            marginHorizontal: 18,
+            marginTop: -2,
+            borderTopLeftRadius: 0,
+            borderTopRightRadius: 0,
+            borderTopWidth: 0,
+          }}
+        >
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={[
+              "Model and reasoning settings",
+              currentModelOption?.label ?? currentModelSelection.model,
+              ...providerOptionValueLabels(providerOptionDescriptors),
+              RUNTIME_MODE_CHOICES.find((choice) => choice.mode === currentRuntimeMode)?.label ??
+                currentRuntimeMode,
+              props.selectedThread.interactionMode === "plan" ? "Plan mode" : "Chat mode",
+            ].join(", ")}
+            onPress={openSettings}
+            disabled={voiceInput.isBusy}
+            accessibilityState={{ disabled: voiceInput.isBusy }}
+            style={{ minHeight: 44, opacity: voiceInput.isBusy ? 0.6 : 1 }}
+            className="flex-row items-center gap-2 px-3 active:opacity-70"
+          >
+            <ProviderIcon provider={currentModelOption?.providerDriver} size={17} />
+            <Text
+              className="shrink text-xs font-lecturn-medium text-foreground"
+              numberOfLines={1}
+              style={{ maxWidth: "38%" }}
+            >
+              {currentModelOption?.label ?? currentModelSelection.model}
+            </Text>
+            <View className="h-3.5 w-px bg-border" />
+            <Text className="min-w-0 flex-1 text-xs text-foreground-muted" numberOfLines={1}>
+              {[
+                ...providerOptionValueLabels(providerOptionDescriptors),
+                RUNTIME_MODE_CHOICES.find((choice) => choice.mode === currentRuntimeMode)?.label ??
+                  currentRuntimeMode,
+                ...(props.selectedThread.interactionMode === "plan" ? ["Plan"] : []),
+              ].join(" · ")}
+            </Text>
+            <SymbolView name="chevron.right" size={11} tintColorClassName="accent-icon-muted" />
+          </Pressable>
+        </GlassCard>
 
         {/* Queue count */}
         {props.queueCount > 0 ? (

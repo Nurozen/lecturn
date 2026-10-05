@@ -1,5 +1,6 @@
 import { BlurTargetView } from "expo-blur";
 import * as Linking from "expo-linking";
+import { handleIncomingAppLink } from "./features/agent-awareness/activityLinking";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
 import { StatusBar } from "react-native";
@@ -33,8 +34,24 @@ void SplashScreen.preventAutoHideAsync().catch(() => {
   // The native module can be unavailable in non-native test environments.
 });
 
+const appLinkPrefixes = [
+  Linking.createURL("/"),
+  "lecturn://",
+  "lecturn-dev://",
+  "lecturn-preview://",
+];
 const appLinking = {
-  prefixes: [Linking.createURL("/"), "lecturn://", "lecturn-dev://", "lecturn-preview://"],
+  prefixes: appLinkPrefixes,
+  getInitialURL: async () => {
+    const url = await Linking.getInitialURL();
+    return url && handleIncomingAppLink(url, appLinkPrefixes) ? null : url;
+  },
+  subscribe: (listener: (url: string) => void) => {
+    const subscription = Linking.addEventListener("url", ({ url }) => {
+      if (!handleIncomingAppLink(url, appLinkPrefixes)) listener(url);
+    });
+    return () => subscription.remove();
+  },
   // The Expo dev client launches the app via
   // <scheme>://expo-development-client/?url=<packager> — that URL addresses
   // the launcher, not app navigation. Without this filter it falls through

@@ -1,3 +1,14 @@
+import * as ContextualLayers from "./extensions/ContextualLayers.ts";
+import * as DecisionWorker from "./threadDecisions/DecisionWorker.ts";
+import * as DecisionIngestion from "./threadDecisions/DecisionIngestion.ts";
+import * as DecisionCloudClient from "./threadDecisions/DecisionCloudClient.ts";
+import * as DecisionService from "./threadDecisions/DecisionService.ts";
+import * as DecisionRepository from "./threadDecisions/DecisionRepository.ts";
+import * as DecisionSettingsRepository from "./threadDecisions/DecisionSettingsRepository.ts";
+import * as DecisionJobRepository from "./threadDecisions/DecisionJobRepository.ts";
+import * as DecisionWriterBinding from "./threadDecisions/DecisionWriterBinding.ts";
+import * as ProviderWorkAdmission from "./provider/ProviderWorkAdmission.ts";
+import * as ThreadNoteService from "./threadNotes/ThreadNoteService.ts";
 import * as PullRequestWatchDiscovery from "./pullRequest/PullRequestWatchDiscovery.ts";
 import * as PullRequestWatchService from "./pullRequest/PullRequestWatchService.ts";
 import * as PullRequestWatchProvider from "./pullRequest/PullRequestWatchProvider.ts";
@@ -24,6 +35,7 @@ import * as HostPowerMonitor from "./background/HostPowerMonitor.ts";
 import * as ServerConfig from "./config.ts";
 import {
   otlpTracesProxyRouteLayer,
+  contextualExportRouteLayer,
   assetRouteLayer,
   attachmentUploadRouteLayer,
   serverEnvironmentHttpApiLayer,
@@ -129,9 +141,11 @@ import {
   pendingServiceUpdateExists,
   reconcileDesiredCloudLink,
   releaseManagedTunnelOnShutdown,
+  syncManagedEndpointOrigin,
 } from "./cloud/http.ts";
 import { serverRelayBrokerTracingLayer } from "./cloud/relayTracing.ts";
 import { shouldRetryCloudLink } from "./cloud/relayResponse.ts";
+import * as DeviceRelayReservation from "./cloud/DeviceRelayReservation.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
 import * as CloudCliState from "./cloud/CliState.ts";
@@ -322,6 +336,7 @@ const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
 // NDJSON writers and is provided at the outer runtime layer so both
 // `ProviderService` and the per-instance drivers read the same logger pair.
 const ProviderLayerLive = ProviderServiceLive.pipe(
+  Layer.provideMerge(ProviderWorkAdmission.layer),
   Layer.provide(ProviderAdapterRegistryLive),
   Layer.provideMerge(ProviderSessionDirectoryLayerLive),
 );
@@ -466,6 +481,69 @@ const StaveRpcRuntimeLayerLive = StaveRpcHandlers.runtimeLayer.pipe(
     ),
   ),
 );
+const ThreadNoteLayerLive = ThreadNoteService.layer.pipe(Layer.provide(PersistenceLayerLive));
+const DecisionSettingsLayerLive = DecisionSettingsRepository.layer.pipe(
+  Layer.provide(PersistenceLayerLive),
+);
+const DecisionJobsLayerLive = DecisionJobRepository.layer.pipe(
+  Layer.provide(DecisionSettingsLayerLive),
+  Layer.provide(PersistenceLayerLive),
+);
+const DecisionWriterLayerLive = DecisionWriterBinding.layer.pipe(
+  Layer.provide(ProviderWorkAdmission.layer),
+  Layer.provide(PersistenceLayerLive),
+);
+const DecisionCloudLayerLive = DecisionCloudClient.layer.pipe(
+  Layer.provide(ServerEnvironment.identityLayer),
+  Layer.provide(ServerSecretStore.layer),
+);
+const DecisionIngestionLayerLive = DecisionIngestion.layer.pipe(
+  Layer.provide(DecisionJobsLayerLive),
+);
+const DecisionWorkerLayerLive = DecisionWorker.layer.pipe(
+  Layer.provide(DecisionJobsLayerLive),
+  Layer.provide(DecisionSettingsLayerLive),
+  Layer.provide(
+    DecisionRepository.layer.pipe(
+      Layer.provide(PersistenceLayerLive),
+      Layer.provide(ServerEnvironment.identityLayer),
+    ),
+  ),
+  Layer.provide(DecisionWriterLayerLive),
+  Layer.provide(DecisionCloudLayerLive),
+  Layer.provide(ProviderWorkAdmission.layer),
+  Layer.provide(PersistenceLayerLive),
+);
+const DecisionLayerLive = DecisionService.layer.pipe(
+  Layer.provide(DecisionCloudLayerLive),
+  Layer.provide(
+    DecisionRepository.layer.pipe(
+      Layer.provide(PersistenceLayerLive),
+      Layer.provide(ServerEnvironment.identityLayer),
+    ),
+  ),
+  Layer.provide(DecisionJobsLayerLive),
+  Layer.provide(DecisionSettingsLayerLive),
+  Layer.provide(
+    DecisionWriterBinding.availabilityLayer.pipe(Layer.provide(DecisionWriterLayerLive)),
+  ),
+  Layer.provide(PersistenceLayerLive),
+);
+
+const ContextualLayerLive = ContextualLayers.layer.pipe(
+  Layer.provide(TextGeneration.layer),
+  Layer.provide(ServerSettingsLayerLive),
+  Layer.provide(
+    DecisionRepository.layer.pipe(
+      Layer.provide(PersistenceLayerLive),
+      Layer.provide(ServerEnvironment.identityLayer),
+    ),
+  ),
+  Layer.provide(ServerEnvironment.identityLayer),
+  Layer.provide(ServerSecretStore.layer),
+  Layer.provide(PersistenceLayerLive),
+);
+
 const PullRequestWatchLayerLive = PullRequestWatchService.layer.pipe(
   Layer.provide(StaveRpcRuntimeLayerLive),
   Layer.provide(PersistenceLayerLive),
@@ -541,6 +619,7 @@ const AuthLayerLive = EnvironmentAuth.layer.pipe(
 const CloudManagedEndpointRuntimeLive = Layer.mergeAll(
   RelayClientLive,
   CloudManagedEndpointRuntime.layer.pipe(
+    Layer.provide(DeviceRelayReservation.layer.pipe(Layer.provide(ServerEnvironmentLayerLive))),
     Layer.provide(ServerSecretStore.layer),
     Layer.provide(RelayClientLive),
   ),
@@ -592,10 +671,16 @@ const AntigravityInstallationRefreshLive = Layer.effectDiscard(
 );
 
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+  Layer.provideMerge(ContextualLayerLive),
+  Layer.provideMerge(
+    Layer.mergeAll(DecisionIngestionLayerLive, DecisionWorkerLayerLive, DecisionCloudLayerLive),
+  ),
   Layer.provideMerge(AntigravityInstallationRefreshLive),
   Layer.provideMerge(SagaWorkbenchLayerLive),
   Layer.provideMerge(PullRequestWatchDiscoveryLayerLive),
   Layer.provideMerge(PullRequestWatchLayerLive),
+  Layer.provideMerge(ThreadNoteLayerLive),
+  Layer.provideMerge(DecisionLayerLive),
   Layer.provideMerge(ProviderAuthServiceLive),
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),
@@ -690,6 +775,7 @@ export const makeRoutesLayer = Layer.mergeAll(
       Layer.provide(environmentAuthenticatedAuthLayer),
     ),
     otlpTracesProxyRouteLayer,
+    contextualExportRouteLayer,
     assetRouteLayer,
     attachmentUploadRouteLayer,
     staticAndDevRouteLayer,
@@ -700,6 +786,9 @@ export const makeRoutesLayer = Layer.mergeAll(
   // Reusing the exact layer object shares the runtime instance by memoization;
   // isolated route harnesses can also supply its dependencies directly.
   Layer.provide(SagaWorkbenchLayerLive),
+  Layer.provide(ThreadNoteLayerLive),
+  Layer.provide(DecisionLayerLive),
+  Layer.provide(ContextualLayerLive),
   Layer.provide(PullRequestWatchLayerLive),
   Layer.provide(PullRequestServiceLive),
   // One registry per server: a Stave operation started over one socket keeps
@@ -852,10 +941,41 @@ export const makeServerLayer = Layer.unwrap(
             if (!cleanupBeforeActivation) {
               yield* Effect.addFinalizer(() => releaseManagedTunnel);
             }
-            if (!(yield* CloudCliState.readCliDesiredCloudLink)) return;
             const server = yield* HttpServer.HttpServer;
             const address = server.address;
             if (typeof address === "string" || !("port" in address)) return;
+            const retryTransientFailures = {
+              while: shouldRetryCloudLink,
+              schedule: Schedule.exponential("1 second").pipe(
+                Schedule.modifyDelay(({ duration }) =>
+                  Effect.succeed(Duration.min(duration, Duration.seconds(30))),
+                ),
+                Schedule.upTo({ duration: "10 minutes" }),
+              ),
+            };
+            if (!(yield* CloudCliState.readCliDesiredCloudLink)) {
+              // A link installed from a web/mobile client is never re-provisioned
+              // at boot, so its tunnel still targets the port recorded at link
+              // time. Repoint it at the port this launch actually bound. The
+              // CLI reconcile below already links with the current origin.
+              yield* syncManagedEndpointOrigin(`http://127.0.0.1:${address.port}`).pipe(
+                Effect.retry(retryTransientFailures),
+                Effect.tap((updated) =>
+                  updated
+                    ? Effect.logInfo("Lecturn Connect managed tunnel origin synced on startup", {
+                        port: address.port,
+                      })
+                    : Effect.void,
+                ),
+                Effect.catch((cause) =>
+                  Effect.logWarning(
+                    "Failed to sync the Lecturn Connect managed tunnel origin on startup",
+                    { message: cause.message },
+                  ),
+                ),
+              );
+              return;
+            }
             // No settling delay before the first attempt: routes are already
             // serving by the time activation opens this gate (the startup
             // sequence awaits routesReady), and the retry schedule below
@@ -863,15 +983,7 @@ export const makeServerLayer = Layer.unwrap(
             // millisecond here is dead time on the path to remote
             // reachability after a restart.
             yield* reconcileDesiredCloudLink(`http://127.0.0.1:${address.port}`).pipe(
-              Effect.retry({
-                while: shouldRetryCloudLink,
-                schedule: Schedule.exponential("1 second").pipe(
-                  Schedule.modifyDelay(({ duration }) =>
-                    Effect.succeed(Duration.min(duration, Duration.seconds(30))),
-                  ),
-                  Schedule.upTo({ duration: "10 minutes" }),
-                ),
-              }),
+              Effect.retry(retryTransientFailures),
               Effect.tap(() =>
                 Effect.logInfo("Lecturn Connect desired link reconciled on startup"),
               ),

@@ -1,3 +1,4 @@
+import { ContextualDraftControl } from "../contextual/ContextualDraftControl";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { useAtomValue } from "@effect/atom-react";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
@@ -26,11 +27,7 @@ import {
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
 import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
-import {
-  isStaveProject,
-  staveForcedEnvMode,
-  staveThreadStartMessage,
-} from "@lecturn/client-runtime/state/projectGit";
+import { isStaveProject, staveForcedEnvMode } from "@lecturn/client-runtime/state/projectGit";
 import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   resolveEnvironmentMachineKind,
@@ -90,7 +87,7 @@ import {
   scheduleUnusedComposerAttachmentCleanup,
   type ComposerDraft,
 } from "../../state/use-composer-drafts";
-import { useEnvironmentServerConfig, useProjects } from "../../state/entities";
+import { useEnvironmentServerConfig, useListedProjects } from "../../state/entities";
 import {
   isModelSelectionUnavailable,
   resolveSelectableModelSelection,
@@ -103,6 +100,7 @@ import { removeThreadOutboxMessage } from "../../state/thread-outbox-removal";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
 import { useNewTaskFlow } from "./new-task-flow-provider";
 import { resolveProjectThreadCreationBranch } from "./projectThreadCreationValidation";
+import { useThreadImportAvailability } from "./use-import-thread";
 import { useCreateProjectThread } from "./use-project-actions";
 import { resolveDraftProjectSelection } from "./new-task-project-selection";
 import {
@@ -161,7 +159,7 @@ export function NewTaskDraftScreen(props: {
   /** Durable native share inbox item to merge into this project draft. */
   readonly incomingShareId?: string;
 }) {
-  const projects = useProjects();
+  const projects = useListedProjects();
   const createProjectThread = useCreateProjectThread();
   const flow = useNewTaskFlow();
   const navigation = useNavigation();
@@ -181,6 +179,7 @@ export function NewTaskDraftScreen(props: {
   const selectedEnvironmentServerConfig = useEnvironmentServerConfig(
     selectedProject?.environmentId ?? null,
   );
+  const importAvailability = useThreadImportAvailability(selectedProject?.environmentId ?? null);
   const environmentConnected =
     selectedProject !== null &&
     connectedEnvironments.find(
@@ -872,11 +871,6 @@ export function NewTaskDraftScreen(props: {
   async function handleStart(): Promise<void> {
     if (voiceInput.blocksSubmission) return;
     const selectedProject = flow.selectedProject;
-    const staveStartMessage = staveThreadStartMessage(selectedProject);
-    if (staveStartMessage !== null) {
-      Alert.alert("Unarchive to start a thread", staveStartMessage);
-      return;
-    }
     const draftKey = flow.draftKey;
     if (!selectedProject || !draftKey) {
       return;
@@ -997,6 +991,7 @@ export function NewTaskDraftScreen(props: {
     });
     const result = await createProjectThread({
       project: selectedProject,
+      ...(draft.contextual ? { contextual: draft.contextual } : {}),
       modelSelection,
       envMode: workspaceMode,
       branch: creationBranch,
@@ -1134,7 +1129,9 @@ export function NewTaskDraftScreen(props: {
     void KeyboardController.dismiss({ animated: true });
     navigation.dispatch(StackActions.push("NewTask", { incomingShareId: props.incomingShareId }));
   };
-  const openContextPicker = (routeName: "NewTaskBranch" | "NewTaskEnvironment") => {
+  const openContextPicker = (
+    routeName: "NewTaskBranch" | "NewTaskEnvironment" | "NewTaskImportSession",
+  ) => {
     if (isComposerInteractionLocked) {
       return;
     }
@@ -1214,11 +1211,6 @@ export function NewTaskDraftScreen(props: {
   const workspaceModeLocked = isStaveProject(selectedProject);
   const workspaceControls = (
     <View className="flex-row items-center gap-1 px-2">
-      {selectedProject?.stave?.state === "archived" ? (
-        <Text className="text-xs text-muted-foreground">
-          Unarchive on web or desktop to start a thread.
-        </Text>
-      ) : null}
       {flow.submitting && environmentConnected && flow.workspaceMode === "worktree" ? (
         <View
           accessible
@@ -1265,6 +1257,19 @@ export function NewTaskDraftScreen(props: {
             maxWidth={190}
             onPress={() => openContextPicker("NewTaskBranch")}
           />
+
+          {importAvailability.available ? (
+            <ComposerInlineControl
+              accessibilityHint="Continues a session you started in the agent's own app"
+              accessibilityLabel="Import session"
+              chevronDirection="right"
+              disabled={isComposerInteractionLocked}
+              icon="square.and.arrow.down"
+              label="Import"
+              maxWidth={140}
+              onPress={() => openContextPicker("NewTaskImportSession")}
+            />
+          ) : null}
         </>
       )}
     </View>
@@ -1359,6 +1364,13 @@ export function NewTaskDraftScreen(props: {
                     onPickMedia={handlePickMedia}
                     onPickFiles={handlePickFiles}
                   />
+                  {flow.selectedProject && flow.draftKey ? (
+                    <ContextualDraftControl
+                      environmentId={flow.selectedProject.environmentId}
+                      projectId={flow.selectedProject.id}
+                      draftKey={flow.draftKey}
+                    />
+                  ) : null}
                   <ComposerToolbarScroller align="end" contentPaddingRight={0} fadeSurface="sheet">
                     <ComposerInlineControl
                       accessibilityLabel="Model and reasoning settings"

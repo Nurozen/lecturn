@@ -105,14 +105,15 @@ import { ProviderUpdateEnvironmentRows } from "./ProviderUpdateEnvironmentRows";
 
 const environmentId = "env-wsl" as EnvironmentId;
 const pendingExpiryMs = 6 * 60_000;
+const failedUpdateOutput = "npm error code EACCES\nnpm error syscall rename";
 
-function provider(updateStatus?: "succeeded"): ServerProvider {
+function provider(updateStatus?: "succeeded" | "failed"): ServerProvider {
   const result: ServerProvider = {
     instanceId: ProviderInstanceId.make("codex-wsl"),
     driver: ProviderDriverKind.make("codex"),
     enabled: true,
     installed: true,
-    version: updateStatus ? "1.1.0" : "1.0.0",
+    version: updateStatus === "succeeded" ? "1.1.0" : "1.0.0",
     status: "ready",
     auth: { status: "authenticated" },
     checkedAt: "2026-06-26T12:00:00.000Z",
@@ -120,13 +121,13 @@ function provider(updateStatus?: "succeeded"): ServerProvider {
     slashCommands: [],
     skills: [],
     versionAdvisory: {
-      status: updateStatus ? "current" : "behind_latest",
-      currentVersion: updateStatus ? "1.1.0" : "1.0.0",
+      status: updateStatus === "succeeded" ? "current" : "behind_latest",
+      currentVersion: updateStatus === "succeeded" ? "1.1.0" : "1.0.0",
       latestVersion: "1.1.0",
       updateCommand: "npm install -g @openai/codex@latest",
       canUpdate: true,
       checkedAt: "2026-06-26T12:00:00.000Z",
-      message: updateStatus ? "Up to date." : "Update available.",
+      message: updateStatus === "succeeded" ? "Up to date." : "Update available.",
     },
   };
 
@@ -137,8 +138,11 @@ function provider(updateStatus?: "succeeded"): ServerProvider {
           status: updateStatus,
           startedAt: "2026-06-26T12:00:00.000Z",
           finishedAt: "2026-06-26T12:00:01.000Z",
-          message: "Provider updated.",
-          output: null,
+          message:
+            updateStatus === "failed"
+              ? "Update command exited with code 243."
+              : "Provider updated.",
+          output: updateStatus === "failed" ? failedUpdateOutput : null,
         },
       }
     : result;
@@ -222,5 +226,20 @@ describe("ProviderUpdateEnvironmentRows", () => {
     await flushPromises();
 
     expect(renderRow().props.status.kind).toBe("success");
+  });
+
+  it("hands a failed update's command output to the row", async () => {
+    testState.updateProvider.mockResolvedValueOnce(
+      AsyncResult.success({ providers: [provider("failed")] }),
+    );
+
+    renderRow().props.onUpdate();
+    await flushPromises();
+
+    expect(renderRow().props.status).toEqual({
+      kind: "failed",
+      text: "Update command exited with code 243. npm error code EACCES",
+      output: failedUpdateOutput,
+    });
   });
 });
