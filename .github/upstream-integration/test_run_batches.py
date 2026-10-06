@@ -346,17 +346,19 @@ class GitSafetyTests(unittest.TestCase):
         self.assertIn('timed out after 1 s', log.read_text())
         with self.assertRaisesRegex(batches.Blocked, 'Command failed \\(124\\)'):
             batches.command([sys.executable, '-c', 'import time; time.sleep(30)'], self.repo, log=log, timeout=1)
-        result = batches.command([sys.executable, '-c', 'import time; time.sleep(30)'], self.repo,
-                                 allow_failure=True, timeout=1)
+        result = batches.command([sys.executable, '-c', 'import sys, time; print("partial", flush=True); time.sleep(30)'],
+                                 self.repo, allow_failure=True, timeout=1)
         self.assertEqual(result.returncode, batches.TIMEOUT_EXIT)
+        self.assertEqual(result.stdout, 'partial\n')
 
     def test_grok_calls_carry_wall_clock_timeouts(self):
         runner = batches.Runner.__new__(batches.Runner)
-        runner.lock_fd = None
+        runner.lock_fd = 99  # grok calls must never pass the controller lock down
         seen = []
 
         def launch(argv, cwd, **kwargs):
             seen.append(('--json-schema' in argv, kwargs.get('timeout')))
+            self.assertIsNone(kwargs.get('lock_fd'))
             env = self.grok_env(num_turns=1, structuredOutput={'verdict': 'changes', 'tree': 'abc123'}) \
                 if '--json-schema' in argv else self.grok_env()
             Path(kwargs['log']).write_text(json.dumps(argv) + '\n' + env)

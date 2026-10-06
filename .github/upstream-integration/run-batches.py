@@ -62,7 +62,10 @@ def command(argv, cwd, *, log=None, stdin=None, allow_failure=False, lock_fd=Non
         try:
             result = subprocess.run(argv, stdout=subprocess.PIPE, **kwargs)
         except subprocess.TimeoutExpired as expired:
-            result = subprocess.CompletedProcess(argv, TIMEOUT_EXIT, stdout=(expired.stdout or '') if isinstance(expired.stdout, str) else '')
+            partial = expired.stdout or b''
+            if isinstance(partial, bytes):
+                partial = partial.decode(errors='replace')
+            result = subprocess.CompletedProcess(argv, TIMEOUT_EXIT, stdout=partial)
     if result.returncode and not allow_failure:
         tail = result.stdout[-4000:]
         if log:
@@ -432,8 +435,10 @@ class Runner:
         nudged, prompt_file = False, prompt_path
         for attempt in range(GROK_ATTEMPTS):
             log_path = folder / (f'{name}.events.log' if attempt == 0 else f'{name}.retry{attempt}.events.log')
+            # No lock_fd: grok is read-only and its helper processes (ripgrep, hook shells) run in
+            # their own process groups, so an inherited lock could outlive a timed-out grok.
             result = command([*base, '--max-turns', '300', '--prompt-file', str(prompt_file)], repo,
-                             log=log_path, lock_fd=self.lock_fd, allow_failure=True, timeout=GROK_ANALYSIS_TIMEOUT)
+                             log=log_path, allow_failure=True, timeout=GROK_ANALYSIS_TIMEOUT)
             if result.returncode:
                 continue
             analysis = grok_analysis(log_path)
@@ -449,7 +454,7 @@ class Runner:
         structure_log = folder / f'{name}.structure.events.log'
         for attempt in range(GROK_ATTEMPTS):
             result = command([*base, '--disallowed-tools', GROK_TOOLS, '--max-turns', '5', '--prompt-file', str(structure_path),
-                              '--json-schema', json.dumps(output_schema)], repo, log=structure_log, lock_fd=self.lock_fd,
+                              '--json-schema', json.dumps(output_schema)], repo, log=structure_log,
                              allow_failure=(attempt < GROK_ATTEMPTS - 1),
                              timeout=GROK_STRUCTURE_TIMEOUT)
             if not result.returncode:
