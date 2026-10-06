@@ -6,10 +6,10 @@ signals, and application lifecycle events. React views consume the runtime.
 Keeping retries and session lifetime here prevents competing reconnect loops when
 several views need the same environment.
 
-## One retry owner
+## One transport retry owner
 
 The [supervisor](../../packages/client-runtime/src/connection/supervisor.ts) owns
-retry policy; resolving an endpoint and opening an RPC session are single
+transport retry policy; resolving an endpoint and opening an RPC session are single
 attempts. Transient failures retry with capped backoff. Offline states and
 authentication failures wait for a wakeup instead of spending attempts on
 unchanged conditions.
@@ -26,6 +26,27 @@ connections by environment. An involuntary disconnect retains the registration
 and cached data. Explicit removal closes the scope and clears credentials,
 projections, and platform-owned state such as drafts. Cloud-account changes apply
 to relay registrations; they must not discard directly paired environments.
+
+## HTTP authorization
+
+RPC sessions authenticate at socket upgrade, while HTTP requests need current
+credentials from the
+[authorization service](../../packages/client-runtime/src/authorization/service.ts).
+Replacing a healthy socket for HTTP renewal would interrupt conversations and
+change the transport generation without a transport failure. Credential expiry
+does not close the socket, and refresh failure belongs to the HTTP operation.
+
+A relay credential belongs to one Connect account. The authorization service
+picks that account for socket upgrades and HTTP renewals alike: the account the
+target is tagged with, else the only known account, never each account in turn.
+HTTP requests read the tag from the prepared connection, so the supervisor
+republishes it when a live target is retagged, and replaces the session only when
+it was opened as an account that no longer owns the environment.
+
+Session listings must retain unrevoked connected sessions after credential expiry
+so an open connection does not disappear from connection management. This does
+not extend the credential's lifetime. New HTTP requests and socket upgrades still
+require valid credentials.
 
 ## Transport health and data freshness are separate
 

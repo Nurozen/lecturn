@@ -171,11 +171,16 @@ describe("makeManagedServerProvider", () => {
           },
         };
         let shellLoaded = false;
-        const enrichedWith = yield* Deferred.make<string | undefined>();
+        const rederivedWith = yield* Deferred.make<string | undefined>();
         const provider = yield* makeManagedServerProvider<TestSettings>({
-          resolveMaintenanceCapabilities: Effect.sync(() =>
-            shellLoaded ? homebrewCapabilities : maintenanceCapabilities,
-          ),
+          resolveMaintenance: (options) =>
+            Effect.gen(function* () {
+              const capabilities = shellLoaded ? homebrewCapabilities : maintenanceCapabilities;
+              if (options?.fresh) {
+                yield* Deferred.succeed(rederivedWith, capabilities.update?.executable);
+              }
+              return capabilities;
+            }),
           getSettings: Effect.succeed({ enabled: true }),
           streamSettings: Stream.empty,
           haveSettingsChanged: () => false,
@@ -187,12 +192,67 @@ describe("makeManagedServerProvider", () => {
             },
           },
           checkProvider: Effect.succeed(refreshedSnapshot),
-          enrichSnapshot: ({ maintenanceCapabilities: capabilities }) =>
-            Deferred.succeed(enrichedWith, capabilities.update?.executable).pipe(Effect.asVoid),
           refreshOnInterval: false,
         });
+        assert.equal(yield* Deferred.await(rederivedWith), "brew");
+        assert.equal((yield* provider.resolveMaintenance()).update?.executable, "brew");
+      }),
+    ).pipe(Effect.provide(AlwaysRunTestLayer)),
+  );
+
+  it.effect("publishes the detected snapshot before the update method is re-derived", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const homebrewCapabilities = {
+          ...maintenanceCapabilities,
+          update: {
+            command: "brew upgrade codex",
+            executable: "brew",
+            args: ["upgrade", "codex"],
+            lockKey: "homebrew",
+          },
+        };
+        const rederiveStarted = yield* Deferred.make<void>();
+        const finishRederive = yield* Deferred.make<void>();
+        const rederived = yield* Ref.make(false);
+        const enrichedWith = yield* Deferred.make<string | undefined>();
+        const resolveMaintenance = (options?: { readonly fresh?: boolean }) =>
+          Effect.gen(function* () {
+            if (options?.fresh) {
+              yield* Deferred.succeed(rederiveStarted, undefined);
+              yield* Deferred.await(finishRederive);
+              yield* Ref.set(rederived, true);
+            }
+            return (yield* Ref.get(rederived)) ? homebrewCapabilities : maintenanceCapabilities;
+          });
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: () => false,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          discovery: { waitForShell: false, refreshEnvironment: () => {} },
+          checkProvider: Effect.succeed(refreshedSnapshot),
+          enrichSnapshot: () =>
+            resolveMaintenance().pipe(
+              Effect.flatMap((capabilities) =>
+                Deferred.succeed(enrichedWith, capabilities.update?.executable),
+              ),
+              Effect.asVoid,
+            ),
+          refreshOnInterval: false,
+        });
+
+        yield* Deferred.await(rederiveStarted);
+        assert.equal((yield* provider.getSnapshot).discovery?.status, "ready");
+        // A refresh holds the same lock as detection, so it only returns once
+        // detection has let go of it.
+        const refreshed = yield* provider.refresh;
+        assert.equal(refreshed.discovery?.status, "ready");
+        assert.isFalse(yield* Deferred.isDone(enrichedWith));
+
+        yield* Deferred.succeed(finishRederive, undefined);
         assert.equal(yield* Deferred.await(enrichedWith), "brew");
-        assert.equal(provider.maintenanceCapabilities.update?.executable, "brew");
       }),
     ).pipe(Effect.provide(AlwaysRunTestLayer)),
   );
@@ -204,7 +264,7 @@ describe("makeManagedServerProvider", () => {
         const finishRefresh = yield* Deferred.make<void>();
         const checks = yield* Ref.make(0);
         const provider = yield* makeManagedServerProvider<TestSettings>({
-          resolveMaintenanceCapabilities: Effect.succeed(maintenanceCapabilities),
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
           getSettings: Effect.succeed({ enabled: true }),
           streamSettings: Stream.empty,
           haveSettingsChanged: () => false,
@@ -236,7 +296,7 @@ describe("makeManagedServerProvider", () => {
         const started = yield* Deferred.make<void>();
         const shouldHang = yield* Ref.make(true);
         const provider = yield* makeManagedServerProvider<TestSettings>({
-          resolveMaintenanceCapabilities: Effect.succeed(maintenanceCapabilities),
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
           getSettings: Effect.succeed({ enabled: true }),
           streamSettings: Stream.empty,
           haveSettingsChanged: () => false,
@@ -274,7 +334,7 @@ describe("makeManagedServerProvider", () => {
       Effect.gen(function* () {
         const checks = yield* Ref.make(0);
         const provider = yield* makeManagedServerProvider<TestSettings>({
-          resolveMaintenanceCapabilities: Effect.succeed(maintenanceCapabilities),
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
           getSettings: Effect.succeed({ enabled: true }),
           streamSettings: Stream.empty,
           haveSettingsChanged: () => false,
@@ -318,7 +378,7 @@ describe("makeManagedServerProvider", () => {
           const checkCalls = yield* Ref.make(0);
           const releaseCheck = yield* Deferred.make<void>();
           const provider = yield* makeManagedServerProvider<TestSettings>({
-            resolveMaintenanceCapabilities: Effect.succeed(maintenanceCapabilities),
+            resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
             getSettings: Effect.succeed({ enabled: true }),
             streamSettings: Stream.empty,
             haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
@@ -358,7 +418,7 @@ describe("makeManagedServerProvider", () => {
         const checkCalls = yield* Ref.make(0);
         const initialCheckDone = yield* Deferred.make<void>();
         yield* makeManagedServerProvider<TestSettings>({
-          resolveMaintenanceCapabilities: Effect.succeed(maintenanceCapabilities),
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
           getSettings: Effect.succeed({ enabled: true }),
           streamSettings: Stream.empty,
           haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
@@ -389,7 +449,7 @@ describe("makeManagedServerProvider", () => {
         const checkCalls = yield* Ref.make(0);
         const initialCheckDone = yield* Deferred.make<void>();
         yield* makeManagedServerProvider<TestSettings>({
-          resolveMaintenanceCapabilities: Effect.succeed(maintenanceCapabilities),
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
           getSettings: Effect.succeed({ enabled: true }),
           streamSettings: Stream.empty,
           haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
@@ -416,7 +476,7 @@ describe("makeManagedServerProvider", () => {
         const checkCalls = yield* Ref.make(0);
         const initialCheckDone = yield* Deferred.make<void>();
         const provider = yield* makeManagedServerProvider<TestSettings>({
-          resolveMaintenanceCapabilities: Effect.succeed(maintenanceCapabilities),
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
           getSettings: Effect.succeed({ enabled: true }),
           streamSettings: Stream.empty,
           haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
@@ -471,7 +531,7 @@ describe("makeManagedServerProvider", () => {
         const periodicCheckDone = yield* Deferred.make<void>();
 
         yield* makeManagedServerProvider<TestSettings>({
-          resolveMaintenanceCapabilities: Effect.succeed(maintenanceCapabilities),
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
           getSettings: Effect.succeed({ enabled: true }),
           streamSettings: Stream.empty,
           haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
@@ -514,7 +574,7 @@ describe("makeManagedServerProvider", () => {
         const releaseInitialCheck = yield* Deferred.make<void>();
         const releaseSettingsCheck = yield* Deferred.make<void>();
         const provider = yield* makeManagedServerProvider<TestSettings>({
-          resolveMaintenanceCapabilities: Effect.succeed(maintenanceCapabilities),
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
           getSettings: Ref.get(settingsRef),
           streamSettings: Stream.fromPubSub(settingsChanges),
           haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
@@ -558,7 +618,7 @@ describe("makeManagedServerProvider", () => {
         const initialCheckDone = yield* Deferred.make<void>();
         const enrichmentCalls = yield* Ref.make(0);
         yield* makeManagedServerProvider<TestSettings>({
-          resolveMaintenanceCapabilities: Effect.succeed(maintenanceCapabilities),
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
           getSettings: Effect.succeed({ enabled: true }),
           streamSettings: Stream.fromPubSub(settingsChanges),
           haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
@@ -591,7 +651,7 @@ describe("makeManagedServerProvider", () => {
         const releaseEnrichment = yield* Deferred.make<void>();
         const releaseCheck = yield* Deferred.make<void>();
         const provider = yield* makeManagedServerProvider<TestSettings>({
-          resolveMaintenanceCapabilities: Effect.succeed(maintenanceCapabilities),
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
           getSettings: Effect.succeed({ enabled: true }),
           streamSettings: Stream.empty,
           haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
@@ -632,7 +692,7 @@ describe("makeManagedServerProvider", () => {
         const secondCallbackReady = yield* Deferred.make<void>();
         const allowFirstRefresh = yield* Deferred.make<void>();
         const provider = yield* makeManagedServerProvider<TestSettings>({
-          resolveMaintenanceCapabilities: Effect.succeed(maintenanceCapabilities),
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
           getSettings: Effect.succeed({ enabled: true }),
           streamSettings: Stream.empty,
           haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
@@ -688,7 +748,7 @@ describe("makeManagedServerProvider", () => {
     Effect.scoped(
       Effect.gen(function* () {
         const provider = yield* makeManagedServerProvider<TestSettings>({
-          resolveMaintenanceCapabilities: Effect.succeed(maintenanceCapabilities),
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
           getSettings: Effect.succeed({ enabled: true }),
           streamSettings: Stream.empty,
           haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
@@ -756,7 +816,7 @@ describe("makeManagedServerProvider", () => {
           windows: [{ id: "primary", kind: "session", label: "Session", usedPercent: 10 }],
         } as const;
         const provider = yield* makeManagedServerProvider<TestSettings>({
-          resolveMaintenanceCapabilities: Effect.succeed(maintenanceCapabilities),
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
           getSettings: Effect.succeed({ enabled: true }),
           streamSettings: Stream.empty,
           haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
@@ -839,7 +899,7 @@ describe("makeManagedServerProvider", () => {
         const started = yield* Queue.unbounded<number>();
         const calls = yield* Ref.make(0);
         const provider = yield* makeManagedServerProvider<TestSettings>({
-          resolveMaintenanceCapabilities: Effect.succeed(maintenanceCapabilities),
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
           getSettings: Effect.succeed({ enabled: true }),
           streamSettings: Stream.empty,
           haveSettingsChanged: () => false,

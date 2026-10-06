@@ -48,10 +48,13 @@ const fixture = Effect.gen(function* () {
     configurationFingerprint: "effective-config",
     continuationIdentity: { driverKind, continuationKey: "codex:home:/tmp/binding-account" },
     snapshot: {
-      maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
-        provider: driverKind,
-        packageName: null,
-      }),
+      resolveMaintenance: () =>
+        Effect.succeed(
+          makeManualOnlyProviderMaintenanceCapabilities({
+            provider: driverKind,
+            packageName: null,
+          }),
+        ),
       getSnapshot: snapshot,
       refresh: snapshot,
       streamChanges: Stream.empty,

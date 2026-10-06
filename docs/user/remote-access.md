@@ -24,6 +24,11 @@ On your other device, sign in to the same Lecturn Connect account and choose the
 environment. Over SSH, the CLI prints a browser link and accepts the returned
 authorization code, so you do not need to forward an OAuth callback port.
 
+Lecturn Connect renews access credentials when needed without disconnecting a healthy
+connection. Pull request diffs and provider settings keep working after the
+previous credential expires. A failed renewal affects that request; it does not
+disconnect an otherwise healthy conversation.
+
 ## Pair over a LAN or private network
 
 Use direct pairing when the other device can reach the host's network address.
@@ -126,6 +131,9 @@ On the host, **Settings → Connections** lets authorized administrators create
 pairing links and revoke client sessions. Revoking an unused link prevents new
 pairings; revoke a device's session to remove its existing access. Command-line
 management is available through `npx lecturn auth --help`.
+
+A session with an open connection stays listed after its access credential
+expires.
 
 To remove an environment from Lecturn Connect, open your account menu's **Lecturn Connect**
 page, or **Settings → Lecturn Connect** on mobile, and choose **Deregister**. This

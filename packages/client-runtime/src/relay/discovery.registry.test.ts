@@ -88,6 +88,7 @@ const makeHarness = Effect.fn("TestDiscoveryRegistry.makeHarness")(function* () 
       ClientCapabilities.CloudSession,
       ClientCapabilities.CloudSession.of({
         accountIds: Effect.succeed([ACCOUNT_ID]),
+        identity: (accountId) => Effect.succeed(Option.some({ accountId })),
         clerkToken: (accountId) => Effect.succeed(accountToken(accountId)),
       }),
     ),

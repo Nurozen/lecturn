@@ -1,5 +1,4 @@
 import type { AuthClientPresentationMetadata } from "@lecturn/contracts";
-import { RelayEnvironmentConnectScope } from "@lecturn/contracts/relay";
 import { withRelayClientTracing } from "@lecturn/shared/relayTracing";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -9,7 +8,6 @@ import * as Schema from "effect/Schema";
 
 import { appendClientConnectionParams } from "../authorization/remote.ts";
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
-import * as ManagedRelay from "../relay/managedRelay.ts";
 import * as ClientCapabilities from "../platform/capabilities.ts";
 import {
   BearerConnectionCredential,
@@ -18,12 +16,7 @@ import {
   SshConnectionProfile,
 } from "./catalog.ts";
 import * as ConnectionCredentialStore from "./credentialStore.ts";
-import {
-  credentialMissingError,
-  environmentMismatchError,
-  mapManagedRelayError,
-  profileMissingError,
-} from "./errors.ts";
+import { credentialMissingError, environmentMismatchError, profileMissingError } from "./errors.ts";
 import type {
   BearerConnectionTarget,
   ConnectionTarget,
@@ -147,74 +140,14 @@ const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")
   });
 });
 
-// No single Connect account can be named as the owner of a relay target.
-// Blocked, not transient: the supervisor parks a blocked target until a wakeup
-// or retarget instead of retrying a question that time alone cannot answer.
-function relayAccountUnresolvedError(signedInAccounts: number): ConnectionBlockedError {
-  return new ConnectionBlockedError({
-    reason: "authentication",
-    detail:
-      signedInAccounts === 0
-        ? "Sign in to Lecturn Connect to connect this environment."
-        : "Could not tell which Lecturn Connect account owns this environment.",
-  });
-}
-
 const makeRelayBroker = Effect.fn("clientRuntime.connection.broker.makeRelay")(function* () {
-  const relay = yield* ManagedRelay.ManagedRelayClient;
-  const session = yield* ClientCapabilities.CloudSession;
-  const identity = yield* ClientCapabilities.RelayDeviceIdentity;
   const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
 
   return Effect.fnUntraced(
     function* (target: RelayConnectionTarget) {
-      // The owner is the tagged account, else the only known account. Never
-      // try each account: the relay would see every account ask for it.
-      const accountIds = yield* ClientCapabilities.knownAccountIds(session);
-      const accountId = target.accountId ?? (accountIds.length === 1 ? accountIds[0] : undefined);
-      if (accountId === undefined && accountIds.length > 0) {
-        return yield* relayAccountUnresolvedError(accountIds.length);
-      }
-      // A cached token outlives its account's session. Once sign-in state is
-      // loaded, whoever is signed in instead must not connect with it.
-      if (accountId !== undefined && session.accountsSynced !== undefined) {
-        const signedIn = yield* session.accountIds;
-        if ((yield* session.accountsSynced) && !signedIn.includes(accountId)) {
-          return yield* relayAccountUnresolvedError(0);
-        }
-      }
       const authorized = yield* remote.authorizeDpop({
         expectedEnvironmentId: target.environmentId,
-        ...(accountId === undefined ? {} : { accountId }),
-        // No other account could own an unstamped token. That holds with no
-        // account too: a cold start before sign-in loads still connects from cache.
-        acceptUnstampedToken: accountIds.every((id) => id === accountId),
-        obtainBootstrap: Effect.gen(function* () {
-          if (accountId === undefined) {
-            return yield* relayAccountUnresolvedError(accountIds.length);
-          }
-          const clerkToken = yield* session
-            .clerkToken(accountId)
-            .pipe(Effect.withSpan("relay.connection.cloudSessionToken.resolve"));
-          const deviceId = yield* identity.deviceId.pipe(
-            Effect.withSpan("relay.connection.deviceIdentity.resolve"),
-          );
-          const connected = yield* relay
-            .connectEnvironment({
-              clerkToken,
-              scopes: [RelayEnvironmentConnectScope],
-              environmentId: target.environmentId,
-              ...(Option.isSome(deviceId) ? { deviceId: deviceId.value } : {}),
-            })
-            .pipe(Effect.mapError(mapManagedRelayError));
-          if (connected.environmentId !== target.environmentId) {
-            return yield* environmentMismatchError({
-              expected: target.environmentId,
-              actual: connected.environmentId,
-            });
-          }
-          return connected;
-        }).pipe(Effect.withSpan("relay.connection.bootstrap.obtain")),
+        ...(target.accountId === undefined ? {} : { accountId: target.accountId }),
       });
       return {
         environmentId: authorized.environmentId,
