@@ -85,7 +85,7 @@ class GitSafetyTests(unittest.TestCase):
         with self.assertRaisesRegex(batches.Blocked, 'commits'):
             batches.check_selection(self.repo, self.base, self.accepted, self.target, self.target, 0, 100)
 
-    def write_events(self, log, value, model=batches.TOP_MODEL):
+    def write_events(self, log, value, model='device-default-model'):
         Path(log).write_text('["claude"]\n' + json.dumps({'type': 'system'}) + '\n' + json.dumps(
             {'type': 'result', 'subtype': 'success', 'is_error': False, 'structured_output': value,
              'modelUsage': {model: {}}}) + '\n')
@@ -102,8 +102,8 @@ class GitSafetyTests(unittest.TestCase):
                 return real_command(argv, cwd, **kwargs)
             self.assertEqual(argv[:2], ['claude', '--print'])
             self.assertEqual(cwd, self.repo)
-            self.assertEqual(argv[argv.index('--model') + 1], 'claude-fable-5-1')
-            self.assertEqual(kwargs['env']['CLAUDE_CODE_SUBAGENT_MODEL'], 'claude-opus-5')
+            self.assertNotIn('--model', argv)
+            self.assertIsNone(kwargs.get('env'))
             self.assertEqual(argv[argv.index('--permission-mode') + 1], 'default')
             self.assertNotIn('--dangerously-skip-permissions', argv)
             report_dirs = sorted({str(self.folder), reports})
@@ -131,7 +131,7 @@ class GitSafetyTests(unittest.TestCase):
             self.assertFalse(any(rule.startswith('Write(///') for rule in tools))
             self.assertIn('--no-session-persistence', argv)
             self.assertIn('--strict-mcp-config', argv)
-            self.assertEqual(argv[argv.index('--setting-sources') + 1], '')
+            self.assertEqual(argv[argv.index('--setting-sources') + 1], 'user')
             self.assertEqual(json.loads(argv[argv.index('--json-schema') + 1]), schema)
             self.write_events(kwargs['log'], {'verdict': 'approve'})
 
@@ -150,13 +150,13 @@ class GitSafetyTests(unittest.TestCase):
                     runner.agent(self.repo, folder, 'review', 'Review source', {}, readonly=True)
                 command.assert_not_called()
 
-    def test_builder_runs_unsandboxed_on_top_model_with_opus_subagents(self):
+    def test_builder_runs_unsandboxed_on_device_default_model(self):
         runner = batches.Runner.__new__(batches.Runner)
         runner.lock_fd = None
 
         def launch(argv, cwd, **kwargs):
-            self.assertEqual(argv[argv.index('--model') + 1], 'claude-fable-5-1')
-            self.assertEqual(kwargs['env']['CLAUDE_CODE_SUBAGENT_MODEL'], 'claude-opus-5')
+            self.assertNotIn('--model', argv)
+            self.assertIsNone(kwargs.get('env'))
             self.assertEqual(argv[argv.index('--permission-mode') + 1], 'bypassPermissions')
             self.assertIn('--dangerously-skip-permissions', argv)
             self.assertEqual(argv[argv.index('--add-dir') + 1], str(self.folder))
@@ -166,7 +166,7 @@ class GitSafetyTests(unittest.TestCase):
             self.assertEqual((self.folder / 'builder.prompt.md').read_text(), 'Build')
             self.assertEqual(argv[argv.index('--output-format') + 1], 'stream-json')
             self.assertIn('--strict-mcp-config', argv)
-            self.assertEqual(argv[argv.index('--setting-sources') + 1], '')
+            self.assertEqual(argv[argv.index('--setting-sources') + 1], 'user')
             self.assertEqual(kwargs['stdin'], 'Build')
             self.write_events(kwargs['log'], {'ready': True})
 
@@ -174,12 +174,11 @@ class GitSafetyTests(unittest.TestCase):
             self.assertEqual(runner.agent(self.repo, self.folder, 'builder', 'Build', {'required': ['ready']}),
                              {'ready': True})
 
-    def test_agent_rejects_incomplete_or_off_model_results(self):
+    def test_agent_accepts_any_model_but_rejects_incomplete_results(self):
         runner = batches.Runner.__new__(batches.Runner)
         runner.lock_fd = None
-        with patch.object(batches, 'command', side_effect=lambda argv, cwd, **kw: self.write_events(kw['log'], {'ready': True}, model='claude-opus-5')):
-            with self.assertRaisesRegex(batches.Blocked, 'required model'):
-                runner.agent(self.repo, self.folder, 'builder', 'Build', {'required': ['ready']})
+        with patch.object(batches, 'command', side_effect=lambda argv, cwd, **kw: self.write_events(kw['log'], {'ready': True}, model='any-model-the-device-uses')):
+            self.assertEqual(runner.agent(self.repo, self.folder, 'builder', 'Build', {'required': ['ready']}), {'ready': True})
         with patch.object(batches, 'command', side_effect=lambda argv, cwd, **kw: self.write_events(kw['log'], {'ready': True, 'extra': 1})):
             with self.assertRaisesRegex(batches.Blocked, 'Incomplete structured'):
                 runner.agent(self.repo, self.folder, 'builder', 'Build', {'required': ['ready']})
@@ -375,7 +374,7 @@ class GitSafetyTests(unittest.TestCase):
         cases = [
             ('["grok"]\nno json here\n', 'no JSON result'),
             ('["grok"]\n' + json.dumps({**ok, 'stopReason': 'cancelled'}) + '\n', 'did not finish'),
-            ('["grok"]\n' + json.dumps({**ok, 'modelUsage': {'claude-opus-5': {}}}) + '\n', 'no grok model'),
+            ('["grok"]\n' + json.dumps({**ok, 'modelUsage': {}}) + '\n', 'no model usage'),
             ('["grok"]\n{broken\n', 'no JSON result'),
         ]
         for text, message in cases:
@@ -408,6 +407,7 @@ class GitSafetyTests(unittest.TestCase):
             ('["claude"]\n' + json.dumps({'type': 'assistant'}) + '\n', 'no result event'),
             (json.dumps({**success, 'subtype': 'error_max_turns', 'is_error': True}) + '\n', 'failed: error_max_turns'),
             (json.dumps({**success, 'structured_output': None}) + '\n', 'no structured output'),
+            (json.dumps({**success, 'modelUsage': {}}) + '\n', 'no model usage'),
         ]
         for text, message in cases:
             log.write_text(text)
