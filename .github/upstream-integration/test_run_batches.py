@@ -338,6 +338,34 @@ class GitSafetyTests(unittest.TestCase):
                 runner.agent(self.repo, self.folder, 'outside', 'Review', schema, True, runtime='grok')
         self.assertEqual(len(calls), 3)
 
+    def test_command_timeout_is_an_ordinary_failure(self):
+        log = self.folder / 'slow.log'
+        result = batches.command([sys.executable, '-c', 'import time; time.sleep(30)'], self.repo, log=log,
+                                 allow_failure=True, timeout=1)
+        self.assertEqual(result.returncode, batches.TIMEOUT_EXIT)
+        self.assertIn('timed out after 1 s', log.read_text())
+        with self.assertRaisesRegex(batches.Blocked, 'Command failed \\(124\\)'):
+            batches.command([sys.executable, '-c', 'import time; time.sleep(30)'], self.repo, log=log, timeout=1)
+        result = batches.command([sys.executable, '-c', 'import time; time.sleep(30)'], self.repo,
+                                 allow_failure=True, timeout=1)
+        self.assertEqual(result.returncode, batches.TIMEOUT_EXIT)
+
+    def test_grok_calls_carry_wall_clock_timeouts(self):
+        runner = batches.Runner.__new__(batches.Runner)
+        runner.lock_fd = None
+        seen = []
+
+        def launch(argv, cwd, **kwargs):
+            seen.append(('--json-schema' in argv, kwargs.get('timeout')))
+            env = self.grok_env(num_turns=1, structuredOutput={'verdict': 'changes', 'tree': 'abc123'}) \
+                if '--json-schema' in argv else self.grok_env()
+            Path(kwargs['log']).write_text(json.dumps(argv) + '\n' + env)
+            return SimpleNamespace(returncode=0)
+
+        with patch.object(batches, 'command', side_effect=launch):
+            runner.agent(self.repo, self.folder, 'outside', 'Review', {'required': ['verdict', 'tree']}, True, runtime='grok')
+        self.assertEqual(seen, [(False, batches.GROK_ANALYSIS_TIMEOUT), (True, batches.GROK_STRUCTURE_TIMEOUT)])
+
     def test_grok_envelope_rejects_cancelled_or_unstructured_runs(self):
         log = self.folder / 'g.events.log'
         ok = {'stopReason': 'end_turn', 'num_turns': 3, 'text': 'review', 'structuredOutput': {'a': 1},
