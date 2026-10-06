@@ -150,7 +150,7 @@ class GitSafetyTests(unittest.TestCase):
                     runner.agent(self.repo, folder, 'review', 'Review source', {}, readonly=True)
                 command.assert_not_called()
 
-    def test_builder_runs_unsandboxed_on_top_model_with_opus_subagents(self):
+    def test_builder_runs_unsandboxed_on_device_default_model(self):
         runner = batches.Runner.__new__(batches.Runner)
         runner.lock_fd = None
 
