@@ -3009,23 +3009,27 @@ export default function ChatView(props: ChatViewProps) {
     }
     return byMessageId;
   }, [turnDiffSummaries]);
-  const revertTurnCountByUserMessageId = useMemo(
-    () =>
-      buildRevertTurnCountByUserMessageId({
+  const lastRevertTurnCountRef = useRef<Map<MessageId, number> | null>(null);
+  const revertTurnCountByUserMessageId = useMemo(() => {
+    const next = buildRevertTurnCountByUserMessageId(
+      {
         supportsConversationRollback,
         timelineEntries,
         turnDiffSummaryByAssistantMessageId,
         inferredCheckpointTurnCountByTurnId,
         importedFrom: activeThread?.importedFrom,
-      }),
-    [
-      activeThread?.importedFrom,
-      supportsConversationRollback,
-      inferredCheckpointTurnCountByTurnId,
-      timelineEntries,
-      turnDiffSummaryByAssistantMessageId,
-    ],
-  );
+      },
+      lastRevertTurnCountRef.current,
+    );
+    lastRevertTurnCountRef.current = next;
+    return next;
+  }, [
+    activeThread?.importedFrom,
+    supportsConversationRollback,
+    inferredCheckpointTurnCountByTurnId,
+    timelineEntries,
+    turnDiffSummaryByAssistantMessageId,
+  ]);
   const environmentSupportsForking = serverConfig?.environment.capabilities.threadForking === true;
   // Provider/server gate only — per-message turn availability is what the
   // map below encodes, so `hasCompletedTurn` is not part of this check.
