@@ -2,7 +2,7 @@ export type LoopbackAuthorizationStage = "dev" | "nightly" | "latest";
 
 declare const __LECTURN_BUILD_CHANNEL__: "nightly" | "latest" | undefined;
 
-export function resolveLoopbackAuthorizationStage(): LoopbackAuthorizationStage {
+function resolveLoopbackAuthorizationStage(): LoopbackAuthorizationStage {
   return typeof __LECTURN_BUILD_CHANNEL__ === "undefined" ? "dev" : __LECTURN_BUILD_CHANNEL__;
 }
 

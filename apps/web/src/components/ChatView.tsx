@@ -552,6 +552,7 @@ const PreviewPanel = lazy(() =>
 const DiffPanel = lazy(() => import("./DiffPanel"));
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
+const EMPTY_FORK_TURN_IDS: ReadonlyMap<MessageId, TurnId> = new Map();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
   "textarea",
@@ -3009,23 +3010,27 @@ export default function ChatView(props: ChatViewProps) {
     }
     return byMessageId;
   }, [turnDiffSummaries]);
-  const revertTurnCountByUserMessageId = useMemo(
-    () =>
-      buildRevertTurnCountByUserMessageId({
+  const lastRevertTurnCountRef = useRef<Map<MessageId, number> | null>(null);
+  const revertTurnCountByUserMessageId = useMemo(() => {
+    const next = buildRevertTurnCountByUserMessageId(
+      {
         supportsConversationRollback,
         timelineEntries,
         turnDiffSummaryByAssistantMessageId,
         inferredCheckpointTurnCountByTurnId,
         importedFrom: activeThread?.importedFrom,
-      }),
-    [
-      activeThread?.importedFrom,
-      supportsConversationRollback,
-      inferredCheckpointTurnCountByTurnId,
-      timelineEntries,
-      turnDiffSummaryByAssistantMessageId,
-    ],
-  );
+      },
+      lastRevertTurnCountRef.current,
+    );
+    lastRevertTurnCountRef.current = next;
+    return next;
+  }, [
+    activeThread?.importedFrom,
+    supportsConversationRollback,
+    inferredCheckpointTurnCountByTurnId,
+    timelineEntries,
+    turnDiffSummaryByAssistantMessageId,
+  ]);
   const environmentSupportsForking = serverConfig?.environment.capabilities.threadForking === true;
   // Provider/server gate only — per-message turn availability is what the
   // map below encodes, so `hasCompletedTurn` is not part of this check.
@@ -3046,23 +3051,30 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
   // Fork completed conversation turns even when no Git checkpoint exists.
+  const lastForkTurnIdRef = useRef<Map<MessageId, TurnId> | null>(null);
   const forkTurnIdByMessageId = useMemo(() => {
     if (forkUnavailableReason !== null || !isServerThread) {
-      return new Map<MessageId, TurnId>();
+      return EMPTY_FORK_TURN_IDS;
     }
-    return buildForkTurnIdByMessageId({
-      timelineEntries,
-      turnDiffSummaryByAssistantMessageId,
-      activeRunningTurnId,
-      completedTurns: activeThread?.completedTurns,
-      latestTurn: activeThread?.latestTurn ?? null,
-      requiresProviderTurnRef:
-        providerStatuses.find(
-          (provider) =>
-            provider.instanceId ===
-            (activeThread?.session?.providerInstanceId ?? activeThread?.modelSelection.instanceId),
-        )?.conversationForkRequiresAnchor === true,
-    });
+    const next = buildForkTurnIdByMessageId(
+      {
+        timelineEntries,
+        turnDiffSummaryByAssistantMessageId,
+        activeRunningTurnId,
+        completedTurns: activeThread?.completedTurns,
+        latestTurn: activeThread?.latestTurn ?? null,
+        requiresProviderTurnRef:
+          providerStatuses.find(
+            (provider) =>
+              provider.instanceId ===
+              (activeThread?.session?.providerInstanceId ??
+                activeThread?.modelSelection.instanceId),
+          )?.conversationForkRequiresAnchor === true,
+      },
+      lastForkTurnIdRef.current,
+    );
+    lastForkTurnIdRef.current = next;
+    return next;
   }, [
     activeRunningTurnId,
     activeThread?.completedTurns,

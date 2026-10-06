@@ -3,15 +3,11 @@ import { BUILT_IN_THEMES, getThemeColorsForAppearance } from "@lecturn/shared/th
 
 import { themeColorToNativeColor } from "../../lib/mobileTheme";
 
-import {
-  buildGhosttyThemeConfig,
-  getMobileTerminalTheme,
-  getPierreTerminalTheme,
-} from "./terminalTheme";
+import { buildGhosttyThemeConfig, getMobileTerminalTheme } from "./terminalTheme";
 
-describe("getPierreTerminalTheme", () => {
-  it("returns the Pierre light terminal palette", () => {
-    expect(getPierreTerminalTheme("light")).toMatchObject({
+describe("getMobileTerminalTheme", () => {
+  it("preserves the default light terminal palette", () => {
+    expect(getMobileTerminalTheme("lecturn", "light")).toMatchObject({
       background: "#f2f2f7",
       foreground: "#6C6C71",
       cursorForeground: "#009fff",
@@ -19,23 +15,14 @@ describe("getPierreTerminalTheme", () => {
     });
   });
 
-  it("returns the Pierre dark terminal palette", () => {
-    expect(getPierreTerminalTheme("dark")).toMatchObject({
+  it("preserves the default dark terminal palette", () => {
+    expect(getMobileTerminalTheme("lecturn", "dark")).toMatchObject({
       background: "#0a0a0a",
       foreground: "#adadb1",
       cursorForeground: "#009fff",
       cursorBackground: "#0a0a0a",
     });
   });
-});
-
-describe("getMobileTerminalTheme", () => {
-  it("preserves the Pierre terminal for the default theme", () => {
-    for (const scheme of ["light", "dark"] as const) {
-      expect(getMobileTerminalTheme("lecturn", scheme)).toEqual(getPierreTerminalTheme(scheme));
-    }
-  });
-
   it("applies the selected palette without replacing ANSI status colors", () => {
     const standard = getMobileTerminalTheme("lecturn", "dark");
     const ocean = getMobileTerminalTheme("ocean", "dark");
@@ -58,7 +45,7 @@ describe("getMobileTerminalTheme", () => {
 
 describe("buildGhosttyThemeConfig", () => {
   it("serializes theme colors into a ghostty config file", () => {
-    const config = buildGhosttyThemeConfig(getPierreTerminalTheme("dark"));
+    const config = buildGhosttyThemeConfig(getMobileTerminalTheme("lecturn", "dark"));
 
     expect(config).toContain("background = #0a0a0a");
     expect(config).toContain("foreground = #adadb1");

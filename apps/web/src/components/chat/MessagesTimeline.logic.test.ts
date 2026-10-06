@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { MessageId, TurnId } from "@lecturn/contracts";
+import { CheckpointRef, MessageId, TurnId } from "@lecturn/contracts";
 import {
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
@@ -20,6 +20,7 @@ import {
   deriveTimelineEntriesWithState,
   type WorkLogEntry,
 } from "../../session-logic";
+import { buildForkTurnIdByMessageId, buildRevertTurnCountByUserMessageId } from "../ChatView.logic";
 import { isImageAttachment, type ChatMessage, type TurnDiffSummary } from "../../types";
 
 describe("streaming row projection", () => {
@@ -241,6 +242,83 @@ describe("streaming row projection", () => {
       }
     },
   );
+
+  it("reuses rows when the revert and fork maps are rebuilt from the streamed entries", () => {
+    const initial = fixture("Partial");
+    const inferredCheckpointTurnCountByTurnId = { [initial.historyTurnId]: 1 };
+    const turnDiffSummaryByAssistantMessageId = new Map<MessageId, TurnDiffSummary>([
+      [
+        MessageId.make("history-assistant"),
+        {
+          turnId: initial.historyTurnId,
+          checkpointTurnCount: 1,
+          checkpointRef: CheckpointRef.make("refs/lecturn/checkpoints/history-turn"),
+          status: "ready",
+          files: [],
+          assistantMessageId: MessageId.make("history-assistant"),
+          completedAt: initial.time(4),
+        },
+      ],
+    ]);
+    let revertMap: Map<MessageId, number> | null = null;
+    let forkMap: Map<MessageId, TurnId> | null = null;
+    // Mirrors ChatView: both maps are derived from each delta's entries.
+    const build = (timelineEntries: typeof initial.timeline.entries) => {
+      revertMap = buildRevertTurnCountByUserMessageId(
+        {
+          supportsConversationRollback: true,
+          timelineEntries,
+          turnDiffSummaryByAssistantMessageId,
+          inferredCheckpointTurnCountByTurnId,
+        },
+        revertMap,
+      );
+      forkMap = buildForkTurnIdByMessageId(
+        {
+          timelineEntries,
+          turnDiffSummaryByAssistantMessageId,
+          activeRunningTurnId: initial.turnId,
+          completedTurns: [
+            {
+              turnId: initial.historyTurnId,
+              assistantMessageId: MessageId.make("history-assistant"),
+              hasProviderTurnRef: true,
+            },
+          ],
+        },
+        forkMap,
+      );
+      return {
+        ...initial.input,
+        timelineEntries,
+        turnDiffSummaryByAssistantMessageId,
+        revertTurnCountByUserMessageId: revertMap,
+        forkTurnIdByMessageId: forkMap,
+      };
+    };
+    const previous = deriveMessagesTimelineRowsWithState(build(initial.timeline.entries));
+    expect(previous.rows.some((row) => row.kind === "message" && row.revertTurnCount === 0)).toBe(
+      true,
+    );
+    expect(
+      previous.rows.some(
+        (row) => row.kind === "message" && row.forkTurnId === initial.historyTurnId,
+      ),
+    ).toBe(true);
+    const last = initial.messages.at(-1)!;
+    const messages = [...initial.messages.slice(0, -1), { ...last, text: "Partial token" }];
+    const timeline = deriveTimelineEntriesWithState(messages, [], initial.work, initial.timeline);
+    const next = deriveMessagesTimelineRowsWithState(build(timeline.entries), previous);
+
+    expect(next.rows).toEqual(deriveMessagesTimelineRows(build(timeline.entries)));
+    for (const [index, row] of previous.rows.entries()) {
+      if ((row.kind === "message" || row.kind === "assistant-meta") && row.message === last) {
+        expect(next.rows[index]).toMatchObject({ message: { text: "Partial token" } });
+      } else {
+        expect(next.rows[index]).toBe(row);
+      }
+    }
+  });
 
   it.each(["completion", "turn", "role", "ordering"] as const)(
     "rebuilds row structure for a %s change with otherwise unchanged controls",

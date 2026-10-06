@@ -1389,6 +1389,56 @@ describe("buildRevertTurnCountByUserMessageId", () => {
       }).size,
     ).toBe(0);
   });
+
+  it.each([true, false])(
+    "returns the previous map when contents are unchanged (rollback supported: %s)",
+    (supportsConversationRollback) => {
+      const input = {
+        supportsConversationRollback,
+        timelineEntries,
+        turnDiffSummaryByAssistantMessageId,
+        inferredCheckpointTurnCountByTurnId: {},
+      };
+      const previous = buildRevertTurnCountByUserMessageId(input);
+      const streamed = timelineEntries.map((entry) =>
+        entry.message.role === "assistant"
+          ? { ...entry, message: { ...entry.message, text: "Updated the file again" } }
+          : entry,
+      );
+
+      expect(
+        buildRevertTurnCountByUserMessageId({ ...input, timelineEntries: streamed }, previous),
+      ).toBe(previous);
+    },
+  );
+
+  it("returns a new map when a revert target changes", () => {
+    const input = {
+      supportsConversationRollback: true,
+      timelineEntries,
+      turnDiffSummaryByAssistantMessageId,
+      inferredCheckpointTurnCountByTurnId: {},
+    };
+    const previous = buildRevertTurnCountByUserMessageId(input);
+    const next = buildRevertTurnCountByUserMessageId(
+      {
+        ...input,
+        turnDiffSummaryByAssistantMessageId: new Map([
+          [
+            assistantMessageId,
+            {
+              ...turnDiffSummaryByAssistantMessageId.get(assistantMessageId)!,
+              checkpointTurnCount: 3,
+            },
+          ],
+        ]),
+      },
+      previous,
+    );
+
+    expect(next).not.toBe(previous);
+    expect(next).toEqual(new Map([[userMessageId, 2]]));
+  });
 });
 
 describe("deriveComposerSendState", () => {
@@ -1746,6 +1796,61 @@ describe("buildForkTurnIdByMessageId", () => {
 
     expect(byMessageId.get(assistantM2)).toBeUndefined();
     expect(byMessageId.get(userM3)).toBe(turnA);
+  });
+
+  it.each([true, false])(
+    "returns the previous map when contents are unchanged (fork points: %s)",
+    (hasForkPoints) => {
+      const input = {
+        timelineEntries: entries,
+        turnDiffSummaryByAssistantMessageId: new Map<MessageId, TurnDiffSummary>(),
+        activeRunningTurnId: null,
+        completedTurns: hasForkPoints
+          ? [
+              { turnId: turnA, assistantMessageId: assistantM1, hasProviderTurnRef: true },
+              { turnId: turnB, assistantMessageId: assistantM2, hasProviderTurnRef: true },
+            ]
+          : [],
+        latestTurn,
+      };
+      const previous = buildForkTurnIdByMessageId(input);
+      expect(previous.size).toBe(hasForkPoints ? 4 : 0);
+      // A streaming text delta rebuilds the entries and the thread's turn list.
+      const streamed = entries.map((entry) =>
+        entry.kind === "message" && entry.message.id === userM3
+          ? { ...entry, message: { ...entry.message, text: "Next token" } }
+          : entry,
+      );
+
+      expect(
+        buildForkTurnIdByMessageId(
+          { ...input, timelineEntries: streamed, completedTurns: [...input.completedTurns] },
+          previous,
+        ),
+      ).toBe(previous);
+    },
+  );
+
+  it("returns a new map when a fork point changes", () => {
+    const input = {
+      timelineEntries: entries,
+      turnDiffSummaryByAssistantMessageId: new Map<MessageId, TurnDiffSummary>(),
+      activeRunningTurnId: null,
+      completedTurns: [
+        { turnId: turnA, assistantMessageId: assistantM1, hasProviderTurnRef: true },
+        { turnId: turnB, assistantMessageId: assistantM2, hasProviderTurnRef: true },
+      ],
+      latestTurn,
+    };
+    const previous = buildForkTurnIdByMessageId(input);
+    const next = buildForkTurnIdByMessageId({ ...input, activeRunningTurnId: turnB }, previous);
+
+    expect(next).not.toBe(previous);
+    expect([...next]).toEqual([
+      [assistantM1, turnA],
+      [userM2, turnA],
+      [userM3, turnA],
+    ]);
   });
 });
 

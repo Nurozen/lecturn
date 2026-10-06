@@ -41,6 +41,7 @@ import {
 } from "../types";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import * as Schema from "effect/Schema";
+import { shallow } from "zustand/vanilla/shallow";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentThreadDetails, environmentThreadShells } from "../state/threads";
 import {
@@ -470,19 +471,26 @@ export function getAntigravitySendBlockReason(
   return null;
 }
 
-export function buildRevertTurnCountByUserMessageId(input: {
-  supportsConversationRollback: boolean;
-  timelineEntries: ReadonlyArray<TimelineEntry>;
-  turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
-  inferredCheckpointTurnCountByTurnId: Readonly<Record<string, number | undefined>>;
-  /** Imported history has no checkpoints, so its messages never offer revert. */
-  importedFrom?: ThreadImportOrigin | null | undefined;
-}) {
+/**
+ * Maps each user message to the checkpoint turn count a revert should target.
+ * Returns `previous` when the result is unchanged: streaming text deltas
+ * rebuild `timelineEntries` per token, and the timeline row projection only
+ * reuses rows while this Map keeps its identity.
+ */
+export function buildRevertTurnCountByUserMessageId(
+  input: {
+    supportsConversationRollback: boolean;
+    timelineEntries: ReadonlyArray<TimelineEntry>;
+    turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
+    inferredCheckpointTurnCountByTurnId: Readonly<Record<string, number | undefined>>;
+    /** Imported history has no checkpoints, so its messages never offer revert. */
+    importedFrom?: ThreadImportOrigin | null | undefined;
+  },
+  previous: Map<MessageId, number> | null = null,
+): Map<MessageId, number> {
   const byUserMessageId = new Map<MessageId, number>();
-  if (!input.supportsConversationRollback) {
-    return byUserMessageId;
-  }
-  for (let index = 0; index < input.timelineEntries.length; index += 1) {
+  const entryCount = input.supportsConversationRollback ? input.timelineEntries.length : 0;
+  for (let index = 0; index < entryCount; index += 1) {
     const entry = input.timelineEntries[index];
     if (!entry || entry.kind !== "message" || entry.message.role !== "user") {
       continue;
@@ -512,7 +520,7 @@ export function buildRevertTurnCountByUserMessageId(input: {
       break;
     }
   }
-  return byUserMessageId;
+  return previous !== null && shallow(previous, byUserMessageId) ? previous : byUserMessageId;
 }
 
 export function reconcileMountedTerminalThreadIds(input: {
@@ -990,15 +998,20 @@ export function buildForkTitle(parentTitle: string | null | undefined): string {
  * turn; a user message forks through the previous completed assistant turn
  * (its text is re-seeded into the child's composer). Conversation completion
  * is independent of Git checkpoints, which plain chats may never create.
+ * Returns `previous` when the result is unchanged, for the same row-reuse
+ * reason as `buildRevertTurnCountByUserMessageId`.
  */
-export function buildForkTurnIdByMessageId(input: {
-  timelineEntries: ReadonlyArray<TimelineEntry>;
-  turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
-  activeRunningTurnId: TurnId | null;
-  completedTurns?: Thread["completedTurns"];
-  latestTurn?: Thread["latestTurn"];
-  requiresProviderTurnRef?: boolean;
-}): Map<MessageId, TurnId> {
+export function buildForkTurnIdByMessageId(
+  input: {
+    timelineEntries: ReadonlyArray<TimelineEntry>;
+    turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
+    activeRunningTurnId: TurnId | null;
+    completedTurns?: Thread["completedTurns"];
+    latestTurn?: Thread["latestTurn"];
+    requiresProviderTurnRef?: boolean;
+  },
+  previous: Map<MessageId, TurnId> | null = null,
+): Map<MessageId, TurnId> {
   const byMessageId = new Map<MessageId, TurnId>();
   const completedByMessageId = new Map<MessageId, TurnId>();
   if (input.completedTurns !== undefined) {
@@ -1045,7 +1058,7 @@ export function buildForkTurnIdByMessageId(input: {
     byMessageId.set(message.id, turnId);
     lastCompletedTurnId = turnId;
   }
-  return byMessageId;
+  return previous !== null && shallow(previous, byMessageId) ? previous : byMessageId;
 }
 
 /**
