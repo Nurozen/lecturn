@@ -35,6 +35,7 @@ import {
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   isNodePackageManagerCommandPath,
+  makeCachedProviderMaintenanceResolution,
   makeProviderMaintenanceCapabilities,
   type ProviderMaintenanceCapabilitiesResolver,
   resolvePackageManagedProviderMaintenance,
@@ -52,36 +53,37 @@ const decodeCopilotSettings = Schema.decodeSync(GithubCopilotSettings);
 const DRIVER_KIND = ProviderDriverKind.make("githubCopilot");
 const COPILOT_NPM_PACKAGE = "@github/copilot";
 
+const COPILOT_PACKAGE_MAINTENANCE = {
+  provider: DRIVER_KIND,
+  npmPackageName: COPILOT_NPM_PACKAGE,
+  nativeUpdate: null,
+};
+
 /**
- * npm, bun, pnpm, and Vite+ installs update through their package manager.
- * Every other install (Homebrew cask, WinGet, the install script) updates itself
- * with `copilot update`. The npm package name stays set either way so the
- * registry version check still works.
+ * npm, bun, pnpm, and Vite+ installs update through their package manager, and
+ * only once that manager is proven to own the executable. Every other install
+ * (Homebrew cask, WinGet, the install script) updates itself with
+ * `copilot update`. The npm package name stays set either way so the registry
+ * version check still works.
  */
 export const COPILOT_UPDATE_RESOLVER: ProviderMaintenanceCapabilitiesResolver = {
-  resolve: (options) => {
-    const commandPaths = [options?.resolvedCommandPath, options?.realCommandPath].filter(
-      (commandPath): commandPath is string => Boolean(commandPath?.trim()),
-    );
-    if (commandPaths.some(isNodePackageManagerCommandPath)) {
-      return resolvePackageManagedProviderMaintenance(
-        {
-          provider: DRIVER_KIND,
-          npmPackageName: COPILOT_NPM_PACKAGE,
-          homebrewFormula: null,
-          nativeUpdate: null,
-        },
-        options,
-      );
+  resolve: (context) => {
+    if (
+      context === null ||
+      [context.resolvedCommandPath, context.realCommandPath].some(isNodePackageManagerCommandPath)
+    ) {
+      return resolvePackageManagedProviderMaintenance(COPILOT_PACKAGE_MAINTENANCE, context);
     }
-    return makeProviderMaintenanceCapabilities({
-      provider: DRIVER_KIND,
-      packageName: COPILOT_NPM_PACKAGE,
-      updateExecutable:
-        options?.resolvedCommandPath?.trim() || options?.binaryPath?.trim() || "copilot",
-      updateArgs: ["update"],
-      updateLockKey: "copilot-native",
-    });
+    return Effect.succeed(
+      makeProviderMaintenanceCapabilities({
+        provider: DRIVER_KIND,
+        packageName: COPILOT_NPM_PACKAGE,
+        updateExecutable: context.resolvedCommandPath,
+        updateArgs: ["update"],
+        updateLockKey: "copilot-native",
+        platform: context.platform,
+      }),
+    );
   },
 };
 
@@ -127,12 +129,15 @@ export const CopilotDriver: ProviderDriver<GithubCopilotSettings, CopilotDriverE
         continuationGroupKey: continuationIdentity.continuationKey,
       });
       const effectiveConfig = { ...config, enabled } satisfies GithubCopilotSettings;
-      const resolveMaintenanceCapabilities = resolveProviderMaintenanceCapabilitiesEffect(
-        COPILOT_UPDATE_RESOLVER,
-        { binaryPath: effectiveConfig.binaryPath, env: processEnv },
-      ).pipe(
-        Effect.provideService(FileSystem.FileSystem, fileSystem),
-        Effect.provideService(Path.Path, path),
+      const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
+        resolveProviderMaintenanceCapabilitiesEffect(COPILOT_UPDATE_RESOLVER, {
+          binaryPath: effectiveConfig.binaryPath,
+          env: processEnv,
+        }).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+        ),
       );
 
       const adapter = yield* makeCopilotAdapter(effectiveConfig, {
@@ -155,7 +160,7 @@ export const CopilotDriver: ProviderDriver<GithubCopilotSettings, CopilotDriverE
       const snapshot = yield* makeManagedServerProvider<
         ProviderSnapshotSettings<GithubCopilotSettings>
       >({
-        resolveMaintenanceCapabilities,
+        resolveMaintenance,
         discovery: {
           waitForShell: !/[\\/]/.test(effectiveConfig.binaryPath?.trim() ?? ""),
           refreshEnvironment: () =>
@@ -168,19 +173,18 @@ export const CopilotDriver: ProviderDriver<GithubCopilotSettings, CopilotDriverE
           buildInitialCopilotProviderSnapshot(settings.provider).pipe(Effect.map(stampIdentity)),
         checkProvider,
         detectionTimeout: COPILOT_DETECTION_TIMEOUT_MS,
-        enrichSnapshot: ({
-          settings,
-          snapshot: currentSnapshot,
-          maintenanceCapabilities,
-          publishSnapshot,
-        }) =>
-          enrichCopilotSnapshot({
-            snapshot: currentSnapshot,
-            maintenanceCapabilities,
-            enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
-            publishSnapshot,
-            httpClient,
-          }),
+        enrichSnapshot: ({ settings, snapshot: currentSnapshot, publishSnapshot }) =>
+          resolveMaintenance().pipe(
+            Effect.flatMap((maintenanceCapabilities) =>
+              enrichCopilotSnapshot({
+                snapshot: currentSnapshot,
+                maintenanceCapabilities,
+                enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
+                publishSnapshot,
+                httpClient,
+              }),
+            ),
+          ),
       }).pipe(
         Effect.mapError(
           (cause) =>

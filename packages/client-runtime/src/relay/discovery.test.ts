@@ -189,6 +189,7 @@ const makeHarness = Effect.fn("RelayDiscoveryTest.makeHarness")(function* () {
           ClientCapabilities.CloudSession,
           ClientCapabilities.CloudSession.of({
             accountIds: Ref.get(accountIds),
+            identity: (accountId) => Effect.succeed(Option.some({ accountId })),
             clerkToken: (accountId) =>
               Effect.all([Ref.get(accountTokens), Ref.get(clerkToken)]).pipe(
                 Effect.map(([tokens, fallback]) => tokens.get(accountId) ?? fallback),
@@ -383,6 +384,7 @@ describe("RelayEnvironmentDiscovery", () => {
             Layer.succeed(ManagedRelay.ManagedRelayClient, client),
             Layer.succeed(ClientCapabilities.CloudSession, {
               accountIds: Effect.succeed(["account-1"]),
+              identity: (accountId) => Effect.succeed(Option.some({ accountId })),
               clerkToken: () => Effect.succeed("clerk-token"),
             }),
             Layer.succeed(Connectivity.Connectivity, {

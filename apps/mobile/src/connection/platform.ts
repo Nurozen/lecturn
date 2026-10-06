@@ -123,6 +123,10 @@ const capabilitiesLayer = Layer.effectContext(
         accountIds: Effect.sync(() =>
           appAtomRegistry.get(knownConnectAccountsAtom).map((account) => account.accountId),
         ),
+        identity: (accountId) =>
+          Effect.sync(() =>
+            Option.fromNullishOr(appAtomRegistry.get(managedRelaySessionsAtom).get(accountId)),
+          ),
         clerkToken: Effect.fnUntraced(function* (accountId: string) {
           const session = appAtomRegistry.get(managedRelaySessionsAtom).get(accountId);
           if (session === undefined) {

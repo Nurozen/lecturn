@@ -21,6 +21,11 @@ export interface ProvisionedSshEnvironment extends PreparedSshEnvironment {
   readonly label: string;
 }
 
+/** Stable for one signed-in session, including same-account token refreshes. */
+export interface CloudSessionIdentity {
+  readonly accountId: string;
+}
+
 export class CloudSession extends Context.Service<
   CloudSession,
   {
@@ -37,6 +42,8 @@ export class CloudSession extends Context.Service<
      * blocked instead of connecting from cache. Left out, nothing is blocked.
      */
     readonly accountsSynced?: Effect.Effect<boolean>;
+    /** That account's signed-in session, absent while it is signed out or not yet loaded. */
+    readonly identity: (accountId: string) => Effect.Effect<Option.Option<CloudSessionIdentity>>;
     readonly clerkToken: (accountId: string) => Effect.Effect<string, ConnectionAttemptError>;
   }
 >()("@lecturn/client-runtime/platform/capabilities/CloudSession") {}

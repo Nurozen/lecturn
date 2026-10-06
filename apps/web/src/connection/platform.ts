@@ -124,6 +124,10 @@ export const webCloudSession = CloudSession.of({
   accountIds: Effect.sync(() => managedRelayAccountIds(appAtomRegistry)),
   knownAccountIds: Effect.sync(() => appAtomRegistry.get(knownConnectAccountsAtom).accountIds),
   accountsSynced: Effect.sync(() => appAtomRegistry.get(knownConnectAccountsAtom).synced),
+  identity: (accountId) =>
+    Effect.sync(() =>
+      Option.fromNullishOr(appAtomRegistry.get(managedRelaySessionsAtom).get(accountId)),
+    ),
   clerkToken: Effect.fnUntraced(function* (accountId: string) {
     const session = appAtomRegistry.get(managedRelaySessionsAtom).get(accountId);
     if (session === undefined) {

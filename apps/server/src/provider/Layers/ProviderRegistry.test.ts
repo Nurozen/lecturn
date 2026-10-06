@@ -1165,10 +1165,13 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               displayName: undefined,
               enabled: true,
               snapshot: {
-                maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
-                  provider: cachedProvider.driver,
-                  packageName: null,
-                }),
+                resolveMaintenance: () =>
+                  Effect.succeed(
+                    makeManualOnlyProviderMaintenanceCapabilities({
+                      provider: cachedProvider.driver,
+                      packageName: null,
+                    }),
+                  ),
                 getSnapshot: Effect.succeed(pendingProvider),
                 refresh: Ref.get(nextProvider),
                 streamChanges: Stream.empty,
@@ -1439,10 +1442,13 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             displayName: undefined,
             enabled: true,
             snapshot: {
-              maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
-                provider: codexDriver,
-                packageName: null,
-              }),
+              resolveMaintenance: () =>
+                Effect.succeed(
+                  makeManualOnlyProviderMaintenanceCapabilities({
+                    provider: codexDriver,
+                    packageName: null,
+                  }),
+                ),
               getSnapshot: Effect.succeed(initialProvider),
               refresh: Ref.update(refreshCalls, (count) => count + 1).pipe(
                 Effect.andThen(Effect.never),
@@ -1531,10 +1537,13 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             displayName: undefined,
             enabled: true,
             snapshot: {
-              maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
-                provider: driver,
-                packageName: null,
-              }),
+              resolveMaintenance: () =>
+                Effect.succeed(
+                  makeManualOnlyProviderMaintenanceCapabilities({
+                    provider: driver,
+                    packageName: null,
+                  }),
+                ),
               getSnapshot: Effect.succeed(provider),
               refresh: Effect.succeed(provider),
               streamChanges: Stream.empty,
@@ -1720,10 +1729,13 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               displayName: undefined,
               enabled: true,
               snapshot: {
-                maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
-                  provider: codexDriver,
-                  packageName: null,
-                }),
+                resolveMaintenance: () =>
+                  Effect.succeed(
+                    makeManualOnlyProviderMaintenanceCapabilities({
+                      provider: codexDriver,
+                      packageName: null,
+                    }),
+                  ),
                 getSnapshot: Effect.succeed(codexProvider),
                 refresh: Ref.update(codexRefreshCalls, (count) => count + 1).pipe(
                   Effect.as(codexProvider),
@@ -1744,10 +1756,13 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               displayName: undefined,
               enabled: true,
               snapshot: {
-                maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
-                  provider: openCodeDriver,
-                  packageName: null,
-                }),
+                resolveMaintenance: () =>
+                  Effect.succeed(
+                    makeManualOnlyProviderMaintenanceCapabilities({
+                      provider: openCodeDriver,
+                      packageName: null,
+                    }),
+                  ),
                 getSnapshot: Effect.succeed(failedOpenCodeProvider),
                 refresh: Ref.update(openCodeRefreshCalls, (count) => count + 1).pipe(
                   Effect.andThen(Ref.get(catalogSnapshot)),
@@ -1868,10 +1883,13 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             displayName: undefined,
             enabled: true,
             snapshot: {
-              maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
-                provider: cursorDriver,
-                packageName: null,
-              }),
+              resolveMaintenance: () =>
+                Effect.succeed(
+                  makeManualOnlyProviderMaintenanceCapabilities({
+                    provider: cursorDriver,
+                    packageName: null,
+                  }),
+                ),
               getSnapshot: Effect.succeed(initialProvider),
               refresh: Effect.succeed(refreshedProvider),
               streamChanges: Stream.fromPubSub(changes),
@@ -1990,10 +2008,13 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               displayName: undefined,
               enabled: true,
               snapshot: {
-                maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
-                  provider: openCodeDriver,
-                  packageName: null,
-                }),
+                resolveMaintenance: () =>
+                  Effect.succeed(
+                    makeManualOnlyProviderMaintenanceCapabilities({
+                      provider: openCodeDriver,
+                      packageName: null,
+                    }),
+                  ),
                 getSnapshot: Effect.succeed(initialProvider),
                 refresh: Effect.succeed(authoritativeProvider),
                 streamChanges: Stream.fromPubSub(changes),
@@ -2090,10 +2111,13 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             displayName: undefined,
             enabled: true,
             snapshot: {
-              maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
-                provider: codexDriver,
-                packageName: null,
-              }),
+              resolveMaintenance: () =>
+                Effect.succeed(
+                  makeManualOnlyProviderMaintenanceCapabilities({
+                    provider: codexDriver,
+                    packageName: null,
+                  }),
+                ),
               getSnapshot: Effect.succeed(cachedProvider),
               refresh: Effect.die(new Error("simulated refresh failure")),
               streamChanges: Stream.empty,
@@ -2184,10 +2208,13 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             displayName: undefined,
             enabled: true,
             snapshot: {
-              maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
-                provider: provider.driver,
-                packageName: null,
-              }),
+              resolveMaintenance: () =>
+                Effect.succeed(
+                  makeManualOnlyProviderMaintenanceCapabilities({
+                    provider: provider.driver,
+                    packageName: null,
+                  }),
+                ),
               getSnapshot: Effect.succeed(provider),
               refresh: Effect.succeed(provider),
               streamChanges: Stream.empty,
@@ -2448,7 +2475,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             Layer.updateService(ChildProcessSpawner.ChildProcessSpawner, (spawner) =>
               ChildProcessSpawner.make((command) => {
                 if (command._tag !== "StandardCommand") return spawner.spawn(command);
-                spawnedCommands.push(command.command);
+                // Another provider installed on this machine may ask its installer who owns it.
+                if (command.command === firstMissing || command.command === secondMissing) {
+                  spawnedCommands.push(command.command);
+                }
                 const beforeSpawn =
                   command.command === secondMissing
                     ? Deferred.succeed(secondProbeStarted, undefined).pipe(

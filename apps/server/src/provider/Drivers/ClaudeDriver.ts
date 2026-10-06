@@ -50,6 +50,7 @@ import { withInstanceIdentity } from "./instanceIdentity.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
+  makeCachedProviderMaintenanceResolution,
   makePackageManagedProviderMaintenanceResolver,
   normalizeCommandPath,
   resolveProviderMaintenanceCapabilitiesEffect,
@@ -83,11 +84,8 @@ function isClaudeNativeCommandPath(commandPath: string): boolean {
 const UPDATE = makePackageManagedProviderMaintenanceResolver({
   provider: DRIVER_KIND,
   npmPackageName: "@anthropic-ai/claude-code",
-  homebrewFormula: "claude-code",
   nativeUpdate: {
-    executable: "claude",
     args: ["update"],
-    lockKey: "claude-native",
     isCommandPath: isClaudeNativeCommandPath,
   },
 });
@@ -142,12 +140,15 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
           ),
         ),
       );
-      const resolveMaintenanceCapabilities = resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
-        binaryPath: effectiveConfig.binaryPath,
-        env: processEnv,
-      }).pipe(
-        Effect.provideService(FileSystem.FileSystem, fileSystem),
-        Effect.provideService(Path.Path, path),
+      const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
+        resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
+          binaryPath: effectiveConfig.binaryPath,
+          env: processEnv,
+        }).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+        ),
       );
       const continuationGroupKey = yield* makeClaudeContinuationGroupKey(effectiveConfig);
       // External sessions are only listable from the server process's own
@@ -210,7 +211,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
 
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<ClaudeSettings>>({
-        resolveMaintenanceCapabilities,
+        resolveMaintenance,
         discovery: {
           waitForShell: !/[\\/]/.test(effectiveConfig.binaryPath?.trim() ?? ""),
           refreshEnvironment: () =>
@@ -227,10 +228,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
             Effect.map(stampIdentity),
           ),
         checkProvider,
-        enrichSnapshot: ({ settings, snapshot, maintenanceCapabilities, publishSnapshot }) =>
-          enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities, {
-            enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
-          }).pipe(
+        enrichSnapshot: ({ settings, snapshot, publishSnapshot }) =>
+          resolveMaintenance().pipe(
+            Effect.flatMap((maintenanceCapabilities) =>
+              enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities, {
+                enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
+              }),
+            ),
             Effect.provideService(HttpClient.HttpClient, httpClient),
             Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
           ),

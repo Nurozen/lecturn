@@ -59,7 +59,9 @@ import { makeCodexExternalSessionsLister } from "./CodexExternalSessions.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
+  makeCachedProviderMaintenanceResolution,
   makePackageManagedProviderMaintenanceResolver,
+  normalizeCommandPath,
   resolveProviderMaintenanceCapabilitiesEffect,
 } from "../providerMaintenance.ts";
 import {
@@ -75,12 +77,29 @@ import {
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("codex");
-const UPDATE = makePackageManagedProviderMaintenanceResolver({
-  provider: DRIVER_KIND,
-  npmPackageName: "@openai/codex",
-  homebrewFormula: "codex",
-  nativeUpdate: null,
-});
+// The standalone installer lays out `<CODEX_HOME>/packages/standalone/…`;
+// CODEX_HOME is not always `~/.codex`.
+function isCodexStandaloneCommandPath(commandPath: string): boolean {
+  return normalizeCommandPath(commandPath).includes("/packages/standalone/");
+}
+
+/**
+ * `codex update` replaces the standalone tree under `CODEX_HOME`. That tree
+ * lives in the shared home even when an auth-overlay shadow home is in use
+ * (the overlay only carries auth and a few local entries), so the updater
+ * runs against `sharedHomePath` rather than the instance's effective home.
+ */
+function makeCodexMaintenanceResolver(sharedHomePath: string) {
+  return makePackageManagedProviderMaintenanceResolver({
+    provider: DRIVER_KIND,
+    npmPackageName: "@openai/codex",
+    nativeUpdate: {
+      args: ["update"],
+      isCommandPath: isCodexStandaloneCommandPath,
+      env: { CODEX_HOME: sharedHomePath },
+    },
+  });
+}
 
 /**
  * Services the driver needs to materialize an instance. Surfaced as the
@@ -113,6 +132,8 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const resetCreditCoordinator = yield* CodexResetCreditCoordinator;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const pathService = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
@@ -143,12 +164,18 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         enabled,
         homePath: homeLayout.effectiveHomePath ?? "",
       } satisfies CodexSettings;
-      const resolveMaintenanceCapabilities = resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
-        binaryPath: effectiveConfig.binaryPath,
-        env: processEnv,
-      }).pipe(
-        Effect.provideService(FileSystem.FileSystem, yield* FileSystem.FileSystem),
-        Effect.provideService(Path.Path, yield* Path.Path),
+      const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
+        resolveProviderMaintenanceCapabilitiesEffect(
+          makeCodexMaintenanceResolver(homeLayout.sharedHomePath),
+          {
+            binaryPath: effectiveConfig.binaryPath,
+            env: processEnv,
+          },
+        ).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, pathService),
+        ),
       );
 
       // `makeCodexAdapter` and `makeCodexTextGeneration` have `never` error
@@ -186,7 +213,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       );
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<CodexSettings>>({
-        resolveMaintenanceCapabilities,
+        resolveMaintenance,
         discovery: {
           waitForShell: !/[\\/]/.test(effectiveConfig.binaryPath?.trim() ?? ""),
           refreshEnvironment: () =>
@@ -203,10 +230,13 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
               stampIdentity(ModelManifest.applyModelManifest(draft, manifest, DRIVER_KIND)),
           ),
         checkProvider,
-        enrichSnapshot: ({ settings, snapshot, maintenanceCapabilities, publishSnapshot }) =>
-          enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities, {
-            enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
-          }).pipe(
+        enrichSnapshot: ({ settings, snapshot, publishSnapshot }) =>
+          resolveMaintenance().pipe(
+            Effect.flatMap((maintenanceCapabilities) =>
+              enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities, {
+                enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
+              }),
+            ),
             Effect.provideService(HttpClient.HttpClient, httpClient),
             Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
           ),
