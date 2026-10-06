@@ -1,0 +1,91 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // These executables are supplied by the OS or installed separately from npm.
+  "ignoreBinaries": ["eas", "file", "mkfifo", "pkill", "pkg-config", "plutil", "sips"],
+  "workspaces": {
+    ".": {
+      // Keep vendored reference repositories outside the root project.
+      "project": ["*.{js,mjs,cjs,ts,mts,cts}", ".github/**/*.cjs"],
+      "entry": [".github/scripts/thread-transfer-report.cjs"],
+      "vite": { "entry": [".github/**/*.test.cjs"] },
+      "vitest": { "entry": [".github/**/*.test.cjs"] },
+    },
+    "apps/server": {
+      // Vite+ pack entries and the launcher used by installed background services.
+      "entry": [
+        "src/bin.ts!",
+        "src/service-launcher.ts!",
+        "scripts/cli.ts",
+        "src/provider/testFixtures/*.mjs",
+      ],
+      // Native msgpack acceleration and the Vite+ web build prerequisite.
+      "ignoreDependencies": ["msgpackr-extract", "@lecturn/web"],
+    },
+    "apps/desktop": {
+      // Electron loads these bundles by filename rather than importing them.
+      "entry": [
+        "src/main.ts!",
+        "src/preload.ts!",
+        "src/preview-pick-preload.ts!",
+        "src/preview-pip-preload.ts!",
+        "src/activity-preload.ts!",
+        "src/preview/Annotation.css!",
+      ],
+      // The injected runtime resolves Playwright by string; release tooling runs
+      // electron-builder from this workspace, outside its package scripts.
+      "ignoreDependencies": ["playwright-core", "electron-builder"],
+    },
+    "apps/web": {
+      // Worktree setup invokes this directly from lecturn.json.
+      "entry": ["scripts/warm-dep-cache.ts"],
+      // Replaced in the sidebar by useSagaSidebarTree; kept until the fork decides its fate.
+      "ignore": ["src/components/stave/SagaSidebarSection.tsx"],
+    },
+    "apps/marketing": {
+      // Upstream's legal page layout. The fork's legal pages are hand-written and do not use it.
+      "ignore": ["src/components/LegalPage.astro"],
+    },
+    "apps/mobile": {
+      // Expo loads local config plugins by string; Metro handles platform variants.
+      "entry": ["index.ts!", "plugins/*.cjs"],
+      // Fonts are configured as asset paths; Expo autolinks the native packages.
+      "ignoreDependencies": [
+        "@expo-google-fonts/dm-sans",
+        "@lecturn/mobile-review-diff-native",
+        "@lecturn/mobile-terminal-native",
+      ],
+    },
+    "apps/mobile/modules/lecturn-markdown-text": {
+      // React Native codegen discovers component specifications by filename.
+      "entry": ["src/*NativeComponent.ts!"],
+    },
+    "infra/relay": {
+      // The multi-account push probe is run by hand; see infra/relay/README.md.
+      "entry": [
+        "alchemy.run.ts!",
+        "src/persistence/schema.ts!",
+        "scripts/verify-multi-account-push.ts",
+      ],
+    },
+    "scripts": {
+      // Maintainer scripts run by hand (NOTICE.md, assets/provider-emblems/README.md). The upstream
+      // icon exporter stays beside export-lecturn-icons.ts, which icons:export runs instead.
+      "entry": ["export-brand-icons.ts", "export-provider-emblems.ts", "generate-legal-notices.ts"],
+    },
+    "packages/*": {
+      // These workspace packages are private to this monorepo.
+      "includeEntryExports": true,
+    },
+    "packages/effect-acp": {
+      "includeEntryExports": true,
+      "entry": ["test/fixtures/*.ts"],
+      // Generated upstream protocol definitions are retained as a complete set.
+      "ignoreIssues": { "src/_generated/**": ["exports", "types"] },
+    },
+    "packages/effect-codex-app-server": {
+      "includeEntryExports": true,
+      "entry": ["test/fixtures/*.ts"],
+      "ignoreIssues": { "src/_generated/**": ["exports", "types"] },
+    },
+  },
+}
