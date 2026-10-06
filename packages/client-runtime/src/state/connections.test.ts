@@ -85,6 +85,7 @@ function makeCatalog(initialTargets: ReadonlyArray<ConnectionTarget>) {
         }),
         Layer.succeed(ClientCapabilities.CloudSession, {
           accountIds: Effect.succeed(["account-a", "account-b"]),
+          identity: (accountId) => Effect.succeed(Option.some({ accountId })),
           clerkToken: () => Effect.die(new Error("Clerk tokens are not used.")),
         }),
         Layer.succeed(Connectivity.Connectivity, {

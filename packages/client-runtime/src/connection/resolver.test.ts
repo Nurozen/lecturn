@@ -1,5 +1,4 @@
 import { EnvironmentId, type DesktopSshEnvironmentTarget } from "@lecturn/contracts";
-import { RelayEnvironmentConnectScope } from "@lecturn/contracts/relay";
 import { RelayClientTracer } from "@lecturn/shared/relayTracing";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -8,7 +7,6 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Tracer from "effect/Tracer";
 
-import * as ManagedRelay from "../relay/managedRelay.ts";
 import * as ConnectionResolver from "./resolver.ts";
 import * as ClientCapabilities from "../platform/capabilities.ts";
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
@@ -35,7 +33,6 @@ const ENVIRONMENT_ID = EnvironmentId.make("environment-1");
 const ENDPOINT = {
   httpBaseUrl: "https://environment.example.test",
   wsBaseUrl: "wss://environment.example.test",
-  providerKind: "cloudflare_tunnel" as const,
 };
 const SSH_TARGET: DesktopSshEnvironmentTarget = {
   alias: "development",
@@ -49,10 +46,6 @@ function catalogEntry(
   profile: Option.Option<ConnectionProfile> = Option.none(),
 ): ConnectionCatalogEntry {
   return { target, profile };
-}
-
-function unsupported<A>(name: string): Effect.Effect<A> {
-  return Effect.die(new Error(`Unexpected relay call: ${name}`));
 }
 
 function collectingTracer(spans: Array<string>): Tracer.Tracer {
@@ -69,33 +62,9 @@ function collectingTracer(spans: Array<string>): Tracer.Tracer {
   });
 }
 
-function relayClient(
-  connectEnvironment: ManagedRelay.ManagedRelayClient["Service"]["connectEnvironment"],
-) {
-  return ManagedRelay.ManagedRelayClient.of({
-    relayUrl: "https://relay.example.test",
-    listEnvironments: () => unsupported("listEnvironments"),
-    listDevices: () => unsupported("listDevices"),
-    createEnvironmentLinkChallenge: () => unsupported("createEnvironmentLinkChallenge"),
-    linkEnvironment: () => unsupported("linkEnvironment"),
-    unlinkEnvironment: () => unsupported("unlinkEnvironment"),
-    getEnvironmentStatus: () => unsupported("getEnvironmentStatus"),
-    connectEnvironment,
-    registerDevice: () => unsupported("registerDevice"),
-    unregisterDevice: () => unsupported("unregisterDevice"),
-    registerLiveActivity: () => unsupported("registerLiveActivity"),
-    getAgentActivitySnapshot: () => unsupported("getAgentActivitySnapshot"),
-    resetTokenCache: () => Effect.void,
-  });
-}
-
 const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((options?: {
   readonly profiles?: ReadonlyArray<ConnectionProfile>;
   readonly credentials?: ReadonlyArray<readonly [string, ConnectionCredential]>;
-  readonly accountIds?: ReadonlyArray<string>;
-  readonly knownAccountIds?: ReadonlyArray<string>;
-  readonly accountsSynced?: boolean;
-  readonly connectEnvironment?: ManagedRelay.ManagedRelayClient["Service"]["connectEnvironment"];
   readonly authorizeBearer?: RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization["Service"]["authorizeBearer"];
   readonly authorizeDpop?: RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization["Service"]["authorizeDpop"];
   readonly primaryBearerToken?: string;
@@ -134,19 +103,18 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
     authorizeDpop:
       options?.authorizeDpop ??
       ((input) =>
-        input.obtainBootstrap.pipe(
-          Effect.as({
-            environmentId: input.expectedEnvironmentId,
-            label: "Authorized relay environment",
-            httpBaseUrl: ENDPOINT.httpBaseUrl,
-            socketUrl: "wss://authorized.example.test/ws?wsTicket=dpop",
-            httpAuthorization: {
-              _tag: "Dpop" as const,
-              accessToken: "dpop-access-token",
-              expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
-            },
-          }),
-        )),
+        Effect.succeed({
+          environmentId: input.expectedEnvironmentId,
+          label: "Authorized relay environment",
+          httpBaseUrl: ENDPOINT.httpBaseUrl,
+          socketUrl: "wss://authorized.example.test/ws?wsTicket=dpop",
+          httpAuthorization: {
+            _tag: "Dpop" as const,
+            accessToken: "dpop-access-token",
+            expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+          },
+        })),
+    authorizeDpopHttp: () => Effect.die("unused"),
   });
   const ssh = ClientCapabilities.SshEnvironmentGateway.of({
     provision: () => Effect.die("unused"),
@@ -169,19 +137,6 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
     Layer.succeed(ConnectionProfileStore.ConnectionProfileStore, profileStore),
     Layer.succeed(ConnectionCredentialStore.ConnectionCredentialStore, credentialStore),
     Layer.succeed(
-      ClientCapabilities.CloudSession,
-      ClientCapabilities.CloudSession.of({
-        accountIds: Effect.succeed(options?.accountIds ?? ["account-1"]),
-        ...(options?.knownAccountIds === undefined
-          ? {}
-          : { knownAccountIds: Effect.succeed(options.knownAccountIds) }),
-        ...(options?.accountsSynced === undefined
-          ? {}
-          : { accountsSynced: Effect.succeed(options.accountsSynced) }),
-        clerkToken: (accountId) => Effect.succeed(`clerk-session:${accountId}`),
-      }),
-    ),
-    Layer.succeed(
       ClientCapabilities.PrimaryEnvironmentAuth,
       ClientCapabilities.PrimaryEnvironmentAuth.of({
         bearerToken: Effect.succeed(Option.fromNullishOr(options?.primaryBearerToken)),
@@ -194,27 +149,8 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
         scopes: [],
       }),
     ),
-    Layer.succeed(
-      ClientCapabilities.RelayDeviceIdentity,
-      ClientCapabilities.RelayDeviceIdentity.of({
-        deviceId: Effect.succeed(Option.some("device-1")),
-      }),
-    ),
     Layer.succeed(RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization, remote),
     Layer.succeed(ClientCapabilities.SshEnvironmentGateway, ssh),
-    Layer.succeed(
-      ManagedRelay.ManagedRelayClient,
-      relayClient(
-        options?.connectEnvironment ??
-          ((input) =>
-            Effect.succeed({
-              environmentId: input.environmentId,
-              endpoint: ENDPOINT,
-              credential: "relay-bootstrap",
-              expiresAt: "2026-06-06T00:00:00.000Z",
-            })),
-      ),
-    ),
   );
 
   return Effect.succeed(ConnectionResolver.layer.pipe(Layer.provide(dependencies)));
@@ -326,42 +262,36 @@ describe("ConnectionResolver", () => {
     }),
   );
 
-  it.effect("brokers relay credentials with the current cloud session and device identity", () =>
+  it.effect("prepares relay connections with the authorized endpoint and credentials", () =>
     Effect.gen(function* () {
-      const relayInputs = yield* Ref.make<
-        ReadonlyArray<{
-          readonly clerkToken: string;
-          readonly scopes: ReadonlyArray<string>;
-          readonly deviceId?: string;
-        }>
-      >([]);
-      const bootstrapCredentials = yield* Ref.make<ReadonlyArray<string>>([]);
       const target = new RelayConnectionTarget({
         environmentId: ENVIRONMENT_ID,
         label: "Cloud",
       });
+      const brokerLayer = yield* makeDependencies();
+      const broker = yield* ConnectionResolver.ConnectionResolver.pipe(Effect.provide(brokerLayer));
+
+      expect(yield* broker.prepare(catalogEntry(target))).toEqual({
+        environmentId: ENVIRONMENT_ID,
+        label: "Authorized relay environment",
+        httpBaseUrl: ENDPOINT.httpBaseUrl,
+        socketUrl: "wss://authorized.example.test/ws?wsTicket=dpop",
+        httpAuthorization: {
+          _tag: "Dpop",
+          accessToken: "dpop-access-token",
+          expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+        },
+        target,
+      });
+    }),
+  );
+
+  it.effect("names a tagged relay target's owning account to the authorization service", () =>
+    Effect.gen(function* () {
+      const owners = yield* Ref.make<ReadonlyArray<string | undefined>>([]);
       const brokerLayer = yield* makeDependencies({
-        connectEnvironment: (input) =>
-          Ref.update(relayInputs, (values) => [
-            ...values,
-            {
-              clerkToken: input.clerkToken,
-              scopes: input.scopes,
-              ...(input.deviceId ? { deviceId: input.deviceId } : {}),
-            },
-          ]).pipe(
-            Effect.as({
-              environmentId: input.environmentId,
-              endpoint: ENDPOINT,
-              credential: "relay-bootstrap",
-              expiresAt: "2026-06-06T00:00:00.000Z",
-            }),
-          ),
         authorizeDpop: (input) =>
-          input.obtainBootstrap.pipe(
-            Effect.tap((bootstrap) =>
-              Ref.update(bootstrapCredentials, (values) => [...values, bootstrap.credential]),
-            ),
+          Ref.update(owners, (values) => [...values, input.accountId]).pipe(
             Effect.as({
               environmentId: input.expectedEnvironmentId,
               label: "Cloud",
@@ -376,255 +306,21 @@ describe("ConnectionResolver", () => {
           ),
       });
       const broker = yield* ConnectionResolver.ConnectionResolver.pipe(Effect.provide(brokerLayer));
+      const prepare = (accountId?: string) =>
+        broker.prepare(
+          catalogEntry(
+            new RelayConnectionTarget({
+              environmentId: ENVIRONMENT_ID,
+              label: "Cloud",
+              ...(accountId === undefined ? {} : { accountId }),
+            }),
+          ),
+        );
 
-      expect((yield* broker.prepare(catalogEntry(target))).socketUrl).toContain("wsTicket=dpop");
-      expect(yield* Ref.get(relayInputs)).toEqual([
-        {
-          clerkToken: "clerk-session:account-1",
-          scopes: [RelayEnvironmentConnectScope],
-          deviceId: "device-1",
-        },
-      ]);
-      expect(yield* Ref.get(bootstrapCredentials)).toEqual(["relay-bootstrap"]);
-    }),
-  );
+      yield* prepare("account-b");
+      yield* prepare();
 
-  const prepareRelayAs = Effect.fn("test.prepareRelayAs")(function* (input: {
-    readonly accountIds: ReadonlyArray<string>;
-    readonly knownAccountIds?: ReadonlyArray<string>;
-    readonly accountsSynced?: boolean;
-    readonly targetAccountId?: string;
-    /** Whether the authorization service already holds a usable access token. */
-    readonly cachedToken?: boolean;
-  }) {
-    const clerkTokens = yield* Ref.make<ReadonlyArray<string>>([]);
-    const owners = yield* Ref.make<
-      ReadonlyArray<{
-        readonly accountId?: string;
-        readonly acceptUnstampedToken: boolean | undefined;
-      }>
-    >([]);
-    const brokerLayer = yield* makeDependencies({
-      accountIds: input.accountIds,
-      ...(input.knownAccountIds === undefined ? {} : { knownAccountIds: input.knownAccountIds }),
-      ...(input.accountsSynced === undefined ? {} : { accountsSynced: input.accountsSynced }),
-      connectEnvironment: (request) =>
-        Ref.update(clerkTokens, (values) => [...values, request.clerkToken]).pipe(
-          Effect.as({
-            environmentId: request.environmentId,
-            endpoint: ENDPOINT,
-            credential: "relay-bootstrap",
-            expiresAt: "2026-06-06T00:00:00.000Z",
-          }),
-        ),
-      authorizeDpop: ({
-        accountId,
-        acceptUnstampedToken,
-        expectedEnvironmentId,
-        obtainBootstrap,
-      }) =>
-        Ref.update(owners, (values) => [
-          ...values,
-          { ...(accountId === undefined ? {} : { accountId }), acceptUnstampedToken },
-        ]).pipe(
-          Effect.andThen(input.cachedToken === true ? Effect.void : obtainBootstrap),
-          Effect.as({
-            environmentId: expectedEnvironmentId,
-            label: "Cloud",
-            httpBaseUrl: ENDPOINT.httpBaseUrl,
-            socketUrl: "wss://environment.example.test/ws?wsTicket=dpop",
-            httpAuthorization: {
-              _tag: "Dpop" as const,
-              accessToken: "dpop-access-token",
-              expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
-            },
-          }),
-        ),
-    });
-    const broker = yield* ConnectionResolver.ConnectionResolver.pipe(Effect.provide(brokerLayer));
-    const target = new RelayConnectionTarget({
-      environmentId: ENVIRONMENT_ID,
-      label: "Cloud",
-      ...(input.targetAccountId === undefined ? {} : { accountId: input.targetAccountId }),
-    });
-    const result = yield* Effect.result(broker.prepare(catalogEntry(target)));
-    return { result, clerkTokens: yield* Ref.get(clerkTokens), owners: yield* Ref.get(owners) };
-  });
-
-  it.effect("connects a tagged relay target as its owning account", () =>
-    Effect.gen(function* () {
-      const prepared = yield* prepareRelayAs({
-        accountIds: ["account-a", "account-b"],
-        targetAccountId: "account-b",
-      });
-
-      expect(prepared.result._tag).toBe("Success");
-      expect(prepared.clerkTokens).toEqual(["clerk-session:account-b"]);
-      expect(prepared.owners).toEqual([{ accountId: "account-b", acceptUnstampedToken: false }]);
-    }),
-  );
-
-  it.effect("connects an untagged relay target as the only signed-in account", () =>
-    Effect.gen(function* () {
-      const prepared = yield* prepareRelayAs({ accountIds: ["account-a"] });
-
-      expect(prepared.result._tag).toBe("Success");
-      expect(prepared.clerkTokens).toEqual(["clerk-session:account-a"]);
-      expect(prepared.owners).toEqual([{ accountId: "account-a", acceptUnstampedToken: true }]);
-    }),
-  );
-
-  it.effect("blocks an untagged relay target with two accounts instead of trying each", () =>
-    Effect.gen(function* () {
-      const prepared = yield* prepareRelayAs({ accountIds: ["account-a", "account-b"] });
-
-      expect(prepared.clerkTokens).toEqual([]);
-      expect(prepared.owners).toEqual([]);
-      expect(prepared.result).toMatchObject({
-        _tag: "Failure",
-        failure: { _tag: "ConnectionBlockedError", reason: "authentication" },
-      });
-    }),
-  );
-
-  it.effect("does not guess the signed-in account while a known account needs sign-in", () =>
-    Effect.gen(function* () {
-      const prepared = yield* prepareRelayAs({
-        accountIds: ["account-b"],
-        knownAccountIds: ["account-expired", "account-b"],
-        cachedToken: true,
-      });
-
-      expect(prepared.clerkTokens).toEqual([]);
-      expect(prepared.owners).toEqual([]);
-      expect(prepared.result).toMatchObject({
-        _tag: "Failure",
-        failure: { _tag: "ConnectionBlockedError", reason: "authentication" },
-      });
-    }),
-  );
-
-  it.effect("connects from a cached token while no account is signed in", () =>
-    Effect.gen(function* () {
-      const prepared = yield* prepareRelayAs({ accountIds: [], cachedToken: true });
-
-      expect(prepared.result._tag).toBe("Success");
-      expect(prepared.clerkTokens).toEqual([]);
-      expect(prepared.owners).toEqual([{ acceptUnstampedToken: true }]);
-    }),
-  );
-
-  it.effect("asks for sign-in when no account is signed in and nothing is cached", () =>
-    Effect.gen(function* () {
-      const prepared = yield* prepareRelayAs({ accountIds: [] });
-
-      expect(prepared.clerkTokens).toEqual([]);
-      expect(prepared.result).toMatchObject({
-        _tag: "Failure",
-        failure: {
-          _tag: "ConnectionBlockedError",
-          reason: "authentication",
-          detail: "Sign in to Lecturn Connect to connect this environment.",
-        },
-      });
-    }),
-  );
-
-  it.effect("lets a tagged target use an unstamped token before any account has loaded", () =>
-    Effect.gen(function* () {
-      const prepared = yield* prepareRelayAs({
-        accountIds: [],
-        targetAccountId: "account-a",
-        cachedToken: true,
-      });
-
-      expect(prepared.result._tag).toBe("Success");
-      expect(prepared.owners).toEqual([{ accountId: "account-a", acceptUnstampedToken: true }]);
-    }),
-  );
-
-  it.effect(
-    "blocks a signed-out owner's target before the token cache once accounts are synced",
-    () =>
-      Effect.gen(function* () {
-        const prepared = yield* prepareRelayAs({
-          accountIds: ["account-b"],
-          knownAccountIds: ["account-a", "account-b"],
-          accountsSynced: true,
-          targetAccountId: "account-a",
-          cachedToken: true,
-        });
-
-        // authorizeDpop owns the cache, and is never reached.
-        expect(prepared.owners).toEqual([]);
-        expect(prepared.clerkTokens).toEqual([]);
-        expect(prepared.result).toMatchObject({
-          _tag: "Failure",
-          failure: {
-            _tag: "ConnectionBlockedError",
-            reason: "authentication",
-            detail: "Sign in to Lecturn Connect to connect this environment.",
-          },
-        });
-      }),
-  );
-
-  it.effect("blocks the only known account's untagged target once it is synced as signed out", () =>
-    Effect.gen(function* () {
-      const prepared = yield* prepareRelayAs({
-        accountIds: [],
-        knownAccountIds: ["account-a"],
-        accountsSynced: true,
-        cachedToken: true,
-      });
-
-      expect(prepared.owners).toEqual([]);
-      expect(prepared.result).toMatchObject({
-        _tag: "Failure",
-        failure: { _tag: "ConnectionBlockedError", reason: "authentication" },
-      });
-    }),
-  );
-
-  it.effect("connects a signed-out owner's target from cache until accounts are synced", () =>
-    Effect.gen(function* () {
-      const prepared = yield* prepareRelayAs({
-        accountIds: [],
-        knownAccountIds: ["account-a"],
-        accountsSynced: false,
-        targetAccountId: "account-a",
-        cachedToken: true,
-      });
-
-      expect(prepared.result._tag).toBe("Success");
-      expect(prepared.owners).toEqual([{ accountId: "account-a", acceptUnstampedToken: true }]);
-    }),
-  );
-
-  it.effect("connects a signed-in owner's target once accounts are synced", () =>
-    Effect.gen(function* () {
-      const prepared = yield* prepareRelayAs({
-        accountIds: ["account-a"],
-        knownAccountIds: ["account-a"],
-        accountsSynced: true,
-        targetAccountId: "account-a",
-      });
-
-      expect(prepared.result._tag).toBe("Success");
-      expect(prepared.clerkTokens).toEqual(["clerk-session:account-a"]);
-    }),
-  );
-
-  it.effect("leaves a session without a known list or synced flag as it was, as on mobile", () =>
-    Effect.gen(function* () {
-      const prepared = yield* prepareRelayAs({
-        accountIds: ["account-b"],
-        targetAccountId: "account-a",
-        cachedToken: true,
-      });
-
-      expect(prepared.result._tag).toBe("Success");
-      expect(prepared.owners).toEqual([{ accountId: "account-a", acceptUnstampedToken: false }]);
+      expect(yield* Ref.get(owners)).toEqual(["account-b", undefined]);
     }),
   );
 
@@ -638,20 +334,17 @@ describe("ConnectionResolver", () => {
       });
       const brokerLayer = yield* makeDependencies({
         authorizeDpop: (input) =>
-          input.obtainBootstrap.pipe(
-            Effect.as({
-              environmentId: input.expectedEnvironmentId,
-              label: "Cloud",
-              httpBaseUrl: ENDPOINT.httpBaseUrl,
-              socketUrl: "wss://environment.example.test/ws?wsTicket=dpop",
-              httpAuthorization: {
-                _tag: "Dpop" as const,
-                accessToken: "dpop-access-token",
-                expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
-              },
-            }),
-            Effect.withSpan("test.remote.authorizeDpop"),
-          ),
+          Effect.succeed({
+            environmentId: input.expectedEnvironmentId,
+            label: "Cloud",
+            httpBaseUrl: ENDPOINT.httpBaseUrl,
+            socketUrl: "wss://environment.example.test/ws?wsTicket=dpop",
+            httpAuthorization: {
+              _tag: "Dpop" as const,
+              accessToken: "dpop-access-token",
+              expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+            },
+          }).pipe(Effect.withSpan("test.remote.authorizeDpop")),
       });
       const broker = yield* ConnectionResolver.ConnectionResolver.pipe(Effect.provide(brokerLayer));
 
@@ -721,27 +414,24 @@ describe("ConnectionResolver", () => {
     }),
   );
 
-  it.effect("classifies relay request timeouts as retryable connection failures", () =>
+  it.effect("preserves relay authorization failure classification and trace details", () =>
     Effect.gen(function* () {
       const target = new RelayConnectionTarget({
         environmentId: ENVIRONMENT_ID,
         label: "Cloud",
       });
+      const authorizationError = new ConnectionTransientError({
+        reason: "timeout",
+        detail: "Relay environment connection timed out.",
+        traceId: "relay-trace",
+      });
       const brokerLayer = yield* makeDependencies({
-        connectEnvironment: () =>
-          Effect.fail(
-            new ManagedRelay.ManagedRelayRequestTimeoutError({
-              activity: "Relay environment connection",
-              timeoutMs: ManagedRelay.MANAGED_RELAY_REQUEST_TIMEOUT_MS,
-              traceId: null,
-            }),
-          ),
+        authorizeDpop: () => Effect.fail(authorizationError),
       });
       const broker = yield* ConnectionResolver.ConnectionResolver.pipe(Effect.provide(brokerLayer));
       const error = yield* Effect.flip(broker.prepare(catalogEntry(target)));
 
-      expect(error).toBeInstanceOf(ConnectionTransientError);
-      expect(error).toMatchObject({ reason: "timeout" });
+      expect(error).toBe(authorizationError);
     }),
   );
 });

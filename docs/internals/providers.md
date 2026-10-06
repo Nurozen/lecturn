@@ -55,6 +55,32 @@ run before the prompt. They reject profiles with such configuration before launc
 instructions and tool denial do not create a native sandbox.
 See [helper constraints](../../apps/server/src/textGeneration/AntigravityTextGeneration.ts).
 
+## Provider updates run only through the owning installer
+
+A one-click update is offered only when the resolved executable's path proves which installer owns
+it. Homebrew and npm are proven by the real path (symlinks followed): a versioned keg or cask under
+`brew --prefix`, or `<prefix>/lib/node_modules/<pkg>/` (Windows: the shim beside `node_modules`).
+Native installer layouts and the global bin directories of pnpm, Bun, and Vite+ may match on either
+the resolved path or its real target, since those installers place real files or their own symlinks
+there. Anything unproven stays manual-only but still reports the version gap. npm updates pin
+`--prefix` because the `npm` on `PATH` can belong to a different Node than the one that owns the
+provider. Homebrew
+compares against `brew info` since casks trail npm by hours; native installs share npm's version
+train, so the registry stays authoritative for them.
+See the [resolver](../../apps/server/src/provider/providerMaintenance.ts).
+
+GitHub Copilot is the one provider whose other installs update themselves: a path that is not a
+Node package install runs `copilot update`, and a Node package install updates only through a
+proven package manager.
+
+Ownership is cached per instance. It is re-read after provider detection, because the login-shell
+`PATH` can change which executable resolves, and immediately before an update runs. The re-read
+after detection runs in the background, before snapshot enrichment, so a slow `brew` never delays
+the detected snapshot. The
+[runner](../../apps/server/src/provider/providerMaintenanceRunner.ts) refuses when the lock key
+changed since the advisory, and reports success only when the refreshed provider is still installed
+with a readable, current version.
+
 ## Protocol traps
 
 Codex async questions arrive as notifications and are answered with a new user message. There is

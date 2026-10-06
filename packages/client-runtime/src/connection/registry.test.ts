@@ -395,6 +395,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
             ...(options?.knownAccountIds === undefined
               ? {}
               : { knownAccountIds: Effect.succeed(options.knownAccountIds) }),
+            identity: (accountId) => Effect.succeed(Option.some({ accountId })),
             clerkToken: () => Effect.die(new Error("Clerk tokens are not used by registry tests.")),
           }),
         ),

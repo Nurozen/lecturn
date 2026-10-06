@@ -241,15 +241,15 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
     return yield* options.stampIdentity(next.draft);
   });
 
+  const maintenanceCapabilities =
+    options.maintenanceCapabilities ??
+    makeManualOnlyProviderMaintenanceCapabilities({
+      provider: ProviderDriverKind.make("antigravity"),
+      packageName: null,
+    });
   const managed = yield* makeManagedServerProvider({
     ...(options.discovery ? { discovery: options.discovery } : {}),
-    resolveMaintenanceCapabilities: Effect.succeed(
-      options.maintenanceCapabilities ??
-        makeManualOnlyProviderMaintenanceCapabilities({
-          provider: ProviderDriverKind.make("antigravity"),
-          packageName: null,
-        }),
-    ),
+    resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
     getSettings: Effect.succeed(settings),
     streamSettings: Stream.empty,
     haveSettingsChanged: () => false,

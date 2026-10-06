@@ -30,11 +30,7 @@ import {
 import { withInstanceIdentity } from "./instanceIdentity.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { discoverGrokSkills } from "./GrokSkills.ts";
-import {
-  makeManualOnlyProviderMaintenanceCapabilities,
-  makeStaticProviderMaintenanceResolver,
-  resolveProviderMaintenanceCapabilitiesEffect,
-} from "../providerMaintenance.ts";
+import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
@@ -43,12 +39,10 @@ import {
 const decodeGrokSettings = Schema.decodeSync(GrokSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("grok");
-const UPDATE = makeStaticProviderMaintenanceResolver(
-  makeManualOnlyProviderMaintenanceCapabilities({
-    provider: DRIVER_KIND,
-    packageName: null,
-  }),
-);
+const MAINTENANCE_CAPABILITIES = makeManualOnlyProviderMaintenanceCapabilities({
+  provider: DRIVER_KIND,
+  packageName: null,
+});
 
 export type GrokDriverEnv =
   | StaveMemoryWiring
@@ -91,14 +85,6 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
         continuationGroupKey: continuationIdentity.continuationKey,
       });
       const effectiveConfig = { ...config, enabled } satisfies GrokSettings;
-      const resolveMaintenanceCapabilities = resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
-        binaryPath: effectiveConfig.binaryPath,
-        env: processEnv,
-      }).pipe(
-        Effect.provideService(FileSystem.FileSystem, yield* FileSystem.FileSystem),
-        Effect.provideService(Path.Path, yield* Path.Path),
-      );
-
       const adapter = yield* makeGrokAdapter(effectiveConfig, {
         staveMemoryWiring: yield* StaveMemoryWiring,
         environment: processEnv,
@@ -115,7 +101,7 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
 
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<GrokSettings>>({
-        resolveMaintenanceCapabilities,
+        resolveMaintenance: () => Effect.succeed(MAINTENANCE_CAPABILITIES),
         discovery: {
           waitForShell: !/[\\/]/.test(effectiveConfig.binaryPath?.trim() ?? ""),
           refreshEnvironment: () =>
@@ -128,15 +114,10 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
           buildInitialGrokProviderSnapshot(settings.provider).pipe(Effect.map(stampIdentity)),
         checkProvider,
         detectionTimeout: GROK_DETECTION_TIMEOUT_MS,
-        enrichSnapshot: ({
-          settings,
-          snapshot: currentSnapshot,
-          maintenanceCapabilities,
-          publishSnapshot,
-        }) =>
+        enrichSnapshot: ({ settings, snapshot: currentSnapshot, publishSnapshot }) =>
           enrichGrokSnapshot({
             snapshot: currentSnapshot,
-            maintenanceCapabilities,
+            maintenanceCapabilities: MAINTENANCE_CAPABILITIES,
             enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
             publishSnapshot,
             httpClient,
