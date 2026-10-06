@@ -77,10 +77,9 @@ def command(argv, cwd, *, log=None, stdin=None, allow_failure=False, lock_fd=Non
     return result
 
 
-# Agent model policy: every top-level agent (planner, builder, reviewer, verifier, repair,
-# final review) runs on Fable 5.1; any subagents/workers those agents spawn run on Opus 5.
-TOP_MODEL = 'claude-fable-5-1'
-WORKER_MODEL = 'claude-opus-5'
+# Agent model policy: no model is pinned. Claude agents use the operator's device default
+# (user-level Claude settings, ANTHROPIC_MODEL), subagents follow Claude Code's own default, and
+# grok uses its own config default. The models actually used are recorded in each events log.
 # Read-only GitHub CLI subcommands a sandboxed reviewer may run outside the OS sandbox: gh is a Go
 # binary that does not trust the sandbox TLS proxy, so it fails inside. Nothing here writes files.
 REVIEW_GH_COMMANDS = ('gh api', 'gh run view', 'gh run list', 'gh pr view', 'gh pr list',
@@ -163,7 +162,7 @@ def grok_envelope(log_path):
         start = text.find('\n{', start + 1)
     require(result is not None, 'Grok produced no JSON result envelope')
     require(result.get('stopReason') == 'end_turn', f"Grok run did not finish: {result.get('stopReason')}")
-    require(any(model.startswith('grok') for model in (result.get('modelUsage') or {})), 'Grok run reported no grok model')
+    require(result.get('modelUsage'), 'Grok run reported no model usage')
     return result
 
 
@@ -201,7 +200,7 @@ def agent_result(log_path):
     require(result is not None, 'Agent produced no result event')
     require(result.get('subtype') == 'success' and not result.get('is_error'),
             f"Agent run failed: {result.get('subtype')}")
-    require(TOP_MODEL in (result.get('modelUsage') or {}), f'Agent did not run on the required model {TOP_MODEL}')
+    require(result.get('modelUsage'), 'Agent run reported no model usage')
     value = result.get('structured_output')
     require(isinstance(value, dict), 'Agent returned no structured output')
     return value
@@ -396,15 +395,15 @@ class Runner:
         (folder / f'{name}.prompt.md').write_text(prompt)
         # Each run is a fresh session; never resume/fork a builder into its reviewer.
         # The reviewed tree is upstream text: --strict-mcp-config keeps its .mcp.json from starting
-        # host processes, and an empty --setting-sources keeps its .claude/settings.json hooks (which
-        # run on the host outside every sandbox layer, unlogged) and .claude/agents out of the
-        # session. Only the controller's --settings payload applies.
-        command(['claude', '--print', '--model', TOP_MODEL, *access,
+        # host processes, and --setting-sources user loads only the operator's own user settings
+        # (device default model and env), never the tree's .claude/settings.json hooks (which run
+        # on the host outside every sandbox layer, unlogged) or .claude/agents. The controller's
+        # --settings payload is applied on top.
+        command(['claude', '--print', *access,
                  '--output-format', 'stream-json', '--verbose', '--no-session-persistence',
-                 '--strict-mcp-config', '--setting-sources', '',
+                 '--strict-mcp-config', '--setting-sources', 'user',
                  '--json-schema', json.dumps(output_schema)], repo, log=log_path,
-                stdin=prompt, lock_fd=self.lock_fd,
-                env={**os.environ, 'CLAUDE_CODE_SUBAGENT_MODEL': WORKER_MODEL})
+                stdin=prompt, lock_fd=self.lock_fd)
         value = agent_result(log_path)
         write_json(output_path, value)
         require(set(value) == set(output_schema['required']), 'Incomplete structured agent response')
@@ -761,8 +760,8 @@ transient infrastructure failure that should be rerun. Otherwise return ci_retry
             body += f"\nBefore:\n![Before]({m['build']['before_url']})\n\nAfter:\n![After]({m['build']['after_url']})\n"
         for url in m['build'].get('video_urls', []):
             body += f'\n{url}\n'
-        body += ('\nImplemented and independently reviewed by fresh Claude Code agents '
-                 f'({TOP_MODEL} top-level, {WORKER_MODEL} subagents).\n')
+        body += ('\nImplemented and independently reviewed by fresh Claude Code agents on the operator\'s '
+                 'default model, with a Grok outside reviewer.\n')
         (folder / 'pr-body.md').write_text(body)
         if prs:
             require(prs[0]['state'] != 'CLOSED', 'PR closed without merge; do not reopen automatically')
