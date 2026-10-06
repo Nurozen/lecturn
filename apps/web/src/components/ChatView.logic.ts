@@ -998,15 +998,20 @@ export function buildForkTitle(parentTitle: string | null | undefined): string {
  * turn; a user message forks through the previous completed assistant turn
  * (its text is re-seeded into the child's composer). Conversation completion
  * is independent of Git checkpoints, which plain chats may never create.
+ * Returns `previous` when the result is unchanged, for the same row-reuse
+ * reason as `buildRevertTurnCountByUserMessageId`.
  */
-export function buildForkTurnIdByMessageId(input: {
-  timelineEntries: ReadonlyArray<TimelineEntry>;
-  turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
-  activeRunningTurnId: TurnId | null;
-  completedTurns?: Thread["completedTurns"];
-  latestTurn?: Thread["latestTurn"];
-  requiresProviderTurnRef?: boolean;
-}): Map<MessageId, TurnId> {
+export function buildForkTurnIdByMessageId(
+  input: {
+    timelineEntries: ReadonlyArray<TimelineEntry>;
+    turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
+    activeRunningTurnId: TurnId | null;
+    completedTurns?: Thread["completedTurns"];
+    latestTurn?: Thread["latestTurn"];
+    requiresProviderTurnRef?: boolean;
+  },
+  previous: Map<MessageId, TurnId> | null = null,
+): Map<MessageId, TurnId> {
   const byMessageId = new Map<MessageId, TurnId>();
   const completedByMessageId = new Map<MessageId, TurnId>();
   if (input.completedTurns !== undefined) {
@@ -1053,7 +1058,7 @@ export function buildForkTurnIdByMessageId(input: {
     byMessageId.set(message.id, turnId);
     lastCompletedTurnId = turnId;
   }
-  return byMessageId;
+  return previous !== null && shallow(previous, byMessageId) ? previous : byMessageId;
 }
 
 /**
