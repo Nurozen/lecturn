@@ -861,11 +861,18 @@ and directs cleanup management to web or desktop.
 ## Provider memory and compatibility (Phase 8)
 
 `StaveMemoryWiring.resolve(cwd)` is a read-only per-session resolver. It requires enabled Stave,
-a valid live manifest at exactly that root, and a Marmot attachment before reading that root's
-`.mcp.json`. It selects only the `mcpServers.context-marmot` entry, requiring an absolute command,
-string arguments, and optional string-valued environment. It does not walk ancestors, invent one
+a valid live manifest at exactly that root, and a Marmot attachment (its own, or its saga's as
+described below) before trusting that root's `.mcp.json`. It selects only the
+`mcpServers.context-marmot` entry, requiring an absolute command, string arguments, and optional
+string-valued environment. It does not walk ancestors, invent one
 server per den, or rewrite provider configuration. Missing/invalid generated configuration is an
 unavailable result; non-Stave, archived, and disabled roots produce an absent result.
+
+Saga members share the saga's den: Stave writes their `.mcp.json` but records the attachment only
+in the saga manifest. A root with a `.mcp.json` and no Marmot attachment of its own therefore
+counts as attached when a sibling saga manifest lists it in `saga.members` and records a Marmot
+memory. Without such a saga (including an unreadable saga manifest) the result stays absent, so a
+stray `.mcp.json` is never wired; a member with no `.mcp.json` is absent without a sibling scan.
 
 Provider drivers receive this service in the production graph. Codex creates a short unique
 `sm_<12 hex>` MCP entry for each session with safe TOML value encoding and disables the inherited
@@ -878,7 +885,7 @@ executable, working directory, home, environment and configuration launch argume
 transport flags are excluded from this inventory command. An absent canonical entry receives a
 valid disabled placeholder; an existing entry retains its transport and is disabled. Inventory
 failure refuses startup with a diagnostic that omits inventory contents. No shared Codex
-configuration is written. Cursor, Grok and Antigravity append
+configuration is written. Cursor, Grok, GitHub Copilot and Antigravity append
 an ACP stdio MCP entry for both new and loaded sessions. OpenCode registers a local MCP entry
 before readiness and disconnects it with the session scope, including failed startup and
 unexpected exit. MCP additions have a 10-second bound and Stave disconnection a 1-second bound;

@@ -134,6 +134,22 @@ export function mapManifestToProjectInfo(
   };
 }
 
+/**
+ * Member space ids from a saga manifest's roster. Members carry no back-pointer
+ * in their own manifest, so the roster is the only on-disk record of membership.
+ * A missing or malformed `saga` block yields no members.
+ */
+export function manifestSagaMemberIds(manifest: StaveManifest): ReadonlyArray<string> {
+  const saga = manifest.saga;
+  if (typeof saga !== "object" || saga === null || !("members" in saga)) return [];
+  if (!Array.isArray(saga.members)) return [];
+  return saga.members.flatMap((member: unknown) => {
+    if (typeof member !== "object" || member === null || !("id" in member)) return [];
+    const id = member.id;
+    return typeof id === "string" || typeof id === "number" ? [String(id).trim()] : [];
+  });
+}
+
 /** Coerce a YAML scalar to a trimmed string; blank, null and absent values collapse to `undefined`. */
 function normalizeScalar(value: ManifestScalar | null | undefined): string | undefined {
   if (value === null || value === undefined) {
