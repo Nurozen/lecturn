@@ -1,85 +1,59 @@
 import { assert, it } from "@effect/vitest";
 
-import { detectCliRunner, formatCliCommand, suggestedPackageSpec } from "./invocation.ts";
+import { formatCliCommand } from "./invocation.ts";
 
-it("detects package runners from their cache entry paths", () => {
-  assert.equal(
-    detectCliRunner("/home/theo/.npm/_npx/abc123/node_modules/lecturn/dist/bin.mjs"),
-    "npx",
-  );
-  assert.equal(
-    detectCliRunner(
-      "C:\\Users\\theo\\AppData\\Local\\npm-cache\\_npx\\abc\\node_modules\\lecturn\\dist\\bin.mjs",
-    ),
-    "npx",
-  );
-  assert.equal(
-    detectCliRunner("/home/theo/.cache/pnpm/dlx/abc/node_modules/lecturn/dist/bin.mjs"),
-    "pnpm dlx",
-  );
-  assert.equal(
-    detectCliRunner("/home/theo/.local/share/pnpm/.pnpm/dlx/abc/node_modules/lecturn/dist/bin.mjs"),
-    "pnpm dlx",
-  );
-  assert.equal(
-    detectCliRunner(
-      "C:\\Users\\theo\\AppData\\Local\\pnpm-cache\\dlx\\abc\\node_modules\\lecturn\\dist\\bin.mjs",
-    ),
-    "pnpm dlx",
-  );
-  assert.equal(
-    detectCliRunner("/home/theo/.bun/install/cache/lecturn@0.0.31/dist/bin.mjs"),
-    "bunx",
-  );
-  assert.equal(
-    detectCliRunner("/tmp/bunx-1000-lecturn@latest/node_modules/lecturn/dist/bin.mjs"),
-    "bunx",
-  );
-  assert.equal(
-    detectCliRunner(
-      "C:\\Users\\theo\\AppData\\Local\\Temp\\bunx-0-lecturn@latest\\node_modules\\lecturn\\dist\\bin.mjs",
-    ),
-    "bunx",
-  );
+it("never suggests package runner commands from cache entry paths", () => {
+  for (const entryPath of [
+    "/home/theo/.npm/_npx/abc123/node_modules/lecturn/dist/bin.mjs",
+    "C:\\Users\\theo\\AppData\\Local\\npm-cache\\_npx\\abc\\node_modules\\lecturn\\dist\\bin.mjs",
+    "/home/theo/.cache/pnpm/dlx/abc/node_modules/lecturn/dist/bin.mjs",
+    "/home/theo/.local/share/pnpm/.pnpm/dlx/abc/node_modules/lecturn/dist/bin.mjs",
+    "C:\\Users\\theo\\AppData\\Local\\pnpm-cache\\dlx\\abc\\node_modules\\lecturn\\dist\\bin.mjs",
+    "/home/theo/.bun/install/cache/lecturn@0.0.31/dist/bin.mjs",
+    "/tmp/bunx-1000-lecturn@latest/node_modules/lecturn/dist/bin.mjs",
+    "C:\\Users\\theo\\AppData\\Local\\Temp\\bunx-0-lecturn@latest\\node_modules\\lecturn\\dist\\bin.mjs",
+  ]) {
+    assert.equal(
+      formatCliCommand({ subcommand: "serve", entryPath, version: "0.0.31" }),
+      "lecturn serve",
+    );
+  }
 });
 
 it("treats stable installs as direct invocations", () => {
-  assert.isNull(detectCliRunner("/usr/local/lib/node_modules/lecturn/dist/bin.mjs"));
-  assert.isNull(detectCliRunner("/home/theo/Code/work/lecturn/apps/server/dist/bin.mjs"));
-  assert.isNull(
-    detectCliRunner("/home/theo/.lecturn/runtime/0.0.31/node_modules/lecturn/dist/bin.mjs"),
-  );
-  assert.isNull(detectCliRunner(""));
+  for (const entryPath of [
+    "/usr/local/lib/node_modules/lecturn/dist/bin.mjs",
+    "/home/theo/Code/work/lecturn/apps/server/dist/bin.mjs",
+    "/home/theo/.lecturn/runtime/0.0.31/node_modules/lecturn/dist/bin.mjs",
+    "",
+  ]) {
+    assert.equal(
+      formatCliCommand({ subcommand: "serve", entryPath, version: "0.0.31" }),
+      "lecturn serve",
+    );
+  }
 });
 
-it("re-suggests the nightly channel only for nightly builds", () => {
-  assert.equal(suggestedPackageSpec("0.0.31-nightly.20260729"), "@cloudgatherer/lecturn@nightly");
-  assert.equal(suggestedPackageSpec("0.0.31"), "@cloudgatherer/lecturn");
+it("never re-suggests the nightly channel, even for nightly builds", () => {
+  for (const version of ["0.0.31-nightly.20260729", "0.0.31"]) {
+    assert.equal(
+      formatCliCommand({
+        subcommand: "serve",
+        entryPath: "/home/theo/.npm/_npx/abc123/node_modules/lecturn/dist/bin.mjs",
+        version,
+      }),
+      "lecturn serve",
+    );
+  }
 });
 
-it("formats serve suggestions to match the launching command", () => {
+it("formats the requested subcommand", () => {
   assert.equal(
     formatCliCommand({
-      subcommand: "serve",
-      entryPath: "/home/theo/.npm/_npx/abc/node_modules/lecturn/dist/bin.mjs",
-      version: "0.0.31-nightly.20260729",
-    }),
-    "lecturn serve",
-  );
-  assert.equal(
-    formatCliCommand({
-      subcommand: "serve",
+      subcommand: "connect",
       entryPath: "/tmp/bunx-1000-lecturn@latest/node_modules/lecturn/dist/bin.mjs",
       version: "0.0.31",
     }),
-    "lecturn serve",
-  );
-  assert.equal(
-    formatCliCommand({
-      subcommand: "serve",
-      entryPath: "/usr/local/lib/node_modules/lecturn/dist/bin.mjs",
-      version: "0.0.31-nightly.20260729",
-    }),
-    "lecturn serve",
+    "lecturn connect",
   );
 });

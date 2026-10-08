@@ -4,63 +4,20 @@ import { HostProcessArguments } from "@lecturn/shared/hostProcess";
 
 import packageJson from "../../package.json" with { type: "json" };
 
-export type CliRunner = "npx" | "pnpm dlx" | "bunx";
-
 /**
- * How the CLI was launched, judged by where its entry script lives. Each
- * package runner executes out of a distinctive cache/temp layout:
- *
- *   npx      ~/.npm/_npx/<hash>/node_modules/...
- *   pnpm dlx ~/.cache/pnpm/dlx/..., $PNPM_HOME/.pnpm/dlx/...,
- *            or %LOCALAPPDATA%/pnpm-cache/dlx/... on Windows
- *   bunx     ~/.bun/install/cache/... or $TMPDIR/bunx-<uid>-<spec>/...
- *
- * Global installs and repo checkouts match none of these and return null.
- * Detection is best-effort; callers must fail closed to a plain `lecturn` command.
- */
-export function detectCliRunner(entryPath: string): CliRunner | null {
-  const path = entryPath.replaceAll("\\", "/");
-  if (path.includes("/_npx/")) {
-    return "npx";
-  }
-  if (
-    path.includes("/pnpm/dlx/") ||
-    path.includes("/.pnpm/dlx/") ||
-    path.includes("/pnpm-cache/dlx/")
-  ) {
-    return "pnpm dlx";
-  }
-  if (path.includes("/.bun/install/cache/") || path.includes("/bunx-")) {
-    return "bunx";
-  }
-  return null;
-}
-
-/**
- * The `lecturn` package spec to suggest. The literal spec the user typed (e.g.
- * `lecturn@nightly`) is resolved away before our process starts, so re-derive it
- * from the running version: nightly builds re-suggest the nightly channel,
- * anything else suggests the bare package.
- */
-export function suggestedPackageSpec(version: string): string {
-  return version.includes("-nightly.")
-    ? "@cloudgatherer/lecturn@nightly"
-    : "@cloudgatherer/lecturn";
-}
-
-/**
- * Render a `lecturn <subcommand>` suggestion that matches how this process was
- * launched, so copy/pasting it actually works: `lecturn connect` suggests
- * `lecturn serve`, a global install suggests `lecturn serve`, and a nightly build
- * keeps the `@nightly` tag.
+ * Render a `lecturn <subcommand>` suggestion. Upstream derives a package
+ * runner (`npx`, `pnpm dlx`, `bunx`) and channel tag from the entry path and
+ * version so copy/pasting matches the launching command. Lecturn has no public
+ * npm distribution yet, so every launch style suggests the plain binary and the
+ * entry path and version are accepted only for call-site compatibility.
  */
 export function formatCliCommand(input: {
   readonly subcommand: string;
   readonly entryPath: string;
   readonly version: string;
 }): string {
-  // Lecturn has no public npm distribution yet. Never suggest a command that
-  // could download the upstream app or an unrelated package with the same name.
+  // Never suggest a command that could download the upstream app or an
+  // unrelated package with the same name.
   return `lecturn ${input.subcommand}`;
 }
 
