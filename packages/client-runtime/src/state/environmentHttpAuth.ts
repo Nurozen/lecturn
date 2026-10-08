@@ -27,7 +27,7 @@ export interface EnvironmentHttpAuthHeaders {
  * per-request via `FetchHttpClient.RequestInit`, which the fetch client reads
  * from the fiber context at request time.
  */
-export const withEnvironmentCredentials = <A, E, R>(
+const withEnvironmentCredentials = <A, E, R>(
   authorization: PreparedHttpAuthorization | null,
   request: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E, R> =>

@@ -33,7 +33,7 @@ export const STAVE_WIZARD_STEP_LABELS: Record<StaveWizardStep, string> = {
 export const STAVE_SPACE_KIND_CHIPS = ["ticket", "spike", "audit", "custom"] as const;
 export type StaveSpaceKindChip = (typeof STAVE_SPACE_KIND_CHIPS)[number];
 
-export const RESERVED_STAVE_SPACE_KINDS: ReadonlyArray<string> = ["review", "saga"];
+const RESERVED_STAVE_SPACE_KINDS: ReadonlyArray<string> = ["review", "saga"];
 
 export type StaveWizardRepoMode = "none" | "edit" | "reference";
 
@@ -318,7 +318,7 @@ export interface StaveMemorySuggestion {
   readonly label: string;
 }
 
-export const FRESH_MEMORY_SPEC = ".";
+const FRESH_MEMORY_SPEC = ".";
 
 /** `.` (a fresh task store) followed by every den the listed spaces attach, as `provider:id`. */
 export function memorySuggestions(

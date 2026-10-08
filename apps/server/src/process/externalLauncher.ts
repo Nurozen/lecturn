@@ -45,7 +45,6 @@ export {
   ExternalLauncherEditorSpawnError,
   ExternalLauncherUnknownEditorError,
   ExternalLauncherUnsupportedEditorError,
-  isExternalLauncherError,
 } from "@lecturn/contracts";
 export type { LaunchEditorInput };
 interface EditorLaunch {

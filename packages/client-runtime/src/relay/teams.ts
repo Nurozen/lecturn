@@ -49,7 +49,7 @@ const SeatPreview = Schema.Struct({
   effectiveAt: Schema.Number,
 });
 export type TeamSeatPreview = typeof SeatPreview.Type;
-export class TeamsRequestError extends Error {}
+class TeamsRequestError extends Error {}
 
 export function createTeamsClient(options: {
   relayUrl: string;

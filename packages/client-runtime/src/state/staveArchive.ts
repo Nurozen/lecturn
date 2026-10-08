@@ -38,7 +38,7 @@ export function withoutArchivedStaveProjects<Project extends StaveStateLike>(
 }
 
 /** Stamps from `.stave.yaml` and `space list` differ only in trailing fraction digits. */
-export function sameStaveIncarnation(left: string, right: string): boolean {
+function sameStaveIncarnation(left: string, right: string): boolean {
   const key = (value: string) => {
     const match = /^(.*T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
     if (match === null) return null;
@@ -226,7 +226,7 @@ export interface StaveArchiveUndo {
   readonly paths: ReadonlyArray<string>;
 }
 
-export const STAVE_ARCHIVE_RESTORE_HINT = "Restore it any time from New project → Stave.";
+const STAVE_ARCHIVE_RESTORE_HINT = "Restore it any time from New project → Stave.";
 
 /** The undo toast an archive's result earns; null for anything else. */
 export function staveArchiveUndo(result: StaveOperationResult): StaveArchiveUndo | null {

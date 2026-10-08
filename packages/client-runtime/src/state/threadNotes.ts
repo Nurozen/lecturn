@@ -9,7 +9,7 @@ import {
 } from "./runtime.ts";
 
 /** A single canonical query is shared by the panel and every transcript highlight. */
-export function threadNoteListKey(environmentId: EnvironmentId, input: ThreadNoteListInput = {}) {
+function threadNoteListKey(environmentId: EnvironmentId, input: ThreadNoteListInput = {}) {
   return {
     environmentId,
     input: input.projectId === undefined ? {} : { projectId: input.projectId },
