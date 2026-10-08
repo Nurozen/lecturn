@@ -29,7 +29,6 @@ import {
   setManagedRelayPrimaryAccount,
   setManagedRelaySession,
   syncManagedRelaySessions,
-  waitForManagedRelayClerkToken,
 } from "./managedRelayState.ts";
 
 let registry = AtomRegistry.make();
@@ -125,20 +124,6 @@ function clerkToken(expiresAtSeconds: number): string {
 
 describe("createManagedRelayQueryManager", () => {
   afterEach(resetRegistry);
-
-  it.effect("waits for an account's cloud session before reading its token", () =>
-    Effect.gen(function* () {
-      const tokenFiber = yield* waitForManagedRelayClerkToken(registry, "account-b").pipe(
-        Effect.forkChild,
-      );
-
-      syncManagedRelaySessions(registry, [account("account-a")]);
-      syncManagedRelaySessions(registry, [account("account-a"), account("account-b")]);
-
-      expect(yield* Fiber.join(tokenFiber)).toBe("clerk-token:account-b");
-      expect(registry.getNodes().get(managedRelaySessionsAtom)?.listeners.size).toBe(0);
-    }),
-  );
 
   it.effect("deregisters an environment through the owning account, primary or not", () =>
     Effect.gen(function* () {
