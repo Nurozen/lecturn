@@ -100,6 +100,7 @@ it.layer(SqlitePersistenceMemory)("Contextual continuity", (it) => {
           ),
         getProvider: () => Effect.succeed(ProviderDriverKind.make("codex")),
         upsert: () => Effect.void,
+        recordImportedTranscript: () => Effect.void,
         listThreadIds: () => Effect.succeed([parent]),
         listBindings: () => Effect.succeed([]),
       });

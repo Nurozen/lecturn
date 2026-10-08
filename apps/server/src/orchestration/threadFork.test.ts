@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   CheckpointRef,
+  EventId,
+  isImportedAgentSessionMessageId,
   MessageId,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
   TurnId,
-  EventId,
   type ChatAttachment,
   type OrchestrationThread,
   type OrchestrationThreadActivity,
@@ -405,6 +406,46 @@ describe("assembleThreadFork", () => {
     const titled = assembleThreadFork(makeInput({ title: "My fork" }));
     assertOk(titled);
     expect(titled.command.thread.title).toBe("My fork");
+  });
+
+  it("keeps the reserved import prefix on copies of agent-session history rows", () => {
+    const importedUser: OrchestrationThread["messages"][number] = {
+      id: MessageId.make("import:codex:native-session:user-1"),
+      role: "user",
+      text: "imported prompt",
+      turnId: null,
+      streaming: false,
+      createdAt: t(0, 10),
+      updatedAt: t(0, 10),
+    };
+    const importedAssistant: OrchestrationThread["messages"][number] = {
+      id: MessageId.make("import:codex:native-session:assistant-1"),
+      role: "assistant",
+      text: "imported answer",
+      turnId: null,
+      streaming: false,
+      createdAt: t(0, 20),
+      updatedAt: t(0, 20),
+    };
+    const result = assembleThreadFork(
+      makeInput({
+        source: {
+          ...sourceThread,
+          messages: [importedUser, importedAssistant, ...sourceMessages],
+        },
+      }),
+    );
+    assertOk(result);
+    const copies = result.command.history.messages.filter((message) =>
+      message.text.startsWith("imported "),
+    );
+    expect(copies).toHaveLength(2);
+    for (const copy of copies) {
+      expect(copy.id).not.toBe(importedUser.id);
+      expect(copy.id).not.toBe(importedAssistant.id);
+      expect(isImportedAgentSessionMessageId(copy.id)).toBe(true);
+      expect(UUID_PATTERN.test(copy.id.slice("import:fork:".length))).toBe(true);
+    }
   });
 
   it("mints fresh ids disjoint from the parent for messages, activities and plans", () => {

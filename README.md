@@ -141,6 +141,7 @@ Read [AGENTS.md](./AGENTS.md) and [CONTRIBUTING.md](./CONTRIBUTING.md) before ma
 ## Documentation
 
 - [Lecturn installation and data isolation](./docs/user/lecturn-installation.md)
+- [Welcome wizard](./docs/user/welcome-wizard.md)
 - [Stave spaces and saga boards](./docs/user/stave.md)
 - [Project hierarchy and thread organization](./docs/user/thread-sidebar.md)
 - [PR tracking and agent handoff](./docs/user/notifications-and-live-activities.md#pull-request-activity)

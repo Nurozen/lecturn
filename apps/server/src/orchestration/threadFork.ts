@@ -12,7 +12,12 @@ import type {
   ThreadId,
   TurnId,
 } from "@lecturn/contracts";
-import { EventId, isImportedHistoryRow, MessageId } from "@lecturn/contracts";
+import {
+  EventId,
+  isImportedAgentSessionMessageId,
+  isImportedHistoryRow,
+  MessageId,
+} from "@lecturn/contracts";
 import { UUID_NAMESPACE_DNS, uuidV5 } from "@lecturn/shared/uuid";
 
 import { deriveCopiedAttachmentId } from "../attachmentStore.ts";
@@ -282,8 +287,11 @@ export function assembleThreadFork(input: AssembleThreadForkInput): AssembleThre
   const messages = source.messages
     .filter((message) => keepsRow(message.turnId, message.createdAt))
     .map((message) => {
-      const id =
-        message.role === "assistant"
+      // Rows imported from an on-disk agent session keep their reserved
+      // `import:` prefix so a revert in the child still retains them.
+      const id = isImportedAgentSessionMessageId(message.id)
+        ? MessageId.make(`import:fork:${input.mintUuid()}`)
+        : message.role === "assistant"
           ? MessageId.make(`assistant:${input.mintUuid()}`)
           : MessageId.make(input.mintUuid());
       messageIdMap.set(message.id, id);

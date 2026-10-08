@@ -474,6 +474,7 @@ describe("ProviderCommandReactor", () => {
         Effect.sync(() => {
           directoryBindings.set(String(binding.threadId), binding);
         }),
+      recordImportedTranscript: () => Effect.void,
       getProvider: (threadId) => {
         const binding = directoryBindings.get(String(threadId));
         return binding !== undefined
