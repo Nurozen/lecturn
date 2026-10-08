@@ -1,7 +1,7 @@
 import { pipe } from "effect/Function";
 import * as Arr from "effect/Array";
 import * as O from "effect/Order";
-import { isImportedHistoryRow } from "@lecturn/contracts";
+import { isImportedAgentSessionMessageId, isImportedHistoryRow } from "@lecturn/contracts";
 import type {
   MessageId,
   OrchestrationCheckpointSummary,
@@ -13,6 +13,7 @@ import type {
   OrchestrationThreadActivity,
   TurnId,
 } from "@lecturn/contracts";
+import { compareDateTimeStrings } from "@lecturn/shared/dateTime";
 
 export type ThreadDetailReducerResult =
   | { readonly kind: "updated"; readonly thread: OrchestrationThread }
@@ -626,11 +627,7 @@ function reduceThreadDetailEvent(
 
       const retainedTurnIds = new Set(Arr.map(checkpoints, (entry) => entry.turnId));
       const latestCheckpoint = checkpoints.at(-1) ?? null;
-      const messages = retainMessagesAfterRevert(
-        thread,
-        retainedTurnIds,
-        latestCheckpoint?.completedAt ?? null,
-      );
+      const messages = retainMessagesAfterRevert(thread, retainedTurnIds, event.payload.turnCount);
       const proposedPlans = pipe(
         thread.proposedPlans,
         Arr.filter((plan) => plan.turnId === null || retainedTurnIds.has(plan.turnId)),
@@ -822,24 +819,49 @@ function rebindCheckpointAssistantMessage(
 function retainMessagesAfterRevert(
   thread: Pick<OrchestrationThread, "messages" | "importedFrom">,
   retainedTurnIds: ReadonlySet<string>,
-  retainedThrough: string | null,
+  turnCount: number,
 ): OrchestrationMessage[] {
-  // Keep messages that belong to a retained turn, plus system messages. User
-  // messages never carry a turn id, so they are kept by position: only those
-  // sent before the latest retained checkpoint completed started a retained
-  // turn. The server prunes the same way; keeping every unbound user message
-  // would leave reverted prompts on screen with no reply and no revert arrow.
-  // Imported history predates every turn, so no revert reaches it.
-  return Arr.filter(thread.messages, (message) => {
-    if (message.role === "system" || isImportedHistoryRow(thread, message)) {
-      return true;
+  // Mirrors the server's revert retention: keep system rows and imported
+  // history, keep rows bound to a retained turn, then fill the per-turn user
+  // and assistant slots from unbound rows in order. User messages never carry
+  // a turn id, so without the fallback every reverted prompt would stay on
+  // screen with no reply and no revert arrow. Imported history predates every
+  // turn, so no revert reaches it and it never competes for a slot.
+  const messages = thread.messages;
+  const isImported = (message: OrchestrationMessage) =>
+    isImportedHistoryRow(thread, message) || isImportedAgentSessionMessageId(message.id);
+  const retainedMessageIds = new Set<string>();
+  for (const message of messages) {
+    if (message.role === "system" || isImported(message)) {
+      retainedMessageIds.add(message.id);
+    } else if (message.turnId !== null && retainedTurnIds.has(message.turnId)) {
+      retainedMessageIds.add(message.id);
     }
-    if (message.turnId === null) {
-      return (
-        message.role !== "user" ||
-        (retainedThrough !== null && message.createdAt <= retainedThrough)
-      );
+  }
+
+  for (const role of ["user", "assistant"] as const) {
+    const retainedCount = messages.filter(
+      (message) =>
+        message.role === role && !isImported(message) && retainedMessageIds.has(message.id),
+    ).length;
+    const missingCount = Math.max(0, turnCount - retainedCount);
+    const fallbackMessages = messages
+      .filter(
+        (message) =>
+          message.role === role &&
+          !retainedMessageIds.has(message.id) &&
+          (message.turnId === null || retainedTurnIds.has(message.turnId)),
+      )
+      .toSorted(
+        (left, right) =>
+          compareDateTimeStrings(left.createdAt, right.createdAt) ||
+          left.id.localeCompare(right.id),
+      )
+      .slice(0, missingCount);
+    for (const message of fallbackMessages) {
+      retainedMessageIds.add(message.id);
     }
-    return retainedTurnIds.has(message.turnId);
-  });
+  }
+
+  return Arr.filter(messages, (message) => retainedMessageIds.has(message.id));
 }
