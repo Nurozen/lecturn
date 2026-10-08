@@ -35,7 +35,7 @@ import {
   type TurnDiffSummary,
 } from "./types";
 
-export { formatDuration, formatElapsed } from "@lecturn/shared/orchestrationTiming";
+export { formatDuration } from "@lecturn/shared/orchestrationTiming";
 
 export type WorkLogToolLifecycleStatus =
   | "inProgress"

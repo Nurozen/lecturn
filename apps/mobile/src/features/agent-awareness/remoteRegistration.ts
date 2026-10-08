@@ -186,14 +186,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     return { ...stored, ...override };
   }
 
-  function normalizeAgentAwarenessRelayBaseUrl(value: string | null | undefined): string | null {
-    const trimmed = value?.trim();
-    if (!trimmed) {
-      return null;
-    }
-    return trimmed.replace(/\/+$/g, "");
-  }
-
   function readRelayConfig(): { readonly url: string } | null {
     const relayUrl = resolveCloudPublicConfig().relay.url;
     if (!relayUrl) {
@@ -1326,7 +1318,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     registerLiveActivityPushToken,
     refreshActiveLiveActivityRemoteRegistration,
     armAgentAwarenessLiveActivityForLocalWork,
-    normalizeAgentAwarenessRelayBaseUrl,
     mergeAgentAwarenessRegistrationPreferences,
     shouldRegisterAgentAwarenessDeviceForProvider,
   };
@@ -1334,7 +1325,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
 
 const legacy = makeAccountRegistration(null);
 const registrations = () => (accounts.size > 0 ? [...accounts.values()] : [legacy]);
-export const normalizeAgentAwarenessRelayBaseUrl = legacy.normalizeAgentAwarenessRelayBaseUrl;
 export const mergeAgentAwarenessRegistrationPreferences =
   legacy.mergeAgentAwarenessRegistrationPreferences;
 export const shouldRegisterAgentAwarenessDeviceForProvider =
