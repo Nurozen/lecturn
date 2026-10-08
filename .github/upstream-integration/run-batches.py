@@ -813,6 +813,19 @@ transient infrastructure failure that should be rerun. Otherwise return ci_retry
                 failed = next((run for run in latest_by_workflow.values() if run['headSha'] == m['head']
                                and run['status'] == 'completed' and run['conclusion'] not in ('success', 'skipped', 'neutral')), None)
                 write_json(folder / 'failed-workflow-runs.json', list(latest_by_workflow.values()))
+                # The PR rollup can lag the run list; retain fresh run/jobs without inventing check conclusions.
+                pr = json.loads(self.gh('pr', 'view', str(m['pr']), '--repo', self.args.github_repo, '--json',
+                                       'state,headRefOid,baseRefName,statusCheckRollup,mergeable,reviewDecision,mergeCommit'))
+                require(pr['headRefOid'] == m['head'] and pr['baseRefName'] == 'main', 'PR head/base changed outside controller')
+                require(pr['state'] == 'OPEN', 'PR is no longer open during CI failure refresh')
+                if failed:
+                    run = json.loads(self.gh('run', 'view', str(failed['databaseId']), '--repo', self.args.github_repo,
+                                             '--json', 'databaseId,headSha,status,conclusion,jobs'))
+                    require(run['headSha'] == m['head'], 'CI failure receipt has another head')
+                    require(run['status'] == 'completed' and run['conclusion'] not in ('success', 'skipped', 'neutral'),
+                            'CI failure run changed during receipt refresh; resume same PR later')
+                    pr['failedWorkflowRun'] = run
+                write_json(folder / 'latest-ci.json', pr)
                 m.update(phase='building', expected_head=m['head'], merge_parent=None, failed_run=failed['databaseId'] if failed else None,
                          feedback=f"CI failed on exact head. Inspect {folder}/latest-ci.json and gh run logs; fix actual defects, rerun focused checks. Never weaken/disable checks.")
                 self.save(folder, m)
