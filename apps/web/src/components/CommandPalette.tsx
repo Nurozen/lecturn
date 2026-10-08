@@ -55,6 +55,7 @@ import {
   BoxesIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
+  FactoryIcon,
   FolderIcon,
   FolderPlusIcon,
   GitForkIcon,
@@ -1826,6 +1827,15 @@ function OpenCommandPaletteDialog(props: {
 
   const connectAccountItems = useConnectAccountPaletteItems();
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+
+  actionItems.push({
+    kind: "action",
+    value: "action:provider-factory",
+    title: "Factory: update a provider integration",
+    icon: <FactoryIcon className={ITEM_ICON_CLASS} />,
+    searchTerms: ["factory", "provider", "release notes", "integration", "automation"],
+    run: () => navigate({ to: "/factory", search: {} }),
+  });
 
   if (
     draftContextualKey &&

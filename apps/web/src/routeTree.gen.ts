@@ -30,6 +30,7 @@ import { Route as ContextualEnvironmentIdRouteImport } from './routes/contextual
 import { Route as ConnectCallbackRouteImport } from './routes/connect_.callback'
 import { Route as AccountBillingRouteImport } from './routes/account.billing'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
+import { Route as ChatFactoryRouteImport } from './routes/_chat.factory'
 import { Route as ExtensionsFundingApproveRouteImport } from './routes/extensions.funding.approve'
 import { Route as DecisionsFundingApproveRouteImport } from './routes/decisions.funding.approve'
 import { Route as DecisionsEnvironmentIdProjectIdRouteImport } from './routes/decisions.$environmentId.$projectId'
@@ -141,6 +142,11 @@ const ChatPullRequestsRoute = ChatPullRequestsRouteImport.update({
   path: '/pull-requests',
   getParentRoute: () => ChatRoute,
 } as any)
+const ChatFactoryRoute = ChatFactoryRouteImport.update({
+  id: '/factory',
+  path: '/factory',
+  getParentRoute: () => ChatRoute,
+} as any)
 const ExtensionsFundingApproveRoute =
   ExtensionsFundingApproveRouteImport.update({
     id: '/extensions/funding/approve',
@@ -182,6 +188,7 @@ export interface FileRoutesByFullPath {
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/usage': typeof UsageRoute
+  '/factory': typeof ChatFactoryRoute
   '/pull-requests': typeof ChatPullRequestsRoute
   '/account/billing': typeof AccountBillingRoute
   '/connect/callback': typeof ConnectCallbackRoute
@@ -209,6 +216,7 @@ export interface FileRoutesByTo {
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/usage': typeof UsageRoute
+  '/factory': typeof ChatFactoryRoute
   '/pull-requests': typeof ChatPullRequestsRoute
   '/account/billing': typeof AccountBillingRoute
   '/connect/callback': typeof ConnectCallbackRoute
@@ -239,6 +247,7 @@ export interface FileRoutesById {
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/usage': typeof UsageRoute
+  '/_chat/factory': typeof ChatFactoryRoute
   '/_chat/pull-requests': typeof ChatPullRequestsRoute
   '/account/billing': typeof AccountBillingRoute
   '/connect_/callback': typeof ConnectCallbackRoute
@@ -270,6 +279,7 @@ export interface FileRouteTypes {
     | '/pair'
     | '/settings'
     | '/usage'
+    | '/factory'
     | '/pull-requests'
     | '/account/billing'
     | '/connect/callback'
@@ -297,6 +307,7 @@ export interface FileRouteTypes {
     | '/pair'
     | '/settings'
     | '/usage'
+    | '/factory'
     | '/pull-requests'
     | '/account/billing'
     | '/connect/callback'
@@ -326,6 +337,7 @@ export interface FileRouteTypes {
     | '/pair'
     | '/settings'
     | '/usage'
+    | '/_chat/factory'
     | '/_chat/pull-requests'
     | '/account/billing'
     | '/connect_/callback'
@@ -514,6 +526,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatPullRequestsRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/_chat/factory': {
+      id: '/_chat/factory'
+      path: '/factory'
+      fullPath: '/factory'
+      preLoaderRoute: typeof ChatFactoryRouteImport
+      parentRoute: typeof ChatRoute
+    }
     '/extensions/funding/approve': {
       id: '/extensions/funding/approve'
       path: '/extensions/funding/approve'
@@ -560,6 +579,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface ChatRouteChildren {
+  ChatFactoryRoute: typeof ChatFactoryRoute
   ChatPullRequestsRoute: typeof ChatPullRequestsRoute
   ChatIndexRoute: typeof ChatIndexRoute
   ChatEnvironmentIdThreadIdRoute: typeof ChatEnvironmentIdThreadIdRoute
@@ -568,6 +588,7 @@ interface ChatRouteChildren {
 }
 
 const ChatRouteChildren: ChatRouteChildren = {
+  ChatFactoryRoute: ChatFactoryRoute,
   ChatPullRequestsRoute: ChatPullRequestsRoute,
   ChatIndexRoute: ChatIndexRoute,
   ChatEnvironmentIdThreadIdRoute: ChatEnvironmentIdThreadIdRoute,
