@@ -827,6 +827,79 @@ class UIEvidenceGates(unittest.TestCase):
         batches.validate_ui_evidence(build)
 
 
+class FailedCIReceiptTests(unittest.TestCase):
+    def failure_fixture(self, *, pr_changes=None, run_changes=None):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        folder = Path(temp.name)
+        runner = batches.Runner.__new__(batches.Runner)
+        runner.args = SimpleNamespace(github_repo='example/fork', ci_timeout=30)
+        runner.fetch = Mock(return_value=('base', 'target'))
+        m = dict(pr=115, head='a' * 40, review_base='base', phase='published', round=3)
+        queued = {'__typename': 'CheckRun', 'name': 'macOS', 'status': 'QUEUED', 'conclusion': None}
+        initial = dict(state='OPEN', headRefOid=m['head'], baseRefName='main', statusCheckRollup=[queued],
+                       mergeable='UNKNOWN', reviewDecision='')
+        terminal = dict(queued, status='COMPLETED', conclusion='FAILURE')
+        fresh = initial | {'statusCheckRollup': [terminal]} | (pr_changes or {})
+        run = dict(databaseId=123, headSha=m['head'], status='completed', conclusion='failure', workflowName='CI')
+        detail = {key: value for key, value in run.items() if key != 'workflowName'}
+        detail['jobs'] = [dict(databaseId=456, name='macOS', status='completed', conclusion='failure')]
+        detail.update(run_changes or {})
+        runner.gh = Mock(side_effect=[json.dumps(value) for value in (initial, [run], [run], fresh, detail)])
+        return runner, folder, m, initial, fresh, detail
+
+    def test_queued_receipt_is_refreshed_before_failed_run_repair(self):
+        runner, folder, m, initial, fresh, detail = self.failure_fixture()
+        receipt = fresh | {'failedWorkflowRun': detail}
+
+        def save(folder, manifest):
+            self.assertEqual(json.loads((folder / 'latest-ci.json').read_text()), receipt)
+            batches.Runner.save(runner, folder, manifest)
+
+        runner.save = Mock(side_effect=save)
+        runner.wait_merge(folder, m)
+        self.assertEqual(initial['statusCheckRollup'][0]['status'], 'QUEUED')
+        self.assertEqual(receipt['statusCheckRollup'][0]['conclusion'], 'FAILURE')
+        persisted = json.loads((folder / 'manifest.json').read_text())
+        self.assertEqual((persisted['phase'], persisted['failed_run'], persisted['round']), ('building', 123, 3))
+        self.assertEqual(persisted['expected_head'], m['head'])
+        self.assertIsNone(persisted['merge_parent'])
+        runner.save.assert_called_once()
+
+    def test_lagging_rollup_keeps_real_terminal_run_and_jobs(self):
+        queued = {'__typename': 'CheckRun', 'name': 'macOS', 'status': 'QUEUED', 'conclusion': None}
+        runner, folder, m, initial, fresh, detail = self.failure_fixture(pr_changes={'statusCheckRollup': [queued]})
+        runner.wait_merge(folder, m)
+        receipt = json.loads((folder / 'latest-ci.json').read_text())
+        self.assertEqual(receipt['statusCheckRollup'], initial['statusCheckRollup'])
+        self.assertEqual(receipt['failedWorkflowRun'], detail)
+        self.assertEqual(receipt['failedWorkflowRun']['headSha'], m['head'])
+        self.assertEqual(receipt['failedWorkflowRun']['jobs'][0]['conclusion'], 'failure')
+        self.assertEqual(m['phase'], 'building')
+        self.assertEqual(m['round'], 3)
+
+    def test_refresh_rejects_changed_head_base_or_run_before_repair(self):
+        cases = [
+            ({'headRefOid': 'b' * 40}, {}, 'PR head/base changed'),
+            ({'baseRefName': 'other'}, {}, 'PR head/base changed'),
+            ({'state': 'MERGED'}, {}, 'no longer open'),
+            ({}, {'headSha': 'b' * 40}, 'another head'),
+            ({}, {'status': 'in_progress', 'conclusion': None}, 'run changed'),
+            ({}, {'conclusion': 'success'}, 'run changed'),
+        ]
+        for pr_changes, run_changes, message in cases:
+            with self.subTest(pr=pr_changes, run=run_changes):
+                runner, folder, m, initial, fresh, detail = self.failure_fixture(
+                    pr_changes=pr_changes, run_changes=run_changes)
+                runner.save = Mock()
+                with self.assertRaisesRegex(batches.Blocked, message):
+                    runner.wait_merge(folder, m)
+                runner.save.assert_not_called()
+                self.assertEqual(m['phase'], 'published')
+                self.assertEqual(m['round'], 3)
+                self.assertEqual(json.loads((folder / 'latest-ci.json').read_text()), initial)
+
+
 class CIGates(unittest.TestCase):
     def check(self, conclusion, status='COMPLETED'):
         return {'__typename': 'CheckRun', 'status': status, 'conclusion': conclusion}
