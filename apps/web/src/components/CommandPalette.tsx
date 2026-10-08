@@ -53,6 +53,7 @@ import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
   BoxesIcon,
+  BrainIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderIcon,
@@ -101,6 +102,12 @@ import { sourceControlEnvironment } from "../state/sourceControl";
 import { vcsEnvironment } from "../state/vcs";
 import { resolveThreadGitTarget } from "../lib/threadGitTarget";
 import { useAtomCommand } from "../state/use-atom-command";
+import {
+  memoryDemoEnvironment,
+  useFirstMemoryDemoEnvironmentId,
+  useMemoryStatus,
+} from "../state/memoryDemo";
+import { nextSimulatedMemoryWrite } from "./memory/simulatedWrites";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import {
@@ -142,6 +149,7 @@ import {
   buildBrowseGroups,
   buildProjectActionItems,
   buildRootGroups,
+  buildMemoryActionItems,
   buildStaveAddProjectItems,
   buildThreadActionItems,
   enumerateCommandPaletteItems,
@@ -687,6 +695,10 @@ function OpenCommandPaletteDialog(props: {
   );
   const contextualToggle = useAtomCommand(contextualEnvironment.updateThreadSettings);
   const contextualRefresh = useAtomCommand(contextualEnvironment.refresh);
+  const memoryEnvironmentId = useFirstMemoryDemoEnvironmentId();
+  const memoryStatus = useMemoryStatus(memoryEnvironmentId);
+  const memoryWrite = useAtomCommand(memoryDemoEnvironment.write);
+  const memoryReset = useAtomCommand(memoryDemoEnvironment.reset);
   const activeThreadProject = useProject(
     activeThread === null
       ? null
@@ -1934,6 +1946,39 @@ function OpenCommandPaletteDialog(props: {
         },
       ],
     });
+
+  const memoryThread = activeThread ?? activeDraftThread;
+  actionItems.push(
+    ...buildMemoryActionItems({
+      environmentId: memoryEnvironmentId,
+      activeProjectId:
+        memoryThread && memoryThread.environmentId === memoryEnvironmentId
+          ? memoryThread.projectId
+          : null,
+      pending: memoryStatus.data?.pending ?? [],
+      icon: <BrainIcon className={ITEM_ICON_CLASS} />,
+      run: async (action, projectId) => {
+        if (memoryEnvironmentId === null) return;
+        const environmentId = memoryEnvironmentId;
+        if (action === "open-map") {
+          await navigate({ to: "/memory", search: { environmentId } });
+        } else if (action === "contribute" && projectId !== null) {
+          await navigate({ to: "/memory", search: { environmentId, projectId, gate: "1" } });
+        } else if (action === "simulate-write" && projectId !== null) {
+          const result = await memoryWrite({
+            environmentId,
+            input: nextSimulatedMemoryWrite(projectId),
+          });
+          if (result._tag === "Success")
+            toastManager.add({ type: "success", title: "Simulated agent write recorded" });
+        } else if (action === "reset") {
+          const result = await memoryReset({ environmentId, input: {} });
+          if (result._tag === "Success")
+            toastManager.add({ type: "success", title: "Memory demo data reset" });
+        }
+      },
+    }),
+  );
 
   if (listedProjects.length > 0) {
     const activeProjectTitle =

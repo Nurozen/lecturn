@@ -1,5 +1,7 @@
 import { contextualDraftKey, useContextualDrafts } from "../state/contextualDrafts";
 import { NotesPanel } from "./NotesPanel";
+import { MemoryPanel } from "./memory/MemoryPanel";
+import { useMemoryDemoAvailable } from "../state/memoryDemo";
 import { AccountSurface } from "./AccountSurface";
 import { RepositoryPullRequestOverview } from "./pullRequest/RepositoryPullRequestOverview";
 import { useStaveGitSelection } from "./stave/staveGitSelection";
@@ -2304,6 +2306,8 @@ export default function ChatView(props: ChatViewProps) {
   const pullRequestsCapabilityKnown = serverConfig !== null;
   const notesAvailable =
     isServerThread && serverConfig?.environment.capabilities.threadNotes === true;
+  const memoryAvailable =
+    useMemoryDemoAvailable(activeThreadRef?.environmentId ?? null) && isServerThread;
   const supportsPullRequests = serverConfig?.environment.capabilities.pullRequests === true;
   const attachmentEnvironmentConfig = environmentById.get(environmentId)?.serverConfig ?? null;
   const attachmentUploadsCapabilityKnown = attachmentEnvironmentConfig !== null;
@@ -7963,6 +7967,14 @@ export default function ChatView(props: ChatViewProps) {
           Notes require an updated environment.
         </div>
       )
+    ) : renderedRightPanelSurface?.kind === "memory" ? (
+      memoryAvailable && activeThreadRef ? (
+        <MemoryPanel key={activeThreadKey} threadRef={activeThreadRef} />
+      ) : (
+        <div className="p-4 text-sm text-muted-foreground">
+          Memory is not enabled on this environment.
+        </div>
+      )
     ) : renderedRightPanelSurface?.kind === "agents" ? (
       <AgentsPanel
         model={agentPanelModel}
@@ -8596,6 +8608,8 @@ export default function ChatView(props: ChatViewProps) {
           onAddPullRequest={addPullRequestSurface}
           onAddNotes={() => useRightPanelStore.getState().open(activeThreadRef, "notes")}
           notesAvailable={notesAvailable}
+          onAddMemory={() => useRightPanelStore.getState().open(activeThreadRef, "memory")}
+          memoryAvailable={memoryAvailable}
           onAddAgents={addAgentsSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           terminalAvailable={activeProject !== null}
@@ -8648,6 +8662,8 @@ export default function ChatView(props: ChatViewProps) {
             onAddPullRequest={addPullRequestSurface}
             onAddNotes={() => useRightPanelStore.getState().open(activeThreadRef, "notes")}
             notesAvailable={notesAvailable}
+            onAddMemory={() => useRightPanelStore.getState().open(activeThreadRef, "memory")}
+            memoryAvailable={memoryAvailable}
             onAddAgents={addAgentsSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             terminalAvailable={activeProject !== null}

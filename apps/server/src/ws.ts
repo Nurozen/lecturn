@@ -141,6 +141,8 @@ import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import { makeStaveRpcHandlers } from "./stave/staveRpcHandlers.ts";
+import { makeMemoryDemoRpcHandlers } from "./memoryDemo/memoryDemoRpcHandlers.ts";
+import { MemoryDemoStore } from "./memoryDemo/MemoryDemoStore.ts";
 import * as StaveAdmission from "./stave/StaveAdmission.ts";
 import * as StaveOperations from "./stave/StaveOperations.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
@@ -1917,9 +1919,14 @@ const makeWsRpcLayer = (
       // auth/tracing wrapper so scope enforcement stays in one place.
       const sagaWorkbench = yield* SagaWorkbenchService;
       const staveRpcHandlers = yield* makeStaveRpcHandlers({ observeRpcEffect, observeRpcStream });
+      const memoryDemoRpcHandlers = yield* makeMemoryDemoRpcHandlers({
+        observeRpcEffect,
+        observeRpcStream,
+      });
 
       return WsRpcGroup.of({
         ...staveRpcHandlers,
+        ...memoryDemoRpcHandlers,
         [WS_METHODS.contextualStatus]: (input) =>
           observeRpcEffect(WS_METHODS.contextualStatus, contextual.status(input)),
         [WS_METHODS.contextualProjectSettings]: (input) =>
@@ -3784,6 +3791,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
     const pullRequestWatches = yield* PullRequestWatchService;
     const staveOperations = yield* StaveOperations.StaveOperations;
     const sagaWorkbench = yield* SagaWorkbenchService;
+    const memoryDemoStore = yield* MemoryDemoStore;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -3832,6 +3840,8 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               // connection attaches to the one server-lifetime registry.
               Layer.provide(Layer.succeed(StaveOperations.StaveOperations, staveOperations)),
               Layer.provide(Layer.succeed(SagaWorkbenchService, sagaWorkbench)),
+              // Shared with /mcp so agent writes reach every socket's subscription.
+              Layer.provide(Layer.succeed(MemoryDemoStore, memoryDemoStore)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(

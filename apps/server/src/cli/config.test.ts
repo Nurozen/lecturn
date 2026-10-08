@@ -42,6 +42,7 @@ const makeDesktopBootstrap = (
 it.layer(NodeServices.layer)("cli config resolution", (it) => {
   const defaultRuntimeConfig = {
     staveEnabled: true,
+    memoryDemoEnabled: false,
     threadForkingEnabled: true,
     desktopTelemetryFd: undefined,
     desktopTelemetryControlFd: undefined,
@@ -226,6 +227,43 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
 
       expect(resolved.staveEnabled).toBe(false);
       expect(resolved.stavePath).toBeUndefined();
+    }),
+  );
+
+  it.effect("enables the memory demo when LECTURN_MEMORY_DEMO is 1", () =>
+    Effect.gen(function* () {
+      const { join } = yield* Path.Path;
+      const baseDir = join(NodeOS.tmpdir(), "t3-cli-config-memory-demo-base");
+      const resolved = yield* resolveServerConfig(
+        {
+          mode: Option.none(),
+          port: Option.none(),
+          host: Option.none(),
+          baseDir: Option.none(),
+          cwd: Option.none(),
+          devUrl: Option.none(),
+          noBrowser: Option.none(),
+          bootstrapFd: Option.none(),
+          autoBootstrapProjectFromCwd: Option.none(),
+          logWebSocketEvents: Option.none(),
+          tailscaleServeEnabled: Option.none(),
+          tailscaleServePort: Option.none(),
+        },
+        Option.none(),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(
+              ConfigProvider.fromEnv({
+                env: { LECTURN_HOME: baseDir, LECTURN_MEMORY_DEMO: "1" },
+              }),
+            ),
+            NetService.layer,
+          ),
+        ),
+      );
+
+      expect(resolved.memoryDemoEnabled).toBe(true);
     }),
   );
 
