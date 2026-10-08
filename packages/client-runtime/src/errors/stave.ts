@@ -7,14 +7,14 @@
  * envelopes), so either transport renders the same text.
  */
 
-export const STAVE_ADMISSION_ERROR_TAGS = [
+const STAVE_ADMISSION_ERROR_TAGS = [
   "StaveWorktreeForbiddenError",
   "StaveArchivedProjectError",
   "StaveSpaceTransitioningError",
 ] as const;
 export type StaveAdmissionErrorTag = (typeof STAVE_ADMISSION_ERROR_TAGS)[number];
 
-export const STAVE_ADMISSION_ERROR_CODES = [
+const STAVE_ADMISSION_ERROR_CODES = [
   "stave_worktree_forbidden",
   "archived_project",
   "space_transitioning",
@@ -89,7 +89,7 @@ export function staveAdmissionErrorMessage(error: unknown): string | null {
  * `error`/`cause` lookup the admission mapping uses.
  */
 
-export const STAVE_RPC_ERROR_TAGS = [
+const STAVE_RPC_ERROR_TAGS = [
   "StaveUnavailableError",
   "StaveNotSpaceError",
   "StaveCommandError",

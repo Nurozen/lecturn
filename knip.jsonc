@@ -1,5 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
+  // Exported types are part of our contracts even before they have consumers.
+  "rules": { "types": "off", "nsTypes": "off" },
   // These executables are supplied by the OS or installed separately from npm.
   "ignoreBinaries": ["eas", "file", "mkfifo", "pkill", "pkg-config", "plutil", "sips"],
   "workspaces": {
@@ -70,7 +72,13 @@
     "scripts": {
       // Maintainer scripts run by hand (NOTICE.md, assets/provider-emblems/README.md). The upstream
       // icon exporter stays beside export-lecturn-icons.ts, which icons:export runs instead.
-      "entry": ["export-brand-icons.ts", "export-provider-emblems.ts", "generate-legal-notices.ts"],
+      // Knip loads its preprocessor (knip-schemas.ts) through a CLI option, not a source import.
+      "entry": [
+        "export-brand-icons.ts",
+        "export-provider-emblems.ts",
+        "generate-legal-notices.ts",
+        "knip-schemas.ts",
+      ],
     },
     "packages/*": {
       // These workspace packages are private to this monorepo.

@@ -83,7 +83,7 @@ export function initialStaveOperationState(operationId: string): StaveOperationS
   };
 }
 
-export function isStaveOperationTerminal(status: StaveOperationStatus): boolean {
+function isStaveOperationTerminal(status: StaveOperationStatus): boolean {
   return status === "finished" || status === "failed";
 }
 
@@ -402,7 +402,7 @@ export interface ReattachStaveOperationInput<E, R> {
 }
 
 /** Reattaches to a running operation after a reconnect (`stave.observeOperation`). */
-export function reattachStaveOperation<E, R>(
+function reattachStaveOperation<E, R>(
   input: ReattachStaveOperationInput<E, R>,
 ): Effect.Effect<StaveOperationOutcome<R>, never, R> {
   const observe = observeFrom(input.client, input.environmentId);
