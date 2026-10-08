@@ -258,36 +258,6 @@ function readSessionClerkToken(
   );
 }
 
-export const waitForManagedRelayClerkToken = Effect.fn(
-  "clientRuntime.managedRelaySession.waitForClerkToken",
-)(function* (registry: AtomRegistry.AtomRegistry, accountId: string) {
-  return yield* Effect.callback<string, ManagedRelaySessionError>((resume) => {
-    let unsubscribe: (() => void) | undefined;
-    let completed = false;
-    const readCurrentSession = () => {
-      if (completed) {
-        return true;
-      }
-      const session = registry.get(managedRelaySessionsAtom).get(accountId);
-      if (!session) {
-        return false;
-      }
-      completed = true;
-      unsubscribe?.();
-      resume(readSessionClerkToken(session));
-      return true;
-    };
-
-    if (readCurrentSession()) {
-      return;
-    }
-
-    unsubscribe = registry.subscribe(managedRelaySessionsAtom, readCurrentSession);
-    readCurrentSession();
-    return Effect.sync(() => unsubscribe?.());
-  });
-});
-
 /** Removes an environment from one signed-in account without contacting that environment. */
 export const deregisterManagedRelayEnvironment = Effect.fn(
   "clientRuntime.managedRelaySession.deregisterEnvironment",
