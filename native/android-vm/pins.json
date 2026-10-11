@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "architecture": "arm64",
+  "androidApi": 35,
+  "ndk": "27.1.12297006",
+  "hostQemu": "8.2.2",
+  "rootfs": {
+    "file": "ubuntu-base-24.04.5-base-arm64.tar.gz",
+    "sha256": "a91d5a93010193712d346d761372b7c9db6dfcf093893161c64ca107f05914f2"
+  },
+  "cloud": {
+    "file": "noble-server-cloudimg-arm64.img",
+    "imageDate": "20260926",
+    "bytes": 620224512,
+    "sha256": "1d6bffe64b848468ac97f821d369a4846d983de1800ccf6b5ec8853e85cefc55"
+  },
+  "node": {
+    "version": "24.14.1",
+    "file": "node-v24.14.1-linux-arm64.tar.xz",
+    "sha256": "71e427e28b78846f201d4d5ecc30cb13d1508ca099ef3871889a1256c7d6f67e"
+  },
+  "npm": {
+    "@openai/codex": "0.160.1",
+    "@anthropic-ai/claude-code": "2.1.291",
+    "lecturn": "0.0.51-nightly.20261008.98"
+  },
+  "npmOverrides": {
+    "@effect/platform-node-shared": "4.0.0-beta.103"
+  }
+}

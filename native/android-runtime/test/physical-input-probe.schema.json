@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Read-only native physical input qualification sample",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "sample",
+    "ready",
+    "inputOrFailureNotifications",
+    "injectionTested"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "kind": { "const": "physicalInputProbe" },
+    "sample": { "type": "integer", "minimum": 0, "maximum": 60 },
+    "ready": { "type": "boolean" },
+    "inputOrFailureNotifications": { "type": "integer", "minimum": 0 },
+    "injectionTested": { "const": false }
+  }
+}

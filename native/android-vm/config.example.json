@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "package": "com.cloudgatherer.lecturn.symba",
+  "memoryMiB": 4096,
+  "cpus": 4,
+  "networkBoundary": "authenticated-loopback-with-slirp-host-access"
+}

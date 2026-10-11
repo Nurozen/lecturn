@@ -1,0 +1,22 @@
+[Unit]
+Description=Lecturn guest server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lecturn
+Group=lecturn
+WorkingDirectory=/home/lecturn/workspace
+Environment=HOME=/home/lecturn
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStartPre=/usr/bin/test /home/lecturn != /root
+ExecStart=/usr/local/bin/lecturn --host=0.0.0.0 --port=3773 --base-dir=/home/lecturn/.lecturn --no-browser
+# A runtime restart starts the server only; it submits no turns or replay commands.
+Restart=no
+KillMode=control-group
+TimeoutStopSec=12
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
