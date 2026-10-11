@@ -8,6 +8,7 @@ import {
   readTerminalOutputUpdate,
   type TerminalOutputCursor,
   type TerminalOutputUpdate,
+  type TerminalOutputState,
   type TerminalSessionState,
 } from "@lecturn/client-runtime/state/terminal";
 import {
@@ -317,6 +318,7 @@ interface TerminalViewportProps {
   runtimeEnv?: Record<string, string>;
   providerInstanceId?: ProviderInstanceId;
   onSessionExited: () => void;
+  onOutput?: (output: TerminalOutputState) => void;
   onAddTerminalContext?: (selection: TerminalContextSelection) => void;
   focusRequestId: number;
   autoFocus: boolean;
@@ -343,6 +345,7 @@ export function TerminalViewport({
   runtimeEnv,
   providerInstanceId,
   onSessionExited,
+  onOutput,
   onAddTerminalContext,
   focusRequestId,
   autoFocus,
@@ -425,6 +428,10 @@ export function TerminalViewport({
     }),
   );
   const terminalOutput = terminalSession.output;
+  const reportOutput = useEffectEvent((output: TerminalOutputState) => onOutput?.(output));
+  useEffect(() => {
+    reportOutput(terminalOutput);
+  }, [terminalOutput]);
   const terminalError = terminalSession.error;
   const terminalStatus = terminalSession.status;
   const outputCursorRef = useRef<TerminalOutputCursor>(INITIAL_TERMINAL_OUTPUT_CURSOR);

@@ -9,6 +9,9 @@ import { ProviderInstanceId } from "./providerInstance.ts";
  */
 export const DEFAULT_TERMINAL_ID = "term-1";
 
+/** Reserved setup PTY: authentication output must stay in memory, never terminal history files. */
+export const PHONE_AUTH_TERMINAL_THREAD_ID = "onboarding-phone-auth";
+
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 const TerminalColsSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).check(
   Schema.isLessThanOrEqualTo(1000),

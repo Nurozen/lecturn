@@ -13,9 +13,27 @@ import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
+import { withAndroidAccess } from "./androidAccessCommand";
 import { environmentSnapshotAtom } from "./shell";
 
-export const threadEnvironment = createThreadEnvironmentAtoms(connectionAtomRuntime);
+const commands = createThreadEnvironmentAtoms(connectionAtomRuntime);
+export const threadEnvironment = {
+  ...commands,
+  create: withAndroidAccess(commands.create),
+  import: withAndroidAccess(commands.import),
+  fork: withAndroidAccess(
+    commands.fork,
+    (registry, value) =>
+      registry.get(
+        environmentThreadShells.threadShellAtom({
+          environmentId: value.environmentId,
+          threadId: value.input.sourceThreadId,
+        }),
+      )?.runtimeMode,
+  ),
+  setRuntimeMode: withAndroidAccess(commands.setRuntimeMode),
+  startTurn: withAndroidAccess(commands.startTurn),
+};
 export const environmentThreads = createEnvironmentThreadStateAtoms(connectionAtomRuntime);
 export const environmentThreadDetails = createEnvironmentThreadDetailAtoms(
   environmentThreads.stateAtom,

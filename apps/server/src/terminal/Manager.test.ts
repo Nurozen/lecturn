@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   DEFAULT_TERMINAL_ID,
+  PHONE_AUTH_TERMINAL_THREAD_ID,
   type TerminalAttachStreamEvent,
   type TerminalEvent,
   type TerminalMetadataStreamEvent,
@@ -775,6 +776,57 @@ it.layer(
       expect(first.writes).toEqual(["pwd\n"]);
       expect(second.writes).toEqual(["ls\n"]);
       expect(ptyAdapter.spawnInputs).toHaveLength(2);
+    }),
+  );
+
+  it.effect(
+    "keeps phone authentication output in memory across writes, clear, restart, and close",
+    () =>
+      Effect.gen(function* () {
+        const { manager, ptyAdapter, logsDir } = yield* createManager();
+        const threadId = PHONE_AUTH_TERMINAL_THREAD_ID;
+        const input = openInput({ threadId });
+        const outputProcessed = yield* Deferred.make<void>();
+        const unsubscribe = yield* manager.subscribe((event) =>
+          event.type === "output" && event.threadId === threadId
+            ? Deferred.succeed(outputProcessed, undefined).pipe(Effect.asVoid)
+            : Effect.void,
+        );
+        yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+        yield* manager.open(input);
+        const synthetic = "https://claude.ai/oauth/authorize?state=synthetic\nsynthetic#state\n";
+        ptyAdapter.processes[0]!.emitData(synthetic);
+        yield* Deferred.await(outputProcessed);
+        expect((yield* manager.open(input)).history).toBe(synthetic);
+        yield* manager.write({
+          threadId,
+          terminalId: DEFAULT_TERMINAL_ID,
+          data: "synthetic#state\r",
+        });
+        expect(ptyAdapter.processes[0]!.writes).toEqual(["synthetic#state\r"]);
+        const logPath = yield* historyLogPath(logsDir, threadId);
+        yield* manager.clear({ threadId, terminalId: DEFAULT_TERMINAL_ID });
+        expect(yield* pathExists(logPath)).toBe(false);
+        yield* manager.restart(restartInput({ threadId }));
+        expect(yield* pathExists(logPath)).toBe(false);
+        ptyAdapter.processes[1]!.emitData(synthetic);
+        // Close drains the output and persistence workers; no wall-clock polling.
+        yield* manager.close({ threadId });
+        expect(yield* pathExists(logPath)).toBe(false);
+        expect((yield* manager.open(input)).history).toBe("");
+      }),
+  );
+
+  it.effect("never replays a pre-existing phone-auth history file", () =>
+    Effect.gen(function* () {
+      const { manager, logsDir } = yield* createManager();
+      const fs = yield* FileSystem.FileSystem;
+      const logPath = yield* historyLogPath(logsDir, PHONE_AUTH_TERMINAL_THREAD_ID);
+      yield* fs.writeFileString(logPath, "synthetic stale authentication URL");
+      const opened = yield* manager.open(openInput({ threadId: PHONE_AUTH_TERMINAL_THREAD_ID }));
+      expect(opened.history).toBe("");
+      yield* manager.close({ threadId: PHONE_AUTH_TERMINAL_THREAD_ID, deleteHistory: true });
+      expect(yield* pathExists(logPath)).toBe(false);
     }),
   );
 

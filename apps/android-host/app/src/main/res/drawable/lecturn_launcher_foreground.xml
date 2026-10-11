@@ -1,0 +1,5 @@
+<!-- The official mark's outer ring fits the adaptive icon's 66dp safe circle. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/lecturn_mark"
+    android:insetLeft="13%" android:insetTop="13%"
+    android:insetRight="13%" android:insetBottom="13%" />

@@ -145,6 +145,38 @@ describe("selectOnboardingProvidersByDriver", () => {
 });
 
 describe("resolveOnboardingProviderLoginCommand", () => {
+  it("pretypes the exact Codex device-auth command only for phone-local auth", () => {
+    expect(
+      resolveOnboardingProviderLoginCommand(readyCodex, DEFAULT_SERVER_SETTINGS, "linux", true),
+    ).toBe("codex login --device-auth");
+    expect(
+      resolveOnboardingProviderLoginCommand(readyCodex, DEFAULT_SERVER_SETTINGS, "linux", false),
+    ).toBe("codex login");
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      providerInstances: {
+        [readyCodex.instanceId]: {
+          driver: readyCodex.driver,
+          config: { binaryPath: "/opt/Phone Tools/codex" },
+        },
+      },
+    };
+    expect(resolveOnboardingProviderLoginCommand(readyCodex, settings, "linux", true)).toBe(
+      "'/opt/Phone Tools/codex' login --device-auth",
+    );
+  });
+
+  it("keeps Claude on its printed-URL/manual-code login command", () => {
+    const provider = {
+      ...readyCodex,
+      driver: ProviderDriverKind.make("claudeAgent"),
+      instanceId: ProviderInstanceId.make("claude"),
+    };
+    expect(
+      resolveOnboardingProviderLoginCommand(provider, DEFAULT_SERVER_SETTINGS, "linux", true),
+    ).toBe("claude auth login");
+  });
+
   it("uses the selected Codex account binary", () => {
     const provider = { ...readyCodex, instanceId: ProviderInstanceId.make("codex_work") };
 

@@ -1,3 +1,4 @@
+import { requireAndroidFullAccess } from "../lib/androidHostAccess";
 import { contextualDraftKey, useContextualDrafts } from "../state/contextualDrafts";
 import { NotesPanel } from "./NotesPanel";
 import { AccountSurface } from "./AccountSurface";
@@ -3810,9 +3811,33 @@ export default function ChatView(props: ChatViewProps) {
     [activeProject, persistProjectScripts],
   );
 
+  const runtimeModeRequest = useRef(0);
+  useEffect(
+    () => () => {
+      runtimeModeRequest.current++;
+    },
+    [composerDraftTarget],
+  );
   const handleRuntimeModeChange = useCallback(
-    (mode: RuntimeMode) => {
+    async (mode: RuntimeMode) => {
+      const request = ++runtimeModeRequest.current;
       if (mode === runtimeMode) return;
+      try {
+        await requireAndroidFullAccess(
+          typeof composerDraftTarget === "string"
+            ? composerDraftTarget
+            : composerDraftTarget.threadId,
+          mode,
+        );
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Full access not enabled",
+          description: error instanceof Error ? error.message : "Review Android device access.",
+        });
+        return;
+      }
+      if (request !== runtimeModeRequest.current) return;
       setComposerDraftRuntimeMode(composerDraftTarget, mode);
       if (isLocalDraftThread) {
         setDraftThreadContext(composerDraftTarget, { runtimeMode: mode });

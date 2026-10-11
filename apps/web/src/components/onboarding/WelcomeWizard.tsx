@@ -13,7 +13,12 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
-import { CommandId, ProviderDriverKind, ThreadId } from "@lecturn/contracts";
+import {
+  CommandId,
+  PHONE_AUTH_TERMINAL_THREAD_ID,
+  ProviderDriverKind,
+  ThreadId,
+} from "@lecturn/contracts";
 import * as Schema from "effect/Schema";
 import {
   ArrowRightIcon,
@@ -28,6 +33,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+
+import { type TerminalOutputState } from "@lecturn/client-runtime/state/terminal";
+import { isPhoneLocalOnboarding } from "../../onboarding/phoneAuth.logic";
+import { PhoneAuthControls } from "./PhoneAuthControls";
 
 import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../../appearanceFonts";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
@@ -655,6 +664,7 @@ interface AgentTerminalSession {
   readonly cwd: string;
   readonly command: string;
   readonly keybindings: ServerConfig["keybindings"];
+  readonly phoneLocalAuth: boolean;
 }
 
 /**
@@ -677,6 +687,13 @@ function AgentsStep({
   readonly onSkip: () => void;
 }) {
   const targetEnvironment = useOnboardingTargetEnvironment(mode, pairedEnvironmentId);
+  const primaryEnvironment = usePrimaryEnvironment();
+  const phoneLocal = isPhoneLocalOnboarding({
+    protocolVersion: typeof window === "undefined" ? undefined : window.symbaHost?.protocolVersion,
+    mode,
+    environmentId: targetEnvironment?.environmentId ?? null,
+    primaryEnvironmentId: primaryEnvironment?.environmentId ?? null,
+  });
   if (targetEnvironment === null) {
     return (
       <StepShell
@@ -694,7 +711,8 @@ function AgentsStep({
   }
   return (
     <ConnectedAgentsStep
-      key={targetEnvironment.environmentId}
+      key={`${targetEnvironment.environmentId}:${phoneLocal}`}
+      phoneLocal={phoneLocal}
       environmentId={targetEnvironment.environmentId}
       machineLabel={targetEnvironment.label}
       onBack={onBack}
@@ -705,12 +723,14 @@ function AgentsStep({
 }
 
 function ConnectedAgentsStep({
+  phoneLocal,
   environmentId,
   machineLabel,
   onBack,
   onContinue,
   onSkip,
 }: {
+  readonly phoneLocal: boolean;
   readonly environmentId: EnvironmentId;
   readonly machineLabel: string;
   readonly onBack: () => void;
@@ -747,6 +767,7 @@ function ConnectedAgentsStep({
             key={driver}
             driver={driver}
             provider={provider}
+            phoneLocal={phoneLocal}
             terminalOpen={terminalSession?.driver === driver}
             terminalAvailable={serverConfig !== null}
             onOpenTerminal={() => {
@@ -761,9 +782,11 @@ function ConnectedAgentsStep({
                       provider,
                       serverConfig.settings,
                       serverConfig.environment.platform.os,
+                      phoneLocal,
                     )
                   : AGENT_INSTALL_COMMANDS[driver],
                 keybindings: serverConfig.keybindings,
+                phoneLocalAuth: phoneLocal && provider.installed,
               });
             }}
           />
@@ -773,6 +796,9 @@ function ConnectedAgentsStep({
         <AgentInstallTerminal
           key={`${terminalSession.environmentId}:${terminalSession.providerInstanceId}:${terminalSession.driver}`}
           session={terminalSession}
+          onRefresh={async () =>
+            (await refreshProviders({ environmentId, input: {} }))._tag === "Success"
+          }
           onClose={() => {
             setTerminalSession(null);
             void refreshProviders({ environmentId, input: {} });
@@ -798,12 +824,14 @@ function ConnectedAgentsStep({
 }
 
 function AgentCard({
+  phoneLocal,
   driver,
   provider,
   terminalOpen,
   terminalAvailable,
   onOpenTerminal,
 }: {
+  readonly phoneLocal: boolean;
   readonly driver: OnboardingAgentDriver;
   readonly provider: ServerProvider | undefined;
   readonly terminalOpen: boolean;
@@ -845,6 +873,7 @@ function AgentCard({
             size="xs"
             variant="ghost"
             onClick={onOpenTerminal}
+            className={phoneLocal ? "min-h-12 px-4" : undefined}
             disabled={terminalOpen || !terminalAvailable}
           >
             <TerminalIcon className="size-3.5" />
@@ -864,12 +893,19 @@ function AgentCard({
  */
 function AgentInstallTerminal({
   session,
+  onRefresh,
   onClose,
 }: {
   readonly session: AgentTerminalSession;
+  readonly onRefresh: () => Promise<boolean>;
   readonly onClose: () => void;
 }) {
-  const { command, cwd, driver, environmentId, keybindings, providerInstanceId } = session;
+  const { command, cwd, driver, environmentId, keybindings, providerInstanceId, phoneLocalAuth } =
+    session;
+  const [output, setOutput] = useState<TerminalOutputState | null>(null);
+  const threadId = phoneLocalAuth
+    ? ThreadId.make(PHONE_AUTH_TERMINAL_THREAD_ID)
+    : AGENT_ONBOARDING_THREAD_ID;
   // Same terminal typography preference the thread drawer honors.
   const [advancedTypography] = useLocalStorage(
     TYPOGRAPHY_ADVANCED_STORAGE_KEY,
@@ -877,15 +913,18 @@ function AgentInstallTerminal({
     Schema.Boolean,
   );
   const openTerminal = useAtomCommand(terminalEnvironment.open, { reportFailure: false });
-  const writeTerminal = useAtomCommand(terminalEnvironment.write, { reportFailure: false });
+  const writeTerminal = useAtomCommand(terminalEnvironment.write, {
+    reportFailure: false,
+    reportDefect: false,
+  });
   const closeTerminal = useAtomCommand(terminalEnvironment.close, { reportFailure: false });
   const setupQueueRef = useRef(Promise.resolve());
   const setupGenerationRef = useRef(0);
   const activeSetupGenerationRef = useRef<number | null>(null);
   const [terminalId] = useState(() => `onboarding-${driver}-${randomUUID()}`);
   const threadRef = useMemo(
-    () => scopeThreadRef(environmentId, AGENT_ONBOARDING_THREAD_ID),
-    [environmentId],
+    () => scopeThreadRef(environmentId, threadId),
+    [environmentId, threadId],
   );
   const [setupAttempt, setSetupAttempt] = useState(0);
   const [setupState, setSetupState] = useState<
@@ -901,13 +940,14 @@ function AgentInstallTerminal({
     setupGenerationRef.current = generation;
     activeSetupGenerationRef.current = generation;
     setSetupState("preparing");
+    setOutput(null);
 
     setupQueueRef.current = setupQueueRef.current.then(async () => {
       if (activeSetupGenerationRef.current !== generation) return;
       const opened = await openTerminal({
         environmentId,
         input: {
-          threadId: AGENT_ONBOARDING_THREAD_ID,
+          threadId,
           terminalId,
           cwd,
           providerInstanceId,
@@ -922,7 +962,7 @@ function AgentInstallTerminal({
 
       const wrote = await writeTerminal({
         environmentId,
-        input: { threadId: AGENT_ONBOARDING_THREAD_ID, terminalId, data: command },
+        input: { threadId, terminalId, data: command },
       });
       if (activeSetupGenerationRef.current !== generation) return;
       setSetupState(wrote._tag === "Success" ? "ready" : "writeFailed");
@@ -939,7 +979,7 @@ function AgentInstallTerminal({
       setupQueueRef.current = setupQueueRef.current.then(async () => {
         await closeTerminal({
           environmentId,
-          input: { threadId: AGENT_ONBOARDING_THREAD_ID, terminalId, deleteHistory: true },
+          input: { threadId, terminalId, deleteHistory: true },
         });
       });
     };
@@ -952,6 +992,7 @@ function AgentInstallTerminal({
     providerInstanceId,
     setupAttempt,
     terminalId,
+    threadId,
     writeTerminal,
   ]);
 
@@ -978,24 +1019,47 @@ function AgentInstallTerminal({
               Retry
             </Button>
           ) : null}
-          <Button size="xs" variant="ghost-muted" onClick={onClose}>
+          <Button
+            size="xs"
+            className={phoneLocalAuth ? "min-h-12 px-4" : undefined}
+            variant="ghost-muted"
+            onClick={onClose}
+          >
             Close
           </Button>
         </div>
       </div>
+      {phoneLocalAuth && terminalReady ? (
+        <PhoneAuthControls
+          driver={driver}
+          command={command}
+          output={output}
+          commandReady={setupState === "ready"}
+          onRefresh={onRefresh}
+          writeInput={async (data) => {
+            if (activeSetupGenerationRef.current === null) return false;
+            const result = await writeTerminal({
+              environmentId,
+              input: { threadId, terminalId, data },
+            });
+            return result._tag === "Success";
+          }}
+        />
+      ) : null}
       <div className="h-64">
         {terminalReady ? (
           <TerminalViewport
             threadRef={threadRef}
-            threadId={AGENT_ONBOARDING_THREAD_ID}
+            threadId={threadId}
             terminalId={terminalId}
-            terminalLabel={`Install ${driver}`}
+            terminalLabel={`Set up ${driver}`}
+            {...(phoneLocalAuth ? { onOutput: setOutput } : {})}
             cwd={cwd}
             providerInstanceId={providerInstanceId}
             advancedTypography={advancedTypography}
             onSessionExited={onClose}
             focusRequestId={1}
-            autoFocus
+            autoFocus={!phoneLocalAuth}
             visible
             resizeEpoch={0}
             drawerHeight={256}
