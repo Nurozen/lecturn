@@ -11,6 +11,7 @@ import subprocess
 import shutil
 import sys
 import time
+import tempfile
 import uuid
 
 
@@ -77,9 +78,8 @@ def command(argv, cwd, *, log=None, stdin=None, allow_failure=False, lock_fd=Non
     return result
 
 
-# Agent model policy: no model is pinned. Claude agents use the operator's device default
-# (user-level Claude settings, ANTHROPIC_MODEL), subagents follow Claude Code's own default, and
-# grok uses its own config default. The models actually used are recorded in each events log.
+# Agent model policy: no model is pinned. Each selected CLI inherits the operator's device
+# default; selecting a different CLI does not change the outside reviewer's Grok runtime.
 # Read-only GitHub CLI subcommands a sandboxed reviewer may run outside the OS sandbox: gh is a Go
 # binary that does not trust the sandbox TLS proxy, so it fails inside. Nothing here writes files.
 REVIEW_GH_COMMANDS = ('gh api', 'gh run view', 'gh run list', 'gh pr view', 'gh pr list',
@@ -203,6 +203,33 @@ def agent_result(log_path):
     require(result.get('modelUsage'), 'Agent run reported no model usage')
     value = result.get('structured_output')
     require(isinstance(value, dict), 'Agent returned no structured output')
+    return value
+
+
+def codex_result(log_path):
+    """Accept a structured final message only after a successful Codex turn."""
+    result, completed = None, False
+    with Path(log_path).open(errors='replace') as events:
+        for line in events:
+            if not line.startswith('{'):
+                continue
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            kind = event.get('type')
+            require(kind not in ('turn.failed', 'error'), 'Codex agent run failed')
+            if kind == 'turn.started':
+                result, completed = None, False
+            elif kind == 'item.completed' and event.get('item', {}).get('type') == 'agent_message':
+                result, completed = event['item'].get('text'), False
+            elif kind == 'turn.completed':
+                completed = bool(event.get('usage', {}).get('output_tokens'))
+    require(completed and isinstance(result, str), 'Codex produced no completed agent result')
+    value = json.loads(result)
+    require(isinstance(value, dict), 'Codex returned no structured output')
     return value
 
 
@@ -360,9 +387,13 @@ class Runner:
             git(self.repo, 'fetch', '--no-tags', 'origin', 'refs/heads/upstream-mirror:refs/remotes/origin/upstream-mirror')
         return git(self.repo, 'rev-parse', 'origin/main'), git(self.repo, 'rev-parse', 'origin/upstream-mirror')
 
-    def agent(self, repo, folder, name, prompt, output_schema, readonly=False, runtime='claude'):
+    def agent(self, repo, folder, name, prompt, output_schema, readonly=False, runtime=None):
+        if runtime is None:
+            runtime = self.args.agent_cli
         if runtime == 'grok':
             return self.grok_agent(repo, folder, name, prompt, output_schema)
+        if runtime == 'codex':
+            return self.codex_agent(repo, folder, name, prompt, output_schema, readonly)
         require(runtime == 'claude', f'Unknown agent runtime {runtime}')
         access = ['--permission-mode', 'bypassPermissions', '--dangerously-skip-permissions',
                   '--add-dir', str(folder)]
@@ -407,6 +438,53 @@ class Runner:
         value = agent_result(log_path)
         write_json(output_path, value)
         require(set(value) == set(output_schema['required']), 'Incomplete structured agent response')
+        return value
+
+    def codex_agent(self, repo, folder, name, prompt, output_schema, readonly):
+        source, reports = repo.resolve(), folder.resolve()
+        if readonly:
+            require(source != reports and source not in reports.parents and reports not in source.parents,
+                    'Reviewer report directory must be separate from source')
+            common = Path(git(repo, 'rev-parse', '--path-format=absolute', '--git-common-dir')).resolve()
+            require(reports != common and reports not in common.parents and common not in reports.parents,
+                    'Reviewer report directory must be separate from git data')
+        # Codex exec can auto-trust project config in full-access mode even with an untrusted
+        # override. Launch from a fresh empty directory; the agent uses explicit source paths.
+        config = ['-c', 'approval_policy="never"', '-c', 'features.hooks=false', '-c', 'notify=[]',
+                  '-c', 'features.plugins=false', '-c', 'features.apps=false',
+                  '-c', 'features.network_proxy=false']
+        if readonly:
+            # A unique profile cannot inherit extra write grants from a same-named user profile.
+            profile = 'lecturn_review_' + uuid.uuid4().hex
+            rules = f'{{filesystem={{":root"="read",{json.dumps(str(reports))}="write"}},network={{enabled=true}}}}'
+            config += ['-c', f'default_permissions="{profile}"', '-c', f'permissions.{profile}={rules}',
+                       '-c', 'shell_environment_policy.set=' +
+                       f'{{TMPDIR={json.dumps(str(reports))},TMPPREFIX={json.dumps(str(reports / "zsh"))}}}']
+        else:
+            config += ['-c', 'default_permissions=":danger-full-access"']
+        prompt = (f'Working source repository: {source}. Read {source}/AGENTS.md if present. '
+                  f'Run source commands with that working directory (git -C {source}). '
+                  f'Your report directory is {reports}. The initial working directory is an empty launcher directory.\n\n'
+                  + prompt)
+        schema_path, output_path = folder / f'{name}.schema.json', folder / f'{name}.json'
+        log_path = folder / f'{name}.events.log'
+        write_json(schema_path, output_schema)
+        (folder / f'{name}.prompt.md').write_text(prompt)
+        with tempfile.TemporaryDirectory(prefix='lecturn-agent-') as launch_dir:
+            config += ['-c', f'projects.{json.dumps(str(Path(launch_dir).resolve()))}.trust_level="untrusted"']
+            # MCP tools execute outside shell restrictions. Empty tables merge with user settings;
+            # enumerate without starting servers, then disable each server for the agent session.
+            servers = json.loads(command(['codex', *config, 'mcp', 'list', '--json'], launch_dir).stdout)
+            require(isinstance(servers, list) and all(isinstance(s, dict) and isinstance(s.get('name'), str)
+                                                    for s in servers), 'Cannot enumerate Codex MCP servers')
+            for server in servers:
+                config += ['-c', f'mcp_servers.{json.dumps(server["name"])}.enabled=false']
+            command(['codex', 'exec', '-C', launch_dir, *config, '--ephemeral', '--json', '--ignore-rules',
+                     '--skip-git-repo-check', '--output-schema', str(schema_path), '-'], launch_dir,
+                    log=log_path, stdin=prompt, lock_fd=self.lock_fd)
+        value = codex_result(log_path)
+        require(set(value) == set(output_schema['required']), 'Incomplete structured agent response')
+        write_json(output_path, value)
         return value
 
     def grok_agent(self, repo, folder, name, prompt, output_schema):
@@ -942,12 +1020,15 @@ Return ci_retry_safe false; this final review does not authorize CI reruns.
                     return
 
 
-def main():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repo', required=True)
     parser.add_argument('--state-dir', required=True, help='Durable external manifests/logs; retain between invocations')
     parser.add_argument('--spaces-dir', required=True, help='Stave workspace root, containing SPACE/lecturn')
     parser.add_argument('--github-repo', default='Nurozen/lecturn')
+    parser.add_argument('--agent-cli', choices=('claude', 'codex'),
+                        default=os.environ.get('LECTURN_SYNC_AGENT_CLI', 'claude'),
+                        help='Planner/builder/review CLI (default: LECTURN_SYNC_AGENT_CLI or claude); outside review stays Grok')
     parser.add_argument('--accepted', help='Full initial accepted upstream SHA; used only to bootstrap')
     parser.add_argument('--bootstrap-note', help='Evidence that initial accepted SHA landed in fork main')
     parser.add_argument('--target', help='One explicit full checkpoint SHA instead of planner')
@@ -961,7 +1042,15 @@ def main():
     parser.add_argument('--max-lines', type=int, default=15000)
     parser.add_argument('--max-rounds', type=int, default=8)
     parser.add_argument('--ci-timeout', type=int, default=7200)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    # argparse validates explicit choices, but not a string default supplied by the environment.
+    if args.agent_cli not in ('claude', 'codex'):
+        parser.error('LECTURN_SYNC_AGENT_CLI must be claude or codex')
+    return args
+
+
+def main():
+    args = parse_args()
     repo, state = Path(args.repo).resolve(), Path(args.state_dir).resolve()
     require(state != repo and repo not in state.parents, 'State directory must be outside product checkout')
     common = Path(git(repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'))
