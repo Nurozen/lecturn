@@ -3,6 +3,14 @@ import { formatProviderDriverKindLabel } from "../providerModels";
 
 export function providerDetectionLabel(provider: ServerProvider): string {
   const name = provider.displayName?.trim() || formatProviderDriverKindLabel(provider.driver);
+  if (
+    provider.installed &&
+    provider.auth.status === "unauthenticated" &&
+    provider.discovery?.status !== "detecting" &&
+    provider.discovery?.status !== "timed-out"
+  ) {
+    return `${name} needs sign-in`;
+  }
   switch (provider.discovery?.status) {
     case "detecting":
       return provider.discovery.phase === "shell"
@@ -13,12 +21,19 @@ export function providerDetectionLabel(provider: ServerProvider): string {
     case "ready":
       return `${name} detection is ready`;
     default:
-      return `${name} could not be started`;
+      return `${name} detection failed`;
   }
 }
 
 /** Recovery guidance under a failed detection label. */
 export function providerDetectionHint(provider: ServerProvider): string {
+  if (
+    provider.installed &&
+    provider.auth.status === "unauthenticated" &&
+    provider.discovery?.status !== "timed-out"
+  ) {
+    return "The executable was found. Sign in from provider settings, then refresh its status.";
+  }
   return provider.discovery?.status === "timed-out"
     ? "Detection took too long, which can happen when this machine is busy. Retry, or check the executable path in provider settings."
     : "Retry detection or configure the executable path in provider settings. Check that the project folder still exists.";
@@ -49,6 +64,7 @@ export function isProviderExecutableError(error: string): boolean {
 export function shouldShowProviderDetection(provider: ServerProvider, connected: boolean): boolean {
   return (
     connected &&
+    provider.enabled &&
     (provider.discovery?.status === "detecting" ||
       provider.discovery?.status === "timed-out" ||
       (provider.discovery?.status === "error" && provider.installed))

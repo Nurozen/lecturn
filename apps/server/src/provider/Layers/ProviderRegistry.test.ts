@@ -2726,7 +2726,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           providerStatus: "ready",
         },
       ]) {
-        it.effect(`uses CLI auth when ${name} even with SDK capabilities`, () =>
+        it.effect(`uses CLI auth when ${name} before optional SDK capabilities`, () =>
           Effect.gen(function* () {
             const status = yield* checkClaudeProviderStatus(
               defaultClaudeSettings,
@@ -2749,14 +2749,19 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             assert.strictEqual(status.auth.status, authStatus);
             assert.strictEqual(status.status, providerStatus);
             const model = status.models.find((model) => model.slug === "claude-test-next[1m]");
-            assert.ok(model);
-            assert.ok(
-              model.capabilities?.optionDescriptors?.some((option) => option.id === "effort"),
-            );
-            assert.deepStrictEqual(status.slashCommands, [
-              COMPACT_SLASH_COMMAND,
-              { name: "review", description: "Review changes" },
-            ]);
+            if (authStatus !== "unauthenticated") {
+              assert.ok(model);
+              assert.ok(
+                model.capabilities?.optionDescriptors?.some((option) => option.id === "effort"),
+              );
+              assert.deepStrictEqual(status.slashCommands, [
+                COMPACT_SLASH_COMMAND,
+                { name: "review", description: "Review changes" },
+              ]);
+            } else {
+              assert.strictEqual(model, undefined);
+              assert.deepStrictEqual(status.slashCommands, [COMPACT_SLASH_COMMAND]);
+            }
             if (authStatus === "unauthenticated") {
               assert.strictEqual(
                 status.message,
@@ -3176,12 +3181,15 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
       // An empty initialization result looks the same whether the CLI is logged
       // out, timed out, or crashed, so the auth verdict comes from asking the
       // CLI directly rather than from the absence of capabilities.
-      it.effect("reports unauthenticated when the CLI says it is not signed in", () =>
+      it.effect("reports signed out without waiting for a stalled SDK capability probe", () =>
         Effect.gen(function* () {
-          const status = yield* checkClaudeProviderStatus(
-            defaultClaudeSettings,
-            noClaudeCapabilities,
+          let capabilitiesProbed = false;
+          const status = yield* checkClaudeProviderStatus(defaultClaudeSettings, () =>
+            Effect.sync(() => {
+              capabilitiesProbed = true;
+            }).pipe(Effect.andThen(Effect.never)),
           );
+          assert.strictEqual(capabilitiesProbed, false);
           assert.strictEqual(status.installed, true);
           assert.strictEqual(status.auth.status, "unauthenticated");
           assert.strictEqual(status.status, "error");

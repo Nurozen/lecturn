@@ -1,5 +1,12 @@
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { $copyNode, $getRoot, $isElementNode, PASTE_COMMAND, type LexicalEditor } from "lexical";
+import {
+  $copyNode,
+  $getRoot,
+  $isElementNode,
+  $setCompositionKey,
+  PASTE_COMMAND,
+  type LexicalEditor,
+} from "lexical";
 import { act, createRef } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -29,7 +36,7 @@ vi.mock("@lexical/react/LexicalPlainTextPlugin", () => ({
 let renderer: ReactTestRenderer | undefined;
 const editorRef = createRef<ComposerPromptEditorHandle>();
 
-function composer(value: string) {
+function composer(value: string, onChange = (_value: string) => {}) {
   return (
     <ComposerPromptEditor
       value={value}
@@ -39,17 +46,17 @@ function composer(value: string) {
       disabled={false}
       placeholder="Write a prompt"
       onRemoveTerminalContext={() => {}}
-      onChange={() => {}}
+      onChange={onChange}
       onPaste={() => {}}
       editorRef={editorRef}
     />
   );
 }
 
-async function renderPrompt(value: string) {
+async function renderPrompt(value: string, onChange?: (value: string) => void) {
   await act(() => {
-    if (renderer) renderer.update(composer(value));
-    else renderer = create(composer(value));
+    if (renderer) renderer.update(composer(value, onChange));
+    else renderer = create(composer(value, onChange));
   });
 }
 
@@ -85,6 +92,59 @@ afterEach(async () => {
 });
 
 describe("composer mention serialization", () => {
+  it("publishes composing deletions and preserves node identity when the draft echoes back", async () => {
+    const onChange = vi.fn();
+    await renderPrompt("word", onChange);
+    const nodeKey = lexicalEditor
+      .getEditorState()
+      .read(() => $getRoot().getAllTextNodes()[0]!.getKey());
+    await act(() => {
+      lexicalEditor.update(
+        () => {
+          $getRoot().getAllTextNodes()[0]!.selectEnd();
+          $setCompositionKey(nodeKey);
+        },
+        { discrete: true },
+      );
+    });
+
+    for (const value of ["wor", "wo", "w"]) {
+      await act(() => {
+        // Model the state produced by Lexical's native-input reconciliation;
+        // the component must publish it without replacing the composing node.
+        lexicalEditor.update(
+          () => {
+            $getRoot().getAllTextNodes()[0]!.setTextContent(value).selectEnd();
+          },
+          { discrete: true },
+        );
+      });
+      expect(onChange.mock.lastCall?.[0]).toBe(value);
+      await renderPrompt(value, onChange);
+      expect(editorRef.current?.readSnapshot()).toMatchObject({ value, cursor: value.length });
+      expect(
+        lexicalEditor.getEditorState().read(() => $getRoot().getAllTextNodes()[0]!.getKey()),
+      ).toBe(nodeKey);
+      expect(lexicalEditor.isComposing()).toBe(true);
+    }
+
+    await act(() => {
+      lexicalEditor.update(
+        () => {
+          $setCompositionKey(null);
+          $getRoot().getAllTextNodes()[0]!.remove();
+          $getRoot().selectEnd();
+        },
+        { discrete: true },
+      );
+    });
+    expect(onChange.mock.lastCall?.[0]).toBe("");
+    await renderPrompt("", onChange);
+    expect(editorRef.current?.readSnapshot()).toMatchObject({ value: "", cursor: 0 });
+    await renderPrompt("@README.md restored", onChange);
+    expect(editorRef.current?.readSnapshot().value).toBe("@README.md restored");
+  });
+
   it.each([
     "@README.md control",
     "@terminal-1:3 Explain this output\n\n<terminal_context>\n- Terminal 1 line 3:\n  3 | output\n</terminal_context>",

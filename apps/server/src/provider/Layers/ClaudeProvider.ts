@@ -589,11 +589,15 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
-  const capabilities = resolveCapabilities
-    ? yield* resolveCapabilities(claudeSettings, parsedVersion ?? undefined).pipe(
-        Effect.orElseSucceed(() => undefined),
-      )
-    : undefined;
+  // Resolve sign-in before optional SDK initialization, which can stall on a
+  // logged-out CLI and consume the entire discovery budget.
+  const loggedIn = yield* probeClaudeLoggedIn(claudeSettings, resolvedEnvironment);
+  const capabilities =
+    resolveCapabilities && loggedIn !== false
+      ? yield* resolveCapabilities(claudeSettings, parsedVersion ?? undefined).pipe(
+          Effect.orElseSucceed(() => undefined),
+        )
+      : undefined;
   const discoveredCatalog = mergeClaudeRuntimeModelCatalog(
     modelCatalog,
     capabilities?.models?.length ? capabilities.models : lastRuntimeModels?.(),
@@ -610,7 +614,6 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
 
   // SDK initialization can return capabilities without credentials. Only the
   // CLI's explicit loggedIn verdict establishes authentication.
-  const loggedIn = yield* probeClaudeLoggedIn(claudeSettings, resolvedEnvironment);
   if (loggedIn === false) {
     return buildServerProvider({
       presentation: CLAUDE_PRESENTATION,
