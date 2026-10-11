@@ -12,6 +12,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Message;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.view.View;
 import android.view.WindowInsets;
@@ -277,10 +278,11 @@ public final class MainActivity extends Activity implements HostController.Liste
     }
     private void more() {
         new AlertDialog.Builder(this).setTitle("Lecturn on this phone")
-                .setItems(new String[]{"Refresh runtime status", "Reload Lecturn", Settings.canDrawOverlays(this) ? "Overlay permission: on" : "Enable activity overlay", "About device access", "Retry pairing", host.monitoring ? "Check background runtime" : "Keep running", "Stop Lecturn", "Set up agents"}, (d, which) -> {
+                .setItems(new String[]{"Refresh runtime status", "Reload Lecturn", Settings.canDrawOverlays(this) ? "Overlay permission: on" : "Enable activity overlay", "About device access", "Retry pairing", host.monitoring ? "Check background runtime" : "Keep running", "Stop Lecturn", "Set up agents", ignoringBatteryOptimizations() ? "Background battery: exempt" : "Background battery: optimized"}, (d, which) -> {
                     if (which == 0) host.refresh();
                     if (which == 5) { if (host.monitoring) host.refresh(); else requestStart(); }
                     if (which == 6) requestStop();
+                    if (which == 8) backgroundBattery();
                     if (which == 7) {
                         if (web != null && host.verified() && "ready".equals(host.state.runtime)
                                 && host.state.uiUrl != null) web.loadUrl(host.state.uiUrl + "/welcome");
@@ -300,6 +302,32 @@ public final class MainActivity extends Activity implements HostController.Liste
                     if (which == 3) new AlertDialog.Builder(this).setTitle("Device access")
                             .setMessage(R.string.access_risks)
                             .setPositiveButton("Close", null).show();
+                }).show();
+    }
+    private boolean ignoringBatteryOptimizations() {
+        return getSystemService(PowerManager.class).isIgnoringBatteryOptimizations(getPackageName());
+    }
+    private void backgroundBattery() {
+        boolean exempt = ignoringBatteryOptimizations();
+        new AlertDialog.Builder(this).setTitle("Background battery")
+                .setMessage((exempt
+                        ? "Lecturn is exempt from battery optimization. The Lecturn host can use network and CPU wake locks during Android Doze. Other system limits still apply; uninterrupted execution is not guaranteed."
+                        : "Battery optimization is on. Android may pause background network and CPU work during Doze with the screen off. You can ask Android to exempt Lecturn for background agent work. This may use more battery; other system limits still apply.")
+                        + "\n\nThis choice is optional. It does not start or stop agents or change device access. You can change it later in Android battery settings.")
+                .setNegativeButton(exempt ? "Close" : "Not now", null)
+                .setPositiveButton(exempt ? "Battery settings" : "Continue to Android", (d, which) -> {
+                    // Re-read: only Android's current exemption state determines the request.
+                    if (!ignoringBatteryOptimizations()) {
+                        try {
+                            startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                    Uri.parse("package:" + getPackageName())));
+                            return;
+                        } catch (ActivityNotFoundException | SecurityException ignored) { /* Try the system list. */ }
+                    }
+                    try { startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)); }
+                    catch (ActivityNotFoundException | SecurityException e) {
+                        toast("Battery settings unavailable. Open Android Settings → Apps → Lecturn → Battery.");
+                    }
                 }).show();
     }
     private void external(String url) {

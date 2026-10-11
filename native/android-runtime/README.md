@@ -33,7 +33,8 @@ is not production SELinux containment; a dedicated enforcing domain remains
 future work. Linux providers remain ordinary guest processes. This directory intentionally contains no bootstrap,
 ADB, init or policy-widening script.
 
-The APK `com.cloudgatherer.lecturn.symba` creates a private mode-0600 file containing
+The installer provisions a private mode-0600 file for
+`com.cloudgatherer.lecturn.symba` containing
 64 random hex digits under its canonical `/data/data/<package>/files/` or
 `/data/user_de/0/<package>/files/`. It owns this control token. A root-owned,
 mode-0600 `/data/local/symba-runtime/state/agent-token` holds a different 64-hex
@@ -44,7 +45,11 @@ hardlinks, oversized token files and equal token values are rejected.
 The parent must keep the control token, status file, host APK data and Android
 root paths outside guest mounts and provider access. Forward **only** guest
 loopback 18769 to Android loopback 18769. Never forward 18768. Both native
-listeners bind to `127.0.0.1`; VM networking must preserve this separation.
+listeners bind to `127.0.0.1`. The current QEMU SLIRP network can nevertheless
+reach host loopback through `10.0.2.2`; this is not network isolation of the
+control port. Its separate private bearer and rejection of browser origins
+enforce the control boundary. Neither control credentials nor controller files
+are available through the agent endpoint or guest mounts.
 
 ## Native control contract
 
