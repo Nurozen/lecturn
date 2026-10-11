@@ -14,7 +14,8 @@ const copy = vi.hoisted(() => vi.fn());
 vi.mock("../../hooks/useCopyToClipboard", () => ({ writeTextToClipboard: copy }));
 import { PhoneAuthControls } from "./PhoneAuthControls";
 
-const url = "https://claude.ai/oauth/authorize?state=synthetic%2Bstate&code=true";
+const url =
+  "https://claude.ai/oauth/authorize?state=synthetic%2Bstate&code=true&redirect_uri=https%3A%2F%2Fclaude.ai%2Foauth%2Fcode%2Fcallback&client_id=synthetic&response_type=code&code_challenge=synthetic_challenge";
 function terminalOutput(data: string): TerminalOutputState {
   const byteLength = new TextEncoder().encode(data).length;
   return {
@@ -63,6 +64,46 @@ async function typeCode(code: string) {
 }
 
 describe("phone authentication controls", () => {
+  it("shows and copies a Codex device code without terminal selection or sending input", async () => {
+    copy.mockResolvedValueOnce(true);
+    const codexProps = {
+      ...props,
+      driver: "codex" as const,
+      command: "codex login --device-auth",
+      output: terminalOutput(
+        "https://auth.openai.com/codex/device\n\nEnter this one-time code:\n\x1b[1mABCD-EFGHJ\x1b[0m\n",
+      ),
+    };
+    await act(async () => {
+      renderer = create(<PhoneAuthControls {...codexProps} />);
+    });
+    expect(contents()).toContain("ABCD-EFGHJ");
+    expect(renderer.root.findAllByType("input")).toHaveLength(0);
+    await act(async () => button("Copy device code").props.onClick());
+    expect(copy).toHaveBeenCalledWith("ABCD-EFGHJ", "device code");
+    expect(writeInput).not.toHaveBeenCalled();
+    expect(contents()).toContain("Device code copied.");
+    await act(async () =>
+      renderer.update(<PhoneAuthControls {...codexProps} output={terminalOutput("")} />),
+    );
+    expect(contents()).not.toContain("ABCD-EFGHJ");
+    expect(button("Copy device code")).toBeUndefined();
+  });
+
+  it("copies the complete reconstructed Claude link outside the terminal", async () => {
+    await mount({
+      ...props,
+      output: terminalOutput(
+        url.match(/.{1,28}/g)!.join("\r\n  ") + "\r\n\r\nPaste code here if prompted > ",
+      ),
+    });
+    expect(renderer.root.findByType("a").props.href).toBe(url);
+    await act(async () => button("Copy link").props.onClick());
+    expect(copy).toHaveBeenCalledWith(url, "login link");
+    await typeCode("synthetic#state");
+    await act(async () => renderer.root.findByType("form").props.onSubmit({ preventDefault() {} }));
+    expect(writeInput.mock.calls).toEqual([["synthetic#state\r"]]);
+  });
   it("waits for a user action, sends Enter once, and prevents a duplicate pending command", async () => {
     let finish: (value: boolean) => void = () => {};
     writeInput.mockImplementationOnce(

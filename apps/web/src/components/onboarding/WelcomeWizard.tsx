@@ -37,6 +37,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { type TerminalOutputState } from "@lecturn/client-runtime/state/terminal";
 import { isPhoneLocalOnboarding } from "../../onboarding/phoneAuth.logic";
 import { PhoneAuthControls } from "./PhoneAuthControls";
+import { PhoneAuthTerminal } from "./PhoneAuthTerminal";
+import { usePhoneAuthViewport } from "../../onboarding/usePhoneAuthViewport";
 
 import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../../appearanceFonts";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
@@ -144,6 +146,17 @@ export function WelcomeWizard({
   const finishingPromiseRef = useRef<Promise<boolean> | null>(null);
   const completionErrorToastIdRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
   const targetEnvironment = useOnboardingTargetEnvironment(mode, pairedEnvironmentId);
+  const primaryEnvironment = usePrimaryEnvironment();
+  const phoneAuthViewportRef = usePhoneAuthViewport(
+    step === "agents" &&
+      isPhoneLocalOnboarding({
+        protocolVersion:
+          typeof window === "undefined" ? undefined : window.symbaHost?.protocolVersion,
+        mode,
+        environmentId: targetEnvironment?.environmentId ?? null,
+        primaryEnvironmentId: primaryEnvironment?.environmentId ?? null,
+      }),
+  );
   const stageIndex = step === "agents" ? 1 : step === "import" ? 2 : 0;
   const finish = useCallback(
     (projectRef?: ScopedProjectRef) => {
@@ -187,7 +200,10 @@ export function WelcomeWizard({
   );
 
   return (
-    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-black text-foreground">
+    <div
+      ref={phoneAuthViewportRef}
+      className="flex h-dvh min-h-0 flex-col overflow-hidden bg-black text-foreground"
+    >
       {isElectron ? (
         <div
           aria-hidden
@@ -1006,7 +1022,11 @@ function AgentInstallTerminal({
               terminal.
             </>
           ) : setupState === "ready" ? (
-            "Review the command, then press Enter to run it."
+            phoneLocalAuth ? (
+              "Sign in on this phone"
+            ) : (
+              "Review the command, then press Enter to run it."
+            )
           ) : setupState === "openFailed" ? (
             "Could not open the setup terminal."
           ) : (
@@ -1046,27 +1066,29 @@ function AgentInstallTerminal({
           }}
         />
       ) : null}
-      <div className="h-64">
-        {terminalReady ? (
-          <TerminalViewport
-            threadRef={threadRef}
-            threadId={threadId}
-            terminalId={terminalId}
-            terminalLabel={`Set up ${driver}`}
-            {...(phoneLocalAuth ? { onOutput: setOutput } : {})}
-            cwd={cwd}
-            providerInstanceId={providerInstanceId}
-            advancedTypography={advancedTypography}
-            onSessionExited={onClose}
-            focusRequestId={1}
-            autoFocus={!phoneLocalAuth}
-            visible
-            resizeEpoch={0}
-            drawerHeight={256}
-            keybindings={keybindings}
-          />
-        ) : null}
-      </div>
+      <PhoneAuthTerminal enabled={phoneLocalAuth}>
+        {(visible) =>
+          terminalReady ? (
+            <TerminalViewport
+              threadRef={threadRef}
+              threadId={threadId}
+              terminalId={terminalId}
+              terminalLabel={`Set up ${driver}`}
+              {...(phoneLocalAuth ? { onOutput: setOutput } : {})}
+              cwd={cwd}
+              providerInstanceId={providerInstanceId}
+              advancedTypography={advancedTypography}
+              onSessionExited={onClose}
+              focusRequestId={1}
+              autoFocus={!phoneLocalAuth}
+              visible={visible}
+              resizeEpoch={0}
+              drawerHeight={256}
+              keybindings={keybindings}
+            />
+          ) : null
+        }
+      </PhoneAuthTerminal>
     </div>
   );
 }

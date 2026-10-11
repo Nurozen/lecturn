@@ -56,11 +56,11 @@ export function PhoneAuthControls({
   };
 
   return (
-    <div className="space-y-3 border-b border-border/60 bg-accent/30 p-3 text-sm">
+    <div className="min-w-0 space-y-3 border-b border-border/60 bg-accent/30 p-3 text-sm">
       <p className="leading-relaxed text-muted-foreground">
         {driver === "codex"
-          ? "Sign in in your phone’s browser using the device code shown in the terminal. If asked, enable device code login in your account settings. Then return here."
-          : "Open the login link in your phone’s browser. Copy the full code#state shown after sign-in, return here, and paste it when the terminal asks for a code."}
+          ? "Copy the device code below, then open login in your phone’s browser. If asked, enable device code login in your account settings. Then return here."
+          : "Open login in your phone’s browser. Copy the full code#state shown after sign-in, return here, and paste it below."}
       </p>
       {!started && prompt.url === null && commandReady ? (
         <div className="space-y-2">
@@ -69,6 +69,9 @@ export function PhoneAuthControls({
             Run sign-in command
           </Button>
         </div>
+      ) : null}
+      {prompt.deviceCode !== null ? (
+        <PhoneAuthDeviceCode key={`device:${prompt.deviceCode}`} code={prompt.deviceCode} />
       ) : null}
       {prompt.url !== null ? (
         <PhoneAuthLink key={prompt.url} url={prompt.url} />
@@ -107,8 +110,39 @@ export function PhoneAuthControls({
         {busy ? "Please wait…" : "Refresh sign-in status"}
       </Button>
       <p className="text-xs text-muted-foreground">
-        Keep this terminal open until sign-in finishes.
+        Keep this sign-in panel open until sign-in finishes. Terminal details are optional.
       </p>
+      {notice ? (
+        <p role="status" className="text-xs text-muted-foreground">
+          {notice}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function PhoneAuthDeviceCode({ code }: { readonly code: string }) {
+  const [notice, setNotice] = useState("");
+  return (
+    <div className="space-y-2 rounded-md border border-border p-3">
+      <p className="text-xs font-medium">Device code</p>
+      <code className="block break-all text-xl tracking-wider">{code}</code>
+      <Button
+        className="min-h-12 w-full"
+        variant="outline"
+        onClick={async () => {
+          try {
+            const copied = await writeTextToClipboard(code, "device code");
+            setNotice(
+              copied ? "Device code copied." : "Could not copy. Enter the code shown above.",
+            );
+          } catch {
+            setNotice("Could not copy. Enter the code shown above.");
+          }
+        }}
+      >
+        Copy device code
+      </Button>
       {notice ? (
         <p role="status" className="text-xs text-muted-foreground">
           {notice}
@@ -129,12 +163,12 @@ function PhoneAuthLink({ url }: { readonly url: string }) {
           target="_blank"
           rel="noopener noreferrer"
           referrerPolicy="no-referrer"
-          className="inline-flex min-h-12 flex-1 items-center justify-center rounded-md bg-primary px-4 font-medium text-primary-foreground focus-visible:outline-2 focus-visible:outline-ring"
+          className="inline-flex min-h-12 min-w-0 basis-full items-center justify-center rounded-md bg-primary px-4 py-2 text-center font-medium text-primary-foreground focus-visible:outline-2 focus-visible:outline-ring sm:basis-auto sm:flex-1"
         >
           Open login in browser
         </a>
         <Button
-          className="min-h-12"
+          className="min-h-12 w-full sm:w-auto"
           variant="outline"
           onClick={async () => {
             try {
@@ -170,7 +204,7 @@ function PhoneAuthCodeEntry({
   const pendingRef = useRef(false);
   return (
     <form
-      className="space-y-2"
+      className="scroll-my-4 space-y-2"
       onSubmit={async (event) => {
         event.preventDefault();
         if (pendingRef.current) return;
@@ -204,7 +238,8 @@ function PhoneAuthCodeEntry({
         id={id}
         type="password"
         nativeInput
-        className="min-h-12 text-base"
+        className="text-base [&_input]:min-h-12 [&_input]:text-base"
+        enterKeyHint="send"
         autoComplete="off"
         autoCapitalize="none"
         autoCorrect="off"
