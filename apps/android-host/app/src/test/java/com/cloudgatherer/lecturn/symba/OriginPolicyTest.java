@@ -11,6 +11,12 @@ public class OriginPolicyTest {
             assertFalse(String.valueOf(url), OriginPolicy.isUi(url));
         }
     }
+    @Test public void chatEntryKeepsSelectedPathWithoutQueryOrFragmentCredentials() {
+        assertEquals(OriginPolicy.ORIGIN + "/env/thread", OriginPolicy.chatStateUrl(OriginPolicy.ORIGIN + "/env/thread?token=synthetic#secret"));
+        assertNull(OriginPolicy.chatStateUrl(OriginPolicy.ORIGIN + "/pair?token=synthetic"));
+        assertNull(OriginPolicy.chatStateUrl("https://evil.test/env/thread"));
+        assertNull(OriginPolicy.chatStateUrl("http://user@127.0.0.1:3773/env/thread"));
+    }
     @Test public void browserOnlyAcceptsHttpsWithoutUserinfo() {
         assertTrue(OriginPolicy.isExternal("https://accounts.example.test/oauth?code=synthetic"));
         for (String url : new String[]{"http://accounts.example.test", "https://user:pass@example.test", "javascript:alert(1)", "intent://x", "file:///x", "https://localhost:3773", "https://127.0.0.1:3773", "https:///missing-host", "//example.test"}) {

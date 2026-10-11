@@ -1,22 +1,26 @@
 import { AccountSurface } from "../components/AccountSurface";
-import { RotateCcwIcon } from "lucide-react";
+import { ArrowLeftIcon, RotateCcwIcon } from "lucide-react";
 import {
   Outlet,
   createFileRoute,
   redirect,
-  useCanGoBack,
   useLocation,
+  useCanGoBack,
   useNavigate,
 } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { SettingsBreadcrumb } from "../components/settings/SettingsBreadcrumb";
+import { PhoneSettingsCategorySelect } from "../components/settings/PhoneSettingsCategorySelect";
 import "../components/settings/project-settings-glass.css";
 import { Button } from "../components/ui/button";
-import { SidebarInset } from "../components/ui/sidebar";
+import { SidebarInset, useSidebar } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { isElectron } from "../env";
+import { useBackToChat } from "../components/settings/SettingsNavigation";
+import { usePhoneAuthViewport } from "../onboarding/usePhoneAuthViewport";
+import "../components/settings/phone-settings.css";
 
 function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
@@ -36,18 +40,19 @@ function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
 
 function SettingsContentLayout() {
   const location = useLocation();
+  const backToChat = useBackToChat();
+  const { isMobile } = useSidebar();
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
+  const navigateBackWithinApp = useCallback(() => {
+    if (isMobile) backToChat();
+    else if (canGoBack) window.history.back();
+    else void navigate({ to: "/" });
+  }, [backToChat, canGoBack, isMobile, navigate]);
+  const viewportRef = usePhoneAuthViewport(!isElectron);
   const [restoreSignal, setRestoreSignal] = useState(0);
   const showRestoreDefaults = location.pathname === "/settings/general";
   const handleRestored = () => setRestoreSignal((value) => value + 1);
-  const navigateBackWithinApp = useCallback(() => {
-    if (canGoBack) {
-      window.history.back();
-      return;
-    }
-    void navigate({ to: "/" });
-  }, [canGoBack, navigate]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -74,21 +79,43 @@ function SettingsContentLayout() {
 
   return (
     <SidebarInset
-      className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate"
+      ref={viewportRef}
+      className="phone-settings-viewport h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate"
       data-settings-page-layout
     >
       <AccountSurface className="lecturn-settings-surface lecturn-project-settings flex min-h-0 min-w-0 flex-1 flex-col text-foreground">
         <WorkspacePageHeader electron={isElectron}>
-          <div className="flex w-full items-center gap-3">
-            <SettingsBreadcrumb pathname={location.pathname} />
+          <div className="flex min-w-0 w-full items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              aria-label="Back to chat"
+              className="min-h-11 shrink-0 md:hidden"
+              onClick={navigateBackWithinApp}
+            >
+              <ArrowLeftIcon className="size-4" />
+              <span className="hidden sm:inline">Back to chat</span>
+              <span className="sm:hidden">Chat</span>
+            </Button>
+            <div className="min-w-0 flex-1 md:hidden">
+              <PhoneSettingsCategorySelect />
+            </div>
+            <div className="hidden min-w-0 flex-1 md:block">
+              <SettingsBreadcrumb pathname={location.pathname} />
+            </div>
             {showRestoreDefaults ? (
-              <div className="ms-auto flex items-center gap-2">
+              <div className="ms-auto hidden items-center gap-2 sm:flex">
                 <RestoreDefaultsButton onRestored={handleRestored} />
               </div>
             ) : null}
           </div>
         </WorkspacePageHeader>
 
+        {showRestoreDefaults ? (
+          <div className="flex shrink-0 justify-end px-4 pb-2 sm:hidden">
+            <RestoreDefaultsButton onRestored={handleRestored} />
+          </div>
+        ) : null}
         <div key={restoreSignal} className="min-h-0 flex flex-1 flex-col">
           <Outlet />
         </div>

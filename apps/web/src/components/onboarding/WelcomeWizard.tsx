@@ -1,3 +1,4 @@
+import "../settings/phone-settings.css";
 import { useAuth } from "@clerk/react";
 import { useAtomValue } from "@effect/atom-react";
 import type {
@@ -110,6 +111,7 @@ type ConnectionMode = "local" | "connect" | "direct";
 function useOnboardingTargetEnvironment(
   mode: ConnectionMode,
   pairedEnvironmentId: EnvironmentId | null,
+  retainLocalTarget = false,
 ) {
   const { environments } = useEnvironments();
   const primaryEnvironment = usePrimaryEnvironment();
@@ -118,6 +120,7 @@ function useOnboardingTargetEnvironment(
     environments,
     primaryEnvironment,
     pairedEnvironmentId,
+    retainLocalTarget,
   });
 }
 
@@ -146,17 +149,7 @@ export function WelcomeWizard({
   const finishingPromiseRef = useRef<Promise<boolean> | null>(null);
   const completionErrorToastIdRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
   const targetEnvironment = useOnboardingTargetEnvironment(mode, pairedEnvironmentId);
-  const primaryEnvironment = usePrimaryEnvironment();
-  const phoneAuthViewportRef = usePhoneAuthViewport(
-    step === "agents" &&
-      isPhoneLocalOnboarding({
-        protocolVersion:
-          typeof window === "undefined" ? undefined : window.symbaHost?.protocolVersion,
-        mode,
-        environmentId: targetEnvironment?.environmentId ?? null,
-        primaryEnvironmentId: primaryEnvironment?.environmentId ?? null,
-      }),
-  );
+  const phoneAuthViewportRef = usePhoneAuthViewport(!isElectron);
   const stageIndex = step === "agents" ? 1 : step === "import" ? 2 : 0;
   const finish = useCallback(
     (projectRef?: ScopedProjectRef) => {
@@ -202,7 +195,7 @@ export function WelcomeWizard({
   return (
     <div
       ref={phoneAuthViewportRef}
-      className="flex h-dvh min-h-0 flex-col overflow-hidden bg-black text-foreground"
+      className="phone-setup-viewport flex h-dvh min-h-0 flex-col overflow-hidden bg-black text-foreground"
     >
       {isElectron ? (
         <div
@@ -211,7 +204,7 @@ export function WelcomeWizard({
         />
       ) : null}
       <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
-        <div className="mx-auto grid min-h-full w-full max-w-5xl content-center gap-10 px-6 py-12 sm:grid-cols-[170px_minmax(0,1fr)] sm:gap-14 sm:px-10 lg:px-12">
+        <div className="mx-auto grid min-h-full w-full max-w-5xl content-start gap-6 px-5 py-6 sm:content-center sm:py-12 sm:grid-cols-[170px_minmax(0,1fr)] sm:gap-14 sm:px-10 lg:px-12">
           <aside className="flex min-w-0 flex-col justify-between sm:min-h-72">
             <nav
               aria-label="Setup progress"
@@ -702,7 +695,7 @@ function AgentsStep({
   readonly onContinue: () => void;
   readonly onSkip: () => void;
 }) {
-  const targetEnvironment = useOnboardingTargetEnvironment(mode, pairedEnvironmentId);
+  const targetEnvironment = useOnboardingTargetEnvironment(mode, pairedEnvironmentId, true);
   const primaryEnvironment = usePrimaryEnvironment();
   const phoneLocal = isPhoneLocalOnboarding({
     protocolVersion: typeof window === "undefined" ? undefined : window.symbaHost?.protocolVersion,
@@ -731,6 +724,7 @@ function AgentsStep({
       phoneLocal={phoneLocal}
       environmentId={targetEnvironment.environmentId}
       machineLabel={targetEnvironment.label}
+      connected={targetEnvironment.connection.phase === "connected"}
       onBack={onBack}
       onContinue={onContinue}
       onSkip={onSkip}
@@ -742,6 +736,7 @@ function ConnectedAgentsStep({
   phoneLocal,
   environmentId,
   machineLabel,
+  connected,
   onBack,
   onContinue,
   onSkip,
@@ -749,6 +744,7 @@ function ConnectedAgentsStep({
   readonly phoneLocal: boolean;
   readonly environmentId: EnvironmentId;
   readonly machineLabel: string;
+  readonly connected: boolean;
   readonly onBack: () => void;
   readonly onContinue: () => void;
   readonly onSkip: () => void;
@@ -763,8 +759,8 @@ function ConnectedAgentsStep({
   // Re-probe on entry so freshly installed CLIs show up without a manual
   // refresh; harmless when nothing changed (single-flighted per environment).
   useEffect(() => {
-    void refreshProviders({ environmentId, input: {} });
-  }, [environmentId, refreshProviders]);
+    if (connected) void refreshProviders({ environmentId, input: {} });
+  }, [connected, environmentId, refreshProviders]);
 
   const byDriver = useMemo(() => selectOnboardingProvidersByDriver(providers), [providers]);
 
@@ -777,6 +773,11 @@ function ConnectedAgentsStep({
   ).length;
   return (
     <StepShell title="Your agents" description={`Detected on ${machineLabel}.`} onBack={onBack}>
+      {!connected ? (
+        <p role="status" className="mt-4 rounded-lg border border-border bg-accent/30 p-3 text-sm">
+          Reconnecting to {machineLabel}. Your sign-in panel will stay open.
+        </p>
+      ) : null}
       <div className="mt-7 border-t border-border">
         {primaryAgents.map(({ driver, provider }) => (
           <AgentCard
@@ -785,7 +786,7 @@ function ConnectedAgentsStep({
             provider={provider}
             phoneLocal={phoneLocal}
             terminalOpen={terminalSession?.driver === driver}
-            terminalAvailable={serverConfig !== null}
+            terminalAvailable={connected && serverConfig !== null}
             onOpenTerminal={() => {
               if (provider === undefined || serverConfig === null) return;
               setTerminalSession({
@@ -867,7 +868,7 @@ function AgentCard({
       ) : null}
       <div className="min-w-0 flex-1">
         <span className="block text-sm font-medium text-foreground">{displayName}</span>
-        <p className="mt-1 truncate text-xs text-muted-foreground">
+        <p className="mt-1 break-words text-xs text-muted-foreground sm:truncate">
           {summary.headline}
           {summary.detail ? ` · ${summary.detail}` : ""}
         </p>
@@ -887,9 +888,9 @@ function AgentCard({
         ) : (
           <Button
             size="xs"
-            variant="ghost"
+            variant={phoneLocal ? "default" : "ghost"}
             onClick={onOpenTerminal}
-            className={phoneLocal ? "min-h-12 px-4" : undefined}
+            className={phoneLocal ? "min-h-12 rounded-lg px-4 shadow-sm" : undefined}
             disabled={terminalOpen || !terminalAvailable}
           >
             <TerminalIcon className="size-3.5" />
@@ -918,6 +919,7 @@ function AgentInstallTerminal({
 }) {
   const { command, cwd, driver, environmentId, keybindings, providerInstanceId, phoneLocalAuth } =
     session;
+  const [sessionEnded, setSessionEnded] = useState(false);
   const [output, setOutput] = useState<TerminalOutputState | null>(null);
   const threadId = phoneLocalAuth
     ? ThreadId.make(PHONE_AUTH_TERMINAL_THREAD_ID)
@@ -956,6 +958,7 @@ function AgentInstallTerminal({
     setupGenerationRef.current = generation;
     activeSetupGenerationRef.current = generation;
     setSetupState("preparing");
+    setSessionEnded(false);
     setOutput(null);
 
     setupQueueRef.current = setupQueueRef.current.then(async () => {
@@ -984,10 +987,8 @@ function AgentInstallTerminal({
       setSetupState(wrote._tag === "Success" ? "ready" : "writeFailed");
     });
 
-    // Every exit path unmounts the drawer (Done, Continue/Skip, card switch,
-    // session exit), so this cleanup is the single place the PTY dies —
-    // nothing is left running behind the wizard. An interrupted install is
-    // re-runnable from the card.
+    // Explicit retries and leaving setup close the PTY and discard auth history.
+    // A connection gap keeps this owner mounted so browser handoff can finish.
     return () => {
       if (activeSetupGenerationRef.current === generation) {
         activeSetupGenerationRef.current = null;
@@ -1051,11 +1052,14 @@ function AgentInstallTerminal({
       </div>
       {phoneLocalAuth && terminalReady ? (
         <PhoneAuthControls
+          key={setupAttempt}
           driver={driver}
           command={command}
           output={output}
           commandReady={setupState === "ready"}
+          sessionEnded={sessionEnded}
           onRefresh={onRefresh}
+          onRestart={() => setSetupAttempt((value) => value + 1)}
           writeInput={async (data) => {
             if (activeSetupGenerationRef.current === null) return false;
             const result = await writeTerminal({
@@ -1078,7 +1082,7 @@ function AgentInstallTerminal({
               cwd={cwd}
               providerInstanceId={providerInstanceId}
               advancedTypography={advancedTypography}
-              onSessionExited={onClose}
+              onSessionExited={phoneLocalAuth ? () => setSessionEnded(true) : onClose}
               focusRequestId={1}
               autoFocus={!phoneLocalAuth}
               visible={visible}

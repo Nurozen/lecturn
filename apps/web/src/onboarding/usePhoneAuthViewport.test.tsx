@@ -9,17 +9,19 @@ afterEach(async () => {
 });
 it("reflows on keyboard resize, keeps the focused input visible and restores normal sizing on exit", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  const viewport = Object.assign(new EventTarget(), { height: 760 });
+  const viewport = Object.assign(new EventTarget(), { height: 760, offsetTop: 0 });
   class Input {
     scrollIntoView = vi.fn();
   }
   const input = new Input();
   const element = {
+    getBoundingClientRect: () => ({ top: 24 }),
     style: { height: "", removeProperty: vi.fn() },
     contains: (node: unknown) => node === input,
   };
   vi.stubGlobal("window", { visualViewport: viewport });
   vi.stubGlobal("HTMLInputElement", Input);
+  vi.stubGlobal("HTMLTextAreaElement", Input);
   vi.stubGlobal("document", { activeElement: input });
   function Fixture({ enabled }: { enabled: boolean }) {
     return <div ref={usePhoneAuthViewport(enabled)} />;
@@ -27,14 +29,17 @@ it("reflows on keyboard resize, keeps the focused input visible and restores nor
   await act(async () => {
     renderer = create(<Fixture enabled />, { createNodeMock: () => element });
   });
-  expect(element.style.height).toBe("760px");
+  expect(element.style.height).toBe("736px");
   viewport.height = 280;
   viewport.dispatchEvent(new Event("resize"));
-  expect(element.style.height).toBe("280px");
+  expect(element.style.height).toBe("256px");
+  viewport.offsetTop = 10;
+  viewport.dispatchEvent(new Event("scroll"));
+  expect(element.style.height).toBe("266px");
   expect(input.scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
   await act(async () => renderer.update(<Fixture enabled={false} />));
   expect(element.style.removeProperty).toHaveBeenCalledWith("height");
   viewport.height = 450;
   viewport.dispatchEvent(new Event("resize"));
-  expect(element.style.height).toBe("280px");
+  expect(element.style.height).toBe("266px");
 });

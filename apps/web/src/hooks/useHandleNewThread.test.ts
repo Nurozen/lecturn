@@ -168,78 +168,38 @@ describe("useNewThreadHandler", () => {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("Android new thread confirmation", () => {
+describe("Android empty drafts", () => {
   it.each([
     ["new", null],
     [
-      "persisted Full",
+      "reusable Full",
       {
         draftId: "draft-existing",
         environmentId: "environment-ssh",
         promotedTo: null,
         threadId: "thread-existing",
+        runtimeMode: "full-access",
       },
     ],
-  ] as const)(
-    "does not enable a %s draft before confirmation or after cancel",
-    async (_, draft) => {
-      testState.reset(draft);
-      let reply!: (value: unknown) => void;
-      const disabled = {
-        verified: true,
-        fullAccess: false,
-        computerUse: false,
-        revision: 1,
-        capabilities: { appData: true, computerUse: false },
-      };
-      const requestFullAccess = vi.fn(
-        () =>
-          new Promise((resolve) => {
-            reply = resolve;
-          }),
-      );
-      vi.stubGlobal("window", {
-        symbaHost: { protocolVersion: 2, getAccessState: async () => disabled, requestFullAccess },
-      });
-      const open = useNewThreadHandler()({
-        environmentId: "environment-ssh",
-        projectId: "project-remote",
-      } as never);
-      await vi.waitFor(() => expect(requestFullAccess).toHaveBeenCalled());
-      expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
-      reply(disabled);
-      expect(await open).toBeNull();
-      expect(testState.router.navigate).not.toHaveBeenCalled();
-      expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
-    },
-  );
-  it("creates a Full draft only after a native applied receipt", async () => {
-    testState.reset(null);
-    const disabled = {
-      verified: true,
-      fullAccess: false,
-      computerUse: false,
-      revision: 1,
-      capabilities: { appData: true, computerUse: false },
-    };
+  ] as const)("opens a %s draft without requesting device access", async (_, draft) => {
+    testState.reset(draft);
+    const getAccessState = vi.fn();
+    const requestFullAccess = vi.fn();
     vi.stubGlobal("window", {
-      symbaHost: {
-        protocolVersion: 2,
-        getAccessState: async () => disabled,
-        requestFullAccess: async () => ({ ...disabled, revision: 2, fullAccess: true }),
-      },
+      symbaHost: { protocolVersion: 2, getAccessState, requestFullAccess },
     });
     testState.completeProjectFileRead(null);
     const opened = await useNewThreadHandler()({
       environmentId: "environment-ssh",
       projectId: "project-remote",
     } as never);
-    expect(opened?.threadId).toBe("thread-delayed");
-    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
-      "remote-project",
-      expect.anything(),
-      "draft-delayed",
-      expect.objectContaining({ runtimeMode: "full-access" }),
-    );
+    expect(opened).toEqual({
+      draftId: draft?.draftId ?? "draft-delayed",
+      threadId: draft?.threadId ?? "thread-delayed",
+    });
+    expect(testState.router.navigate).toHaveBeenCalled();
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalled();
+    expect(getAccessState).not.toHaveBeenCalled();
+    expect(requestFullAccess).not.toHaveBeenCalled();
   });
 });

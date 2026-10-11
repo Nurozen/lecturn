@@ -8,16 +8,26 @@ export interface AndroidAccessState {
   readonly capabilities: { readonly appData: boolean; readonly computerUse: boolean };
 }
 
+export interface AndroidChatWidgetSnapshot {
+  readonly threadId: string;
+  readonly title: string;
+  readonly messages: ReadonlyArray<{ readonly role: "user" | "assistant"; readonly text: string }>;
+}
+
 export interface AndroidHost {
   readonly protocolVersion: number;
   getAccessState(): Promise<AndroidAccessState>;
   requestFullAccess(threadId: string): Promise<AndroidAccessState>;
   openDeviceAccess(): Promise<AndroidAccessState>;
+  publishChatWidget?(
+    payload: AndroidChatWidgetSnapshot | null,
+  ): Promise<{ readonly published: boolean }>;
 }
 
 declare global {
   interface Window {
     readonly symbaHost?: AndroidHost;
+    __lecturnComposeRequested?: boolean;
   }
 }
 

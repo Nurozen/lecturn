@@ -1,6 +1,7 @@
 "use client";
 
 import { Toast } from "@base-ui/react/toast";
+import "./toast.css";
 import {
   useEffect,
   useMemo,

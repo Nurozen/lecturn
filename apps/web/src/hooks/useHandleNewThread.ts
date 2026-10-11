@@ -1,4 +1,3 @@
-import { requireAndroidFullAccess } from "../lib/androidHostAccess";
 import { useComposerHandleContext } from "../composerHandleContext";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -231,26 +230,6 @@ export function useNewThreadHandler() {
           : getDraftSession(currentRouteTarget.draftId)
         : null;
       const threadId = newThreadId();
-      if (typeof window !== "undefined" && window.symbaHost) {
-        const mode =
-          carryRuntimeMode ?? emptyStoredDraftThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
-        try {
-          await requireAndroidFullAccess(emptyStoredDraftThread?.threadId ?? threadId, mode);
-        } catch (error) {
-          toastManager.add({
-            type: "error",
-            title: "Full access not enabled",
-            description: error instanceof Error ? error.message : "Review Android device access.",
-          });
-          return null;
-        }
-        // Native review yields: never overwrite a draft another action has changed.
-        if (
-          routeChangedSinceRequest() ||
-          getDraftSessionByLogicalProjectKey(logicalProjectKey) !== storedDraftThread
-        )
-          return null;
-      }
       if (emptyStoredDraftThread) {
         return (async () => {
           const isDraftAlreadyOpen =

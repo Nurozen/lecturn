@@ -20,6 +20,8 @@ export function PhoneAuthControls({
   output,
   writeInput,
   onRefresh,
+  onRestart,
+  sessionEnded = false,
 }: {
   readonly driver: PhoneAuthDriver;
   readonly command: string;
@@ -27,6 +29,8 @@ export function PhoneAuthControls({
   readonly output: TerminalOutputState | null;
   readonly writeInput: (data: string) => Promise<boolean>;
   readonly onRefresh: () => Promise<boolean>;
+  readonly onRestart: () => void;
+  readonly sessionEnded?: boolean;
 }) {
   const prompt = useMemo(
     () => readPhoneAuthPrompt(output === null ? "" : terminalOutputText(output), driver),
@@ -58,11 +62,13 @@ export function PhoneAuthControls({
   return (
     <div className="min-w-0 space-y-3 border-b border-border/60 bg-accent/30 p-3 text-sm">
       <p className="leading-relaxed text-muted-foreground">
-        {driver === "codex"
-          ? "Copy the device code below, then open login in your phone’s browser. If asked, enable device code login in your account settings. Then return here."
-          : "Open login in your phone’s browser. Copy the full code#state shown after sign-in, return here, and paste it below."}
+        {sessionEnded
+          ? "The sign-in terminal ended. Refresh status to check whether sign-in completed, or start again for a new login link."
+          : driver === "codex"
+            ? "Copy the device code below, then open login in your phone’s browser. If asked, enable device code login in your account settings. Then return here."
+            : "Open login in your phone’s browser. Copy the full code#state shown after sign-in, return here, and paste it below."}
       </p>
-      {!started && prompt.url === null && commandReady ? (
+      {!sessionEnded && !started && prompt.url === null && commandReady ? (
         <div className="space-y-2">
           <code className="block break-all font-mono text-xs">{command}</code>
           <Button className="min-h-12 w-full" disabled={busy} onClick={() => void runCommand()}>
@@ -70,17 +76,17 @@ export function PhoneAuthControls({
           </Button>
         </div>
       ) : null}
-      {prompt.deviceCode !== null ? (
+      {!sessionEnded && prompt.deviceCode !== null ? (
         <PhoneAuthDeviceCode key={`device:${prompt.deviceCode}`} code={prompt.deviceCode} />
       ) : null}
-      {prompt.url !== null ? (
+      {!sessionEnded && prompt.url !== null ? (
         <PhoneAuthLink key={prompt.url} url={prompt.url} />
-      ) : (
+      ) : !sessionEnded ? (
         <p className="text-xs text-muted-foreground">
           The login link will appear after the command runs.
         </p>
-      )}
-      {prompt.awaitingCode ? (
+      ) : null}
+      {!sessionEnded && prompt.awaitingCode ? (
         <PhoneAuthCodeEntry key={`code:${prompt.url}`} writeInput={writeInput} />
       ) : null}
       <Button
@@ -110,8 +116,12 @@ export function PhoneAuthControls({
         {busy ? "Please wait…" : "Refresh sign-in status"}
       </Button>
       <p className="text-xs text-muted-foreground">
-        Keep this sign-in panel open until sign-in finishes. Terminal details are optional.
+        Return to this panel after using the browser. Login links can expire at the provider; if
+        login stops responding, start again for a new link.
       </p>
+      <Button className="min-h-12 w-full" variant="outline" disabled={busy} onClick={onRestart}>
+        Start sign-in again
+      </Button>
       {notice ? (
         <p role="status" className="text-xs text-muted-foreground">
           {notice}

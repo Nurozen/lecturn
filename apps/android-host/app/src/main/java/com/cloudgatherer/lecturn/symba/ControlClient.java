@@ -14,8 +14,11 @@ import java.nio.charset.StandardCharsets;
 
 final class ControlClient {
     static final class Failure extends Exception {
-        final boolean conflict;
-        Failure(String safeMessage, boolean conflict) { super(safeMessage); this.conflict = conflict; }
+        final boolean conflict, transitionConflict;
+        Failure(String safeMessage, boolean conflict) { this(safeMessage, conflict, false); }
+        Failure(String safeMessage, boolean conflict, boolean transitionConflict) {
+            super(safeMessage); this.conflict = conflict; this.transitionConflict = transitionConflict;
+        }
     }
     interface ConfigSource { String read() throws Exception; }
     interface Connections { HttpURLConnection open(URL url) throws IOException; }
@@ -60,7 +63,8 @@ final class ControlClient {
             connection = connections.open(new URL("http://127.0.0.1:18768" + path));
             connection.setInstanceFollowRedirects(false);
             connection.setConnectTimeout(3000);
-            connection.setReadTimeout(12000);
+            // The controller may spend 28 seconds stopping; allow the confirmation overhead too.
+            connection.setReadTimeout("POST".equals(method) && "/v1/runtime/stop".equals(path) ? 32000 : 12000);
             connection.setUseCaches(false);
             connection.setRequestMethod(method);
             connection.setRequestProperty("Authorization", "Bearer " + rawToken);
@@ -73,7 +77,19 @@ final class ControlClient {
                 try (var out = connection.getOutputStream()) { out.write(bytes); }
             }
             int status = connection.getResponseCode();
-            if (status == 409) throw new Failure("Device access changed. Review the refreshed policy before trying again.", true);
+            if (status == 409) {
+                String code = "";
+                try (InputStream in = connection.getErrorStream()) {
+                    if (in != null) code = new JSONObject(readLimited(in, 4096)).optString("error", "");
+                } catch (Exception ignored) { /* Unknown conflicts must never authorize replay. */ }
+                boolean runtime = "POST".equals(method)
+                        && ("/v1/runtime/stop".equals(path) || "/v1/runtime/start".equals(path));
+                if (runtime && "runtime_transition_in_progress".equals(code))
+                    throw new Failure("Runtime is busy with another control operation. Try again shortly.", false, true);
+                if ("/v1/policy".equals(path) && "stale_policy_revision".equals(code))
+                    throw new Failure("Device access changed. Review the refreshed policy before trying again.", true);
+                throw new Failure("Control request conflicted. Refresh status before trying again.", false);
+            }
             if (status != 200) throw new Failure("Control request failed (HTTP " + status + "). No access change confirmed.", false);
             String type = connection.getContentType();
             if (type == null || !"application/json".equalsIgnoreCase(type.split(";", 2)[0].trim()))

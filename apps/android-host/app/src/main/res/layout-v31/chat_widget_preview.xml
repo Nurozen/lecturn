@@ -1,0 +1,32 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="12dp"
+    android:background="@drawable/chat_widget_background">
+    <TextView android:id="@+id/widget_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:minHeight="40dp" android:gravity="center_vertical"
+        android:drawableStart="@drawable/chat_widget_mark" android:drawablePadding="8dp"
+        android:text="@string/widget_name" android:textColor="#E5D1AC" android:textSize="16sp"
+        android:fontFamily="sans-serif-medium" android:maxLines="2" android:ellipsize="end" />
+    <TextView android:id="@+id/widget_status" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="@string/widget_preview_status" android:textColor="#C3CED4" android:textSize="12sp"
+        android:layout_marginTop="4dp" android:layout_marginBottom="8dp" />
+    <TextView android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1" android:text="@string/widget_preview_messages"
+        android:textColor="#FFFFFF" android:textSize="14sp" />
+    <LinearLayout style="?android:attr/buttonBarStyle" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" android:orientation="horizontal">
+        <Button style="?android:attr/buttonBarButtonStyle" android:id="@+id/widget_open" android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:layout_marginEnd="8dp" android:minHeight="48dp" android:minWidth="48dp"
+            android:paddingHorizontal="8dp" android:paddingVertical="8dp"
+            android:background="@drawable/chat_widget_action" android:backgroundTint="@null"
+            android:textColor="#E5D1AC" android:textSize="14sp" android:fontFamily="sans-serif-medium"
+            android:textAllCaps="false" android:text="@string/widget_open" />
+        <Button style="?android:attr/buttonBarButtonStyle" android:id="@+id/widget_reply" android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:minHeight="48dp" android:minWidth="48dp"
+            android:paddingHorizontal="8dp" android:paddingVertical="8dp"
+            android:background="@drawable/chat_widget_action" android:backgroundTint="@null"
+            android:textColor="#E5D1AC" android:textSize="14sp" android:fontFamily="sans-serif-medium"
+            android:textAllCaps="false" android:text="@string/widget_reply" />
+    </LinearLayout>
+</LinearLayout>

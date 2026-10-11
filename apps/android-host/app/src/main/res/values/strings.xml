@@ -46,4 +46,11 @@
     <string name="host_welcome_title">Your workspace, on this phone</string>
     <string name="host_welcome_detail">Start Lecturn to open your projects and agents.</string>
     <string name="host_keep_running">Keep running</string>
+    <string name="widget_name">Lecturn chat</string>
+    <string name="widget_description">Scrollable recent messages with reply in floating chat</string>
+    <string name="widget_open">Open chat</string>
+    <string name="widget_reply">Reply</string>
+    <string name="widget_waiting">Waiting for Lecturn</string>
+    <string name="widget_preview_status">Recent messages · Reply opens floating chat</string>
+    <string name="widget_preview_messages">You: What’s next?\n\nAgent: Let’s continue.</string>
 </resources>

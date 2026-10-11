@@ -103,12 +103,14 @@ final class HostSurface extends LinearLayout {
         HostState state = host.state;
         boolean ready = verified && "ready".equals(state.runtime);
         boolean starting = verified && "starting".equals(state.runtime);
+        boolean stopped = verified && "stopped".equals(state.runtime);
         status.setText(host.stopping ? R.string.host_stopping : !verified ? (host.busy ? R.string.host_checking : R.string.host_unavailable)
                 : starting ? R.string.host_starting : ready ? (host.monitoring ? R.string.host_on_phone : R.string.host_background_off)
                 : "stopped".equals(state.runtime) ? R.string.host_stopped : R.string.host_attention);
         device.setEnabled(!host.busy);
-        pairingStatus.setVisibility(pairing.error != null || pairing.waiting ? VISIBLE : GONE);
-        pairingStatus.setText(pairing.error != null ? pairing.error : getResources().getString(R.string.host_pairing));
+        pairingStatus.setVisibility(host.stopFailure != null || (!stopped && (pairing.error != null || pairing.waiting)) ? VISIBLE : GONE);
+        pairingStatus.setText(host.stopFailure != null ? host.stopFailure
+                : pairing.error != null ? pairing.error : getResources().getString(R.string.host_pairing));
         boolean showWorkspace = hasWorkspace && bridgeAvailable && !host.stopping
                 && (ready || !verified);
         for (int i = 0; i < content.getChildCount(); i++) {
@@ -145,7 +147,7 @@ final class HostSurface extends LinearLayout {
         start.setText((ready || starting) && !host.monitoring ? R.string.host_keep_running : starting ? R.string.host_starting : R.string.host_start);
         start.setEnabled(!host.busy && !host.stopping && (!(ready || starting) || !host.monitoring));
         start.setVisibility((ready || starting) && host.monitoring ? GONE : VISIBLE);
-        stop.setVisibility(host.monitoring || starting || ready || host.stopping ? VISIBLE : GONE);
+        stop.setVisibility(!stopped && (host.monitoring || starting || ready || host.stopping) ? VISIBLE : GONE);
         stop.setEnabled(!host.stopping || !host.busy);
     }
 

@@ -236,7 +236,7 @@ function Sidebar({
         <Sheet onOpenChange={setOpenMobile} open={openMobile} {...props}>
           <SheetPopup
             className={cn(
-              "w-(--sidebar-width) max-w-none bg-sidebar surface-grain p-0 text-sidebar-foreground",
+              "w-(--sidebar-width) max-w-[calc(100vw-2rem)] bg-sidebar surface-grain p-0 text-sidebar-foreground",
               className,
             )}
             data-mobile="true"
@@ -256,7 +256,7 @@ function Sidebar({
             </SheetHeader>
             <div
               className={cn(
-                "flex h-full w-full flex-col pb-safe pt-safe",
+                "flex h-full min-h-0 w-full min-w-0 flex-col pb-safe pt-safe",
                 side === "left" ? "pl-safe" : "pr-safe",
               )}
             >

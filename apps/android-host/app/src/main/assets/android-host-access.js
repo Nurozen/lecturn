@@ -26,7 +26,7 @@
       /* Invalid replies never authorize access. */
     }
   };
-  const request = (method, threadId) =>
+  const request = (method, threadId, payload) =>
     new Promise((resolve) => {
       if (pending.size >= 16) {
         resolve(unavailable());
@@ -37,7 +37,7 @@
       pending.set(requestId, { resolve, timer });
       try {
         window.__lecturnNative.postMessage(
-          JSON.stringify({ protocolVersion: 2, requestId, method, threadId }),
+          JSON.stringify({ protocolVersion: 2, requestId, method, threadId, payload }),
         );
       } catch {
         finish(requestId, unavailable());
@@ -55,6 +55,10 @@
           ? request("requestFullAccess", threadId)
           : Promise.resolve(unavailable()),
       openDeviceAccess: () => request("openDeviceAccess"),
+      publishChatWidget: (payload) =>
+        request("publishChatWidget", undefined, payload).then((state) => ({
+          published: state.published === true,
+        })),
     }),
     writable: false,
     configurable: false,

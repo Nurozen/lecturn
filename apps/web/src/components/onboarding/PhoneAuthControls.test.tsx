@@ -37,6 +37,7 @@ const props = {
   output,
   writeInput,
   onRefresh: refresh,
+  onRestart: vi.fn(),
 };
 const button = (label: string) =>
   renderer.root.findAllByType("button").find((node) => node.children.join("") === label)!;
@@ -173,6 +174,30 @@ describe("phone authentication controls", () => {
     const replacement = terminalOutput(`${url}&new=synthetic\nPaste code here if prompted > `);
     await act(async () => renderer.update(<PhoneAuthControls {...props} output={replacement} />));
     expect(renderer.root.findByType("input").props.value).toBe("");
+  });
+
+  it("keeps ended sign-in visible, removes stale auth inputs, and reports refresh failures", async () => {
+    await mount();
+    await typeCode("synthetic#state");
+    await act(async () => renderer.update(<PhoneAuthControls {...props} sessionEnded />));
+    expect(contents()).toContain("The sign-in terminal ended");
+    expect(renderer.root.findAllByType("input")).toHaveLength(0);
+    expect(renderer.root.findAllByType("a")).toHaveLength(0);
+    refresh.mockResolvedValueOnce(false);
+    await act(async () => button("Refresh sign-in status").props.onClick());
+    expect(contents()).toContain("Could not refresh sign-in status");
+    await act(async () => button("Start sign-in again").props.onClick());
+    expect(props.onRestart).toHaveBeenCalledOnce();
+    expect(writeInput).not.toHaveBeenCalled();
+  });
+
+  it("offers explicit recovery without silently rerunning or sending the old code", async () => {
+    await mount();
+    await typeCode("synthetic#state");
+    await act(async () => button("Start sign-in again").props.onClick());
+    expect(props.onRestart).toHaveBeenCalledOnce();
+    expect(writeInput).not.toHaveBeenCalled();
+    expect(contents()).toContain("Login links can expire");
   });
 
   it("shows generic failures without logging exception messages containing auth material", async () => {

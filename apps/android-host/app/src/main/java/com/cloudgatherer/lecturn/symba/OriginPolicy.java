@@ -18,6 +18,12 @@ final class OriginPolicy {
                 && !"/pair".equals(uri.getPath());
     }
 
+    static String chatStateUrl(String value) {
+        if (!isUi(value)) return null;
+        String route = ORIGIN + parse(value).getRawPath();
+        return isStateUrl(route) ? route : null;
+    }
+
     static boolean isExternal(String value) {
         URI uri = parse(value);
         return uri != null && "https".equals(uri.getScheme()) && uri.getHost() != null

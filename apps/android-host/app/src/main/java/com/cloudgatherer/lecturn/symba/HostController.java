@@ -11,16 +11,21 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 final class HostController {
+    private static final String STOP_UNCONFIRMED = "Stop was not confirmed. Refresh status or try Stop again.";
     interface Listener { void changed(); }
     interface Completion { void complete(HostState state); }
     interface BootstrapCompletion { void complete(UiBootstrap result); }
     private long stopEpoch;
+    private long stopRetryDeadline;
+    private int stopRetries;
     private final ControlClient client;
+    private final Context context;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Set<Listener> listeners = new HashSet<>();
     HostState state;
     String error = "Status has not been checked.";
+    String stopFailure;
     boolean busy, monitoring, stopping;
     long receivedAt;
     final StartupLease startupLease = new StartupLease();
@@ -29,7 +34,10 @@ final class HostController {
         if (!fresh()) { error = "Control status is stale. Runtime and device access are unverified."; notifyListeners(); }
     };
 
-    HostController(Context context) { client = new ControlClient(context); }
+    HostController(Context context) {
+        this.context = context.getApplicationContext();
+        client = new ControlClient(this.context);
+    }
     void add(Listener listener) { listeners.add(listener); }
     void remove(Listener listener) { listeners.remove(listener); }
     boolean fresh() { return state != null && SystemClock.elapsedRealtime() - receivedAt < 20000; }
@@ -42,11 +50,17 @@ final class HostController {
     void refresh() { if (!busy) request("GET", "/v1/state", null); }
     void start() {
         if (busy) { pendingStart = true; return; }
+        stopFailure = null;
         request("POST", "/v1/runtime/start", new JSONObject());
     }
     void stop() {
         stopEpoch++;
+        stopRetries = 0;
+        stopRetryDeadline = SystemClock.elapsedRealtime() + 6000;
+        pendingStart = false;
+        stopFailure = null;
         stopping = true;
+        ChatWidget.clear(context);
         notifyListeners();
         if (busy) {
             // A stop must not disappear behind a slow start/poll. It is the next serialized command.
@@ -81,6 +95,7 @@ final class HostController {
         else if (monitoring) main.postDelayed(poll, failed ? 10000 : state != null && state.working() ? 3000 : 8000);
     }
     private boolean pendingStop, pendingStart;
+    boolean hasPendingStop() { return pendingStop; }
     void readAccess(Completion completion) {
         if (busy || pendingStop) { completion.complete(null); return; }
         request("GET", "/v1/state", null, completion);
@@ -123,12 +138,38 @@ final class HostController {
             ControlClient.Failure failed = failure;
             main.post(() -> {
                 busy = false;
-                if ("/v1/runtime/stop".equals(path)) stopping = false;
+                boolean stop = "/v1/runtime/stop".equals(path);
                 state = returned;
                 error = failed == null ? null : failed.getMessage();
                 receivedAt = returned == null ? 0 : SystemClock.elapsedRealtime();
                 main.removeCallbacks(expire);
                 if (returned != null) main.postDelayed(expire, 20000);
+                if (stop && epoch == stopEpoch && !pendingStop && !pendingStart
+                        && failed != null && failed.transitionConflict && stopRetries < 3
+                        && SystemClock.elapsedRealtime() + 1000 < stopRetryDeadline) {
+                    // Only this pre-execution refusal is replayable. Keep the explicit Stop serialized.
+                    stopRetries++;
+                    busy = true;
+                    main.postDelayed(() -> {
+                        busy = false;
+                        if (epoch != stopEpoch || pendingStop || pendingStart) {
+                            if (!pendingStop) stopping = false;
+                            nextRequest(false);
+                        } else if (SystemClock.elapsedRealtime() >= stopRetryDeadline) {
+                            stopping = false;
+                            stopFailure = STOP_UNCONFIRMED;
+                            notifyListeners();
+                            nextRequest(true);
+                        } else request(method, path, body, completion);
+                    }, 1000);
+                    notifyListeners();
+                    return;
+                }
+                if (stop && epoch == stopEpoch && !pendingStop) {
+                    stopping = false;
+                    if (failed != null || returned == null || !"stopped".equals(returned.runtime))
+                        stopFailure = STOP_UNCONFIRMED;
+                }
                 completion.complete(failed == null && epoch == stopEpoch && !pendingStop ? returned : null);
                 notifyListeners();
                 if (pendingStop) { pendingStop = false; pendingStart = false; stop(); }

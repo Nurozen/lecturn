@@ -65,7 +65,7 @@ final class ActivityOverlay {
     void update() {
         if (closed) return;
         boolean active = host.state != null && (host.state.working() || !"idle".equals(host.state.activity)) && !"stopped".equals(host.state.runtime);
-        boolean shouldShow = host.monitoring && Settings.canDrawOverlays(context)
+        boolean shouldShow = !((HostApplication) context.getApplicationContext()).floatingChat && host.monitoring && Settings.canDrawOverlays(context)
                 && context.getSystemService(PowerManager.class).isInteractive()
                 && !context.getSystemService(KeyguardManager.class).isKeyguardLocked()
                 && (active || (visible && !host.verified()));
@@ -133,10 +133,13 @@ final class ActivityOverlay {
         detail = text(13); detail.setMaxLines(4); root.addView(detail);
         LinearLayout actions = new LinearLayout(context);
         actions.addView(button("Open", v -> {
-            context.startActivity(new Intent(context, MainActivity.class).setAction(RuntimeService.OPEN_TASK)
+            context.startActivity(new Intent(context, MainActivity.class).setAction(Intent.ACTION_MAIN)
+                    .putExtra("widget_thread_url", ChatWidget.selectedUrl())
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP));
         }));
         actions.addView(button("Stop", v -> stop.run()));
+        actions.addView(button("Chat", v -> context.startActivity(new Intent(context, MainActivity.class)
+                .setAction(MainActivity.FLOAT_CHAT).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP))));
         root.addView(actions);
         root.addView(button("Minimize", v -> expand(false)));
         params = new WindowManager.LayoutParams(dp(68), WindowManager.LayoutParams.WRAP_CONTENT,

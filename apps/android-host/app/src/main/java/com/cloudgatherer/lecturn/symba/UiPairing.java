@@ -15,7 +15,11 @@ final class UiPairing {
         deadline = now + Math.min(30000, Math.max(0, remainingMillis));
     }
     boolean expired(long now) { return waiting && now >= deadline; }
-    void confirm() { authenticated = true; waiting = false; error = null; }
+    boolean confirm() {
+        boolean completedBootstrap = waiting;
+        authenticated = true; waiting = false; error = null;
+        return completedBootstrap;
+    }
     void fail(String message) { authenticated = false; waiting = false; error = message; }
     void retry() { attempted = false; authenticated = false; waiting = false; error = null; }
 }

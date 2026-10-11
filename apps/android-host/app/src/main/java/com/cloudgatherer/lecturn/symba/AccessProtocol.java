@@ -5,8 +5,11 @@ import org.json.JSONObject;
 
 /** Only capability state crosses into the page, never control credentials or policy methods. */
 final class AccessProtocol {
-    static boolean acceptsSource(boolean resumed, boolean mainFrame, String origin, String pageUrl) {
-        return resumed && mainFrame && OriginPolicy.ORIGIN.equals(origin) && OriginPolicy.isUi(pageUrl);
+    static boolean acceptsSource(boolean interactive, boolean mainFrame, String origin, String pageUrl) {
+        return interactive && acceptsDocument(mainFrame, origin, pageUrl);
+    }
+    static boolean acceptsDocument(boolean mainFrame, String origin, String pageUrl) {
+        return mainFrame && OriginPolicy.ORIGIN.equals(origin) && OriginPolicy.isUi(pageUrl);
     }
     static boolean applied(HostState state, long reviewedRevision, boolean full, boolean computer) {
         return state != null && state.revision > reviewedRevision && state.fullAccess == full

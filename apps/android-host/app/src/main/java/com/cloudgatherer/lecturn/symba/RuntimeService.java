@@ -50,7 +50,7 @@ public final class RuntimeService extends Service implements HostController.List
         foreground = true;
         if (STOP.equals(action)) { stopping = true; host.stop(); }
         else {
-            stopping = false;
+            stopping = host.hasPendingStop();
             if (host.verified() && ("ready".equals(host.state.runtime) || "starting".equals(host.state.runtime))) host.refresh();
             else host.start();
         }
@@ -60,6 +60,8 @@ public final class RuntimeService extends Service implements HostController.List
     }
 
     @Override public void changed() {
+        boolean stopped = stopping && !host.busy && host.verified() && "stopped".equals(host.state.runtime);
+        if (!host.stopping && !stopped) stopping = false;
         WorkLease.Action action = lease.update(host.state, host.verified() && !stopping,
                 host.receivedAt, android.os.SystemClock.elapsedRealtime(), wake.isHeld());
         if (action == WorkLease.Action.ACQUIRE) wake.acquire(WorkLease.TIMEOUT_MS);
@@ -70,7 +72,7 @@ public final class RuntimeService extends Service implements HostController.List
         else if (startupAction == WorkLease.Action.RELEASE) startupWake.release();
         overlay.update();
         if (foreground) getSystemService(NotificationManager.class).notify(1, notification());
-        if (stopping && !host.busy && host.verified() && "stopped".equals(host.state.runtime)) {
+        if (stopped) {
             stopForeground(STOP_FOREGROUND_REMOVE);
             stopSelf();
         }
@@ -82,6 +84,7 @@ public final class RuntimeService extends Service implements HostController.List
         else if (!"ready".equals(host.state.runtime)) text = "Runtime " + host.state.runtime;
         else text = "Runtime ready · " + host.state.activity;
         if (stopping && host.busy) text = "Stopping local runtime…";
+        if (host.stopFailure != null) text = host.stopFailure;
         PendingIntent open = PendingIntent.getActivity(this, 0,
                 new Intent(this, MainActivity.class).setAction(OPEN_TASK), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         PendingIntent stop = PendingIntent.getService(this, 1,

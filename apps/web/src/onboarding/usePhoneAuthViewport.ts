@@ -8,16 +8,23 @@ export function usePhoneAuthViewport(enabled: boolean) {
     const viewport = window.visualViewport;
     if (!enabled || !element || !viewport) return;
     const update = () => {
-      element.style.height = `${viewport.height}px`;
+      // Root chrome may already reserve a safe-area inset. Do not count it twice.
+      const top = Math.max(0, element.getBoundingClientRect().top - viewport.offsetTop);
+      element.style.height = `${Math.max(0, viewport.height - top)}px`;
       const focused = document.activeElement;
-      if (focused instanceof HTMLInputElement && element.contains(focused)) {
+      if (
+        (focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) &&
+        element.contains(focused)
+      ) {
         focused.scrollIntoView({ block: "nearest" });
       }
     };
     update();
     viewport.addEventListener("resize", update);
+    viewport.addEventListener("scroll", update);
     return () => {
       viewport.removeEventListener("resize", update);
+      viewport.removeEventListener("scroll", update);
       element.style.removeProperty("height");
     };
   }, [enabled]);

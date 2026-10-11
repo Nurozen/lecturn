@@ -53,6 +53,7 @@ test("only main frame receives the narrow frozen promise API", () => {
     "getAccessState",
     "openDeviceAccess",
     "protocolVersion",
+    "publishChatWidget",
     "requestFullAccess",
   ]);
   assert.equal(h.messages.length, 0); // Page initialization cannot request or grant access.
@@ -111,4 +112,28 @@ test("invalid thread and broken transport settle false without hanging", async (
   };
   assert.equal((await h.host.requestFullAccess("thread")).verified, false);
   assert.equal(h.timers.size, 0);
+});
+
+test("widget publication is an explicit correlated request, never a grant or send", async () => {
+  const h = harness();
+  const payload = {
+    threadId: "demo",
+    title: "Demo",
+    messages: [{ role: "assistant", text: "Hello" }],
+  };
+  const pending = h.host.publishChatWidget(payload);
+  assert.equal(h.messages[0].method, "publishChatWidget");
+  assert.deepEqual(h.messages[0].payload, payload);
+  h.reply(h.messages[0].requestId, { published: true });
+  assert.equal((await pending).published, true);
+  assert.equal(h.messages.length, 1);
+});
+
+test("failed widget publication reports false without an access-shaped result", async () => {
+  const h = harness();
+  const pending = h.host.publishChatWidget(null);
+  for (const timeout of Array.from(h.timers.values())) timeout();
+  const response = await pending;
+  assert.equal(response.published, false);
+  assert.deepEqual(Object.keys(response), ["published"]);
 });

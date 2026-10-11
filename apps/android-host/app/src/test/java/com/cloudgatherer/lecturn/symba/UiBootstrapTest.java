@@ -65,4 +65,12 @@ public class UiBootstrapTest {
         UiPairing pairing = new UiPairing(); pairing.begin(); pairing.await(1000, 900000);
         assertTrue(pairing.expired(31000));
     }
+    @Test public void resumeSessionChecksPreserveHistoryAfterBootstrap() {
+        UiPairing pairing = new UiPairing();
+        assertFalse(pairing.confirm());
+        pairing.retry(); pairing.begin(); pairing.await(1000, 5000);
+        assertTrue(pairing.confirm());
+        for (int i = 0; i < 5; i++) assertFalse(pairing.confirm());
+        assertTrue(pairing.authenticated);
+    }
 }

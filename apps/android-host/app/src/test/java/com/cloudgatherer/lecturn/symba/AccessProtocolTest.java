@@ -34,7 +34,7 @@ public class AccessProtocolTest {
         assertFalse(revoked.getJSONObject("capabilities").getBoolean("computerUse"));
         assertEquals(5, revoked.length());
     }
-    @Test public void onlyResumedMainFrameAtExactOriginMayRequestAccess() {
+    @Test public void onlyInteractiveMainFrameAtExactOriginMayRequestAccess() {
         String origin = "http://127.0.0.1:3773";
         assertTrue(AccessProtocol.acceptsSource(true, true, origin, origin + "/thread"));
         assertFalse(AccessProtocol.acceptsSource(false, true, origin, origin));
@@ -42,6 +42,14 @@ public class AccessProtocolTest {
         assertFalse(AccessProtocol.acceptsSource(true, true, "https://evil.test", origin));
         assertFalse(AccessProtocol.acceptsSource(true, true, origin, "https://evil.test"));
         assertFalse(AccessProtocol.acceptsSource(true, true, "http://127.0.0.1:18768", origin));
+    }
+    @Test public void hiddenDocumentsMayOnlyPassTheDocumentGateForClearing() {
+        String origin = OriginPolicy.ORIGIN;
+        assertTrue(AccessProtocol.acceptsDocument(true, origin, origin + "/env/thread"));
+        assertFalse(AccessProtocol.acceptsSource(false, true, origin, origin + "/env/thread"));
+        assertFalse(AccessProtocol.acceptsDocument(false, origin, origin));
+        assertFalse(AccessProtocol.acceptsDocument(true, "https://evil.test", origin));
+        assertFalse(AccessProtocol.acceptsDocument(true, origin, "https://evil.test"));
     }
     @Test public void idsAreStrictAndBounded() {
         assertTrue(AccessProtocol.validId("document_12"));

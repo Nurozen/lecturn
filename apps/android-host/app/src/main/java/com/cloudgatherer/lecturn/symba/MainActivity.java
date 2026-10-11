@@ -42,13 +42,80 @@ public final class MainActivity extends Activity implements HostController.Liste
     private HostSurface surface;
     private ValueCallback<Uri[]> fileCallback;
     private String pendingDownload, downloadCookie;
-    private String lastUiUrl;
-    private boolean openTask, resumed, bridgeAvailable;
+    private String lastUiUrl, widgetThreadUrl;
+    static final String FLOAT_CHAT = "com.cloudgatherer.lecturn.symba.FLOAT_CHAT";
+    static final String COMPOSE = "com.cloudgatherer.lecturn.symba.COMPOSE";
+    private boolean openTask, resumed, bridgeAvailable, floatRequested, composeRequested;
+    private FloatingChatWindow floating;
+    private boolean unlocked() {
+        return getSystemService(PowerManager.class).isInteractive()
+                && !getSystemService(android.app.KeyguardManager.class).isKeyguardLocked();
+    }
+    private boolean interactive() {
+        return web != null && unlocked()
+                && (floating != null ? floating.interactive() : resumed);
+    }
     private final UiPairing pairing = new UiPairing();
     private final UiSessionClient sessions = new UiSessionClient();
     private final ExecutorService pairingIo = Executors.newSingleThreadExecutor();
     private boolean sessionBusy, sessionNeeded = true;
     private long pageEpoch;
+    private int widgetRequests;
+    private long widgetPublication;
+    private boolean widgetHostReady;
+    private final android.content.BroadcastReceiver widgetScreen = new android.content.BroadcastReceiver() {
+        @Override public void onReceive(android.content.Context context, Intent intent) {
+            updateWidgetVisibility();
+        }
+    };
+    // Widget text may advance on Home. This does not authorize interactive bridge actions.
+    private boolean widgetAllowed() {
+        return !isDestroyed() && web != null && unlocked() && bridgeAvailable
+                && host.verified() && !host.stopping && host.state != null && "ready".equals(host.state.runtime);
+    }
+    private void clearWidget() { widgetPublication++; ChatWidget.clear(this); }
+    void updateWidgetVisibility() {
+        if (web == null) return;
+        if (unlocked()) {
+            web.onResume();
+            refreshChatWidget();
+        } else {
+            clearWidget();
+            web.onPause();
+        }
+    }
+    private void refreshChatWidget() {
+        if (widgetAllowed() && OriginPolicy.chatStateUrl(web.getUrl()) != null)
+            web.evaluateJavascript("window.dispatchEvent(new Event('lecturn:chat-visible'))", null);
+    }
+    void publishChatWidget(WebView view, Object payload, boolean mainFrame, String origin,
+            java.util.function.Consumer<Boolean> acknowledge) {
+        if (view != web || !AccessProtocol.acceptsDocument(mainFrame, origin, view.getUrl())) {
+            acknowledge.accept(false); return;
+        }
+        if (payload == null || payload == JSONObject.NULL) {
+            clearWidget(); acknowledge.accept(true); return;
+        }
+        String pageUrl = OriginPolicy.chatStateUrl(view.getUrl());
+        if (!widgetAllowed() || pageUrl == null || widgetRequests >= 2) { acknowledge.accept(false); return; }
+        long epoch = pageEpoch, publication = ++widgetPublication;
+        String cookie = CookieManager.getInstance().getCookie(OriginPolicy.ORIGIN);
+        widgetRequests++;
+        pairingIo.execute(() -> {
+            boolean authenticated = false;
+            try { authenticated = sessions.authenticated(cookie); }
+            catch (Exception ignored) { /* No publication without a verified session. */ }
+            boolean verified = authenticated;
+            main.post(() -> {
+                widgetRequests--;
+                boolean pending = epoch == pageEpoch && publication == widgetPublication && view == web;
+                boolean current = pending && pageUrl.equals(OriginPolicy.chatStateUrl(view.getUrl()))
+                        && java.util.Objects.equals(cookie, CookieManager.getInstance().getCookie(OriginPolicy.ORIGIN));
+                if (pending && (!current || !verified || !widgetAllowed())) clearWidget();
+                acknowledge.accept(current && verified && widgetAllowed() && ChatWidget.publish(this, payload, pageUrl));
+            });
+        });
+    }
     private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable checkPairing = this::checkPairing;
     private final Runnable expirePairing = () -> {
@@ -73,6 +140,9 @@ public final class MainActivity extends Activity implements HostController.Liste
         if (Build.VERSION.SDK_INT >= 31) getWindow().setHideOverlayWindows(true);
         host = ((HostApplication) getApplication()).controller;
         openTask = RuntimeService.OPEN_TASK.equals(getIntent().getAction());
+        floatRequested = FLOAT_CHAT.equals(getIntent().getAction()) || COMPOSE.equals(getIntent().getAction());
+        composeRequested = COMPOSE.equals(getIntent().getAction());
+        widgetThreadUrl = widgetUrl(getIntent());
         surface = new HostSurface(this);
         surface.actions(v -> requestStart(), v -> requestStop(),
                 v -> accessDialog.show(this, host, null), v -> more());
@@ -85,9 +155,16 @@ public final class MainActivity extends Activity implements HostController.Liste
         });
         web = new WebView(this); web.setBackgroundColor(Color.rgb(18, 39, 53));
         configureWebView();
-        blobDownloads = new BlobDownloads(this, web, () -> resumed);
+        android.content.IntentFilter screen = new android.content.IntentFilter(Intent.ACTION_SCREEN_OFF);
+        screen.addAction(Intent.ACTION_SCREEN_ON); screen.addAction(Intent.ACTION_USER_PRESENT);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(widgetScreen, screen, RECEIVER_NOT_EXPORTED);
+        else registerReceiver(widgetScreen, screen);
+        blobDownloads = new BlobDownloads(this, web, this::interactive);
         surface.content.addView(web, 0, new android.widget.FrameLayout.LayoutParams(-1, -1));
         setContentView(surface);
+        if (saved != null && saved.getBundle("webState") != null
+                && web.restoreState(saved.getBundle("webState")) != null)
+            lastUiUrl = saved.getString("lastUiUrl", OriginPolicy.ORIGIN);
         if (Build.VERSION.SDK_INT >= 33) getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
                 android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::goBack);
     }
@@ -114,6 +191,7 @@ public final class MainActivity extends Activity implements HostController.Liste
             }
             @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 clearAccessRequests();
+                clearWidget();
                 pageEpoch++; sessionBusy = false; sessionNeeded = true; pairing.authenticated = false;
                 main.removeCallbacks(checkPairing);
                 if (!OriginPolicy.isUi(url)) { view.stopLoading(); toast("Navigation blocked."); }
@@ -134,6 +212,7 @@ public final class MainActivity extends Activity implements HostController.Liste
                 }
             }
             @Override public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
+                if (floating != null) floating.close();
                 cancelPairing("Web page stopped. Reopen Lecturn and retry pairing.");
                 clearAccessRequests();
                 blobDownloads.close();
@@ -187,15 +266,25 @@ public final class MainActivity extends Activity implements HostController.Liste
                 && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT);
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             WebViewCompat.addWebMessageListener(web, "__lecturnNative", Collections.singleton(OriginPolicy.ORIGIN), (view, message, origin, mainFrame, reply) -> {
-                if (!AccessProtocol.acceptsSource(resumed, mainFrame, origin.toString(), view.getUrl())) return;
+                if (!AccessProtocol.acceptsDocument(mainFrame, origin.toString(), view.getUrl())) return;
                 if (message.getType() != androidx.webkit.WebMessageCompat.TYPE_STRING) return;
                 String data = message.getData();
-                if (data == null || data.length() > 1024) return;
+                if (data == null || data.length() > 24000) return;
                 try {
                     JSONObject request = new JSONObject(data);
                     if (!Integer.valueOf(2).equals(request.opt("protocolVersion")) || !AccessProtocol.validId(request.opt("requestId"))) return;
                     String id = request.getString("requestId");
                     String method = request.optString("method");
+                    if ("publishChatWidget".equals(method)) {
+                        publishChatWidget(view, request.opt("payload"), mainFrame, origin.toString(), published -> {
+                            try { reply.postMessage(new JSONObject().put("protocolVersion", 2).put("requestId", id)
+                                    .put("state", new JSONObject().put("published", published)).toString()); }
+                            catch (org.json.JSONException | IllegalStateException ignored) { /* Departed document. */ }
+                        });
+                        return;
+                    }
+                    if (!AccessProtocol.acceptsSource(interactive(), mainFrame, origin.toString(), view.getUrl())) return;
+                    if (data.length() > 1024) return;
                     AccessRequests.Pending pending = accessRequests.add(id, state -> {
                         try {
                             reply.postMessage(new JSONObject().put("protocolVersion", 2).put("requestId", id)
@@ -227,6 +316,11 @@ public final class MainActivity extends Activity implements HostController.Liste
                             }
                             if (full && state.effectiveFullAccess()) {
                                 accessReview = null; pending.finish(state); return;
+                            }
+                            if (!resumed) {
+                                // Native grant review belongs to a foreground Activity. Retry there.
+                                accessReview = null; pending.finish(null); openFromFloating();
+                                toast("Review device access in Lecturn, then retry your action."); return;
                             }
                             accessDialog.show(this, host, full ? ((String) thread).replaceAll("[\\p{Cntrl}]", "") : null, applied -> {
                                 if (accessReview == pending) accessReview = null;
@@ -271,6 +365,7 @@ public final class MainActivity extends Activity implements HostController.Liste
         else if (request == NOTIFICATIONS) toast("Runtime not started. Notifications are needed for a visible Stop control.");
     }
     private void requestStop() {
+        ChatWidget.clear(this);
         cancelPairing("Runtime stopped. Use More → Retry pairing after restarting.");
         clearAccessRequests();
         if (host.monitoring) startService(new Intent(this, RuntimeService.class).setAction(RuntimeService.STOP));
@@ -278,7 +373,8 @@ public final class MainActivity extends Activity implements HostController.Liste
     }
     private void more() {
         new AlertDialog.Builder(this).setTitle("Lecturn on this phone")
-                .setItems(new String[]{"Refresh runtime status", "Reload Lecturn", Settings.canDrawOverlays(this) ? "Overlay permission: on" : "Enable activity overlay", "About device access", "Retry pairing", host.monitoring ? "Check background runtime" : "Keep running", "Stop Lecturn", "Set up agents", ignoringBatteryOptimizations() ? "Background battery: exempt" : "Background battery: optimized"}, (d, which) -> {
+                .setItems(new String[]{"Refresh runtime status", "Reload Lecturn", Settings.canDrawOverlays(this) ? "Overlay permission: on" : "Enable activity overlay", "About device access", "Retry pairing", host.monitoring ? "Check background runtime" : "Keep running", "Stop Lecturn", "Set up agents", ignoringBatteryOptimizations() ? "Background battery: exempt" : "Background battery: optimized", "Float chat"}, (d, which) -> {
+                    if (which == 9) { floatRequested = true; changed(); }
                     if (which == 0) host.refresh();
                     if (which == 5) { if (host.monitoring) host.refresh(); else requestStart(); }
                     if (which == 6) requestStop();
@@ -332,30 +428,48 @@ public final class MainActivity extends Activity implements HostController.Liste
     }
     private void external(String url) {
         if (!OriginPolicy.isExternal(url)) { toast("Only local Lecturn pages and external HTTPS links are allowed."); return; }
+        if (floating != null) floating.minimize(true);
         try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE)); }
         catch (ActivityNotFoundException e) { toast("No browser available."); }
     }
     @Override public void changed() {
         HostState state = host.state;
+        if (floating != null) floating.working(host.verified() && state != null && state.working());
+        boolean ready = host.verified() && !host.stopping && state != null && "ready".equals(state.runtime);
+        if (!ready) clearWidget();
+        else if (!widgetHostReady) refreshChatWidget();
+        widgetHostReady = ready;
+        if (host.stopping && floating != null) floating.close();
         if (host.stopping) cancelPairing("Runtime stopping. Retry pairing after restarting.");
         surface.render(host, web != null && lastUiUrl != null, bridgeAvailable, pairing);
         if (host.stopping || (!host.busy && !host.verified()) || (state != null && !"ready".equals(state.runtime))) clearAccessRequests();
         if (!host.verified()) return;
         if (host.notice != null) { toast(host.notice); host.notice = null; }
         if (!bridgeAvailable) return;
-        if (!resumed) return;
+        if (!interactive()) return;
         if (web != null && "ready".equals(state.runtime) && state.uiUrl != null && !state.uiUrl.equals(lastUiUrl)) {
             lastUiUrl = state.uiUrl; web.loadUrl(state.uiUrl);
             surface.render(host, true, bridgeAvailable, pairing);
         }
         if (sessionNeeded) checkPairing();
+        if (widgetThreadUrl != null && pairing.authenticated && !sessionNeeded && web != null && web.getProgress() == 100) {
+            String target = widgetThreadUrl; widgetThreadUrl = null;
+            if (!target.equals(web.getUrl())) { web.loadUrl(target); return; }
+        }
+        if (floatRequested && widgetThreadUrl == null && pairing.authenticated && !sessionNeeded
+                && web != null && web.getProgress() == 100) showFloating();
+        if (composeRequested && pairing.authenticated && !sessionNeeded && web != null && web.getProgress() == 100) {
+            composeRequested = false;
+            web.evaluateJavascript("window.__lecturnComposeRequested=true;window.dispatchEvent(new Event('lecturn:compose'))", null);
+        }
         if (openTask && pairing.authenticated && !sessionNeeded && web != null
                 && "ready".equals(state.runtime) && state.taskUrl != null && web.getProgress() == 100) {
             openTask = false;
-            web.loadUrl(state.taskUrl);
+            if (!state.taskUrl.equals(web.getUrl())) web.loadUrl(state.taskUrl);
         }
     }
     private void cancelPairing(String message) {
+        clearWidget();
         pageEpoch++; sessionBusy = false; sessionNeeded = false;
         main.removeCallbacks(checkPairing);
         main.removeCallbacks(expirePairing);
@@ -363,7 +477,7 @@ public final class MainActivity extends Activity implements HostController.Liste
     }
     private void checkPairing() {
         main.removeCallbacks(checkPairing);
-        if (!resumed || web == null || sessionBusy || !sessionNeeded || !bridgeAvailable
+        if (!interactive() || web == null || sessionBusy || !sessionNeeded || !bridgeAvailable
                 || !host.verified() || !"ready".equals(host.state.runtime)
                 || web.getProgress() < 100 || !OriginPolicy.isUi(web.getUrl())) return;
         long epoch = pageEpoch;
@@ -375,12 +489,14 @@ public final class MainActivity extends Activity implements HostController.Liste
             catch (Exception ignored) { /* Never display cookie or transport exception data. */ }
             Boolean result = authenticated;
             main.post(() -> {
-                if (isDestroyed() || !resumed || epoch != pageEpoch) return;
+                if (isDestroyed() || !interactive() || epoch != pageEpoch) return;
                 sessionBusy = false;
                 if (!host.verified() || !"ready".equals(host.state.runtime)) return;
                 if (Boolean.TRUE.equals(result)) {
-                    pairing.confirm(); sessionNeeded = false;
-                    web.clearHistory(); changed();
+                    boolean completedBootstrap = pairing.confirm(); sessionNeeded = false;
+                    if (completedBootstrap) web.clearHistory();
+                    changed();
+                    if (epoch == pageEpoch) refreshChatWidget();
                 } else if (result == null) {
                     pairing.fail("Lecturn session unavailable. Use More → Retry pairing.");
                     sessionNeeded = false; changed();
@@ -394,7 +510,7 @@ public final class MainActivity extends Activity implements HostController.Liste
                 } else if (pairing.begin()) {
                     sessionBusy = true;
                     boolean accepted = host.bootstrap(bootstrap -> {
-                        if (isDestroyed() || !resumed || epoch != pageEpoch) return;
+                        if (isDestroyed() || !interactive() || epoch != pageEpoch) return;
                         sessionBusy = false;
                         long remaining = bootstrap == null ? 0 : java.time.Duration.between(
                                 java.time.Instant.now(), bootstrap.expiresAt).toMillis();
@@ -420,21 +536,99 @@ public final class MainActivity extends Activity implements HostController.Liste
     }
     @Override protected void onResume() {
         super.onResume(); resumed = true; sessionNeeded = true;
-        if (web != null) web.onResume(); host.add(this); changed(); host.refresh();
+        if (floating != null) floating.close();
+        if (web != null) web.onResume(); host.add(this); changed(); host.refresh(); refreshChatWidget();
     }
     @Override protected void onPause() {
-        resumed = false; pageEpoch++; sessionBusy = false;
-        if (web != null) web.onPause(); main.removeCallbacks(checkPairing);
-        clearAccessRequests(); host.remove(this); super.onPause();
+        resumed = false;
+        if (!unlocked()) clearWidget();
+        if (floating == null) {
+            pageEpoch++; sessionBusy = false;
+            // Keep this trusted document receiving chat updates while Home is visible.
+            // The interaction epoch still cancels pending foreground work.
+            if (web != null) { if (unlocked()) web.onResume(); else web.onPause(); }
+            main.removeCallbacks(checkPairing);
+            clearAccessRequests();
+        }
+        super.onPause();
     }
     @Override protected void onSaveInstanceState(Bundle saved) {
         saved.putBoolean("pairingAttempted", pairing.attempted);
+        if (web != null && pairing.authenticated) {
+            var history = web.copyBackForwardList();
+            boolean safe = history.getSize() > 0;
+            for (int i = 0; i < history.getSize(); i++) safe &= OriginPolicy.isStateUrl(history.getItemAtIndex(i).getUrl());
+            if (safe) {
+                Bundle state = new Bundle();
+                web.saveState(state); saved.putBundle("webState", state);
+                saved.putString("lastUiUrl", lastUiUrl);
+            }
+        }
         super.onSaveInstanceState(saved);
     }
-    @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); openTask = RuntimeService.OPEN_TASK.equals(intent.getAction()); sessionNeeded = true; pairing.authenticated = false; changed(); }
-    private void goBack() { if (web != null && web.canGoBack()) web.goBack(); else moveTaskToBack(true); }
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent); setIntent(intent);
+        openTask = RuntimeService.OPEN_TASK.equals(intent.getAction());
+        floatRequested = FLOAT_CHAT.equals(intent.getAction()) || COMPOSE.equals(intent.getAction());
+        composeRequested = COMPOSE.equals(intent.getAction());
+        widgetThreadUrl = widgetUrl(intent);
+        sessionNeeded = true;
+    }
+    private static String widgetUrl(Intent intent) {
+        String url = intent.getStringExtra("widget_thread_url");
+        return OriginPolicy.isStateUrl(url) ? url : null;
+    }
+    private void goBack() {
+        if (web == null || !OriginPolicy.isUi(web.getUrl())) { moveTaskToBack(true); return; }
+        long epoch = pageEpoch;
+        web.evaluateJavascript("window.dispatchEvent(new Event('lecturn:native-back', {cancelable:true}))", result -> {
+            if (isDestroyed() || epoch != pageEpoch || !interactive()) return;
+            if ("false".equals(result)) return;
+            if (floating != null) floating.minimize(true);
+            else if (web.canGoBack()) web.goBack();
+            else moveTaskToBack(true);
+        });
+    }
+    private void showFloating() {
+        floatRequested = false;
+        if (!Settings.canDrawOverlays(this)) { toast("Enable the activity overlay in More first."); return; }
+        if (floating != null || web == null || !resumed) return;
+        if (Build.VERSION.SDK_INT >= 31) getWindow().setHideOverlayWindows(false);
+        ((android.view.ViewGroup) web.getParent()).removeView(web);
+        floating = new FloatingChatWindow(this, web, this::openFromFloating, this::goBack, active -> {
+            if (!active) {
+                pageEpoch++; sessionBusy = false; clearAccessRequests(); main.removeCallbacks(checkPairing);
+                updateWidgetVisibility();
+            } else {
+                sessionNeeded = true; changed();
+                refreshChatWidget();
+            }
+        }, () -> {
+            floating = null;
+            ((HostApplication) getApplication()).floatingChat = false;
+            if (web != null) {
+                var parent = (android.view.ViewGroup) web.getParent();
+                if (parent != null) parent.removeView(web);
+                surface.content.addView(web, 0, new android.widget.FrameLayout.LayoutParams(-1, -1));
+                if (!resumed) { if (unlocked()) web.onResume(); else web.onPause(); }
+            }
+            if (!resumed) clearAccessRequests();
+            if (Build.VERSION.SDK_INT >= 31) getWindow().setHideOverlayWindows(true);
+        });
+        ((HostApplication) getApplication()).floatingChat = true;
+        if (floating.show()) moveTaskToBack(true);
+        else { floating.close(); toast("Floating chat unavailable. Check overlay permission."); }
+    }
+    private void openFromFloating() {
+        if (floating != null) floating.close();
+        startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
+    }
     @Override public void onBackPressed() { goBack(); }
     @Override protected void onDestroy() {
+        unregisterReceiver(widgetScreen);
+        host.remove(this);
+        clearWidget();
+        if (floating != null) floating.close();
         clearAccessRequests();
         main.removeCallbacks(checkPairing);
         main.removeCallbacks(expirePairing);
