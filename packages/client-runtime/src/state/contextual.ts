@@ -102,7 +102,7 @@ export function contextualCollectionPresentation(input: {
   return { canStart: capture.state !== "unavailable", message: captureReason(capture.reason) };
 }
 
-export function captureReason(reason: ContextualCaptureStatusResult["reason"]): string {
+function captureReason(reason: ContextualCaptureStatusResult["reason"]): string {
   return {
     requested: "Collection is paused. Start collection when you’re ready.",
     ready: "Collecting from selected Slack desktop caches on this host.",

@@ -90,7 +90,7 @@ export const managedRelaySessionAtom = Atom.make((get): ManagedRelaySession | nu
 }).pipe(Atom.keepAlive, Atom.withLabel("managed-relay:session"));
 
 /** One account's session. Unlike the map, it only changes when that account's session does. */
-export const managedRelayAccountSessionAtom = Atom.family((accountId: string) =>
+const managedRelayAccountSessionAtom = Atom.family((accountId: string) =>
   Atom.make((get) => get(managedRelaySessionsAtom).get(accountId) ?? null).pipe(
     Atom.withLabel(`managed-relay:session:${accountId}`),
   ),
