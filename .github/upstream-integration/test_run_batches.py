@@ -15,6 +15,25 @@ batches = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(batches)
 
 
+class AgentSelectionTests(unittest.TestCase):
+    def test_cli_selection_precedence_and_invalid_environment(self):
+        required = ['--repo', '/source', '--state-dir', '/reports', '--spaces-dir', '/spaces']
+        for env, flags, expected in (({}, [], 'claude'), ({'LECTURN_SYNC_AGENT_CLI': 'codex'}, [], 'codex'),
+                                     ({'LECTURN_SYNC_AGENT_CLI': 'codex'}, ['--agent-cli', 'claude'], 'claude'),
+                                     ({'LECTURN_SYNC_AGENT_CLI': 'invalid'}, ['--agent-cli=codex'], 'codex')):
+            with self.subTest(env=env, flags=flags), patch.dict(os.environ, env, clear=True):
+                self.assertEqual(batches.parse_args(required + flags).agent_cli, expected)
+        for env, flags in (({'LECTURN_SYNC_AGENT_CLI': ''}, []),
+                           ({'LECTURN_SYNC_AGENT_CLI': 'invalid'}, []), ({}, ['--agent-cli', 'grok'])):
+            with self.subTest(env=env, flags=flags), patch.dict(os.environ, env, clear=True), \
+                    patch.object(sys, 'argv', ['run-batches.py', *required, *flags]), \
+                    patch.object(sys, 'stderr'), patch.object(batches, 'git') as git:
+                with self.assertRaises(SystemExit) as error:
+                    batches.main()
+                self.assertEqual(error.exception.code, 2)
+                git.assert_not_called()
+
+
 class GitSafetyTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -92,6 +111,7 @@ class GitSafetyTests(unittest.TestCase):
 
     def test_review_agent_is_sandboxed_read_only_with_external_report_writes(self):
         runner = batches.Runner.__new__(batches.Runner)
+        runner.args = SimpleNamespace(agent_cli='claude')
         runner.lock_fd = None
         schema = {'required': ['verdict']}
         reports = str(self.folder.resolve())
@@ -144,6 +164,7 @@ class GitSafetyTests(unittest.TestCase):
 
     def test_review_agent_rejects_report_write_grant_covering_source(self):
         runner = batches.Runner.__new__(batches.Runner)
+        runner.args = SimpleNamespace(agent_cli='claude')
         for folder in (self.repo, self.repo / 'reports', self.repo.parent):
             with self.subTest(folder=folder), patch.object(batches, 'command') as command:
                 with self.assertRaisesRegex(batches.Blocked, 'separate from source'):
@@ -152,6 +173,7 @@ class GitSafetyTests(unittest.TestCase):
 
     def test_builder_runs_unsandboxed_on_device_default_model(self):
         runner = batches.Runner.__new__(batches.Runner)
+        runner.args = SimpleNamespace(agent_cli='claude')
         runner.lock_fd = None
 
         def launch(argv, cwd, **kwargs):
@@ -176,12 +198,119 @@ class GitSafetyTests(unittest.TestCase):
 
     def test_agent_accepts_any_model_but_rejects_incomplete_results(self):
         runner = batches.Runner.__new__(batches.Runner)
+        runner.args = SimpleNamespace(agent_cli='claude')
         runner.lock_fd = None
         with patch.object(batches, 'command', side_effect=lambda argv, cwd, **kw: self.write_events(kw['log'], {'ready': True}, model='any-model-the-device-uses')):
             self.assertEqual(runner.agent(self.repo, self.folder, 'builder', 'Build', {'required': ['ready']}), {'ready': True})
         with patch.object(batches, 'command', side_effect=lambda argv, cwd, **kw: self.write_events(kw['log'], {'ready': True, 'extra': 1})):
             with self.assertRaisesRegex(batches.Blocked, 'Incomplete structured'):
                 runner.agent(self.repo, self.folder, 'builder', 'Build', {'required': ['ready']})
+
+    def write_codex_events(self, log, value):
+        events = [{'type': 'turn.started'},
+                  {'type': 'item.completed', 'item': {'type': 'agent_message', 'text': json.dumps(value)}},
+                  {'type': 'turn.completed', 'usage': {'output_tokens': 10}}]
+        Path(log).write_text('["codex"]\n' + '\n'.join(json.dumps(event) for event in events) + '\n')
+
+    def test_codex_selection_preserves_model_and_isolates_review_writes(self):
+        runner = batches.Runner.__new__(batches.Runner)
+        runner.args, runner.lock_fd = SimpleNamespace(agent_cli='codex'), None
+        real_command = batches.command
+        for readonly in (False, True):
+            with self.subTest(readonly=readonly):
+                def launch(argv, cwd, **kwargs):
+                    if argv[0] == 'git':
+                        return real_command(argv, cwd, **kwargs)
+                    self.assertEqual(argv[0], 'codex')
+                    config = dict(item.split('=', 1) for i, item in enumerate(argv) if i and argv[i-1] == '-c')
+                    self.assertEqual(config['approval_policy'], '"never"')
+                    self.assertEqual(config['features.hooks'], 'false')
+                    self.assertEqual(config['features.plugins'], 'false')
+                    self.assertEqual(config['features.apps'], 'false')
+                    self.assertEqual(config[f'projects.{json.dumps(str(Path(cwd).resolve()))}.trust_level'], '"untrusted"')
+                    self.assertNotEqual(Path(cwd).resolve(), self.repo.resolve())
+                    self.assertFalse((Path(cwd) / '.codex').exists())
+                    self.assertNotIn('--model', argv)
+                    self.assertNotIn('--ignore-user-config', argv)
+                    self.assertIsNone(kwargs.get('env'))
+                    if 'mcp' in argv:
+                        return subprocess.CompletedProcess(argv, 0, stdout='[{"name":"configured-server"}]')
+                    self.assertEqual(argv[:2], ['codex', 'exec'])
+                    self.assertEqual(config['mcp_servers."configured-server".enabled'], 'false')
+                    if readonly:
+                        profile = json.loads(config['default_permissions'])
+                        self.assertTrue(profile.startswith('lecturn_review_'))
+                        rules = config['permissions.' + profile]
+                        self.assertIn('":root"="read"', rules)
+                        self.assertIn(json.dumps(str(self.folder.resolve())) + '="write"', rules)
+                        self.assertIn('network={enabled=true}', rules)
+                        self.assertIn(str(self.folder.resolve()), config['shell_environment_policy.set'])
+                        self.assertNotIn('--sandbox', argv)
+                    else:
+                        self.assertEqual(config['default_permissions'], '":danger-full-access"')
+                    self.assertIn('--ephemeral', argv)
+                    self.assertIn('--ignore-rules', argv)
+                    self.assertIn('--skip-git-repo-check', argv)
+                    self.assertEqual(json.loads(Path(argv[argv.index('--output-schema') + 1]).read_text()), {'required': ['ready']})
+                    self.write_codex_events(kwargs['log'], {'ready': True})
+                with patch.object(batches, 'command', side_effect=launch):
+                    self.assertEqual(runner.agent(self.repo, self.folder, 'codex', 'Task', {'required': ['ready']}, readonly),
+                                     {'ready': True})
+                self.assertEqual(json.loads((self.folder / 'codex.json').read_text()), {'ready': True})
+        with patch.object(runner, 'grok_agent', return_value={'verdict': 'approve'}) as grok:
+            runner.agent(self.repo, self.folder, 'outside', 'Review', {}, True, runtime='grok')
+            grok.assert_called_once()
+
+    def test_codex_failure_never_falls_back_or_accepts_stale_output(self):
+        runner = batches.Runner.__new__(batches.Runner)
+        runner.args, runner.lock_fd = SimpleNamespace(agent_cli='codex'), None
+        output = self.folder / 'builder.json'
+        output.write_text('{"ready":true}')
+        for value in ({}, {'ready': True, 'extra': 1}):
+            def launch(argv, cwd, **kwargs):
+                if 'mcp' in argv:
+                    return subprocess.CompletedProcess(argv, 0, stdout='[]')
+                self.assertEqual(argv[0], 'codex')
+                self.write_codex_events(kwargs['log'], value)
+            with patch.object(batches, 'command', side_effect=launch):
+                with self.assertRaisesRegex(batches.Blocked, 'Incomplete structured'):
+                    runner.agent(self.repo, self.folder, 'builder', 'Build', {'required': ['ready']})
+        with patch.object(batches, 'command', side_effect=FileNotFoundError('codex missing')) as command:
+            with self.assertRaises(FileNotFoundError):
+                runner.agent(self.repo, self.folder, 'builder', 'Build', {'required': ['ready']})
+            self.assertEqual(command.call_count, 1)
+
+    def test_codex_reviewer_rejects_report_directory_covering_source_or_git(self):
+        runner = batches.Runner.__new__(batches.Runner)
+        runner.args = SimpleNamespace(agent_cli='codex')
+        for folder in (self.repo, self.repo / 'reports', self.repo.parent):
+            with self.subTest(folder=folder), patch.object(batches, 'command') as command:
+                with self.assertRaisesRegex(batches.Blocked, 'separate from source'):
+                    runner.agent(self.repo, folder, 'review', '', {}, True)
+                command.assert_not_called()
+        # A linked worktree's shared git data can live outside its source directory.
+        with patch.object(batches, 'git', return_value=str(self.folder / 'common.git')), \
+                patch.object(batches, 'command') as command:
+            with self.assertRaisesRegex(batches.Blocked, 'separate from git data'):
+                runner.agent(self.repo, self.folder, 'review', '', {}, True)
+            command.assert_not_called()
+
+    def test_codex_rejects_failed_incomplete_or_unstructured_results(self):
+        log = self.folder / 'events.log'
+        self.write_codex_events(log, {'ready': True})
+        valid = log.read_text()
+        self.assertEqual(batches.codex_result(log), {'ready': True})
+        log.write_text(valid.replace('{"type": "turn.started"}', '{"type": "turn.started"}\n{"type":"error","message":"retrying"}'))
+        self.assertEqual(batches.codex_result(log), {'ready': True})
+        for invalid in (valid.rsplit('\n', 2)[0], valid + '{"type":"turn.failed"}\n',
+                        valid + '{"type":"error"}\n', valid + '{"type":"turn.started"}\n',
+                        valid.replace('"output_tokens": 10', '"output_tokens": 0'),
+                        valid.replace('{\\"ready\\": true}', 'not json'),
+                        valid.replace('{\\"ready\\": true}', '[]')):
+            with self.subTest(invalid=invalid):
+                log.write_text(invalid)
+                with self.assertRaises((batches.Blocked, ValueError)):
+                    batches.codex_result(log)
 
     def test_check_env_resolves_worktree_package_binaries_first(self):
         cwd = self.repo / 'apps' / 'server'
