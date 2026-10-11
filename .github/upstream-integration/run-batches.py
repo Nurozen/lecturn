@@ -220,8 +220,10 @@ def codex_result(log_path):
             if not isinstance(event, dict):
                 continue
             kind = event.get('type')
-            require(kind not in ('turn.failed', 'error'), 'Codex agent run failed')
-            if kind == 'turn.started':
+            require(kind != 'turn.failed', 'Codex agent run failed')
+            # Stream errors can precede a successful retry. Require a new final message and
+            # completion after the error; process failures are rejected by command().
+            if kind in ('turn.started', 'error'):
                 result, completed = None, False
             elif kind == 'item.completed' and event.get('item', {}).get('type') == 'agent_message':
                 result, completed = event['item'].get('text'), False

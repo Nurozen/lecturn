@@ -300,6 +300,8 @@ class GitSafetyTests(unittest.TestCase):
         self.write_codex_events(log, {'ready': True})
         valid = log.read_text()
         self.assertEqual(batches.codex_result(log), {'ready': True})
+        log.write_text(valid.replace('{"type": "turn.started"}', '{"type": "turn.started"}\n{"type":"error","message":"retrying"}'))
+        self.assertEqual(batches.codex_result(log), {'ready': True})
         for invalid in (valid.rsplit('\n', 2)[0], valid + '{"type":"turn.failed"}\n',
                         valid + '{"type":"error"}\n', valid + '{"type":"turn.started"}\n',
                         valid.replace('"output_tokens": 10', '"output_tokens": 0'),
