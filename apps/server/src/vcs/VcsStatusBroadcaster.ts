@@ -7,6 +7,7 @@ import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
@@ -23,10 +24,13 @@ import type {
   VcsStatusStreamEvent,
 } from "@lecturn/contracts";
 import { mergeGitStatusParts } from "@lecturn/shared/git";
+import { resolveProjectAutoPull } from "@lecturn/shared/serverSettings";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import { hasStaveAutoPullOwner } from "../stave/StaveAutoPullOwnership.ts";
 
 const DEFAULT_VCS_STATUS_REFRESH_INTERVAL = Duration.seconds(30);
 const VCS_STATUS_REFRESH_FAILURE_BASE_DELAY = Duration.seconds(30);
@@ -148,52 +152,29 @@ export class VcsAutoPullPolicy extends Context.Reference<{
   defaultValue: () => ({ isEnabled: () => Effect.succeed(false) }),
 }) {}
 
-// The subset of a project row the auto-pull policy reads. Both
-// OrchestrationProject and OrchestrationProjectShell satisfy it.
-interface AutoPullCandidate {
-  readonly autoPull?: boolean | undefined;
-  readonly stave?: { readonly primaryRepoPath?: string | undefined } | null | undefined;
-}
-
-// Stave owns its edit branches and synchronisation; automatic Git pulls are disabled.
-function autoPullEnabledFor(project: AutoPullCandidate): boolean {
-  if (project.autoPull !== true) return false;
-  if (project.stave != null) return false;
-  return true;
-}
-
 export const autoPullPolicyLayer = Layer.effect(
   VcsAutoPullPolicy,
   Effect.gen(function* () {
     const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
-    // A Stave space's workspace root is a directory of worktrees rather than a
-    // repo, so clients request status (and therefore auto-pull) for
-    // `stave.primaryRepoPath`, which the exact-root query cannot find. Paths
-    // are compared as raw strings, matching that query: the policy layer has no
-    // FileSystem, and clients echo the `primaryRepoPath` string the server
-    // derived, so realPath is unnecessary.
-    const findByPrimaryRepoPath = (cwd: string) =>
-      snapshots
-        .getShellSnapshot()
-        .pipe(
-          Effect.map((snapshot) =>
-            Option.fromUndefinedOr(
-              snapshot.projects.find((project) => project.stave?.primaryRepoPath === cwd),
-            ),
-          ),
-        );
+    const serverSettings = yield* ServerSettings.ServerSettingsService;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
     return {
-      isEnabled: (cwd: string) =>
-        snapshots.getActiveProjectByWorkspaceRoot(cwd).pipe(
-          Effect.flatMap(
-            Option.match({
-              onNone: () => findByPrimaryRepoPath(cwd),
-              onSome: (project) => Effect.succeed(Option.some<AutoPullCandidate>(project)),
-            }),
-          ),
-          Effect.map(Option.exists((project) => autoPullEnabledFor(project))),
-          Effect.orElseSucceed(() => false),
-        ),
+      isEnabled: Effect.fn("VcsAutoPullPolicy.isEnabled")(
+        function* (cwd: string) {
+          const project = yield* snapshots.getActiveProjectByWorkspaceRoot(cwd);
+          if (Option.isNone(project) || project.value.stave != null) return false;
+          const settings = yield* serverSettings.getSettings;
+          if (!resolveProjectAutoPull(settings, project.value.id, project.value.autoPull))
+            return false;
+          const snapshot = yield* snapshots.getShellSnapshot();
+          return !(yield* hasStaveAutoPullOwner(snapshot.projects, cwd).pipe(
+            Effect.provideService(FileSystem.FileSystem, fs),
+            Effect.provideService(Path.Path, path),
+          ));
+        },
+        Effect.orElseSucceed(() => false),
+      ),
     };
   }),
 );

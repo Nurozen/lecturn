@@ -29,7 +29,13 @@ const testState = vi.hoisted(() => {
     setModelSelection: vi.fn(),
   };
 
+  const remoteSettings = {
+    defaultThreadEnvMode: "local" as "local" | "worktree",
+    newWorktreesStartFromOrigin: false,
+    defaultModelSelection: null as { instanceId: string; model: string } | null,
+  };
   return {
+    remoteSettings,
     completeProjectFileRead: (value: null) => completeProjectFileRead(value),
     draftStore,
     get projectFileRead() {
@@ -37,6 +43,9 @@ const testState = vi.hoisted(() => {
     },
     reset(nextStoredDraft: typeof storedDraft) {
       storedDraft = nextStoredDraft;
+      remoteSettings.defaultThreadEnvMode = "local";
+      remoteSettings.defaultModelSelection = null;
+      draftStore.setModelSelection.mockClear();
       router.state.location.href = "/";
       router.navigate.mockClear();
       draftStore.setLogicalProjectDraftThreadId.mockClear();
@@ -49,7 +58,17 @@ const testState = vi.hoisted(() => {
 });
 
 vi.mock("@effect/atom-react", () => ({
-  useAtomValue: () => ({ defaultThreadEnvMode: "local", newWorktreesStartFromOrigin: false }),
+  useAtomValue: (atom: unknown) =>
+    atom === "primary-settings"
+      ? { newWorktreesStartFromOrigin: false }
+      : new Map([
+          [
+            "environment-ssh",
+            {
+              settings: testState.remoteSettings,
+            },
+          ],
+        ]),
 }));
 vi.mock("@lecturn/client-runtime/environment", () => ({
   scopedProjectKey: () => "remote-project",
@@ -61,7 +80,10 @@ vi.mock("@lecturn/client-runtime/state/projectGit", () => ({
   normalizeProjectThreadWorkspace: (_project: unknown, workspace: unknown) => workspace,
   staveThreadStartMessage: () => null,
 }));
-vi.mock("@lecturn/contracts", () => ({ DEFAULT_RUNTIME_MODE: "full-access" }));
+vi.mock("@lecturn/contracts", () => ({
+  DEFAULT_RUNTIME_MODE: "full-access",
+  DEFAULT_SERVER_SETTINGS: {},
+}));
 vi.mock("@lecturn/shared/threadEnvMode", () => ({
   resolveDefaultThreadEnvMode: (input: {
     readonly projectFile: "local" | "worktree" | null;
@@ -89,7 +111,8 @@ vi.mock("../composerDraftStore", () => {
     useComposerDraftStore,
   };
 });
-vi.mock("../lib/chatThreadActions", () => ({
+vi.mock("../lib/chatThreadActions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/chatThreadActions")>()),
   hasExplicitComposerModelSelection: () => false,
   resolveCarriedThreadModes: () => ({ runtimeMode: null, interactionMode: null }),
   resolveNewDraftStartFromOrigin: () => false,
@@ -98,7 +121,6 @@ vi.mock("../lib/chatThreadActions", () => ({
     projectSetting: null,
     consultProjectFile: true,
   }),
-  resolveNewThreadModelSelectionOverride: () => null,
 }));
 vi.mock("../lib/lecturnProjectFileDefaults", () => ({
   readLecturnProjectFileDefaultThreadEnvMode: () => testState.projectFileRead,
@@ -126,7 +148,10 @@ vi.mock("../state/entities", () => ({
   useProjects: () => [],
   useThread: () => null,
 }));
-vi.mock("../state/server", () => ({ primaryServerSettingsAtom: {} }));
+vi.mock("../state/server", () => ({
+  environmentServerConfigsAtom: {},
+  primaryServerSettingsAtom: "primary-settings",
+}));
 vi.mock("../threadRoutes", () => ({ resolveThreadRouteTarget: () => null }));
 vi.mock("../uiStateStore", () => ({
   legacyProjectCwdPreferenceKey: () => "remote-project",
@@ -137,6 +162,32 @@ vi.mock("./useSettings", () => ({ useClientSettings: () => ({}) }));
 import { useNewThreadHandler } from "./useHandleNewThread";
 
 describe("useNewThreadHandler", () => {
+  it("opens a remote project with that machine’s model and workspace defaults", async () => {
+    testState.reset(null);
+    testState.remoteSettings.defaultThreadEnvMode = "worktree";
+    testState.remoteSettings.defaultModelSelection = {
+      instanceId: "codex_work",
+      model: "remote-model",
+    };
+    testState.completeProjectFileRead(null);
+    const result = await useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    expect(result?.draftId).toBe("draft-delayed");
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+      "remote-project",
+      { environmentId: "environment-ssh", projectId: "project-remote" },
+      "draft-delayed",
+      expect.objectContaining({ envMode: "worktree" }),
+    );
+    expect(testState.draftStore.setModelSelection).toHaveBeenCalledWith(
+      "draft-delayed",
+      { instanceId: "codex_work", model: "remote-model" },
+      { replaceOptions: true },
+    );
+  });
+
   it.each([
     ["new", null],
     [

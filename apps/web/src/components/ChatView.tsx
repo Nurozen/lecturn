@@ -1,3 +1,9 @@
+import { accountByEnvironmentIdAtom } from "../cloud/connectAccounts";
+import {
+  canAutomaticallyRetargetDraft,
+  canAutomaticallyRouteToEnvironment,
+} from "../lib/automaticEnvironment";
+import { projectKeyMapPerAccount, useSidebarSegmentation } from "./sidebar/accountProjectGroups";
 import { useAndroidChatBridge } from "../hooks/useAndroidChatBridge";
 import { requireAndroidFullAccess } from "../lib/androidHostAccess";
 import { contextualDraftKey, useContextualDrafts } from "../state/contextualDrafts";
@@ -11,6 +17,7 @@ import {
   resolveRepositoryPullRequestSelector,
 } from "@lecturn/client-runtime/state/projectGit";
 import type { UsageLimitSourceSnapshots } from "@lecturn/contracts";
+import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import {
   collectProviderUsageLimits,
   hasProviderUsageLimits,
@@ -67,7 +74,11 @@ import {
   createModelSelection,
   resolvePromptInjectedEffort,
 } from "@lecturn/shared/model";
-import { projectScriptCwd, projectScriptRuntimeEnv } from "@lecturn/shared/projectScripts";
+import {
+  projectScriptCwd,
+  projectScriptRuntimeEnv,
+  resolveProjectScripts,
+} from "@lecturn/shared/projectScripts";
 import { truncate } from "@lecturn/shared/String";
 import { resolveThreadReferenceCopyTarget } from "@lecturn/shared/threadReference";
 import {
@@ -294,7 +305,6 @@ import { appendReviewCommentsToPrompt, type ReviewCommentContext } from "../revi
 import { environmentCatalog } from "../connection/catalog";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
-import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import {
   environmentServerConfigsAtom,
@@ -564,6 +574,7 @@ const PreviewPanel = lazy(() =>
 const DiffPanel = lazy(() => import("./DiffPanel"));
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
+const EMPTY_ENVIRONMENT_IDS: readonly EnvironmentId[] = [];
 const EMPTY_FORK_TURN_IDS: ReadonlyMap<MessageId, TurnId> = new Map();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
@@ -1415,7 +1426,9 @@ export default function ChatView(props: ChatViewProps) {
     [environmentId, threadId],
   );
   const routeThreadKey = useMemo(() => scopedThreadKey(routeThreadRef), [routeThreadRef]);
-  const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
+  const updateProjectScriptSettings = useAtomCommand(serverEnvironment.updateSettings, {
+    reportFailure: false,
+  });
   const upsertKeybinding = useAtomCommand(serverEnvironment.upsertKeybinding, {
     reportFailure: false,
   });
@@ -1506,9 +1519,6 @@ export default function ChatView(props: ChatViewProps) {
   }, [routeKind, routeThreadRef, routeThreadState]);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
   const settings = useEnvironmentSettings(environmentId);
-  // New-thread defaults live in the primary environment's settings.json (the
-  // settings UI never writes to remote environments), so read them from the
-  // primary server rather than the thread's environment.
   const primaryServerSettings = useAtomValue(primaryServerSettingsAtom);
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
@@ -1791,10 +1801,17 @@ export default function ChatView(props: ChatViewProps) {
         ? buildLocalDraftThread(
             threadId,
             draftThread,
-            fallbackDraftProject?.defaultModelSelection ?? NO_PROVIDER_MODEL_SELECTION,
+            fallbackDraftProject?.defaultModelSelection ??
+              settings.defaultModelSelection ??
+              NO_PROVIDER_MODEL_SELECTION,
           )
         : undefined,
-    [draftThread, fallbackDraftProject?.defaultModelSelection, threadId],
+    [
+      draftThread,
+      fallbackDraftProject?.defaultModelSelection,
+      settings.defaultModelSelection,
+      threadId,
+    ],
   );
   // Promotion is data-driven: the draft route keeps rendering while the
   // server thread (same pre-allocated ref) starts, so live state must not
@@ -2020,10 +2037,17 @@ export default function ChatView(props: ChatViewProps) {
   );
   const activeProject = useProject(activeProjectRef);
   const canCheckoutPullRequestIntoThread = isLocalDraftThread && !activeProject?.stave;
+  const activeProjectScripts = useMemo(
+    () => (activeProject ? resolveProjectScripts(settings, activeProject) : []),
+    [activeProject, settings],
+  );
+  const activeProjectDefaultModelSelection =
+    activeProject?.defaultModelSelection ?? settings.defaultModelSelection;
   const handleNewThreadInActiveProject = useCallback(() => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
   }, [activeProjectRef, handleNewThread]);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
+  const sidebarSegmentation = useSidebarSegmentation();
   const allProjects = useProjects();
   const primaryEnvironmentId = primaryEnvironment?.environmentId ?? null;
   // Reuse the sidebar's grouping so project settings and history follow the
@@ -2031,12 +2055,15 @@ export default function ChatView(props: ChatViewProps) {
   // would miss the identity a duplicate row borrows from its siblings.
   const logicalKeyByPhysicalKey = useMemo(
     () =>
-      buildPhysicalToLogicalProjectKeyMap({
+      projectKeyMapPerAccount(
+        sidebarSegmentation,
+        buildPhysicalToLogicalProjectKeyMap,
+      )({
         projects: allProjects,
         settings: projectGroupingSettings,
         primaryEnvironmentId,
       }),
-    [allProjects, primaryEnvironmentId, projectGroupingSettings],
+    [allProjects, primaryEnvironmentId, projectGroupingSettings, sidebarSegmentation],
   );
   const activeLogicalProjectKey = useMemo(
     () =>
@@ -2090,8 +2117,8 @@ export default function ChatView(props: ChatViewProps) {
     [activeProjectKey],
   );
   const configuredPreviewUrls = useMemo(
-    () => getConfiguredPreviewUrls(activeProject?.scripts),
-    [activeProject?.scripts],
+    () => getConfiguredPreviewUrls(activeProjectScripts),
+    [activeProjectScripts],
   );
 
   useEffect(() => {
@@ -2314,7 +2341,7 @@ export default function ChatView(props: ChatViewProps) {
   const selectedProviderByThreadId = composerActiveProvider ?? null;
   const threadProvider =
     activeThread?.modelSelection.instanceId ??
-    activeProject?.defaultModelSelection?.instanceId ??
+    activeProjectDefaultModelSelection?.instanceId ??
     null;
   const lockedProvider = deriveLockedProvider({
     thread: activeThread,
@@ -2551,7 +2578,7 @@ export default function ChatView(props: ChatViewProps) {
           selectedProviderByThreadId,
           activeThread?.session?.providerInstanceId,
           activeThread?.modelSelection.instanceId,
-          activeProject?.defaultModelSelection?.instanceId,
+          activeProjectDefaultModelSelection?.instanceId,
         ],
         lockedProvider,
         lockedInstanceId:
@@ -2561,7 +2588,7 @@ export default function ChatView(props: ChatViewProps) {
         requireExactInstance: unsentImportInstanceId !== null,
       }),
     [
-      activeProject?.defaultModelSelection?.instanceId,
+      activeProjectDefaultModelSelection?.instanceId,
       activeThread?.modelSelection.instanceId,
       activeThread?.session?.providerInstanceId,
       lockedProvider,
@@ -3410,6 +3437,138 @@ export default function ChatView(props: ChatViewProps) {
       (activeThread.session !== null && activeThread.session.status !== "stopped")),
   );
 
+  const loadBalancingSettings = useClientSettings();
+  const accountByEnvironmentId = useAtomValue(accountByEnvironmentIdAtom);
+  const hasContextualDraftChoice = useContextualDrafts((state) =>
+    Boolean(
+      draftId &&
+      activeProject &&
+      state.choices[contextualDraftKey(environmentId, activeProject.id, draftId)],
+    ),
+  );
+  const automaticEnvironment = Boolean(
+    clientSettingsHydrated &&
+    draftId &&
+    !envLocked &&
+    !activeProject?.stave &&
+    !hasContextualDraftChoice &&
+    hasMultipleEnvironments &&
+    loadBalancingSettings.loadBalancingEnabled &&
+    draftThread?.environmentSelection !== "manual" &&
+    (!composerHasNonPromptContent || Boolean(draftThread?.loadBalancedEnvironmentId)) &&
+    (!draftThread?.branch || draftThread.environmentSelection === "auto") &&
+    !draftThread?.worktreePath,
+  );
+  const needsLoadBalancing = automaticEnvironment && !draftThread?.loadBalancedEnvironmentId;
+  const eligibleLoadBalancingCandidates = useMemo(
+    () =>
+      logicalProjectEnvironments
+        .filter((candidate) => {
+          const environment = environmentById.get(candidate.environmentId);
+          return (
+            environment?.connection.phase === "connected" &&
+            (loadBalancingSettings.loadBalancingWeights[candidate.environmentId] ?? 50) > 0 &&
+            canAutomaticallyRouteToEnvironment({
+              sourceEnvironmentId: environmentId,
+              targetEnvironmentId: candidate.environmentId,
+              accountByEnvironmentId,
+              selectedProvider: activeProviderStatus,
+              providers: environment.serverConfig?.providers ?? [],
+            })
+          );
+        })
+        .map((candidate) => candidate.environmentId),
+    [
+      logicalProjectEnvironments,
+      environmentById,
+      loadBalancingSettings.loadBalancingWeights,
+      environmentId,
+      accountByEnvironmentId,
+      activeProviderStatus,
+    ],
+  );
+  const loadBalancing = useLoadBalancedEnvironment(
+    needsLoadBalancing ? eligibleLoadBalancingCandidates : EMPTY_ENVIRONMENT_IDS,
+    loadBalancingSettings.loadBalancingWeights,
+  );
+  useEffect(() => {
+    if (!needsLoadBalancing || loadBalancing.pending || !draftId || sendInFlightRef.current) return;
+    const target = logicalProjectEnvironments.find(
+      (environment) => environment.environmentId === loadBalancing.environmentId,
+    );
+    if (!target || !eligibleLoadBalancingCandidates.includes(target.environmentId)) return;
+    const current = useComposerDraftStore.getState().getComposerDraft(draftId);
+    if (
+      !activeProject ||
+      !canAutomaticallyRetargetDraft({ draftId, environmentId, projectId: activeProject.id })
+    )
+      return;
+    if (target.environmentId !== environmentId) {
+      const selection = composerRef.current?.getSendContext().selectedModelSelection;
+      if (!selection || selection.instanceId !== activeProviderInstanceId) return;
+      // Keep the model shown before routing, even if the target has different defaults.
+      setComposerDraftModelSelection(draftId, selection, {
+        replaceOptions: true,
+        explicit: current?.modelSelectionExplicit === true,
+      });
+    }
+    setDraftThreadContext(draftId, {
+      projectRef: scopeProjectRef(target.environmentId, target.projectId),
+      environmentSelection: "auto",
+      loadBalancedEnvironmentId: target.environmentId,
+    });
+  }, [
+    needsLoadBalancing,
+    loadBalancing.pending,
+    loadBalancing.environmentId,
+    eligibleLoadBalancingCandidates,
+    environmentId,
+    activeProject,
+    activeProviderInstanceId,
+    draftId,
+    logicalProjectEnvironments,
+    setDraftThreadContext,
+    setComposerDraftModelSelection,
+  ]);
+  const onAutoEnvironment = useCallback(() => {
+    if (envLocked || !draftId || sendInFlightRef.current) return;
+    if (
+      !activeProject ||
+      !canAutomaticallyRetargetDraft({ draftId, environmentId, projectId: activeProject.id })
+    ) {
+      toastManager.add({
+        type: "warning",
+        id: "load-balancing-attachments",
+        title: "Keep attachments and context on this machine",
+        description:
+          "Choose a machine manually to keep this draft's attachments and Contextual settings.",
+      });
+      return;
+    }
+    loadBalancing.refresh(eligibleLoadBalancingCandidates);
+    setDraftThreadContext(draftId, {
+      environmentSelection: "auto",
+      loadBalancedEnvironmentId: null,
+      branch: null,
+      worktreePath: null,
+    });
+  }, [
+    envLocked,
+    activeProject,
+    environmentId,
+    draftId,
+    setDraftThreadContext,
+    loadBalancing.refresh,
+    eligibleLoadBalancingCandidates,
+  ]);
+  const autoEnvironmentLabel = automaticEnvironment
+    ? draftThread?.loadBalancedEnvironmentId
+      ? "Auto balance"
+      : loadBalancing.pending
+        ? "Checking machines…"
+        : "Auto balance unavailable"
+    : undefined;
+
   // Handle environment change for draft threads.  When the user picks a
   // different environment we update the draft context to point at the physical
   // project in that environment while keeping the same logical project.
@@ -3422,6 +3581,8 @@ export default function ChatView(props: ChatViewProps) {
       if (!target) return;
       setDraftThreadContext(draftId, {
         projectRef: scopeProjectRef(target.environmentId, target.projectId),
+        environmentSelection: "manual",
+        loadBalancedEnvironmentId: null,
       });
     },
     [draftId, envLocked, logicalProjectEnvironments, setDraftThreadContext],
@@ -3815,11 +3976,14 @@ export default function ChatView(props: ChatViewProps) {
       keybindingCommand: KeybindingCommand;
     }): Promise<AtomCommandResult<void, unknown>> => {
       const updateResult = mapAtomCommandResult(
-        await updateProject({
+        await updateProjectScriptSettings({
           environmentId,
           input: {
-            projectId: input.projectId,
-            scripts: input.nextScripts,
+            patch: {
+              projectScriptOverrides: {
+                [input.projectId]: input.nextScripts,
+              },
+            },
           },
         }),
         () => undefined,
@@ -3844,7 +4008,7 @@ export default function ChatView(props: ChatViewProps) {
       }
       return updateResult;
     },
-    [environmentId, updateProject, upsertKeybinding],
+    [environmentId, updateProjectScriptSettings, upsertKeybinding],
   );
   const saveProjectScript = useCallback(
     async (input: NewProjectScriptInput): Promise<AtomCommandResult<void, unknown>> => {
@@ -3853,28 +4017,28 @@ export default function ChatView(props: ChatViewProps) {
       }
       const nextId = nextProjectScriptId(
         input.name,
-        activeProject.scripts.map((script) => script.id),
+        activeProjectScripts.map((script) => script.id),
       );
       const nextScript = buildProjectScript(nextId, input);
       const nextScripts = input.runOnWorktreeCreate
         ? [
-            ...activeProject.scripts.map((script) =>
+            ...activeProjectScripts.map((script) =>
               script.runOnWorktreeCreate ? { ...script, runOnWorktreeCreate: false } : script,
             ),
             nextScript,
           ]
-        : [...activeProject.scripts, nextScript];
+        : [...activeProjectScripts, nextScript];
 
       return persistProjectScripts({
         projectId: activeProject.id,
         projectCwd: activeProject.workspaceRoot,
-        previousScripts: activeProject.scripts,
+        previousScripts: activeProjectScripts,
         nextScripts,
         keybinding: input.keybinding,
         keybindingCommand: commandForProjectScript(nextId),
       });
     },
-    [activeProject, persistProjectScripts],
+    [activeProject, activeProjectScripts, persistProjectScripts],
   );
   const updateProjectScript = useCallback(
     async (
@@ -3884,13 +4048,13 @@ export default function ChatView(props: ChatViewProps) {
       if (!activeProject) {
         return AsyncResult.success(undefined);
       }
-      const existingScript = activeProject.scripts.find((script) => script.id === scriptId);
+      const existingScript = activeProjectScripts.find((script) => script.id === scriptId);
       if (!existingScript) {
         return AsyncResult.failure(Cause.fail(new Error("Script not found.")));
       }
 
       const updatedScript = buildProjectScript(existingScript.id, input);
-      const nextScripts = activeProject.scripts.map((script) =>
+      const nextScripts = activeProjectScripts.map((script) =>
         script.id === scriptId
           ? updatedScript
           : input.runOnWorktreeCreate
@@ -3901,27 +4065,27 @@ export default function ChatView(props: ChatViewProps) {
       return persistProjectScripts({
         projectId: activeProject.id,
         projectCwd: activeProject.workspaceRoot,
-        previousScripts: activeProject.scripts,
+        previousScripts: activeProjectScripts,
         nextScripts,
         keybinding: input.keybinding,
         keybindingCommand: commandForProjectScript(scriptId),
       });
     },
-    [activeProject, persistProjectScripts],
+    [activeProject, activeProjectScripts, persistProjectScripts],
   );
   const deleteProjectScript = useCallback(
     async (scriptId: string): Promise<AtomCommandResult<void, unknown>> => {
       if (!activeProject) {
         return AsyncResult.success(undefined);
       }
-      const nextScripts = activeProject.scripts.filter((script) => script.id !== scriptId);
+      const nextScripts = activeProjectScripts.filter((script) => script.id !== scriptId);
 
-      const deletedName = activeProject.scripts.find((s) => s.id === scriptId)?.name;
+      const deletedName = activeProjectScripts.find((s) => s.id === scriptId)?.name;
 
       const result = await persistProjectScripts({
         projectId: activeProject.id,
         projectCwd: activeProject.workspaceRoot,
-        previousScripts: activeProject.scripts,
+        previousScripts: activeProjectScripts,
         nextScripts,
         keybinding: null,
         keybindingCommand: commandForProjectScript(scriptId),
@@ -3943,7 +4107,7 @@ export default function ChatView(props: ChatViewProps) {
       }
       return result;
     },
-    [activeProject, persistProjectScripts],
+    [activeProject, activeProjectScripts, persistProjectScripts],
   );
 
   const runtimeModeRequest = useRef(0);
@@ -6287,7 +6451,7 @@ export default function ChatView(props: ChatViewProps) {
 
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
-      const script = activeProject.scripts.find((entry) => entry.id === scriptId);
+      const script = activeProjectScripts.find((entry) => entry.id === scriptId);
       if (!script) return;
       event.preventDefault();
       event.stopPropagation();
@@ -6298,6 +6462,7 @@ export default function ChatView(props: ChatViewProps) {
   }, [
     activeProject,
     activeRightPanelSurface,
+    activeProjectScripts,
     addTerminalSurface,
     activeThreadRef,
     activeThreadPinned,
@@ -6492,11 +6657,24 @@ export default function ChatView(props: ChatViewProps) {
       !activeThread ||
       isSendBusy ||
       isConnecting ||
+      !clientSettingsHydrated ||
       threadDetailLoading ||
       sendInFlightRef.current ||
       feedbackUploadsInFlightRef.current.has(routeThreadKey)
     ) {
       notifyDirectAnnotationAttached();
+      return;
+    }
+    if (needsLoadBalancing) {
+      toastManager.add({
+        type: "warning",
+        title: loadBalancing.pending
+          ? "Checking machine resources"
+          : "Choose a machine to continue",
+        description: loadBalancing.pending
+          ? "Resource checks are still running. You can choose a machine in the composer."
+          : "No eligible machine has available resources. Choose a machine in the composer to override.",
+      });
       return;
     }
     if (activeEnvironmentUnavailable) {
@@ -7040,7 +7218,7 @@ export default function ChatView(props: ChatViewProps) {
     const turnTitleSeed = isFirstPostForkSend ? activeThread.title.trim() : title;
     const threadCreateModelSelection = createModelSelection(
       ctxSelectedModelSelection.instanceId,
-      ctxSelectedModel || activeProject.defaultModelSelection?.model || DEFAULT_MODEL,
+      ctxSelectedModel || activeProjectDefaultModelSelection?.model || DEFAULT_MODEL,
       ctxSelectedModelSelection.options,
     );
 
@@ -8267,7 +8445,7 @@ export default function ChatView(props: ChatViewProps) {
             activeProjectFaviconPath={activeProject?.faviconPath ?? null}
             activeProjectIcon={activeProject?.projectIcon ?? null}
             openInCwd={gitCwd}
-            activeProjectScripts={activeProject?.scripts}
+            activeProjectScripts={activeProjectScripts}
             preferredScriptId={
               activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
             }
@@ -8571,7 +8749,7 @@ export default function ChatView(props: ChatViewProps) {
                               lockedProvider={lockedProvider}
                               providerStatuses={providerStatuses as ServerProvider[]}
                               activeProjectDefaultModelSelection={
-                                activeProject?.defaultModelSelection
+                                activeProjectDefaultModelSelection
                               }
                               activeThreadModelSelection={activeThread?.modelSelection}
                               activeContextWindow={activeContextWindow}
@@ -8660,6 +8838,16 @@ export default function ChatView(props: ChatViewProps) {
                                     ? { onCheckoutPullRequestRequest: openPullRequestDialog }
                                     : {})}
                                   {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
+                                  autoEnvironmentLabel={autoEnvironmentLabel}
+                                  onAutoEnvironment={
+                                    draftId &&
+                                    !envLocked &&
+                                    hasMultipleEnvironments &&
+                                    loadBalancingSettings.loadBalancingEnabled &&
+                                    !activeProject?.stave
+                                      ? onAutoEnvironment
+                                      : undefined
+                                  }
                                   availableEnvironments={logicalProjectEnvironments}
                                   composerControlsHostRef={setRestingComposerControlsHost}
                                   contextStripVisible={showComposerContextStrip}

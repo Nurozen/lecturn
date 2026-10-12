@@ -126,6 +126,8 @@ export interface WorkLogEntry {
       readonly title: string;
       readonly status: WorkLogToolLifecycleStatus | undefined;
       readonly detail: string | undefined;
+      /** When this member last reported, so the card can show the newest activity. */
+      readonly updatedAt: string;
     }>;
   };
   toolData?: unknown;
@@ -136,6 +138,8 @@ interface DerivedWorkLogEntry extends WorkLogEntry {
   collapseKey?: string;
   /** Grouping key for subagent lifecycle rows (one row per agent). */
   taskId?: string;
+  /** The tool call that launched this agent, when the provider reports one. */
+  agentSpawnToolCallId?: string;
   isWorkflowCoordinator?: boolean;
   /** Shell/monitor/plan tasks: ordinary work-log rows, never spawn batches. */
   isBackgroundTask?: boolean;
@@ -200,11 +204,48 @@ export type ThreadFeedEntry =
       readonly label: string;
     }
   | {
+      /**
+       * The turn's single live slot. Web keys its live tool row and its
+       * "Thinking" row identically so the slot updates in place; here the
+       * slot holds "Thinking" whenever no tool row is shimmering, so a tool
+       * failing does not insert a row under the group it lives in.
+       */
       readonly type: "thinking";
       readonly id: string;
       readonly createdAt: string;
       readonly turnId: TurnId | null;
+    }
+  | {
+      /**
+       * One batch of spawned subagents. Rendered as its own card because a
+       * single-line tool row has no room for what the agents are doing now,
+       * which on a phone is the one thing worth showing.
+       */
+      readonly type: "agent-spawn";
+      readonly id: string;
+      readonly createdAt: string;
+      readonly turnId: TurnId | null;
+      readonly activity: ThreadFeedActivity;
+      readonly expanded: boolean;
+      readonly summary: AgentSpawnSummary;
     };
+
+export interface AgentSpawnSummary {
+  /** "Locate UNO hand rendering code" for one agent, "3 subagents" for a batch. */
+  readonly title: string;
+  /** Latest member activity while working, else the batch outcome. */
+  readonly status: string;
+  readonly tone: "working" | "completed" | "failed" | "stopped";
+  /** A workflow can report detail before it has spawned any members. */
+  readonly coordinatorDetail?: string;
+  readonly members: ReadonlyArray<{
+    readonly title: string;
+    readonly status: string;
+    readonly tone: "working" | "completed" | "failed" | "stopped";
+    readonly detail: string | undefined;
+    readonly updatedAt: string;
+  }>;
+}
 
 export type ThreadFeedLatestTurn = Pick<
   OrchestrationLatestTurn,
@@ -570,6 +611,10 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     if (payload.agentKind !== "agent") {
       entry.isBackgroundTask = true;
     }
+    const spawnToolCallId = asTrimmedString(payload.toolUseId);
+    if (spawnToolCallId) {
+      entry.agentSpawnToolCallId = spawnToolCallId;
+    }
     if (
       payload.taskType === "local_workflow" ||
       (typeof payload.workflowName === "string" && payload.workflowName.length > 0)
@@ -639,8 +684,11 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     entry.requestKind = requestKind;
   }
   let toolLifecycleStatus = extractWorkLogToolLifecycleStatus(payload);
-  if (!toolLifecycleStatus && activity.kind === "tool.completed") {
-    toolLifecycleStatus = "completed";
+  if (
+    !toolLifecycleStatus &&
+    (activity.kind === "tool.completed" || activity.kind === "task.completed")
+  ) {
+    toolLifecycleStatus = activity.tone === "error" ? "failed" : "completed";
   }
   // Codex starts omit status; a fresh start also reactivates an idle child.
   if (!toolLifecycleStatus && activity.kind === "task.started") {
@@ -716,6 +764,7 @@ function agentSpawnMember(
     title: entry.toolTitle ?? previous?.title ?? entry.label,
     status: entry.toolLifecycleStatus ?? previous?.status,
     detail: entry.detail ?? previous?.detail,
+    updatedAt: entry.createdAt,
   };
 }
 
@@ -748,6 +797,7 @@ function agentSpawnLifecycleStatus(
     return "inProgress";
   }
   if (statuses.includes("failed")) return "failed";
+  if (statuses.includes("declined")) return "declined";
   if (statuses.includes("stopped")) return "stopped";
   return "completed";
 }
@@ -764,7 +814,26 @@ function collapseDerivedWorkLogEntries(
   const spawnRowIndex = new Map<string, number>();
   const spawnGroupByTaskId = new Map<string, string>();
   const toolLifecycleRowIndex = new Map<string, number>();
+  // Tool calls that launched an agent (Claude's Agent tool, ACP subagent
+  // calls). The batch card is the whole story of that call, so its own
+  // lifecycle row is dropped.
+  const spawnToolCallIds = new Set(
+    entries.flatMap((entry) =>
+      entry.taskId !== undefined &&
+      !entry.isBackgroundTask &&
+      entry.agentSpawnToolCallId !== undefined
+        ? [entry.agentSpawnToolCallId]
+        : [],
+    ),
+  );
   for (const entry of entries) {
+    if (
+      entry.toolCallId !== undefined &&
+      entry.taskId === undefined &&
+      spawnToolCallIds.has(entry.toolCallId)
+    ) {
+      continue;
+    }
     const isTaskRow =
       entry.taskId !== undefined &&
       (entry.sourceActivityKind === "task.started" ||
@@ -1197,6 +1266,85 @@ function agentSpawnCoordinator(spawn: NonNullable<WorkLogEntry["agentSpawn"]>) {
   return spawn.workflowId === null
     ? undefined
     : spawn.agents[spawn.agentTaskIds.indexOf(spawn.workflowId)];
+}
+
+function agentSpawnTone(status: WorkLogToolLifecycleStatus | undefined): AgentSpawnSummary["tone"] {
+  switch (status) {
+    case undefined:
+    case "inProgress":
+      return "working";
+    case "completed":
+      return "completed";
+    case "failed":
+    case "declined":
+      return "failed";
+    case "stopped":
+      return "stopped";
+  }
+}
+
+/**
+ * What the spawn card shows. While members work, the status line is the
+ * newest member activity (its progress detail), so the card reads like the
+ * live tool row does for a single call. Once every member settles, it is the
+ * batch outcome in web's CTA wording.
+ */
+export function agentSpawnSummary(
+  spawn: NonNullable<WorkLogEntry["agentSpawn"]>,
+  batchStatus: WorkLogToolLifecycleStatus | undefined,
+): AgentSpawnSummary {
+  const members = agentSpawnMembers(spawn).map((agent) => {
+    const tone = agentSpawnTone(agent.status);
+    return {
+      title: agent.title,
+      status: tone === "working" ? "working" : (agent.status ?? tone),
+      tone,
+      detail: agent.detail,
+      updatedAt: agent.updatedAt,
+    };
+  });
+  const tone = agentSpawnTone(batchStatus);
+  const coordinator = members.length === 0 ? agentSpawnCoordinator(spawn) : undefined;
+  const coordinatorDetail = coordinator?.detail?.trim() || undefined;
+  // A workflow's coordinator is not a member; before any member reports the
+  // batch has none.
+  const title =
+    members.length === 0
+      ? (coordinator?.title ?? "Subagents")
+      : members.length === 1
+        ? members[0]!.title
+        : `${members.length} subagents`;
+  if (tone === "working") {
+    const working = members.filter((member) => member.tone === "working");
+    const latest = working
+      .filter((member) => member.detail !== undefined)
+      .reduce<(typeof working)[number] | undefined>(
+        (newest, member) =>
+          newest === undefined || member.updatedAt > newest.updatedAt ? member : newest,
+        undefined,
+      );
+    const status =
+      latest?.detail ??
+      coordinatorDetail ??
+      (members.length > 1 ? `${working.length} of ${members.length} working` : "Working");
+    return { title, status, tone, members, ...(coordinatorDetail ? { coordinatorDetail } : {}) };
+  }
+  // The batch tone covers a coordinator that failed or stopped on its own.
+  const failed = members.filter((member) => member.tone === "failed").length;
+  const stopped = members.filter((member) => member.tone === "stopped").length;
+  const outcome =
+    tone === "failed" || failed > 0
+      ? `${members.length > 1 && failed > 0 ? `${failed} ` : ""}failed`
+      : tone === "stopped" || stopped > 0
+        ? `${members.length > 1 && stopped > 0 ? `${stopped} ` : ""}stopped`
+        : "completed";
+  return {
+    title,
+    status: outcome,
+    tone,
+    members,
+    ...(coordinatorDetail ? { coordinatorDetail } : {}),
+  };
 }
 
 function agentSpawnExpandedBody(spawn: NonNullable<WorkLogEntry["agentSpawn"]>): string | null {
@@ -1986,7 +2134,8 @@ export function deriveThreadFeedPresentation(
       entry.type !== "turn-fold" &&
       entry.type !== "work-toggle" &&
       entry.type !== "thinking" &&
-      entry.type !== "import-divider",
+      entry.type !== "import-divider" &&
+      entry.type !== "agent-spawn",
   );
   const activeTailGroup = sourceFeed.findLast(
     (entry) => entry.type !== "message" || !isEmptyMessage(entry),
@@ -2056,18 +2205,36 @@ export function deriveThreadFeedPresentation(
   }
   // A working turn always shows one live activity. When no tool row is
   // shimmering (no tools yet, or the latest failed), that row is "Thinking".
+  // The trailing group's live row and this row share LIVE_ACTIVITY_ROW_ID, so
+  // the handoff between them happens in place (one row, new content) instead
+  // of a row being inserted below the group every time a call fails.
   if (
     activeWorkStartedAt !== null &&
-    !result.some((row) => row.type === "work-toggle" && row.shimmer)
+    !result.some(
+      (row) =>
+        (row.type === "work-toggle" && row.shimmer) ||
+        // A working spawn card is the live activity: its status line shows
+        // what the agents are doing, so a Thinking row under it would lie.
+        (row.type === "agent-spawn" &&
+          row.summary.tone === "working" &&
+          row.turnId === unsettledTurnId),
+    )
   ) {
     result.push(thinkingRow(activeWorkStartedAt, unsettledTurnId));
   }
   return result;
 }
 
+/**
+ * Shared by the trailing tool group's live row and the "Thinking" row so the
+ * list keeps one mounted row for the turn's live slot (mirrors web's
+ * LIVE_ACTIVITY_ROW_ID). Anything keyed by row id must not distinguish them.
+ */
+export const LIVE_ACTIVITY_ROW_ID = "live-activity-row";
+
 function thinkingRow(createdAt: string, turnId: TurnId | null) {
   if (cachedThinkingRow?.createdAt !== createdAt || cachedThinkingRow.turnId !== turnId) {
-    cachedThinkingRow = { type: "thinking", id: "thinking", createdAt, turnId };
+    cachedThinkingRow = { type: "thinking", id: LIVE_ACTIVITY_ROW_ID, createdAt, turnId };
   }
   return cachedThinkingRow;
 }
@@ -2098,7 +2265,9 @@ function appendPresentedFeedEntry(
     cached.activeTail !== activeTail ||
     cached.importedFrom !== importedFrom ||
     cached.rows.some(
-      (row) => row.type === "work-toggle" && expandedWorkGroupIds.has(row.groupId) !== row.expanded,
+      (row) =>
+        (row.type === "work-toggle" && expandedWorkGroupIds.has(row.groupId) !== row.expanded) ||
+        (row.type === "agent-spawn" && expandedWorkGroupIds.has(row.id) !== row.expanded),
     )
   ) {
     const rows: ThreadFeedEntry[] = [];
@@ -2157,11 +2326,27 @@ function appendActivityGroupRows(
     groupableRun = [];
   };
   for (const activity of activities) {
-    if (activity.workEntry.tone !== "error" && activity.workEntry.agentSpawn === undefined) {
+    const spawn = activity.workEntry.agentSpawn;
+    if (activity.workEntry.tone !== "error" && spawn === undefined) {
       groupableRun.push(activity);
       continue;
     }
     flushGroupableRun(false);
+    if (spawn !== undefined) {
+      // Keyed by the batch, not the anchor activity: the anchor can change
+      // as members arrive, and a changed key remounts the card.
+      const groupId = `agent-spawn:${spawn.workflowId ?? activity.turnId ?? spawn.agentTaskIds[0]}`;
+      result.push({
+        type: "agent-spawn",
+        id: groupId,
+        createdAt: activity.createdAt,
+        turnId: activity.turnId,
+        activity,
+        expanded: expandedWorkGroupIds.has(groupId),
+        summary: agentSpawnSummary(spawn, activity.lifecycleStatus),
+      });
+      continue;
+    }
     result.push({
       type: "activity-group",
       id: activity.id,
@@ -2203,7 +2388,9 @@ function appendToolGroupRows(
   const latestActivity = latestActiveActivity ?? activities.at(-1)!;
   // Like web, the trailing run keeps shining after its latest call succeeds;
   // only a failed, declined, or stopped call hands the live slot to "Thinking".
-  const shimmer = active || (activeTail && latestActivity.status === "success");
+  // Only the trailing run can be the turn's live slot; an in-progress row in
+  // an earlier run (a call whose end was never reported) stays in place.
+  const shimmer = activeTail && (active || latestActivity.status === "success");
   const singleActivity = activities.length === 1 ? latestActivity : null;
   const summary = live
     ? liveToolActivitySummary(latestActivity, live)
@@ -2244,7 +2431,9 @@ function appendToolGroupRows(
       : undefined;
   result.push({
     type: "work-toggle",
-    id: `${live ? "work-live" : "work-toggle"}:${groupId}`,
+    // The shimmering trailing row is the turn's live slot; it keeps that
+    // identity (and so its mounted view) until "Thinking" takes the slot.
+    id: shimmer ? LIVE_ACTIVITY_ROW_ID : `${live ? "work-live" : "work-toggle"}:${groupId}`,
     createdAt: sourceGroup.createdAt,
     turnId: sourceGroup.turnId,
     groupId,
