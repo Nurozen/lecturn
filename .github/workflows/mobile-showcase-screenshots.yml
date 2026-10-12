@@ -45,7 +45,7 @@ jobs:
   ios:
     name: iPhone 6.9, iPhone 6.5, and iPad 13
     if: inputs.platform == 'all' || inputs.platform == 'ios'
-    runs-on: blacksmith-12vcpu-macos-26
+    runs-on: macos-26
     # Capturing every palette multiplies the device matrix by six, and only the
     # one native build is shared between them.
     timeout-minutes: ${{ inputs.theme == 'all' && 300 || 60 }}
@@ -77,10 +77,22 @@ jobs:
           "$vp_pnpm_bin/pnpm" --version
 
       - name: Capture iOS showcase
-        run: pnpm screenshots:mobile --platform ios --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}"
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes
+          git rev-parse HEAD
+          cat > "$RUNNER_TEMP/lecturn-link-fixture.mjs" <<'FIXTURE'
+          import { pathToFileURL } from "node:url";
+          import path from "node:path";
+          const fixtureUrl = pathToFileURL(path.resolve(process.cwd(), "scripts/mobile-showcase-environment.ts"));
+          const { SHOWCASE_THREADS } = await import(fixtureUrl.href);
+          SHOWCASE_THREADS[0].response = "Native iOS link rendering fixture\n\n[GitHub repository](https://github.com/Nurozen/lecturn) and [Reference website](https://example.com).\n\nBoth link marks should align with their labels and keep the link text color.";
+          console.log("Validation-only fixture: GitHub branded link plus ordinary external link; source files unchanged.");
+          FIXTURE
+          node --import "$RUNNER_TEMP/lecturn-link-fixture.mjs" scripts/mobile-showcase.ts --platform ios --device iphone-6.9 --scene thread --appearance both --theme lecturn
 
       - name: Validate App Store Connect assets
-        run: pnpm screenshots:mobile --platform ios --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}" --validate-only
+        run: node scripts/mobile-showcase.ts --platform ios --device iphone-6.9 --scene thread --appearance both --theme lecturn --validate-only
 
       - name: Upload iOS screenshots
         if: always()
