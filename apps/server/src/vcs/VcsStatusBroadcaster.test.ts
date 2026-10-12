@@ -26,6 +26,7 @@ import type {
 } from "@lecturn/contracts";
 import { GitManagerError, ProjectId } from "@lecturn/contracts";
 
+import * as ServerSettings from "../serverSettings.ts";
 import * as VcsStatusBroadcaster from "./VcsStatusBroadcaster.ts";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
@@ -1078,9 +1079,11 @@ describe("autoPullPolicyLayer", () => {
 
   const makePolicyLayer = (
     query: Partial<ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"]>,
+    settings = ServerSettings.layerTest(),
   ) =>
     VcsStatusBroadcaster.autoPullPolicyLayer.pipe(
       Layer.provide(Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)(query)),
+      Layer.provide(settings),
     );
 
   it.effect("enables auto-pull for an exact workspace-root match without scanning", () =>
@@ -1146,6 +1149,41 @@ describe("autoPullPolicyLayer", () => {
             Effect.succeed(cwd === staveRoot ? Option.some(staveProject) : Option.none()),
           getShellSnapshot: () => Effect.succeed(shellSnapshot([toShell(staveProject)])),
         }),
+      ),
+    ),
+  );
+
+  it.effect("inherits machine defaults and applies checkout overrides while excluding Stave", () =>
+    Effect.gen(function* () {
+      const policy = yield* VcsStatusBroadcaster.VcsAutoPullPolicy;
+      assert.isTrue(yield* policy.isEnabled("/plain"));
+      assert.isFalse(yield* policy.isEnabled("/opted-out"));
+      assert.isFalse(yield* policy.isEnabled(staveRoot));
+      assert.isFalse(yield* policy.isEnabled(stavePrimaryRepo));
+    }).pipe(
+      Effect.provide(
+        makePolicyLayer(
+          {
+            getActiveProjectByWorkspaceRoot: (cwd) =>
+              Effect.succeed(
+                cwd === "/plain"
+                  ? Option.some({ ...plainProject, autoPull: false })
+                  : cwd === "/opted-out"
+                    ? Option.some({ ...plainProject, id: ProjectId.make("opted-out") })
+                    : cwd === staveRoot
+                      ? Option.some(staveProject)
+                      : Option.none(),
+              ),
+            getShellSnapshot: () => Effect.succeed(shellSnapshot([toShell(staveProject)])),
+          },
+          ServerSettings.layerTest({
+            defaultAutoPull: true,
+            projectAutoPullOverrides: {
+              [ProjectId.make("opted-out")]: false,
+              [staveProject.id]: true,
+            },
+          }),
+        ),
       ),
     ),
   );

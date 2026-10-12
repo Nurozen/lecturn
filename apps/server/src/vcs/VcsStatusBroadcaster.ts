@@ -16,6 +16,7 @@ import * as Stream from "effect/Stream";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 import type {
   GitManagerServiceError,
+  ProjectId,
   VcsStatusInput,
   VcsStatusLocalResult,
   VcsStatusRemoteResult,
@@ -23,10 +24,12 @@ import type {
   VcsStatusStreamEvent,
 } from "@lecturn/contracts";
 import { mergeGitStatusParts } from "@lecturn/shared/git";
+import { resolveProjectAutoPull } from "@lecturn/shared/serverSettings";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ServerSettings from "../serverSettings.ts";
 
 const DEFAULT_VCS_STATUS_REFRESH_INTERVAL = Duration.seconds(30);
 const VCS_STATUS_REFRESH_FAILURE_BASE_DELAY = Duration.seconds(30);
@@ -151,21 +154,16 @@ export class VcsAutoPullPolicy extends Context.Reference<{
 // The subset of a project row the auto-pull policy reads. Both
 // OrchestrationProject and OrchestrationProjectShell satisfy it.
 interface AutoPullCandidate {
+  readonly id: ProjectId;
   readonly autoPull?: boolean | undefined;
   readonly stave?: { readonly primaryRepoPath?: string | undefined } | null | undefined;
-}
-
-// Stave owns its edit branches and synchronisation; automatic Git pulls are disabled.
-function autoPullEnabledFor(project: AutoPullCandidate): boolean {
-  if (project.autoPull !== true) return false;
-  if (project.stave != null) return false;
-  return true;
 }
 
 export const autoPullPolicyLayer = Layer.effect(
   VcsAutoPullPolicy,
   Effect.gen(function* () {
     const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+    const serverSettings = yield* ServerSettings.ServerSettingsService;
     // A Stave space's workspace root is a directory of worktrees rather than a
     // repo, so clients request status (and therefore auto-pull) for
     // `stave.primaryRepoPath`, which the exact-root query cannot find. Paths
@@ -183,17 +181,23 @@ export const autoPullPolicyLayer = Layer.effect(
           ),
         );
     return {
-      isEnabled: (cwd: string) =>
-        snapshots.getActiveProjectByWorkspaceRoot(cwd).pipe(
-          Effect.flatMap(
-            Option.match({
-              onNone: () => findByPrimaryRepoPath(cwd),
-              onSome: (project) => Effect.succeed(Option.some<AutoPullCandidate>(project)),
-            }),
-          ),
-          Effect.map(Option.exists((project) => autoPullEnabledFor(project))),
-          Effect.orElseSucceed(() => false),
-        ),
+      isEnabled: Effect.fn("VcsAutoPullPolicy.isEnabled")(
+        function* (cwd: string) {
+          const project = yield* snapshots.getActiveProjectByWorkspaceRoot(cwd).pipe(
+            Effect.flatMap(
+              Option.match({
+                onNone: () => findByPrimaryRepoPath(cwd),
+                onSome: (project) => Effect.succeed(Option.some<AutoPullCandidate>(project)),
+              }),
+            ),
+          );
+          // Stave owns its edit branches and synchronisation, even when machine defaults enable pulls.
+          if (Option.isNone(project) || project.value.stave != null) return false;
+          const settings = yield* serverSettings.getSettings;
+          return resolveProjectAutoPull(settings, project.value.id, project.value.autoPull);
+        },
+        Effect.orElseSucceed(() => false),
+      ),
     };
   }),
 );

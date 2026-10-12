@@ -12,6 +12,7 @@ import {
   CommandId,
   DEFAULT_MODEL,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  DEFAULT_SERVER_SETTINGS,
   type ModelSelection,
   type OrchestrationProjectShell,
   ProjectId,
@@ -19,6 +20,7 @@ import {
   ThreadId,
   TurnId,
 } from "@lecturn/contracts";
+import { resolveProjectAutoPull } from "@lecturn/shared/serverSettings";
 import * as Cause from "effect/Cause";
 import * as Console from "effect/Console";
 import * as Context from "effect/Context";
@@ -208,6 +210,9 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
   let bootstrapThreadCreated = false;
 
   if (serverConfig.autoBootstrapProjectFromCwd) {
+    const settings = yield* (yield* ServerSettings.ServerSettingsService).getSettings;
+    const defaultModelSelection =
+      settings.defaultModelSelection ?? getAutoBootstrapThreadModelSelection();
     yield* Effect.gen(function* () {
       const existingProject = yield* projectionReadModelQuery.getActiveProjectByWorkspaceRoot(
         serverConfig.cwd,
@@ -219,7 +224,7 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
         const createdAt = DateTime.formatIso(yield* DateTime.now);
         nextProjectId = ProjectId.make(yield* randomUUID);
         const bootstrapProjectTitle = path.basename(serverConfig.cwd) || "project";
-        nextThreadModelSelection = getAutoBootstrapThreadModelSelection();
+        nextThreadModelSelection = defaultModelSelection;
         yield* orchestrationEngine.dispatch({
           type: "project.create",
           commandId: CommandId.make(yield* randomUUID),
@@ -234,7 +239,7 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
         nextProjectId = existingProject.value.id;
         bootstrapProjectId = nextProjectId;
         nextThreadModelSelection =
-          existingProject.value.defaultModelSelection ?? getAutoBootstrapThreadModelSelection();
+          existingProject.value.defaultModelSelection ?? defaultModelSelection;
       }
 
       yield* Effect.gen(function* () {
@@ -749,11 +754,15 @@ interface StartupOptions {
 
 export const autoPullProjects = Effect.fn("autoPullProjects")(function* (
   projects: ReadonlyArray<OrchestrationProjectShell>,
+  settings: Pick<
+    typeof DEFAULT_SERVER_SETTINGS,
+    "defaultAutoPull" | "projectAutoPullOverrides"
+  > = DEFAULT_SERVER_SETTINGS,
 ) {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const workspaceRoots = new Set<string>();
   for (const project of projects) {
-    if (project.autoPull !== true) continue;
+    if (!resolveProjectAutoPull(settings, project.id, project.autoPull)) continue;
     // A Stave space root is a directory of worktrees, not a repo, and its edit
     // branches have no upstream to pull from.
     if (project.stave != null) {
@@ -832,7 +841,11 @@ export const make = (options?: StartupOptions) =>
     const reactorScope = yield* Scope.make("sequential");
 
     const syncAutoPullProjects = projectionSnapshotQuery.getShellSnapshot().pipe(
-      Effect.flatMap((snapshot) => autoPullProjects(snapshot.projects)),
+      Effect.flatMap((snapshot) =>
+        serverSettings.getSettings.pipe(
+          Effect.flatMap((settings) => autoPullProjects(snapshot.projects, settings)),
+        ),
+      ),
       Effect.catch((cause) =>
         Effect.logWarning("Failed to load projects for automatic pull", { cause }),
       ),
