@@ -920,6 +920,181 @@ class GitSafetyTests(unittest.TestCase):
             runner.wait_merge(self.folder, m)
         runner.remote_feedback.assert_called_once()
 
+    def final_review_fixture(self):
+        for name in ('ConnectAccount.ts', 'ConnectAccount.test.ts'):
+            (self.repo / name).write_text('original account behavior\n')
+        self.git('add', '.')
+        self.git('commit', '-m', 'account baseline')
+        self.base = self.git('rev-parse', 'HEAD')
+        runner, m = self.runner_manifest()
+        for name in ('ConnectAccount.ts', 'ConnectAccount.test.ts'):
+            (self.repo / name).write_text('integrated account behavior\n')
+        self.git('add', '.')
+        m['tree'] = batches.staged_tree(self.repo, self.base, self.target)
+        runner.commit(self.folder, m)
+        m.update(pr=120, phase='published', review_base=self.base, round=3,
+                 build={'summary': 'Retained builder evidence'}, reviews=[{'tree': m['tree']}])
+        runner.args = SimpleNamespace(github_repo='example/fork', ci_timeout=30)
+        runner.remote_feedback = Mock(return_value=({'comments': []}, 'digest'))
+        runner.fetch = Mock(return_value=(self.base, self.target))
+        approved = dict(tree=m['tree'], verdict='approve', findings='No unresolved issues',
+                        ui_evidence_valid=True, ci_retry_safe=False)
+        runner.agent = Mock(return_value=approved)
+        success = {'__typename': 'CheckRun', 'status': 'COMPLETED', 'conclusion': 'SUCCESS'}
+        pr = dict(state='OPEN', headRefOid=m['head'], baseRefName='main', statusCheckRollup=[success],
+                  mergeable='MERGEABLE', reviewDecision='')
+
+        def gh(*args):
+            if args[:2] == ('pr', 'view'):
+                return json.dumps(pr)
+            if args[:2] == ('run', 'list'):
+                return json.dumps([dict(databaseId=1, headSha=m['head'], status='completed', conclusion='success')])
+            self.fail('Unexpected GitHub mutation: ' + repr(args))
+
+        runner.gh = Mock(side_effect=gh)
+        return runner, m, approved
+
+    def test_main_advance_during_final_review_preserves_findings_and_merge_contract(self):
+        runner, original, approved = self.final_review_fixture()
+        self.git('checkout', '-b', 'advanced-main', self.base)
+        self.git('rm', 'ConnectAccount.ts', 'ConnectAccount.test.ts')
+        self.git('commit', '-m', 'remove old account API')
+        advanced = self.git('rev-parse', 'HEAD')
+        self.git('checkout', 'main')
+        findings = ('Main deletes ConnectAccount.ts and its test; resolve both modify/delete conflicts.\n'
+                    'Substantive defect: account selection drops the requested account ID; add a behavioral regression.')
+        for verdict in ('changes', 'blocked', 'approve'):
+            with self.subTest(verdict=verdict):
+                m = json.loads(json.dumps(original))
+                m['remote_review'] = {'head': m['head'], 'feedback_digest': 'old'}
+                result = approved | {'verdict': verdict, 'findings': findings,
+                                     'ui_evidence_valid': verdict == 'approve'}
+                runner.fetch = Mock(return_value=(self.base, self.target))
+
+                def review(repo, folder, name, *args):
+                    runner.fetch.return_value = (advanced, self.target)
+                    batches.write_json(folder / f'{name}.json', result)
+                    return result
+
+                runner.agent = Mock(side_effect=review)
+                runner.wait_merge(self.folder, m)
+                persisted = json.loads((self.folder / 'manifest.json').read_text())
+                self.assertEqual((persisted['phase'], persisted['review_base'], persisted['merge_parent']),
+                                 ('building', advanced, advanced))
+                for key in ('head', 'tree', 'round', 'build', 'reviews'):
+                    self.assertEqual(persisted[key], original[key])
+                self.assertEqual(persisted['expected_head'], original['head'])
+                self.assertIn('merge the pinned new main', persisted['feedback'])
+                self.assertIn(findings, persisted['feedback'])
+                self.assertIn(f'Final review ({verdict}) against {self.base}', persisted['feedback'])
+                self.assertNotIn('remote_review', persisted)
+                self.assertEqual(runner.fetch.call_count, 2)
+                report = self.folder / 'round-3-remote-digest.json'
+                self.assertEqual(json.loads(report.read_text()), result)
+                self.assertEqual(json.loads((self.folder / 'latest-ci.json').read_text())['headRefOid'], original['head'])
+
+        merge = batches.command(['git', 'merge', '--no-commit', '--no-ff', persisted['merge_parent']],
+                                self.repo, allow_failure=True)
+        self.assertNotEqual(merge.returncode, 0)
+        self.assertEqual(set(self.git('diff', '--name-only', '--diff-filter=U').splitlines()),
+                         {'ConnectAccount.ts', 'ConnectAccount.test.ts'})
+        self.git('rm', 'ConnectAccount.ts', 'ConnectAccount.test.ts')
+        m['tree'] = batches.staged_tree(self.repo, persisted['expected_head'], advanced)
+        runner.commit(self.folder, m)
+        self.assertEqual(self.git('show', '-s', '--format=%P', m['head']).split(), [original['head'], advanced])
+
+    def test_unchanged_main_keeps_final_verdict_behavior(self):
+        runner, original, approved = self.final_review_fixture()
+        for verdict, evidence in (('changes', True), ('blocked', False), ('approve', False), ('approve', True)):
+            with self.subTest(verdict=verdict, evidence=evidence):
+                m = json.loads(json.dumps(original))
+                result = approved | {'verdict': verdict, 'findings': 'Specific final review finding',
+                                     'ui_evidence_valid': evidence}
+                runner.agent = Mock(return_value=result)
+                if verdict == 'blocked' or (verdict == 'approve' and not evidence):
+                    with self.assertRaisesRegex(batches.Blocked, result['findings']):
+                        runner.review_remote_feedback(self.folder, m)
+                    self.assertEqual(m, original)
+                else:
+                    self.assertEqual(runner.review_remote_feedback(self.folder, m), verdict == 'approve')
+                    if verdict == 'changes':
+                        self.assertEqual(m['phase'], 'building')
+                        self.assertIsNone(m['merge_parent'])
+                        self.assertEqual(m['feedback'], result['findings'])
+                        self.assertEqual(m['expected_head'], original['head'])
+                    else:
+                        self.assertEqual(m['remote_review'], dict(head=m['head'], review_base=self.base,
+                                                                 feedback_digest='digest', result=result))
+                self.assertEqual(m['review_base'], self.base)
+                self.assertEqual(m['round'], original['round'])
+        runner.gh.assert_not_called()
+
+    def test_unchanged_main_final_approval_merges_exact_head(self):
+        runner, m, approved = self.final_review_fixture()
+        read_gh = runner.gh
+        merged = False
+
+        def gh(*args):
+            nonlocal merged
+            if args[:3] == ('api', '--method', 'PUT'):
+                merged = True
+                return json.dumps({'merged': True})
+            value = json.loads(read_gh(*args))
+            if merged and args[:2] == ('pr', 'view'):
+                value['state'] = 'MERGED'
+            return json.dumps(value)
+
+        runner.gh = Mock(side_effect=gh)
+        runner.fetch.side_effect = [(self.base, self.target), (self.base, self.target), (m['head'], self.target)]
+        runner.cleanup_dependencies = Mock()
+        git = batches.git
+
+        def remote_guard(repo, *args):
+            if args == ('ls-remote', '--heads', 'origin', 'main'):
+                return f'{self.base}\trefs/heads/main'
+            return git(repo, *args)
+
+        with patch.object(batches, 'git', side_effect=remote_guard):
+            runner.wait_merge(self.folder, m)
+        runner.agent.assert_called_once()
+        runner.gh.assert_any_call('api', '--method', 'PUT', 'repos/example/fork/pulls/120/merge',
+                                  '-f', 'merge_method=merge', '-f', f"sha={m['head']}")
+        self.assertEqual(m['remote_review']['result'], approved)
+        self.assertEqual(m['phase'], 'accepted')
+
+    def test_final_review_rejects_rewritten_main_before_verdict_dispatch(self):
+        runner, original, approved = self.final_review_fixture()
+        for verdict in ('changes', 'blocked', 'approve'):
+            with self.subTest(verdict=verdict):
+                m = json.loads(json.dumps(original))
+                result = approved | {'verdict': verdict, 'findings': 'Retained rewrite review finding'}
+
+                def review(repo, folder, name, *args):
+                    runner.fetch.return_value = (self.accepted, self.target)
+                    batches.write_json(folder / f'{name}.json', result)
+                    return result
+
+                runner.fetch.return_value = (self.base, self.target)
+                runner.agent = Mock(side_effect=review)
+                runner.save = Mock()
+                with self.assertRaisesRegex(batches.Blocked, 'Main history rewritten'):
+                    runner.wait_merge(self.folder, m)
+                runner.save.assert_not_called()
+                self.assertEqual(m, original)
+                self.assertEqual(json.loads((self.folder / 'round-3-remote-digest.json').read_text()), result)
+                self.assertEqual(self.git('rev-parse', 'HEAD'), original['head'])
+
+    def test_final_approval_cache_is_bound_to_review_base(self):
+        runner, original, approved = self.final_review_fixture()
+        receipt = dict(head=original['head'], feedback_digest='digest', result=approved)
+        for base in (None, self.accepted, self.base):
+            with self.subTest(receipt_base=base):
+                m = json.loads(json.dumps(original))
+                m['remote_review'] = receipt | ({'review_base': base} if base else {})
+                runner.agent.reset_mock()
+                self.assertTrue(runner.review_remote_feedback(self.folder, m))
+                self.assertEqual(runner.agent.call_count, 0 if base == self.base else 1)
+
     def test_failed_command_preserves_streamed_output(self):
         log = self.folder / 'failed.log'
         with self.assertRaisesRegex(batches.Blocked, 'retained evidence'):
