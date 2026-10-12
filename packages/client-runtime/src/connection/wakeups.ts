@@ -63,7 +63,7 @@ export class ConnectionWakeups extends Context.Service<
   }
 >()("@lecturn/client-runtime/connection/wakeups/ConnectionWakeups") {}
 
-export const make = (service: ConnectionWakeups["Service"]) => ConnectionWakeups.of(service);
+const make = (service: ConnectionWakeups["Service"]) => ConnectionWakeups.of(service);
 
 export const layer = (service: ConnectionWakeups["Service"]) =>
   Layer.succeed(ConnectionWakeups, make(service));

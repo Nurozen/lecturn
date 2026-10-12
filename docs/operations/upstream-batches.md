@@ -8,19 +8,29 @@ mirror tip. The independent `upstream-mirror-sync.yml` updater remains available
 
 ## Start or resume
 
-Use a stable checkout of the controller, authenticated `gh` and `codex` CLIs,
-Stave with repository `lecturn` configured, Python 3, and the repository's Node
-and package-manager tools on PATH. The controller inherits configured Codex
-model selection and authentication. It does not install or change credentials.
-Builder execution uses the explicitly authorized local host access; worktrees
-isolate source and application state, not credentials or execution. Reviewers
-use the `lecturn_review` Codex permission profile: source remains read-only,
-only the separate external report directory is writable, and network access
-allows authenticated evidence retrieval. The installed Codex must support named
-permission profiles. Reviewer shell `TMPDIR` and `TMPPREFIX` use that report
-directory so temporary files and zsh heredocs work without granting global
-temporary-directory writes. Approval prompts are disabled for these unattended
-sessions.
+Use a stable checkout of the controller, authenticated `gh`, `grok` and the
+selected agent CLI, Stave with repository `lecturn` configured, Python 3, and the
+repository's Node and package-manager tools on PATH.
+
+Choose `--agent-cli claude` or `--agent-cli codex`. The flag overrides
+`LECTURN_SYNC_AGENT_CLI`; when neither is set, Claude is used. This selects the
+planner, builders and main review stages. The independent outside reviewer
+always uses Grok. Each CLI inherits its device default model and authentication;
+the controller does not pin models or change credentials. Invalid selections
+stop before repository or state changes; unavailable CLIs fail without fallback.
+For example, add `--agent-cli codex` to the command below, or export
+`LECTURN_SYNC_AGENT_CLI=codex` before invoking the controller or skill launcher.
+Selection applies to the current launch, including a resumed batch; keep the
+same state directory and round counters when switching.
+
+Builders have local host access. Reviewers have read-only source and Git data,
+a separate writable report directory, and network access for evidence retrieval.
+Claude uses its sandbox and tool permissions. Codex requires a CLI supporting
+named permission profiles and `--ignore-rules`; its shell temporary files stay
+inside the report directory. Codex sessions start in an empty temporary directory
+and receive explicit source paths to prevent repository configuration from loading.
+Project hooks and MCP servers are disabled; user model settings still apply.
+Approval prompts are disabled for these unattended sessions.
 
 Bootstrap accepted upstream ancestry explicitly after inspecting the prior real
 integration merge and its acceptance on fork main:

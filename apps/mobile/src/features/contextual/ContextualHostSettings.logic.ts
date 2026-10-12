@@ -27,7 +27,6 @@ export function updateSourceSelection(
     draftsPolicy: "exclude",
   };
 }
-export { captureReason } from "@lecturn/client-runtime/state/contextual";
 
 /** Observations refer to the challenge generation; redemption advances active funding once. */
 export function matchesFundingChallenge(

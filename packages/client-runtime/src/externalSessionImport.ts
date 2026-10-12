@@ -15,7 +15,7 @@ import type {
 import { inferProjectTitleFromPath, normalizeProjectPathForComparison } from "./state/projects.ts";
 
 /** Sessions updated within this window start selected in the multi-select import. */
-export const RECENT_SESSION_SELECTION_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+const RECENT_SESSION_SELECTION_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 
 export const IMPORT_FOLDER_SOURCE_DESCRIPTION =
   "Add a folder you've used with an agent and import its sessions";

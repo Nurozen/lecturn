@@ -16,7 +16,6 @@ export {
   normalizeCompactToolLabel,
   summarizeToolGroup,
   toolGroupAction,
-  workLogEntryIsLocalCodeSearch,
 } from "@lecturn/client-runtime/work-log/presentation";
 import {
   formatDuration,

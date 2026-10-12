@@ -2,7 +2,7 @@
 export const MULTI_ACCOUNT_ENABLED_MARKER_KEY = "lecturn:multi-account-enabled";
 
 /** Freshness window understood by older clients reading the compatibility marker. */
-export const MULTI_ACCOUNT_MARKER_MAX_AGE_MS = 2 * 60 * 60 * 1_000;
+const MULTI_ACCOUNT_MARKER_MAX_AGE_MS = 2 * 60 * 60 * 1_000;
 
 export function isMultiAccountMarkerFresh(value: string | null, now: number): boolean {
   if (value === null || value.trim() === "") return false;
