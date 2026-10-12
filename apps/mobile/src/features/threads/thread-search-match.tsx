@@ -58,7 +58,7 @@ export function ThreadSearchMatchExcerpt(props: {
       <Text
         className={cn(
           props.compact ? "text-sm font-lecturn-medium" : "text-xs font-lecturn-medium",
-          isUser ? "text-adaptive-blue-500-400" : "text-adaptive-emerald-600-400",
+          isUser ? "text-foreground-secondary" : "text-adaptive-emerald-600-400",
         )}
       >
         {isUser ? "You:" : "Agent:"}{" "}
