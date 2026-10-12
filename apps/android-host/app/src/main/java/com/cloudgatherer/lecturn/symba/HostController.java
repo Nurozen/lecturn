@@ -27,6 +27,7 @@ final class HostController {
     String error = "Status has not been checked.";
     String stopFailure;
     boolean busy, monitoring, stopping;
+    private boolean foreground;
     long receivedAt;
     final StartupLease startupLease = new StartupLease();
     private final Runnable poll = this::refresh;
@@ -44,8 +45,17 @@ final class HostController {
     boolean verified() { return fresh() && error == null && !stopping; }
     void monitor(boolean enabled) {
         monitoring = enabled;
+        schedulePoll();
+    }
+    // A live guest may outlast the native service (for example, after an APK replacement).
+    // Observe it while visible without starting it or claiming background service ownership.
+    void foreground(boolean enabled) {
+        foreground = enabled;
+        schedulePoll();
+    }
+    private void schedulePoll() {
         main.removeCallbacks(poll);
-        if (enabled && !busy) main.post(poll);
+        if ((monitoring || foreground) && !busy) main.post(poll);
     }
     void refresh() { if (!busy) request("GET", "/v1/state", null); }
     void start() {
@@ -92,7 +102,7 @@ final class HostController {
     private void nextRequest(boolean failed) {
         if (pendingStop) { pendingStop = false; pendingStart = false; stop(); }
         else if (pendingStart) { pendingStart = false; start(); }
-        else if (monitoring) main.postDelayed(poll, failed ? 10000 : state != null && state.working() ? 3000 : 8000);
+        else if (monitoring || foreground) main.postDelayed(poll, failed ? 10000 : state != null && state.working() ? 3000 : 8000);
     }
     private boolean pendingStop, pendingStart;
     boolean hasPendingStop() { return pendingStop; }

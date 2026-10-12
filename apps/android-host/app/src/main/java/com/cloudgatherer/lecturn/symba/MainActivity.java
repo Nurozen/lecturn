@@ -538,10 +538,11 @@ public final class MainActivity extends Activity implements HostController.Liste
     @Override protected void onResume() {
         super.onResume(); resumed = true; sessionNeeded = true;
         if (floating != null) floating.close();
-        if (web != null) web.onResume(); host.add(this); changed(); host.refresh(); refreshChatWidget();
+        if (web != null) web.onResume(); host.add(this); changed(); host.foreground(true); refreshChatWidget();
     }
     @Override protected void onPause() {
         resumed = false;
+        host.foreground(false);
         if (!unlocked()) clearWidget();
         if (floating == null) {
             pageEpoch++; sessionBusy = false;

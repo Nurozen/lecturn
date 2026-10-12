@@ -66,17 +66,78 @@ public class LifecycleReproductionTest {
     }
     @After public void close() throws Exception { Collections.reverse(mocks); for(AutoCloseable m:mocks)m.close(); }
     HostState state(String runtime) throws Exception {
+        return state(runtime, "working");
+    }
+    HostState state(String runtime, String activity) throws Exception {
         JSONObject f=new JSONObject("""
           {"schemaVersion":1,"runtime":{"status":"ready","message":"Synthetic"},"uiUrl":"http://127.0.0.1:3773",
           "activity":{"state":"working","threadId":null,"title":"Synthetic","detail":"Synthetic","taskUrl":null,"completedSteps":null,"totalSteps":null},
           "policy":{"revision":1,"fullAccess":false,"computerUse":false},"capabilities":{"appData":false,"computerUse":false}}
           """);
+        f.getJSONObject("activity").put("state",activity);
         f.getJSONObject("runtime").put("status",runtime); return HostState.parse(f.toString());
     }
     void complete(Object reply) { replies.add(reply); ioQueue.remove().run(); mainQueue.remove().run(); }
     void poll(long delay) {
         Runnable r=delayed.entrySet().stream().filter(e->e.getValue()==delay).map(Map.Entry::getKey).findFirst().orElseThrow();
         delayed.remove(r); now += delay; r.run();
+    }
+    @Test public void oneShotResumeWithoutServiceExpiresWithoutAnotherRequest() throws Exception {
+        host.refresh(); complete(state("ready"));
+        poll(20000);
+        assertFalse(host.verified()); assertNotNull(host.error);
+        assertTrue(mainQueue.isEmpty()); assertTrue(ioQueue.isEmpty()); assertTrue(delayed.isEmpty());
+        assertEquals(List.of("GET /v1/state"), calls);
+    }
+    @Test public void foregroundObservesExistingGuestBeyondExpiryWithoutStartingServiceOrRuntime() throws Exception {
+        host.foreground(true); mainQueue.remove().run(); complete(state("ready", "idle"));
+        for (int i = 0; i < 3; i++) {
+            poll(8000); complete(state("ready", "idle"));
+            assertTrue(host.verified()); assertFalse(host.monitoring);
+        }
+        assertEquals(Collections.nCopies(4, "GET /v1/state"), calls);
+    }
+    @Test public void browserReturnRetriesFailedRefreshAndRestoresVerificationOnlyAfterReceipt() throws Exception {
+        host.foreground(true); mainQueue.remove().run(); complete(state("ready"));
+        host.foreground(false); poll(20000);
+        assertFalse(host.verified()); assertTrue(ioQueue.isEmpty());
+        host.foreground(true); mainQueue.remove().run();
+        assertFalse(host.verified());
+        complete(new ControlClient.Failure("Synthetic return timeout", false));
+        assertFalse(host.verified());
+        poll(10000); assertFalse(host.verified()); complete(state("ready"));
+        assertTrue(host.verified()); assertFalse(host.monitoring);
+        assertEquals(Collections.nCopies(3, "GET /v1/state"), calls);
+    }
+    @Test public void resumeDuringInFlightFailureStillSchedulesRecovery() throws Exception {
+        host.refresh(); host.foreground(true);
+        assertTrue(mainQueue.isEmpty()); assertEquals(1, ioQueue.size());
+        complete(new ControlClient.Failure("Synthetic in-flight failure", false));
+        poll(10000); complete(state("ready"));
+        assertTrue(host.verified());
+        assertEquals(Collections.nCopies(2, "GET /v1/state"), calls);
+    }
+    @Test public void foregroundAndServiceReleaseOnlyTheirOwnPollingOwnership() throws Exception {
+        host.foreground(true); mainQueue.remove().run(); complete(state("ready"));
+        host.monitor(true); host.foreground(false);
+        assertEquals(1, mainQueue.size()); mainQueue.remove().run(); complete(state("ready"));
+        poll(3000); complete(state("ready"));
+        host.foreground(true); host.monitor(false);
+        assertEquals(1, mainQueue.size()); mainQueue.remove().run(); complete(state("ready"));
+        poll(3000); complete(state("ready"));
+        host.foreground(false);
+        assertFalse(delayed.containsValue(3000L)); assertTrue(mainQueue.isEmpty());
+        poll(20000); assertFalse(host.verified()); assertTrue(ioQueue.isEmpty());
+        assertEquals(Collections.nCopies(5, "GET /v1/state"), calls);
+    }
+    @Test public void foregroundStopAndStaleStoppedReturnNeverRestartRuntime() throws Exception {
+        host.foreground(true); mainQueue.remove().run(); complete(state("ready"));
+        host.stop(); assertFalse(host.verified()); complete(state("stopped"));
+        poll(8000); complete(state("stopped"));
+        host.foreground(false); poll(20000); assertFalse(host.verified());
+        host.foreground(true); mainQueue.remove().run(); complete(state("stopped"));
+        assertTrue(host.verified()); assertEquals("stopped", host.state.runtime);
+        assertEquals(List.of("GET /v1/state", "POST /v1/runtime/stop", "GET /v1/state", "GET /v1/state"), calls);
     }
     @Test public void monitoredErrorRecoversWithoutStartRetry() throws Exception {
         host.start(); host.monitor(true); complete(state("error"));
