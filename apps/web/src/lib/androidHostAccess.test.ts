@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   requireAndroidFullAccess,
+  hasPhoneConnectAccount,
   type AndroidAccessState,
   type AndroidHost,
 } from "./androidHostAccess";
@@ -18,7 +19,10 @@ const host = (): AndroidHost => ({
   requestFullAccess: vi.fn(async () => state(true)),
   openDeviceAccess: vi.fn(async () => state()),
 });
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe("Android Full access guard", () => {
   it("preserves bridge-absent clients and all non-Full provider modes", async () => {
@@ -124,4 +128,21 @@ it("does not open a late review after the access read has timed out", async () =
   complete(state(false));
   await Promise.resolve();
   expect(bridge.requestFullAccess).not.toHaveBeenCalled();
+});
+
+describe("phone Connect capability", () => {
+  it("requires the explicit v2 capability and leaves browser/desktop auth selected otherwise", () => {
+    for (const surface of [
+      {},
+      { desktopBridge: {} },
+      { symbaHost: { protocolVersion: 2 } },
+      { symbaHost: { protocolVersion: 2, connectAccount: false } },
+      { symbaHost: { protocolVersion: 1, connectAccount: true } },
+    ]) {
+      vi.stubGlobal("window", surface);
+      expect(hasPhoneConnectAccount()).toBe(false);
+    }
+    vi.stubGlobal("window", { symbaHost: { protocolVersion: 2, connectAccount: true } });
+    expect(hasPhoneConnectAccount()).toBe(true);
+  });
 });

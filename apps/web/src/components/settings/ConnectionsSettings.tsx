@@ -1,3 +1,5 @@
+import { PhoneConnectAccountSection } from "../cloud/PhoneConnectAccount";
+import { hasPhoneConnectAccount } from "../../lib/androidHostAccess";
 import { Link } from "@tanstack/react-router";
 import { ChevronsLeftRightEllipsisIcon, PlusIcon, QrCodeIcon, TerminalIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
@@ -1882,7 +1884,7 @@ function CloudRemoteEnvironmentRows({
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly savedEnvironments: ReadonlyArray<EnvironmentPresentation>;
 }) {
-  return hasCloudPublicConfig() ? (
+  return hasCloudPublicConfig() || hasPhoneConnectAccount() ? (
     <CloudEnvironmentConnectRows
       primaryEnvironmentId={primaryEnvironmentId}
       savedEnvironments={savedEnvironments}
@@ -3252,6 +3254,7 @@ export function ConnectionsSettings() {
 
   return (
     <SettingsPageContainer>
+      <PhoneConnectAccountSection />
       {primaryEnvironmentId ? (
         <SettingsSection title="Contextual">
           <SettingsRow

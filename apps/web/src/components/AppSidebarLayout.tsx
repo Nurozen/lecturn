@@ -10,6 +10,8 @@ import {
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { isElectron } from "../env";
+import { useIsMobile } from "../hooks/useMediaQuery";
+import { useWorkspaceViewport } from "../hooks/useWorkspaceViewport";
 import { getLocalStorageItem, removeLocalStorageItem } from "../hooks/useLocalStorage";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { cn, isMacPlatform } from "../lib/utils";
@@ -143,6 +145,7 @@ function ProjectProjectionRetention() {
 }
 
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
+  const viewportRef = useWorkspaceViewport(useIsMobile());
   const navigate = useNavigate();
   const legacySidebarEnabled = useLegacySidebarEnabled();
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
@@ -222,7 +225,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   return (
     <PanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
       <SidebarProvider
-        className="h-dvh! min-h-0!"
+        ref={viewportRef}
+        className="h-[var(--workspace-viewport-height,100dvh)]! min-h-0! [&>[data-slot=sidebar-inset]]:max-h-full"
         data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
         defaultOpen
         style={sidebarProviderStyle}

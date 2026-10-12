@@ -1,5 +1,5 @@
 import { useProfileStableAccountId } from "../../cloud/useProfileStableAccountId";
-import { useAuth } from "@clerk/react";
+import { useConnectAccountAuth } from "../../cloud/useConnectAccountAuth";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/unstable/reactivity";
 import { useMemo, useState, type ReactNode } from "react";
@@ -144,7 +144,7 @@ function useChosenConnectAccount(
   surface: AccountPickerSurface,
   options: ConnectAccountPickerOptions = {},
 ): PickedConnectAccount {
-  const { userId: clerkUserId } = useAuth();
+  const { userId: clerkUserId } = useConnectAccountAuth();
   const userId = useProfileStableAccountId(clerkUserId);
   const context = useAtomValue(accountPickerContextAtom);
   const scope = accountPickerScope(options);

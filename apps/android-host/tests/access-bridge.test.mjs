@@ -50,12 +50,14 @@ NodeTest.test("only main frame receives the narrow frozen promise API", () => {
   const h = harness();
   NodeAssert.equal(Object.isFrozen(h.host), true);
   NodeAssert.deepEqual(Object.keys(h.host).sort(), [
+    "connectAccount",
     "getAccessState",
     "openDeviceAccess",
     "protocolVersion",
     "publishChatWidget",
     "requestFullAccess",
   ]);
+  NodeAssert.equal(h.host.connectAccount, true);
   NodeAssert.equal(h.messages.length, 0); // Page initialization cannot request or grant access.
 });
 NodeTest.test("only the matching v2 acknowledgement resolves each pending request", async () => {

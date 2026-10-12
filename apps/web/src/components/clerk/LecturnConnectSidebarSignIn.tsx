@@ -1,3 +1,5 @@
+import { hasPhoneConnectAccount } from "../../lib/androidHostAccess";
+import { PhoneConnectSidebarEntry } from "../cloud/PhoneConnectAccount";
 import { useAuth } from "@clerk/react";
 import { LogInIcon } from "lucide-react";
 
@@ -7,6 +9,7 @@ import { ConnectAccountMenu } from "./ConnectAccountMenu";
 import { useLecturnConnectAuthPrompt } from "./useLecturnConnectAuthPrompt";
 
 export function LecturnConnectSidebarSignIn() {
+  if (hasPhoneConnectAccount()) return <PhoneConnectSidebarEntry />;
   if (!hasCloudPublicConfig()) return null;
 
   return <ConfiguredLecturnConnectSidebarSignIn />;

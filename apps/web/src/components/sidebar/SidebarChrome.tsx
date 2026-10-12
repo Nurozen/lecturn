@@ -1,3 +1,4 @@
+import { PhoneConnectSidebarEntry } from "../cloud/PhoneConnectAccount";
 import { useBackToChat } from "../settings/SettingsNavigation";
 import {
   ArrowLeftIcon,
@@ -228,6 +229,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (
     <SidebarFooter className="p-[var(--sidebar-content-inset)]">
+      <PhoneConnectSidebarEntry />
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
       <SidebarUtilityMenu />

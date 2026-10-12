@@ -4,6 +4,27 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class OriginPolicyTest {
+    @Test public void connectAllowsOnlySecureFetchFromLocalDocument() {
+        var headers = java.util.Map.of("Origin", OriginPolicy.ORIGIN, "Sec-Fetch-Dest", "empty", "Accept", "application/json");
+        assertTrue(OriginPolicy.isConnectRequest("https://relay.example.test/api/environments", false, headers));
+        assertTrue(OriginPolicy.isConnectRequest("https://remote.example.test/api/auth/bootstrap", false,
+                java.util.Map.of("origin", OriginPolicy.ORIGIN, "accept", "application/json")));
+        assertTrue(OriginPolicy.isConnectRequest("https://relay.example.test/v1/environments", false,
+                java.util.Map.of("Origin", OriginPolicy.ORIGIN, "Authorization", "DPoP synthetic")));
+        assertTrue(OriginPolicy.isConnectRequest("https://relay.example.test/v1/environments", false,
+                java.util.Map.of("Origin", OriginPolicy.ORIGIN, "Access-Control-Request-Method", "POST")));
+        assertFalse(OriginPolicy.isConnectRequest("https://relay.example.test/runtime.js", false,
+                java.util.Map.of("Origin", OriginPolicy.ORIGIN, "Accept", "*/*")));
+        assertFalse(OriginPolicy.isConnectRequest("https://relay.example.test/", true, headers));
+        for (String url : new String[]{"http://relay.example.test/api", "https://user@relay.example.test/api", "https://localhost/api", "http://127.0.0.1:18768/v1/state", "file:///data/private"})
+            assertFalse(url, OriginPolicy.isConnectRequest(url, false, headers));
+        for (String destination : new String[]{"script", "iframe", "document", "style", "worker", "image"})
+            assertFalse(destination, OriginPolicy.isConnectRequest("https://relay.example.test/api", false,
+                    java.util.Map.of("Origin", OriginPolicy.ORIGIN, "Sec-Fetch-Dest", destination, "Accept", "application/json")));
+        assertFalse(OriginPolicy.isConnectRequest("https://relay.example.test/api", false, java.util.Map.of()));
+        assertFalse(OriginPolicy.isConnectRequest("https://relay.example.test/api", false,
+                java.util.Map.of("Origin", "https://other.example.test", "Sec-Fetch-Dest", "empty")));
+    }
     @Test public void acceptsOnlyExactLoopbackOrigin() {
         assertTrue(OriginPolicy.isUi("http://127.0.0.1:3773"));
         assertTrue(OriginPolicy.isUi("http://127.0.0.1:3773/projects/a?x=b"));

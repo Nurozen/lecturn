@@ -187,6 +187,7 @@ public final class MainActivity extends Activity implements HostController.Liste
             }
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 if (OriginPolicy.isUi(request.getUrl().toString())) return null;
+                if (OriginPolicy.isConnectRequest(request.getUrl().toString(), request.isForMainFrame(), request.getRequestHeaders())) return null;
                 return new WebResourceResponse("text/plain", "UTF-8", 403, "Blocked origin", Collections.emptyMap(), new ByteArrayInputStream(new byte[0]));
             }
             @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {

@@ -49,6 +49,7 @@
   Object.defineProperty(window, "symbaHost", {
     value: Object.freeze({
       protocolVersion: 2,
+      connectAccount: true,
       getAccessState: () => request("getAccessState"),
       requestFullAccess: (threadId) =>
         typeof threadId === "string" && threadId.trim() && threadId.length <= 256

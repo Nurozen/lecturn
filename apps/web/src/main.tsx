@@ -1,3 +1,4 @@
+import { hasPhoneConnectAccount } from "./lib/androidHostAccess";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { createHashHistory, createBrowserHistory } from "@tanstack/react-router";
@@ -44,8 +45,9 @@ const app = <AppRoot router={router} />;
 // clerk-js runtime. Loading only the selected runtime as a split chunk keeps
 // every Clerk byte out of the startup graph for local-mode users, and keeps
 // the bundled clerk-js out of the browser build entirely.
-const managedAuthShellModule =
-  clerkPublishableKey && hasCloudPublicConfig()
+const managedAuthShellModule = hasPhoneConnectAccount()
+  ? import("./cloud/PhoneManagedAuthShell")
+  : clerkPublishableKey && hasCloudPublicConfig()
     ? isElectron
       ? import("./components/clerk/ElectronManagedAuthShell")
       : import("./components/clerk/BrowserManagedAuthShell")
@@ -69,8 +71,8 @@ export const startup = Promise.all([
     if (!chunkLoadFailed) clearChunkReloadGuard();
     ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <React.StrictMode>
-        {ManagedAuthShell && clerkPublishableKey ? (
-          <ManagedAuthShell publishableKey={clerkPublishableKey}>{app}</ManagedAuthShell>
+        {ManagedAuthShell ? (
+          <ManagedAuthShell publishableKey={clerkPublishableKey ?? ""}>{app}</ManagedAuthShell>
         ) : (
           app
         )}

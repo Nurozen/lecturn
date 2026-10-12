@@ -1663,7 +1663,8 @@ body {
 
 html,
 body {
-  min-height: calc(100svh + env(safe-area-inset-top));
+  /* #root reserves the top safe area inside the viewport, not below it. */
+  min-height: 100svh;
   overscroll-behavior: none;
 }
 

@@ -1,3 +1,5 @@
+import { hasPhoneConnectAccount } from "../../lib/androidHostAccess";
+import { PhoneConnectAccountSection } from "../cloud/PhoneConnectAccount";
 import { useAtomValue } from "@effect/atom-react";
 import { AuthAdministrativeScopes, AuthRelayWriteScope } from "@lecturn/contracts";
 import * as Option from "effect/Option";
@@ -119,7 +121,14 @@ function ConfiguredRelaySettings() {
 export function RelaySettings() {
   return (
     <SettingsPageContainer>
-      {hasCloudPublicConfig() ? (
+      {hasPhoneConnectAccount() ? (
+        <>
+          <PhoneConnectAccountSection />
+          <Button render={<Link to="/settings/connections" />} variant="outline">
+            View connections
+          </Button>
+        </>
+      ) : hasCloudPublicConfig() ? (
         <ConfiguredRelaySettings />
       ) : (
         <SettingsSection title="Relay">
