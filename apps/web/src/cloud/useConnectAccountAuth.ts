@@ -8,11 +8,13 @@ export function usePhoneConnectAccount() {
 }
 
 function usePhoneAccountAuth() {
-  const { status } = usePhoneConnectAccount();
+  const { status, error } = usePhoneConnectAccount();
+  const isSignedIn =
+    status?.configured === true && status.state === "signed-in" && status.account !== null;
   return {
-    isLoaded: status !== null,
-    isSignedIn: status?.state === "signed-in" && status.account !== null,
-    userId: status?.state === "signed-in" ? (status.account?.id ?? null) : null,
+    isLoaded: (status !== null && status.state !== "loading") || error !== null,
+    isSignedIn,
+    userId: isSignedIn ? (status.account?.id ?? null) : null,
   };
 }
 

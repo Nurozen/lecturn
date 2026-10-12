@@ -6,4 +6,12 @@
         <item name="android:windowLightNavigationBar">false</item>
         <item name="android:windowBackground">#122735</item>
     </style>
+    <style name="ConnectAuthTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowBackground">#142331</item>
+        <item name="android:colorAccent">#B798F1</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
 </resources>

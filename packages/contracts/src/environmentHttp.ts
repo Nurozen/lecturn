@@ -54,16 +54,6 @@ import {
   RelayLinkProofRequest,
 } from "./relay.ts";
 
-import {
-  ConnectAccountStatus,
-  ConnectAccountBeginResult,
-  ConnectAccountCompleteRequest,
-  ConnectAccountCancelRequest,
-  ConnectAccountTokenRequest,
-  ConnectAccountTokenResult,
-  ConnectAccountError,
-} from "./connectAccount.ts";
-
 const OptionalBearerHeaders = Schema.Struct({
   authorization: Schema.optionalKey(Schema.String),
   dpop: Schema.optionalKey(Schema.String),
@@ -627,52 +617,9 @@ class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
     }),
   ) {}
 
-class EnvironmentConnectAccountHttpApi extends HttpApiGroup.make("connectAccount")
-  .add(
-    HttpApiEndpoint.get("status", "/api/connect/account/status", {
-      success: ConnectAccountStatus,
-      error: [ConnectAccountError, EnvironmentScopeRequiredError],
-    }),
-  )
-  .add(
-    HttpApiEndpoint.post("begin", "/api/connect/account/begin", {
-      success: ConnectAccountBeginResult,
-      error: [ConnectAccountError, EnvironmentScopeRequiredError],
-    }),
-  )
-  .add(
-    HttpApiEndpoint.post("complete", "/api/connect/account/complete", {
-      payload: ConnectAccountCompleteRequest,
-      success: ConnectAccountStatus,
-      error: [ConnectAccountError, EnvironmentScopeRequiredError],
-    }),
-  )
-  .add(
-    HttpApiEndpoint.post("cancel", "/api/connect/account/cancel", {
-      payload: ConnectAccountCancelRequest,
-      success: ConnectAccountStatus,
-      error: [ConnectAccountError, EnvironmentScopeRequiredError],
-    }),
-  )
-  .add(
-    HttpApiEndpoint.post("token", "/api/connect/account/token", {
-      payload: ConnectAccountTokenRequest,
-      success: ConnectAccountTokenResult,
-      error: [ConnectAccountError, EnvironmentScopeRequiredError],
-    }),
-  )
-  .add(
-    HttpApiEndpoint.post("logout", "/api/connect/account/logout", {
-      success: ConnectAccountStatus,
-      error: [ConnectAccountError, EnvironmentScopeRequiredError],
-    }),
-  )
-  .middleware(EnvironmentAuthenticatedAuth) {}
-
 export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentMetadataHttpApi)
   .add(EnvironmentAuthHttpApi)
   .add(EnvironmentOrchestrationHttpApi)
   .add(EnvironmentPullRequestsHttpApi)
-  .add(EnvironmentConnectHttpApi)
-  .add(EnvironmentConnectAccountHttpApi) {}
+  .add(EnvironmentConnectHttpApi) {}

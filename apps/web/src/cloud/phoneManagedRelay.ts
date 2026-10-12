@@ -1,11 +1,11 @@
 import { ManagedRelay } from "@lecturn/client-runtime/relay";
-import { RelayAccessTokenType, RelayWebClientId } from "@lecturn/contracts/relay";
+import { RelayWebClientId } from "@lecturn/contracts/relay";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
 import { phoneConnectAccount } from "./phoneConnectAccount";
 
-/** Resolve server configuration at request time: the local session may pair
+/** Resolve native configuration at request time: the native session may initialize
  * after the connection runtime has started. Keep the existing DPoP client,
  * discovery, token exchange, and remote bootstrap protocols intact. */
 export const phoneManagedRelayLayer = Layer.effect(
@@ -21,7 +21,6 @@ export const phoneManagedRelayLayer = Layer.effect(
           current = yield* ManagedRelay.make({
             relayUrl,
             clientId: RelayWebClientId,
-            subjectTokenType: RelayAccessTokenType,
           }).pipe(Effect.provide(context));
         }
         return current;

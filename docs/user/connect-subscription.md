@@ -32,6 +32,10 @@ If your web or desktop client supports multiple signed-in Connect accounts, the 
 
 Changing this picker does not move environments or transfer a subscription. When you open billing in your browser, check that the same account is selected there. Signing out from billing signs out the selected account; other signed-in accounts stay connected.
 
+## Android phone host
+
+Open **Settings → Connections → Lecturn Connect** to sign in on this phone. Sign-in opens a native screen; close it to cancel and return to your task. If verification fails, refresh the status or reset the phone’s sign-in and try again. Signing in discovers your environments without publishing the phone or changing your plan. If Lecturn asks for an app update, install a phone build that supports native Connect sign-in.
+
 ## iPhone and iPad
 
 Open **Settings** to check Connect access, managed environment usage and any access end date. Refresh the status after an account change. The iOS app is a free companion: it uses your existing account access and does not sell subscriptions or provide payment links.
