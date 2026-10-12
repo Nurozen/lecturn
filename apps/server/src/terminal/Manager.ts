@@ -9,6 +9,7 @@ import { StaveRuntimeFence, noop as noopRuntimeFence } from "../stave/StaveRunti
  */
 import {
   DEFAULT_TERMINAL_ID,
+  PHONE_AUTH_TERMINAL_THREAD_ID,
   TerminalCwdError,
   TerminalCwdNotDirectoryError,
   TerminalCwdNotFoundError,
@@ -1673,6 +1674,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     terminalId: string,
     history: BoundedTerminalHistory,
   ) {
+    if (threadId === PHONE_AUTH_TERMINAL_THREAD_ID) return;
     yield* persistWorker.enqueue(toSessionKey(threadId, terminalId), {
       history,
       immediate: false,
@@ -1691,6 +1693,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     terminalId: string,
     history: BoundedTerminalHistory,
   ) {
+    if (threadId === PHONE_AUTH_TERMINAL_THREAD_ID) return;
     yield* persistWorker.enqueue(toSessionKey(threadId, terminalId), {
       history,
       immediate: true,
@@ -1726,6 +1729,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     threadId: string,
     terminalId: string,
   ) {
+    if (threadId === PHONE_AUTH_TERMINAL_THREAD_ID) {
+      return new BoundedTerminalHistory(historyLineLimit, "", historyByteLimit);
+    }
     const nextPath = historyPath(threadId, terminalId);
     if (
       yield* fileSystem

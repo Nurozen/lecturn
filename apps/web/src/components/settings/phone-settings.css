@@ -1,0 +1,25 @@
+@media (max-width: 767px) {
+  .phone-settings-viewport [data-settings-page-scroll] {
+    scrollbar-gutter: auto;
+    scroll-padding-block: 1rem;
+    padding-bottom: env(safe-area-inset-bottom);
+    overflow-wrap: anywhere;
+  }
+
+  .phone-settings-viewport [data-slot="settings-row"] > div {
+    min-width: 0;
+  }
+
+  .phone-settings-viewport [data-slot="settings-row"] button {
+    max-width: 100%;
+  }
+
+  .phone-setup-viewport {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .phone-setup-viewport main {
+    overscroll-behavior-y: contain;
+    scroll-padding-block: 1rem;
+  }
+}

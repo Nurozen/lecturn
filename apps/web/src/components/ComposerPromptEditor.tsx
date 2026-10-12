@@ -87,6 +87,7 @@ import { getTimelinePageScrollKey } from "./chat/pageScrollController";
 import { formatProviderSkillDisplayName } from "@lecturn/client-runtime/providerSkills";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { registerComposerInlineTokenPaste } from "./composerInlineTokenPaste";
+import { registerComposerAndroidInput } from "./composerAndroidInput";
 import { didComposerSelectionChangeVisibly } from "./composerSelection";
 import {
   $consumeComposerCitationCommentRequest,
@@ -1702,6 +1703,8 @@ function ComposerPromptEditorInner({
   useEffect(() => {
     editor.setEditable(!disabled);
   }, [disabled, editor]);
+
+  useEffect(() => registerComposerAndroidInput(editor), [editor]);
 
   useEffect(() => {
     const openCitationNodeKey = openCitationComment?.nodeKey;

@@ -62,3 +62,5 @@ export * from "./extensionsHelper.ts";
 export * from "./extensions.ts";
 
 export * from "./extensionsEvaluator.ts";
+
+export * from "./connectAccount.ts";

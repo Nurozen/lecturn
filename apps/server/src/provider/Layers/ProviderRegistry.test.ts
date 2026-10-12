@@ -2696,6 +2696,94 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
     // ── checkClaudeProviderStatus tests ──────────────────────────
 
     describe("checkClaudeProviderStatus", () => {
+      for (const { name, stdout, code, authStatus, providerStatus } of [
+        {
+          name: "logged out",
+          stdout: '{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}',
+          code: 1,
+          authStatus: "unauthenticated",
+          providerStatus: "error",
+        },
+        {
+          name: "unknown with malformed output",
+          stdout: "not json",
+          code: 1,
+          authStatus: "unknown",
+          providerStatus: "warning",
+        },
+        {
+          name: "unknown with no loggedIn field",
+          stdout: '{"apiProvider":"firstParty"}',
+          code: 0,
+          authStatus: "unknown",
+          providerStatus: "warning",
+        },
+        {
+          name: "logged in",
+          stdout: '{"loggedIn":true,"authMethod":"claude.ai"}',
+          code: 0,
+          authStatus: "authenticated",
+          providerStatus: "ready",
+        },
+      ]) {
+        it.effect(`uses CLI auth when ${name} before optional SDK capabilities`, () =>
+          Effect.gen(function* () {
+            const status = yield* checkClaudeProviderStatus(
+              defaultClaudeSettings,
+              claudeCapabilities({
+                apiProvider: "firstParty",
+                models: [
+                  {
+                    value: "future",
+                    resolvedModel: "claude-test-next[1m]",
+                    displayName: "Future model",
+                    description: "Discovered without credentials",
+                    supportsEffort: true,
+                    supportedEffortLevels: ["low", "high"],
+                  },
+                ],
+                slashCommands: [{ name: "review", description: "Review changes" }],
+              }),
+            );
+            assert.strictEqual(status.installed, true);
+            assert.strictEqual(status.auth.status, authStatus);
+            assert.strictEqual(status.status, providerStatus);
+            const model = status.models.find((model) => model.slug === "claude-test-next[1m]");
+            if (authStatus !== "unauthenticated") {
+              assert.ok(model);
+              assert.ok(
+                model.capabilities?.optionDescriptors?.some((option) => option.id === "effort"),
+              );
+              assert.deepStrictEqual(status.slashCommands, [
+                COMPACT_SLASH_COMMAND,
+                { name: "review", description: "Review changes" },
+              ]);
+            } else {
+              assert.strictEqual(model, undefined);
+              assert.deepStrictEqual(status.slashCommands, [COMPACT_SLASH_COMMAND]);
+            }
+            if (authStatus === "unauthenticated") {
+              assert.strictEqual(
+                status.message,
+                "Claude Code is not signed in. Run `claude auth login` and try again.",
+              );
+            } else if (authStatus === "unknown") {
+              assert.strictEqual(status.message, "Could not verify Claude authentication status.");
+            }
+          }).pipe(
+            Effect.provide(
+              mockSpawnerLayer((args) => {
+                const joined = args.join(" ");
+                if (joined === "--version")
+                  return { stdout: "2.9.0 (Claude Code)\n", stderr: "", code: 0 };
+                if (joined === "auth status --json") return { stdout, stderr: "", code };
+                throw new Error(`Unexpected args: ${joined}`);
+              }),
+            ),
+          ),
+        );
+      }
+
       it.effect("lists future runtime models and their options without a manifest entry", () =>
         Effect.gen(function* () {
           let probedVersion: string | undefined;
@@ -2744,6 +2832,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             mockSpawnerLayer((args) => {
               if (args.join(" ") === "--version")
                 return { stdout: "2.9.0 (Claude Code)\n", stderr: "", code: 0 };
+              if (args.join(" ") === "auth status --json")
+                return { stdout: '{"loggedIn":true}\n', stderr: "", code: 0 };
               throw new Error(`Unexpected args: ${args.join(" ")}`);
             }),
           ),
@@ -2764,7 +2854,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             mockSpawnerLayer((args) => {
               const joined = args.join(" ");
               if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
-              if (joined === "auth status")
+              if (joined === "auth status --json")
                 return {
                   stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
                   stderr: "",
@@ -2794,6 +2884,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             mockSpawnerLayer((args) => {
               const joined = args.join(" ");
               if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+              if (joined === "auth status --json")
+                return { stdout: '{"loggedIn":true}\n', stderr: "", code: 0 };
               throw new Error(`Unexpected args: ${joined}`);
             }),
           ),
@@ -2815,7 +2907,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             mockSpawnerLayer((args) => {
               const joined = args.join(" ");
               if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
-              if (joined === "auth status")
+              if (joined === "auth status --json")
                 return {
                   stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
                   stderr: "",
@@ -2843,6 +2935,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             mockSpawnerLayer((args) => {
               const joined = args.join(" ");
               if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+              if (joined === "auth status --json")
+                return { stdout: '{"loggedIn":true}\n', stderr: "", code: 0 };
               throw new Error(`Unexpected args: ${joined}`);
             }),
           ),
@@ -2865,6 +2959,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             mockSpawnerLayer((args) => {
               const joined = args.join(" ");
               if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+              if (joined === "auth status --json")
+                return { stdout: '{"loggedIn":true}\n', stderr: "", code: 0 };
               throw new Error(`Unexpected args: ${joined}`);
             }),
           ),
@@ -2884,7 +2980,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             mockSpawnerLayer((args) => {
               const joined = args.join(" ");
               if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
-              if (joined === "auth status")
+              if (joined === "auth status --json")
                 return {
                   stdout:
                     '{"loggedIn":true,"authMethod":"claude.ai","account":{"email":"claude@example.com"}}\n',
@@ -2902,7 +2998,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         const recorded = recordingMockSpawnerLayer((args) => {
           const joined = args.join(" ");
           if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
-          if (joined === "auth status")
+          if (joined === "auth status --json")
             return {
               stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
               stderr: "",
@@ -2923,7 +3019,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           // The home is resolved through the host Path before it reaches the env.
           assert.deepStrictEqual(
             recorded.commands.map((command) => command.env?.CLAUDE_CONFIG_DIR),
-            [(yield* Path.Path).resolve(claudeConfigDir)],
+            [
+              (yield* Path.Path).resolve(claudeConfigDir),
+              (yield* Path.Path).resolve(claudeConfigDir),
+            ],
           );
         }).pipe(Effect.provide(recorded.layer));
       });
@@ -2956,7 +3055,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             mockSpawnerLayer((args) => {
               const joined = args.join(" ");
               if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
-              if (joined === "auth status")
+              if (joined === "auth status --json")
                 return {
                   stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
                   stderr: "",
@@ -3000,7 +3099,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             mockSpawnerLayer((args) => {
               const joined = args.join(" ");
               if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
-              if (joined === "auth status")
+              if (joined === "auth status --json")
                 return {
                   stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
                   stderr: "",
@@ -3027,7 +3126,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             mockSpawnerLayer((args) => {
               const joined = args.join(" ");
               if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
-              if (joined === "auth status")
+              if (joined === "auth status --json")
                 return {
                   stdout: '{"loggedIn":true,"authMethod":"api-key"}\n',
                   stderr: "",
@@ -3082,12 +3181,15 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
       // An empty initialization result looks the same whether the CLI is logged
       // out, timed out, or crashed, so the auth verdict comes from asking the
       // CLI directly rather than from the absence of capabilities.
-      it.effect("reports unauthenticated when the CLI says it is not signed in", () =>
+      it.effect("reports signed out without waiting for a stalled SDK capability probe", () =>
         Effect.gen(function* () {
-          const status = yield* checkClaudeProviderStatus(
-            defaultClaudeSettings,
-            noClaudeCapabilities,
+          let capabilitiesProbed = false;
+          const status = yield* checkClaudeProviderStatus(defaultClaudeSettings, () =>
+            Effect.sync(() => {
+              capabilitiesProbed = true;
+            }).pipe(Effect.andThen(Effect.never)),
           );
+          assert.strictEqual(capabilitiesProbed, false);
           assert.strictEqual(status.installed, true);
           assert.strictEqual(status.auth.status, "unauthenticated");
           assert.strictEqual(status.status, "error");
@@ -3122,10 +3224,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           assert.strictEqual(status.status, "warning");
           assert.strictEqual(status.installed, true);
           assert.strictEqual(status.auth.status, "unknown");
-          assert.strictEqual(
-            status.message,
-            "Could not verify Claude authentication status from initialization result.",
-          );
+          assert.strictEqual(status.message, "Could not verify Claude authentication status.");
         }).pipe(
           Effect.provide(
             mockSpawnerLayer((args) => {

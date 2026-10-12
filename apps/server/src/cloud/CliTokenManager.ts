@@ -17,6 +17,7 @@ import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Terminal from "effect/Terminal";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
@@ -249,6 +250,7 @@ const exchangeToken = Effect.fn("cloud.cli_token.exchange")(function* (
   const response = yield* HttpClientRequest.post(metadata.tokenEndpoint).pipe(
     HttpClientRequest.bodyUrlParams(params),
     httpClient.execute,
+    Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
     Effect.flatMap(HttpClientResponse.schemaBodyJson(OAuthTokenResponse)),
   );
   const now = yield* Clock.currentTimeMillis;
@@ -290,38 +292,55 @@ export const outOfBandOAuthLogin = Effect.fn("cloud.cli_token.out_of_band_oauth_
   E,
   R,
 >(promptForCode: (input: OutOfBandOAuthPromptInput) => Effect.Effect<string, E, R>) {
-  const metadata = yield* cloudCliOAuthConfig;
-  const hostedAppUrl = yield* hostedAppUrlConfig;
-  const { verifier, challenge, state } = yield* makePkceRequest;
-
-  const authorizationCode = yield* promptForCode({
-    authorizeUrl: buildConnectAuthorizeRequestUrl({ hostedAppUrl, state, challenge }),
-    validate: (value) => {
-      const checked = checkConnectAuthCode(value, state);
-      return typeof checked === "string" ? Effect.fail(checked) : Effect.succeed(value);
-    },
-  }).pipe(
-    // Clerk authorization codes expire on this horizon anyway; matching the
-    // loopback flow's timeout turns an abandoned prompt into a clear error.
+  const request = yield* beginOutOfBandOAuthLogin;
+  const authorizationCode = yield* promptForCode(request).pipe(
     Effect.timeout(CLOUD_CLI_OAUTH_CALLBACK_TIMEOUT),
     Effect.catchTag("TimeoutError", (cause) =>
       Effect.fail(new CloudCliAuthorizationTimeoutError({ cause })),
     ),
   );
-  // promptForCode is caller-supplied, so re-check the returned value rather
-  // than trusting that the prompt ran validate.
-  const authCode = checkConnectAuthCode(authorizationCode, state);
-  if (typeof authCode === "string") {
-    return yield* new CloudCliAuthorizationError({ cause: authCode });
-  }
+  return yield* request.complete(authorizationCode);
+});
 
-  return yield* exchangeToken(metadata, {
-    grant_type: "authorization_code",
-    code: authCode.code,
-    redirect_uri: connectCallbackUrl(hostedAppUrl),
+/** The same hosted PKCE protocol, split for an authenticated local UI. */
+export const beginOutOfBandOAuthLogin = Effect.gen(function* () {
+  const metadata = yield* cloudCliOAuthConfig;
+  const hostedAppUrl = yield* hostedAppUrlConfig;
+  const { verifier, challenge, state } = yield* makePkceRequest;
+  return {
+    authorizeUrl: buildConnectAuthorizeRequestUrl({ hostedAppUrl, state, challenge }),
+    validate: (value: string) => {
+      const checked = checkConnectAuthCode(value, state);
+      return typeof checked === "string" ? Effect.fail(checked) : Effect.succeed(value);
+    },
+    complete: Effect.fn("cloud.cli_token.complete_out_of_band")(function* (value: string) {
+      const authCode = checkConnectAuthCode(value, state);
+      if (typeof authCode === "string") {
+        return yield* new CloudCliAuthorizationError({ cause: authCode });
+      }
+      return yield* exchangeToken(metadata, {
+        grant_type: "authorization_code",
+        code: authCode.code,
+        redirect_uri: connectCallbackUrl(hostedAppUrl),
+        client_id: metadata.clientId,
+        code_verifier: verifier,
+      });
+    }),
+  };
+});
+
+export const refreshOAuthToken = Effect.fn("cloud.cli_token.refresh_oauth")(function* (
+  token: PersistedToken,
+) {
+  const metadata = yield* cloudCliOAuthConfig;
+  const { token: refreshed } = yield* exchangeToken(metadata, {
+    grant_type: "refresh_token",
+    refresh_token: token.refreshToken,
     client_id: metadata.clientId,
-    code_verifier: verifier,
   });
+  return refreshed.identity === undefined && token.identity !== undefined
+    ? { ...refreshed, identity: token.identity }
+    : refreshed;
 });
 
 export const make = Effect.gen(function* () {
@@ -351,18 +370,6 @@ export const make = Effect.gen(function* () {
     const encoded = yield* secrets.get(CLOUD_CLI_OAUTH_TOKEN_SECRET);
     if (Option.isNone(encoded)) return Option.none<PersistedToken>();
     return Option.some(yield* decodePersistedToken(bytesToString(encoded.value)));
-  });
-
-  const refresh = Effect.fn("cloud.cli_token.refresh")(function* (token: PersistedToken) {
-    const metadata = yield* cloudCliOAuthConfig;
-    const { token: refreshed } = yield* exchangeToken(metadata, {
-      grant_type: "refresh_token",
-      refresh_token: token.refreshToken,
-      client_id: metadata.clientId,
-    });
-    return refreshed.identity === undefined && token.identity !== undefined
-      ? { ...refreshed, identity: token.identity }
-      : refreshed;
   });
 
   const login = Effect.fn("cloud.cli_token.login")(function* () {
@@ -441,7 +448,7 @@ export const make = Effect.gen(function* () {
     if (token.value.expiresAtEpochMs - CLOUD_CLI_OAUTH_REFRESH_EARLY_MS > now) {
       return token;
     }
-    return Option.some(yield* refresh(token.value).pipe(Effect.flatMap(persist)));
+    return Option.some(yield* refreshOAuthToken(token.value).pipe(Effect.flatMap(persist)));
   });
 
   const getExisting = semaphore.withPermits(1)(

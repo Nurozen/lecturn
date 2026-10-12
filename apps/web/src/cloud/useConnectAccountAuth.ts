@@ -1,0 +1,21 @@
+import { useAuth } from "@clerk/react";
+import { useSyncExternalStore } from "react";
+import { hasPhoneConnectAccount } from "../lib/androidHostAccess";
+import { phoneConnectAccount } from "./phoneConnectAccount";
+
+export function usePhoneConnectAccount() {
+  return useSyncExternalStore(phoneConnectAccount.subscribe, phoneConnectAccount.getSnapshot);
+}
+
+function usePhoneAccountAuth() {
+  const { status } = usePhoneConnectAccount();
+  return {
+    isLoaded: status !== null,
+    isSignedIn: status?.state === "signed-in" && status.account !== null,
+    userId: status?.state === "signed-in" ? (status.account?.id ?? null) : null,
+  };
+}
+
+// Host capability is fixed before app startup. Each platform invokes only its
+// own provider hook; phone account consumers never invoke Clerk hooks.
+export const useConnectAccountAuth = hasPhoneConnectAccount() ? usePhoneAccountAuth : useAuth;

@@ -149,6 +149,30 @@ describe("resolveOnboardingTargetEnvironment", () => {
     ).toBeNull();
   });
 
+  it("retains the local agent setup target through background disconnect and reconnect", () => {
+    for (const phase of ["connected", "disconnected", "connecting", "connected"]) {
+      const primary = { ...primaryEnvironment, connection: { phase } };
+      expect(
+        resolveOnboardingTargetEnvironment({
+          mode: "local",
+          environments: [primary, olderRelay],
+          primaryEnvironment: primary,
+          pairedEnvironmentId: null,
+          retainLocalTarget: true,
+        }),
+      ).toBe(primary);
+    }
+    expect(
+      resolveOnboardingTargetEnvironment({
+        mode: "local",
+        environments: [olderRelay],
+        primaryEnvironment: null,
+        pairedEnvironmentId: null,
+        retainLocalTarget: true,
+      }),
+    ).toBeNull();
+  });
+
   it("uses the newest connected remote when no exact machine was selected", () => {
     expect(
       resolveOnboardingTargetEnvironment({

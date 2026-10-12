@@ -171,6 +171,25 @@ export function assertProductionMobilePublicConfig(env: Environment): void {
   assertRequiredConnectConfig(env, "Production mobile build");
 }
 
+/** The phone host uses hosted OAuth, so its packaged client needs the CLI configuration too. */
+export function assertAndroidHostPublicConfig(env: Environment): void {
+  if (env.LECTURN_ANDROID_HOST_BUILD !== "1") return;
+  assertRequiredConnectConfig(env, "Android host build");
+  if (!resolvePublicConfig(env).clerkCliOAuthClientId) {
+    throw new Error("Android host build requires LECTURN_CLERK_CLI_OAUTH_CLIENT_ID.");
+  }
+  try {
+    const url = new URL(
+      env.LECTURN_HOSTED_APP_URL?.trim() || env.VITE_HOSTED_APP_URL?.trim() || "",
+    );
+    if (url.protocol === "https:" && !url.username && !url.password && !url.search && !url.hash)
+      return;
+  } catch {
+    /* Report the setting name without its value. */
+  }
+  throw new Error("Android host build requires a valid HTTPS LECTURN_HOSTED_APP_URL.");
+}
+
 function assertRequiredConnectConfig(env: Environment, buildName: string): void {
   const config = resolvePublicConfig(env);
   const missing = [

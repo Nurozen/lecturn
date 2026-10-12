@@ -1,3 +1,5 @@
+import { hasPhoneConnectAccount } from "../lib/androidHostAccess";
+import { phoneConnectAccount } from "./phoneConnectAccount";
 import { relayClerkTokenOptions } from "@lecturn/shared/relayAuth";
 import { normalizeSecureRelayUrl } from "@lecturn/shared/relayUrl";
 import * as Schema from "effect/Schema";
@@ -43,9 +45,11 @@ export function resolveCloudPublicConfig(): CloudPublicConfig {
       import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined,
     ),
     clerkJwtTemplate: trimNonEmpty(import.meta.env.VITE_CLERK_JWT_TEMPLATE as string | undefined),
-    relayUrl: normalizeSecureRelayUrl(
-      (import.meta.env.VITE_LECTURN_RELAY_URL as string | undefined) ?? "",
-    ),
+    relayUrl: hasPhoneConnectAccount()
+      ? (phoneConnectAccount.getSnapshot().status?.relayUrl ?? null)
+      : normalizeSecureRelayUrl(
+          (import.meta.env.VITE_LECTURN_RELAY_URL as string | undefined) ?? "",
+        ),
     relayTracing: {
       tracesUrl: normalizeSecureUrl(
         (import.meta.env.VITE_RELAY_OTLP_TRACES_URL as string | undefined) ?? "",
@@ -70,6 +74,8 @@ export function resolveRelayTracingConfig() {
 }
 
 export function hasCloudPublicConfig(): boolean {
+  // This gate mounts browser Clerk surfaces. Phone Connect has its own provider.
+  if (hasPhoneConnectAccount()) return false;
   const config = resolveCloudPublicConfig();
   return Boolean(config.clerkPublishableKey && config.clerkJwtTemplate && config.relayUrl);
 }

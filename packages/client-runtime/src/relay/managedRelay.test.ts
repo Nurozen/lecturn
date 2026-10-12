@@ -1,5 +1,7 @@
 import { EnvironmentId } from "@lecturn/contracts";
 import {
+  RelayAccessTokenType,
+  RelayJwtSubjectTokenType,
   RelayEnvironmentConnectScope,
   RelayEnvironmentStatusScope,
 } from "@lecturn/contracts/relay";
@@ -23,6 +25,7 @@ function managedRelayTestLayer(
   fetchFn: typeof globalThis.fetch,
   relayUrl = "https://relay.example.test",
   accessTokenStore?: ManagedRelay.ManagedRelayAccessTokenStore,
+  subjectTokenType?: ManagedRelay.ManagedRelayClientLayerOptions["subjectTokenType"],
 ) {
   const httpClientLayer = remoteHttpClientLayer(fetchFn);
   const signerLayer = Layer.succeed(
@@ -36,6 +39,7 @@ function managedRelayTestLayer(
   return ManagedRelay.layer({
     relayUrl,
     clientId: "lecturn-mobile",
+    ...(subjectTokenType ? { subjectTokenType } : {}),
     ...(accessTokenStore ? { accessTokenStore } : {}),
   }).pipe(Layer.provide(signerLayer), Layer.provide(httpClientLayer));
 }
@@ -47,6 +51,78 @@ function clerkToken(subject: string, nonce: string): string {
 }
 
 describe("ManagedRelayClient", () => {
+  it.effect.each([
+    {
+      subjectTokenType: undefined,
+      token: clerkToken("user-1", "session-1"),
+      wireType: RelayJwtSubjectTokenType,
+    },
+    {
+      subjectTokenType: RelayAccessTokenType,
+      token: "opaque-oauth-access-token",
+      wireType: RelayAccessTokenType,
+    },
+  ])(
+    "exchanges $wireType credentials and uses the DPoP response",
+    ({ subjectTokenType, token, wireType }) => {
+      const requests: Array<{ url: string; headers: Headers; body: string }> = [];
+      const fetchFn = (async (input, init) => {
+        const url = String(input);
+        requests.push({
+          url,
+          headers: new Headers(init?.headers),
+          body: await new Response(init?.body).text(),
+        });
+        return Promise.resolve(
+          Response.json(
+            url.endsWith("/v1/client/dpop-token")
+              ? {
+                  access_token: "relay-token",
+                  issued_token_type: RelayAccessTokenType,
+                  token_type: "DPoP",
+                  expires_in: 1_800,
+                  scope: RelayEnvironmentStatusScope,
+                }
+              : {
+                  environmentId: "env-1",
+                  status: "offline",
+                  endpoint: {
+                    httpBaseUrl: "https://desktop.example.test/",
+                    wsBaseUrl: "wss://desktop.example.test/ws",
+                    providerKind: "cloudflare_tunnel",
+                  },
+                  checkedAt: "2026-10-11T00:00:00.000Z",
+                },
+          ),
+        );
+      }) satisfies typeof globalThis.fetch;
+
+      return Effect.gen(function* () {
+        const client = yield* ManagedRelay.ManagedRelayClient;
+        yield* client.getEnvironmentStatus({
+          clerkToken: token,
+          scopes: [RelayEnvironmentStatusScope],
+          environmentId: EnvironmentId.make("env-1"),
+        });
+        expect(requests).toHaveLength(2);
+        expect(Object.fromEntries(new URLSearchParams(requests[0]!.body))).toEqual({
+          grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+          subject_token: token,
+          subject_token_type: wireType,
+          requested_token_type: RelayAccessTokenType,
+          resource: "https://relay.example.test",
+          scope: RelayEnvironmentStatusScope,
+          client_id: "lecturn-mobile",
+        });
+        expect(requests[0]!.headers.get("dpop")).toBe(`proof:${requests[0]!.url}`);
+        expect(requests[1]!.headers.get("authorization")).toBe("DPoP relay-token");
+        expect(requests[1]!.headers.get("dpop")).toBe(`proof:${requests[1]!.url}`);
+      }).pipe(
+        Effect.provide(managedRelayTestLayer(fetchFn, undefined, undefined, subjectTokenType)),
+      );
+    },
+  );
+
   it.effect("owns tracing at service and implementation boundaries", () => {
     const spanNames: Array<string> = [];
     const tracer = Tracer.make({

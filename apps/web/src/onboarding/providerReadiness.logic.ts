@@ -76,6 +76,7 @@ export function resolveOnboardingProviderLoginCommand(
   provider: ServerProvider,
   settings: ServerSettings,
   platform: ExecutionEnvironmentPlatformOs,
+  phoneLocalAuth = false,
 ): string {
   const instance = settings.providerInstances[provider.instanceId];
 
@@ -92,7 +93,7 @@ export function resolveOnboardingProviderLoginCommand(
       instance ? (instance.config ?? {}) : settings.providers.codex,
     );
     const binaryPath = Option.isSome(config) ? config.value.binaryPath : "codex";
-    return `${quoteProviderBinary(binaryPath, "codex", platform)} login`;
+    return `${quoteProviderBinary(binaryPath, "codex", platform)} login${phoneLocalAuth ? " --device-auth" : ""}`;
   }
 
   return provider.driver;

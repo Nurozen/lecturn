@@ -589,11 +589,15 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
-  const capabilities = resolveCapabilities
-    ? yield* resolveCapabilities(claudeSettings, parsedVersion ?? undefined).pipe(
-        Effect.orElseSucceed(() => undefined),
-      )
-    : undefined;
+  // Resolve sign-in before optional SDK initialization, which can stall on a
+  // logged-out CLI and consume the entire discovery budget.
+  const loggedIn = yield* probeClaudeLoggedIn(claudeSettings, resolvedEnvironment);
+  const capabilities =
+    resolveCapabilities && loggedIn !== false
+      ? yield* resolveCapabilities(claudeSettings, parsedVersion ?? undefined).pipe(
+          Effect.orElseSucceed(() => undefined),
+        )
+      : undefined;
   const discoveredCatalog = mergeClaudeRuntimeModelCatalog(
     modelCatalog,
     capabilities?.models?.length ? capabilities.models : lastRuntimeModels?.(),
@@ -608,32 +612,27 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   const slashCommands = [COMPACT_SLASH_COMMAND, ...(capabilities?.slashCommands ?? [])];
   const dedupedSlashCommands = dedupeSlashCommands(slashCommands);
 
-  if (!capabilities) {
-    // An empty capabilities probe looks identical whether the CLI is logged
-    // out, timed out, or crashed. Ask the CLI directly so a signed-out user
-    // gets an actionable re-auth message instead of a generic "unavailable",
-    // and so `auth.status` can finally report `unauthenticated`. This spawn
-    // only happens on the path where the probe already produced nothing, so
-    // the healthy case pays nothing for it.
-    const loggedIn = yield* probeClaudeLoggedIn(claudeSettings, resolvedEnvironment);
-    if (loggedIn === false) {
-      return buildServerProvider({
-        presentation: CLAUDE_PRESENTATION,
-        enabled: claudeSettings.enabled,
-        checkedAt,
-        models,
-        slashCommands: dedupedSlashCommands,
-        skills,
-        probe: {
-          installed: true,
-          version: parsedVersion,
-          status: "error",
-          auth: { status: "unauthenticated" },
-          message: "Claude Code is not signed in. Run `claude auth login` and try again.",
-        },
-      });
-    }
+  // SDK initialization can return capabilities without credentials. Only the
+  // CLI's explicit loggedIn verdict establishes authentication.
+  if (loggedIn === false) {
+    return buildServerProvider({
+      presentation: CLAUDE_PRESENTATION,
+      enabled: claudeSettings.enabled,
+      checkedAt,
+      models,
+      slashCommands: dedupedSlashCommands,
+      skills,
+      probe: {
+        installed: true,
+        version: parsedVersion,
+        status: "error",
+        auth: { status: "unauthenticated" },
+        message: "Claude Code is not signed in. Run `claude auth login` and try again.",
+      },
+    });
+  }
 
+  if (loggedIn === undefined || !capabilities) {
     return buildServerProvider({
       presentation: CLAUDE_PRESENTATION,
       enabled: claudeSettings.enabled,
@@ -646,7 +645,10 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         version: parsedVersion,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Could not verify Claude authentication status from initialization result.",
+        message:
+          loggedIn === undefined
+            ? "Could not verify Claude authentication status."
+            : "Could not verify Claude authentication status from initialization result.",
       },
     });
   }

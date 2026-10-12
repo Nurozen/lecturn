@@ -303,7 +303,7 @@ export function SettingsRow({
           {status ? <div className="pt-0.5 text-xs text-muted-foreground">{status}</div> : null}
         </div>
         {renderedControl ? (
-          <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
+          <div className="flex w-full min-w-0 shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap sm:justify-end">
             {renderedControl}
           </div>
         ) : null}
@@ -383,7 +383,7 @@ export function SettingsPageContainer({
       onTargetHandled={clearTargetHash}
     >
       <div
-        className="topbar-scroll-fade scrollbar-gutter-both flex-1 overflow-y-auto"
+        className="topbar-scroll-fade scrollbar-gutter-both min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain"
         data-settings-page-scroll
       >
         <WorkspacePageContainer width={width} className={cn("gap-8", className)}>

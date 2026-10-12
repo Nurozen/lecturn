@@ -289,7 +289,12 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
             snapshot.discovery?.status === "timed-out"
               ? snapshot.discovery
               : {
-                  status: snapshot.installed && snapshot.status !== "error" ? "ready" : "error",
+                  // Signed out is a completed detection, not a failed CLI start.
+                  status:
+                    snapshot.installed &&
+                    (snapshot.status !== "error" || snapshot.auth.status === "unauthenticated")
+                      ? "ready"
+                      : "error",
                   phase: "provider",
                   ...(snapshot.message ? { message: snapshot.message } : {}),
                 },

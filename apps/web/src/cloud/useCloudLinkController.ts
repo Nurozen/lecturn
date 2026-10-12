@@ -2,7 +2,7 @@ import { EnvironmentId } from "@lecturn/contracts";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { serverEnvironment } from "../state/server";
 import { threadDecisionEnvironment } from "../state/threadDecisions";
-import { useAuth } from "@clerk/react";
+import { useConnectAccountAuth } from "./useConnectAccountAuth";
 import { useAtomValue } from "@effect/atom-react";
 import { findErrorTraceId } from "@lecturn/client-runtime/errors";
 import {
@@ -55,7 +55,7 @@ export function useCloudLinkController(
     readonly onSelectAccount?: (accountId: string) => void;
   } = {},
 ) {
-  const auth = useAuth();
+  const auth = useConnectAccountAuth();
   const known = useAtomValue(knownConnectAccountsAtom);
   const profiles = useAtomValue(connectAccountProfilesAtom);
   const userId = options.accountId === undefined ? auth.userId : options.accountId;

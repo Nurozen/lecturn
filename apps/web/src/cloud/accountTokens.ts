@@ -1,3 +1,5 @@
+import { hasPhoneConnectAccount } from "../lib/androidHostAccess";
+import { phoneConnectAccount } from "./phoneConnectAccount";
 import { resolveRelayClerkTokenOptions } from "./publicConfig";
 
 /** The slice of a Clerk instance that relay tokens are read from. */
@@ -109,6 +111,7 @@ function tokenSubject(token: string): string | null {
  * cookie alone, which a bare `getToken()` on a non-active session would not.
  */
 export function readToken(accountId: string): Promise<string | null> {
+  if (hasPhoneConnectAccount()) return phoneConnectAccount.readToken(accountId);
   return withTokenPermit(async () => {
     const session = clerk?.client?.signedInSessions.find((entry) => entry.user?.id === accountId);
     const token = (await session?.getToken(resolveRelayClerkTokenOptions())) ?? null;

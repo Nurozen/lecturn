@@ -1,0 +1,12 @@
+{
+  "name": "symba-guest-tools",
+  "private": true,
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.291",
+    "@openai/codex": "0.160.1",
+    "lecturn": "0.0.51-nightly.20261008.98"
+  },
+  "overrides": {
+    "@effect/platform-node-shared": "4.0.0-beta.103"
+  }
+}

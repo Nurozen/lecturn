@@ -1,3 +1,5 @@
+import { hasPhoneConnectAccount } from "../lib/androidHostAccess";
+import { phoneManagedRelayLayer } from "./phoneManagedRelay";
 import { ManagedRelay } from "@lecturn/client-runtime/relay";
 import { RelayWebClientId } from "@lecturn/contracts/relay";
 import * as Crypto from "effect/Crypto";
@@ -77,6 +79,7 @@ export const relayDpopSignerLayer = Layer.effect(
 );
 
 export const managedRelayClientLayer = (relayUrl: string) =>
-  ManagedRelay.layer({ relayUrl, clientId: RelayWebClientId }).pipe(
-    Layer.provideMerge(relayDpopSignerLayer),
-  );
+  (hasPhoneConnectAccount()
+    ? phoneManagedRelayLayer
+    : ManagedRelay.layer({ relayUrl, clientId: RelayWebClientId })
+  ).pipe(Layer.provideMerge(relayDpopSignerLayer));

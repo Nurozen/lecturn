@@ -153,7 +153,11 @@ export function useAttachedTerminalSession(input: {
             .byThreadId.get(input.terminal.threadId)
             ?.find((terminal) => terminal.terminalId === input.terminal?.terminalId)) ?? null;
     const state = combineTerminalSessionState(summary, attach.data ?? EMPTY_TERMINAL_BUFFER_STATE);
-    return attach.error === null ? state : { ...state, error: attach.error, status: "error" };
+    if (attach.error !== null) return { ...state, error: attach.error, status: "error" };
+    // A reconnect seed has no server observation yet. Treating it as closed
+    // makes terminal owners destroy a live sign-in before the snapshot arrives.
+    if (summary === null && state.version === 0) return { ...state, status: "starting" };
+    return state;
   }, [attach.data, attach.error, input.environmentId, input.terminal, metadata.data]);
 }
 

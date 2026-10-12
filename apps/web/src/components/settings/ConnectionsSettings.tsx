@@ -1,3 +1,5 @@
+import { PhoneConnectAccountSection } from "../cloud/PhoneConnectAccount";
+import { hasPhoneConnectAccount } from "../../lib/androidHostAccess";
 import { Link } from "@tanstack/react-router";
 import { ChevronsLeftRightEllipsisIcon, PlusIcon, QrCodeIcon, TerminalIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
@@ -746,7 +748,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
             </p>
           ) : null}
         </div>
-        <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
+        <div className="flex w-full min-w-0 shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap sm:justify-end">
           {shareablePairingUrl && canCopyToClipboard ? (
             <Button
               size="xs"
@@ -995,7 +997,7 @@ const ConnectedClientListRow = memo(function ConnectedClientListRow({
             <AccessScopeSummary scopes={clientSession.scopes} label="Client scopes" />
           </p>
         </div>
-        <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
+        <div className="flex w-full min-w-0 shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap sm:justify-end">
           {!clientSession.current ? (
             <Button
               size="xs"
@@ -1542,7 +1544,7 @@ function SavedBackendListRow({
             </p>
           ) : null}
         </div>
-        <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
+        <div className="flex w-full min-w-0 shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap sm:justify-end">
           {versionMismatch &&
           (serverUpdateState.status === "idle" || serverUpdateState.status === "failed") ? (
             <ServerUpdateAction
@@ -1882,7 +1884,7 @@ function CloudRemoteEnvironmentRows({
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly savedEnvironments: ReadonlyArray<EnvironmentPresentation>;
 }) {
-  return hasCloudPublicConfig() ? (
+  return hasCloudPublicConfig() || hasPhoneConnectAccount() ? (
     <CloudEnvironmentConnectRows
       primaryEnvironmentId={primaryEnvironmentId}
       savedEnvironments={savedEnvironments}
@@ -3252,6 +3254,7 @@ export function ConnectionsSettings() {
 
   return (
     <SettingsPageContainer>
+      <PhoneConnectAccountSection />
       {primaryEnvironmentId ? (
         <SettingsSection title="Contextual">
           <SettingsRow
