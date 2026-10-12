@@ -17,6 +17,7 @@ import {
   RelayExchangeDpopAccessTokenEndpoint,
   RelayGetEnvironmentStatusEndpoint,
   RelayJwtSubjectTokenType,
+  type RelaySubjectTokenType,
   type RelayAgentActivitySnapshotResponse,
   type RelayLiveActivityRegistrationRequest,
   RelayMobileRegistrationScope,
@@ -250,6 +251,8 @@ export interface ManagedRelayAuthorization {
 export interface ManagedRelayClientLayerOptions {
   readonly relayUrl: string;
   readonly clientId: RelayPublicClientId;
+  /** Defaults to a Clerk session JWT; use RelayAccessTokenType for Clerk OAuth credentials. */
+  readonly subjectTokenType?: RelaySubjectTokenType;
   readonly accessTokenStore?: ManagedRelayAccessTokenStore;
 }
 
@@ -507,7 +510,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
           payload: {
             grant_type: RelayDpopTokenExchangeGrantType,
             subject_token: input.clerkToken,
-            subject_token_type: RelayJwtSubjectTokenType,
+            subject_token_type: options.subjectTokenType ?? RelayJwtSubjectTokenType,
             requested_token_type: RelayAccessTokenType,
             resource: relayUrl,
             scope: encodeOAuthScope(input.scopes),
@@ -539,11 +542,18 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
         "relay.scopes": input.scopes.join(" "),
       });
       const nowMillis = yield* Clock.currentTimeMillis;
-      const accountId = relayAccountId(input.clerkToken);
+      // OAuth credentials need not carry a locally readable account identity.
+      const accountId =
+        options.subjectTokenType === RelayAccessTokenType
+          ? Option.none<string>()
+          : relayAccountId(input.clerkToken);
       if (Option.isNone(accountId)) {
         yield* Effect.annotateCurrentSpan({
           "relay.token_cache.result": "bypass",
-          "relay.token_cache.bypass_reason": "invalid_subject_token",
+          "relay.token_cache.bypass_reason":
+            options.subjectTokenType === RelayAccessTokenType
+              ? "oauth_subject_token"
+              : "invalid_subject_token",
         });
         const response = yield* exchangeAccessToken(input);
         return {

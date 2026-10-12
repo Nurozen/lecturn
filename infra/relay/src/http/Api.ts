@@ -842,12 +842,19 @@ export const tokenApi = HttpApiBuilder.group(
           return yield* new HttpApiError.Unauthorized({});
         }
 
-        const verified = yield* verifyClerkBearerToken(config, args.payload.subject_token).pipe(
-          Effect.catch(() => relayAuthInvalidError("invalid_bearer")),
-        );
-        if (!verified.sub || !hasExpectedClerkAudience(verified.aud, config.clerkJwtAudience)) {
-          return yield* relayAuthInvalidError("invalid_bearer");
-        }
+        const verified = yield* (
+          args.payload.subject_token_type === RelayAccessTokenType
+            ? verifyClerkOAuthBearerToken(config, args.payload.subject_token)
+            : verifyClerkBearerToken(config, args.payload.subject_token).pipe(
+                Effect.flatMap((claims) =>
+                  claims.sub && hasExpectedClerkAudience(claims.aud, config.clerkJwtAudience)
+                    ? Effect.succeed({ sub: claims.sub })
+                    : Effect.fail(
+                        new ClerkTokenVerificationFailed({ cause: "missing_relay_audience" }),
+                      ),
+                ),
+              )
+        ).pipe(Effect.catch(() => relayAuthInvalidError("invalid_bearer")));
         const proofKeyThumbprint = yield* requireDpopProof().pipe(
           Effect.provideService(DpopProofs.DpopProofReplay, dpopProofs),
         );

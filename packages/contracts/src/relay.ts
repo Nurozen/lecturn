@@ -735,6 +735,11 @@ export const RelayDpopTokenExchangeGrantType =
   "urn:ietf:params:oauth:grant-type:token-exchange" as const;
 export const RelayJwtSubjectTokenType = "urn:ietf:params:oauth:token-type:jwt" as const;
 export const RelayAccessTokenType = "urn:ietf:params:oauth:token-type:access_token" as const;
+export const RelaySubjectTokenType = Schema.Literals([
+  RelayJwtSubjectTokenType,
+  RelayAccessTokenType,
+]);
+export type RelaySubjectTokenType = typeof RelaySubjectTokenType.Type;
 export const RelayPublicClientId = Schema.Literals(["lecturn-mobile", "lecturn-web"]);
 export type RelayPublicClientId = typeof RelayPublicClientId.Type;
 export const RelayMobileClientId = "lecturn-mobile" as const;
@@ -745,7 +750,7 @@ export const RelayDpopAccessTokenRequest = Schema.Struct({
   subject_token: TrimmedNonEmptyString.annotate({
     description: "Clerk bearer token for the signed-in cloud user.",
   }),
-  subject_token_type: Schema.Literal(RelayJwtSubjectTokenType),
+  subject_token_type: RelaySubjectTokenType,
   requested_token_type: Schema.Literal(RelayAccessTokenType),
   resource: TrimmedNonEmptyString.annotate({
     description: "Relay issuer URL that will receive the DPoP-bound access token.",

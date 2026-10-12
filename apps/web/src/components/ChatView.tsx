@@ -1,3 +1,5 @@
+import { useAndroidChatBridge } from "../hooks/useAndroidChatBridge";
+import { requireAndroidFullAccess } from "../lib/androidHostAccess";
 import { contextualDraftKey, useContextualDrafts } from "../state/contextualDrafts";
 import { NotesPanel } from "./NotesPanel";
 import { AccountSurface } from "./AccountSurface";
@@ -3475,6 +3477,22 @@ export default function ChatView(props: ChatViewProps) {
   const focusComposer = useCallback(() => {
     composerRef.current?.focusAtEnd();
   }, [composerRef]);
+  const androidChatThread = useMemo(
+    () =>
+      activeThread && activeEnvironmentConnectionPhase === "connected"
+        ? {
+            id: activeThread.id,
+            title: activeThread.title,
+            messages: timelineMessages,
+          }
+        : null,
+    [activeThread, activeEnvironmentConnectionPhase, timelineMessages],
+  );
+  const nativeComposerExpanded = useAndroidChatBridge({
+    scope: routeThreadKey,
+    thread: androidChatThread,
+    focusComposer,
+  });
   const scheduleComposerFocus = useCallback(() => {
     window.requestAnimationFrame(() => {
       focusComposer();
@@ -3928,9 +3946,33 @@ export default function ChatView(props: ChatViewProps) {
     [activeProject, persistProjectScripts],
   );
 
+  const runtimeModeRequest = useRef(0);
+  useEffect(
+    () => () => {
+      runtimeModeRequest.current++;
+    },
+    [composerDraftTarget],
+  );
   const handleRuntimeModeChange = useCallback(
-    (mode: RuntimeMode) => {
+    async (mode: RuntimeMode) => {
+      const request = ++runtimeModeRequest.current;
       if (mode === runtimeMode) return;
+      try {
+        await requireAndroidFullAccess(
+          typeof composerDraftTarget === "string"
+            ? composerDraftTarget
+            : composerDraftTarget.threadId,
+          mode,
+        );
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Full access not enabled",
+          description: error instanceof Error ? error.message : "Review Android device access.",
+        });
+        return;
+      }
+      if (request !== runtimeModeRequest.current) return;
       setComposerDraftRuntimeMode(composerDraftTarget, mode);
       if (isLocalDraftThread) {
         setDraftThreadContext(composerDraftTarget, { runtimeMode: mode });
@@ -8482,7 +8524,8 @@ export default function ChatView(props: ChatViewProps) {
                               isServerThread={isServerThread}
                               isLocalDraftThread={isLocalDraftThread}
                               forceExpandedOnMobile={
-                                forceExpandedMobileComposer && isDraftHeroState
+                                nativeComposerExpanded ||
+                                (forceExpandedMobileComposer && isDraftHeroState)
                               }
                               projectSelectionRequired={
                                 isLocalDraftThread && activeProject === null

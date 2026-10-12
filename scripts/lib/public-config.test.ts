@@ -5,11 +5,43 @@ import * as NodePath from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import {
+  assertAndroidHostPublicConfig,
   assertProductionMobilePublicConfig,
   assertHostedWebPublicConfig,
   loadRepoEnv,
   resolvePublicConfig,
 } from "./public-config.ts";
+
+describe("Android host packaging configuration", () => {
+  const configured = {
+    LECTURN_ANDROID_HOST_BUILD: "1",
+    LECTURN_CLERK_PUBLISHABLE_KEY: "pk_live_example",
+    LECTURN_CLERK_JWT_TEMPLATE: "relay-template",
+    LECTURN_CLERK_CLI_OAUTH_CLIENT_ID: "oauth-client",
+    LECTURN_RELAY_URL: "https://relay.example.test",
+    LECTURN_HOSTED_APP_URL: "https://app.example.test",
+  };
+  it.each(Object.keys(configured).filter((name) => name !== "LECTURN_ANDROID_HOST_BUILD"))(
+    "rejects phone packaging missing %s instead of silently hiding Connect",
+    (name) =>
+      expect(() => assertAndroidHostPublicConfig({ ...configured, [name]: "" })).toThrow(name),
+  );
+  it("accepts complete phone configuration and leaves offline builds available", () => {
+    expect(() => assertAndroidHostPublicConfig(configured)).not.toThrow();
+    expect(() => assertAndroidHostPublicConfig({ NODE_ENV: "production" })).not.toThrow();
+  });
+  it.each([
+    "http://app.example.test",
+    "https://user:secret@app.example.test",
+    "https://app.example.test/?token=secret",
+    "not-a-url",
+  ])("rejects unsafe hosted OAuth destinations without exposing their values", (url) => {
+    const build = () =>
+      assertAndroidHostPublicConfig({ ...configured, LECTURN_HOSTED_APP_URL: url });
+    expect(build).toThrow("valid HTTPS LECTURN_HOSTED_APP_URL");
+    expect(build).not.toThrow(url);
+  });
+});
 
 const temporaryDirectories: string[] = [];
 

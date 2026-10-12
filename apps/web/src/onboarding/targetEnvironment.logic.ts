@@ -19,12 +19,17 @@ export function resolveOnboardingTargetEnvironment<TEnvironment extends Onboardi
   environments,
   primaryEnvironment,
   pairedEnvironmentId,
+  retainLocalTarget = false,
 }: {
   readonly mode: "local" | "connect" | "direct";
   readonly environments: ReadonlyArray<TEnvironment>;
   readonly primaryEnvironment: TEnvironment | null;
   readonly pairedEnvironmentId: EnvironmentId | null;
+  readonly retainLocalTarget?: boolean;
 }): TEnvironment | null {
+  // Agent setup owns a live PTY: reconnecting must not unmount its owner.
+  if (mode === "local" && retainLocalTarget) return primaryEnvironment;
+
   if (mode === "direct" && pairedEnvironmentId !== null) {
     const pairedEnvironment = environments.find(
       (environment) => environment.environmentId === pairedEnvironmentId,

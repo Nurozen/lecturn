@@ -1,6 +1,6 @@
 import type { EnvironmentId, ServerProvider } from "@lecturn/contracts";
 import { Link } from "@tanstack/react-router";
-import { CheckCircle2Icon, RotateCwIcon } from "lucide-react";
+import { CheckCircle2Icon, RotateCwIcon, XIcon } from "lucide-react";
 import { useRef, useState } from "react";
 import { useEnvironments } from "../state/environments";
 import { serverEnvironment } from "../state/server";
@@ -26,7 +26,8 @@ export function ProviderDetectionRecovery({
   const pending = useRef(false);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState(false);
-  const ready = provider.discovery?.status === "ready";
+  const ready =
+    provider.discovery?.status === "ready" && provider.auth.status !== "unauthenticated";
   const detecting = provider.discovery?.status === "detecting" || (retrying && !ready);
   const retry = async () => {
     if (pending.current) return;
@@ -107,33 +108,62 @@ export function ProviderDetectionRecovery({
 /** Lives above routes so settings and navigation remain available during discovery. */
 export function ProviderDetectionProgress() {
   const { environments } = useEnvironments();
+  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set());
+  // A retry or reconnect is still the same unresolved problem. Re-arm only
+  // after recovery or disabling the provider.
+  if (dismissed.size > 0) {
+    const resolved = new Set(
+      environments.flatMap((environment) =>
+        (environment.serverConfig?.providers ?? [])
+          .filter((provider) => !provider.enabled || provider.discovery?.status === "ready")
+          .map((provider) => JSON.stringify([environment.environmentId, provider.instanceId])),
+      ),
+    );
+    const remaining = new Set([...dismissed].filter((key) => !resolved.has(key)));
+    if (remaining.size !== dismissed.size) setDismissed(remaining);
+  }
   const rows = environments.flatMap((environment) =>
     (environment.serverConfig?.providers ?? [])
       .filter((provider) =>
         shouldShowProviderDetection(provider, environment.connection.phase === "connected"),
       )
-      .map((provider) => ({ environment, provider })),
+      .map((provider) => ({
+        environment,
+        provider,
+        key: JSON.stringify([environment.environmentId, provider.instanceId]),
+      })),
   );
   // Every implicit executable shares one shell probe. Show that operation once.
   const shellEnvironments = new Set<EnvironmentId>();
-  const visibleRows = rows.filter(({ environment, provider }) => {
-    if (provider.discovery?.status !== "detecting" || provider.discovery.phase !== "shell")
+  const visibleRows = rows
+    .filter(({ environment, provider }) => {
+      if (provider.discovery?.status !== "detecting" || provider.discovery.phase !== "shell")
+        return true;
+      if (shellEnvironments.has(environment.environmentId)) return false;
+      shellEnvironments.add(environment.environmentId);
       return true;
-    if (shellEnvironments.has(environment.environmentId)) return false;
-    shellEnvironments.add(environment.environmentId);
-    return true;
-  });
+    })
+    .filter(({ key }) => !dismissed.has(key));
   if (visibleRows.length === 0) return null;
   return (
     <aside
       aria-label="Provider detection"
-      className="pointer-events-none fixed bottom-4 right-4 z-40 flex max-h-[min(50vh,28rem)] w-96 max-w-[calc(100vw-2rem)] flex-col gap-2 overflow-y-auto"
+      className="pointer-events-none fixed top-[calc(env(safe-area-inset-top)+0.5rem)] right-4 z-40 flex max-h-[min(35dvh,28rem)] w-96 max-w-[calc(100vw-2rem)] flex-col gap-2 overflow-y-auto sm:top-auto sm:bottom-4 sm:max-h-[min(50vh,28rem)]"
     >
-      {visibleRows.map(({ environment, provider }) => (
+      {visibleRows.map(({ environment, provider, key }) => (
         <div
-          key={`${environment.environmentId}:${provider.instanceId}`}
-          className="pointer-events-auto rounded-xl border border-border bg-popover/95 p-3 shadow-lg"
+          key={key}
+          className="pointer-events-auto relative rounded-xl border border-border bg-popover/95 p-3 pr-10 shadow-lg"
         >
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Dismiss provider notification"
+            className="absolute top-1 right-1 size-9"
+            onClick={() => setDismissed((previous) => new Set([...previous, key]))}
+          >
+            <XIcon className="size-4" />
+          </Button>
           {environments.length > 1 ? (
             <p className="mb-1 text-xs text-muted-foreground">{environment.label}</p>
           ) : null}

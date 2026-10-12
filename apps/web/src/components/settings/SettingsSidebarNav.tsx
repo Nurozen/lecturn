@@ -1,3 +1,4 @@
+import { useBackToChat } from "./SettingsNavigation";
 import {
   lazy,
   Suspense,
@@ -18,6 +19,7 @@ import {
   GitBranchIcon,
   KeyboardIcon,
   Link2Icon,
+  ArrowLeftIcon,
   PaletteIcon,
   SearchIcon,
   Settings2Icon,
@@ -157,6 +159,7 @@ function SettingsSubmenuCollapse({
 
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const navigate = useNavigate();
+  const backToChat = useBackToChat();
   const currentHash = useLocation({ select: (location) => location.hash });
   const resolvedPathname = useRouterState({
     select: (state) => state.resolvedLocation?.pathname,
@@ -335,6 +338,13 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   );
   return (
     <>
+      <div className="space-y-2 border-b border-sidebar-border p-3 md:hidden">
+        <p className="px-2 text-sm font-semibold">Settings</p>
+        <Button className="min-h-11 w-full justify-start" variant="outline" onClick={backToChat}>
+          <ArrowLeftIcon className="size-4" />
+          Back to chat
+        </Button>
+      </div>
       <SidebarContent className="overflow-x-hidden">
         <SidebarGroup className="gap-2 p-[var(--sidebar-content-inset)]">
           <div className="flex h-8 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground">

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "source": "/data/local/symba-agent-probe/rootfs",
+  "destination": "/data/local/symba-runtime/host",
+  "operation": "parent-owned-cold-move",
+  "requiresStoppedProbeVM": true,
+  "requiresNoProcessesOrMountsBelowSource": true,
+  "guestDisk": "/opt/vm/guest.qcow2",
+  "baseDisk": "/opt/vm/base.qcow2",
+  "backingPathInsideChroot": "/opt/vm/base.qcow2",
+  "preserveWorkspace": true,
+  "replayTasks": false
+}

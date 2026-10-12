@@ -1,3 +1,5 @@
+import { PhoneConnectSidebarEntry } from "../cloud/PhoneConnectAccount";
+import { useBackToChat } from "../settings/SettingsNavigation";
 import {
   ArrowLeftIcon,
   ChartNoAxesColumnIcon,
@@ -132,6 +134,7 @@ function SidebarUtilityItem({
 export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
+  const backToChat = useBackToChat();
   const { isMobile, setOpenMobile } = useSidebar();
   const currentFooterPage = useLocation({
     select: (location) =>
@@ -177,12 +180,16 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
 
   const handleBackClick = useCallback(() => {
     closeMobileSidebar();
+    if (isMobile && currentFooterPage === "settings") {
+      backToChat();
+      return;
+    }
     if (canGoBack) {
       window.history.back();
       return;
     }
     void navigate({ to: "/" });
-  }, [canGoBack, closeMobileSidebar, navigate]);
+  }, [backToChat, canGoBack, closeMobileSidebar, currentFooterPage, isMobile, navigate]);
 
   return (
     <SidebarMenu className="flex-row items-center">
@@ -190,7 +197,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
         <SidebarMenuItem className="min-w-0 flex-1">
           <SidebarMenuButton onClick={handleBackClick}>
             <ArrowLeftIcon />
-            <span>Back</span>
+            <span>{isMobile && currentFooterPage === "settings" ? "Back to chat" : "Back"}</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       ) : (
@@ -222,6 +229,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (
     <SidebarFooter className="p-[var(--sidebar-content-inset)]">
+      <PhoneConnectSidebarEntry />
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
       <SidebarUtilityMenu />

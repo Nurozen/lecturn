@@ -1,4 +1,4 @@
-import { useAuth } from "@clerk/react";
+import { useConnectAccountAuth } from "../../cloud/useConnectAccountAuth";
 import { selectTeam, selectedTeam, subscribeTeamSelection } from "@lecturn/client-runtime/relay";
 import type { RelayTeamOrganization } from "@lecturn/contracts";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
@@ -9,7 +9,7 @@ import { createAccountTeamsClient } from "../../cloud/accountRelayClients";
  * active account when none is given. A chosen account always has a session.
  */
 function useTeamAccount(accountId: string | null | undefined) {
-  const { userId, isSignedIn } = useAuth();
+  const { userId, isSignedIn } = useConnectAccountAuth();
   return accountId === undefined || accountId === userId
     ? { userId, isSignedIn }
     : { userId: accountId, isSignedIn: accountId !== null };

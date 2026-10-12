@@ -158,6 +158,59 @@ const enrichedSnapshotSecond: ServerProvider = {
 };
 
 describe("makeManagedServerProvider", () => {
+  it.effect(
+    "completes signed-out detection without hiding auth errors or automatically retrying",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const calls = yield* Ref.make(0);
+          const signedOut: ServerProvider = {
+            ...refreshedSnapshot,
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            driver: ProviderDriverKind.make("claudeAgent"),
+            status: "error",
+            auth: { status: "unauthenticated" },
+            message: "Claude Code is not signed in. Run `claude auth login` and try again.",
+          };
+          const nextProbe = yield* Ref.make(signedOut);
+          const provider = yield* makeManagedServerProvider<TestSettings>({
+            resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+            getSettings: Effect.succeed({ enabled: true }),
+            streamSettings: Stream.empty,
+            haveSettingsChanged: () => false,
+            initialSnapshot: () => Effect.succeed({ ...signedOut, installed: false }),
+            discovery: { waitForShell: false, refreshEnvironment: () => {} },
+            checkProvider: Ref.update(calls, (count) => count + 1).pipe(
+              Effect.andThen(Ref.get(nextProbe)),
+            ),
+            refreshOnInterval: false,
+          });
+          const [snapshot] = Array.from(
+            yield* provider.streamChanges.pipe(
+              Stream.filter((snapshot) => snapshot.discovery?.status !== "detecting"),
+              Stream.take(1),
+              Stream.runCollect,
+            ),
+          );
+          assert.strictEqual(snapshot?.discovery?.status, "ready");
+          assert.strictEqual(snapshot?.installed, true);
+          assert.strictEqual(snapshot?.status, "error");
+          assert.strictEqual(snapshot?.auth.status, "unauthenticated");
+          assert.strictEqual(snapshot?.message, signedOut.message);
+          yield* TestClock.adjust("2 minutes");
+          assert.strictEqual(yield* Ref.get(calls), 1);
+          for (const [probe, expected] of [
+            [{ ...signedOut, auth: { status: "unknown" } }, "error"],
+            [{ ...signedOut, installed: false }, "error"],
+            [{ ...signedOut, discovery: { status: "timed-out", phase: "provider" } }, "timed-out"],
+          ] as const) {
+            yield* Ref.set(nextProbe, probe);
+            assert.strictEqual((yield* provider.refresh).discovery?.status, expected);
+          }
+        }),
+      ).pipe(Effect.provide(Layer.mergeAll(AlwaysRunTestLayer, TestClock.layer()))),
+  );
+
   it.effect("resolves the update method after discovery loads the shell environment", () =>
     Effect.scoped(
       Effect.gen(function* () {

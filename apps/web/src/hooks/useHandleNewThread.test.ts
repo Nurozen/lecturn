@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 const testState = vi.hoisted(() => {
   let completeProjectFileRead: (value: null) => void = () => undefined;
@@ -61,7 +61,7 @@ vi.mock("@lecturn/client-runtime/state/projectGit", () => ({
   normalizeProjectThreadWorkspace: (_project: unknown, workspace: unknown) => workspace,
   staveThreadStartMessage: () => null,
 }));
-vi.mock("@lecturn/contracts", () => ({ DEFAULT_RUNTIME_MODE: "default" }));
+vi.mock("@lecturn/contracts", () => ({ DEFAULT_RUNTIME_MODE: "full-access" }));
 vi.mock("@lecturn/shared/threadEnvMode", () => ({
   resolveDefaultThreadEnvMode: (input: {
     readonly projectFile: "local" | "worktree" | null;
@@ -163,5 +163,43 @@ describe("useNewThreadHandler", () => {
     expect(testState.router.state.location.href).toBe("/usage");
     expect(testState.router.navigate).not.toHaveBeenCalled();
     expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
+  });
+});
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("Android empty drafts", () => {
+  it.each([
+    ["new", null],
+    [
+      "reusable Full",
+      {
+        draftId: "draft-existing",
+        environmentId: "environment-ssh",
+        promotedTo: null,
+        threadId: "thread-existing",
+        runtimeMode: "full-access",
+      },
+    ],
+  ] as const)("opens a %s draft without requesting device access", async (_, draft) => {
+    testState.reset(draft);
+    const getAccessState = vi.fn();
+    const requestFullAccess = vi.fn();
+    vi.stubGlobal("window", {
+      symbaHost: { protocolVersion: 2, getAccessState, requestFullAccess },
+    });
+    testState.completeProjectFileRead(null);
+    const opened = await useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    expect(opened).toEqual({
+      draftId: draft?.draftId ?? "draft-delayed",
+      threadId: draft?.threadId ?? "thread-delayed",
+    });
+    expect(testState.router.navigate).toHaveBeenCalled();
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalled();
+    expect(getAccessState).not.toHaveBeenCalled();
+    expect(requestFullAccess).not.toHaveBeenCalled();
   });
 });

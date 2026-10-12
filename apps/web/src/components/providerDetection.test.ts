@@ -60,7 +60,7 @@ describe("provider discovery recovery", () => {
     expect(providerDetectionHint(timedOut)).toMatch(/took too long.*busy/);
     expect(providerDetectionHint(timedOut)).not.toMatch(/project folder/);
     const failed = { ...provider, discovery: { status: "error", phase: "provider" } } as const;
-    expect(providerDetectionLabel(failed)).toBe("Codex could not be started");
+    expect(providerDetectionLabel(failed)).toBe("Codex detection failed");
     expect(providerDetectionHint(failed)).toMatch(/project folder still exists/);
   });
   it("recognizes the reported spawn stack while leaving unrelated missing-file failures alone", () => {
@@ -82,6 +82,30 @@ describe("provider discovery recovery", () => {
 });
 
 describe("provider discovery visibility", () => {
+  it("keeps sign-in distinct from a startup failure, including old server snapshots", () => {
+    const signedOut = {
+      ...provider,
+      installed: true,
+      status: "error",
+      auth: { status: "unauthenticated" },
+      discovery: { status: "ready", phase: "provider" },
+    } as const;
+    expect(providerDetectionLabel(signedOut)).toBe("Codex needs sign-in");
+    expect(providerDetectionHint(signedOut)).toContain("executable was found");
+    expect(shouldShowProviderDetection(signedOut, true)).toBe(false);
+    expect(providerDetectionSendBlock(signedOut)).toBeNull();
+    const legacy = { ...signedOut, discovery: { status: "error", phase: "provider" } } as const;
+    expect(providerDetectionLabel(legacy)).toBe("Codex needs sign-in");
+    expect(shouldShowProviderDetection(legacy, true)).toBe(true);
+    const timedOut = {
+      ...signedOut,
+      discovery: { status: "timed-out", phase: "provider" },
+    } as const;
+    expect(providerDetectionLabel(timedOut)).toBe("Codex detection timed out");
+    expect(providerDetectionHint(timedOut)).toContain("took too long");
+    expect(shouldShowProviderDetection({ ...timedOut, enabled: false }, true)).toBe(false);
+  });
+
   it("does not replay cached discovery work while an environment reconnects", () => {
     expect(shouldShowProviderDetection(provider, true)).toBe(true);
     expect(shouldShowProviderDetection(provider, false)).toBe(false);
