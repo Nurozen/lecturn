@@ -113,11 +113,17 @@ class NativeConnect internal constructor(
     private var signingOut = false
     private var storageUnavailable = false
     private var refreshSequence = 0L
+    private var observedSdkState: ConnectSdkState? = null
 
     fun initialize() {
         if (!configured) return
         sdk.initialize()
-        scope.launch { sdk.changes.collectLatest { refresh() } }
+        scope.launch { sdk.changes.collectLatest { snapshot ->
+            // A -> B -> A must still invalidate token work started before the switch.
+            if (observedSdkState != null && snapshot != observedSdkState) generation++
+            observedSdkState = snapshot
+            refresh()
+        } }
     }
 
     /** The Activity owns cancellation; equal states never trigger another web refresh. */
@@ -163,20 +169,20 @@ class NativeConnect internal constructor(
     }
     private suspend fun fetchToken(expected: ConnectSession, version: Long): String? {
         if (signingOut || storageUnavailable || version != generation || !sdk.snapshot().ready
-            || sdk.snapshot().session != expected) return null
+            || sdk.snapshot().failed || sdk.snapshot().session != expected) return null
         val result = try { withTimeoutOrNull(30_000) { sdk.token() } }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { null }
         return result?.takeIf {
             version == generation && !signingOut && !storageUnavailable
-                && sdk.snapshot().ready && sdk.snapshot().session == expected
+                && sdk.snapshot().ready && !sdk.snapshot().failed && sdk.snapshot().session == expected
         }
     }
     fun getState(reply: Consumer<JSONObject>) { scope.launch { reply.accept(refresh().json()) } }
     fun deliveryContext(accountId: String): String? {
         val snapshot = sdk.snapshot()
         val session = snapshot.session
-        return if (configured && !signingOut && !storageUnavailable && snapshot.ready && session?.accountId == accountId)
+        return if (configured && !signingOut && !storageUnavailable && snapshot.ready && !snapshot.failed && session?.accountId == accountId)
             "$generation:${session.id}" else null
     }
     fun getToken(accountId: String, reply: Consumer<JSONObject>) {

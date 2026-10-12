@@ -1,7 +1,8 @@
 import { withoutArchivedStaveProjects } from "@lecturn/client-runtime/state/stave-archive";
+import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { LinkIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
+import { LinkIcon, PlusIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { openCommandPalette } from "../commandPaletteBus";
@@ -101,7 +102,7 @@ function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
           </EmptyDescription>
           <div className="mt-5 flex justify-center">
             <Button size="sm" onClick={onRetry}>
-              <RotateCcwIcon className="size-4" />
+              <RefreshIcon className="size-4" />
               Try again
             </Button>
           </div>

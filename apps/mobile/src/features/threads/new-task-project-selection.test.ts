@@ -6,15 +6,33 @@ import type { HomeProjectScope } from "../home/homeThreadList";
 import {
   getProjectScopeSelectionTarget,
   resolveDraftProjectSelection,
+  resolveEnvironmentProjectMatch,
 } from "./new-task-project-selection";
 
-function makeProject(id: string, environmentId = "environment"): EnvironmentProject {
+function makeProject(
+  id: string,
+  environmentId = "environment",
+  options: {
+    readonly title?: string;
+    readonly workspaceRoot?: string;
+    readonly repositoryKey?: string;
+  } = {},
+): EnvironmentProject {
   return {
     environmentId: EnvironmentId.make(environmentId),
     id: ProjectId.make(id),
-    title: id,
-    workspaceRoot: `/work/${id}`,
-    repositoryIdentity: null,
+    title: options.title ?? id,
+    workspaceRoot: options.workspaceRoot ?? `/work/${id}`,
+    repositoryIdentity: options.repositoryKey
+      ? {
+          canonicalKey: options.repositoryKey,
+          locator: {
+            source: "git-remote",
+            remoteName: "origin",
+            remoteUrl: `https://${options.repositoryKey}.git`,
+          },
+        }
+      : null,
     defaultModelSelection: null,
     scripts: [],
     createdAt: "2026-07-01T00:00:00.000Z",
@@ -48,6 +66,55 @@ describe("getProjectScopeSelectionTarget", () => {
     expect(getProjectScopeSelectionTarget(makeScope(projects), EnvironmentId.make("other"))).toBe(
       projects[0],
     );
+  });
+});
+
+describe("resolveEnvironmentProjectMatch", () => {
+  it("follows the same repository onto the target machine", () => {
+    const selected = makeProject("lecturn", "mac", { repositoryKey: "github.com/Nurozen/lecturn" });
+    const target = [
+      makeProject("other", "server", { repositoryKey: "github.com/Nurozen/other" }),
+      makeProject("lecturn-clone", "server", { repositoryKey: "github.com/Nurozen/lecturn" }),
+    ];
+    expect(resolveEnvironmentProjectMatch(target, selected)).toBe(target[1]);
+  });
+
+  it("falls back to workspace basename, then title, for unindexed projects", () => {
+    const selected = makeProject("lecturn", "mac", { workspaceRoot: "/Users/me/lecturn" });
+    const byBasename = [
+      makeProject("other", "server"),
+      makeProject("srv", "server", { workspaceRoot: "/home/me/lecturn" }),
+    ];
+    expect(resolveEnvironmentProjectMatch(byBasename, selected)).toBe(byBasename[1]);
+
+    const byTitle = [
+      makeProject("other", "server"),
+      makeProject("srv", "server", { title: "lecturn" }),
+    ];
+    expect(resolveEnvironmentProjectMatch(byTitle, selected)).toBe(byTitle[1]);
+  });
+
+  it("does not treat a known different repository as a basename or title match", () => {
+    const selected = makeProject("lecturn", "mac", {
+      repositoryKey: "github.com/Nurozen/lecturn",
+      workspaceRoot: "/Users/me/lecturn",
+    });
+    const fork = makeProject("fork", "server", {
+      repositoryKey: "github.com/someone/lecturn",
+      title: "lecturn",
+      workspaceRoot: "/home/me/lecturn",
+    });
+    const unindexed = makeProject("unindexed", "server", { workspaceRoot: "/srv/lecturn" });
+    expect(resolveEnvironmentProjectMatch([fork, unindexed], selected)).toBe(unindexed);
+    // Without any weaker match the fork is still the first-project fallback.
+    expect(resolveEnvironmentProjectMatch([fork], selected)).toBe(fork);
+  });
+
+  it("falls back to the first project on the target so the draft has a key to carry over to", () => {
+    const selected = makeProject("lecturn", "mac", { repositoryKey: "github.com/Nurozen/lecturn" });
+    const target = [makeProject("unrelated", "server"), makeProject("also-unrelated", "server")];
+    expect(resolveEnvironmentProjectMatch(target, selected)).toBe(target[0]);
+    expect(resolveEnvironmentProjectMatch([], selected)).toBeNull();
   });
 });
 

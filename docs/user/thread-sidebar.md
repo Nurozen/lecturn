@@ -40,7 +40,10 @@ thread. Work in progress, pending questions or approvals, and live background wo
 prevent automatic settlement. An open pull request does not prevent inactivity
 settlement, except in a Stave space, where an open pull request in any editable
 repo keeps the space's threads active. An old closed or merged pull request does
-not settle work you resumed after it closed.
+not settle work you resumed after it closed. Settlement uses the actual close or merge time;
+later pull request edits do not make old work eligible again. For a Stave space, every
+editable repo and any linked pull request must have a terminal time before PR-based
+settlement can apply.
 
 **Settled** is an expandable group beneath each project, Stave space, or saga in the project
 hierarchy. Its red-gold connectors and check marks distinguish finished conversations. The flat
@@ -76,6 +79,10 @@ for custom configuration.
 ## Inspect agent work
 
 On web and desktop, use **Agents** to follow work delegated to subagents.
+
+On mobile, the work log groups subagents and shows how many are still working.
+Before a workflow reports its members, its coordinator shows its own status and
+details. Once members arrive, the group counts those members and lists their results.
 
 Expand a tool call in the conversation to see its full command and output.
 Summaries shorten shell wrappers and can still describe the latest call after it

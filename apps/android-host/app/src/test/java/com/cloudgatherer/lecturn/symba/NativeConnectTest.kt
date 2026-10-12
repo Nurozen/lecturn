@@ -175,6 +175,26 @@ class NativeConnectTest {
         assertFalse(connect.state.value.json().toString().contains("synthetic-jwt"))
     }
 
+    @Test fun staleAccountRequestPreservesVerifiedAccountAndSubsequentTokenRead() = runTest {
+        val sdk = Sdk().apply { changes.value = ConnectSdkState(true, false, account) }
+        val connect = NativeConnect(true, "https://relay.example.invalid", sdk, backgroundScope)
+        val verified = connect.refresh()
+        assertEquals("signed-in", verified.state)
+        assertNull(verified.error)
+        val verifiedCalls = sdk.tokenCalls
+        var result: JSONObject? = null
+
+        connect.getToken("stale-account") { result = it }; runCurrent()
+        assertTrue(result!!.isNull("token"))
+        assertEquals(verifiedCalls, sdk.tokenCalls)
+        assertEquals(verified, connect.state.value)
+
+        connect.getToken(account.accountId) { result = it }; runCurrent()
+        assertEquals("synthetic-jwt", result.getString("token"))
+        assertEquals(verifiedCalls + 1, sdk.tokenCalls)
+        assertEquals(verified, connect.state.value)
+    }
+
     @Test fun wrongAccountNeverRequestsTokenAndAccountSwitchDuringAwaitDropsToken() = runTest {
         val sdk = Sdk().apply { changes.value = ConnectSdkState(true, false, account) }
         val connect = NativeConnect(true, "https://relay.example.invalid", sdk, backgroundScope)
@@ -187,6 +207,38 @@ class NativeConnectTest {
         sdk.changes.value = ConnectSdkState(true, false, account.copy(id = "session-b", accountId = "user-b"))
         sdk.tokenWait!!.complete("synthetic-old-token"); runCurrent()
         assertTrue(result!!.isNull("token"))
+    }
+
+    @Test fun failedSdkSnapshotCannotDeliverAnOtherwiseAvailableToken() = runTest {
+        val sdk = Sdk().apply { changes.value = ConnectSdkState(true, true, account) }
+        val connect = NativeConnect(true, null, sdk, backgroundScope)
+        assertEquals("error", connect.refresh().state)
+        var result: JSONObject? = null
+        connect.getToken(account.accountId) { result = it }; runCurrent()
+        assertTrue(result!!.isNull("token"))
+        assertEquals(0, sdk.tokenCalls)
+        assertNull(connect.deliveryContext(account.accountId))
+    }
+
+    @Test fun observedAccountRoundTripFencesPendingTokenDelivery() = runTest {
+        val sdk = Sdk().apply { changes.value = ConnectSdkState(true, false, account) }
+        val connect = NativeConnect(true, null, sdk, backgroundScope)
+        connect.initialize(); runCurrent()
+        assertEquals("signed-in", connect.state.value.state)
+        val context = connect.deliveryContext(account.accountId)
+        sdk.tokenWait = CompletableDeferred()
+        var result: JSONObject? = null
+        connect.getToken(account.accountId) { result = it }; runCurrent()
+        sdk.changes.value = ConnectSdkState(true, false, account.copy(id = "session-b", accountId = "user-b"))
+        runCurrent()
+        sdk.changes.value = ConnectSdkState(true, false, account)
+        runCurrent()
+        sdk.tokenWait!!.complete("synthetic-old-token"); runCurrent()
+        assertTrue(result!!.isNull("token"))
+        assertNotEquals(context, connect.deliveryContext(account.accountId))
+        sdk.tokenWait = null
+        connect.getToken(account.accountId) { result = it }; runCurrent()
+        assertEquals("synthetic-jwt", result.getString("token"))
     }
 
     @Test fun sameAccountWithReplacementSessionAlsoDropsToken() = runTest {
