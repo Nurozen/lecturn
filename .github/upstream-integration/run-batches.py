@@ -855,6 +855,17 @@ transient infrastructure failure that should be rerun. Otherwise return ci_retry
         m['phase'] = 'published'
         self.save(folder, m)
 
+    def repair_main_advance(self, folder, m, base, feedback=''):
+        if base == m['review_base']:
+            return False
+        require(ancestor(self.repo, m['review_base'], base), 'Main history rewritten')
+        m.update(phase='building', expected_head=m['head'], merge_parent=base, review_base=base,
+                 feedback='Main advanced: merge the pinned new main, revalidate all affected checks and obtain fresh review.'
+                          + (f'\n\n{feedback}' if feedback else ''))
+        m.pop('remote_review', None)
+        self.save(folder, m)
+        return True
+
     def wait_merge(self, folder, m):
         deadline = time.monotonic() + self.args.ci_timeout
         while True:
@@ -871,11 +882,7 @@ transient infrastructure failure that should be rerun. Otherwise return ci_retry
                 return
             require(pr['state'] == 'OPEN', 'PR is closed without merge')
             base, _ = self.fetch()
-            if base != m['review_base']:
-                require(ancestor(self.repo, m['review_base'], base), 'Main history rewritten')
-                m.update(phase='building', expected_head=m['head'], merge_parent=base, review_base=base,
-                         feedback='Main advanced: merge the pinned new main, revalidate all affected checks and obtain fresh review.')
-                self.save(folder, m)
+            if self.repair_main_advance(folder, m, base):
                 return
             runs = json.loads(self.gh('run', 'list', '--repo', self.args.github_repo, '--workflow', 'ci.yml',
                                       '--event', 'pull_request', '--commit', m['head'], '--limit', '100',
@@ -947,7 +954,8 @@ transient infrastructure failure that should be rerun. Otherwise return ci_retry
     def review_remote_feedback(self, folder, m):
         feedback, digest = self.remote_feedback(m)
         receipt = m.get('remote_review', {})
-        if receipt.get('head') == m['head'] and receipt.get('feedback_digest') == digest:
+        if (receipt.get('head') == m['head'] and receipt.get('feedback_digest') == digest
+                and receipt.get('review_base') == m['review_base']):
             return True
         name = f"round-{m['round']}-remote-{digest[:10]}"
         write_json(folder / f'{name}-feedback.json', feedback)
@@ -967,12 +975,17 @@ Return ci_retry_safe false; this final review does not authorize CI reruns.
 """, REVIEW_SCHEMA, True)
         require(git(repo, 'rev-parse', 'HEAD') == m['head'] and clean(repo) and result['tree'] == m['tree'],
                 'Post-CI reviewer changed checkout or returned stale tree')
+        base, _ = self.fetch()
+        if self.repair_main_advance(folder, m, base,
+                f"Final review ({result['verdict']}) against {m['review_base']}:\n{result['findings']}"):
+            return False
         if result['verdict'] == 'changes':
             m.update(phase='building', expected_head=m['head'], merge_parent=None, feedback=result['findings'])
             self.save(folder, m)
             return False
         require(result['verdict'] == 'approve' and result['ui_evidence_valid'] is True, result['findings'])
-        m['remote_review'] = {'head': m['head'], 'feedback_digest': digest, 'result': result}
+        m['remote_review'] = {'head': m['head'], 'review_base': m['review_base'],
+                              'feedback_digest': digest, 'result': result}
         self.save(folder, m)
         return True
 
