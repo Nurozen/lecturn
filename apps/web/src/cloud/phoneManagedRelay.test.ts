@@ -1,7 +1,7 @@
 import { EnvironmentId } from "@lecturn/contracts";
 import { RelayJwtSubjectTokenType, RelayEnvironmentConnectScope } from "@lecturn/contracts/relay";
 import { ManagedRelay, createManagedRelaySession } from "@lecturn/client-runtime/relay";
-import { remoteHttpClientLayer } from "@lecturn/client-runtime/rpc";
+import { makeWebRemoteHttpClientLayer } from "../lib/remoteHttpLayer";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -42,18 +42,34 @@ describe("phone managed relay transport", () => {
         });
         yield* Effect.promise(() => phoneConnectAccount.refresh());
         const requests: Array<{ host: string; path: string; authorized: boolean }> = [];
+        const proofTargets: Array<{ method: string; url: string }> = [];
         const fetcher: typeof fetch = async (input, init) => {
           const url = new URL(String(input));
           const headers = new Headers(init?.headers);
+          expect(url.protocol).toBe("https:");
+          expect(headers.get("accept")).toBe("application/json");
           requests.push({
             host: url.host,
             path: url.pathname,
             authorized: headers.has("authorization"),
           });
           if (url.pathname.endsWith("/dpop-token")) {
+            expect(String(input)).toBe("https://phone-relay.example.test/v1/client/dpop-token");
+            expect(init?.method).toBe("POST");
+            expect(headers.get("content-type")).toBe("application/x-www-form-urlencoded");
+            expect(headers.get("dpop")).toBe("test-proof");
+            expect(headers.has("authorization")).toBe(false);
             const payload = new URLSearchParams(await new Request(input, init).text());
-            expect(payload.get("subject_token") === nativeToken).toBe(true);
-            expect(payload.get("subject_token_type")).toBe(RelayJwtSubjectTokenType);
+            expect(Object.fromEntries(payload)).toEqual({
+              grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+              subject_token: nativeToken,
+              subject_token_type: RelayJwtSubjectTokenType,
+              requested_token_type: "urn:ietf:params:oauth:token-type:access_token",
+              resource: "https://phone-relay.example.test",
+              scope: RelayEnvironmentConnectScope,
+              client_id: "lecturn-web",
+            });
+            expect(proofTargets).toContainEqual({ method: "POST", url: String(input) });
             return Response.json({
               access_token: "test-dpop-access",
               issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
@@ -81,13 +97,17 @@ describe("phone managed relay transport", () => {
           });
         };
         const layer = phoneManagedRelayLayer.pipe(
-          Layer.provide(remoteHttpClientLayer(fetcher)),
+          Layer.provide(makeWebRemoteHttpClientLayer(fetcher)),
           Layer.provide(
             Layer.succeed(
               ManagedRelay.ManagedRelayDpopSigner,
               ManagedRelay.ManagedRelayDpopSigner.of({
                 thumbprint: Effect.succeed("test-thumbprint"),
-                createProof: () => Effect.succeed("test-proof"),
+                createProof: (input) =>
+                  Effect.sync(() => {
+                    proofTargets.push({ method: input.method, url: input.url });
+                    return "test-proof";
+                  }),
               }),
             ),
           ),
