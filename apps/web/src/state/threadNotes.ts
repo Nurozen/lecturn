@@ -18,7 +18,7 @@ import { useEnvironmentQuery } from "./query";
 import { randomUUID } from "../lib/utils";
 import { toastManager } from "../components/ui/toast";
 
-export const threadNoteEnvironment = createThreadNoteEnvironmentAtoms(connectionAtomRuntime);
+const threadNoteEnvironment = createThreadNoteEnvironmentAtoms(connectionAtomRuntime);
 const EMPTY_NOTES: readonly ThreadNoteListItem[] = [];
 export type PendingNote = {
   environmentId: EnvironmentId;
@@ -143,7 +143,7 @@ export function threadNoteToCitation(
     ...(note.comment ? { comment: note.comment } : {}),
   };
 }
-export function threadNoteCreateInput(note: ThreadNoteListItem): ThreadNoteCreateInput {
+function threadNoteCreateInput(note: ThreadNoteListItem): ThreadNoteCreateInput {
   return {
     id: note.id,
     threadId: note.threadId,

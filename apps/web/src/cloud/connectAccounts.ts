@@ -14,7 +14,7 @@ import { primaryCloudPublisherAtom } from "./primaryCloudLinkState";
 import { withPrimaryPublisher } from "./environmentAccountOwnership";
 import { knownConnectAccountsAtom } from "./knownAccounts";
 
-export const ACCOUNT_PROFILES_STORAGE_KEY = "lecturn:account-profiles:v1";
+const ACCOUNT_PROFILES_STORAGE_KEY = "lecturn:account-profiles:v1";
 
 const AccountProfile = Schema.Struct({
   email: Schema.String,

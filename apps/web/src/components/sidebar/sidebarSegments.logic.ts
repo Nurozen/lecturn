@@ -113,9 +113,9 @@ export function flattenSegmentsForNavigation<Thread>(
 }
 
 /** Bars stack at the edges of the scroll viewport, so each has the same fixed height. */
-export const ACCOUNT_BAR_HEIGHT_REM = 2.25;
+const ACCOUNT_BAR_HEIGHT_REM = 2.25;
 /** The rule that ends the last account's segment sticks under the bars. */
-export const NO_ACCOUNT_RULE_HEIGHT_REM = 0.5;
+const NO_ACCOUNT_RULE_HEIGHT_REM = 0.5;
 
 export interface SegmentStickyLayout {
   /** Where the segment's bar, or rule, sticks. No `bottom`: it scrolls away below. */

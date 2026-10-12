@@ -6,10 +6,10 @@ import { getLocalStorageItem, setLocalStorageItem } from "../hooks/useLocalStora
 import type { ConnectAccountProfiles } from "./connectAccounts";
 
 /** The account last chosen on each surface that asks "which account?". */
-export const ACCOUNT_PICKER_STORAGE_KEY = "lecturn:account-picker:v1";
+const ACCOUNT_PICKER_STORAGE_KEY = "lecturn:account-picker:v1";
 export const AccountPickerLastUsed = Schema.Record(Schema.String, Schema.String);
 export type AccountPickerLastUsed = typeof AccountPickerLastUsed.Type;
-export const NO_ACCOUNT_PICKER_LAST_USED: AccountPickerLastUsed = {};
+const NO_ACCOUNT_PICKER_LAST_USED: AccountPickerLastUsed = {};
 
 /** Billing and Teams share one surface, so their tabs show the same account. */
 export type AccountPickerSurface =
@@ -120,15 +120,6 @@ export function selectionInScope(
   return selection !== null && selection.scope === scope ? selection.accountId : null;
 }
 
-/** Drops an account from the last-used choices. The same record when it was in none. */
-export function withoutPickerAccount(
-  lastUsed: AccountPickerLastUsed,
-  accountId: string,
-): AccountPickerLastUsed {
-  const kept = Object.entries(lastUsed).filter(([, usedId]) => usedId !== accountId);
-  return kept.length === Object.keys(lastUsed).length ? lastUsed : Object.fromEntries(kept);
-}
-
 export function readAccountPickerLastUsed(): AccountPickerLastUsed {
   try {
     return (
@@ -160,11 +151,6 @@ export function rememberAccountPickerChoice(
   storeAccountPickerLastUsed((lastUsed) =>
     lastUsed[surface] === accountId ? lastUsed : { ...lastUsed, [surface]: accountId },
   );
-}
-
-/** Call when an account's data is removed, so no picker defaults to it afterwards. */
-export function forgetAccountPickerAccount(accountId: string): void {
-  storeAccountPickerLastUsed((lastUsed) => withoutPickerAccount(lastUsed, accountId));
 }
 
 const BILLING_ACCOUNT_STORAGE_KEY = "lecturn-connect-billing-account";

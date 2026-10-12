@@ -78,7 +78,7 @@ export const primaryCloudPublisherAtom = Atom.make((get) => {
   return null;
 }).pipe(Atom.withLabel("primary-cloud-publisher"));
 
-export function refreshPrimaryCloudLinkState(target: CloudLinkTarget | null): void {
+function refreshPrimaryCloudLinkState(target: CloudLinkTarget | null): void {
   if (target) {
     appAtomRegistry.refresh(primaryCloudLinkStateAtom(targetKey(target)));
   }

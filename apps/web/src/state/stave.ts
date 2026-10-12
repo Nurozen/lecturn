@@ -34,7 +34,7 @@ export const staveStatus = createEnvironmentRpcQueryAtomFamily(connectionAtomRun
 });
 
 /** Per-space drift (ahead/behind/dirty) and memory freshness. */
-export const staveSpaceStatus = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+const staveSpaceStatus = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
   label: "environment-data:stave:space-status",
   tag: WS_METHODS.staveSpaceStatus,
   staleTimeMs: 15_000,

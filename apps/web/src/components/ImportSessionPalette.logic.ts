@@ -161,9 +161,7 @@ export function externalSessionSearchTerms(
   return [session.title, session.firstPrompt ?? "", session.gitBranch ?? ""];
 }
 
-export function externalSessionOriginLabel(
-  origin: ExternalSessionOrigin | undefined,
-): string | null {
+function externalSessionOriginLabel(origin: ExternalSessionOrigin | undefined): string | null {
   switch (origin) {
     case "cli":
       return "CLI";

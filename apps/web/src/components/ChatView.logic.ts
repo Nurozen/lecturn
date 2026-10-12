@@ -894,7 +894,7 @@ export function getStartedThreadModelChangeBlockReason(input: {
 }
 
 /** The product an imported session was made in, as users know it. */
-export function importSourceLabel(driverKind: ProviderDriverKind): string {
+function importSourceLabel(driverKind: ProviderDriverKind): string {
   return driverKind === "claudeAgent"
     ? "Claude Code"
     : (PROVIDER_DISPLAY_NAMES[driverKind] ?? driverKind);

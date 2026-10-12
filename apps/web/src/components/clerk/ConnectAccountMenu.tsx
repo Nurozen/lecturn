@@ -32,7 +32,7 @@ import { useConnectSignOut } from "./useConnectSignOut";
 import { useConnectSignIn } from "./useConnectSignIn";
 
 /** Settings search lands here: the hash opens the menu and the id takes focus. */
-export const CONNECT_ACCOUNT_MENU_TARGET_ID = "connect-accounts";
+const CONNECT_ACCOUNT_MENU_TARGET_ID = "connect-accounts";
 
 function AccountAvatar({
   row,

@@ -1,4 +1,1 @@
-export {
-  isTransportConnectionErrorMessage,
-  sanitizeThreadErrorMessage,
-} from "@lecturn/client-runtime/errors";
+export { sanitizeThreadErrorMessage } from "@lecturn/client-runtime/errors";

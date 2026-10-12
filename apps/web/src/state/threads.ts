@@ -34,7 +34,7 @@ export const threadEnvironment = {
   setRuntimeMode: withAndroidAccess(commands.setRuntimeMode),
   startTurn: withAndroidAccess(commands.startTurn),
 };
-export const environmentThreads = createEnvironmentThreadStateAtoms(connectionAtomRuntime);
+const environmentThreads = createEnvironmentThreadStateAtoms(connectionAtomRuntime);
 export const environmentThreadDetails = createEnvironmentThreadDetailAtoms(
   environmentThreads.stateAtom,
 );

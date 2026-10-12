@@ -1,6 +1,8 @@
 # Project settings
 
 Open **Settings → Projects** and select a project to change its preferences.
+With the legacy sidebar enabled, right-click a project and choose **Project settings**.
+When using multiple Connect accounts, the settings apply to that account's project group.
 
 ## Project icons
 

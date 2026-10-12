@@ -1,0 +1,81 @@
+---
+interface Props {
+  edition: "Stable" | "Nightly";
+}
+
+const { edition } = Astro.props;
+---
+
+<div class:list={["retro-box", { nightly: edition === "Nightly" }]} role="img" aria-label={`Lecturn ${edition} in a navy and gold software box.`}>
+  <span class="box-spine" aria-hidden="true">LECTURN</span>
+  <div class="box-front" aria-hidden="true">
+    <span class="box-name">LECTURN</span>
+    <span class="box-edition">{edition} edition</span>
+    <img src="/lecturn-mark.svg" alt="" width="96" height="96" />
+    <span class="box-year">95</span>
+    <span class="box-caption">ALL YOUR AGENTS.<br />ONE LITTLE WINDOW.</span>
+  </div>
+</div>
+
+<style>
+  .retro-box {
+    position: relative;
+    display: flex;
+    width: 100%;
+    aspect-ratio: 4 / 5;
+    padding: 4% 0 4% 9%;
+    color: #f7e0a7;
+    font-family: Tahoma, Verdana, sans-serif;
+  }
+  .box-front {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12% 5% 9%;
+    border: 2px solid #c89954;
+    background: linear-gradient(145deg, #193c4f, #061522 70%);
+    box-shadow: inset 0 0 0 3px #061522, 4px 4px 0 #000;
+    transform: skewY(-3deg);
+  }
+  .box-spine {
+    position: absolute;
+    top: 6%;
+    bottom: 5%;
+    left: 0;
+    width: 10%;
+    padding-top: 18%;
+    border: 2px solid #c89954;
+    background: #0b2637;
+    writing-mode: vertical-rl;
+    font-size: clamp(7px, 1vw, 12px);
+    font-weight: 700;
+    letter-spacing: 2px;
+    transform: skewY(15deg);
+  }
+  .box-name {
+    font-size: clamp(12px, 2vw, 21px);
+    font-weight: 900;
+    letter-spacing: 1px;
+  }
+  .box-edition {
+    font-size: clamp(8px, 1vw, 11px);
+  }
+  .box-front img {
+    width: 65%;
+    height: auto;
+  }
+  .box-year {
+    align-self: flex-end;
+    font: italic 900 32px/1 Georgia, serif;
+  }
+  .box-caption {
+    font: 700 7px/1.4 "Courier New", monospace;
+    text-align: center;
+  }
+  .nightly .box-front {
+    background: linear-gradient(145deg, #384968, #061522 70%);
+    border-color: #adbde5;
+  }
+</style>

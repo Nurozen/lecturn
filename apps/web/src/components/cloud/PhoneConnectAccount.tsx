@@ -7,7 +7,7 @@ import { hasPhoneConnectAccount } from "../../lib/androidHostAccess";
 import { Button } from "../ui/button";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "../ui/sidebar";
 
-export function phoneConnectLabel({ status, error }: PhoneConnectSnapshot): string {
+function phoneConnectLabel({ status, error }: PhoneConnectSnapshot): string {
   if (!status) return error ? "Status unavailable" : "Checking account…";
   if (!status.configured) return "App update needed";
   if (status.state === "loading") return "Checking account…";

@@ -49,7 +49,7 @@ function assertActive(bound: ActiveAccountClerk, accountId: string, when: string
 }
 
 /** How long a caller waits, including earlier turns, before receiving a retryable error. */
-export const ACTIVE_ACCOUNT_TIMEOUT_MS = 15_000;
+const ACTIVE_ACCOUNT_TIMEOUT_MS = 15_000;
 
 /**
  * Serializes Clerk mutations. A timeout reports failure to the caller, but

@@ -138,7 +138,7 @@ const ProjectIconPickerDialog = lazy(() =>
   })),
 );
 
-export const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
+const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
   repository: "Group by repository",
   repository_path: "Group by repository path",
   separate: "Keep separate",
@@ -289,7 +289,7 @@ function ProjectSettingsBreadcrumb({ projectKey }: { projectKey: string }) {
   );
 }
 
-export function ProjectSettingsPanel({ projectKey }: { projectKey: string }) {
+function ProjectSettingsPanel({ projectKey }: { projectKey: string }) {
   const groups = useSettingsProjectGroups(projectKey);
   const navigate = useNavigate();
 
