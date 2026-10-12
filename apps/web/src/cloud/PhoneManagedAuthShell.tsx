@@ -48,9 +48,15 @@ export default function PhoneManagedAuthShell({
         needsSignIn: known.accountIds,
         synced: true,
       });
-      // A failed refresh is not sign-out. Keep the account's saved connections
-      // and drafts until it recovers or the user explicitly removes it.
-      if (status.state === "error") return;
+      // Restoring or refreshing a session is not sign-out. Keep saved data
+      // until native confirms the session ended or a different account signs in.
+      if (
+        status.state === "loading" ||
+        status.state === "error" ||
+        status.state === "authorizing" ||
+        !status.configured
+      )
+        return;
       transition = transition
         .catch(() => undefined)
         .then(async () => {
@@ -64,7 +70,9 @@ export default function PhoneManagedAuthShell({
               { accountId: id },
               { reportFailure: false, reportDefect: false },
             );
+            if (disposed || version !== generation) return;
             const reset = await resetRelayTokenCache(id);
+            if (disposed || version !== generation) return;
             if (result._tag !== "Success" || reset._tag !== "Success") {
               phoneConnectAccount.setRuntimeError(
                 "Could not clear the previous account's local connections. Refresh status to retry.",
@@ -72,6 +80,7 @@ export default function PhoneManagedAuthShell({
               return;
             }
             const { clearEnvironmentOwnedState } = await import("../environmentOwnedState");
+            if (disposed || version !== generation) return;
             result.value.forEach(clearEnvironmentOwnedState);
           }
           if (disposed || version !== generation) return;
@@ -120,16 +129,22 @@ export default function PhoneManagedAuthShell({
     const unsubscribe = phoneConnectAccount.subscribe(sync);
     sync();
     void phoneConnectAccount.refresh();
+    // Native AuthActivity dismissal may leave WebView focus/visibility unchanged.
+    const refreshNative = () => {
+      void phoneConnectAccount.refresh();
+    };
     const refresh = () => {
-      if (document.visibilityState === "visible") void phoneConnectAccount.refresh();
+      if (document.visibilityState === "visible") refreshNative();
     };
     document.addEventListener("visibilitychange", refresh);
     window.addEventListener("focus", refresh);
+    window.addEventListener("lecturn:connect-changed", refreshNative);
     return () => {
       disposed = true;
       unsubscribe();
       document.removeEventListener("visibilitychange", refresh);
       window.removeEventListener("focus", refresh);
+      window.removeEventListener("lecturn:connect-changed", refreshNative);
       setManagedRelayPrimaryAccount(appAtomRegistry, null);
       syncManagedRelaySessions(appAtomRegistry, []);
     };

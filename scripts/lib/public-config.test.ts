@@ -17,9 +17,7 @@ describe("Android host packaging configuration", () => {
     LECTURN_ANDROID_HOST_BUILD: "1",
     LECTURN_CLERK_PUBLISHABLE_KEY: "pk_live_example",
     LECTURN_CLERK_JWT_TEMPLATE: "relay-template",
-    LECTURN_CLERK_CLI_OAUTH_CLIENT_ID: "oauth-client",
     LECTURN_RELAY_URL: "https://relay.example.test",
-    LECTURN_HOSTED_APP_URL: "https://app.example.test",
   };
   it.each(Object.keys(configured).filter((name) => name !== "LECTURN_ANDROID_HOST_BUILD"))(
     "rejects phone packaging missing %s instead of silently hiding Connect",
@@ -30,16 +28,14 @@ describe("Android host packaging configuration", () => {
     expect(() => assertAndroidHostPublicConfig(configured)).not.toThrow();
     expect(() => assertAndroidHostPublicConfig({ NODE_ENV: "production" })).not.toThrow();
   });
-  it.each([
-    "http://app.example.test",
-    "https://user:secret@app.example.test",
-    "https://app.example.test/?token=secret",
-    "not-a-url",
-  ])("rejects unsafe hosted OAuth destinations without exposing their values", (url) => {
-    const build = () =>
-      assertAndroidHostPublicConfig({ ...configured, LECTURN_HOSTED_APP_URL: url });
-    expect(build).toThrow("valid HTTPS LECTURN_HOSTED_APP_URL");
-    expect(build).not.toThrow(url);
+  it("does not require a CLI browser callback for native sign-in", () => {
+    expect(() =>
+      assertAndroidHostPublicConfig({
+        ...configured,
+        LECTURN_CLERK_CLI_OAUTH_CLIENT_ID: "",
+        LECTURN_HOSTED_APP_URL: "",
+      }),
+    ).not.toThrow();
   });
 });
 

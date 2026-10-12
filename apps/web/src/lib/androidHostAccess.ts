@@ -16,8 +16,13 @@ export interface AndroidChatWidgetSnapshot {
 
 export interface AndroidHost {
   readonly protocolVersion: number;
-  /** Native host explicitly supports the server-owned phone Connect account. */
+  /** Retained for older Android hosts; nativeConnect identifies SDK-backed auth. */
   readonly connectAccount?: boolean;
+  readonly nativeConnect?: boolean;
+  getConnectState?(): Promise<unknown>;
+  openConnectSignIn?(): Promise<unknown>;
+  signOutConnect?(): Promise<unknown>;
+  getConnectToken?(accountId: string): Promise<unknown>;
   getAccessState(): Promise<AndroidAccessState>;
   requestFullAccess(threadId: string): Promise<AndroidAccessState>;
   openDeviceAccess(): Promise<AndroidAccessState>;
@@ -81,11 +86,26 @@ export async function requireAndroidFullAccess(
   }
 }
 
-/** Chosen before React mounts; never infer phone auth from a user agent or loopback URL. */
+/** An older Android host must show update guidance rather than select web Clerk. */
 export function hasPhoneConnectAccount(): boolean {
+  return typeof window !== "undefined" && window.symbaHost !== undefined;
+}
+
+export type NativeConnectHost = AndroidHost &
+  Required<
+    Pick<
+      AndroidHost,
+      "getConnectState" | "openConnectSignIn" | "signOutConnect" | "getConnectToken"
+    >
+  >;
+
+export function hasNativeConnect(host: AndroidHost | undefined): host is NativeConnectHost {
   return (
-    typeof window !== "undefined" &&
-    window.symbaHost?.protocolVersion === 2 &&
-    window.symbaHost.connectAccount === true
+    host?.protocolVersion === 2 &&
+    host.nativeConnect === true &&
+    typeof host.getConnectState === "function" &&
+    typeof host.openConnectSignIn === "function" &&
+    typeof host.signOutConnect === "function" &&
+    typeof host.getConnectToken === "function"
   );
 }

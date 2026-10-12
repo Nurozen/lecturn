@@ -1,5 +1,5 @@
 import { EnvironmentId } from "@lecturn/contracts";
-import { RelayAccessTokenType, RelayEnvironmentConnectScope } from "@lecturn/contracts/relay";
+import { RelayJwtSubjectTokenType, RelayEnvironmentConnectScope } from "@lecturn/contracts/relay";
 import { ManagedRelay, createManagedRelaySession } from "@lecturn/client-runtime/relay";
 import { remoteHttpClientLayer } from "@lecturn/client-runtime/rpc";
 import { it } from "@effect/vitest";
@@ -8,6 +8,8 @@ import * as Layer from "effect/Layer";
 import { afterEach, describe, expect, vi } from "vite-plus/test";
 import { phoneConnectAccount } from "./phoneConnectAccount";
 import { phoneManagedRelayLayer } from "./phoneManagedRelay";
+
+const nativeToken = `eyJhbGciOiJIUzI1NiJ9.${btoa(JSON.stringify({ sub: "phone-account" }))}.synthetic`;
 
 const endpoint = {
   httpBaseUrl: "https://desktop.example.test/",
@@ -18,23 +20,26 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("phone managed relay transport", () => {
   it.effect(
-    "uses server account credentials and runtime configuration for discovery and remote bootstrap",
+    "uses native SDK JWT credentials and runtime configuration for discovery and remote bootstrap",
     () =>
       Effect.gen(function* () {
         let configured = false;
-        vi.stubGlobal(
-          "fetch",
-          vi.fn<typeof fetch>(async (input) => {
-            if (String(input).endsWith("/token"))
-              return Response.json({ token: "opaque-phone-test-credential" });
-            return Response.json({
+        vi.stubGlobal("window", {
+          symbaHost: {
+            protocolVersion: 2,
+            connectAccount: true,
+            nativeConnect: true,
+            getConnectState: async () => ({
               configured,
               state: configured ? "signed-in" : "signed-out",
               account: configured ? { id: "phone-account" } : null,
               relayUrl: configured ? "https://phone-relay.example.test" : null,
-            });
-          }),
-        );
+            }),
+            getConnectToken: async () => ({ token: nativeToken }),
+            openConnectSignIn: vi.fn(),
+            signOutConnect: vi.fn(),
+          },
+        });
         yield* Effect.promise(() => phoneConnectAccount.refresh());
         const requests: Array<{ host: string; path: string; authorized: boolean }> = [];
         const fetcher: typeof fetch = async (input, init) => {
@@ -47,8 +52,8 @@ describe("phone managed relay transport", () => {
           });
           if (url.pathname.endsWith("/dpop-token")) {
             const payload = new URLSearchParams(await new Request(input, init).text());
-            expect(payload.get("subject_token") === "opaque-phone-test-credential").toBe(true);
-            expect(payload.get("subject_token_type")).toBe(RelayAccessTokenType);
+            expect(payload.get("subject_token") === nativeToken).toBe(true);
+            expect(payload.get("subject_token_type")).toBe(RelayJwtSubjectTokenType);
             return Response.json({
               access_token: "test-dpop-access",
               issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
@@ -89,7 +94,7 @@ describe("phone managed relay transport", () => {
         );
         yield* Effect.gen(function* () {
           const client = yield* ManagedRelay.ManagedRelayClient;
-          // Acquired while disabled; server configuration arrives after pairing.
+          // Acquired while disabled; native configuration arrives after initialization.
           configured = true;
           yield* Effect.promise(() => phoneConnectAccount.refresh());
           const session = createManagedRelaySession({

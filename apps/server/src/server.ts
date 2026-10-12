@@ -1,5 +1,3 @@
-import * as ConnectAccount from "./cloud/ConnectAccount.ts";
-import { connectAccountHttpApiLayer } from "./cloud/connectAccountHttp.ts";
 import * as ContextualLayers from "./extensions/ContextualLayers.ts";
 import * as DecisionWorker from "./threadDecisions/DecisionWorker.ts";
 import * as DecisionIngestion from "./threadDecisions/DecisionIngestion.ts";
@@ -771,7 +769,6 @@ export const makeRoutesLayer = Layer.mergeAll(
     HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
       Layer.provide(authHttpApiLayer),
       Layer.provide(connectHttpApiLayer),
-      Layer.provide(connectAccountHttpApiLayer.pipe(Layer.provide(ConnectAccount.layer))),
       Layer.provide(orchestrationHttpApiLayer),
       Layer.provide(pullRequestHttpApiLayer),
       Layer.provide(serverEnvironmentHttpApiLayer),

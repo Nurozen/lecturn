@@ -11,7 +11,8 @@ const test = vi.hoisted(() => {
   vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" }));
   return {
     status: vi.fn(),
-    token: vi.fn(async () => ({ token: "opaque-test-credential" })),
+    begin: vi.fn(),
+    token: vi.fn(async () => ({ token: "synthetic.session.jwt" })),
     remove: vi.fn(),
     reset: vi.fn(),
     clear: vi.fn(),
@@ -28,16 +29,20 @@ vi.mock("./phoneConnectAccount", async (original) => {
   };
   return {
     ...module,
-    phoneConnectAccount: module.createPhoneConnectAccount({
-      status: test.status,
-      token: test.token,
-      begin: async () => {
-        throw new Error("unused");
-      },
-      complete: async () => signedOut,
-      cancel: async () => signedOut,
-      logout: async () => signedOut,
-    }),
+    phoneConnectAccount: module.createPhoneConnectAccount(
+      module.createPhoneConnectApi({
+        protocolVersion: 2,
+        connectAccount: true,
+        nativeConnect: true,
+        getAccessState: vi.fn(),
+        requestFullAccess: vi.fn(),
+        openDeviceAccess: vi.fn(),
+        getConnectState: test.status,
+        getConnectToken: test.token,
+        openConnectSignIn: test.begin,
+        signOutConnect: async () => signedOut,
+      }),
+    ),
   };
 });
 vi.mock("../rpc/atomRegistry", async () => {
@@ -72,6 +77,8 @@ const signedIn: PhoneConnectStatus = {
   account: { id: "phone-account", email: "phone@example.test" },
   relayUrl: "https://relay.example.test",
 };
+const signedOut: PhoneConnectStatus = { ...signedIn, state: "signed-out", account: null };
+const authorizing: PhoneConnectStatus = { ...signedOut, state: "authorizing" };
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -82,11 +89,14 @@ function deferred<T>() {
 let renderer: ReactTestRenderer;
 beforeEach(async () => {
   await phoneConnectAccount.logout();
-  test.status.mockResolvedValue(signedIn);
+  test.status.mockReset().mockResolvedValue(signedIn);
+  test.begin.mockReset().mockResolvedValue(authorizing);
+  Object.assign(document, { visibilityState: "visible" });
   test.remove.mockReset().mockResolvedValue({ _tag: "Success", value: ["removed-environment"] });
   test.reset.mockReset().mockResolvedValue({ _tag: "Success", value: undefined });
-  test.clear.mockClear();
-  test.persist.mockClear();
+  test.clear.mockReset();
+  test.persist.mockReset();
+  test.token.mockClear();
   appAtomRegistry.set(knownConnectAccountsAtom, { accountIds: [], needsSignIn: [], synced: false });
 });
 afterEach(async () => {
@@ -102,6 +112,93 @@ const mount = () =>
   });
 
 describe("phone account runtime binding", () => {
+  it.each([null, signedIn.account])(
+    "preserves cached account data through loading with account %s and native restoration",
+    async (account) => {
+      const saved = {
+        accounts: { accountIds: ["phone-account"] },
+        connections: new Map([["removed-environment", { accountId: "phone-account" }]]),
+        drafts: new Map([["removed-environment", "synthetic unsent draft"]]),
+        cache: new Map([["phone-account", "synthetic cached relay entry"]]),
+      };
+      const original = structuredClone(saved);
+      test.persist.mockImplementation((_key, value) => {
+        saved.accounts = value;
+      });
+      test.remove.mockImplementation(async () => {
+        const ids = [...saved.connections.keys()];
+        saved.connections.clear();
+        return { _tag: "Success", value: ids };
+      });
+      test.clear.mockImplementation((id: string) => saved.drafts.delete(id));
+      test.reset.mockImplementation(async (id: string) => {
+        saved.cache.delete(id);
+        return { _tag: "Success", value: undefined };
+      });
+      // A cached signed-in snapshot and saved account survive native SDK restart.
+      await phoneConnectAccount.refresh();
+      appAtomRegistry.set(knownConnectAccountsAtom, {
+        accountIds: saved.accounts.accountIds,
+        needsSignIn: [],
+        synced: false,
+      });
+      await mount();
+      expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("phone-account");
+      test.status.mockResolvedValue({ ...signedIn, state: "loading", account });
+      await act(async () => {
+        window.dispatchEvent(new Event("lecturn:connect-changed"));
+      });
+      expect(phoneConnectAccount.getSnapshot().status?.state).toBe("loading");
+      expect(appAtomRegistry.get(managedRelaySessionsAtom).size).toBe(0);
+      expect(await phoneConnectAccount.readToken("phone-account")).toBeNull();
+      expect(test.token).not.toHaveBeenCalled();
+      expect(appAtomRegistry.get(knownConnectAccountsAtom).accountIds).toEqual(["phone-account"]);
+      expect(saved).toEqual(original);
+      expect(test.remove).not.toHaveBeenCalled();
+      expect(test.clear).not.toHaveBeenCalled();
+      expect(test.reset).not.toHaveBeenCalled();
+
+      test.status.mockResolvedValue(signedIn);
+      await act(async () => {
+        window.dispatchEvent(new Event("lecturn:connect-changed"));
+      });
+      expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("phone-account");
+      expect(appAtomRegistry.get(knownConnectAccountsAtom).needsSignIn).toEqual([]);
+      expect(saved).toEqual(original);
+
+      // Prove this same fixture actually loses data on explicit sign-out.
+      await act(async () => phoneConnectAccount.logout());
+      expect(saved.accounts.accountIds).toEqual([]);
+      expect(saved.connections.size).toBe(0);
+      expect(saved.drafts.size).toBe(0);
+      expect(saved.cache.size).toBe(0);
+    },
+  );
+
+  it("keeps persisted accounts without installing credentials on an initially loading SDK", async () => {
+    test.status.mockResolvedValue({ ...signedOut, state: "loading" });
+    await phoneConnectAccount.refresh();
+    appAtomRegistry.set(knownConnectAccountsAtom, {
+      accountIds: ["phone-account"],
+      needsSignIn: [],
+      synced: false,
+    });
+    await mount();
+    expect(appAtomRegistry.get(managedRelaySessionsAtom).size).toBe(0);
+    expect(appAtomRegistry.get(knownConnectAccountsAtom).accountIds).toEqual(["phone-account"]);
+    expect(test.persist).not.toHaveBeenCalled();
+    expect(test.remove).not.toHaveBeenCalled();
+    expect(test.clear).not.toHaveBeenCalled();
+    expect(test.reset).not.toHaveBeenCalled();
+    expect(test.token).not.toHaveBeenCalled();
+    test.status.mockResolvedValue(signedIn);
+    await act(async () => {
+      window.dispatchEvent(new Event("lecturn:connect-changed"));
+    });
+    expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("phone-account");
+    expect(test.remove).not.toHaveBeenCalled();
+  });
+
   it("suspends credentials on refresh failure without deleting saved connections or drafts", async () => {
     await mount();
     test.status.mockResolvedValue({ ...signedIn, state: "error", error: "Refresh failed" });
@@ -123,8 +220,124 @@ describe("phone account runtime binding", () => {
     expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("phone-account");
     expect(test.remove).not.toHaveBeenCalled();
   });
+  it.each([
+    ["focus", "visible"],
+    ["visibilitychange", "visible"],
+    ["lecturn:connect-changed", "visible"],
+    ["lecturn:connect-changed", "hidden"],
+  ])(
+    "automatically settles native sign-in and cancellation on %s while %s",
+    async (event, visibilityState) => {
+      test.status.mockResolvedValue(signedOut);
+      await mount();
+      await act(async () => phoneConnectAccount.begin());
+      expect(phoneConnectAccount.getSnapshot().status?.state).toBe("authorizing");
+      expect(appAtomRegistry.get(managedRelaySessionsAtom).size).toBe(0);
+      Object.assign(document, { visibilityState });
+      test.status.mockResolvedValue(signedIn);
+      test.status.mockClear();
+      await act(async () => {
+        (event === "visibilitychange" ? document : window).dispatchEvent(new Event(event));
+      });
+      expect(test.status).toHaveBeenCalledOnce();
+      expect(phoneConnectAccount.getSnapshot().status?.state).toBe("signed-in");
+      expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("phone-account");
+      expect(appAtomRegistry.get(knownConnectAccountsAtom)).toEqual({
+        accountIds: ["phone-account"],
+        needsSignIn: [],
+        synced: true,
+      });
+      expect(appAtomRegistry.get(connectAccountProfilesAtom).get("phone-account")?.email).toBe(
+        "phone@example.test",
+      );
+      await act(async () => phoneConnectAccount.logout());
+      await act(async () => phoneConnectAccount.begin());
+      expect(phoneConnectAccount.getSnapshot().status?.state).toBe("authorizing");
+      test.status.mockResolvedValue(signedOut);
+      test.status.mockClear();
+      await act(async () => {
+        (event === "visibilitychange" ? document : window).dispatchEvent(new Event(event));
+      });
+      expect(test.status).toHaveBeenCalledOnce();
+      expect(phoneConnectAccount.getSnapshot().status?.state).toBe("signed-out");
+      expect(appAtomRegistry.get(managedRelaySessionsAtom).size).toBe(0);
+      expect(appAtomRegistry.get(knownConnectAccountsAtom).accountIds).toEqual([]);
+      expect(appAtomRegistry.get(connectAccountProfilesAtom).size).toBe(0);
+    },
+  );
+
+  it("queues native return during the opening receipt without concurrent mutations", async () => {
+    test.status.mockResolvedValue(signedOut);
+    await mount();
+    const opening = deferred<PhoneConnectStatus>();
+    test.begin.mockReturnValueOnce(opening.promise);
+    await act(async () => {
+      const begin = phoneConnectAccount.begin();
+      await phoneConnectAccount.begin();
+      test.status.mockClear().mockResolvedValue(signedIn);
+      window.dispatchEvent(new Event("lecturn:connect-changed"));
+      expect(phoneConnectAccount.getSnapshot().busy).toBe(true);
+      expect(test.status).not.toHaveBeenCalled();
+      opening.resolve(authorizing);
+      await begin;
+    });
+    expect(test.begin).toHaveBeenCalledOnce();
+    expect(test.status).toHaveBeenCalledOnce();
+    expect(phoneConnectAccount.getSnapshot()).toMatchObject({ busy: false, status: signedIn });
+    expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("phone-account");
+  });
+
+  it("queues native return behind an earlier status read without concurrent reads", async () => {
+    const earlier = deferred<PhoneConnectStatus>();
+    test.status.mockReturnValueOnce(earlier.promise);
+    await mount();
+    expect(test.status).toHaveBeenCalledOnce();
+    test.status.mockResolvedValue(signedIn);
+    await act(async () => {
+      window.dispatchEvent(new Event("lecturn:connect-changed"));
+      window.dispatchEvent(new Event("lecturn:connect-changed"));
+      expect(test.status).toHaveBeenCalledOnce();
+      earlier.resolve(authorizing);
+      await earlier.promise;
+    });
+    expect(test.status).toHaveBeenCalledTimes(2);
+    expect(phoneConnectAccount.getSnapshot().status?.state).toBe("signed-in");
+    expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("phone-account");
+    expect(appAtomRegistry.get(knownConnectAccountsAtom).accountIds).toEqual(["phone-account"]);
+  });
+
+  it("stops lifecycle refreshes and relay activation after unmount", async () => {
+    await mount();
+    await act(async () => renderer.unmount());
+    test.status.mockClear();
+    await act(async () => {
+      window.dispatchEvent(new Event("lecturn:connect-changed"));
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(test.status).not.toHaveBeenCalled();
+    expect(appAtomRegistry.get(managedRelaySessionsAtom).size).toBe(0);
+  });
+
+  it("preserves saved connections during native sign-in and transport errors", async () => {
+    await mount();
+    test.status.mockResolvedValue({ ...signedIn, state: "authorizing", account: null });
+    await act(async () => phoneConnectAccount.refresh());
+    expect(appAtomRegistry.get(managedRelaySessionsAtom).size).toBe(0);
+    expect(test.remove).not.toHaveBeenCalled();
+    expect(test.clear).not.toHaveBeenCalled();
+    test.status.mockRejectedValueOnce(new Error("private detail"));
+    await act(async () => phoneConnectAccount.refresh());
+    expect(test.remove).not.toHaveBeenCalled();
+    expect(appAtomRegistry.get(knownConnectAccountsAtom).accountIds).toEqual(["phone-account"]);
+    test.status.mockResolvedValue(signedIn);
+    await act(async () => phoneConnectAccount.refresh());
+    expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("phone-account");
+    expect(test.remove).not.toHaveBeenCalled();
+  });
+
   it.effect(
-    "binds identity, profile and opaque token into existing managed sessions without refreshing their identity",
+    "binds identity, profile and native token into existing managed sessions without refreshing their identity",
     () =>
       Effect.gen(function* () {
         const session = yield* Effect.promise(async () => {
@@ -208,7 +421,7 @@ describe("phone account runtime binding", () => {
         const session = appAtomRegistry.get(managedRelaySessionAtom)!;
         return session;
       });
-      expect(yield* session.readClerkToken()).toBe("opaque-test-credential");
+      expect(yield* session.readClerkToken()).toBe("synthetic.session.jwt");
     }),
   );
 
@@ -218,10 +431,11 @@ describe("phone account runtime binding", () => {
       needsSignIn: [],
       synced: true,
     });
-    test.remove.mockResolvedValueOnce({ _tag: "Failure" });
+    test.remove.mockResolvedValue({ _tag: "Failure" });
     await mount();
     expect(appAtomRegistry.get(managedRelaySessionsAtom).size).toBe(0);
     expect(phoneConnectAccount.getSnapshot().error).toContain("previous account");
+    test.remove.mockResolvedValue({ _tag: "Success", value: ["removed-environment"] });
     await act(async () => {
       await phoneConnectAccount.refresh();
     });
