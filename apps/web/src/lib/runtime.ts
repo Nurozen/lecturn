@@ -3,7 +3,7 @@ import type * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Socket from "effect/unstable/socket/Socket";
 
-import { remoteHttpClientLayer } from "@lecturn/client-runtime/rpc";
+import { makeWebRemoteHttpClientLayer } from "./remoteHttpLayer";
 import { makeRelayClientTracingLayer } from "@lecturn/shared/relayTracing";
 import * as PrimaryEnvironmentHttpClient from "../environments/primary/httpClient";
 import { primaryEnvironmentHttpLayer } from "../environments/primary/httpLayer";
@@ -16,7 +16,9 @@ function configuredRelayUrl(): string {
   return resolveCloudPublicConfig().relayUrl ?? "http://relay.invalid";
 }
 
-const httpClientLayer = remoteHttpClientLayer((input, init) => globalThis.fetch(input, init));
+const httpClientLayer = makeWebRemoteHttpClientLayer((input, init) =>
+  globalThis.fetch(input, init),
+);
 const relayTracingLayer = makeRelayClientTracingLayer(resolveRelayTracingConfig(), {
   serviceName: "lecturn-web-relay-client",
   serviceVersion: import.meta.env.APP_VERSION,

@@ -37,6 +37,8 @@ import java.util.concurrent.Executors;
 public final class MainActivity extends Activity implements HostController.Listener {
     private static final int FILES = 1, SAVE = 2, NOTIFICATIONS = 3;
     private HostController host;
+    private NativeConnect connect;
+    private Runnable unsubscribeConnect;
     private WebView web;
     private BlobDownloads blobDownloads;
     private HostSurface surface;
@@ -125,6 +127,7 @@ public final class MainActivity extends Activity implements HostController.Liste
         }
     };
     private final AccessRequests accessRequests = new AccessRequests();
+    private final ConnectRequests connectRequests = new ConnectRequests();
     private AccessRequests.Pending accessReview;
     private void clearAccessRequests() {
         accessRequests.drain(); accessReview = null; accessDialog.close();
@@ -139,6 +142,7 @@ public final class MainActivity extends Activity implements HostController.Liste
         }
         if (Build.VERSION.SDK_INT >= 31) getWindow().setHideOverlayWindows(true);
         host = ((HostApplication) getApplication()).controller;
+        connect = ((HostApplication) getApplication()).connect;
         openTask = RuntimeService.OPEN_TASK.equals(getIntent().getAction());
         floatRequested = FLOAT_CHAT.equals(getIntent().getAction()) || COMPOSE.equals(getIntent().getAction());
         composeRequested = COMPOSE.equals(getIntent().getAction());
@@ -167,6 +171,7 @@ public final class MainActivity extends Activity implements HostController.Liste
             lastUiUrl = saved.getString("lastUiUrl", OriginPolicy.ORIGIN);
         if (Build.VERSION.SDK_INT >= 33) getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
                 android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::goBack);
+        unsubscribeConnect = connect.subscribe(this::notifyConnectChanged);
     }
 
     private void configureWebView() {
@@ -192,6 +197,7 @@ public final class MainActivity extends Activity implements HostController.Liste
             }
             @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 clearAccessRequests();
+                connectRequests.clear();
                 clearWidget();
                 pageEpoch++; sessionBusy = false; sessionNeeded = true; pairing.authenticated = false;
                 main.removeCallbacks(checkPairing);
@@ -276,6 +282,14 @@ public final class MainActivity extends Activity implements HostController.Liste
                     if (!Integer.valueOf(2).equals(request.opt("protocolVersion")) || !AccessProtocol.validId(request.opt("requestId"))) return;
                     String id = request.getString("requestId");
                     String method = request.optString("method");
+                    if (ConnectRequests.isMethod(method)) {
+                        if (data.length() <= 2048) handleConnect(view, request, mainFrame, origin.toString(), result -> {
+                            try { reply.postMessage(new JSONObject().put("protocolVersion", 2).put("requestId", id)
+                                    .put("state", result).toString()); }
+                            catch (org.json.JSONException | IllegalStateException ignored) { /* Departed document. */ }
+                        });
+                        return;
+                    }
                     if ("publishChatWidget".equals(method)) {
                         publishChatWidget(view, request.opt("payload"), mainFrame, origin.toString(), published -> {
                             try { reply.postMessage(new JSONObject().put("protocolVersion", 2).put("requestId", id)
@@ -343,6 +357,90 @@ public final class MainActivity extends Activity implements HostController.Liste
                 } catch (java.io.IOException e) { throw new IllegalStateException("Missing host bridge", e); }
             }
         }
+    }
+
+    private boolean connectDocument(WebView view, long epoch, String url, String cookie) {
+        return !isDestroyed() && view == web && pageEpoch == epoch && bridgeAvailable
+                && host.verified() && !host.stopping && host.state != null && "ready".equals(host.state.runtime)
+                && OriginPolicy.isUi(url) && url.equals(view.getUrl())
+                && java.util.Objects.equals(cookie, CookieManager.getInstance().getCookie(OriginPolicy.ORIGIN));
+    }
+    private JSONObject connectUnavailable(boolean token) {
+        try {
+            if (token) return new JSONObject().put("token", JSONObject.NULL);
+            return new JSONObject().put("configured", BuildConfig.CONNECT_CONFIGURED).put("state", "error")
+                    .put("account", JSONObject.NULL).put("relayUrl", BuildConfig.CONNECT_CONFIGURED
+                            ? BuildConfig.LECTURN_RELAY_URL : JSONObject.NULL)
+                    .put("error", "Connect is unavailable. Reopen Lecturn and retry.");
+        } catch (org.json.JSONException impossible) { throw new IllegalStateException(impossible); }
+    }
+    // Both reads are allowed on Home, but only for the same authenticated local top document.
+    // AuthView is a separate Activity and never gets this transport or any device broker authority.
+    void handleConnect(WebView view, JSONObject request, boolean mainFrame, String origin,
+            java.util.function.Consumer<JSONObject> reply) {
+        String method = request.optString("method");
+        if (!ConnectRequests.isMethod(method) || view != web
+                || !AccessProtocol.acceptsDocument(mainFrame, origin, view.getUrl())
+                || !AccessProtocol.validId(request.opt("requestId"))) return;
+        boolean tokenRequest = "getConnectToken".equals(method), mutating = ConnectRequests.mutates(method);
+        ConnectRequests.Pending pending = connectRequests.add(request.optString("requestId"), reply);
+        if (pending == null) return;
+        long epoch = pageEpoch;
+        String url = view.getUrl(), cookie = CookieManager.getInstance().getCookie(OriginPolicy.ORIGIN);
+        Runnable expire = () -> pending.finish(connectUnavailable(tokenRequest));
+        pending.cleanup = () -> main.removeCallbacks(expire);
+        main.postDelayed(expire, 75000); // Bounds transport work, never the native sign-in attempt.
+        JSONObject payload = request.optJSONObject("payload");
+        Object account = payload == null ? null : payload.opt("accountId");
+        if ((tokenRequest && (!(account instanceof String) || ((String) account).isBlank()
+                || ((String) account).length() > 512))
+                || !connectDocument(view, epoch, url, cookie)
+                || (mutating && (!resumed || !unlocked() || floating != null))) {
+            pending.finish(connectUnavailable(tokenRequest)); return;
+        }
+        authenticateConnect(pending, cookie, authenticated -> {
+            if (!connectDocument(view, epoch, url, cookie)) { pending.cancel(); return; }
+            if (!authenticated || (mutating && (!resumed || !unlocked() || floating != null))) {
+                pending.finish(connectUnavailable(tokenRequest)); return;
+            }
+            if ("openConnectSignIn".equals(method)) {
+                JSONObject state = connect.open();
+                pending.finish(state); // Immediate receipt; AuthView may stay open as long as needed.
+                if ("authorizing".equals(state.optString("state"))) {
+                    try { startActivity(new Intent(this, ConnectAuthActivity.class)); }
+                    catch (ActivityNotFoundException | SecurityException ignored) { connect.launchFailed(); }
+                }
+                return;
+            }
+            java.util.function.Consumer<JSONObject> completed = result -> {
+                if (!pending.active()) return;
+                if (!connectDocument(view, epoch, url, cookie)) { pending.cancel(); return; }
+                JSONObject resultAccount = result.optJSONObject("account");
+                String resultAccountId = tokenRequest ? (String) account
+                        : resultAccount == null ? null : resultAccount.optString("id");
+                String deliveryContext = resultAccountId == null ? null : connect.deliveryContext(resultAccountId);
+                // A local logout during SDK I/O must prevent delivery of account data or JWTs.
+                authenticateConnect(pending, cookie, stillAuthenticated -> {
+                    if (!connectDocument(view, epoch, url, cookie)) { pending.cancel(); return; }
+                    boolean sameAccount = resultAccountId == null || (deliveryContext != null
+                            && deliveryContext.equals(connect.deliveryContext(resultAccountId)));
+                    pending.finish(stillAuthenticated && sameAccount ? result : connectUnavailable(tokenRequest));
+                });
+            };
+            if (tokenRequest) connect.getToken((String) account, completed);
+            else if ("signOutConnect".equals(method)) connect.signOut(completed);
+            else connect.getState(completed);
+        });
+    }
+    private void authenticateConnect(ConnectRequests.Pending pending, String cookie,
+            java.util.function.Consumer<Boolean> callback) {
+        pairingIo.execute(() -> {
+            boolean authenticated = false;
+            try { authenticated = sessions.authenticated(cookie); }
+            catch (Exception ignored) { /* Never log session transport data. */ }
+            boolean result = authenticated;
+            main.post(() -> { if (pending.active()) callback.accept(result); });
+        });
     }
 
     private void requestStart() {
@@ -539,6 +637,11 @@ public final class MainActivity extends Activity implements HostController.Liste
         super.onResume(); resumed = true; sessionNeeded = true;
         if (floating != null) floating.close();
         if (web != null) web.onResume(); host.add(this); changed(); host.foreground(true); refreshChatWidget();
+        notifyConnectChanged();
+    }
+    void notifyConnectChanged() {
+        if (!isDestroyed() && web != null && OriginPolicy.isUi(web.getUrl()))
+            web.evaluateJavascript("window.dispatchEvent(new Event('lecturn:connect-changed'))", null);
     }
     @Override protected void onPause() {
         resumed = false;
@@ -627,6 +730,8 @@ public final class MainActivity extends Activity implements HostController.Liste
     }
     @Override public void onBackPressed() { goBack(); }
     @Override protected void onDestroy() {
+        if (unsubscribeConnect != null) { unsubscribeConnect.run(); unsubscribeConnect = null; }
+        connectRequests.clear();
         unregisterReceiver(widgetScreen);
         host.remove(this);
         clearWidget();

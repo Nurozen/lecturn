@@ -131,18 +131,19 @@ it("does not open a late review after the access read has timed out", async () =
 });
 
 describe("phone Connect capability", () => {
-  it("requires the explicit v2 capability and leaves browser/desktop auth selected otherwise", () => {
-    for (const surface of [
-      {},
-      { desktopBridge: {} },
-      { symbaHost: { protocolVersion: 2 } },
-      { symbaHost: { protocolVersion: 2, connectAccount: false } },
-      { symbaHost: { protocolVersion: 1, connectAccount: true } },
-    ]) {
+  it("leaves browser/desktop auth selected only when there is no Android host", () => {
+    for (const surface of [{}, { desktopBridge: {} }]) {
       vi.stubGlobal("window", surface);
       expect(hasPhoneConnectAccount()).toBe(false);
     }
-    vi.stubGlobal("window", { symbaHost: { protocolVersion: 2, connectAccount: true } });
-    expect(hasPhoneConnectAccount()).toBe(true);
+    for (const symbaHost of [
+      { protocolVersion: 1 },
+      { protocolVersion: 2 },
+      { protocolVersion: 2, connectAccount: true },
+      { protocolVersion: 2, connectAccount: true, nativeConnect: true },
+    ]) {
+      vi.stubGlobal("window", { symbaHost });
+      expect(hasPhoneConnectAccount()).toBe(true);
+    }
   });
 });

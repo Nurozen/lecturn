@@ -8,7 +8,14 @@ const test = vi.hoisted(() => {
     symbaHost: { protocolVersion: 2, connectAccount: true },
     open: vi.fn(),
   });
-  return { navigate: vi.fn(), closeSidebar: vi.fn(), configured: true, status: vi.fn() };
+  return {
+    openNative: vi.fn(),
+    navigate: vi.fn(),
+    closeSidebar: vi.fn(),
+    configured: true,
+    nativeConnect: true,
+    status: vi.fn(),
+  };
 });
 vi.mock("@clerk/react", () => ({
   useAuth: () => {
@@ -23,28 +30,29 @@ vi.mock("../../cloud/phoneConnectAccount", async (original) => {
     account: null,
     relayUrl: test.configured ? "https://relay.example.test" : null,
   });
-  const account = module.createPhoneConnectAccount({
-    status: async () => test.status() ?? signedOut(),
-    begin: async () => ({
-      authorizationUrl: "https://accounts.example.test/authorize",
-      requestId: "test-attempt",
-      expiresAt: "2030-01-01T00:00:00.000Z",
-    }),
-    complete: async () => ({
-      ...signedOut(),
-      state: "signed-in",
-      account: { id: "phone-account", email: "phone@example.test" },
-    }),
-    cancel: async () => signedOut(),
-    logout: async () => signedOut(),
-    token: async () => ({ token: null }),
-  });
+  const host = {
+    protocolVersion: 2,
+    connectAccount: true,
+    get nativeConnect() {
+      return test.nativeConnect;
+    },
+    getAccessState: vi.fn(),
+    requestFullAccess: vi.fn(),
+    openDeviceAccess: vi.fn(),
+    getConnectState: async () => test.status() ?? signedOut(),
+    openConnectSignIn: async () => {
+      test.openNative();
+      return { ...signedOut(), state: "authorizing" };
+    },
+    signOutConnect: async () => signedOut(),
+    getConnectToken: async () => ({ token: null }),
+  };
+  const account = module.createPhoneConnectAccount(module.createPhoneConnectApi(host));
   return { ...module, phoneConnectAccount: account };
 });
 vi.mock("../ui/button", () => ({
   Button: (props: ComponentProps<"button">) => <button {...props} />,
 }));
-vi.mock("../ui/input", () => ({ Input: (props: ComponentProps<"input">) => <input {...props} /> }));
 vi.mock("../ui/sidebar", () => ({
   SidebarMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   SidebarMenuItem: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -71,18 +79,24 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 import { phoneConnectAccount } from "../../cloud/phoneConnectAccount";
+import { useConnectAccountAuth } from "../../cloud/useConnectAccountAuth";
 import { PhoneConnectAccountSection, PhoneConnectSidebarEntry } from "./PhoneConnectAccount";
 let renderer: ReactTestRenderer;
 const button = (label: string) =>
   renderer.root.findAllByType("button").find((node) => node.children.join("") === label)!;
 const displayedText = () => JSON.stringify(renderer.toJSON());
+function AuthState() {
+  const { isLoaded, isSignedIn, userId } = useConnectAccountAuth();
+  return <output>{JSON.stringify({ isLoaded, isSignedIn, userId })}</output>;
+}
 beforeEach(async () => {
   test.configured = true;
+  test.nativeConnect = true;
   test.status.mockReset();
   test.navigate.mockClear();
+  test.openNative.mockClear();
   test.closeSidebar.mockClear();
   await phoneConnectAccount.logout();
-  vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn(async () => {}) } });
 });
 afterEach(async () => {
   await act(async () => renderer?.unmount());
@@ -94,17 +108,50 @@ async function mount() {
       <>
         <PhoneConnectSidebarEntry />
         <PhoneConnectAccountSection />
+        <AuthState />
       </>,
     );
   });
 }
 
 describe("phone Connect controls", () => {
+  it("shows restoration progress and blocks duplicate sign-in until native settles", async () => {
+    test.status.mockReturnValue({
+      configured: true,
+      state: "loading",
+      account: null,
+      relayUrl: "https://relay.example.test",
+    });
+    await phoneConnectAccount.refresh();
+    await mount();
+    expect(displayedText()).toContain("Checking account…");
+    expect(displayedText()).not.toContain("Signed out");
+    expect(renderer.root.findByType("output").children).toEqual([
+      JSON.stringify({ isLoaded: false, isSignedIn: false, userId: null }),
+    ]);
+    expect(button("Sign in to Lecturn Connect").props.disabled).toBe(true);
+    await act(async () => button("Sign in to Lecturn Connect").props.onClick());
+    expect(test.openNative).not.toHaveBeenCalled();
+
+    test.status.mockImplementationOnce(() => {
+      throw new Error("synthetic startup failure");
+    });
+    await act(async () => button("Refresh status").props.onClick());
+    expect(displayedText()).toContain("Sign-in needs attention");
+    expect(renderer.root.findByType("output").children).toEqual([
+      JSON.stringify({ isLoaded: true, isSignedIn: false, userId: null }),
+    ]);
+    await act(async () => button("Reset sign-in").props.onClick());
+    expect(button("Sign in to Lecturn Connect").props.disabled).toBe(false);
+    await act(async () => button("Sign in to Lecturn Connect").props.onClick());
+    expect(test.openNative).toHaveBeenCalledOnce();
+  });
+
   it("keeps the account entry discoverable and reaches the Connections body while disabled", async () => {
     test.configured = false;
     await phoneConnectAccount.refresh();
     await mount();
-    expect(displayedText()).toContain("Not configured on this phone");
+    expect(displayedText()).toContain("App update needed");
     expect(button("Sign in to Lecturn Connect").props.disabled).toBe(true);
     await act(async () => renderer.root.findByType("a").props.onClick());
     expect(test.navigate).toHaveBeenCalledWith("/settings/connections");
@@ -114,20 +161,27 @@ describe("phone Connect controls", () => {
     expect(button("Sign in to Lecturn Connect").props.disabled).toBe(false);
   });
 
-  it("runs sign-in, open/copy, pasted return, and logout through the real account state", async () => {
+  it("opens native sign-in directly and settles success/cancel from native status", async () => {
     await mount();
     await act(async () => button("Sign in to Lecturn Connect").props.onClick());
-    expect(displayedText()).toContain("Waiting for return code");
-    await act(async () => button("Open browser").props.onClick());
-    expect(window.open).toHaveBeenCalledOnce();
-    await act(async () => button("Copy sign-in link").props.onClick());
-    expect(displayedText()).toContain("Sign-in link copied.");
-    await act(async () =>
-      renderer.root.findByType("input").props.onChange({ target: { value: "entire-code" } }),
-    );
-    await act(async () => renderer.root.findByType("form").props.onSubmit({ preventDefault() {} }));
-    expect(displayedText()).toContain("phone@example.test");
+    expect(test.openNative).toHaveBeenCalledOnce();
+    expect(displayedText()).toContain("Signing in…");
+    expect(window.open).not.toHaveBeenCalled();
     expect(renderer.root.findAllByType("input")).toHaveLength(0);
+    expect(renderer.root.findAllByType("form")).toHaveLength(0);
+    expect(button("Open browser")).toBeUndefined();
+    expect(button("Copy sign-in link")).toBeUndefined();
+    await act(async () => phoneConnectAccount.refresh());
+    expect(displayedText()).toContain("Signed out");
+    await act(async () => button("Sign in to Lecturn Connect").props.onClick());
+    test.status.mockReturnValue({
+      configured: true,
+      state: "signed-in",
+      account: { id: "phone-account", email: "phone@example.test" },
+      relayUrl: "https://relay.example.test",
+    });
+    await act(async () => phoneConnectAccount.refresh());
+    expect(displayedText()).toContain("phone@example.test");
     await act(async () => button("Sign out").props.onClick());
     expect(displayedText()).toContain("Signed out");
     expect(displayedText()).not.toContain("phone@example.test");
@@ -159,23 +213,18 @@ describe("phone Connect controls", () => {
       expect(displayedText()).toContain("Signed out");
       expect(renderer.root.findAllByProps({ role: "alert" })).toHaveLength(0);
       await act(async () => button("Sign in to Lecturn Connect").props.onClick());
-      expect(phoneConnectAccount.getSnapshot().authorization?.requestId).toBe("test-attempt");
-      expect(button("Open browser")).toBeDefined();
+      expect(phoneConnectAccount.getSnapshot().status?.state).toBe("authorizing");
+      expect(test.openNative).toHaveBeenCalledOnce();
     },
   );
 
-  it("cancels without leaving the return code or link visible and reports clipboard failure", async () => {
+  it("shows explicit update guidance for older native binaries", async () => {
+    test.nativeConnect = false;
+    await phoneConnectAccount.refresh();
     await mount();
-    await act(async () => button("Sign in to Lecturn Connect").props.onClick());
-    vi.stubGlobal("navigator", {});
-    await act(async () => button("Copy sign-in link").props.onClick());
-    expect(displayedText()).toContain("Could not copy the link");
-    await act(async () =>
-      renderer.root.findByType("input").props.onChange({ target: { value: "discard-me" } }),
-    );
-    await act(async () => button("Cancel sign-in").props.onClick());
-    expect(displayedText()).toContain("Signed out");
+    expect(displayedText()).toContain("Update Lecturn on this phone");
+    expect(test.openNative).not.toHaveBeenCalled();
+    expect(button("Open browser")).toBeUndefined();
     expect(renderer.root.findAllByType("input")).toHaveLength(0);
-    expect(phoneConnectAccount.getSnapshot().authorization).toBeNull();
   });
 });

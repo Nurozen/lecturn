@@ -50,6 +50,14 @@
     value: Object.freeze({
       protocolVersion: 2,
       connectAccount: true,
+      nativeConnect: true,
+      getConnectState: () => request("getConnectState"),
+      openConnectSignIn: () => request("openConnectSignIn"),
+      signOutConnect: () => request("signOutConnect"),
+      getConnectToken: (accountId) =>
+        typeof accountId === "string" && accountId.trim() && accountId.length <= 512
+          ? request("getConnectToken", undefined, { accountId })
+          : Promise.resolve(unavailable()),
       getAccessState: () => request("getAccessState"),
       requestFullAccess: (threadId) =>
         typeof threadId === "string" && threadId.trim() && threadId.length <= 256

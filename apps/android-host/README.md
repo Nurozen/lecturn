@@ -1,6 +1,6 @@
 # Lecturn Android host
 
-Standalone Java Android shell for the phone-local fullweb UI. It does not contain, start at boot, or simulate the Lecturn server. The launcher package is `com.cloudgatherer.lecturn.symba`, label **Lecturn**. The native book vector is derived directly from `../../assets/lecturn/mark.svg`; the adaptive launcher icon uses that unchanged mark over an edge-to-edge navy background.
+Native Android shell for the phone-local fullweb UI. It does not contain, start at boot, or simulate the Lecturn server. The launcher package is `com.cloudgatherer.lecturn.symba`, label **Lecturn**. The native book vector is derived directly from `../../assets/lecturn/mark.svg`; the adaptive launcher icon uses that unchanged mark over an edge-to-edge navy background.
 
 Build with JDK 21 and Android SDK 36:
 
@@ -12,7 +12,11 @@ ANDROID_HOME="$HOME/Library/Android/sdk" \
 
 APK: `app/build/outputs/apk/debug/app-debug.apk`. Tests and lint reports are under `app/build/reports/`. This is a debug APK for parent-controlled installation and device verification.
 
-Package the matching fullweb client with `LECTURN_ANDROID_HOST_BUILD=1`. Its build validates the public Connect settings described in [Connect setup](../../docs/operations/connect-setup.md), including the CLI OAuth client ID and hosted app URL. Supply the same public configuration to the guest server build. These are application configuration values, never user credentials or a Clerk secret key. The phone uses hosted browser authorization instead of loading the production Clerk browser SDK on loopback.
+Build the native APK and matching fullweb client with the same `LECTURN_CLERK_PUBLISHABLE_KEY`, `LECTURN_CLERK_JWT_TEMPLATE`, and `LECTURN_RELAY_URL` public configuration; set `LECTURN_ANDROID_HOST_BUILD=1` for the web build. See [Connect setup](../../docs/operations/connect-setup.md). These are application configuration values, never user credentials or a Clerk secret key.
+
+Lecturn Connect sign-in opens Clerk's native Android `AuthView` inside Lecturn. The native SDK owns its account session and token refresh; the local web client receives short-lived, account-bound relay tokens through the authenticated native bridge. Connect credentials are not stored in the Linux guest. Closing the sign-in surface returns to the current task without changing device permissions. The CLI's browser/code login remains a CLI feature.
+
+Enable Clerk's Native API for the configured instance. For Google sign-in or passkeys, register `com.cloudgatherer.lecturn.symba` with the installed APK's signing certificate; debug and release certificates differ. Enabled OAuth providers need the SDK callback `clerk://com.cloudgatherer.lecturn.symba.callback` allowlisted. See Clerk's [Android setup](https://clerk.com/docs/android/getting-started/quickstart) for provider-specific configuration.
 
 Open **More → Set up agents** to sign in to Codex or Claude locally. The phone build uses Codex device login and Claude’s manual browser/code flow; the sign-in terminal must stay open until completion. Provider credentials stay in the Linux guest.
 
@@ -30,7 +34,7 @@ After provisioning, run Android `restorecon -F` on the private `host-config.json
 
 ## Web and lifecycle contracts
 
-Only `http://127.0.0.1:3773` is trusted in the WebView. `uiUrl` and `taskUrl` must use this literal origin, with an explicit port. Pairing links stay in process/private WebView storage. HTTPS links and OAuth popups open in the external browser without forwarding native credentials. Connect can make HTTPS CORS fetch requests from the local document; external documents, scripts, workers, frames, and other embedded resources remain blocked. Browser CORS and TLS checks still apply. No `desktopBridge` is created.
+Only `http://127.0.0.1:3773` is trusted in the WebView. `uiUrl` and `taskUrl` must use this literal origin, with an explicit port. Pairing links stay in process/private WebView storage. External HTTPS links open in the browser without forwarding native credentials; Lecturn Connect authentication has a separate native screen. Connect can make HTTPS CORS fetch requests from the local document; external documents, scripts, workers, frames, and other embedded resources remain blocked. Browser CORS and TLS checks still apply. No `desktopBridge` is created.
 
 The origin-scoped, main-frame-only `window.symbaHost` uses `protocolVersion: 2`. `getAccessState()`, `requestFullAccess(threadId)`, and `openDeviceAccess()` return promises correlated by request ID. The reply exposes only `{verified, revision, fullAccess, computerUse, capabilities: {appData, computerUse}}`. Full access succeeds only after a fresh broker read confirms an existing grant, or the user confirms native review and the broker returns a newer applied revision with the requested grants. Cancellation, conflict, Stop, disconnect, stale review, and departed documents cannot authorize a send. There is no arbitrary URL, command, token, or policy mutation method. Reads never grant access; page events never apply policy.
 
