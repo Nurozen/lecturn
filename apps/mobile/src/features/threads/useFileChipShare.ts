@@ -1,0 +1,73 @@
+import { resolveAssetUrl } from "@lecturn/client-runtime/state/assets";
+import type { EnvironmentId, ThreadId } from "@lecturn/contracts";
+import * as Option from "effect/Option";
+import { useCallback, useLayoutEffect, useRef } from "react";
+import { Alert } from "react-native";
+
+import { downloadAndShareAttachment } from "../../lib/attachmentDownload";
+import { assetEnvironment } from "../../state/assets";
+import { usePreparedConnection } from "../../state/session";
+import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
+import { fileChipShareSource, type FileChipTarget } from "./fileChipMenu";
+
+/** Fetches host files through the selected environment before opening the native save/share sheet. */
+export function useFileChipShare(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  sourceIdentifier: string,
+) {
+  const connection = usePreparedConnection(environmentId);
+  const httpBaseUrl = Option.isSome(connection) ? connection.value.httpBaseUrl : null;
+  const createUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
+    refresh: true,
+    reportFailure: false,
+  });
+  const connectionRef = useRef({ environmentId, threadId, httpBaseUrl });
+  const requestRef = useRef<AbortController | null>(null);
+  useLayoutEffect(() => {
+    connectionRef.current = { environmentId, threadId, httpBaseUrl };
+    return () => {
+      requestRef.current?.abort();
+      requestRef.current = null;
+    };
+  }, [environmentId, httpBaseUrl, threadId]);
+
+  const share = useCallback(
+    (target: FileChipTarget) => {
+      const source = fileChipShareSource(target, threadId);
+      if (!source || requestRef.current) return;
+      const request = new AbortController();
+      requestRef.current = request;
+      const httpBaseUrl = connectionRef.current.httpBaseUrl;
+      void (async () => {
+        if (httpBaseUrl === null) throw new Error("Reconnect to the environment and try again.");
+        const result = await createUrl({ environmentId, input: { resource: source.resource } });
+        if (request.signal.aborted) return;
+        const url =
+          result._tag === "Success" ? resolveAssetUrl(httpBaseUrl, result.value.relativeUrl) : null;
+        if (url === null) throw new Error("The file could not be loaded. Reconnect and try again.");
+        await downloadAndShareAttachment({
+          url,
+          attachment: source,
+          signal: request.signal,
+          sourceIdentifier,
+        });
+      })()
+        .catch((error: unknown) => {
+          if (!request.signal.aborted) {
+            Alert.alert(
+              "Could not share file",
+              error instanceof Error ? error.message : "Try again.",
+            );
+          }
+        })
+        .finally(() => {
+          if (requestRef.current === request) {
+            requestRef.current = null;
+          }
+        });
+    },
+    [createUrl, environmentId, sourceIdentifier, threadId],
+  );
+  return share;
+}

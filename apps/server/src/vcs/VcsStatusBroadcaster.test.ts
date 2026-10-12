@@ -26,6 +26,7 @@ import type {
 } from "@lecturn/contracts";
 import { GitManagerError, ProjectId } from "@lecturn/contracts";
 
+import * as ServerSettings from "../serverSettings.ts";
 import * as VcsStatusBroadcaster from "./VcsStatusBroadcaster.ts";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
@@ -1078,12 +1079,15 @@ describe("autoPullPolicyLayer", () => {
 
   const makePolicyLayer = (
     query: Partial<ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"]>,
+    settings = ServerSettings.layerTest(),
   ) =>
     VcsStatusBroadcaster.autoPullPolicyLayer.pipe(
       Layer.provide(Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)(query)),
+      Layer.provide(settings),
+      Layer.provideMerge(NodeServices.layer),
     );
 
-  it.effect("enables auto-pull for an exact workspace-root match without scanning", () =>
+  it.effect("enables auto-pull for an ordinary exact workspace-root match", () =>
     Effect.gen(function* () {
       const policy = yield* VcsStatusBroadcaster.VcsAutoPullPolicy;
       assert.isTrue(yield* policy.isEnabled("/plain"));
@@ -1099,7 +1103,7 @@ describe("autoPullPolicyLayer", () => {
                   ? Option.some({ ...plainProject, workspaceRoot: cwd, autoPull: false })
                   : Option.none(),
             ),
-          getShellSnapshot: () => Effect.die("exact match must not scan the shell snapshot"),
+          getShellSnapshot: () => Effect.succeed(shellSnapshot([toShell(plainProject)])),
         }),
       ),
     ),
@@ -1150,6 +1154,41 @@ describe("autoPullPolicyLayer", () => {
     ),
   );
 
+  it.effect("inherits machine defaults and applies checkout overrides while excluding Stave", () =>
+    Effect.gen(function* () {
+      const policy = yield* VcsStatusBroadcaster.VcsAutoPullPolicy;
+      assert.isTrue(yield* policy.isEnabled("/plain"));
+      assert.isFalse(yield* policy.isEnabled("/opted-out"));
+      assert.isFalse(yield* policy.isEnabled(staveRoot));
+      assert.isFalse(yield* policy.isEnabled(stavePrimaryRepo));
+    }).pipe(
+      Effect.provide(
+        makePolicyLayer(
+          {
+            getActiveProjectByWorkspaceRoot: (cwd) =>
+              Effect.succeed(
+                cwd === "/plain"
+                  ? Option.some({ ...plainProject, autoPull: false })
+                  : cwd === "/opted-out"
+                    ? Option.some({ ...plainProject, id: ProjectId.make("opted-out") })
+                    : cwd === staveRoot
+                      ? Option.some(staveProject)
+                      : Option.none(),
+              ),
+            getShellSnapshot: () => Effect.succeed(shellSnapshot([toShell(staveProject)])),
+          },
+          ServerSettings.layerTest({
+            defaultAutoPull: true,
+            projectAutoPullOverrides: {
+              [ProjectId.make("opted-out")]: false,
+              [staveProject.id]: true,
+            },
+          }),
+        ),
+      ),
+    ),
+  );
+
   it.effect("disables auto-pull for unrelated paths", () =>
     Effect.gen(function* () {
       const policy = yield* VcsStatusBroadcaster.VcsAutoPullPolicy;
@@ -1177,10 +1216,10 @@ describe("autoPullPolicyLayer", () => {
         ),
       );
       const scanFails = yield* VcsStatusBroadcaster.VcsAutoPullPolicy.pipe(
-        Effect.flatMap((policy) => policy.isEnabled(stavePrimaryRepo)),
+        Effect.flatMap((policy) => policy.isEnabled("/plain")),
         Effect.provide(
           makePolicyLayer({
-            getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+            getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.some(plainProject)),
             getShellSnapshot: () => Effect.fail(queryFailure),
           }),
         ),
@@ -1189,6 +1228,138 @@ describe("autoPullPolicyLayer", () => {
       assert.isFalse(scanFails);
     }),
   );
+
+  for (const ownerMetadata of [true, false, null]) {
+    it.effect(
+      `inherited status pulls respect separately registered Stave ownership (metadata: ${ownerMetadata})`,
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const root = yield* fs.makeTempDirectoryScoped();
+          const space = path.join(root, "space");
+          const ownerAlias = path.join(root, "aliases", "space");
+          const primary = path.join(space, "primary");
+          const secondary = path.join(space, "secondary");
+          const alias = path.join(root, "alias");
+          const ordinary = path.join(root, "space-other");
+          const external = path.join(root, "external");
+          const externalAlias = path.join(root, "external-alias");
+          const unrelated = path.join(root, "aliases", "external");
+          yield* fs.makeDirectory(unrelated, { recursive: true });
+          for (const cwd of [primary, path.join(secondary, "src"), external, ordinary]) {
+            yield* fs.makeDirectory(cwd, { recursive: true });
+          }
+          if (symlinksSupported) {
+            yield* fs.makeDirectory(path.dirname(ownerAlias), { recursive: true });
+            yield* fs.symlink(space, ownerAlias);
+            yield* fs.symlink(secondary, alias);
+            yield* fs.symlink(external, externalAlias);
+          }
+          if (!ownerMetadata) {
+            yield* fs.writeFileString(
+              path.join(space, ".stave.yaml"),
+              "version: 2\nid: space\nrepos:\n  - name: primary\n    path: primary\n    mode: edit\n  - name: secondary\n    path: secondary\n    mode: edit\n  - name: external\n    path: ../external\n    mode: edit\nmemories: []\n",
+            );
+          }
+          const project = (cwd: string): OrchestrationProject => ({
+            ...plainProject,
+            id: ProjectId.make(cwd),
+            workspaceRoot: cwd,
+            autoPull: false,
+            stave: null,
+          });
+          const targets = [
+            primary,
+            secondary,
+            path.join(secondary, "src"),
+            ...(ownerMetadata === null ? [] : [external]),
+            ...(symlinksSupported
+              ? [
+                  alias,
+                  path.join(alias, "missing"),
+                  ...(ownerMetadata === null ? [] : [externalAlias]),
+                ]
+              : []),
+          ];
+          const projects = [
+            ...targets.map(project),
+            project(ordinary),
+            project(unrelated),
+            ...(ownerMetadata === null
+              ? []
+              : [
+                  {
+                    ...project(symlinksSupported ? ownerAlias : space),
+                    stave: ownerMetadata
+                      ? {
+                          ...staveProject.stave!,
+                          primaryRepoPath: symlinksSupported ? unrelated : external,
+                          repos: [
+                            { name: "external", path: "../external", mode: "edit" as const },
+                            { name: "primary", path: "primary", mode: "edit" as const },
+                            { name: "secondary", path: "secondary", mode: "edit" as const },
+                          ],
+                        }
+                      : null,
+                  } satisfies OrchestrationProject,
+                ]),
+          ];
+          const pulled: string[] = [];
+          const testLayer = VcsStatusBroadcaster.layer.pipe(
+            Layer.provideMerge(NodeServices.layer),
+            Layer.provide(makeBackgroundPolicyLayer(() => true)),
+            Layer.provide(
+              makePolicyLayer(
+                {
+                  getActiveProjectByWorkspaceRoot: (cwd) =>
+                    Effect.succeed(
+                      Option.fromUndefinedOr(
+                        projects.find((project) => project.workspaceRoot === cwd),
+                      ),
+                    ),
+                  getShellSnapshot: () => Effect.succeed(shellSnapshot(projects.map(toShell))),
+                },
+                ServerSettings.layerTest({ defaultAutoPull: true }),
+              ),
+            ),
+            Layer.provide(
+              Layer.mock(GitWorkflowService.GitWorkflowService)({
+                localStatus: () =>
+                  Effect.succeed({ ...baseLocalStatus, isDefaultRef: true, refName: "main" }),
+                remoteStatus: () => Effect.succeed({ ...baseRemoteStatus, behindCount: 1 }),
+                invalidateLocalStatus: () => Effect.void,
+                invalidateRemoteStatus: () => Effect.void,
+                invalidateStatus: () => Effect.void,
+                pullCurrentBranch: (cwd) =>
+                  Effect.sync(() => {
+                    pulled.push(cwd);
+                    return {
+                      status: "pulled" as const,
+                      refName: "main",
+                      upstreamRef: "origin/main",
+                    };
+                  }),
+              }),
+            ),
+          );
+          yield* Effect.gen(function* () {
+            const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
+            for (const cwd of targets) {
+              const status = yield* broadcaster.refreshStatus(cwd);
+              assert.equal(status.behindCount, 1);
+            }
+            assert.deepStrictEqual(pulled, []);
+            yield* broadcaster.refreshStatus(ordinary);
+            yield* broadcaster.refreshStatus(unrelated);
+            assert.deepStrictEqual(pulled, [
+              yield* fs.realPath(ordinary),
+              yield* fs.realPath(unrelated),
+            ]);
+          }).pipe(Effect.provide(testLayer));
+        }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    );
+  }
 
   it.effect("leaves a behind Stave primary repo unchanged when status refreshes", () => {
     let remoteStatus: VcsStatusRemoteResult = { ...baseRemoteStatus, behindCount: 1 };
