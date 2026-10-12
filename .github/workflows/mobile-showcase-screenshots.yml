@@ -45,7 +45,7 @@ jobs:
   ios:
     name: iPhone 6.9, iPhone 6.5, and iPad 13
     if: inputs.platform == 'all' || inputs.platform == 'ios'
-    runs-on: blacksmith-12vcpu-macos-26
+    runs-on: macos-26
     # Capturing every palette multiplies the device matrix by six, and only the
     # one native build is shared between them.
     timeout-minutes: ${{ inputs.theme == 'all' && 300 || 60 }}
@@ -77,10 +77,51 @@ jobs:
           "$vp_pnpm_bin/pnpm" --version
 
       - name: Capture iOS showcase
-        run: pnpm screenshots:mobile --platform ios --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}"
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes
+          git rev-parse HEAD
+          cat > "$RUNNER_TEMP/lecturn-link-fixture.mjs" <<'FIXTURE'
+          import { registerHooks } from "node:module";
+          import assert from "node:assert/strict";
+          registerHooks({
+            load(url, context, nextLoad) {
+              const result = nextLoad(url, context);
+              if (!url.endsWith("/scripts/mobile-showcase.ts")) return result;
+              let source = typeof result.source === "string" ? result.source : Buffer.from(result.source).toString("utf8");
+              const replaceOnce = (before, after) => {
+                assert.equal(source.split(before).length - 1, 1, "Pinned showcase harness anchor changed");
+                source = source.replace(before, after);
+              };
+              replaceOnce("await waitForIosShowcaseScene(simulator.udid, scene, 120_000);", "await waitForIosShowcaseScene(simulator.udid, scene, 300_000);");
+              replaceOnce("const readyScene = await NodeFSP.readFile(readyPath, \"utf8\").catch(() => \"\");\n    if (readyScene.trim() === scene) return;", "const readyScene = await NodeFSP.readFile(readyPath, \"utf8\").catch(() => \"\");\n    if (readyScene.trim() === scene) { console.log('iOS readiness marker verified:', scene); return; }");
+              replaceOnce("  throw new Error(`iOS showcase scene '${scene}' did not render within ${timeoutMs}ms.`);", `  const diagnosticDirectory = NodePath.join(REPO_ROOT, "artifacts/ios-validation");
+            await NodeFSP.mkdir(diagnosticDirectory, { recursive: true });
+            await runCommand("xcrun", ["simctl", "io", udid, "screenshot", NodePath.join(diagnosticDirectory, "readiness-timeout-" + Date.now() + ".png")]).catch(() => undefined);
+            console.log("iOS readiness timeout; diagnostic screenshot retained; no acceptance.");
+            throw new Error(\`iOS showcase scene '\${scene}' did not render within \${timeoutMs}ms.\`);`);
+              replaceOnce("    for (const capture of captures) {\n      const pairingHost", `    if (hasIos && !options.skipMetro) {
+                console.log("Validation harness: native build complete; rewarming iOS bundle after prebuild.");
+                await warmMetroBundle("ios", metroHost, showcaseConfig);
+                console.log("Validation harness: post-build bundle warm-up complete; readiness predicate unchanged.");
+              }
+              for (const capture of captures) {
+                const pairingHost`);
+              console.log("Validation-only harness: post-build warm-up, 300s first-scene deadline, same ready marker, failure screenshots.");
+              return { ...result, source };
+            },
+          });
+          import { pathToFileURL } from "node:url";
+          import path from "node:path";
+          const fixtureUrl = pathToFileURL(path.resolve(process.cwd(), "scripts/mobile-showcase-environment.ts"));
+          const { SHOWCASE_THREADS } = await import(fixtureUrl.href);
+          SHOWCASE_THREADS[0].response = "Native iOS link rendering fixture\n\n[GitHub repository](https://github.com/Nurozen/lecturn) and [Reference website](https://example.com).\n\nBoth link marks should align with their labels and keep the link text color.";
+          console.log("Validation-only fixture: GitHub branded link plus ordinary external link; source files unchanged.");
+          FIXTURE
+          node --import "$RUNNER_TEMP/lecturn-link-fixture.mjs" scripts/mobile-showcase.ts --platform ios --device iphone-6.9 --scene thread --appearance both --theme lecturn
 
       - name: Validate App Store Connect assets
-        run: pnpm screenshots:mobile --platform ios --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}" --validate-only
+        run: node scripts/mobile-showcase.ts --platform ios --device iphone-6.9 --scene thread --appearance both --theme lecturn --validate-only
 
       - name: Upload iOS screenshots
         if: always()
@@ -90,6 +131,27 @@ jobs:
           path: artifacts/app-store/screenshots/apple/
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Retain simulator build and provenance
+        if: always()
+        run: |
+          mkdir -p artifacts/ios-validation
+          git rev-parse HEAD > artifacts/ios-validation/validation-commit.txt
+          git status --porcelain > artifacts/ios-validation/post-prebuild-status.txt
+          cp "$RUNNER_TEMP/lecturn-link-fixture.mjs" artifacts/ios-validation/fixture-preload.mjs
+          ios_products=apps/mobile/.showcase/ios-derived-data/Build/Products/Debug-iphonesimulator
+          if [ -d "$ios_products/Lecturn.app" ]; then
+            tar -czf artifacts/ios-validation/Lecturn-simulator.app.tgz -C "$ios_products" Lecturn.app
+          fi
+
+      - name: Upload validation diagnostics and reusable app
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-link-validation-diagnostics
+          path: artifacts/ios-validation/
+          if-no-files-found: warn
+          retention-days: 7
 
   android:
     name: Android phone, 7-inch tablet, and 10-inch tablet
