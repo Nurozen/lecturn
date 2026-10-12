@@ -37,6 +37,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   NODE_OPTIONS: --max-old-space-size=8192
@@ -45,7 +46,7 @@ jobs:
   ios:
     name: iPhone 6.9, iPhone 6.5, and iPad 13
     if: inputs.platform == 'all' || inputs.platform == 'ios'
-    runs-on: blacksmith-12vcpu-macos-26
+    runs-on: macos-26
     # Capturing every palette multiplies the device matrix by six, and only the
     # one native build is shared between them.
     timeout-minutes: ${{ inputs.theme == 'all' && 300 || 60 }}
@@ -76,11 +77,75 @@ jobs:
           echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
           "$vp_pnpm_bin/pnpm" --version
 
+      - name: Download exact reusable simulator app
+        uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          repository: Nurozen/lecturn
+          run-id: 38302183128
+          name: ios-link-validation-diagnostics
+          path: artifacts/ios-reuse-input
+
+      - name: Verify and install reusable app artifact
+        run: |
+          echo '752c2b09e418dcfc6b439e441529c2415b8f1dcc780acd5da4a5a81579ec9d38  artifacts/ios-reuse-input/Lecturn-simulator.app.tgz' | shasum -a 256 -c -
+          test "$(cat artifacts/ios-reuse-input/validation-commit.txt)" = '3ed03a2f87fd7e5736b209a47c74b0c263609716'
+          mkdir -p apps/mobile/.showcase/ios-derived-data/Build/Products/Debug-iphonesimulator
+          tar -xzf artifacts/ios-reuse-input/Lecturn-simulator.app.tgz -C apps/mobile/.showcase/ios-derived-data/Build/Products/Debug-iphonesimulator
+          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' apps/mobile/.showcase/ios-derived-data/Build/Products/Debug-iphonesimulator/Lecturn.app/Info.plist
+
       - name: Capture iOS showcase
-        run: pnpm screenshots:mobile --platform ios --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}"
+        env:
+          EXPO_PUBLIC_SHOWCASE: '1'
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes
+          git rev-parse HEAD
+          cat > "$RUNNER_TEMP/lecturn-link-fixture.mjs" <<'FIXTURE'
+          import { registerHooks } from "node:module";
+          import assert from "node:assert/strict";
+          registerHooks({
+            load(url, context, nextLoad) {
+              const result = nextLoad(url, context);
+              if (!url.endsWith("/scripts/mobile-showcase.ts")) return result;
+              let source = typeof result.source === "string" ? result.source : Buffer.from(result.source).toString("utf8");
+              const replaceOnce = (before, after) => {
+                assert.equal(source.split(before).length - 1, 1, "Pinned showcase harness anchor changed");
+                source = source.replace(before, after);
+              };
+              replaceOnce("await waitForIosShowcaseScene(simulator.udid, scene, 120_000);", "await waitForIosShowcaseScene(simulator.udid, scene, 300_000);");
+              replaceOnce("const readyScene = await NodeFSP.readFile(readyPath, \"utf8\").catch(() => \"\");\n    if (readyScene.trim() === scene) return;", "const readyScene = await NodeFSP.readFile(readyPath, \"utf8\").catch(() => \"\");\n    if (readyScene.trim() === scene) { console.log('iOS readiness marker verified:', scene); return; }");
+              replaceOnce("  throw new Error(`iOS showcase scene '${scene}' did not render within ${timeoutMs}ms.`);", `  const diagnosticDirectory = NodePath.join(REPO_ROOT, "artifacts/ios-validation");
+            await NodeFSP.mkdir(diagnosticDirectory, { recursive: true });
+            await runCommand("xcrun", ["simctl", "io", udid, "screenshot", NodePath.join(diagnosticDirectory, "readiness-timeout-" + Date.now() + ".png")]).catch(() => undefined);
+            console.log("iOS readiness timeout; diagnostic screenshot retained; no acceptance.");
+            throw new Error(\`iOS showcase scene '\${scene}' did not render within \${timeoutMs}ms.\`);`);
+              replaceOnce("    for (const capture of captures) {\n      const pairingHost", `    if (hasIos && !options.skipMetro) {
+                console.log("Validation harness: native build complete; rewarming iOS bundle after prebuild.");
+                await warmMetroBundle("ios", metroHost, showcaseConfig);
+                console.log("Validation harness: post-build bundle warm-up complete; readiness predicate unchanged.");
+              }
+              for (const capture of captures) {
+                const pairingHost`);
+              replaceOnce("const metroHost = hasIos ? lanIpv4Address() : \"127.0.0.1\";", "const metroHost = \"127.0.0.1\"; // Owned hosted simulator shares host loopback.");
+              replaceOnce("[\"exec\", \"expo\", \"start\", \"--dev-client\", \"--port\", String(config.metroPort)]", "[\"exec\", \"expo\", \"start\", \"--dev-client\", \"--scheme\", \"lecturn\", \"--clear\", \"--port\", String(config.metroPort)]");
+              replaceOnce("async function warmMetroBundle(\n  platform: ShowcaseDevice[\"platform\"],\n  host: string,\n  config: ShowcaseConfig,\n): Promise<void> {\n  const url = `http://${host}:${config.metroPort}/apps/mobile/index.bundle?platform=${platform}&dev=true&minify=false`;\n  await runCommand(\"curl\", [\"--fail\", \"--silent\", \"--show-error\", \"--output\", \"/dev/null\", url]);\n}\n", "async function warmMetroBundle(\n  platform: ShowcaseDevice[\"platform\"], host: string, config: ShowcaseConfig,\n): Promise<void> {\n  if (platform !== \"ios\") throw new Error(\"This validation fixture is iOS only\");\n  const manifestResponse = await fetch(`http://${host}:${config.metroPort}/?platform=ios`, {\n    headers: { \"expo-platform\": \"ios\", accept: \"application/expo+json\" },\n  });\n  if (!manifestResponse.ok) throw new Error(\"Validation Metro manifest unavailable\");\n  const manifest = await manifestResponse.json() as { launchAsset?: { url?: string } };\n  const asset = manifest.launchAsset?.url;\n  if (!asset) throw new Error(\"Validation Metro manifest has no launch asset\");\n  const bundleUrl = new URL(asset);\n  if (![\"127.0.0.1\", \"localhost\"].includes(bundleUrl.hostname) || bundleUrl.port !== String(config.metroPort)) {\n    throw new Error(\"Validation manifest launch asset is not owned loopback Metro\");\n  }\n  const bundleResponse = await fetch(bundleUrl);\n  if (!bundleResponse.ok) throw new Error(\"Validation launch bundle unavailable\");\n  const bundle = await bundleResponse.text();\n  const serializedFlag = /[\"']EXPO_PUBLIC_SHOWCASE[\"']\\s*:\\s*\\{\\s*enumerable:\\s*true,\\s*value:\\s*[\"']1[\"']\\s*\\}/.test(bundle);\n  const dotenvFiles = (await NodeFSP.readdir(MOBILE_ROOT)).filter((name) => /^\\.env(?:\\.development|\\.local|\\.development\\.local)?$/.test(name));\n  const coordinatorIncluded = bundle.includes(\"SHOWCASE_ENABLED\") && bundle.includes(\"EXPO_PUBLIC_SHOWCASE\");\n  console.log(\"Validation launch asset warm; serialized showcase flag:\", serializedFlag, \"dotenv overrides:\", dotenvFiles.length, \"coordinator included:\", coordinatorIncluded);\n  if (!serializedFlag || dotenvFiles.length !== 0 || !coordinatorIncluded) throw new Error(\"Validation bundle does not prove showcase fixture enabled\");\n}");
+              replaceOnce("    ]);\n  };\n  await NodeFSP.rm(readyPath, { force: true });", "    ]);\n    if (pairingUrls.length !== 3) throw new Error(\"Validation requires three synthetic pairing inputs\");\n    console.log(\"Validation native launch arguments supplied: three pairing inputs, scene, theme, orientation.\");\n    await delay(2000);\n    const devClientUrl = \"exp+lecturn://expo-development-client/?url=\" + encodeURIComponent(metroUrl);\n    await runCommand(\"xcrun\", [\"simctl\", \"openurl\", simulator.udid, devClientUrl]);\n    console.log(\"Validation explicit development-client URL opened on owned simulator.\");\n    await delay(45000);\n    const diagnosticDirectory = NodePath.join(REPO_ROOT, \"artifacts/ios-validation\");\n    await NodeFSP.mkdir(diagnosticDirectory, { recursive: true });\n    await runCommand(\"xcrun\", [\"simctl\", \"io\", simulator.udid, \"screenshot\", NodePath.join(diagnosticDirectory, \"post-launch-\" + Date.now() + \".png\")]);\n  };\n  await NodeFSP.rm(readyPath, { force: true });");
+              console.log("Validation-only harness: post-build warm-up, 300s first-scene deadline, same ready marker, failure screenshots.");
+              return { ...result, source };
+            },
+          });
+          import { pathToFileURL } from "node:url";
+          import path from "node:path";
+          const fixtureUrl = pathToFileURL(path.resolve(process.cwd(), "scripts/mobile-showcase-environment.ts"));
+          const { SHOWCASE_THREADS } = await import(fixtureUrl.href);
+          SHOWCASE_THREADS[0].response = "Native iOS link rendering fixture\n\n[GitHub repository](https://github.com/Nurozen/lecturn) and [Reference website](https://example.com).\n\nBoth link marks should align with their labels and keep the link text color.";
+          console.log("Validation-only fixture: GitHub branded link plus ordinary external link; source files unchanged.");
+          FIXTURE
+          node --import "$RUNNER_TEMP/lecturn-link-fixture.mjs" scripts/mobile-showcase.ts --skip-build --platform ios --device iphone-6.9 --scene thread --appearance both --theme lecturn
 
       - name: Validate App Store Connect assets
-        run: pnpm screenshots:mobile --platform ios --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}" --validate-only
+        run: node scripts/mobile-showcase.ts --platform ios --device iphone-6.9 --scene thread --appearance both --theme lecturn --validate-only
 
       - name: Upload iOS screenshots
         if: always()
@@ -90,6 +155,27 @@ jobs:
           path: artifacts/app-store/screenshots/apple/
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Retain simulator build and provenance
+        if: always()
+        run: |
+          mkdir -p artifacts/ios-validation
+          git rev-parse HEAD > artifacts/ios-validation/validation-commit.txt
+          git status --porcelain > artifacts/ios-validation/post-prebuild-status.txt
+          cp "$RUNNER_TEMP/lecturn-link-fixture.mjs" artifacts/ios-validation/fixture-preload.mjs
+          ios_products=apps/mobile/.showcase/ios-derived-data/Build/Products/Debug-iphonesimulator
+          if [ -d "$ios_products/Lecturn.app" ]; then
+            tar -czf artifacts/ios-validation/Lecturn-simulator.app.tgz -C "$ios_products" Lecturn.app
+          fi
+
+      - name: Upload validation diagnostics and reusable app
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-link-validation-reuse-diagnostics
+          path: artifacts/ios-validation/
+          if-no-files-found: warn
+          retention-days: 7
 
   android:
     name: Android phone, 7-inch tablet, and 10-inch tablet
