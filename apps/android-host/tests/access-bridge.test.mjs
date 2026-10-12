@@ -1,9 +1,9 @@
-import { readFileSync } from "node:fs";
-import { runInNewContext } from "node:vm";
-import { test } from "node:test";
-import assert from "node:assert/strict";
+import * as NodeFS from "node:fs";
+import * as NodeVM from "node:vm";
+import * as NodeTest from "node:test";
+import * as NodeAssert from "node:assert/strict";
 
-const script = readFileSync(
+const script = NodeFS.readFileSync(
   new URL("../app/src/main/assets/android-host-access.js", import.meta.url),
   "utf8",
 );
@@ -17,7 +17,7 @@ function harness(frame = false) {
     addEventListener: (name, listener) => events.set(name, listener),
   };
   window.top = frame ? {} : window;
-  runInNewContext(script, {
+  NodeVM.runInNewContext(script, {
     window,
     setTimeout: (callback) => {
       timers.set(++next, callback);
@@ -45,20 +45,20 @@ const granted = {
   capabilities: { appData: true, computerUse: false },
 };
 
-test("only main frame receives the narrow frozen promise API", () => {
-  assert.equal(harness(true).host, undefined);
+NodeTest.test("only main frame receives the narrow frozen promise API", () => {
+  NodeAssert.equal(harness(true).host, undefined);
   const h = harness();
-  assert.equal(Object.isFrozen(h.host), true);
-  assert.deepEqual(Object.keys(h.host).sort(), [
+  NodeAssert.equal(Object.isFrozen(h.host), true);
+  NodeAssert.deepEqual(Object.keys(h.host).sort(), [
     "getAccessState",
     "openDeviceAccess",
     "protocolVersion",
     "publishChatWidget",
     "requestFullAccess",
   ]);
-  assert.equal(h.messages.length, 0); // Page initialization cannot request or grant access.
+  NodeAssert.equal(h.messages.length, 0); // Page initialization cannot request or grant access.
 });
-test("only the matching v2 acknowledgement resolves each pending request", async () => {
+NodeTest.test("only the matching v2 acknowledgement resolves each pending request", async () => {
   const h = harness();
   let finished = false;
   const full = h.host.requestFullAccess("thread").then((state) => {
@@ -66,74 +66,83 @@ test("only the matching v2 acknowledgement resolves each pending request", async
     return state;
   });
   const read = h.host.getAccessState();
-  assert.equal(h.messages[0].threadId, "thread");
+  NodeAssert.equal(h.messages[0].threadId, "thread");
   h.reply("unknown", granted);
   h.reply(h.messages[0].requestId, granted, 1);
   await Promise.resolve();
-  assert.equal(finished, false);
+  NodeAssert.equal(finished, false);
   h.reply(h.messages[1].requestId, { ...granted, fullAccess: false });
-  assert.equal((await read).fullAccess, false);
-  assert.equal(finished, false);
+  NodeAssert.equal((await read).fullAccess, false);
+  NodeAssert.equal(finished, false);
   h.reply(h.messages[0].requestId, granted);
-  assert.equal((await full).fullAccess, true);
-  assert.equal(h.timers.size, 0);
+  NodeAssert.equal((await full).fullAccess, true);
+  NodeAssert.equal(h.timers.size, 0);
 });
-test("page departure drains all promises false and late receipts are ignored", async () => {
-  const h = harness();
-  const first = h.host.requestFullAccess("thread"),
-    second = h.host.openDeviceAccess();
-  h.events.get("pagehide")();
-  h.reply(h.messages[0].requestId, granted);
-  for (const state of await Promise.all([first, second])) {
-    assert.equal(state.fullAccess, false);
-    assert.equal(state.verified, false);
-  }
-  assert.equal(h.timers.size, 0);
-});
-test("pending requests are bounded and time out false", async () => {
+NodeTest.test(
+  "page departure drains all promises false and late receipts are ignored",
+  async () => {
+    const h = harness();
+    const first = h.host.requestFullAccess("thread"),
+      second = h.host.openDeviceAccess();
+    h.events.get("pagehide")();
+    h.reply(h.messages[0].requestId, granted);
+    for (const state of await Promise.all([first, second])) {
+      NodeAssert.equal(state.fullAccess, false);
+      NodeAssert.equal(state.verified, false);
+    }
+    NodeAssert.equal(h.timers.size, 0);
+  },
+);
+NodeTest.test("pending requests are bounded and time out false", async () => {
   const h = harness();
   const pending = Array.from({ length: 16 }, () => h.host.getAccessState());
-  assert.equal((await h.host.requestFullAccess("overflow")).verified, false);
-  assert.equal(h.messages.length, 16);
+  NodeAssert.equal((await h.host.requestFullAccess("overflow")).verified, false);
+  NodeAssert.equal(h.messages.length, 16);
   for (const timeout of Array.from(h.timers.values())) timeout();
-  assert.equal(h.timers.size, 0);
-  assert.equal(
+  NodeAssert.equal(h.timers.size, 0);
+  NodeAssert.equal(
     (await Promise.all(pending)).every((s) => s.fullAccess === false),
     true,
   );
 });
-test("invalid thread and broken transport settle false without hanging", async () => {
+NodeTest.test("invalid thread and broken transport settle false without hanging", async () => {
   const h = harness();
   for (const thread of [undefined, "", " ", "a".repeat(257)])
-    assert.equal((await h.host.requestFullAccess(thread)).fullAccess, false);
-  assert.equal(h.messages.length, 0);
+    NodeAssert.equal((await h.host.requestFullAccess(thread)).fullAccess, false);
+  NodeAssert.equal(h.messages.length, 0);
   h.window.__lecturnNative.postMessage = () => {
     throw new Error("disconnected");
   };
-  assert.equal((await h.host.requestFullAccess("thread")).verified, false);
-  assert.equal(h.timers.size, 0);
+  NodeAssert.equal((await h.host.requestFullAccess("thread")).verified, false);
+  NodeAssert.equal(h.timers.size, 0);
 });
 
-test("widget publication is an explicit correlated request, never a grant or send", async () => {
-  const h = harness();
-  const payload = {
-    threadId: "demo",
-    title: "Demo",
-    messages: [{ role: "assistant", text: "Hello" }],
-  };
-  const pending = h.host.publishChatWidget(payload);
-  assert.equal(h.messages[0].method, "publishChatWidget");
-  assert.deepEqual(h.messages[0].payload, payload);
-  h.reply(h.messages[0].requestId, { published: true });
-  assert.equal((await pending).published, true);
-  assert.equal(h.messages.length, 1);
-});
+NodeTest.test(
+  "widget publication is an explicit correlated request, never a grant or send",
+  async () => {
+    const h = harness();
+    const payload = {
+      threadId: "demo",
+      title: "Demo",
+      messages: [{ role: "assistant", text: "Hello" }],
+    };
+    const pending = h.host.publishChatWidget(payload);
+    NodeAssert.equal(h.messages[0].method, "publishChatWidget");
+    NodeAssert.deepEqual(h.messages[0].payload, payload);
+    h.reply(h.messages[0].requestId, { published: true });
+    NodeAssert.equal((await pending).published, true);
+    NodeAssert.equal(h.messages.length, 1);
+  },
+);
 
-test("failed widget publication reports false without an access-shaped result", async () => {
-  const h = harness();
-  const pending = h.host.publishChatWidget(null);
-  for (const timeout of Array.from(h.timers.values())) timeout();
-  const response = await pending;
-  assert.equal(response.published, false);
-  assert.deepEqual(Object.keys(response), ["published"]);
-});
+NodeTest.test(
+  "failed widget publication reports false without an access-shaped result",
+  async () => {
+    const h = harness();
+    const pending = h.host.publishChatWidget(null);
+    for (const timeout of Array.from(h.timers.values())) timeout();
+    const response = await pending;
+    NodeAssert.equal(response.published, false);
+    NodeAssert.deepEqual(Object.keys(response), ["published"]);
+  },
+);

@@ -1,26 +1,28 @@
 // Runs only in a fresh qualification cwd/HOME. Resolve native deps from the installed package.
-import assert from "node:assert/strict";
-import { createRequire } from "node:module";
-import { readFileSync, writeFileSync, appendFileSync, realpathSync, existsSync } from "node:fs";
-import { resolve, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import * as NodeAssert from "node:assert/strict";
+import * as NodeModule from "node:module";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 
 const [kind, packageRoot] = process.argv.slice(2);
-assert(packageRoot, "Pass the installed Lecturn package root");
-const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
-assert.equal(pkg.name, "lecturn");
-assert.equal(pkg.version, "0.0.51-nightly.20261008.98");
-const require = createRequire(join(realpathSync(packageRoot), "package.json"));
+NodeAssert.ok(packageRoot, "Pass the installed Lecturn package root");
+const pkg = JSON.parse(NodeFS.readFileSync(NodePath.join(packageRoot, "package.json"), "utf8"));
+NodeAssert.equal(pkg.name, "lecturn");
+NodeAssert.equal(pkg.version, "0.0.51-nightly.20261008.98");
+const require = NodeModule.createRequire(
+  NodePath.join(NodeFS.realpathSync(packageRoot), "package.json"),
+);
 const report = { kind, node: process.versions.node, package: packageRoot };
 const unwrap = (result) => {
-  assert.equal(result.ok, true, result.error);
+  NodeAssert.equal(result.ok, true, result.error);
   return result.value;
 };
 
 if (kind === "sqlite") {
   // This is the native API used by the packaged nodeSqliteClient, not a substitute DB.
   const { DatabaseSync } = require("node:sqlite");
-  const path = resolve("qualification.sqlite");
+  const path = NodePath.resolve("qualification.sqlite");
   let db = new DatabaseSync(path);
   try {
     db.exec(
@@ -31,11 +33,11 @@ if (kind === "sqlite") {
     db.prepare("INSERT INTO probes(value) VALUES (?)").run("synthetic-rolled-back");
     db.exec("ROLLBACK");
     const stmt = db.prepare("SELECT id, value FROM probes ORDER BY id");
-    assert.deepEqual(
+    NodeAssert.deepEqual(
       stmt.columns().map((c) => c.name),
       ["id", "value"],
     );
-    assert.deepEqual(
+    NodeAssert.deepEqual(
       stmt.all().map((r) => ({ ...r })),
       [{ id: 1, value: "synthetic-committed" }],
     );
@@ -44,7 +46,7 @@ if (kind === "sqlite") {
   }
   db = new DatabaseSync(path, { readOnly: true });
   try {
-    assert.equal(db.prepare("SELECT count(*) AS n FROM probes").get().n, 1);
+    NodeAssert.equal(db.prepare("SELECT count(*) AS n FROM probes").get().n, 1);
   } finally {
     db.close();
   }
@@ -54,13 +56,15 @@ if (kind === "sqlite") {
   // package from Lecturn's dependency search paths, then load that public entry.
   const searchRoot = require.resolve
     .paths("@ff-labs/fff-node")
-    .map((base) => join(base, "@ff-labs/fff-node"))
-    .find((base) => existsSync(join(base, "package.json")));
-  assert(searchRoot, "Installed fff-node missing");
-  const searchPackage = JSON.parse(readFileSync(join(searchRoot, "package.json"), "utf8"));
-  report.resolved = resolve(searchRoot, searchPackage.exports["."].import);
-  const { FileFinder } = await import(pathToFileURL(report.resolved).href);
-  writeFileSync("qualification-needle.txt", "synthetic_qualification_content_731\n");
+    .map((base) => NodePath.join(base, "@ff-labs/fff-node"))
+    .find((base) => NodeFS.existsSync(NodePath.join(base, "package.json")));
+  NodeAssert.ok(searchRoot, "Installed fff-node missing");
+  const searchPackage = JSON.parse(
+    NodeFS.readFileSync(NodePath.join(searchRoot, "package.json"), "utf8"),
+  );
+  report.resolved = NodePath.resolve(searchRoot, searchPackage.exports["."].import);
+  const { FileFinder } = await import(NodeURL.pathToFileURL(report.resolved).href);
+  NodeFS.writeFileSync("qualification-needle.txt", "synthetic_qualification_content_731\n");
   const finder = unwrap(
     FileFinder.create({
       basePath: process.cwd(),
@@ -72,9 +76,9 @@ if (kind === "sqlite") {
     }),
   );
   try {
-    assert.equal(unwrap(await finder.waitForIndexReady(15000)), true);
+    NodeAssert.equal(unwrap(await finder.waitForIndexReady(15000)), true);
     const files = unwrap(finder.fileSearch("qualification-needle", { pageSize: 10 }));
-    assert(files.items.some((f) => f.relativePath === "qualification-needle.txt"));
+    NodeAssert.ok(files.items.some((f) => f.relativePath === "qualification-needle.txt"));
     const content = unwrap(
       finder.grep("synthetic_qualification_content_731", {
         mode: "plain",
@@ -84,7 +88,7 @@ if (kind === "sqlite") {
         timeBudgetMs: 1000,
       }),
     );
-    assert(
+    NodeAssert.ok(
       content.items.some(
         (f) =>
           f.relativePath === "qualification-needle.txt" &&
@@ -117,8 +121,8 @@ if (kind === "sqlite") {
     { name: "xterm-256color", cols: 80, rows: 24, cwd: process.cwd(), env: process.env },
   );
   report.ptyPid = child.pid;
-  appendFileSync(
-    resolve("..", "pty-process.jsonl"),
+  NodeFS.appendFileSync(
+    NodePath.resolve("..", "pty-process.jsonl"),
     JSON.stringify({ pid: child.pid, executable: process.execPath }) + "\n",
   );
   let exited = false;
