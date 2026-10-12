@@ -23,6 +23,7 @@ final class HostSurface extends LinearLayout {
     private final ScrollView waiting;
     private final TextView title, detail;
     private final Button start, stop, device, more;
+    private boolean lastVerifiedReady;
 
     HostSurface(Context context) {
         super(context);
@@ -104,15 +105,17 @@ final class HostSurface extends LinearLayout {
         boolean ready = verified && "ready".equals(state.runtime);
         boolean starting = verified && "starting".equals(state.runtime);
         boolean stopped = verified && "stopped".equals(state.runtime);
+        // Preserve a ready document through lost contact, but not through a confirmed exit or Stop.
+        if (host.stopping) lastVerifiedReady = false;
+        else if (verified) lastVerifiedReady = ready;
+        boolean showWorkspace = hasWorkspace && bridgeAvailable && !host.stopping && lastVerifiedReady;
         status.setText(host.stopping ? R.string.host_stopping : !verified ? (host.busy ? R.string.host_checking : R.string.host_unavailable)
                 : starting ? R.string.host_starting : ready ? (host.monitoring ? R.string.host_on_phone : R.string.host_background_off)
                 : "stopped".equals(state.runtime) ? R.string.host_stopped : R.string.host_attention);
         device.setEnabled(!host.busy);
-        pairingStatus.setVisibility(host.stopFailure != null || (!stopped && (pairing.error != null || pairing.waiting)) ? VISIBLE : GONE);
+        pairingStatus.setVisibility(host.stopFailure != null || (showWorkspace && (pairing.error != null || pairing.waiting)) ? VISIBLE : GONE);
         pairingStatus.setText(host.stopFailure != null ? host.stopFailure
                 : pairing.error != null ? pairing.error : getResources().getString(R.string.host_pairing));
-        boolean showWorkspace = hasWorkspace && bridgeAvailable && !host.stopping
-                && (ready || !verified);
         for (int i = 0; i < content.getChildCount(); i++) {
             View child = content.getChildAt(i);
             if (child != waiting) child.setVisibility(showWorkspace ? VISIBLE : INVISIBLE);
