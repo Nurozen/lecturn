@@ -6,7 +6,7 @@ Build with JDK 21 and Android SDK 36:
 
 ```sh
 JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home \
-ANDROID_HOME=/Users/nurozen/Library/Android/sdk \
+ANDROID_HOME="$HOME/Library/Android/sdk" \
 ./gradlew --no-daemon :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 ```
 
