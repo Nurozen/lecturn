@@ -129,6 +129,8 @@ function makePullRequestSummary(input: {
     headBranch: "feature",
     baseBranch: "main",
     updatedAt: input.updatedAt ?? NOW,
+    closedAt: input.state === "closed" ? (input.updatedAt ?? NOW) : null,
+    mergedAt: input.state === "merged" ? (input.updatedAt ?? NOW) : null,
   };
 }
 
@@ -391,7 +393,9 @@ describe("ThreadSettlementReactor", () => {
             }),
           ]),
           branchPullRequest: () =>
-            Ref.get(pullRequest).pipe(Effect.map((state) => ({ state, updatedAt: NOW }))),
+            Ref.get(pullRequest).pipe(
+              Effect.map((state) => ({ state, updatedAt: NOW, closedAt: NOW, mergedAt: NOW })),
+            ),
         });
 
         yield* Effect.gen(function* () {
@@ -491,7 +495,12 @@ describe("ThreadSettlementReactor", () => {
             ]),
             branchPullRequest: () =>
               Ref.get(state).pipe(
-                Effect.map((pullRequestState) => ({ state: pullRequestState, updatedAt: NOW })),
+                Effect.map((pullRequestState) => ({
+                  state: pullRequestState,
+                  updatedAt: NOW,
+                  closedAt: NOW,
+                  mergedAt: NOW,
+                })),
               ),
             onDispatch: () => Deferred.succeed(mergedThreadSettled, undefined),
           });
@@ -622,7 +631,12 @@ describe("ThreadSettlementReactor", () => {
                     : Effect.void,
               ),
               Effect.andThen(Ref.get(state)),
-              Effect.map((pullRequestState) => ({ state: pullRequestState, updatedAt: NOW })),
+              Effect.map((pullRequestState) => ({
+                state: pullRequestState,
+                updatedAt: NOW,
+                closedAt: NOW,
+                mergedAt: NOW,
+              })),
             ),
         });
 
@@ -768,7 +782,8 @@ describe("ThreadSettlementReactor", () => {
               makeProject(LINKED_PROJECT_ID, "/workspace/linked-root"),
             ],
           ),
-          branchPullRequest: () => Effect.succeed({ state: "closed", updatedAt: NOW }),
+          branchPullRequest: () =>
+            Effect.succeed({ state: "closed", updatedAt: NOW, closedAt: NOW }),
           pullRequestSummary: (input) =>
             Effect.succeed(makePullRequestSummary({ ...input, state: "merged" })),
         });
@@ -885,6 +900,7 @@ describe("Stave saga settlement", () => {
         const harness = yield* makeHarness({
           snapshot: makeSnapshot([
             makeThread("ready"),
+            makeThread("created-now", { createdAt: NOW, latestUserMessageAt: null }),
             makeThread("busy", {
               session: {
                 threadId: ThreadId.make("busy"),
@@ -913,8 +929,10 @@ describe("Stave saga settlement", () => {
           const commands = yield* Ref.get(harness.commands);
           assert.deepStrictEqual(
             commands.map((command) => command.threadId),
-            [ThreadId.make("ready")],
+            [ThreadId.make("ready"), ThreadId.make("created-now")],
           );
+          assert.strictEqual(commands[0]?.settledAt, "2026-08-20T00:00:00.000Z");
+          assert.strictEqual(commands[1]?.settledAt, NOW);
         }).pipe(Effect.provide(harness.layer));
       }),
   );
@@ -1020,6 +1038,181 @@ describe("Stave inactivity settlement", () => {
 });
 
 describe("Stave multi-repo settlement", () => {
+  const project: OrchestrationProjectShell = {
+    ...makeProject(),
+    stave: {
+      spaceId: "multi",
+      isSaga: false,
+      state: "live",
+      memories: [],
+      repos: [
+        { name: "api", path: "services/api", mode: "edit", branch: "stale-manifest" },
+        { name: "web", path: "web", mode: "edit", branch: "also-stale" },
+        { name: "reference", path: "references/docs", mode: "reference" },
+      ],
+      primaryRepoPath: "/workspace/project/services/api",
+      primaryBranch: "stale-primary",
+    },
+  };
+  const linkedPullRequest = {
+    projectId: PROJECT_ID,
+    repository: "owner/repository",
+    number: 42,
+    url: "https://github.com/owner/repository/pull/42",
+  };
+  const terminalScenarios = [
+    {
+      name: "all-closed members with the latest close in a checkout",
+      api: "closed",
+      web: "closed",
+      linked: "closed",
+      latest: "web",
+      onMerge: false,
+    },
+    {
+      name: "all-closed members with the latest close in the explicit link",
+      api: "closed",
+      web: "closed",
+      linked: "closed",
+      latest: "linked",
+      onMerge: false,
+    },
+    {
+      name: "mixed members with the latest close in a checkout",
+      api: "merged",
+      web: "closed",
+      linked: "merged",
+      latest: "web",
+      onMerge: true,
+    },
+    {
+      name: "mixed members with the latest close in the explicit link",
+      api: "merged",
+      web: "merged",
+      linked: "closed",
+      latest: "linked",
+      onMerge: true,
+    },
+    {
+      name: "mixed members with the latest merge in a checkout",
+      api: "merged",
+      web: "closed",
+      linked: "closed",
+      latest: "api",
+      onMerge: true,
+    },
+    {
+      name: "all-merged members with the latest merge in the explicit link",
+      api: "merged",
+      web: "merged",
+      linked: "merged",
+      latest: "linked",
+      onMerge: true,
+    },
+  ] as const;
+  const invalidScenarios = (["closed", "merged"] as const).flatMap((state) =>
+    (["api", "web", "linked"] as const).flatMap((member) =>
+      [undefined, null, "invalid"].map((timestamp) => ({
+        name: `${state} members with ${String(timestamp)} terminal time in ${member}`,
+        api: state,
+        web: state,
+        linked: state,
+        latest: "web" as const,
+        onMerge: true,
+        invalidMember: member,
+        invalidTimestamp: timestamp,
+      })),
+    ),
+  );
+  for (const scenario of [...terminalScenarios, ...invalidScenarios]) {
+    it.effect(`uses terminal evidence for ${scenario.name} despite metadata changes`, () =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const older = "2026-08-19T00:00:00.000Z";
+        const latest = "2026-08-21T00:00:00.000Z";
+        const metadataAt = yield* Ref.make(older);
+        const memberSummary = (member: "api" | "web" | "linked", updatedAt: string) => {
+          const state = scenario[member];
+          const terminalAt =
+            "invalidMember" in scenario && scenario.invalidMember === member
+              ? scenario.invalidTimestamp
+              : scenario.latest === member
+                ? latest
+                : older;
+          return {
+            state,
+            updatedAt,
+            closedAt: state === "closed" ? (terminalAt ?? null) : NOW,
+            mergedAt: state === "merged" ? (terminalAt ?? null) : NOW,
+          };
+        };
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot(
+            [
+              makeThread("before-terminal", { linkedPullRequest }),
+              makeThread("at-terminal", { linkedPullRequest, latestUserMessageAt: latest }),
+              makeThread("resumed", {
+                linkedPullRequest,
+                latestUserMessageAt: "2026-08-22T00:00:00.000Z",
+              }),
+            ],
+            [project],
+          ),
+          settings: {
+            ...DEFAULT_SERVER_SETTINGS,
+            sidebarAutoSettleAfterDays: null,
+            sidebarAutoSettleOnMerge: scenario.onMerge,
+          },
+          branchPullRequest: ({ cwd }) =>
+            Ref.get(metadataAt).pipe(
+              Effect.map((updatedAt) =>
+                memberSummary(cwd.endsWith("/api") ? "api" : "web", updatedAt),
+              ),
+            ),
+          pullRequestSummary: (input) =>
+            Ref.get(metadataAt).pipe(
+              Effect.map((updatedAt) => ({
+                ...makePullRequestSummary({ ...input, state: scenario.linked }),
+                ...memberSummary("linked", updatedAt),
+              })),
+            ),
+        });
+        yield* Effect.gen(function* () {
+          const reactor = yield* ThreadSettlementReactor.ThreadSettlementReactor;
+          yield* startHarness(reactor, fixture.activation, fixture.snapshotReads);
+          const expected =
+            "invalidMember" in scenario
+              ? []
+              : [
+                  {
+                    threadId: ThreadId.make("before-terminal"),
+                    settledAt: "2026-08-20T00:00:00.000Z",
+                  },
+                  { threadId: ThreadId.make("at-terminal"), settledAt: latest },
+                ];
+          assert.deepStrictEqual(
+            (yield* Ref.get(fixture.commands)).map(({ threadId, settledAt }) => ({
+              threadId,
+              settledAt,
+            })),
+            expected,
+          );
+          yield* Ref.set(fixture.commands, []);
+          yield* Ref.set(metadataAt, NOW);
+          yield* TestClock.adjust("1 minute");
+          yield* Queue.take(fixture.snapshotReads);
+          yield* reactor.drain;
+          assert.deepStrictEqual(
+            (yield* Ref.get(fixture.commands)).map(({ threadId, settledAt }) => ({
+              threadId,
+              settledAt,
+            })),
+            expected,
+          );
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    );
+  }
   for (const scenario of [
     {
       name: "waits for an older explicit open PR",
@@ -1048,33 +1241,12 @@ describe("Stave multi-repo settlement", () => {
     it.effect(scenario.name, () =>
       Effect.gen(function* () {
         yield* TestClock.setTime(Date.parse(NOW));
-        const project: OrchestrationProjectShell = {
-          ...makeProject(),
-          stave: {
-            spaceId: "multi",
-            isSaga: false,
-            state: "live",
-            memories: [],
-            repos: [
-              { name: "api", path: "services/api", mode: "edit", branch: "stale-manifest" },
-              { name: "web", path: "web", mode: "edit", branch: "also-stale" },
-              { name: "reference", path: "references/docs", mode: "reference" },
-            ],
-            primaryRepoPath: "/workspace/project/services/api",
-            primaryBranch: "stale-primary",
-          },
-        };
         const fixture = yield* makeHarness({
           snapshot: makeSnapshot(
             [
               makeThread("multi-thread", {
                 branch: "stale-thread",
-                linkedPullRequest: {
-                  projectId: PROJECT_ID,
-                  repository: "owner/repository",
-                  number: 42,
-                  url: "https://github.com/owner/repository/pull/42",
-                },
+                linkedPullRequest,
               }),
             ],
             [project],
@@ -1094,10 +1266,18 @@ describe("Stave multi-repo settlement", () => {
               workingTree: { files: [], insertions: 0, deletions: 0 },
             }),
           branchPullRequest: ({ cwd }) => {
-            if (cwd.endsWith("/api")) return Effect.succeed({ state: "merged", updatedAt: NOW });
+            if (cwd.endsWith("/api"))
+              return Effect.succeed({ state: "merged", updatedAt: NOW, mergedAt: NOW });
             if (scenario.second === "error") return Effect.die("repo unavailable");
             return Effect.succeed(
-              scenario.second === null ? null : { state: scenario.second, updatedAt: NOW },
+              scenario.second === null
+                ? null
+                : {
+                    state: scenario.second,
+                    updatedAt: NOW,
+                    closedAt: scenario.second === "closed" ? NOW : null,
+                    mergedAt: scenario.second === "merged" ? NOW : null,
+                  },
             );
           },
           pullRequestSummary: (input) =>

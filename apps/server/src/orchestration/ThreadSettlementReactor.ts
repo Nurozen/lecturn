@@ -142,7 +142,12 @@ export const make = Effect.gen(function* () {
           const linked = yield* pullRequests.summary(thread.linkedPullRequest, {
             recoverTransientFailure: false,
           });
-          repoPullRequests.push({ state: linked.state, updatedAt: linked.updatedAt });
+          repoPullRequests.push({
+            state: linked.state,
+            updatedAt: linked.updatedAt,
+            closedAt: linked.closedAt ?? null,
+            mergedAt: linked.mergedAt ?? null,
+          });
         }
         // Any open member keeps the whole space active. Unknown/missing members
         // cannot supply evidence for PR-based settlement.
@@ -150,20 +155,19 @@ export const make = Effect.gen(function* () {
           return { state: "open" as const, updatedAt: null };
         if (repoPullRequests.some((pr) => pr === null)) return null;
         const completed = repoPullRequests.filter((pr) => pr !== null);
-        const timestamps = completed.map((pr) => pr.updatedAt);
-        const updatedAt = timestamps.every(
+        const timestamps = completed.map((pr) =>
+          pr.state === "merged" ? pr.mergedAt : pr.closedAt,
+        );
+        const terminalAt = timestamps.every(
           (value) => value != null && Number.isFinite(Date.parse(value)),
         )
           ? (timestamps.reduce((latest, value) =>
               Date.parse(value!) > Date.parse(latest!) ? value : latest,
             ) ?? null)
           : null;
-        return {
-          state: completed.every((pr) => pr.state === "closed")
-            ? ("closed" as const)
-            : ("merged" as const),
-          updatedAt,
-        };
+        return completed.every((pr) => pr.state === "closed")
+          ? ({ state: "closed", closedAt: terminalAt } satisfies SettlementPullRequest)
+          : ({ state: "merged", mergedAt: terminalAt } satisfies SettlementPullRequest);
       }
       if (thread.linkedPullRequest != null) {
         // The event carries the merged state, so only the threads linked to
@@ -189,7 +193,7 @@ export const make = Effect.gen(function* () {
         ) {
           return {
             state: "merged",
-            updatedAt: mergedPullRequest.mergedAt,
+            mergedAt: mergedPullRequest.mergedAt,
           } satisfies SettlementPullRequest;
         }
         if (!projects.has(thread.linkedPullRequest.projectId)) {
@@ -206,7 +210,8 @@ export const make = Effect.gen(function* () {
         );
         return {
           state: summary.state,
-          updatedAt: summary.updatedAt,
+          closedAt: summary.closedAt ?? null,
+          mergedAt: summary.mergedAt ?? null,
         } satisfies SettlementPullRequest;
       }
       if (thread.branch === null) return null;
@@ -223,7 +228,7 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const sagaMerged = staveMerged.has(group[0]!.projectId);
           const pullRequest = sagaMerged
-            ? { state: "merged" as const, updatedAt: now }
+            ? { state: "merged" as const, mergedAt: now }
             : yield* pullRequestFor(group[0]!);
           // Ordinary threads with an open pull request still settle by
           // inactivity. A live Stave space does not: settling its threads can
