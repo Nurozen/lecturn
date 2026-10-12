@@ -194,6 +194,10 @@ const makeTildeProviderFixtures = Effect.fn(
       '  process.stdout.write("claude 2.1.219\\n");',
       "  process.exit(0);",
       "}",
+      'if (process.argv.slice(2).join(" ") === "auth status --json") {',
+      '  process.stdout.write(JSON.stringify({ loggedIn: true }) + "\\n");',
+      "  process.exit(0);",
+      "}",
       "const lines = NodeReadline.createInterface({ input: process.stdin });",
       'lines.on("line", (line) => {',
       "  const message = JSON.parse(line);",
@@ -419,6 +423,7 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
         status: "ready",
         installed: true,
         version: "2.1.219",
+        auth: { status: "authenticated" },
       });
     }).pipe(Effect.provide(testLayer)),
   );
