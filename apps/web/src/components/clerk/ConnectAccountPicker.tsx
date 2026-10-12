@@ -27,7 +27,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 /** The compact "which account?" select. Every surface that asks uses this one. */
-export function ConnectAccountPicker(props: {
+function ConnectAccountPicker(props: {
   readonly label: string;
   /** For a surface that already shows the label next to the picker. */
   readonly labelHidden?: boolean;

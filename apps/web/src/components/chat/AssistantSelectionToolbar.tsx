@@ -26,7 +26,7 @@ export interface ThreadNoteSelection {
   role: "user" | "assistant";
 }
 
-export function selectionSourceRole(source: HTMLElement): "user" | "assistant" {
+function selectionSourceRole(source: HTMLElement): "user" | "assistant" {
   return source.dataset.citationSourceRole === "user" ? "user" : "assistant";
 }
 

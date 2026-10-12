@@ -8,7 +8,6 @@ import {
   type EnvironmentThreadStatus,
   mergeEnvironmentThread,
 } from "@lecturn/client-runtime/state/threads";
-import { environmentSupportsStave } from "@lecturn/client-runtime/state/stave";
 import type { ScopedProjectRef, ScopedThreadRef, ServerConfig } from "@lecturn/contracts";
 import type { EnvironmentId, ServerProvider } from "@lecturn/contracts";
 import { Atom } from "effect/unstable/reactivity";
@@ -40,7 +39,7 @@ const EMPTY_THREAD_STATUS_ATOM = Atom.make<EnvironmentThreadStatus>("empty").pip
   Atom.withLabel("web-thread-status:empty"),
 );
 
-export const activeEnvironmentIdAtom = Atom.make<EnvironmentId | null>(null).pipe(
+const activeEnvironmentIdAtom = Atom.make<EnvironmentId | null>(null).pipe(
   Atom.keepAlive,
   Atom.withLabel("web-active-environment-id"),
 );
@@ -239,26 +238,12 @@ export function readEnvironmentSupportsForking(environmentId: EnvironmentId): bo
   );
 }
 
-/** Whether the environment's server build ships the Stave integration
-    (`capabilities.stave`). A static build fact: configuration rows render on
-    it alone; feature UI additionally needs the enabled setting and a runnable
-    binary (see `staveFeatureAvailable`). */
-export function readEnvironmentSupportsStave(environmentId: EnvironmentId): boolean {
-  return environmentSupportsStave(
-    appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId),
-  );
-}
-
 /** Provider snapshots for an environment, for gating reads outside React
     (menus, palette actions, keybindings). Empty until the config loads. */
 export function readEnvironmentProviders(
   environmentId: EnvironmentId,
 ): ReadonlyArray<ServerProvider> {
   return appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.providers ?? [];
-}
-
-export function readThreadDetail(ref: ScopedThreadRef): EnvironmentThread | null {
-  return appAtomRegistry.get(environmentThreadDetails.detailAtom(ref));
 }
 
 export function readEnvironmentThreadRefs(

@@ -13,7 +13,7 @@ import { hasCloudPublicConfig, resolveCloudPublicConfig, trimNonEmpty } from "./
 const CONNECT_CLI_AUTH_STATE_STORAGE_KEY = "lecturn-connect-cli-auth-state";
 const CONNECT_CLI_AUTH_ACCOUNT_STORAGE_KEY = "lecturn-connect-cli-auth-account";
 
-export function resolveConnectCliOAuthClientId(): string | null {
+function resolveConnectCliOAuthClientId(): string | null {
   return trimNonEmpty(import.meta.env.VITE_CLERK_CLI_OAUTH_CLIENT_ID as string | undefined);
 }
 

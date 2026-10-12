@@ -14,7 +14,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 
 import { resolveStorage } from "./lib/storage";
 
-export const RIGHT_PANEL_KINDS = [
+const RIGHT_PANEL_KINDS = [
   "diff",
   "files",
   "file",
@@ -205,7 +205,7 @@ export function pullRequestSurfaceId(target: {
   return `pull-request:${scope}${encodeURIComponent(target.projectId)}:${target.host ? `${encodeURIComponent(target.host.toLowerCase())}:` : ""}${encodeURIComponent(target.repository)}:${target.number}`;
 }
 
-export function pullRequestSurface(target: {
+function pullRequestSurface(target: {
   environmentId?: string;
   projectId: string;
   repository: string;

@@ -42,9 +42,11 @@
       "entry": ["scripts/warm-dep-cache.ts"],
       // Replaced in the sidebar by useSagaSidebarTree; kept until the fork decides its fate.
       "ignore": ["src/components/stave/SagaSidebarSection.tsx"],
+      // UI modules retain their complete named component sets.
+      "ignoreIssues": { "src/components/ui/*.tsx": ["exports", "nsExports", "duplicates"] },
     },
     "apps/marketing": {
-      // Upstream's legal page layout. The fork's legal pages are hand-written and do not use it.
+      // The fork's legal pages are hand-written and do not use this layout.
       "ignore": ["src/components/LegalPage.astro"],
     },
     "apps/mobile": {
