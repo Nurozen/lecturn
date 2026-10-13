@@ -431,15 +431,18 @@ static void LecturnFileChipDiagnosticSample(
   }
 }
 
-static void LecturnFileChipDiagnosticStart(UIView *view, UITextView *textView)
+// Main-queue lifecycle: one deferred chain per process, including terminal failure.
+typedef NS_ENUM(NSUInteger, LecturnFileChipDiagnosticState) {
+  LecturnFileChipDiagnosticIdle,
+  LecturnFileChipDiagnosticDeferred,
+  LecturnFileChipDiagnosticStarted,
+  LecturnFileChipDiagnosticTerminal,
+};
+static LecturnFileChipDiagnosticState LecturnFileChipDiagnosticLifecycle;
+
+static void LecturnFileChipDiagnosticArm(UIView *view, UITextView *textView)
 {
-  static BOOL started = NO;
-  if (started || !LecturnFileChipDiagnosticVisible(view, textView)) {
-    LecturnFileChipStatusStartDecision(LecturnFileChipStatusFacts(view, textView),
-        started ? @"already_started" : @"ineligible", NO);
-    return;
-  }
-  started = YES;
+  LecturnFileChipDiagnosticLifecycle = LecturnFileChipDiagnosticStarted;
   const NSTimeInterval startedAt = NSProcessInfo.processInfo.systemUptime;
   __weak UIView *weakView = view;
   __weak UITextView *weakTextView = textView;
@@ -448,6 +451,60 @@ static void LecturnFileChipDiagnosticStart(UIView *view, UITextView *textView)
     LecturnFileChipDiagnosticSample(weakView, weakTextView, 1, 0, startedAt);
   });
   LecturnFileChipStatusStartDecision(LecturnFileChipStatusFacts(view, textView), @"none", YES);
+}
+
+static void LecturnFileChipDiagnosticEligibility(
+    UIView *view, UITextView *textView, NSUInteger attempt)
+{
+  if (LecturnFileChipDiagnosticLifecycle != LecturnFileChipDiagnosticDeferred) return;
+  if (view != nil && textView != nil && LecturnFileChipDiagnosticVisible(view, textView)) {
+    LecturnFileChipDiagnosticArm(view, textView);
+    return;
+  }
+  if (view == nil || textView == nil || attempt == 40) {
+    LecturnFileChipDiagnosticLifecycle = LecturnFileChipDiagnosticTerminal;
+    NSMutableDictionary *facts = [LecturnFileChipStatusFacts(view, textView) mutableCopy];
+    facts[@"armed"] = @NO;
+    facts[@"already_started"] = @NO;
+    // Bypass rejected-decision deduplication so the bounded terminal is retained.
+    LecturnFileChipStatusRecord(@"start_decision", attempt, facts,
+        view == nil || textView == nil ? @"host_lost" : @"ineligible", nil);
+    return;
+  }
+  __weak UIView *weakView = view;
+  __weak UITextView *weakTextView = textView;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 250 * NSEC_PER_MSEC),
+                 dispatch_get_main_queue(), ^{
+    LecturnFileChipDiagnosticEligibility(weakView, weakTextView, attempt + 1);
+  });
+}
+
+static void LecturnFileChipDiagnosticStart(UIView *view, UITextView *textView)
+{
+  NSDictionary *facts = LecturnFileChipStatusFacts(view, textView);
+  if (![facts[@"main_thread"] boolValue]) {
+    LecturnFileChipStatusStartDecision(facts, @"ineligible", NO);
+    return;
+  }
+  if (LecturnFileChipDiagnosticLifecycle == LecturnFileChipDiagnosticStarted) {
+    LecturnFileChipStatusStartDecision(facts, @"already_started", NO);
+    return;
+  }
+  if (LecturnFileChipDiagnosticLifecycle != LecturnFileChipDiagnosticIdle) return;
+  if (LecturnFileChipDiagnosticVisible(view, textView)) {
+    LecturnFileChipDiagnosticArm(view, textView);
+    return;
+  }
+  LecturnFileChipStatusStartDecision(facts, @"ineligible", NO);
+  // Only a natural report-bearing draw can claim the single bounded chain.
+  if (view == nil || textView == nil || ![facts[@"has_report"] boolValue]) return;
+  LecturnFileChipDiagnosticLifecycle = LecturnFileChipDiagnosticDeferred;
+  __weak UIView *weakView = view;
+  __weak UITextView *weakTextView = textView;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 250 * NSEC_PER_MSEC),
+                 dispatch_get_main_queue(), ^{
+    LecturnFileChipDiagnosticEligibility(weakView, weakTextView, 1);
+  });
 }
 
 @protocol LecturnMarkdownOutsideTapTarget <NSObject>
