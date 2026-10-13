@@ -2010,7 +2010,8 @@ jobs:
           
           
           def debugger_script(pid, start, executable, debug_image, udid, service, phase_path=None):
-              # Verify again inside LLDB immediately before attaching; no PID/name search.
+              # Outer verify pins exact simulator/service/PID before launch. Recheck that
+              # PID start/executable here; nested simctl stalled before attach on hosted macOS.
               return '\n'.join([
                   'import json, os, time, subprocess',
                   f'result = {{"attached": False, "detached": False, "pid": {pid}}}',
@@ -2055,9 +2056,6 @@ jobs:
                   '    checkpoint("bootstrap", True)',
                   '    stage = "identity"',
                   '    checkpoint("identity", False)',
-                  f'    services = checked_read(["xcrun", "simctl", "spawn", {udid!r}, "launchctl", "list"], "simulator_launchctl", 5)',
-                  f'    matches = [r.split() for r in services.splitlines() if r.split() and r.split()[-1] == {service!r}]',
-                  f'    if len(matches) != 1 or matches[0][0] != "{pid}": raise RuntimeError("service")',
                   f'    command = checked_read(["ps", "-p", "{pid}", "-o", "comm="], "ps_exe", 3)',
                   f'    if command != {str(executable)!r}: raise RuntimeError("executable")',
                   f'    current = checked_read(["ps", "-p", "{pid}", "-o", "lstart="], "ps_start", 3)',
