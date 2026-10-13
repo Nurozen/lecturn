@@ -1,3 +1,10 @@
+import { EnvironmentId, UsageLimitSourceId } from "@lecturn/contracts";
+import {
+  collectLimitAccounts,
+  collectLimitNotices,
+  collectLimitPools,
+} from "@lecturn/shared/usageLimits";
+
 import { describe, expect, it } from "vite-plus/test";
 
 import { accountEmailFromAuthFile, cliproxyStatusToAccounts } from "./cliproxyUsageLimits.ts";
@@ -101,6 +108,79 @@ describe("cliproxyStatusToAccounts", () => {
         },
       },
     ]);
+  });
+
+  it.each([true, false])(
+    "keeps all-unknown hub accounts visible with a healthy account present: %s",
+    (healthy) => {
+      const accounts = cliproxyStatusToAccounts(
+        {
+          accounts: {
+            ...(healthy
+              ? {
+                  "codex-abc-healthy@example.test-pro.json": {
+                    provider: "codex",
+                    plan: "pro",
+                    five_hour: { known: true, used_percent: 25 },
+                  },
+                }
+              : {}),
+            "codex-def-unknown@example.test-pro.json": {
+              provider: "codex",
+              plan: "pro",
+              five_hour: { known: false, used_percent: 0 },
+              weekly: { known: false, used_percent: 0 },
+            },
+          },
+        },
+        checkedAt,
+      );
+      expect(accounts).toHaveLength(healthy ? 2 : 1);
+      const input = new Map([
+        [
+          EnvironmentId.make("fixture"),
+          {
+            entry: { target: { label: "Fixture" } },
+            serverConfig: {
+              usageLimitSources: [
+                {
+                  id: UsageLimitSourceId.make("fixture-hub"),
+                  kind: "cliproxy" as const,
+                  label: "Hub",
+                  checkedAt,
+                  accounts,
+                },
+              ],
+            },
+          },
+        ],
+      ]);
+      const pools = collectLimitPools(collectLimitAccounts(input), Date.parse(checkedAt));
+      expect(pools).toHaveLength(healthy ? 1 : 0);
+      if (healthy) {
+        expect(pools[0]?.accounts).toHaveLength(1);
+        expect(pools[0]?.windows[0]?.remainingPercent).toBe(75);
+      }
+      expect(collectLimitNotices(input)).toEqual([
+        "Hub: No limits reported. 1 account excluded from pool.",
+      ]);
+    },
+  );
+
+  it("names a Codex five-hour window `primary`, as the Codex driver does", () => {
+    const accounts = cliproxyStatusToAccounts(
+      {
+        accounts: {
+          "codex-abc-someone@example.com-pro.json": {
+            provider: "codex",
+            plan: "pro",
+            five_hour: { hard_limited: false, known: true, used_percent: 40 },
+          },
+        },
+      },
+      checkedAt,
+    );
+    expect(accounts[0]?.usageLimits.windows.map((window) => window.id)).toEqual(["primary"]);
   });
 });
 

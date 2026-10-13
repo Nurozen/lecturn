@@ -63,7 +63,6 @@ import {
 } from "../../onboarding/targetEnvironment.logic";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { newProjectId, randomUUID } from "../../lib/utils";
-import { resolveDefaultProviderModelSelection } from "../../providerInstances";
 import { agentSessionImport, agentSessionScan } from "../../state/agentSessions";
 import { readProjects, useProjects } from "../../state/entities";
 import { useEnvironments, usePrimaryEnvironment } from "../../state/environments";
@@ -1119,9 +1118,6 @@ function ImportStep({
   const targetEnvironment = useOnboardingTargetEnvironment(mode, pairedEnvironmentId);
   const environmentId = targetEnvironment?.environmentId ?? null;
   const machineLabel = targetEnvironment?.label ?? "this machine";
-  const providers = useAtomValue(
-    serverEnvironment.providersValueAtom(environmentId ?? ("" as EnvironmentId)),
-  );
   const scan = useEnvironmentQuery(
     environmentId === null ? null : agentSessionScan({ environmentId, input: {} }),
   );
@@ -1213,7 +1209,6 @@ function ImportStep({
     const importGeneration = importGenerationRef.current;
     const importedProjects = importedProjectsRef.current;
     const projectAttempts = projectAttemptsRef.current;
-    const defaultModelSelection = resolveDefaultProviderModelSelection(providers ?? [], null);
     // Interrupted imports are neither failures nor successes — the command was
     // superseded or the environment dropped — but they still didn't land, so
     // they must not read as "imported everything". Retries skip paths that
@@ -1254,7 +1249,7 @@ function ImportStep({
             title: candidate.title,
             workspaceRoot: candidate.path,
             createWorkspaceRootIfMissing: false,
-            defaultModelSelection,
+            defaultModelSelection: null,
           },
         });
         if (

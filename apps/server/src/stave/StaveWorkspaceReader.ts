@@ -22,6 +22,7 @@ import type {
 } from "@lecturn/contracts";
 import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -29,6 +30,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import type * as PlatformError from "effect/PlatformError";
 import { parse as parseYamlDocument } from "yaml";
 
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
@@ -194,6 +196,56 @@ export function withPrimaryRepositoryIdentity(
   return primaryRepositoryIdentity === null ? info : { ...info, primaryRepositoryIdentity };
 }
 
+class InvalidStaveManifestError extends Data.TaggedError("InvalidStaveManifestError")<{
+  readonly detail: string;
+}> {}
+
+/** Ownership checks must distinguish an absent manifest from one they cannot inspect. */
+export const readManifestStrict = Effect.fn("StaveWorkspaceReader.readManifestStrict")(function* (
+  workspaceRoot: string,
+): Effect.fn.Return<
+  Option.Option<StaveManifest>,
+  PlatformError.PlatformError | InvalidStaveManifestError,
+  FileSystem.FileSystem | Path.Path
+> {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const raw = yield* fileSystem
+    .readFileString(path.join(workspaceRoot, STAVE_MANIFEST_FILE_NAME))
+    .pipe(
+      Effect.map(Option.some),
+      Effect.catchTags({
+        PlatformError: (error) =>
+          error.reason._tag === "NotFound"
+            ? Effect.succeed(Option.none<string>())
+            : Effect.fail(error),
+      }),
+    );
+  if (Option.isNone(raw)) return Option.none();
+
+  const parsed = yield* Effect.try({
+    try: () => parseYamlDocument(raw.value) as unknown,
+    catch: (cause) =>
+      new InvalidStaveManifestError({
+        detail: `yaml parse failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+      }),
+  });
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return yield* new InvalidStaveManifestError({ detail: "manifest is not a mapping" });
+  }
+  return yield* decodeStaveManifest(parsed).pipe(
+    Effect.map(Option.some),
+    Effect.catchTags({
+      SchemaError: (error) =>
+        Effect.fail(
+          new InvalidStaveManifestError({
+            detail: `schema mismatch: ${error.message}`,
+          }),
+        ),
+    }),
+  );
+});
+
 /**
  * Read and decode the manifest at `<workspaceRoot>/.stave.yaml`.
  *
@@ -201,52 +253,25 @@ export function withPrimaryRepositoryIdentity(
  * mismatch) resolves to `Option.none` with a debug log — a non-Stave project
  * must never surface a warning.
  */
-export const readManifest = Effect.fn("StaveWorkspaceReader.readManifest")(function* (
-  workspaceRoot: string,
-): Effect.fn.Return<Option.Option<StaveManifest>, never, FileSystem.FileSystem | Path.Path> {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const filePath = path.join(workspaceRoot, STAVE_MANIFEST_FILE_NAME);
-  const ignore = (reason: string) =>
-    Effect.logDebug("Ignoring Stave manifest").pipe(
-      Effect.annotateLogs({ workspaceRoot, filePath, reason }),
-      Effect.as(Option.none<StaveManifest>()),
-    );
-
-  const raw = yield* fileSystem.readFileString(filePath).pipe(
-    Effect.map(Option.some),
-    Effect.catchTags({
-      PlatformError: (error) =>
-        ignore(`read failed: ${error.reason._tag}`).pipe(Effect.as(Option.none<string>())),
-    }),
-  );
-  if (Option.isNone(raw)) {
-    return Option.none();
-  }
-
-  const parsed = yield* Effect.try({
-    try: () => parseYamlDocument(raw.value) as unknown,
-    catch: (cause) => (cause instanceof Error ? cause.message : String(cause)),
-  }).pipe(
-    Effect.map(Option.some),
-    Effect.catch((message) =>
-      ignore(`yaml parse failed: ${message}`).pipe(Effect.as(Option.none<unknown>())),
+export const readManifest = Effect.fn("StaveWorkspaceReader.readManifest")(
+  (workspaceRoot: string) =>
+    readManifestStrict(workspaceRoot).pipe(
+      Effect.catch((error) =>
+        Effect.gen(function* () {
+          const path = yield* Path.Path;
+          yield* Effect.logDebug("Ignoring Stave manifest").pipe(
+            Effect.annotateLogs({
+              workspaceRoot,
+              filePath: path.join(workspaceRoot, STAVE_MANIFEST_FILE_NAME),
+              reason:
+                error._tag === "PlatformError" ? `read failed: ${error.reason._tag}` : error.detail,
+            }),
+          );
+          return Option.none<StaveManifest>();
+        }),
+      ),
     ),
-  );
-  if (Option.isNone(parsed)) {
-    return Option.none();
-  }
-  if (typeof parsed.value !== "object" || parsed.value === null || Array.isArray(parsed.value)) {
-    return yield* ignore("manifest is not a mapping");
-  }
-
-  return yield* decodeStaveManifest(parsed.value).pipe(
-    Effect.map(Option.some),
-    Effect.catchTags({
-      SchemaError: (error) => ignore(`schema mismatch: ${error.message}`),
-    }),
-  );
-});
+);
 
 export const make = Effect.fn("StaveWorkspaceReader.make")(function* (
   options: StaveWorkspaceReaderOptions = {},
