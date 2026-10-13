@@ -37,6 +37,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   NODE_OPTIONS: --max-old-space-size=8192
@@ -45,14 +46,15 @@ jobs:
   ios:
     name: iPhone 6.9, iPhone 6.5, and iPad 13
     if: inputs.platform == 'all' || inputs.platform == 'ios'
-    runs-on: blacksmith-12vcpu-macos-26
+    runs-on: macos-26
     # Capturing every palette multiplies the device matrix by six, and only the
     # one native build is shared between them.
-    timeout-minutes: ${{ inputs.theme == 'all' && 300 || 60 }}
+    timeout-minutes: ${{ inputs.theme == 'all' && 300 || 80 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          ref: e5ef239aea21c1271dfe0b6d3a89d84ea2d6962c
           sparse-checkout: |
             /*
             !/.repos/
@@ -76,11 +78,1638 @@ jobs:
           echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
           "$vp_pnpm_bin/pnpm" --version
 
-      - name: Capture iOS showcase
-        run: pnpm screenshots:mobile --platform ios --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}"
+      - name: Download exact reusable simulator app
+        uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          repository: Nurozen/lecturn
+          run-id: 38302183128
+          name: ios-link-validation-diagnostics
+          path: artifacts/ios-reuse-input
+
+      - name: Verify and install reusable app artifact
+        run: |
+          echo '752c2b09e418dcfc6b439e441529c2415b8f1dcc780acd5da4a5a81579ec9d38  artifacts/ios-reuse-input/Lecturn-simulator.app.tgz' | shasum -a 256 -c -
+          test "$(cat artifacts/ios-reuse-input/validation-commit.txt)" = '3ed03a2f87fd7e5736b209a47c74b0c263609716'
+          mkdir -p apps/mobile/.showcase/ios-derived-data/Build/Products/Debug-iphonesimulator
+          tar -xzf artifacts/ios-reuse-input/Lecturn-simulator.app.tgz -C apps/mobile/.showcase/ios-derived-data/Build/Products/Debug-iphonesimulator
+          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' apps/mobile/.showcase/ios-derived-data/Build/Products/Debug-iphonesimulator/Lecturn.app/Info.plist
+
+      - name: Install pinned local native UI driver
+        run: |
+          curl --fail --location --silent --show-error 'https://github.com/mobile-dev-inc/Maestro/releases/download/cli-2.11.0/maestro.zip' -o "$RUNNER_TEMP/maestro.zip"
+          echo "5384593cb4e7a106489e75a821d157dd43f4e438df6bc308b72e82c685e1283a  $RUNNER_TEMP/maestro.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$RUNNER_TEMP"
+          "$RUNNER_TEMP/maestro/bin/maestro" --version
+
+      - name: Capture native startup diagnostics
+        timeout-minutes: 20
+        env:
+          EXPO_PUBLIC_SHOWCASE: '1'
+          MAESTRO_CLI_NO_ANALYTICS: '1'
+        run: |
+          test "$(git rev-parse HEAD)" = 'e5ef239aea21c1271dfe0b6d3a89d84ea2d6962c'
+          test "$(git rev-parse HEAD^{tree})" = '7aac649707d0b2043c0cc7c7444c411abed8f4c0'
+          xcodebuild -version
+          xcrun simctl list runtimes
+          git rev-parse HEAD
+          cat > "$RUNNER_TEMP/lecturn-link-fixture.mjs" <<'FIXTURE'
+          import { registerHooks } from "node:module";
+          import assert from "node:assert/strict";
+          registerHooks({
+            load(url, context, nextLoad) {
+              const result = nextLoad(url, context);
+              if (url.endsWith("/scripts/mobile-showcase-environment.ts")) {
+                let source = typeof result.source === "string" ? result.source : Buffer.from(result.source).toString("utf8");
+                const anchor = "async function seedLecturnWorkspace(workspaceRoot: string): Promise<void> {";
+                assert.equal(source.split(anchor).length - 1, 1, "Pinned environment seeder anchor changed");
+                return { ...result, source: source.replace(anchor, "async function seedLecturnWorkspace(workspaceRoot: string): Promise<void> {\n  await NodeFSP.mkdir(workspaceRoot, { recursive: true });\n  await NodeFSP.writeFile(NodePath.join(workspaceRoot, \"report.pdf\"), Buffer.from(\"JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAzMDAgMTgwXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA0IDAgUiA+PiA+PiAvQ29udGVudHMgNSAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhID4+CmVuZG9iago1IDAgb2JqCjw8IC9MZW5ndGggNzUgPj4Kc3RyZWFtCkJUIC9GMSAxNiBUZiAyNSAxMDAgVGQgKExlY3R1cm4gc3ludGhldGljIGZpbGUtY2hpcCBzaGFyaW5nIGZpeHR1cmUpIFRqIEVUCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAzMTEgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo0MzUKJSVFT0YK\", \"base64\"));") };
+              }
+              if (!url.endsWith("/scripts/mobile-showcase.ts")) return result;
+              let source = typeof result.source === "string" ? result.source : Buffer.from(result.source).toString("utf8");
+              const replaceOnce = (before, after) => {
+                assert.equal(source.split(before).length - 1, 1, "Pinned showcase harness anchor changed");
+                source = source.replace(before, after);
+              };
+              replaceOnce("await waitForIosShowcaseScene(simulator.udid, scene, 120_000);", "await waitForIosShowcaseScene(simulator.udid, scene, 300_000);");
+              replaceOnce("const readyScene = await NodeFSP.readFile(readyPath, \"utf8\").catch(() => \"\");\n    if (readyScene.trim() === scene) return;", "const readyScene = await NodeFSP.readFile(readyPath, \"utf8\").catch(() => \"\");\n    if (readyScene.trim() === scene) { console.log('iOS readiness marker verified:', scene); return; }");
+              replaceOnce("  throw new Error(`iOS showcase scene '${scene}' did not render within ${timeoutMs}ms.`);", `  const diagnosticDirectory = NodePath.join(REPO_ROOT, "artifacts/ios-validation");
+            await NodeFSP.mkdir(diagnosticDirectory, { recursive: true });
+            await runCommand(NodeProcess.execPath, [NodePath.join(NodeProcess.env.RUNNER_TEMP!, "ios-runtime-probe.mjs"), "8199", NodePath.join(diagnosticDirectory, "runtime-timeout-" + Date.now() + ".json")]).catch(() => undefined);
+            await runCommand("xcrun", ["simctl", "io", udid, "screenshot", NodePath.join(diagnosticDirectory, "readiness-timeout-" + Date.now() + ".png")]).catch(() => undefined);
+            console.log("iOS readiness timeout; diagnostic screenshot retained; no acceptance.");
+            throw new Error(\`iOS showcase scene '\${scene}' did not render within \${timeoutMs}ms.\`);`);
+              replaceOnce("    for (const capture of captures) {\n      const pairingHost", `    if (hasIos && !options.skipMetro) {
+                console.log("Validation harness: native build complete; rewarming iOS bundle after prebuild.");
+                await warmMetroBundle("ios", metroHost, showcaseConfig);
+                console.log("Validation harness: post-build bundle warm-up complete; readiness predicate unchanged.");
+              }
+              for (const capture of captures) {
+                const pairingHost`);
+              replaceOnce("const metroHost = hasIos ? lanIpv4Address() : \"127.0.0.1\";", "const metroHost = \"127.0.0.1\"; // Owned hosted simulator shares host loopback.");
+              replaceOnce("[\"exec\", \"expo\", \"start\", \"--dev-client\", \"--port\", String(config.metroPort)]", "[\"exec\", \"expo\", \"start\", \"--dev-client\", \"--scheme\", \"lecturn\", \"--clear\", \"--port\", String(config.metroPort)]");
+              replaceOnce("async function warmMetroBundle(\n  platform: ShowcaseDevice[\"platform\"],\n  host: string,\n  config: ShowcaseConfig,\n): Promise<void> {\n  const url = `http://${host}:${config.metroPort}/apps/mobile/index.bundle?platform=${platform}&dev=true&minify=false`;\n  await runCommand(\"curl\", [\"--fail\", \"--silent\", \"--show-error\", \"--output\", \"/dev/null\", url]);\n}\n", "async function warmMetroBundle(\n  platform: ShowcaseDevice[\"platform\"], host: string, config: ShowcaseConfig,\n): Promise<void> {\n  if (platform !== \"ios\") throw new Error(\"This validation fixture is iOS only\");\n  const manifestResponse = await fetch(`http://${host}:${config.metroPort}/?platform=ios`, {\n    headers: { \"expo-platform\": \"ios\", accept: \"application/expo+json\" },\n  });\n  if (!manifestResponse.ok) throw new Error(\"Validation Metro manifest unavailable\");\n  const manifest = await manifestResponse.json() as { launchAsset?: { url?: string } };\n  const asset = manifest.launchAsset?.url;\n  if (!asset) throw new Error(\"Validation Metro manifest has no launch asset\");\n  const bundleUrl = new URL(asset);\n  if (![\"127.0.0.1\", \"localhost\"].includes(bundleUrl.hostname) || bundleUrl.port !== String(config.metroPort)) {\n    throw new Error(\"Validation manifest launch asset is not owned loopback Metro\");\n  }\n  const bundleResponse = await fetch(bundleUrl);\n  if (!bundleResponse.ok) throw new Error(\"Validation launch bundle unavailable\");\n  const bundle = await bundleResponse.text();\n  const serializedFlag = /[\"']EXPO_PUBLIC_SHOWCASE[\"']\\s*:\\s*\\{\\s*enumerable:\\s*true,\\s*value:\\s*[\"']1[\"']\\s*\\}/.test(bundle);\n  const dotenvFiles = (await NodeFSP.readdir(MOBILE_ROOT)).filter((name) => /^\\.env(?:\\.development|\\.local|\\.development\\.local)?$/.test(name));\n  const coordinatorIncluded = bundle.includes(\"SHOWCASE_ENABLED\") && bundle.includes(\"EXPO_PUBLIC_SHOWCASE\");\n  console.log(\"Validation launch asset warm; serialized showcase flag:\", serializedFlag, \"dotenv overrides:\", dotenvFiles.length, \"coordinator included:\", coordinatorIncluded);\n  if (!serializedFlag || dotenvFiles.length !== 0 || !coordinatorIncluded) throw new Error(\"Validation bundle does not prove showcase fixture enabled\");\n}");
+              replaceOnce("    ]);\n  };\n  await NodeFSP.rm(readyPath, { force: true });", "    ]);\n    if (pairingUrls.length !== 3) throw new Error(\"Validation requires three synthetic pairing inputs\");\n    console.log(\"Validation native launch arguments supplied: three pairing inputs, scene, theme, orientation.\");\n    console.log(\"Validation original initialUrl launch only; no second development-client reload.\");\n    await delay(45000);\n    const diagnosticDirectory = NodePath.join(REPO_ROOT, \"artifacts/ios-validation\");\n    await NodeFSP.mkdir(diagnosticDirectory, { recursive: true });\n    await runCommand(\"xcrun\", [\"simctl\", \"io\", simulator.udid, \"screenshot\", NodePath.join(diagnosticDirectory, \"post-launch-\" + Date.now() + \".png\")]);\n  };\n  await NodeFSP.rm(readyPath, { force: true });");
+              replaceOnce("    await delay(45000);\n    const diagnosticDirectory = NodePath.join(REPO_ROOT, \"artifacts/ios-validation\");", "    await delay(45000);\n    const diagnosticDirectory = NodePath.join(REPO_ROOT, \"artifacts/ios-validation\");\n    await NodeFSP.mkdir(diagnosticDirectory, { recursive: true });\n    await runCommand(NodeProcess.execPath, [NodePath.join(NodeProcess.env.RUNNER_TEMP!, \"ios-runtime-probe.mjs\"), \"8199\", NodePath.join(diagnosticDirectory, \"runtime-probe-\" + Date.now() + \".json\")]);");
+              replaceOnce("for (let attempt = 0; attempt < 2; attempt += 1)", "for (let attempt = 0; attempt < 1; attempt += 1)");
+              replaceOnce("const isLastAttempt = attempt === 1;", "const isLastAttempt = attempt === 0;");
+              replaceOnce("    await runCommand(\"xcrun\", [\"simctl\", \"io\", simulator.udid, \"screenshot\", NodePath.join(diagnosticDirectory, \"post-launch-\" + Date.now() + \".png\")]);", "    await runCommand(\"xcrun\", [\"simctl\", \"io\", simulator.udid, \"screenshot\", NodePath.join(diagnosticDirectory, \"post-launch-\" + Date.now() + \".png\")]);\n    await runCommand(\"python3\", [NodePath.join(NodeProcess.env.RUNNER_TEMP!, \"ios-startup-diagnostics.py\"), simulator.udid]);\n    const diagnosticResult = JSON.parse(await NodeFSP.readFile(NodePath.join(diagnosticDirectory, \"startup-diagnostic-result.json\"), \"utf8\"));\n    await NodeFSP.writeFile(NodePath.join(diagnosticDirectory, \"startup-ready.json\"), JSON.stringify({ nativeLoaderError: diagnosticResult.native_loader_error_copied, initialUrlOnly: true, accepted: false }));\n    const phaseDeadline = Date.now() + 300000;\n    while (!(await NodeFSP.access(NodePath.join(diagnosticDirectory, \"startup-release.json\")).then(() => true, () => false))) {\n      if (Date.now() >= phaseDeadline) throw new Error(\"Startup artifact phase release timed out\");\n      await delay(250);\n    }\n    if (diagnosticResult.native_loader_error_copied) throw new Error(\"Native startup failure captured; scene gate not entered\");");
+              replaceOnce("    await runCommand(\"xcrun\", [\"simctl\", \"install\", simulator.udid, appPath]);", "    await runCommand(\"xcrun\", [\"simctl\", \"install\", simulator.udid, appPath]);\n    await runCommand(\"python3\", [NodePath.join(NodeProcess.env.RUNNER_TEMP!, \"ios-driver-warmup.py\"), simulator.udid]);\n    await runCommand(\"python3\", [NodePath.join(NodeProcess.env.RUNNER_TEMP!, \"ios-metro-preflight.py\"), simulator.udid]);");
+              replaceOnce("    await delay(scene === \"review\" ? Math.max(config.settleDelayMs, 8_000) : config.settleDelayMs);", "    await delay(scene === \"review\" ? Math.max(config.settleDelayMs, 8_000) : config.settleDelayMs);\n    await runCommand(\"xcrun\", [\"simctl\", \"io\", simulator.udid, \"screenshot\", NodePath.join(REPO_ROOT, \"artifacts/ios-validation\", \"pre-link-scene-\" + capture.appearance + \"-\" + Date.now() + \".png\")]);\n    await runCommand(\"python3\", [NodePath.join(NodeProcess.env.RUNNER_TEMP!, \"ios-link-scene-assert.py\"), simulator.udid, capture.appearance]);");
+              replaceOnce("  pairingUrls: ReadonlyArray<string>,\n  registerCleanup: (cleanup: IosCaptureCleanup)", "  freshPairingUrls: () => Promise<ReadonlyArray<string>>,\n  registerCleanup: (cleanup: IosCaptureCleanup)");
+              replaceOnce("  const launchShowcaseApp = async (terminateRunningProcess: boolean) => {\n    await runCommand(\"xcrun\", [", "  const launchShowcaseApp = async (terminateRunningProcess: boolean) => {\n    const issueStarted = Date.now();\n    const pairingUrls = await freshPairingUrls();\n    const issueFinished = Date.now();\n    const issueDirectory = NodePath.join(REPO_ROOT, \"artifacts/ios-validation\");\n    await NodeFSP.mkdir(issueDirectory, { recursive: true });\n    await NodeFSP.writeFile(NodePath.join(issueDirectory, \"fixture-pairing-issued-\" + capture.appearance + \"-\" + issueFinished + \".json\"), JSON.stringify({ appearance: capture.appearance, issueStarted, issueFinished, credentialCount: pairingUrls.length, serverTtlUnchanged: true, accepted: false }));\n    console.log(\"Validation fresh synthetic pairing credentials issued immediately before native launch.\");\n    await runCommand(\"xcrun\", [");
+              replaceOnce("      const pairingUrls = await Promise.all(", "      const pairingUrls = capture.device.platform === \"ios\" ? [] : await Promise.all(");
+              replaceOnce("          metroHost,\n          pairingUrls,\n          (cleanup) => iosCleanups.push(cleanup),", "          metroHost,\n          () => Promise.all(showcaseEnvironments.map(async (environment) => {\n            const credential = await issuePairingCredential(environment.baseDir);\n            return buildShowcasePairingUrl(pairingHost, environment.port, credential);\n          })),\n          (cleanup) => iosCleanups.push(cleanup),");
+              replaceOnce("    const issueStarted = Date.now();", "    const pairingTargetMetadata = function pairingTargetMetadata(value) {\n  if (!Array.isArray(value)) return [];\n  return value.slice(0, 10).map((raw, index) => {\n    const result = { index, validUrl: false };\n    if (typeof raw !== 'string' || raw.length > 20000) return result;\n    try {\n      const u = new URL(raw);\n      if (u.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(u.hostname) || u.username || u.password) return result;\n      const port = Number(u.port);if (!Number.isInteger(port) || port < 1 || port > 65535) return result;\n      const token = new URLSearchParams(u.hash.slice(1)).get('token');\n      let hash = 2166136261;for (let i=0;i<raw.length;i++) hash = Math.imul(hash ^ raw.charCodeAt(i), 16777619) >>> 0;\n      return { index, validUrl: true, loopbackHost: u.hostname, port, rootPath: u.pathname === '/',\n        tokenPresent: typeof token === 'string' && token.length > 0, tokenLength: token?.length ?? 0,\n        inputFingerprint: hash.toString(16).padStart(8, '0') };\n    } catch { return result; }\n  });\n};\n    const issueStarted = Date.now();");
+              replaceOnce("credentialCount: pairingUrls.length, serverTtlUnchanged: true", "credentialCount: pairingUrls.length, targets: pairingTargetMetadata(pairingUrls), serverTtlUnchanged: true");
+              replaceOnce("    await runCommand(\"python3\", [NodePath.join(NodeProcess.env.RUNNER_TEMP!, \"ios-link-scene-assert.py\"), simulator.udid, capture.appearance]);", "    await runCommand(\"python3\", [NodePath.join(NodeProcess.env.RUNNER_TEMP!, \"ios-link-scene-assert.py\"), simulator.udid, capture.appearance]);\n    await runCommand(\"python3\", [NodePath.join(NodeProcess.env.RUNNER_TEMP!, \"ios-filechip-interaction.py\"), simulator.udid, \"after\"]);");
+              console.log("Validation-only harness: post-build warm-up, 300s first-scene deadline, same ready marker, failure screenshots.");
+              return { ...result, source };
+            },
+          });
+          import { pathToFileURL } from "node:url";
+          import path from "node:path";
+          const fixtureUrl = pathToFileURL(path.resolve(process.cwd(), "scripts/mobile-showcase-environment.ts"));
+          const { SHOWCASE_THREADS } = await import(fixtureUrl.href);
+          SHOWCASE_THREADS[0].response = "[report.pdf](report.pdf)";
+          console.log("Validation-only fixture: report.pdf alone; real file asset and source files unchanged.");
+          FIXTURE
+          cat > "$RUNNER_TEMP/ios-runtime-probe.mjs" <<'PROBE'
+          // Read-only task Metro CDP. Outputs only booleans, numeric protocol fields and fixed classifications.
+          import fs from 'node:fs/promises';
+          import path from 'node:path';
+          import { createRequire } from 'node:module';
+          import { pathToFileURL } from 'node:url';
+          const mobileRequire = createRequire(path.join(process.cwd(), 'apps/mobile/package.json'));
+          const expoRequire = createRequire(mobileRequire.resolve('expo/package.json'));
+          const WebSocket = expoRequire('ws');
+          const tags = ['ConnectionBlockedError', 'ConnectionTransientError', 'ConnectionPersistenceError',
+            'EnvironmentAuthInvalidError', 'EnvironmentScopeRequiredError', 'EnvironmentRequestInvalidError',
+            'RemoteEnvironmentAuthTimeoutError', 'RemoteEnvironmentAuthFetchError',
+            'RemoteEnvironmentAuthInvalidJsonError', 'RemoteEnvironmentAuthUndeclaredStatusError',
+            'SchemaError', 'ParseError', 'TypeError', 'ReferenceError', 'SyntaxError'];
+          export function classify(value) {
+            const text = typeof value === 'string' ? value : '';
+            return { tags: tags.filter(tag => text.includes(tag)),
+              signals: Object.entries({ authentication: /authentication|credential|unauthoriz|\b401\b/i,
+                permission: /permission|forbidden|\b403\b/i, network: /network|fetch failed|ECONNREFUSED/i,
+                timeout: /timeout|timed out/i, persistence: /persist|storage|keychain/i,
+                decode: /decode|schema|parse/i, websocket: /websocket/i, pairing: /pairing|connect-pairing/i })
+                .filter(([, pattern]) => pattern.test(text)).map(([name]) => name) };
+          }
+          export const expression = `(() => { try {
+            const m = globalThis.expo?.modules?.LecturnNativeControls;
+            const pairingGetterAvailable = typeof m?.getShowcasePairingUrl === 'function';
+            let pairingCount = 0, pairingReadable = false, pairingJsonValid = false, pairingTargets = [];
+            const pairingTargetMetadata = function pairingTargetMetadata(value) {
+            if (!Array.isArray(value)) return [];
+            return value.slice(0, 10).map((raw, index) => {
+              const result = { index, validUrl: false };
+              if (typeof raw !== 'string' || raw.length > 20000) return result;
+              try {
+                const u = new URL(raw);
+                if (u.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(u.hostname) || u.username || u.password) return result;
+                const port = Number(u.port);if (!Number.isInteger(port) || port < 1 || port > 65535) return result;
+                const token = new URLSearchParams(u.hash.slice(1)).get('token');
+                let hash = 2166136261;for (let i=0;i<raw.length;i++) hash = Math.imul(hash ^ raw.charCodeAt(i), 16777619) >>> 0;
+                return { index, validUrl: true, loopbackHost: u.hostname, port, rootPath: u.pathname === '/',
+                  tokenPresent: typeof token === 'string' && token.length > 0, tokenLength: token?.length ?? 0,
+                  inputFingerprint: hash.toString(16).padStart(8, '0') };
+              } catch { return result; }
+            });
+          };
+            if (pairingGetterAvailable) { try { const raw = m.getShowcasePairingUrl();
+              pairingReadable = true; const parsed = typeof raw === 'string' ? JSON.parse(raw) : null;
+              pairingJsonValid = Array.isArray(parsed); pairingCount = pairingJsonValid ? parsed.length : 0; pairingTargets = pairingTargetMetadata(parsed);
+            } catch {} }
+            return { publicShowcaseEnabled: typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_SHOWCASE === '1',
+              nativeControlsAvailable: !!m, pairingGetterAvailable, pairingReadable, pairingJsonValid, pairingCount, pairingTargets,
+              threadSceneRequested: m?.getShowcaseScene?.() === 'thread',
+              lecturnThemeRequested: m?.getShowcaseTheme?.() === 'lecturn',
+              portraitRequested: m?.getShowcaseOrientation?.() === 'portrait',
+              pairingObservations: globalThis.__LECTURN_VALIDATION_PAIRING__ };
+          } catch { return { diagnosticReadFailed: true }; } })()`;
+          const boolFields = ['publicShowcaseEnabled', 'nativeControlsAvailable', 'pairingGetterAvailable',
+            'pairingReadable', 'pairingJsonValid', 'threadSceneRequested', 'lecturnThemeRequested',
+            'portraitRequested', 'diagnosticReadFailed'];
+          export function safePairingObservations(value) {
+            if (!Array.isArray(value)) return [];
+            const reasons = ['network','timeout','transport','endpoint-unavailable','relay-unavailable','remote-unavailable',
+              'authentication','configuration','permission','unsupported','invalid_credential','Transport','Encode','Decode','StatusCode','EmptyBody'];
+            return value.slice(-32).filter(v => v?.schema === 1 && v?.diagnosticInstrumentedBundle === true).map(v => ({
+              diagnosticInstrumentedBundle: true, result: ['Success','Failure','Initial'].includes(v.result) ? v.result : 'Unknown',
+              reasons: (Array.isArray(v.reasons) ? v.reasons : []).slice(0, 8).map(r => ({
+                kind: ['Fail','Die','Interrupt'].includes(r?.kind) ? r.kind : 'Unknown',
+                fields: (Array.isArray(r?.fields) ? r.fields : []).slice(0, 24).map(f => ({
+                  tag: [...tags,'EnvironmentOperationForbiddenError','EnvironmentResourceNotFoundError','EnvironmentInternalError',
+                    'HttpClientError','RequestError','ResponseError'].includes(f?.tag) ? f.tag : 'Unknown',
+                  reason: reasons.includes(f?.reason) ? f.reason : 'Unknown',
+                  status: Number.isInteger(f?.status) && f.status >= 100 && f.status <= 599 ? f.status : null,
+                  invalidResponse: f?.invalidResponse === true, bootstrap: f?.bootstrap === true, timeout: f?.timeout === true,
+                })),
+              })),
+            }));
+          }
+          export function safeTargets(value) {
+            if (!Array.isArray(value)) return [];
+            return value.slice(0, 10).filter(v => Number.isInteger(v?.index) && v.index >= 0 && v.index < 10).map(v => {
+              const row = { index: v.index, validUrl: v.validUrl === true };
+              if (v.validUrl !== true) return row;
+              if (['127.0.0.1', 'localhost'].includes(v.loopbackHost)) row.loopbackHost = v.loopbackHost;
+              if (Number.isInteger(v.port) && v.port >= 1 && v.port <= 65535) row.port = v.port;
+              row.rootPath = v.rootPath === true; row.tokenPresent = v.tokenPresent === true;
+              if (Number.isInteger(v.tokenLength) && v.tokenLength >= 0 && v.tokenLength <= 20000) row.tokenLength = v.tokenLength;
+              if (typeof v.inputFingerprint === 'string' && /^[a-f0-9]{8}$/.test(v.inputFingerprint)) row.inputFingerprint = v.inputFingerprint;
+              return row;
+            });
+          }
+          export function safeValue(value) {
+            const result = {};
+            for (const key of boolFields) if (typeof value?.[key] === 'boolean') result[key] = value[key];
+            if (Number.isInteger(value?.pairingCount) && value.pairingCount >= 0 && value.pairingCount <= 100) result.pairingCount = value.pairingCount;
+            result.pairingTargets = safeTargets(value?.pairingTargets);
+            result.pairingObservations = safePairingObservations(value?.pairingObservations);
+            return result;
+          }
+          export function validTarget(target, port) {
+            try {
+              const u = new URL(target.webSocketDebuggerUrl);
+              return target.appId === 'com.cloudgatherer.lecturn' && ['ws:', 'wss:'].includes(u.protocol) && ['127.0.0.1', 'localhost'].includes(u.hostname)
+                  && u.port === String(port) && !u.username && !u.password && u.pathname === '/inspector/debug'
+                  && !!u.searchParams.get('device') && !!u.searchParams.get('page');
+            } catch { return false; }
+          }
+          export async function inspect(target, port) {
+            return new Promise(resolve => {
+              const output = { connected: false, stage: 'handshake', events: [] };
+              const socket = new WebSocket(target.webSocketDebuggerUrl, { origin: `http://127.0.0.1:${port}`, handshakeTimeout: 10000 });
+              let settled = false, drainTimer, propertyId = 10;
+              const propertyReads = new Map();
+              const readProperties = (remote, event, depth = 0) => {
+                if (!remote?.objectId || propertyId >= 30 || depth > 1) return;
+                const id = propertyId++; propertyReads.set(id, { event, depth });
+                socket.send(JSON.stringify({ id, method: 'Runtime.getProperties', params: { objectId: remote.objectId, ownProperties: true, generatePreview: false } }));
+              };
+              const finish = () => { if (settled) return; settled = true; clearTimeout(timer); clearTimeout(drainTimer); socket.terminate(); resolve(output); };
+              const timer = setTimeout(() => { output.timedOut = true; finish(); }, 15000);
+              socket.on('unexpected-response', (_req, res) => { output.handshakeStatus = res.statusCode; res.resume(); finish(); });
+              socket.on('open', () => { output.connected = true; output.stage = 'runtime-enable'; socket.send(JSON.stringify({ id: 1, method: 'Runtime.enable' })); });
+              socket.on('error', error => { output.transportError = ['ECONNREFUSED','ECONNRESET','ETIMEDOUT','ENOTFOUND'].includes(error.code) ? error.code : 'other'; finish(); });
+              socket.on('close', (code, reason) => { output.closeCode = code; output.closeReasonPresent = reason.length > 0; finish(); });
+              socket.on('message', data => {
+                try {
+                  const message = JSON.parse(data.toString());
+                  if (['Runtime.consoleAPICalled', 'Runtime.exceptionThrown'].includes(message.method) && output.events.length < 80) {
+                    const p = message.params ?? {};
+                    const values = message.method === 'Runtime.consoleAPICalled' ? p.args ?? [] : [p.exceptionDetails?.exception ?? {}];
+                    const event = { kind: message.method === 'Runtime.consoleAPICalled' ? 'console' : 'exception',
+                      level: ['error','warning','warn','log','info','debug'].includes(p.type) ? p.type : 'other',
+                      details: values.slice(0, 8).map(v => classify(typeof v.value === 'string' ? v.value : v.description)), properties: [] };
+                    output.events.push(event);
+                    for (const value of values.slice(0, 4)) readProperties(value, event);
+                  }
+                  if (propertyReads.has(message.id)) {
+                    const { event, depth } = propertyReads.get(message.id); propertyReads.delete(message.id);
+                    for (const property of (message.result?.result ?? []).slice(0, 30)) {
+                      if (['_tag', 'name', 'message', 'detail', 'reason', 'code', 'status', 'statusCode', 'cause'].includes(property.name)) {
+                        const value = property.value;
+                        const record = { field: property.name, ...classify(value?.value ?? value?.description) };
+                        if (['status', 'statusCode'].includes(property.name) && Number.isInteger(value?.value) && value.value >= 100 && value.value <= 599) record.httpStatus = value.value;
+                        event.properties.push(record);
+                        if (property.name === 'cause') readProperties(value, event, depth + 1);
+                      }
+                    }
+                  }
+                  if (message.id === 1) {
+                    if (message.error) { output.cdpErrorCode = Number.isInteger(message.error.code) ? message.error.code : null; finish(); return; }
+                    output.stage = 'runtime-evaluate';
+                    socket.send(JSON.stringify({ id: 2, method: 'Runtime.evaluate', params: { expression, returnByValue: true } }));
+                  }
+                  if (message.id === 2) {
+                    if (message.error) output.cdpErrorCode = Number.isInteger(message.error.code) ? message.error.code : null;
+                    output.exceptionPresent = !!message.result?.exceptionDetails;
+                    output.value = safeValue(message.result?.result?.value);
+                    output.stage = 'event-drain'; drainTimer = setTimeout(() => { output.stage = 'complete'; finish(); }, 2000);
+                  }
+                } catch { output.malformedMessage = true; }
+              });
+            });
+          }
+          export async function probe(port) {
+            if (port !== 8199) throw new Error('Require owned showcase Metro8199');
+            const result = { utc: new Date().toISOString(), targetCount: 0, observations: [], accepted: false };
+            try {
+              const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10000) });
+              result.listingStatus = response.status;
+              if (response.ok) {
+                const targets = await response.json(); result.targetCount = Array.isArray(targets) ? targets.length : 0;
+                // Owned Metro serves only this simulator; no URLs/device names are emitted.
+                for (const target of (Array.isArray(targets) ? targets : []).filter(t => validTarget(t, port)).slice(0, 3)) result.observations.push(await inspect(target, port));
+              }
+            } catch { result.inspectorListingUnavailable = true; }
+            return result;
+          }
+          if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+            if (!process.argv[3]) throw new Error('Output destination required');
+            const result = await probe(Number(process.argv[2]));
+            await fs.writeFile(process.argv[3], JSON.stringify(result, null, 2) + '\n');
+            console.log(JSON.stringify(result));
+          }
+          PROBE
+          cat > "$RUNNER_TEMP/ios-native-launch.yaml" <<'FLOW'
+          appId: com.cloudgatherer.lecturn
+          ---
+          - extendedWaitUntil:
+              visible: 'Open in .*Lecturn.*'
+              timeout: 30000
+          - tapOn: 'Open'
+          - assertNotVisible: 'Open in .*Lecturn.*'
+          FLOW
+          cat > "$RUNNER_TEMP/ios-native-launch.py" <<'HELPER'
+          import os, pathlib, signal, subprocess, sys
+          from ios_owned_processes import spawn, terminate_pid
+          udid = sys.argv[1]
+          root = pathlib.Path(os.environ['RUNNER_TEMP'])
+          logs = pathlib.Path('artifacts/ios-validation')
+          logs.mkdir(parents=True, exist_ok=True)
+          with (logs / ('native-launch-' + str(os.getpid()) + '.log')).open('w') as stream:
+              try:
+                  process = spawn([str(root / 'maestro/bin/maestro'), '--device', udid,
+                      'test', '--debug-output', str(logs / ('maestro-' + str(os.getpid()))),
+                      str(root / 'ios-native-launch.yaml')], stdout=stream, stderr=subprocess.STDOUT,
+                      purpose="native-launch")
+                  code = process.wait(timeout=240)
+              except subprocess.TimeoutExpired:
+                  terminate_pid(process.pid)
+                  process.wait()
+                  print('Native launch dialog automation timed out; no acceptance.')
+                  raise SystemExit(1)
+          if code:
+              print('Native launch dialog automation failed; retained task-local diagnostics.')
+              raise SystemExit(code)
+          print('Native launch dialog flow completed; scene acceptance still required.')
+          HELPER
+          cat > "$RUNNER_TEMP/ios_owned_processes.py" <<'DIAGNOSTIC_0'
+          """Job-local process groups registered before commands begin, including orphaned children."""
+          import json
+          import os
+          from pathlib import Path
+          import signal
+          import subprocess
+          import sys
+          import time
+          import uuid
+          
+          root = Path(os.environ['RUNNER_TEMP'])
+          registry = root / 'ios-owned-process-groups.jsonl'
+          
+          
+          def identity(pid):
+              result = subprocess.run(['ps', '-p', str(pid), '-o', 'lstart='],
+                  text=True, capture_output=True, check=False)
+              return result.stdout.strip() if result.returncode == 0 else None
+          
+          
+          def records():
+              if not registry.exists():
+                  return []
+              with registry.open() as stream:
+                  return [json.loads(line) for line in stream if line.strip()]
+          
+          
+          def group_running(pid):
+              rows = subprocess.check_output(['ps', '-axo', 'pid=,pgid=,stat='], text=True).splitlines()
+              return any(len(fields) >= 3 and int(fields[1]) == pid and not fields[2].startswith('Z')
+                         for fields in (row.split() for row in rows))
+          
+          
+          def signal_group(pid, value):
+              try:
+                  os.killpg(pid, value)
+                  return True
+              except ProcessLookupError:
+                  return False
+              except PermissionError:
+                  # macOS can report EPERM for a group containing only exited zombies.
+                  # Treat only verified non-running groups as gone; live EPERM is an error.
+                  if not group_running(pid):
+                      return False
+                  raise
+          
+          
+          def spawn(command, *, purpose, **kwargs):
+              ticket = uuid.uuid4().hex
+              kwargs['start_new_session'] = True
+              process = subprocess.Popen([sys.executable, __file__, 'launch', ticket, *command], **kwargs)
+              record = {'pid': process.pid, 'start': identity(process.pid), 'purpose': purpose}
+              if not record['start']:
+                  process.wait(timeout=10)
+                  raise RuntimeError('Owned command exited before registration')
+              # One short O_APPEND write avoids a stopped capture helper holding a file
+              # lock while the independent cleanup step reads the ownership registry.
+              data = (json.dumps(record) + '\n').encode()
+              descriptor = os.open(registry, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+              try:
+                  if os.write(descriptor, data) != len(data):
+                      raise RuntimeError('Incomplete ownership registration')
+                  os.fsync(descriptor)
+              finally:
+                  os.close(descriptor)
+              (root / ('ios-command-go-' + ticket)).write_text('registered\n')
+              return process
+          
+          
+          def terminate(record, grace=5):
+              pid = record['pid']
+              current = identity(pid)
+              if current is not None and current != record['start']:
+                  return False  # A live reused PID is never treated as owned.
+              if not signal_group(pid, signal.SIGTERM):
+                  return True
+              # The group remains ours when its original leader exits. Do not use leader
+              # liveness as a proxy for surviving children in this recorded process group.
+              deadline = time.monotonic() + grace
+              while time.monotonic() < deadline:
+                  if not group_running(pid):
+                      return True
+                  time.sleep(0.25)
+              signal_group(pid, signal.SIGKILL)
+              return True
+          
+          
+          def terminate_pid(pid):
+              record = next((record for record in records() if record['pid'] == pid), None)
+              if record is None:
+                  raise RuntimeError('Refusing to stop an unregistered process group')
+              return terminate(record)
+          
+          
+          def cleanup():
+              # Freeze the capture group first: its Python helpers cannot launch more
+              # commands while cleanup stops registered independent command groups.
+              owned = records()
+              for record in owned:
+                  if record['purpose'] == 'showcase-capture' and identity(record['pid']) == record['start']:
+                      signal_group(record['pid'], signal.SIGSTOP)
+              owned = records()
+              for record in reversed(owned):
+                  if record['purpose'] != 'showcase-capture':
+                      terminate(record)
+              for record in owned:
+                  if record['purpose'] == 'showcase-capture':
+                      current = identity(record['pid'])
+                      if current is not None and current != record['start']:
+                          continue
+                      # Never resume a launcher after the final registry snapshot: a
+                      # paused spawn could otherwise register and release a new group.
+                      signal_group(record['pid'], signal.SIGKILL)
+          
+          
+          if __name__ == '__main__':
+              if len(sys.argv) < 4 or sys.argv[1] != 'launch':
+                  raise SystemExit(2)
+              go = root / ('ios-command-go-' + sys.argv[2])
+              deadline = time.monotonic() + 10
+              while not go.exists() and time.monotonic() < deadline:
+                  time.sleep(0.01)
+              if not go.exists():
+                  raise SystemExit('Unregistered command timed out before execution')
+              go.unlink()
+              os.execvp(sys.argv[3], sys.argv[3:])
+          DIAGNOSTIC_0
+          cat > "$RUNNER_TEMP/ios-phase-driver.py" <<'DIAGNOSTIC_1'
+          """Own one hosted showcase process and expose startup artifacts before readiness."""
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import time
+          from ios_owned_processes import spawn, cleanup
+          
+          temporary = Path(os.environ['RUNNER_TEMP'])
+          diagnostics = Path(os.environ['GITHUB_WORKSPACE']) / 'artifacts/ios-validation'
+          diagnostics.mkdir(parents=True, exist_ok=True)
+          owner_path = diagnostics / 'phase-owner.json'
+          completion = diagnostics / 'phase-completion.json'
+          ready = diagnostics / 'startup-ready.json'
+          release = diagnostics / 'startup-release.json'
+          
+          
+          def atomic(path, value):
+              temporary_path = path.with_suffix('.tmp')
+              temporary_path.write_text(json.dumps(value, indent=2) + '\n')
+              temporary_path.replace(path)
+          
+          
+          def start_identity(pid):
+              return subprocess.check_output(['ps', '-p', str(pid), '-o', 'lstart='], text=True).strip()
+          
+          
+          def stop_owned():
+              cleanup()
+          
+          
+          mode = sys.argv[1]
+          if mode == 'worker':
+              with (temporary / 'ios-capture-private.log').open('w') as log:
+                  process = spawn(['node', '--import', str(temporary / 'lecturn-link-fixture.mjs'),
+                      'scripts/mobile-showcase.ts', '--skip-build', '--platform', 'ios', '--device',
+                      'iphone-6.9', '--scene', 'thread', '--appearance', 'light', '--theme', 'lecturn'],
+                      stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, purpose='showcase-capture')
+                  atomic(owner_path, {'pid': process.pid, 'start': start_identity(process.pid),
+                                      'purpose': 'single owned hosted startup and scene capture'})
+                  code = process.wait()
+              # Never upload raw logs: fixture output includes fresh synthetic pairing credentials.
+              safe_lines = []
+              for line in (temporary / 'ios-capture-private.log').read_text(errors='replace').splitlines():
+                  if line.startswith(('Validation ', 'Native launch ', 'iOS readiness ', 'Error: iOS showcase')):
+                      safe_lines.append(line[:500])
+              (diagnostics / 'capture-safe-summary.log').write_text('\n'.join(safe_lines) + '\n')
+              atomic(completion, {'exit_code': code, 'utc_epoch': time.time()})
+          elif mode == 'start':
+              with (temporary / 'ios-phase-worker.log').open('w') as log:
+                  subprocess.Popen([sys.executable, __file__, 'worker'], stdin=subprocess.DEVNULL,
+                      stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+              deadline = time.monotonic() + 900
+              while not ready.exists() and not completion.exists() and time.monotonic() < deadline:
+                  time.sleep(1)
+              if ready.exists():
+                  print('Native startup diagnostics complete; scene gate paused for artifact upload.')
+              elif completion.exists():
+                  print('Capture exited before startup checkpoint; available diagnostics retained.')
+                  raise SystemExit(json.loads(completion.read_text())['exit_code'] or 1)
+              else:
+                  stop_owned()
+                  atomic(diagnostics / 'startup-timeout.json', {'timeout_seconds': 900})
+                  raise SystemExit(1)
+          elif mode == 'finish':
+              atomic(release, {'released_after_startup_artifact_step': True})
+              deadline = time.monotonic() + 2700
+              while not completion.exists() and time.monotonic() < deadline:
+                  time.sleep(1)
+              if not completion.exists():
+                  stop_owned()
+                  raise SystemExit('Owned scene phase exceeded its bound.')
+              raise SystemExit(json.loads(completion.read_text())['exit_code'])
+          elif mode == 'cleanup':
+              stop_owned()
+          else:
+              raise SystemExit('Unknown phase')
+          DIAGNOSTIC_1
+          cat > "$RUNNER_TEMP/ios-startup-diagnostics.py" <<'DIAGNOSTIC_2'
+          """Credential-safe reads from the exact hosted task simulator; no host clipboard."""
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import sys
+          import urllib.parse
+          from ios_owned_processes import spawn, terminate_pid
+          
+          udid = sys.argv[1]
+          temporary = Path(os.environ['RUNNER_TEMP'])
+          diagnostics = Path(os.environ['GITHUB_WORKSPACE']) / 'artifacts/ios-validation'
+          diagnostics.mkdir(parents=True, exist_ok=True)
+          
+          
+          def sanitize(text):
+              def url(match):
+                  value = urllib.parse.urlsplit(match.group())
+                  return urllib.parse.urlunsplit((value.scheme, value.netloc.rsplit('@', 1)[-1], value.path, '', ''))
+              text = re.sub(r'https?://[^\s<>"\)]+', url, text)
+              text = re.sub(r'eyJ[A-Za-z0-9_.-]+', '[redacted]', text)
+              return '\n'.join(line for line in text.splitlines()
+                  if not re.search(r'token|authorization|showcasePairing', line, re.I))[:200000]
+          
+          
+          def run(name, command, timeout=45, input=None):
+              try:
+                  process = spawn(command, stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
+                      text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, purpose='startup-diagnostic')
+                  stdout, stderr = process.communicate(input=input, timeout=timeout)
+                  result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+                  (diagnostics / name).write_text(sanitize(stdout + '\n' + stderr))
+                  return result
+              except subprocess.TimeoutExpired:
+                  terminate_pid(process.pid)
+                  process.communicate()
+                  (diagnostics / name).write_text('Task-owned diagnostic command timed out.\n')
+                  return None
+          
+          
+          clipboard_reset = run('clipboard-reset.log', ['xcrun', 'simctl', 'pbcopy', udid],
+              input='task-ios-empty-diagnostic', timeout=15)
+          clipboard_available = clipboard_reset is not None and clipboard_reset.returncode == 0
+          flow = temporary / 'ios-copy-loader-error.yaml'
+          flow.write_text('''appId: com.cloudgatherer.lecturn
+          ---
+          - runFlow:
+              when:
+                visible: 'There was a problem loading the project.'
+              commands:
+                - tapOn: 'Copy'
+          ''')
+          copied = None
+          if clipboard_available:
+              run('loader-copy-flow.log', [str(temporary / 'maestro/bin/maestro'), '--device', udid,
+                  'test', str(flow)], timeout=180)
+              copied = run('native-loader-error-sanitized.txt', ['xcrun', 'simctl', 'pbpaste', udid], timeout=15)
+          loader_error = bool(copied and 'Failed to load app from' in copied.stdout)
+          run('simulator-url-probe.jsonl', ['xcrun', 'simctl', 'spawn', udid,
+              str(temporary / 'ios-url-probe'), 'http://127.0.0.1:8199?disableOnboarding=1'], timeout=90)
+          run('simulator-native-log-sanitized.txt', ['xcrun', 'simctl', 'spawn', udid, 'log', 'show',
+              '--last', '8m', '--style', 'compact', '--predicate', 'process == "Lecturn"'], timeout=30)
+          container = subprocess.run(['xcrun', 'simctl', 'get_app_container', udid,
+              'com.cloudgatherer.lecturn', 'data'], text=True, capture_output=True, timeout=20, check=False)
+          if container.returncode == 0:
+              log = Path(container.stdout.strip()) / 'Library/Application Support/dev.expo.modules.core.logging.expo-updates.txt'
+              if log.exists():
+                  (diagnostics / 'expo-updates-sanitized.txt').write_text(sanitize(log.read_text(errors='replace')))
+          (diagnostics / 'startup-diagnostic-result.json').write_text(json.dumps({
+              'native_loader_error_copied': loader_error,
+              'clipboard_diagnostic_available': clipboard_available,
+              'clipboard_read_completed': copied is not None and copied.returncode == 0,
+              'transport_probe_scope': 'Separate Foundation process in owned simulator; not app ATS/permission identity',
+              'accepted': False,
+          }, indent=2) + '\n')
+          print('Validation startup error/transport diagnostics retained; no acceptance implied.')
+          DIAGNOSTIC_2
+          cat > "$RUNNER_TEMP/metro-request-observer.mjs" <<'DIAGNOSTIC_3'
+          // Session-local observer only; preserves HTTP methods, headers, bodies and responses.
+          import http from 'node:http';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import crypto from 'node:crypto';
+          const root = process.env.GITHUB_WORKSPACE;
+          const originalEmit = http.Server.prototype.emit;
+          if (root) http.Server.prototype.emit = function (...args) {
+            const [event, request, response] = args;
+            if (event === 'request' && request?.socket?.localPort === 8199 && response) {
+              try {
+                const started = Date.now();
+                const url = new URL(request.url, 'http://127.0.0.1:8199');
+                const record = { utc: new Date().toISOString(), method: request.method, path: url.pathname,
+                  queryKeys: [...url.searchParams.keys()].filter(k => ['platform', 'disableOnboarding'].includes(k)),
+                  headers: {}, clientIdPresent: !!request.headers['expo-dev-client-id'],
+                  easClientIdPresent: !!request.headers['eas-client-id'],
+                  simulatorFoundationProbe: request.headers['x-lecturn-diagnostic-probe'] === 'simulator-foundation' };
+                for (const key of ['accept', 'expo-platform', 'expo-protocol-version', 'expo-api-version',
+                  'expo-updates-environment', 'expo-runtime-version']) {
+                  if (request.headers[key]) record.headers[key] = String(request.headers[key]).slice(0, 200);
+                }
+                const chunks = []; let length = 0;
+                const collect = chunk => {
+                  if (url.pathname !== '/' || !(typeof chunk === 'string' || Buffer.isBuffer(chunk))) return;
+                  const data = Buffer.from(chunk); length += data.length;
+                  if (length <= 262144) chunks.push(data);
+                };
+                const write = response.write; const end = response.end;
+                response.write = function (...args) { collect(args[0]); return write.apply(this, args); };
+                response.end = function (...args) { collect(args[0]); return end.apply(this, args); };
+                response.once('finish', () => {
+                  try {
+                    record.status = response.statusCode; record.elapsedMs = Date.now() - started;
+                    record.contentType = String(response.getHeader('content-type') ?? '');
+                    record.responseProtocol = String(response.getHeader('expo-protocol-version') ?? '');
+                    if (chunks.length && length <= 262144) {
+                      const body = Buffer.concat(chunks); record.bodySha256 = crypto.createHash('sha256').update(body).digest('hex');
+                      let text = body.toString('utf8');
+                      if (record.contentType.startsWith('multipart/')) {
+                        const marker = text.indexOf('\r\n\r\n');
+                        if (marker >= 0) text = text.slice(marker + 4).split('\r\n--')[0];
+                      }
+                      try {
+                        const manifest = JSON.parse(text);
+                        record.manifest = { validJson: true, idPresent: typeof manifest.id === 'string',
+                          runtimeMatches: manifest.runtimeVersion === '8e2c93476ba8fc0b3f5cd189fe6d6c767743026e',
+                          development: manifest.extra?.expoGo?.packagerOpts?.dev === true,
+                          developerTool: manifest.extra?.expoGo?.developer?.tool === 'expo-cli',
+                          launchAssetPresent: typeof manifest.launchAsset?.url === 'string' };
+                      } catch { record.manifest = { validJson: false }; }
+                    }
+                    const dir = path.join(root, 'artifacts/ios-validation'); fs.mkdirSync(dir, { recursive: true });
+                    fs.appendFileSync(path.join(dir, 'metro-http.jsonl'), JSON.stringify(record) + '\n');
+                  } catch {}
+                });
+              } catch {}
+            }
+            return originalEmit.apply(this, args);
+          };
+          DIAGNOSTIC_3
+          cat > "$RUNNER_TEMP/ios-url-probe.swift" <<'DIAGNOSTIC_4'
+          import Foundation
+          import CryptoKit
+          
+          @main struct NativeURLProbe {
+            static func main() async {
+              let allowed = "http://127.0.0.1:8199?disableOnboarding=1"
+              guard CommandLine.arguments.count == 2, CommandLine.arguments[1] == allowed,
+                    let url = URL(string: allowed) else { exit(2) }
+              for method in ["HEAD", "GET"] {
+                var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData,
+                                         timeoutInterval: method == "HEAD" ? 10 : 60)
+                request.httpMethod = method
+                request.setValue("simulator-foundation", forHTTPHeaderField: "X-Lecturn-Diagnostic-Probe")
+                request.setValue("ios", forHTTPHeaderField: "Expo-Platform")
+                request.setValue(method == "HEAD" ? "application/expo+json,application/json" :
+                  "multipart/mixed,application/expo+json,application/json", forHTTPHeaderField: "Accept")
+                if method == "GET" {
+                  for (key, value) in ["Expo-Protocol-Version": "1", "Expo-API-Version": "1",
+                    "Expo-Updates-Environment": "DEVELOPMENT", "Expo-JSON-Error": "true",
+                    "Expo-Runtime-Version": "8e2c93476ba8fc0b3f5cd189fe6d6c767743026e"] {
+                    request.setValue(value, forHTTPHeaderField: key)
+                  }
+                }
+                let start = Date()
+                var result: [String: Any] = ["method": method, "probe": "owned-simulator-Foundation"]
+                do {
+                  let (data, response) = try await URLSession.shared.data(for: request)
+                  if let http = response as? HTTPURLResponse {
+                    result["status"] = http.statusCode
+                    result["contentType"] = http.value(forHTTPHeaderField: "Content-Type") ?? ""
+                    result["protocol"] = http.value(forHTTPHeaderField: "expo-protocol-version") ?? ""
+                  }
+                  result["bytes"] = data.count
+                  result["sha256"] = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+                } catch {
+                  let error = error as NSError
+                  result["errorDomain"] = error.domain
+                  result["errorCode"] = error.code
+                }
+                result["seconds"] = Date().timeIntervalSince(start)
+                if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),
+                   let output = String(data: data, encoding: .utf8) { print(output) }
+              }
+            }
+          }
+          DIAGNOSTIC_4
+          xcrun --sdk iphonesimulator swiftc -parse-as-library -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" -target arm64-apple-ios18.0-simulator "$RUNNER_TEMP/ios-url-probe.swift" -o "$RUNNER_TEMP/ios-url-probe"
+          codesign --force --sign - "$RUNNER_TEMP/ios-url-probe"
+          cat > "$RUNNER_TEMP/metro-runtime-memo.mjs" <<'REUSE6_0'
+          // Validation-only cache of Expo's original result for one immutable Metro process.
+          import { registerHooks } from 'node:module';
+          import assert from 'node:assert/strict';
+          import crypto from 'node:crypto';
+          const suffix = '/@expo/cli/build/src/start/server/middleware/resolveRuntimeVersionWithExpoUpdatesAsync.js';
+          const expectedSourceHash = '6af3e6d38953a80140e4189eaf15713e397dca4c7c093ffbb543243ddc58cd26';
+          registerHooks({
+            load(url, context, nextLoad) {
+              const result = nextLoad(url, context);
+              if (!url.endsWith(suffix)) return result;
+              const source = typeof result.source === 'string' ? result.source : Buffer.from(result.source).toString('utf8');
+              assert.equal(crypto.createHash('sha256').update(source).digest('hex'), expectedSourceHash,
+                'Pinned Expo runtime resolver changed');
+              const anchor = 'async function resolveRuntimeVersionWithExpoUpdatesAsync({ projectRoot, platform }) {';
+              assert.equal(source.split(anchor).length - 1, 1);
+              const wrapper = `
+          const validationRuntimeCache = new Map();
+          async function resolveRuntimeVersionWithExpoUpdatesAsync(input) {
+            if (input.platform !== 'ios') return resolveOriginalRuntimeVersion(input);
+            const key = JSON.stringify([input.projectRoot, input.platform]);
+            if (!validationRuntimeCache.has(key)) {
+              const started = Date.now();
+              const pending = resolveOriginalRuntimeVersion(input).then(value => {
+                if (!process.env.LECTURN_VALIDATION_NATIVE_RUNTIME || value !== process.env.LECTURN_VALIDATION_NATIVE_RUNTIME)
+                  throw new Error('Computed runtime differs from exact archived native runtime');
+                require('node:fs').appendFileSync(require('node:path').join(process.env.GITHUB_WORKSPACE,
+                  'artifacts/ios-validation/runtime-memo.jsonl'), JSON.stringify({ utc: new Date().toISOString(),
+                  event: 'computed-original-runtime', platform: input.platform, runtime: value,
+                  elapsedMs: Date.now() - started }) + '\\n');
+                return value;
+              }).catch(error => { validationRuntimeCache.delete(key); throw error; });
+              validationRuntimeCache.set(key, pending);
+            }
+            return validationRuntimeCache.get(key);
+          }
+          `;
+              return { ...result, source: source.replace(anchor,
+                'async function resolveOriginalRuntimeVersion({ projectRoot, platform }) {') + wrapper };
+            },
+          });
+          REUSE6_0
+          cat > "$RUNNER_TEMP/ios-driver-warmup.py" <<'REUSE6_1'
+          """Warm only the owned simulator's native driver before app launch arguments."""
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import time
+          from ios_owned_processes import spawn, terminate_pid
+          
+          root = Path(os.environ['RUNNER_TEMP'])
+          diagnostics = Path(os.environ['GITHUB_WORKSPACE']) / 'artifacts/ios-validation'
+          diagnostics.mkdir(parents=True, exist_ok=True)
+          flow = root / 'ios-driver-warmup.yaml'
+          flow.write_text('appId: com.cloudgatherer.lecturn\n---\n- takeScreenshot: driver-warmup\n')
+          results = []
+          for attempt in range(2):
+              log = diagnostics / ('driver-warmup-' + str(attempt + 1) + '.log')
+              started = time.monotonic()
+              with log.open('w') as stream:
+                  process = spawn([str(root / 'maestro/bin/maestro'), '--device', sys.argv[1],
+                      'test', '--debug-output', str(diagnostics / ('driver-warmup-debug-' + str(attempt + 1))),
+                      str(flow)], stdout=stream, stderr=subprocess.STDOUT, purpose='native-driver-warmup')
+                  try:
+                      code = process.wait(timeout=240)
+                  except subprocess.TimeoutExpired:
+                      terminate_pid(process.pid)
+                      process.wait()
+                      code = 124
+              results.append({'attempt': attempt + 1, 'exit_code': code, 'seconds': time.monotonic() - started})
+              (diagnostics / 'driver-warmup-result.json').write_text(json.dumps({'attempts': results,
+                  'driver_ready': code == 0, 'accepted': False}, indent=2) + '\n')
+              if code == 0:
+                  print('Validation native driver warm-up passed before app launch; no scene acceptance.')
+                  break
+              if attempt == 1 or 'IOSDriverTimeoutException' not in log.read_text():
+                  raise SystemExit('Native driver warm-up failed; diagnostics retained, app launch not attempted')
+              print('Validation native driver cold-start timed out; one serialized warm-up retry.')
+          REUSE6_1
+          cat > "$RUNNER_TEMP/ios-metro-preflight.py" <<'REUSE6_2'
+          """Require exact native-equivalent manifest responses before launching the fixture app."""
+          from email.parser import BytesParser
+          from email.policy import default
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import time
+          import urllib.request
+          from ios_owned_processes import spawn, terminate_pid
+          
+          root = Path(os.environ['RUNNER_TEMP'])
+          diagnostics = Path(os.environ['GITHUB_WORKSPACE']) / 'artifacts/ios-validation'
+          diagnostics.mkdir(parents=True, exist_ok=True)
+          expected = os.environ['LECTURN_VALIDATION_NATIVE_RUNTIME']
+          url = 'http://127.0.0.1:8199?disableOnboarding=1'
+          rows = []
+          try:
+              for method in ['HEAD', 'HEAD', 'GET']:
+                  headers = {'expo-platform': 'ios', 'accept': 'application/expo+json,application/json'}
+                  if method == 'GET':
+                      headers.update({'accept': 'multipart/mixed,application/expo+json,application/json',
+                          'expo-protocol-version': '1', 'expo-api-version': '1',
+                          'expo-updates-environment': 'DEVELOPMENT', 'expo-runtime-version': expected})
+                  started = time.monotonic()
+                  with urllib.request.urlopen(urllib.request.Request(url, method=method, headers=headers), timeout=10) as response:
+                      body = response.read()
+                      row = {'method': method, 'status': response.status, 'seconds': time.monotonic() - started,
+                             'content_type': response.headers.get('content-type'), 'protocol': response.headers.get('expo-protocol-version')}
+                      rows.append(row)
+                      if response.status != 200 or row['seconds'] >= 5:
+                          raise RuntimeError('Manifest request lacks margin below native ten-second deadline')
+                      if method == 'GET':
+                          message = BytesParser(policy=default).parsebytes(('Content-Type: ' + row['content_type'] + '\r\n\r\n').encode() + body)
+                          manifests = [json.loads(part.get_payload(decode=True)) for part in message.iter_parts()
+                                       if part.get_param('name', header='content-disposition') == 'manifest']
+                          if len(manifests) != 1 or manifests[0].get('runtimeVersion') != expected:
+                              raise RuntimeError('Native multipart manifest runtime does not match archived app')
+                          row['runtime'] = manifests[0]['runtimeVersion']
+              output = diagnostics / 'prelaunch-simulator-url-probe.jsonl'
+              with output.open('w') as stream:
+                  process = spawn(['xcrun', 'simctl', 'spawn', sys.argv[1], str(root / 'ios-url-probe'), url],
+                      stdout=stream, stderr=subprocess.STDOUT, purpose='prelaunch-simulator-transport')
+                  try:
+                      code = process.wait(timeout=90)
+                  except subprocess.TimeoutExpired:
+                      terminate_pid(process.pid)
+                      process.wait()
+                      raise RuntimeError('Prelaunch simulator transport probe timed out')
+              probes = [json.loads(line) for line in output.read_text().splitlines() if line.strip()]
+              if code != 0 or len(probes) != 2 or [x.get('method') for x in probes] != ['HEAD', 'GET'] or any(x.get('status') != 200 or x.get('seconds', 99) >= 5 for x in probes):
+                  raise RuntimeError('Owned simulator native-equivalent requests did not pass with deadline margin')
+              result = {'passed': True, 'requests': rows, 'simulator_probe': probes,
+                        'scope': 'Separate simulator Foundation process; app ATS/permission and native scene remain unverified', 'accepted': False}
+              (diagnostics / 'prelaunch-metro-gate.json').write_text(json.dumps(result, indent=2) + '\n')
+              print('Validation prelaunch exact manifest and simulator transport gates passed; native scene still required.')
+          except Exception as error:
+              (diagnostics / 'prelaunch-metro-gate.json').write_text(json.dumps({'passed': False, 'requests': rows,
+                  'error_type': type(error).__name__, 'accepted': False}, indent=2) + '\n')
+              raise
+          REUSE6_2
+          export LECTURN_VALIDATION_NATIVE_RUNTIME="$(cat apps/mobile/.showcase/ios-derived-data/Build/Products/Debug-iphonesimulator/Lecturn.app/EXUpdates.bundle/fingerprint)"
+          test "$LECTURN_VALIDATION_NATIVE_RUNTIME" = '8e2c93476ba8fc0b3f5cd189fe6d6c767743026e'
+          cat > "$RUNNER_TEMP/reuse8-backend-observer.mjs" <<'BACKEND_OBSERVER'
+          // Task-only NODE_OPTIONS preload. Both env paths are required; no default scope.
+          import http from 'node:http';
+          import fs from 'node:fs';
+          import os from 'node:os';
+          import path from 'node:path';
+          
+          const fixtures = new Set(['moonbase-terminal', 'suspense-station', 'kernel-cabin']);
+          const routes = new Map([
+            ['/.well-known/lecturn/environment', 'environment-discovery'],
+            ['/oauth/token', 'oauth-token'],
+            ['/api/auth/session', 'auth-session'],
+            ['/api/auth/websocket-ticket', 'websocket-ticket'],
+            ['/ws', 'websocket'],
+          ]);
+          
+          function fixtureScope() {
+            const repo = process.env.REUSE8_BACKEND_OBSERVER_REPO;
+            const log = process.env.REUSE8_BACKEND_OBSERVER_LOG;
+            if (!repo || !log || !path.isAbsolute(repo) || !path.isAbsolute(log)) return;
+            try {
+              const root = fs.realpathSync(repo);
+              if (fs.realpathSync(process.cwd()) !== root ||
+                  fs.realpathSync(process.argv[1]) !== path.join(root, 'apps/server/src/bin.ts')) return;
+              const args = process.argv.slice(2);
+              if (args[0] !== 'serve') return;
+              const flag = name => {
+                const index = args.indexOf(name);
+                return index > 0 && args.lastIndexOf(name) === index ? args[index + 1] : undefined;
+              };
+              const portText = flag('--port');
+              const port = Number(portText);
+              if (!/^[1-9]\d{0,4}$/.test(portText ?? '') || port > 65535 || port === 8199 ||
+                  flag('--host') !== '0.0.0.0' || !args.includes('--no-browser')) return;
+              const base = flag('--base-dir');
+              if (!base || !path.isAbsolute(base)) return;
+              const baseDir = fs.realpathSync(base);
+              const relative = path.relative(fs.realpathSync(os.tmpdir()), baseDir).split(path.sep);
+              if (relative.length !== 3 || !/^lecturn-mobile-showcase-[A-Za-z0-9]+$/.test(relative[0]) ||
+                  relative[1] !== 'environments' || !fixtures.has(relative[2]) ||
+                  process.env.SHELL !== path.join(base, 'showcase-shell') ||
+                  process.env.PATH?.split(path.delimiter)[0] !== path.join(base, 'showcase-bin')) return;
+              return { log, port, fixture: relative[2] };
+            } catch {
+              return;
+            }
+          }
+          
+          function install(scope) {
+            const originalEmit = http.Server.prototype.emit;
+            const routeCounts = new Map();
+            const statusCounts = new Map();
+            let requestId = 0;
+            let writeFailureReported = false;
+            const increment = (counts, key) => {
+              const count = (counts.get(key) ?? 0) + 1;
+              counts.set(key, count);
+              return count;
+            };
+            const record = fields => {
+              try {
+                fs.appendFileSync(scope.log, JSON.stringify({
+                  utc: new Date().toISOString(), pid: process.pid, fixture: scope.fixture,
+                  port: scope.port, ...fields,
+                }) + '\n', { mode: 0o600 });
+              } catch {
+                if (!writeFailureReported) {
+                  writeFailureReported = true;
+                  try { process.stderr.write('reuse8 backend observer: log write failed\n'); } catch {}
+                }
+              }
+            };
+            const begin = (request, transport, route) => {
+              const started = process.hrtime.bigint();
+              const fields = {
+                requestId: ++requestId, transport, route,
+                method: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].includes(request.method)
+                  ? request.method : 'OTHER',
+                routeCount: increment(routeCounts, `${transport}:${route}`),
+              };
+              record({ event: 'start', ...fields });
+              let done = false;
+              return (status, outcome, statusSource) => {
+                if (done) return;
+                done = true;
+                record({ event: 'end', ...fields, status, outcome, statusSource,
+                  elapsedMs: Number(process.hrtime.bigint() - started) / 1e6,
+                  statusCount: increment(statusCounts, `${transport}:${route}:${status}:${outcome}`),
+                });
+              };
+            };
+          
+            function observeHttp(request, response, route) {
+              const finish = begin(request, 'http', route);
+              const cleanup = () => {
+                response.removeListener('finish', onFinish);
+                response.removeListener('close', onClose);
+              };
+              const onFinish = () => {
+                cleanup();
+                finish(response.statusCode, 'finished', 'response-finish');
+              };
+              const onClose = () => {
+                cleanup();
+                finish(response.headersSent ? response.statusCode : null, 'closed', 'response-close');
+              };
+              response.once('finish', onFinish);
+              response.once('close', onClose);
+            }
+          
+            function observeUpgrade(request, socket, route) {
+              const finish = begin(request, 'upgrade', route);
+              const write = socket.write;
+              const end = socket.end;
+              const writeDescriptor = Object.getOwnPropertyDescriptor(socket, 'write');
+              const endDescriptor = Object.getOwnPropertyDescriptor(socket, 'end');
+              // Retain only the 13-byte HTTP version/status prefix, never headers or payload.
+              let prefix = '';
+              let complete = false;
+              const restore = (name, wrapper, descriptor) => {
+                if (socket[name] !== wrapper) return;
+                if (descriptor) Object.defineProperty(socket, name, descriptor);
+                else delete socket[name];
+              };
+              const cleanup = () => {
+                complete = true;
+                prefix = '';
+                restore('write', observedWrite, writeDescriptor);
+                restore('end', observedEnd, endDescriptor);
+                socket.removeListener('close', onClose);
+              };
+              const inspect = (chunk, encoding) => {
+                if (complete || prefix.length >= 13) return;
+                const remaining = 13 - prefix.length;
+                if (typeof chunk === 'string') {
+                  if (typeof encoding === 'string' &&
+                      !['utf8', 'utf-8', 'ascii', 'latin1', 'binary'].includes(encoding.toLowerCase())) {
+                    prefix = 'unrecognized!';
+                    return;
+                  }
+                  prefix += chunk.slice(0, remaining);
+                }
+                else if (chunk instanceof Uint8Array) {
+                  prefix += Buffer.from(chunk.buffer, chunk.byteOffset, Math.min(chunk.byteLength, remaining))
+                    .toString('latin1');
+                } else return;
+                if (prefix.length < 13) return;
+                const match = /^HTTP\/1\.[01] ([1-5]\d\d)[ \r]$/.exec(prefix);
+                const status = match ? Number(match[1]) : null;
+                if (status === 101 || status >= 200) {
+                  cleanup();
+                  finish(status, status === 101 ? 'accepted' : 'rejected', 'socket-write');
+                }
+              };
+              function observedWrite(...args) {
+                const result = write.apply(this, args);
+                try { inspect(args[0], args[1]); } catch {}
+                return result;
+              }
+              function observedEnd(...args) {
+                const result = end.apply(this, args);
+                try { inspect(args[0], args[1]); } catch {}
+                return result;
+              }
+              function onClose() {
+                cleanup();
+                finish(null, 'unknown', 'socket-close');
+              }
+              socket.write = observedWrite;
+              socket.end = observedEnd;
+              socket.once('close', onClose);
+            }
+          
+            http.Server.prototype.emit = function (...args) {
+              const [event, request, responseOrSocket] = args;
+              try {
+                if (event === 'listening' && this.address()?.port === scope.port) {
+                  record({ event: 'fixture-listening' });
+                } else if ((event === 'request' || event === 'upgrade') &&
+                           this.address()?.port === scope.port && request?.socket?.localPort === scope.port) {
+                  const route = routes.get(request.url?.split(/[?#]/, 1)[0]);
+                  if (route && event === 'request') observeHttp(request, responseOrSocket, route);
+                  else if (route === 'websocket' && event === 'upgrade') {
+                    observeUpgrade(request, responseOrSocket, route);
+                  }
+                }
+              } catch {}
+              // Application return values, exceptions, listener order and arguments stay intact.
+              return originalEmit.apply(this, args);
+            };
+          }
+          
+          const scope = fixtureScope();
+          if (scope) install(scope);
+          BACKEND_OBSERVER
+          cat > "$RUNNER_TEMP/ios-link-scene-assert.py" <<'LINK_SCENE_ASSERT'
+          """Exact native thread-title gate after the product's ready marker; filename gated by interaction."""
+          import json
+          import os
+          import re
+          from pathlib import Path
+          import subprocess
+          import sys
+          import time
+          from ios_owned_processes import spawn, terminate
+          
+          udid, appearance = sys.argv[1:]
+          if appearance not in ('light', 'dark'):
+              raise SystemExit('Expected light or dark appearance')
+          root = Path(os.environ['RUNNER_TEMP'])
+          diagnostics = Path(os.environ['GITHUB_WORKSPACE']) / 'artifacts/ios-validation'
+          stamp = str(time.time_ns())
+          flow = diagnostics / ('link-scene-' + appearance + '-' + stamp + '.yaml')
+          expected_title = "Make remote coding feel local ✦"
+          flow.write_text('''appId: com.cloudgatherer.lecturn
+          ---
+          - extendedWaitUntil:
+              visible: TITLE_SELECTOR
+              timeout: 60000
+          '''.replace('TITLE_SELECTOR', json.dumps('^' + re.escape(expected_title) + '$')))
+          result = {'appearance': appearance, 'native_ready_marker_preceded': True,
+                    'required_labels': [expected_title],
+                    'filename_gate': 'mandatory unique compact filename leaf in initial interaction hierarchy',
+                    'passed': False, 'accepted': False}
+          logpath = flow.with_suffix('.log')
+          with logpath.open('w') as log:
+              process = spawn([str(root / 'maestro/bin/maestro'), '--device', udid, 'test',
+                               '--debug-output', str(diagnostics / ('link-scene-debug-' + appearance)), str(flow)],
+                              stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                              purpose='native-link-scene-assert')
+              try:
+                  result['exit_code'] = process.wait(timeout=100)
+              except subprocess.TimeoutExpired:
+                  from ios_owned_processes import records
+                  for record in records():
+                      if record['pid'] == process.pid:
+                          terminate(record)
+                  result['timed_out'] = True
+          result['passed'] = result.get('exit_code') == 0 and not result.get('timed_out')
+          flow.with_suffix('.json').write_text(json.dumps(result, indent=2) + '\n')
+          if not result['passed']:
+              raise SystemExit('Exact expected native thread title was not verified')
+          print('Validation exact native thread title visible in ' + appearance + '; filename and interaction gates still required.')
+          LINK_SCENE_ASSERT
+          cat > "$RUNNER_TEMP/ios-filechip-interaction.py" <<'FILECHIP_INTERACTION'
+          """Task-local native file-chip assertions; invoke only after scene readiness."""
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import signal
+          import subprocess
+          import sys
+          import time
+          from contextlib import contextmanager
+          
+          import ios_owned_processes as owned
+          
+          # Eight Maestro invocations on the after path, plus bounded failure capture.
+          TOTAL_SECONDS = 2100
+          WORK_SECONDS = 2040
+          OUTER_SECONDS = 2700
+          ACTION_SECONDS = 30
+          # Includes CLI startup and teardown; hierarchy teardown exceeded 100s hosted.
+          MAESTRO_SECONDS = 180
+          CLEANUP_SECONDS = 10
+          TERM_GRACE_SECONDS = 0.5
+          RECORDER_SECONDS = 30
+          DIAGNOSTICS_SECONDS = 10
+          # The 60s work reserve covers recorder finalization, two pending group stops,
+          # and diagnostics. Successful command groups are stopped/reaped immediately.
+          VISIBILITY_MS = 10000
+          FILENAME = 'report.pdf'
+          MENU = ('Copy full path', 'Copy relative path', 'Open in file viewer')
+          SHARE = 'Save or share'
+          ACTIVITIES = ('Copy', 'Save to Files', 'AirDrop', 'Markup', 'Add to Quick Note')
+          ERROR = 'Could not share file'
+          
+          
+          class GateFailure(Exception):
+              pass
+          
+          
+          class CommandDeadline(Exception):
+              pass
+          
+          
+          def nodes(tree):
+              yield tree
+              for child in tree.get('children', []):
+                  yield from nodes(child)
+          
+          
+          def labels(node):
+              attrs = node.get('attributes', {})
+              return {attrs.get(key, '') for key in ('accessibilityText', 'text', 'title', 'value')} - {''}
+          
+          
+          def matching(tree, text):
+              return [node for node in nodes(tree) if text in labels(node)]
+          
+          
+          def bounds(node):
+              value = node.get('attributes', {}).get('bounds', '')
+              match = re.fullmatch(r'\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]', value)
+              if not match:
+                  raise GateFailure('Missing usable accessibility bounds; inspect retained hierarchy/screenshot.')
+              x, y, right, bottom = map(int, match.groups())
+              if right <= x or bottom <= y:
+                  raise GateFailure('Empty accessibility bounds; inspect retained hierarchy/screenshot.')
+              return x, y, right, bottom
+          
+          
+          
+          def screen_bounds(tree):
+              # Maestro iOS wraps application/window nodes in a zero-frame synthetic root.
+              frames = set()
+              for node in nodes(tree):
+                  try:
+                      frames.add(bounds(node))
+                  except GateFailure:
+                      continue
+              if not frames:
+                  raise GateFailure('No observed nonzero application/window frame.')
+              largest = max((right-left)*(bottom-top) for left, top, right, bottom in frames)
+              candidates = [frame for frame in frames if (frame[2]-frame[0])*(frame[3]-frame[1]) == largest]
+              if len(candidates) != 1:
+                  raise GateFailure('Ambiguous observed application/window frames; inspect hierarchy.')
+              return candidates[0]
+          
+          
+          def thread_anchor(tree):
+              # Keep the actual observed label, including a composite Markdown paragraph.
+              candidates = {text for node in nodes(tree) for text in labels(node)
+                            if len(text) <= 250 and any(marker in text for marker in
+                                ('Make remote coding feel local', 'GitHub repository', 'Reference website'))}
+              candidates = [text for text in candidates if len(matching(tree, text)) == 1]
+              if not candidates:
+                  raise GateFailure('Original thread anchor unavailable; inspect retained hierarchy.')
+              return min(candidates, key=lambda text: (len(text), text))
+          
+          
+          def normalized_filename(text):
+              return text.strip(' \u00a0')
+          
+          
+          def filename_label(node):
+              attrs = node['attributes']
+              return next(attrs[key] for key in ('accessibilityText', 'text', 'title', 'value') if attrs.get(key))
+          
+          
+          def filename_target(tree, *, normalize=True):
+              # The hosted hierarchy repeats the NBSP-prefixed label on a parent and leaf.
+              if normalize:
+                  found = [node for node in nodes(tree) if not node.get('children')
+                           and {normalized_filename(text) for text in labels(node)} == {FILENAME}]
+              else:
+                  found = matching(tree, FILENAME)
+              if len(found) != 1:
+                  raise GateFailure('Need one exact normalized report.pdf leaf, excluding paragraph/container nodes; inspect retained hierarchy.')
+              node = found[0]
+              x, y, right, bottom = bounds(node)
+              sx, sy, sr, sb = screen_bounds(tree)
+              # Maestro 2.11 drops XCUI elementType; retain compact, onscreen leaf checks.
+              if (node.get('children') or (not normalize and labels(node) != {FILENAME})
+                      or node.get('enabled') is False or node.get('attributes', {}).get('enabled') == 'false'
+                      or not (sx <= x < right <= sr and sy <= y < bottom <= sb)
+                      or right-x > 240 or bottom-y > 64):
+                  raise GateFailure('Filename bounds/state are a paragraph/container, disabled or offscreen; no long press attempted. Inspect initial receipts.')
+              return node
+          
+          
+          def reject_error(tree):
+              if any(ERROR.lower() in text.lower() for node in nodes(tree) for text in labels(node)):
+                  raise GateFailure('Native share error visible; inspect retained frame and hierarchy.')
+          
+          
+          def unique_control(tree, text):
+              found = matching(tree, text)
+              if len(found) != 1:
+                  raise GateFailure('Expected a unique native control: ' + text + '; inspect retained hierarchy.')
+              x, y, right, bottom = bounds(found[0])
+              sx, sy, sr, sb = screen_bounds(tree)
+              if found[0].get('enabled') is False or found[0].get('attributes', {}).get('enabled') == 'false' or not (sx <= x < right <= sr and sy <= y < bottom <= sb) or bottom-y > 100:
+                  raise GateFailure('Native control has uncertain bounds/state: ' + text + '; inspect retained hierarchy.')
+              return found[0]
+          
+          
+          def dismiss_control(tree):
+              for text in ('Close', 'Cancel'):
+                  if len(matching(tree, text)) == 1:
+                      unique_control(tree, text)
+                      return text
+              raise GateFailure('No unique Close/Cancel control in the observed sheet; inspect sheet receipts and document an observed dismissal gesture before retrying.')
+          
+          
+          def menu_region(tree):
+              controls = [unique_control(tree, text) for text in MENU]
+              titles = [node for node in nodes(tree) if not node.get('children')
+                        and any(text.endswith('/' + FILENAME) for text in labels(node))]
+              if len(titles) != 1:
+                  raise GateFailure('Need one observed full-path report.pdf menu title; inspect menu receipts.')
+              sx, sy, sr, sb = screen_bounds(tree)
+              elements = controls + titles
+              containers = [node for node in nodes(tree) if node is not tree
+                            and all(any(child is element for child in nodes(node)) for element in elements)
+                            and sx <= bounds(node)[0] < bounds(node)[2] <= sr
+                            and sy <= bounds(node)[1] < bounds(node)[3] <= sb
+                            and bounds(node) != (sx, sy, sr, sb)]
+              if not containers:
+                  raise GateFailure('Title and actions do not share a bounded modal menu; inspect menu receipts.')
+              return bounds(containers[-1])
+          
+          
+          def menu_backdrop(tree, original_filename_bounds):
+              menu_rect = menu_region(tree)
+              sx, sy, sr, sb = screen_bounds(tree)
+              # UIKit's modal hierarchy hides the underlying filename leaf. Preserve its
+              # pre-gesture rectangle and also avoid the observed native Preview region.
+              blocked = [menu_rect, original_filename_bounds]
+              blocked += [bounds(node) for node in matching(tree, 'Preview')]
+              blocked += [bounds(node) for node in nodes(tree) if node.get('clickable') is True]
+              for x, y in ((sx+12, sy+80), (sr-12, sy+80), (sx+12, sb-80), (sr-12, sb-80)):
+                  if not (sx < x < sr and sy < y < sb):
+                      continue
+                  if not any(left <= x <= right and top <= y <= bottom for left, top, right, bottom in blocked):
+                      return f'{x},{y}'
+              raise GateFailure('No hierarchy-observed background point outside the native menu; inspect menu receipts.')
+          
+          
+          def selector(text):
+              return json.dumps(re.escape(text))
+          
+          
+          def visible(text):
+              return '- assertVisible: ' + selector(text) + '\n'
+          
+          
+          def absent(text):
+              return '- assertNotVisible: ' + json.dumps('.*' + re.escape(text) + '.*') + '\n'
+          
+          
+          def redact_diagnostics(path):
+              for file in path.rglob('*'):
+                  if file.is_file() and file.suffix in ('.json', '.log', '.txt', '.xml', '.html'):
+                      text = file.read_text(errors='replace')
+                      text = re.sub(r'(?i)\b[a-z][a-z0-9+.-]*://[^\s"<>]+', '[redacted-url]', text)
+                      text = re.sub(r'(?im)^.*(?:native.?argv|launch.?arguments|authorization|access.?token|refresh.?token).*$','[redacted-sensitive-line]', text)
+                      text = re.sub(r'(?i)("(?:token|secret|apiKey|argv)"\s*:\s*)"[^"\n]*"', r'\1"[redacted]"', text)
+                      file.write_text(text)
+          
+          
+          class Interaction:
+              def __init__(self, udid, phase):
+                  self.udid, self.phase = udid, phase
+                  self.started = time.monotonic()
+                  self.prefix = 'filechip-' + phase + '-' + str(time.time_ns())
+                  self.path = Path(os.environ['GITHUB_WORKSPACE']) / 'artifacts/ios-validation' / self.prefix
+                  self.path.mkdir(parents=True, mode=0o700)
+                  self.maestro = Path(os.environ['RUNNER_TEMP']) / 'maestro/bin/maestro'
+                  self.groups, self.cleaned, self.processes = {}, set(), {}
+                  self.recorder = None
+                  self.result = {'phase': phase, 'passed': False, 'accepted': False,
+                                 'visual_review_required': True, 'limits_seconds': {
+                                     'total': TOTAL_SECONDS, 'work': WORK_SECONDS, 'outer': OUTER_SECONDS,
+                                     'action': ACTION_SECONDS, 'maestro_command': MAESTRO_SECONDS,
+                                     'cleanup_including_reap': CLEANUP_SECONDS, 'term_grace': TERM_GRACE_SECONDS,
+                                     'recorder_finalization': RECORDER_SECONDS, 'diagnostics': DIAGNOSTICS_SECONDS,
+                                     'visibility': VISIBILITY_MS / 1000},
+                                 'stages': [], 'cleanup': [], 'assertions_complete': False}
+                  self.checkpoint()
+          
+              def checkpoint(self):
+                  temporary = self.path / 'receipt.tmp'
+                  temporary.write_text(json.dumps(self.result, indent=2) + '\n')
+                  temporary.replace(self.path / 'receipt.json')
+          
+              @contextmanager
+              def limit(self, seconds, work=False):
+                  remaining = (WORK_SECONDS if work else TOTAL_SECONDS) - (time.monotonic()-self.started)
+                  if remaining <= 0:
+                      raise CommandDeadline()
+                  signal.setitimer(signal.ITIMER_REAL, min(seconds, remaining))
+                  try:
+                      yield min(seconds, remaining)
+                  finally:
+                      remaining = TOTAL_SECONDS - (time.monotonic()-self.started)
+                      signal.setitimer(signal.ITIMER_REAL, max(0, remaining))
+          
+              def start(self, command, stage, stdout, stderr):
+                  purpose = self.prefix + '-' + stage
+                  try:
+                      process = owned.spawn(command, purpose=purpose, stdin=subprocess.DEVNULL,
+                                            stdout=stdout, stderr=stderr, cwd=self.path)
+                      self.processes[process.pid] = process
+                      return process
+                  finally:
+                      # Includes a launcher registered before spawn raised; never sweep the job registry.
+                      self.groups.update({row['pid']: row for row in owned.records() if row['purpose'].startswith(self.prefix + '-')})
+          
+              def stop(self, record):
+                  if record['pid'] in self.cleaned:
+                      return
+                  receipt = {'purpose': record['purpose'].removeprefix(self.prefix + '-'), 'stopped': False}
+                  self.result['cleanup'].append(receipt)
+                  began = time.monotonic()
+                  try:
+                      with self.limit(CLEANUP_SECONDS) as timeout:
+                          deadline = time.monotonic() + timeout
+                          if not owned.terminate(record, grace=TERM_GRACE_SECONDS):
+                              raise GateFailure('Owned process identity not confirmed.')
+                          while owned.group_running(record['pid']):
+                              remaining = deadline - time.monotonic()
+                              if remaining <= 0:
+                                  raise CommandDeadline()
+                              time.sleep(min(0.05, remaining))
+                          remaining = deadline - time.monotonic()
+                          if remaining <= 0:
+                              raise CommandDeadline()
+                          process = self.processes.get(record['pid'])
+                          if process is not None:
+                              process.wait(timeout=remaining)
+                              if time.monotonic() >= deadline:
+                                  raise CommandDeadline()
+                              receipt['reaped'] = True
+                          receipt['stopped'] = True
+                          self.cleaned.add(record['pid'])
+                  except Exception as error:
+                      receipt['stopped'] = False
+                      self.cleaned.discard(record['pid'])
+                      receipt['error_type'] = type(error).__name__
+                  finally:
+                      receipt['elapsed_seconds'] = round(time.monotonic()-began, 3)
+          
+              def command(self, stage, command, output=None):
+                  if (any(row['pid'] not in self.cleaned for row in self.groups.values()
+                          if row['purpose'] != self.prefix + '-recording')
+                          or any(not row['stopped'] for row in self.result['cleanup'])):
+                      raise GateFailure('Owned action group did not stop; refusing another device command.')
+                  receipt = {'stage': stage, 'exit_code': None, 'timed_out': False}
+                  self.result['stages'].append(receipt)
+                  process = None
+                  began = time.monotonic()
+                  with (self.path / (stage + '.log')).open('wb') as log:
+                      with (self.path / output).open('wb') if output else open(os.devnull, 'wb') as out:
+                          try:
+                              with self.limit(MAESTRO_SECONDS if command[0] == str(self.maestro) else ACTION_SECONDS, work=True) as timeout:
+                                  deadline = time.monotonic() + timeout
+                                  process = self.start(command, stage, out if output else log, log if output else subprocess.STDOUT)
+                                  receipt['exit_code'] = process.wait(timeout=max(0, deadline-time.monotonic()))
+                          except (CommandDeadline, subprocess.TimeoutExpired):
+                              receipt['timed_out'] = True
+                              raise GateFailure('Deadline at ' + stage + '; inspect retained diagnostics.') from None
+                          except Exception as error:
+                              receipt['error_type'] = type(error).__name__
+                              raise
+                          finally:
+                              receipt['elapsed_seconds'] = round(time.monotonic()-began, 3)
+                              try:
+                                  if process:
+                                      self.stop(self.groups[process.pid])
+                              finally:
+                                  self.checkpoint()
+                  if not self.result['cleanup'][-1]['stopped']:
+                      raise GateFailure('Owned action group did not stop; refusing another device command.')
+                  if receipt['exit_code'] != 0:
+                      raise GateFailure('Command failed at ' + stage + '; inspect retained diagnostics.')
+          
+              def flow(self, stage, body):
+                  flow = self.path / (stage + '.yaml')
+                  flow.write_text('appId: com.cloudgatherer.lecturn\n---\n' + body)
+                  self.command(stage, [str(self.maestro), '--device', self.udid, 'test', '--debug-output', str(self.path / (stage + '-debug')), str(flow)])
+          
+              def snapshot(self, stage):
+                  image = self.path / (stage + '.png')
+                  self.command(stage + '-screenshot', ['xcrun', 'simctl', 'io', self.udid, 'screenshot', str(image)])
+                  if not image.exists() or image.read_bytes()[:8] != b'\x89PNG\r\n\x1a\n':
+                      raise GateFailure('Missing PNG at ' + stage + '; inspect screenshot log.')
+                  self.command(stage + '-hierarchy', [str(self.maestro), '--device', self.udid, 'hierarchy'], stage + '-hierarchy.json')
+                  raw = (self.path / (stage + '-hierarchy.json')).read_text()
+                  try:
+                      tree, _ = json.JSONDecoder().raw_decode(raw[raw.index('{'):])
+                      if 'attributes' not in tree or 'children' not in tree:
+                          raise ValueError()
+                  except (ValueError, TypeError):
+                      raise GateFailure('Unrecognized Maestro hierarchy at ' + stage + '; inspect retained receipts.') from None
+                  reject_error(tree)
+                  return tree
+          
+              def record(self):
+                  self.video_log = (self.path / 'recording.log').open('wb')
+                  with self.limit(ACTION_SECONDS, work=True):
+                      self.recorder = self.start(['xcrun', 'simctl', 'io', self.udid, 'recordVideo', '--codec=h264', str(self.path / 'interaction.mp4')], 'recording', self.video_log, subprocess.STDOUT)
+                  if self.recorder.poll() is not None:
+                      raise GateFailure('Recorder exited before interaction; inspect recording log.')
+          
+              def finalize(self):
+                  receipt = self.result['recording'] = {'sigint_sent': False, 'finalized': False}
+                  began = time.monotonic()
+                  try:
+                      if self.recorder:
+                          with self.limit(RECORDER_SECONDS) as timeout:
+                              deadline = time.monotonic() + timeout
+                              record = self.groups[self.recorder.pid]
+                              current = owned.identity(record['pid'])
+                              if current is not None and current != record['start']:
+                                  raise GateFailure('Recorder PID identity changed.')
+                              receipt['sigint_sent'] = owned.signal_group(record['pid'], signal.SIGINT)
+                              receipt['exit_code'] = self.recorder.wait(timeout=max(0, deadline-time.monotonic()))
+                              video = self.path / 'interaction.mp4'
+                              if video.exists():
+                                  with video.open('rb') as stream:
+                                      receipt['finalized'] = receipt['sigint_sent'] and receipt['exit_code'] == 0 and video.stat().st_size > 32 and b'ftyp' in stream.read(32)
+                  except Exception as error:
+                      receipt['error_type'] = type(error).__name__
+                  finally:
+                      receipt['elapsed_seconds'] = round(time.monotonic()-began, 3)
+                      for record in reversed(list(self.groups.values())):
+                          self.stop(record)
+                      if hasattr(self, 'video_log'):
+                          self.video_log.close()
+          
+              def interact(self):
+                  self.command('version', [str(self.maestro), '--version'], 'version.txt')
+                  if (self.path / 'version.txt').read_text().strip() != '2.11.0':
+                      raise GateFailure('Expected pinned RUNNER_TEMP Maestro 2.11.0; no interaction attempted.')
+                  initial = self.snapshot('initial')
+                  target = filename_target(initial)
+                  if any(matching(initial, text) for text in (*MENU, SHARE, *ACTIVITIES)):
+                      raise GateFailure('Initial scene already has menu/activity controls; restore the ready thread before invoking.')
+                  anchor = thread_anchor(initial)
+                  label = filename_label(target)
+                  x, y, right, bottom = bounds(target)
+                  point = f'{(x+right)//2},{(y+bottom)//2}'
+                  self.result['target'] = {'method': 'observed-compact-filename-leaf-point', 'label': label,
+                                           'bounds': bounds(target), 'point': point, 'thread_anchor': anchor}
+                  self.record()
+                  body = visible(label) + '- longPressOn:\n    point: ' + json.dumps(point) + '\n'
+                  body += f'- extendedWaitUntil:\n    visible: "Copy full path"\n    timeout: {VISIBILITY_MS}\n'
+                  body += ''.join(visible(text) for text in MENU) + (absent(SHARE) if self.phase == 'before' else visible(SHARE))
+                  body += '- takeScreenshot: menu\n'
+                  self.flow('menu', body)
+                  menu = self.snapshot('menu')
+                  for text in MENU:
+                      unique_control(menu, text)
+                  menu_region(menu)
+                  if self.phase == 'before':
+                      if matching(menu, SHARE):
+                          raise GateFailure('Baseline unexpectedly contains Save or share.')
+                      control = next((text for text in ('Cancel', 'Close') if len(matching(menu, text)) == 1), None)
+                      if control:
+                          unique_control(menu, control)
+                          dismiss = '- tapOn: ' + selector(control) + '\n'
+                          self.result['dismissal'] = {'method': 'observed-menu-control', 'label': control}
+                      else:
+                          point = menu_backdrop(menu, bounds(target))
+                          dismiss = '- tapOn:\n    point: ' + json.dumps(point) + '\n'
+                          self.result['dismissal'] = {'method': 'observed-outside-menu-tap', 'point': point, 'evidence': 'menu.png + menu-hierarchy.json'}
+                      sheet_controls = ()
+                  else:
+                      unique_control(menu, SHARE)
+                      self.flow('share', f'- tapOn: "Save or share"\n- extendedWaitUntil:\n    visible: "Save to Files"\n    timeout: {VISIBILITY_MS}\n' + absent(ERROR) + '- takeScreenshot: sheet\n')
+                      sheet = self.snapshot('sheet')
+                      if any(matching(sheet, text) for text in (*MENU, SHARE)):
+                          raise GateFailure('Menu remains after Save or share; native activity sheet unverified.')
+                      sheet_filename = filename_target(sheet, normalize=False)
+                      sheet_controls = tuple(text for text in ACTIVITIES if len(matching(sheet, text)) == 1)
+                      if 'Save to Files' not in sheet_controls or len(sheet_controls) < 2:
+                          raise GateFailure('Sheet lacks report.pdf plus multiple native activity controls; inspect sheet receipts.')
+                      for text in sheet_controls:
+                          unique_control(sheet, text)
+                      control = dismiss_control(sheet)
+                      evidence = [sheet_filename, unique_control(sheet, control)] + [unique_control(sheet, text) for text in sheet_controls]
+                      containers = [node for node in nodes(sheet) if node is not sheet and all(any(child is item for child in nodes(node)) for item in evidence)]
+                      if not containers or bounds(containers[-1]) == screen_bounds(sheet):
+                          raise GateFailure('Filename/native controls do not share an observed sheet region; background filename alone is insufficient. Inspect sheet receipts.')
+                      self.result['sheet'] = {'filename': FILENAME, 'label': filename_label(sheet_filename), 'filename_bounds': bounds(sheet_filename),
+                                              'native_controls': sheet_controls, 'dismiss_control': control, 'bounds': bounds(containers[-1])}
+                      self.result['dismissal'] = {'method': 'observed-sheet-control', 'label': control, 'evidence': 'sheet.png + sheet-hierarchy.json'}
+                      dismiss = '- tapOn: ' + selector(control) + '\n'
+                  dismiss += '- extendedWaitUntil:\n    visible: ' + selector(anchor) + f'\n    timeout: {VISIBILITY_MS}\n' + visible(label)
+                  gone = (*MENU, SHARE, ERROR, *sheet_controls, *((control,) if control else ()))
+                  dismiss += ''.join(absent(text) for text in gone) + '- takeScreenshot: returned\n'
+                  self.flow('dismiss', dismiss)
+                  returned = self.snapshot('returned')
+                  filename_target(returned)
+                  if not matching(returned, anchor) or any(matching(returned, text) for text in (*gone, *ACTIVITIES)):
+                      raise GateFailure('Original thread/menu/sheet dismissal not verified; inspect returned receipts.')
+                  self.result['assertions_complete'] = True
+          
+              def run(self):
+                  try:
+                      self.interact()
+                  except (Exception, KeyboardInterrupt) as error:
+                      self.result['failure'] = str(error) if isinstance(error, GateFailure) else 'Interrupted at current stage: ' + type(error).__name__
+                      # Only after the action group stopped; no competing navigation/driver.
+                      if all(row['pid'] in self.cleaned for row in self.groups.values() if row['purpose'] != self.prefix + '-recording'):
+                          try:
+                              self.snapshot('failure')
+                          except Exception as diagnostic_error:
+                              self.result['failure_diagnostics_error'] = type(diagnostic_error).__name__
+                  finally:
+                      try:
+                          self.finalize()
+                          self.checkpoint()
+                          self.result['sha256'] = {}
+                          with self.limit(DIAGNOSTICS_SECONDS):
+                              redact_diagnostics(self.path)
+                              for path in sorted(self.path.rglob('*')):
+                                  if path.is_file() and path.name != 'receipt.json':
+                                      digest = hashlib.sha256()
+                                      with path.open('rb') as stream:
+                                          for chunk in iter(lambda: stream.read(1024*1024), b''):
+                                              digest.update(chunk)
+                                      self.result['sha256'][str(path.relative_to(self.path))] = digest.hexdigest()
+                              self.result['sha256']['helper'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+                          self.result['passed'] = 'failure' not in self.result and self.result['assertions_complete'] and self.result['recording']['finalized'] and all(row['stopped'] for row in self.result['cleanup'])
+                          if not self.result['passed'] and 'failure' not in self.result:
+                              self.result['failure'] = 'Recorder finalization or owned cleanup failed; inspect recording/cleanup receipts.'
+                      except Exception as error:
+                          self.result['passed'] = False
+                          self.result['diagnostics_error'] = type(error).__name__
+                          self.result.setdefault('failure', 'Final diagnostics/deadline failure; inspect retained stages and ownership registry.')
+                      finally:
+                          self.result['elapsed_seconds'] = round(time.monotonic()-self.started, 3)
+                          self.checkpoint()
+                  return self.result['passed']
+          
+          
+          def main():
+              if len(sys.argv) != 3 or sys.argv[2] not in ('before', 'after') or not re.fullmatch(r'[0-9A-Fa-f-]{36}', sys.argv[1]):
+                  raise SystemExit('Usage: ios-filechip-interaction.py UDID before|after')
+              def interrupted(signum, frame):
+                  raise CommandDeadline()
+              previous = {number: signal.signal(number, interrupted) for number in (signal.SIGALRM, signal.SIGTERM)}
+              helper = Interaction(*sys.argv[1:])
+              try:
+                  with helper.limit(TOTAL_SECONDS):
+                      passed = helper.run()
+              finally:
+                  signal.setitimer(signal.ITIMER_REAL, 0)
+                  for number, handler in previous.items():
+                      signal.signal(number, handler)
+              print(('Assertions passed; visual review required. ' if passed else 'Assertions failed; inspect retained diagnostics. ') + str(helper.path / 'receipt.json'))
+              return 0 if passed else 1
+          
+          
+          if __name__ == '__main__':
+              sys.exit(main())
+          FILECHIP_INTERACTION
+          echo "a78602c10087d34beb2a1c3e88a5a8848928e41c90d97b314c6cd36fdbf356e1  $RUNNER_TEMP/ios-filechip-interaction.py" | shasum -a 256 -c -
+          export REUSE8_BACKEND_OBSERVER_REPO="$GITHUB_WORKSPACE"
+          export REUSE8_BACKEND_OBSERVER_LOG="$GITHUB_WORKSPACE/artifacts/ios-validation/backend-http.jsonl"
+          export NODE_OPTIONS="--import=$RUNNER_TEMP/metro-request-observer.mjs --import=$RUNNER_TEMP/metro-runtime-memo.mjs --import=$RUNNER_TEMP/reuse8-backend-observer.mjs"
+          python3 "$RUNNER_TEMP/ios-phase-driver.py" start
+
+      - name: Upload native startup diagnostics before scene gate
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-native-startup-diagnostics
+          path: artifacts/ios-validation/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Complete file-chip interaction scene gate
+        if: always()
+        timeout-minutes: 47
+        run: python3 "$RUNNER_TEMP/ios-phase-driver.py" finish
+
+      - name: Stop remaining owned capture process
+        if: always()
+        run: python3 "$RUNNER_TEMP/ios-phase-driver.py" cleanup
 
       - name: Validate App Store Connect assets
-        run: pnpm screenshots:mobile --platform ios --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}" --validate-only
+        run: node scripts/mobile-showcase.ts --platform ios --device iphone-6.9 --scene thread --appearance light --theme lecturn --validate-only
 
       - name: Upload iOS screenshots
         if: always()
@@ -91,13 +1720,35 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Retain simulator build and provenance
+        if: always()
+        run: |
+          mkdir -p artifacts/ios-validation
+          git rev-parse HEAD > artifacts/ios-validation/validation-commit.txt
+          git status --porcelain > artifacts/ios-validation/post-prebuild-status.txt
+          cp "$RUNNER_TEMP/lecturn-link-fixture.mjs" artifacts/ios-validation/fixture-preload.mjs
+          cp "$RUNNER_TEMP/ios-filechip-interaction.py" "$RUNNER_TEMP/ios-link-scene-assert.py" "$RUNNER_TEMP/reuse8-backend-observer.mjs" "$RUNNER_TEMP/metro-runtime-memo.mjs" "$RUNNER_TEMP/ios-driver-warmup.py" "$RUNNER_TEMP/ios-metro-preflight.py" "$RUNNER_TEMP/ios_owned_processes.py" "$RUNNER_TEMP/ios-native-launch.py" "$RUNNER_TEMP/ios-native-launch.yaml" "$RUNNER_TEMP/ios-runtime-probe.mjs" "$RUNNER_TEMP/ios-phase-driver.py" "$RUNNER_TEMP/ios-startup-diagnostics.py" "$RUNNER_TEMP/metro-request-observer.mjs" "$RUNNER_TEMP/ios-url-probe.swift" artifacts/ios-validation/
+          ios_products=apps/mobile/.showcase/ios-derived-data/Build/Products/Debug-iphonesimulator
+          if [ -d "$ios_products/Lecturn.app" ]; then
+            tar -czf artifacts/ios-validation/Lecturn-simulator.app.tgz -C "$ios_products" Lecturn.app
+          fi
+
+      - name: Upload validation diagnostics and reusable app
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-link-validation-reuse-diagnostics
+          path: artifacts/ios-validation/
+          if-no-files-found: warn
+          retention-days: 7
+
   android:
     name: Android phone, 7-inch tablet, and 10-inch tablet
     if: inputs.platform == 'all' || inputs.platform == 'android'
     runs-on: blacksmith-16vcpu-ubuntu-2404
     # Capturing every palette multiplies the device matrix by six, and only the
     # one native build is shared between them.
-    timeout-minutes: ${{ inputs.theme == 'all' && 300 || 60 }}
+    timeout-minutes: ${{ inputs.theme == 'all' && 300 || 80 }}
     env:
       LECTURN_SHOWCASE_ANDROID_ABI: x86_64
     steps:
