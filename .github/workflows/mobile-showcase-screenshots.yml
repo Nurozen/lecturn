@@ -582,7 +582,7 @@ jobs:
                   raise SystemExit(1)
           elif mode == 'finish':
               atomic(release, {'released_after_startup_artifact_step': True})
-              deadline = time.monotonic() + 2700
+              deadline = time.monotonic() + 3000
               while not completion.exists() and time.monotonic() < deadline:
                   time.sleep(1)
               if not completion.exists():
@@ -1173,7 +1173,7 @@ jobs:
           print('Validation native link labels visible in ' + appearance + '; visual tint review still required.')
           LINK_SCENE_ASSERT
           cat > "$RUNNER_TEMP/ios-filechip-interaction.py" <<'FILECHIP_INTERACTION'
-          """Task-local native file-chip assertions; invoke only after scene readiness."""
+          """Diagnostic copy with native-debugger inspection; never final interaction acceptance."""
           import hashlib
           import json
           import os
@@ -1188,11 +1188,22 @@ jobs:
           import ios_owned_processes as owned
           
           # Eight Maestro invocations on the after path, plus bounded failure capture.
-          TOTAL_SECONDS = 2100
-          WORK_SECONDS = 2040
+          TOTAL_SECONDS = 2400
+          WORK_SECONDS = 2300
+          OUTER_SECONDS = 3000
+          NATIVE_WORK_SECONDS = 220
+          NATIVE_TERM_SECONDS = 40
+          NATIVE_STOP_SECONDS = NATIVE_TERM_SECONDS + 10
           ACTION_SECONDS = 30
           # Includes CLI startup and teardown; hierarchy teardown exceeded 100s hosted.
           MAESTRO_SECONDS = 180
+          CLEANUP_SECONDS = 10
+          TERM_GRACE_SECONDS = 0.5
+          RECORDER_SECONDS = 30
+          DIAGNOSTICS_SECONDS = 10
+          # The base final reserve is 60s. Native inspection requires its full work/stop
+          # allowance, a possible repeated stop, and that reserve before launch;
+          # ordinary work retains 100s.
           VISIBILITY_MS = 10000
           FILENAME = 'report.pdf'
           MENU = ('Copy full path', 'Copy relative path', 'Open in file viewer')
@@ -1365,10 +1376,19 @@ jobs:
                   self.path = Path(os.environ['GITHUB_WORKSPACE']) / 'artifacts/ios-validation' / self.prefix
                   self.path.mkdir(parents=True, mode=0o700)
                   self.maestro = Path(os.environ['RUNNER_TEMP']) / 'maestro/bin/maestro'
-                  self.groups, self.cleaned = {}, set()
+                  self.groups, self.cleaned, self.processes = {}, set(), {}
                   self.recorder = None
+                  self.native_cleanup_verified = True
                   self.result = {'phase': phase, 'passed': False, 'accepted': False,
-                                 'visual_review_required': True, 'limits_seconds': {'total': TOTAL_SECONDS, 'work': WORK_SECONDS, 'action': ACTION_SECONDS, 'maestro_command': MAESTRO_SECONDS, 'visibility': VISIBILITY_MS / 1000},
+                                 'visual_review_required': True, 'diagnostic_only': True,
+                                 'classification': 'native-debugger inspection', 'limits_seconds': {
+                                     'total': TOTAL_SECONDS, 'work': WORK_SECONDS, 'outer': OUTER_SECONDS,
+                                     'action': ACTION_SECONDS, 'maestro_command': MAESTRO_SECONDS,
+                                     'native_work': NATIVE_WORK_SECONDS, 'native_term_grace': NATIVE_TERM_SECONDS,
+                                     'native_stop_including_reap': NATIVE_STOP_SECONDS,
+                                     'cleanup_including_reap': CLEANUP_SECONDS, 'term_grace': TERM_GRACE_SECONDS,
+                                     'recorder_finalization': RECORDER_SECONDS, 'diagnostics': DIAGNOSTICS_SECONDS,
+                                     'visibility': VISIBILITY_MS / 1000},
                                  'stages': [], 'cleanup': [], 'assertions_complete': False}
                   self.checkpoint()
           
@@ -1392,30 +1412,57 @@ jobs:
               def start(self, command, stage, stdout, stderr):
                   purpose = self.prefix + '-' + stage
                   try:
-                      return owned.spawn(command, purpose=purpose, stdin=subprocess.DEVNULL,
-                                         stdout=stdout, stderr=stderr, cwd=self.path)
+                      process = owned.spawn(command, purpose=purpose, stdin=subprocess.DEVNULL,
+                                            stdout=stdout, stderr=stderr, cwd=self.path)
+                      self.processes[process.pid] = process
+                      return process
                   finally:
                       # Includes a launcher registered before spawn raised; never sweep the job registry.
                       self.groups.update({row['pid']: row for row in owned.records() if row['purpose'].startswith(self.prefix + '-')})
           
               def stop(self, record):
+                  native = record['purpose'] == self.prefix + '-native-inspect'
+                  grace = NATIVE_TERM_SECONDS if native else TERM_GRACE_SECONDS
+                  seconds = NATIVE_STOP_SECONDS if native else CLEANUP_SECONDS
                   if record['pid'] in self.cleaned:
                       return
                   receipt = {'purpose': record['purpose'].removeprefix(self.prefix + '-'), 'stopped': False}
                   self.result['cleanup'].append(receipt)
+                  began = time.monotonic()
                   try:
-                      with self.limit(2):
-                          stopped = owned.terminate(record, grace=0.5)
-                          if stopped:
-                              while owned.group_running(record['pid']):
-                                  time.sleep(0.05)
-                              receipt['stopped'] = True
-                      if receipt['stopped']:
+                      with self.limit(seconds) as timeout:
+                          deadline = time.monotonic() + timeout
+                          if not owned.terminate(record, grace=grace):
+                              raise GateFailure('Owned process identity not confirmed.')
+                          while owned.group_running(record['pid']):
+                              remaining = deadline - time.monotonic()
+                              if remaining <= 0:
+                                  raise CommandDeadline()
+                              time.sleep(min(0.05, remaining))
+                          remaining = deadline - time.monotonic()
+                          if remaining <= 0:
+                              raise CommandDeadline()
+                          process = self.processes.get(record['pid'])
+                          if process is not None:
+                              process.wait(timeout=remaining)
+                              if time.monotonic() >= deadline:
+                                  raise CommandDeadline()
+                              receipt['reaped'] = True
+                          receipt['stopped'] = True
                           self.cleaned.add(record['pid'])
                   except Exception as error:
+                      receipt['stopped'] = False
+                      self.cleaned.discard(record['pid'])
                       receipt['error_type'] = type(error).__name__
+                  finally:
+                      receipt['elapsed_seconds'] = round(time.monotonic()-began, 3)
           
               def command(self, stage, command, output=None):
+                  if (not self.native_cleanup_verified
+                          or any(row['pid'] not in self.cleaned for row in self.groups.values()
+                          if row['purpose'] != self.prefix + '-recording')
+                          or any(not row['stopped'] for row in self.result['cleanup'])):
+                      raise GateFailure('Owned action group did not stop; refusing another device command.')
                   receipt = {'stage': stage, 'exit_code': None, 'timed_out': False}
                   self.result['stages'].append(receipt)
                   process = None
@@ -1424,8 +1471,9 @@ jobs:
                       with (self.path / output).open('wb') if output else open(os.devnull, 'wb') as out:
                           try:
                               with self.limit(MAESTRO_SECONDS if command[0] == str(self.maestro) else ACTION_SECONDS, work=True) as timeout:
+                                  deadline = time.monotonic() + timeout
                                   process = self.start(command, stage, out if output else log, log if output else subprocess.STDOUT)
-                                  receipt['exit_code'] = process.wait(timeout=timeout)
+                                  receipt['exit_code'] = process.wait(timeout=max(0, deadline-time.monotonic()))
                           except (CommandDeadline, subprocess.TimeoutExpired):
                               receipt['timed_out'] = True
                               raise GateFailure('Deadline at ' + stage + '; inspect retained diagnostics.') from None
@@ -1437,15 +1485,73 @@ jobs:
                               try:
                                   if process:
                                       self.stop(self.groups[process.pid])
-                                      if process.pid in self.cleaned:
-                                          with self.limit(1):
-                                              process.wait(timeout=1)
                               finally:
                                   self.checkpoint()
                   if not self.result['cleanup'][-1]['stopped']:
                       raise GateFailure('Owned action group did not stop; refusing another device command.')
                   if receipt['exit_code'] != 0:
                       raise GateFailure('Command failed at ' + stage + '; inspect retained diagnostics.')
+          
+              def native_inspect(self):
+                  stage = 'native-inspect'
+                  receipt = {'stage': stage, 'exit_code': None, 'timed_out': False,
+                             'accepted': False, 'classification': 'native-debugger inspection',
+                             'dump_complete': False, 'cleanup_verified': False}
+                  self.result['stages'].append(receipt)
+                  self.native_cleanup_verified = False
+                  began = time.monotonic()
+                  output = self.path / 'native-inspect.json'
+                  runner = Path(os.environ['RUNNER_TEMP'])
+                  try:
+                      elapsed = time.monotonic() - self.started
+                      if (WORK_SECONDS - elapsed < NATIVE_WORK_SECONDS
+                              or TOTAL_SECONDS - elapsed < NATIVE_WORK_SECONDS + 2 * NATIVE_STOP_SECONDS + DIAGNOSTICS_SECONDS + 60):
+                          raise GateFailure('Insufficient native inspection work/cleanup reserve.')
+                      if (any(row['pid'] not in self.cleaned for row in self.groups.values())
+                              or any(not row['stopped'] for row in self.result['cleanup'])):
+                          raise GateFailure('Owned initial group did not stop; refusing native inspection.')
+                      try:
+                          with open(os.devnull, 'wb') as log:
+                              with self.limit(NATIVE_WORK_SECONDS, work=True) as timeout:
+                                  deadline = time.monotonic() + timeout
+                                  process = self.start([
+                                      sys.executable, str(runner / 'ios-filechip-native-inspect.py'), self.udid,
+                                      '--automation-lock', str(runner / ('ios-automation-' + self.udid + '.lock')),
+                                      '--output', str(output)], stage, log, subprocess.STDOUT)
+                                  receipt['exit_code'] = process.wait(timeout=max(0, deadline-time.monotonic()))
+                                  if time.monotonic() >= deadline:
+                                      raise CommandDeadline()
+                      except (CommandDeadline, subprocess.TimeoutExpired):
+                          receipt['timed_out'] = True
+                      except (Exception, KeyboardInterrupt) as error:
+                          receipt['error_type'] = type(error).__name__
+                      finally:
+                          # TERM reaches the inspector once; further interrupts must not
+                          # shorten its detach/resume reserve before owned forced stop.
+                          handlers = {s: signal.signal(s, signal.SIG_IGN) for s in (signal.SIGTERM, signal.SIGINT)}
+                          try:
+                              records = [row for row in self.groups.values() if row['purpose'] == self.prefix + '-' + stage]
+                              for row in records:
+                                  self.stop(row)
+                          finally:
+                              for number, handler in handlers.items():
+                                  signal.signal(number, handler)
+                      with self.limit(DIAGNOSTICS_SECONDS):
+                          try:
+                              native = json.loads(output.read_text())
+                              receipt['dump_complete'] = native.get('dump_complete') is True
+                              receipt['cleanup_verified'] = native.get('cleanup_verified') is True
+                          except (OSError, ValueError, AttributeError):
+                              raise GateFailure('Missing or invalid native inspection receipt.') from None
+                      group_stopped = bool(records) and all(row['pid'] in self.cleaned for row in records)
+                      self.native_cleanup_verified = receipt['cleanup_verified'] and group_stopped
+                      if (receipt['exit_code'] != 0 or receipt['timed_out'] or 'error_type' in receipt
+                              or not receipt['dump_complete'] or not self.native_cleanup_verified
+                              or any(not row['stopped'] for row in self.result['cleanup'])):
+                          raise GateFailure('Native inspection incomplete or cleanup unverified; inspect native-inspect.json and ownership registry.')
+                  finally:
+                      receipt['elapsed_seconds'] = round(time.monotonic()-began, 3)
+                      self.checkpoint()
           
               def flow(self, stage, body):
                   flow = self.path / (stage + '.yaml')
@@ -1477,15 +1583,17 @@ jobs:
           
               def finalize(self):
                   receipt = self.result['recording'] = {'sigint_sent': False, 'finalized': False}
+                  began = time.monotonic()
                   try:
                       if self.recorder:
-                          with self.limit(8) as timeout:
+                          with self.limit(RECORDER_SECONDS) as timeout:
+                              deadline = time.monotonic() + timeout
                               record = self.groups[self.recorder.pid]
                               current = owned.identity(record['pid'])
                               if current is not None and current != record['start']:
                                   raise GateFailure('Recorder PID identity changed.')
                               receipt['sigint_sent'] = owned.signal_group(record['pid'], signal.SIGINT)
-                              receipt['exit_code'] = self.recorder.wait(timeout=timeout)
+                              receipt['exit_code'] = self.recorder.wait(timeout=max(0, deadline-time.monotonic()))
                               video = self.path / 'interaction.mp4'
                               if video.exists():
                                   with video.open('rb') as stream:
@@ -1493,6 +1601,7 @@ jobs:
                   except Exception as error:
                       receipt['error_type'] = type(error).__name__
                   finally:
+                      receipt['elapsed_seconds'] = round(time.monotonic()-began, 3)
                       for record in reversed(list(self.groups.values())):
                           self.stop(record)
                       if hasattr(self, 'video_log'):
@@ -1512,6 +1621,7 @@ jobs:
                   point = f'{(x+right)//2},{(y+bottom)//2}'
                   self.result['target'] = {'method': 'observed-compact-filename-leaf-point', 'label': label,
                                            'bounds': bounds(target), 'point': point, 'thread_anchor': anchor}
+                  self.native_inspect()
                   self.record()
                   body = visible(label) + '- longPressOn:\n    point: ' + json.dumps(point) + '\n'
                   body += f'- extendedWaitUntil:\n    visible: "Copy full path"\n    timeout: {VISIBILITY_MS}\n'
@@ -1571,7 +1681,7 @@ jobs:
                   except (Exception, KeyboardInterrupt) as error:
                       self.result['failure'] = str(error) if isinstance(error, GateFailure) else 'Interrupted at current stage: ' + type(error).__name__
                       # Only after the action group stopped; no competing navigation/driver.
-                      if all(row['pid'] in self.cleaned for row in self.groups.values() if row['purpose'] != self.prefix + '-recording'):
+                      if self.native_cleanup_verified and all(row['pid'] in self.cleaned for row in self.groups.values() if row['purpose'] != self.prefix + '-recording'):
                           try:
                               self.snapshot('failure')
                           except Exception as diagnostic_error:
@@ -1581,15 +1691,16 @@ jobs:
                           self.finalize()
                           self.checkpoint()
                           self.result['sha256'] = {}
-                          redact_diagnostics(self.path)
-                          for path in sorted(self.path.rglob('*')):
-                              if path.is_file() and path.name != 'receipt.json':
-                                  digest = hashlib.sha256()
-                                  with path.open('rb') as stream:
-                                      for chunk in iter(lambda: stream.read(1024*1024), b''):
-                                          digest.update(chunk)
-                                  self.result['sha256'][str(path.relative_to(self.path))] = digest.hexdigest()
-                          self.result['sha256']['helper'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+                          with self.limit(DIAGNOSTICS_SECONDS):
+                              redact_diagnostics(self.path)
+                              for path in sorted(self.path.rglob('*')):
+                                  if path.is_file() and path.name != 'receipt.json':
+                                      digest = hashlib.sha256()
+                                      with path.open('rb') as stream:
+                                          for chunk in iter(lambda: stream.read(1024*1024), b''):
+                                              digest.update(chunk)
+                                      self.result['sha256'][str(path.relative_to(self.path))] = digest.hexdigest()
+                              self.result['sha256']['helper'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
                           self.result['passed'] = 'failure' not in self.result and self.result['assertions_complete'] and self.result['recording']['finalized'] and all(row['stopped'] for row in self.result['cleanup'])
                           if not self.result['passed'] and 'failure' not in self.result:
                               self.result['failure'] = 'Recorder finalization or owned cleanup failed; inspect recording/cleanup receipts.'
@@ -1605,7 +1716,7 @@ jobs:
           
           def main():
               if len(sys.argv) != 3 or sys.argv[2] not in ('before', 'after') or not re.fullmatch(r'[0-9A-Fa-f-]{36}', sys.argv[1]):
-                  raise SystemExit('Usage: ios-filechip-interaction.py UDID before|after')
+                  raise SystemExit('Usage: ios-filechip-interaction-native.py UDID before|after')
               def interrupted(signum, frame):
                   raise CommandDeadline()
               previous = {number: signal.signal(number, interrupted) for number in (signal.SIGALRM, signal.SIGTERM)}
@@ -1617,13 +1728,465 @@ jobs:
                   signal.setitimer(signal.ITIMER_REAL, 0)
                   for number, handler in previous.items():
                       signal.signal(number, handler)
-              print(('Assertions passed; visual review required. ' if passed else 'Assertions failed; inspect retained diagnostics. ') + str(helper.path / 'receipt.json'))
+              print(('Native-debugger inspection diagnostics passed; accepted=false. ' if passed else 'Native-debugger inspection diagnostics failed; accepted=false. ') + str(helper.path / 'receipt.json'))
               return 0 if passed else 1
           
           
           if __name__ == '__main__':
               sys.exit(main())
           FILECHIP_INTERACTION
+          cat > "$RUNNER_TEMP/ios-filechip-native-inspect.py" <<'FILECHIP_NATIVE_INSPECT'
+          """One owned simulator attach/read/detach. A dump never establishes acceptance."""
+          import argparse
+          import fcntl
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import plistlib
+          import re
+          import signal
+          import subprocess
+          import sys
+          import time
+          from contextlib import contextmanager
+          
+          BUNDLE = 'com.cloudgatherer.lecturn'
+          DEBUG_SHA256 = 'a0796a7a862c35ff1b57d0086e1727eb5f328f62c4e5323e32c5c67aa539f3f0'
+          MARKER = 'LECTURN_NATIVE_JSON='
+          ATTACH_SECONDS = 40
+          EXPR_SECONDS = 8
+          
+          # Only getters on existing views; temporary collections belong to the inspector.
+          # Never call contextMenu (it constructs UIActions), recursiveDescription, layout,
+          # draw, gesture handlers, or any application setter.
+          EXPRESSION = r'''(const char *)({
+            NSMutableDictionary *out = [NSMutableDictionary dictionary];
+            NSMutableArray *hosts = [NSMutableArray array];
+            out[@"hosts"] = hosts;
+            @try {
+              if (![NSThread isMainThread]) @throw @"not_main_thread";
+              Class hostClass = NSClassFromString(@"LecturnMarkdownText");
+              Class runClass = NSClassFromString(@"LecturnMarkdownTextRun");
+              if (!hostClass || !runClass) @throw @"missing_native_classes";
+              Ivar tvIvar = class_getInstanceVariable(hostClass, "_textView");
+              Ivar configIvar = class_getInstanceVariable(runClass, "_contextMenuConfig");
+              if (!tvIvar || !configIvar) @throw @"missing_native_ivars";
+              NSString *(^safeText)(NSString *) = ^NSString *(NSString *s) {
+                NSString *rest = [s stringByReplacingOccurrencesOfString:@"report.pdf" withString:@""];
+                NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:@" \t\r\n\u00a0\ufffc"];
+                return [rest rangeOfCharacterFromSet:[allowed invertedSet]].location == NSNotFound
+                    ? s : @"[redacted-nonfixture-text]";
+              };
+              NSDictionary *(^rangeJSON)(NSRange) = ^NSDictionary *(NSRange r) {
+                return @{@"location": @(r.location), @"length": @(r.length)};
+              };
+              NSArray *knownIDs = @[@"copy-full-path", @"copy-relative-path", @"open-file", @"save"];
+              NSMutableArray *queue = [NSMutableArray array];
+              UIApplication *app = [UIApplication sharedApplication];
+              for (UIScene *scene in app.connectedScenes) {
+                if ([scene isKindOfClass:[UIWindowScene class]])
+                  [queue addObjectsFromArray:((UIWindowScene *)scene).windows];
+              }
+              [queue addObjectsFromArray:app.windows];
+              NSMutableSet *seen = [NSMutableSet set];
+              NSUInteger scanned = 0;
+              for (NSUInteger q = 0; q < queue.count; ++q) {
+                UIView *view = queue[q];
+                NSValue *key = [NSValue valueWithNonretainedObject:view];
+                if ([seen containsObject:key]) continue;
+                [seen addObject:key];
+                if (++scanned > 20000) @throw @"view_limit";
+                [queue addObjectsFromArray:view.subviews];
+                if (![view isKindOfClass:hostClass]) continue;
+                UITextView *tv = (UITextView *)object_getIvar(view, tvIvar);
+                if (tv && ![tv isKindOfClass:[UITextView class]]) @throw @"unexpected_textview";
+                NSAttributedString *attr = tv.attributedText;
+                NSString *rendered = attr.string ?: @"";
+                NSMutableArray *runs = [NSMutableArray array];
+                NSUInteger offset = 0, runIndex = 0, reportRuns = 0;
+                NSRange reportRange = NSMakeRange(0, 0);
+                for (NSUInteger si = 0; si < view.subviews.count; ++si) {
+                  UIView *child = view.subviews[si];
+                  if (![child isKindOfClass:runClass]) continue;
+                  if (![child respondsToSelector:@selector(text)] ||
+                      ![child respondsToSelector:@selector(hasContextMenu)]) @throw @"missing_run_selector";
+                  NSString *text = [(id)child text] ?: @"";
+                  NSRange runRange = NSMakeRange(offset, text.length);
+                  if ([text rangeOfString:@"report.pdf"].location != NSNotFound) {
+                    reportRuns++;
+                    reportRange = runRange;
+                  }
+                  NSString *config = (NSString *)object_getIvar(child, configIvar);
+                  if (config && ![config isKindOfClass:[NSString class]]) @throw @"unexpected_config_type";
+                  NSMutableArray *ids = [NSMutableArray array];
+                  NSString *configStatus = @"empty";
+                  if (config.length) {
+                    id parsed = [NSJSONSerialization JSONObjectWithData:[config dataUsingEncoding:NSUTF8StringEncoding]
+                                                               options:0 error:NULL];
+                    configStatus = @"invalid";
+                    if ([parsed isKindOfClass:[NSDictionary class]] && [parsed[@"actions"] isKindOfClass:[NSArray class]]) {
+                      configStatus = @"parsed";
+                      for (id action in parsed[@"actions"]) {
+                        id actionID = [action isKindOfClass:[NSDictionary class]] ? action[@"id"] : nil;
+                        [ids addObject:[knownIDs containsObject:actionID ?: @""] ? actionID : @"[redacted-action-id]"];
+                      }
+                    }
+                  }
+                  [runs addObject:@{@"index": @(runIndex++), @"subview_index": @(si),
+                    @"address": [NSString stringWithFormat:@"%p", child], @"text": safeText(text),
+                    @"utf16_length": @(text.length), @"range": rangeJSON(runRange),
+                    @"hasContextMenu": @((BOOL)[(id)child hasContextMenu]),
+                    @"config_utf16_length": @(config.length), @"config_status": configStatus, @"action_ids": ids}];
+                  offset += text.length;
+                }
+                if (!reportRuns && [rendered rangeOfString:@"report.pdf"].location == NSNotFound) continue;
+                NSMutableArray *attachments = [NSMutableArray array], *filenameLinks = [NSMutableArray array];
+                NSDictionary *(^linkAt)(NSUInteger) = ^NSDictionary *(NSUInteger index) {
+                  NSRange effective = NSMakeRange(0, 0);
+                  id link = [attr attribute:NSLinkAttributeName atIndex:index effectiveRange:&effective];
+                  return @{@"index": @(index), @"link_present": @(link != nil), @"effective_range": rangeJSON(effective)};
+                };
+                // Inspect every actual attachment, including ones outside the proposed run
+                // range: a range mismatch must remain visible rather than be filtered out.
+                for (NSUInteger i = 0; i < attr.length; ++i) {
+                  if ([attr attribute:NSAttachmentAttributeName atIndex:i effectiveRange:NULL]) {
+                    NSMutableDictionary *entry = [linkAt(i) mutableCopy];
+                    entry[@"in_report_run"] = @(reportRuns == 1 && NSLocationInRange(i, reportRange));
+                    entry[@"object_replacement_character"] = @([rendered characterAtIndex:i] == 0xfffc);
+                    [attachments addObject:entry];
+                  }
+                }
+                NSUInteger cursor = 0, filenames = 0;
+                NSMutableArray *filenameRanges = [NSMutableArray array];
+                while (cursor < rendered.length) {
+                  NSRange r = [rendered rangeOfString:@"report.pdf" options:0 range:NSMakeRange(cursor, rendered.length-cursor)];
+                  if (r.location == NSNotFound) break;
+                  filenames++;
+                  [filenameRanges addObject:rangeJSON(r)];
+                  for (NSUInteger i = r.location; i < NSMaxRange(r); ++i) [filenameLinks addObject:linkAt(i)];
+                  cursor = NSMaxRange(r);
+                }
+                id delegate = tv.delegate;
+                [hosts addObject:@{@"address": [NSString stringWithFormat:@"%p", view],
+                  @"class": NSStringFromClass([view class]), @"hidden": @(view.hidden), @"alpha": @(view.alpha),
+                  @"window_address": [NSString stringWithFormat:@"%p", view.window],
+                  @"textview_address": [NSString stringWithFormat:@"%p", tv],
+                  @"delegate_class": delegate ? NSStringFromClass([delegate class]) : @"<nil>",
+                  @"menu_delegate_selector": @([delegate respondsToSelector:@selector(textView:menuConfigurationForTextItem:defaultMenu:)]),
+                  @"runs": runs, @"runs_utf16_length": @(offset), @"report_run_count": @(reportRuns),
+                  @"report_run_range": rangeJSON(reportRange), @"attributed_utf16_length": @(attr.length),
+                  @"filename_count": @(filenames), @"filename_ranges": filenameRanges,
+                  @"filename_links": filenameLinks, @"attachments": attachments}];
+              }
+              out[@"views_scanned"] = @(scanned);
+            } @catch (id exception) {
+              NSArray *errors = @[@"not_main_thread", @"missing_native_classes", @"missing_native_ivars", @"view_limit",
+                @"unexpected_textview", @"missing_run_selector", @"unexpected_config_type"];
+              out[@"native_error"] = [errors containsObject:exception] ? exception : @"native_exception";
+            }
+            NSData *data = [NSJSONSerialization dataWithJSONObject:out options:0 error:NULL];
+            (const char *)[[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] UTF8String];
+          })'''
+          
+          
+          class InspectionError(Exception):
+              """Only fixed, credential-free reason codes are raised."""
+          
+          
+          def interrupted(signum, frame):
+              raise InspectionError('deadline' if signum == signal.SIGALRM else 'interrupted')
+          
+          
+          @contextmanager
+          def bounded(seconds):
+              signal.setitimer(signal.ITIMER_REAL, seconds)
+              try:
+                  yield
+              finally:
+                  signal.setitimer(signal.ITIMER_REAL, 0)
+          
+          
+          def read(command):
+              result = subprocess.run(command, capture_output=True, text=True, timeout=5, check=False)
+              if result.returncode:
+                  raise InspectionError('read_command_failed')
+              return result.stdout.strip()
+          
+          
+          def service_pid(text):
+              pattern = re.compile(r'UIKitApplication:' + re.escape(BUNDLE) + r'(?:\[[^\]\s]+\])+')
+              rows = [row.split() for row in text.splitlines()]
+              found = [row for row in rows if len(row) == 3 and pattern.fullmatch(row[2])]
+              if len(found) != 1 or not found[0][0].isdigit() or int(found[0][0]) <= 1:
+                  raise InspectionError('app_service_missing_or_ambiguous')
+              return int(found[0][0]), found[0][2]
+          
+          
+          def current_service(udid):
+              return service_pid(read(['xcrun', 'simctl', 'spawn', udid, 'launchctl', 'list']))
+          
+          
+          def process_info(pid):
+              start = read(['ps', '-p', str(pid), '-o', 'lstart='])
+              executable = read(['ps', '-p', str(pid), '-o', 'comm='])
+              state = read(['ps', '-p', str(pid), '-o', 'stat='])
+              if not start or not state or not executable:
+                  raise InspectionError('app_identity_missing')
+              return {'start': start, 'executable': executable, 'state': state}
+          
+          
+          def sha256(path):
+              digest = hashlib.sha256()
+              deadline = time.monotonic() + 10
+              with Path(path).open('rb') as stream:
+                  for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                      if time.monotonic() > deadline:
+                          raise InspectionError('hash_deadline')
+                      digest.update(chunk)
+              return digest.hexdigest()
+          
+          
+          def discover(udid):
+              devices = json.loads(read(['xcrun', 'simctl', 'list', 'devices', '--json']))
+              matches = [d for group in devices['devices'].values() for d in group if d['udid'].upper() == udid]
+              if len(matches) != 1 or matches[0]['state'] != 'Booted':
+                  raise InspectionError('exact_simulator_not_booted')
+              pid, service = current_service(udid)
+              container = Path(read(['xcrun', 'simctl', 'get_app_container', udid, BUNDLE, 'app'])).resolve()
+              if udid not in (part.upper() for part in container.parts):
+                  raise InspectionError('container_simulator_mismatch')
+              with (container / 'Info.plist').open('rb') as stream:
+                  info = plistlib.load(stream)
+              if info.get('CFBundleIdentifier') != BUNDLE or info.get('CFBundleExecutable') != 'Lecturn':
+                  raise InspectionError('installed_bundle_mismatch')
+              identity = process_info(pid)
+              if Path(identity['executable']).resolve() != container / 'Lecturn' or 'T' in identity['state']:
+                  raise InspectionError('app_executable_mismatch_or_stopped')
+              debug_hash = sha256(container / 'Lecturn.debug.dylib')
+              if debug_hash != DEBUG_SHA256:
+                  raise InspectionError('retained_debug_image_hash_mismatch')
+              verify(udid, pid, service, identity)
+              return pid, service, identity, container, debug_hash
+          
+          
+          def verify(udid, pid, service, identity):
+              if current_service(udid) != (pid, service):
+                  raise InspectionError('app_service_changed')
+              now = process_info(pid)
+              if now['start'] != identity['start'] or now['executable'] != identity['executable']:
+                  raise InspectionError('app_pid_identity_changed')
+              return now
+          
+          
+          def debugger_script(pid, start, executable, debug_image, udid, service):
+              # Verify again inside LLDB immediately before attaching; no PID/name search.
+              return '\n'.join([
+                  'import lldb, json, subprocess',
+                  f'result = {{"attached": False, "detached": False, "pid": {pid}}}',
+                  'target = lldb.debugger.CreateTarget("")',
+                  'process = None',
+                  'stage = "identity"',
+                  'try:',
+                  f'    services = subprocess.check_output(["xcrun", "simctl", "spawn", {udid!r}, "launchctl", "list"], text=True, timeout=5)',
+                  f'    matches = [r.split() for r in services.splitlines() if r.split() and r.split()[-1] == {service!r}]',
+                  f'    if len(matches) != 1 or matches[0][0] != "{pid}": raise RuntimeError("service")',
+                  f'    command = subprocess.check_output(["ps", "-p", "{pid}", "-o", "comm="], text=True, timeout=3).strip()',
+                  f'    if command != {str(executable)!r}: raise RuntimeError("executable")',
+                  f'    current = subprocess.check_output(["ps", "-p", "{pid}", "-o", "lstart="], text=True, timeout=3).strip()',
+                  f'    if current != {start!r}: raise RuntimeError("identity")',
+                  '    lldb.debugger.SetAsync(False)',
+                  '    stage = "attach"',
+                  '    error = lldb.SBError()',
+                  f'    process = target.AttachToProcessWithID(lldb.debugger.GetListener(), {pid}, error)',
+                  '    if error.Fail():',
+                  '        result["lldb_error_code"] = error.GetError()',
+                  '        raise RuntimeError("attach")',
+                  '    result["attached"] = True',
+                  '    stage = "module_identity"',
+                  f'    if process.GetProcessID() != {pid}: raise RuntimeError("pid")',
+                  '    from pathlib import Path',
+                  f'    if Path(str(target.GetExecutable())).resolve() != Path({str(executable)!r}).resolve(): raise RuntimeError("executable")',
+                  f'    modules = [m for m in target.modules if Path(str(m.GetFileSpec())).resolve() == Path({str(debug_image)!r}).resolve()]',
+                  '    if len(modules) != 1: raise RuntimeError("debug_image")',
+                  '    result["debug_image_uuid"] = modules[0].GetUUIDString()',
+                  '    stage = "main_thread"',
+                  '    threads = [t for t in process if t.GetIndexID() == 1]',
+                  '    if len(threads) != 1: raise RuntimeError("main_thread")',
+                  '    thread = threads[0]',
+                  '    result["thread_id"] = thread.GetThreadID()',
+                  '    process.SetSelectedThread(thread)',
+                  '    options = lldb.SBExpressionOptions()',
+                  '    options.SetLanguage(lldb.eLanguageTypeObjC_plus_plus)',
+                  '    options.SetPrefix("#import <UIKit/UIKit.h>\\n#import <objc/runtime.h>\\n@interface NSObject (LecturnInspectionGetters)\\n- (NSString *)text;\\n- (BOOL)hasContextMenu;\\n@end\\n")',
+                  f'    options.SetTimeoutInMicroSeconds({EXPR_SECONDS * 1000000})',
+                  '    options.SetTryAllThreads(False)',
+                  '    options.SetStopOthers(True)',
+                  '    options.SetUnwindOnError(True)',
+                  '    options.SetIgnoreBreakpoints(True)',
+                  '    options.SetTrapExceptions(True)',
+                  '    options.SetSuppressPersistentResult(True)',
+                  '    stage = "expression"',
+                  f'    value = thread.GetFrameAtIndex(0).EvaluateExpression({EXPRESSION!r}, options)',
+                  '    if value.GetError().Fail():',
+                  '        result["lldb_error_code"] = value.GetError().GetError()',
+                  '        raise RuntimeError("expression")',
+                  '    stage = "read_json"',
+                  '    error = lldb.SBError()',
+                  '    text = process.ReadCStringFromMemory(value.GetValueAsUnsigned(), 262144, error)',
+                  '    if error.Fail(): raise RuntimeError("read_json")',
+                  '    result["dump"] = json.loads(text)',
+                  'except BaseException as error:',
+                  '    result["error"] = {"stage": stage, "type": type(error).__name__}',
+                  'finally:',
+                  '    process = target.GetProcess()',
+                  '    if process.IsValid():',
+                  '        error = process.Detach()',
+                  '        result["detached"] = error.Success()',
+                  '        if error.Fail(): result["detach_error_code"] = error.GetError()',
+                  f'    print({MARKER!r} + json.dumps(result), flush=True)',
+              ])
+          
+          
+          def parse_dump(output):
+              lines = [line[len(MARKER):] for line in output.splitlines() if line.startswith(MARKER)]
+              if len(lines) != 1:
+                  raise InspectionError('missing_or_ambiguous_debugger_receipt')
+              return json.loads(lines[0])
+          
+          
+          def dump_complete(result):
+              if result.get('error') or not result.get('attached') or not result.get('detached'):
+                  return False
+              dump = result.get('dump', {})
+              hosts = dump.get('hosts', [])
+              return (not dump.get('native_error') and len(hosts) == 1
+                      and hosts[0].get('report_run_count') == 1 and hosts[0].get('filename_count') == 1
+                      and hosts[0].get('textview_address') not in (None, '0x0', '(nil)'))
+          
+          
+          def inspect(args, owned):
+              receipt = {'accepted': False, 'diagnostic_only': True, 'dump_complete': False,
+                         'cleanup_verified': False, 'udid': args.udid, 'bundle_id': BUNDLE,
+                         'helper_sha256': sha256(__file__), 'limits_seconds':
+                         {'debugger_start_attach_dump': ATTACH_SECONDS, 'expression': EXPR_SECONDS,
+                          'discovery': 60, 'debugger_startup': 5, 'read_command': 5,
+                          'debugger_cleanup': 5, 'app_cleanup': 25}}
+              process = record = identity = None
+              pid = None
+              purpose = 'filechip-native-inspect-' + str(time.time_ns())
+              try:
+                  with bounded(60):
+                      pid, service, identity, container, image_hash = discover(args.udid)
+                  receipt['app'] = {'pid': pid, 'start': identity['start'], 'debug_dylib_sha256': image_hash,
+                                    'service_sha256': hashlib.sha256(service.encode()).hexdigest()}
+                  verify(args.udid, pid, service, identity)
+                  script = debugger_script(pid, identity['start'], identity['executable'], container / 'Lecturn.debug.dylib', args.udid, service)
+                  with bounded(5):
+                      process = owned.spawn(['xcrun', 'lldb', '--no-lldbinit', '--batch', '-o', 'script exec(' + repr(script) + ')'],
+                                            purpose=purpose, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                            stderr=subprocess.STDOUT, text=True)
+                  record = next(row for row in owned.records() if row['pid'] == process.pid and row['purpose'] == purpose)
+                  receipt['debugger'] = {'pid': record['pid'], 'start': record['start'], 'purpose': purpose}
+                  output, _ = process.communicate(timeout=ATTACH_SECONDS)
+                  receipt['debugger_exit_code'] = process.returncode
+                  receipt['native'] = parse_dump(output)
+                  receipt['native_dump_sha256'] = hashlib.sha256(json.dumps(receipt['native'], sort_keys=True).encode()).hexdigest()
+                  receipt['dump_complete'] = process.returncode == 0 and dump_complete(receipt['native'])
+                  if not receipt['dump_complete']:
+                      receipt['error'] = 'native_dump_incomplete_or_ambiguous'
+              except (Exception, KeyboardInterrupt) as error:
+                  receipt['error'] = str(error) if isinstance(error, InspectionError) else type(error).__name__
+              finally:
+                  # Allow one interrupt to enter cleanup, then finish cleanup before
+                  # honoring further termination. SIGALRM still bounds each operation.
+                  handlers = {s: signal.signal(s, signal.SIG_IGN) for s in (signal.SIGINT, signal.SIGTERM)}
+                  # A registration failure can still leave a registered launcher. Limit
+                  # cleanup to this invocation, never sweep another helper's registry.
+                  try:
+                      with bounded(5):
+                          if record is None:
+                              record = next((row for row in owned.records() if row['purpose'] == purpose), None)
+                          if record:
+                              receipt.setdefault('debugger', {'pid': record['pid'], 'start': record['start'], 'purpose': purpose})
+                              receipt['debugger_group_stopped'] = owned.terminate(record, grace=0.5)
+                              if process:
+                                  process.wait(timeout=3)
+                              if not receipt['debugger_group_stopped'] or owned.group_running(record['pid']):
+                                  raise InspectionError('debugger_group_still_running')
+                  except (Exception, KeyboardInterrupt) as error:
+                      receipt['debugger_cleanup_error'] = str(error) if isinstance(error, InspectionError) else type(error).__name__
+                      # If graceful group cleanup failed, the registered leader must
+                      # still have its recorded identity before a forced group stop.
+                      try:
+                          with bounded(5):
+                              if record and read(['ps', '-p', str(record['pid']), '-o', 'lstart=']) == record['start']:
+                                  os.killpg(record['pid'], signal.SIGKILL)
+                                  if process:
+                                      process.wait(timeout=3)
+                                  receipt['debugger_forced_stop'] = not owned.group_running(record['pid'])
+                      except (Exception, KeyboardInterrupt) as recovery_error:
+                          receipt['debugger_recovery_error'] = type(recovery_error).__name__
+                  try:
+                      with bounded(25):
+                          if pid and identity:
+                              now = verify(args.udid, pid, service, identity)
+                              if 'T' in now['state']:
+                                  # Only the identical launch service, executable and start
+                                  # identity may be resumed. Never signal a replacement PID.
+                                  os.kill(pid, signal.SIGCONT)
+                                  receipt['recovery_sigcont'] = True
+                                  now = verify(args.udid, pid, service, identity)
+                                  deadline = time.monotonic() + 3
+                                  while 'T' in now['state'] and time.monotonic() < deadline:
+                                      time.sleep(0.1)
+                                      now = verify(args.udid, pid, service, identity)
+                              receipt['app_state_after_cleanup'] = now['state']
+                              receipt['cleanup_verified'] = ('T' not in now['state'] and 'Z' not in now['state']
+                                                             and 'debugger_cleanup_error' not in receipt)
+                  except (Exception, KeyboardInterrupt) as error:
+                      receipt['cleanup_error'] = str(error) if isinstance(error, InspectionError) else type(error).__name__
+                  receipt['dump_complete'] = receipt['dump_complete'] and receipt['cleanup_verified']
+                  for number, handler in handlers.items():
+                      signal.signal(number, handler)
+              return receipt
+          
+          
+          def main():
+              parser = argparse.ArgumentParser(description=__doc__)
+              parser.add_argument('udid')
+              parser.add_argument('--automation-lock', required=True, type=Path)
+              parser.add_argument('--output', required=True, type=Path)
+              args = parser.parse_args()
+              if not re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', args.udid):
+                  parser.error('An exact simulator UDID is required')
+              args.udid = args.udid.upper()
+              # Import the existing job ownership helper without touching its source.
+              sys.path.insert(0, os.environ['RUNNER_TEMP'])
+              import ios_owned_processes as owned
+              with args.automation_lock.open('a') as lock:
+                  try:
+                      fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                  except BlockingIOError:
+                      receipt = {'accepted': False, 'diagnostic_only': True, 'dump_complete': False,
+                                 'cleanup_verified': False, 'error': 'device_automation_busy', 'udid': args.udid}
+                  else:
+                      previous = {s: signal.signal(s, interrupted) for s in (signal.SIGALRM, signal.SIGINT, signal.SIGTERM)}
+                      try:
+                          receipt = inspect(args, owned)
+                      finally:
+                          signal.setitimer(signal.ITIMER_REAL, 0)
+                          for number, handler in previous.items():
+                              signal.signal(number, handler)
+                  args.output.write_text(json.dumps(receipt, indent=2) + '\n')
+                  os.chmod(args.output, 0o600)
+              print('Native diagnostic only; never acceptance. ' + str(args.output))
+              return 0 if receipt['dump_complete'] else 1
+          
+          
+          if __name__ == '__main__':
+              sys.exit(main())
+          FILECHIP_NATIVE_INSPECT
           export REUSE8_BACKEND_OBSERVER_REPO="$GITHUB_WORKSPACE"
           export REUSE8_BACKEND_OBSERVER_LOG="$GITHUB_WORKSPACE/artifacts/ios-validation/backend-http.jsonl"
           export NODE_OPTIONS="--import=$RUNNER_TEMP/metro-request-observer.mjs --import=$RUNNER_TEMP/metro-runtime-memo.mjs --import=$RUNNER_TEMP/reuse8-backend-observer.mjs"
@@ -1640,7 +2203,7 @@ jobs:
 
       - name: Complete file-chip interaction scene gate
         if: always()
-        timeout-minutes: 47
+        timeout-minutes: 52
         run: python3 "$RUNNER_TEMP/ios-phase-driver.py" finish
 
       - name: Stop remaining owned capture process
@@ -1666,7 +2229,7 @@ jobs:
           git rev-parse HEAD > artifacts/ios-validation/validation-commit.txt
           git status --porcelain > artifacts/ios-validation/post-prebuild-status.txt
           cp "$RUNNER_TEMP/lecturn-link-fixture.mjs" artifacts/ios-validation/fixture-preload.mjs
-          cp "$RUNNER_TEMP/ios-filechip-interaction.py" "$RUNNER_TEMP/ios-link-scene-assert.py" "$RUNNER_TEMP/reuse8-backend-observer.mjs" "$RUNNER_TEMP/metro-runtime-memo.mjs" "$RUNNER_TEMP/ios-driver-warmup.py" "$RUNNER_TEMP/ios-metro-preflight.py" "$RUNNER_TEMP/ios_owned_processes.py" "$RUNNER_TEMP/ios-native-launch.py" "$RUNNER_TEMP/ios-native-launch.yaml" "$RUNNER_TEMP/ios-runtime-probe.mjs" "$RUNNER_TEMP/ios-phase-driver.py" "$RUNNER_TEMP/ios-startup-diagnostics.py" "$RUNNER_TEMP/metro-request-observer.mjs" "$RUNNER_TEMP/ios-url-probe.swift" artifacts/ios-validation/
+          cp "$RUNNER_TEMP/ios-filechip-native-inspect.py" "$RUNNER_TEMP/ios-filechip-interaction.py" "$RUNNER_TEMP/ios-link-scene-assert.py" "$RUNNER_TEMP/reuse8-backend-observer.mjs" "$RUNNER_TEMP/metro-runtime-memo.mjs" "$RUNNER_TEMP/ios-driver-warmup.py" "$RUNNER_TEMP/ios-metro-preflight.py" "$RUNNER_TEMP/ios_owned_processes.py" "$RUNNER_TEMP/ios-native-launch.py" "$RUNNER_TEMP/ios-native-launch.yaml" "$RUNNER_TEMP/ios-runtime-probe.mjs" "$RUNNER_TEMP/ios-phase-driver.py" "$RUNNER_TEMP/ios-startup-diagnostics.py" "$RUNNER_TEMP/metro-request-observer.mjs" "$RUNNER_TEMP/ios-url-probe.swift" artifacts/ios-validation/
           ios_products=apps/mobile/.showcase/ios-derived-data/Build/Products/Debug-iphonesimulator
           if [ -d "$ios_products/Lecturn.app" ]; then
             tar -czf artifacts/ios-validation/Lecturn-simulator.app.tgz -C "$ios_products" Lecturn.app
