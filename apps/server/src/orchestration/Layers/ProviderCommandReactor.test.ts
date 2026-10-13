@@ -290,8 +290,12 @@ describe("ProviderCommandReactor", () => {
             turnId: asTurnId("turn-1"),
           })),
     );
-    const compactThread = vi.fn((_: ThreadId) => input?.compactThreadEffect?.() ?? Effect.void);
-    const interruptTurn = vi.fn((_: unknown) => input?.interruptTurnEffect?.() ?? Effect.void);
+    const compactThread = vi.fn<ProviderServiceShape["compactThread"]>(
+      () => input?.compactThreadEffect?.() ?? Effect.void,
+    );
+    const interruptTurn = vi.fn<ProviderServiceShape["interruptTurn"]>(
+      () => input?.interruptTurnEffect?.() ?? Effect.void,
+    );
     const respondToRequest = vi.fn<ProviderServiceShape["respondToRequest"]>(() => Effect.void);
     const respondToUserInput = vi.fn<ProviderServiceShape["respondToUserInput"]>(() => Effect.void);
     const stopSession = vi.fn((stopInput: unknown) =>
@@ -324,12 +328,14 @@ describe("ProviderCommandReactor", () => {
             : "renamed-branch",
       }),
     );
-    const pruneWorktrees = vi.fn((_: { readonly cwd: string }) => Effect.void);
+    const pruneWorktrees = vi.fn<
+      GitWorkflowService.GitWorkflowService["Service"]["pruneWorktrees"]
+    >(() => Effect.void);
     const createWorktree = vi.fn(
       (input: { readonly refName: string; readonly path: string | null }) =>
         Effect.succeed({ worktree: { path: input.path ?? "", refName: input.refName } }),
     );
-    const refreshStatus = vi.fn((_: string) =>
+    const refreshStatus = vi.fn<VcsStatusBroadcaster["Service"]["refreshStatus"]>(() =>
       Effect.succeed({
         isRepo: true,
         hasPrimaryRemote: true,
@@ -347,7 +353,7 @@ describe("ProviderCommandReactor", () => {
         pr: null,
       }),
     );
-    const generateBranchName = vi.fn<TextGeneration["Service"]["generateBranchName"]>((_) =>
+    const generateBranchName = vi.fn<TextGeneration["Service"]["generateBranchName"]>(() =>
       Effect.fail(
         new TextGenerationError({
           operation: "generateBranchName",
@@ -355,7 +361,7 @@ describe("ProviderCommandReactor", () => {
         }),
       ),
     );
-    const generateThreadTitle = vi.fn<TextGeneration["Service"]["generateThreadTitle"]>((_) =>
+    const generateThreadTitle = vi.fn<TextGeneration["Service"]["generateThreadTitle"]>(() =>
       Effect.fail(
         new TextGenerationError({
           operation: "generateThreadTitle",
@@ -1328,6 +1334,48 @@ describe("ProviderCommandReactor", () => {
         threadId: ThreadId.make("thread-1"),
         input: "Start after activation",
       });
+    }),
+  );
+
+  effectIt.effect("starts a turn and generates its title without loading old message bodies", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const titleGenerated = yield* Deferred.make<void>();
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          unreadableHistory: true,
+          startSessionEffect: (session) =>
+            Deferred.succeed(started, undefined).pipe(Effect.as(session)),
+        }),
+      );
+      harness.generateThreadTitle.mockReturnValue(
+        Deferred.succeed(titleGenerated, undefined).pipe(Effect.as({ title: "Generated title" })),
+      );
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-with-old-history"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: MessageId.make("message-turn-start-with-old-history"),
+          role: "user",
+          text: "Use the current message",
+          attachments: [],
+        },
+        titleSeed: "Thread",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:01.000Z",
+      });
+      yield* Deferred.await(started);
+      yield* Deferred.await(titleGenerated);
+      yield* Effect.promise(() => harness.drain());
+
+      expect(harness.sendTurn).toHaveBeenCalledWith(
+        expect.objectContaining({ input: "Use the current message" }),
+      );
+      expect(harness.generateThreadTitle).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "Use the current message" }),
+      );
     }),
   );
 
@@ -3726,7 +3774,7 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
 
     harness.startSession.mockImplementationOnce(
-      (_: unknown, __: unknown) => Effect.fail("simulated restart failure") as never,
+      () => Effect.fail("simulated restart failure") as never,
     );
 
     await Effect.runPromise(

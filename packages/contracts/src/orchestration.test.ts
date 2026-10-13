@@ -2,6 +2,7 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
+import { CommandId, MessageId, ProjectId, ThreadId, TurnId } from "./baseSchemas.ts";
 
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -596,6 +597,8 @@ it.effect("defaults settled fields when decoding historical thread data", () =>
     // Pre-fork payloads omit forkedFrom entirely.
     assert.strictEqual(thread.forkedFrom, undefined);
     assert.strictEqual(shell.forkedFrom, undefined);
+    assert.strictEqual(thread.branchPullRequest, undefined);
+    assert.strictEqual(shell.branchPullRequest, undefined);
 
     const forkedFrom = yield* decodeThreadForkOrigin({
       threadId: "thread-0",
@@ -603,9 +606,25 @@ it.effect("defaults settled fields when decoding historical thread data", () =>
       turnCount: 3,
       messageId: "assistant:msg-3",
     });
+    const branchPullRequest = {
+      projectId: ProjectId.make("project-1"),
+      repository: "team/repo",
+      host: "gitlab.example.com",
+      number: 42,
+      url: "https://gitlab.example.com/team/repo/-/merge_requests/42",
+    };
+    const completedTurns = [
+      {
+        turnId: TurnId.make("turn-3"),
+        assistantMessageId: MessageId.make("assistant:msg-3"),
+        hasProviderTurnRef: true,
+      },
+    ];
     const forkedThread = yield* decodeOrchestrationThread({
       ...common,
       forkedFrom,
+      branchPullRequest,
+      completedTurns,
       deletedAt: null,
       messages: [],
       proposedPlans: [],
@@ -615,6 +634,7 @@ it.effect("defaults settled fields when decoding historical thread data", () =>
     const forkedShell = yield* decodeOrchestrationThreadShell({
       ...common,
       forkedFrom,
+      branchPullRequest,
       latestUserMessageAt: null,
       hasPendingApprovals: false,
       hasPendingUserInput: false,
@@ -622,6 +642,9 @@ it.effect("defaults settled fields when decoding historical thread data", () =>
     });
     assert.deepStrictEqual(forkedThread.forkedFrom, forkedFrom);
     assert.deepStrictEqual(forkedShell.forkedFrom, forkedFrom);
+    assert.deepStrictEqual(forkedThread.branchPullRequest, branchPullRequest);
+    assert.deepStrictEqual(forkedShell.branchPullRequest, branchPullRequest);
+    assert.deepStrictEqual(forkedThread.completedTurns, completedTurns);
   }),
 );
 
@@ -887,6 +910,47 @@ it.effect("accepts an internal title regeneration completion", () =>
       assert.strictEqual(parsed.requestId, "cmd-title-regenerate");
       assert.strictEqual(parsed.title, "Updated title");
     }
+  }),
+);
+
+it.effect("accepts pull request synchronization only as an internal command", () =>
+  Effect.gen(function* () {
+    const pullRequest = {
+      projectId: ProjectId.make("project-1"),
+      repository: "Nurozen/lecturn",
+      number: 42,
+      url: "https://github.com/Nurozen/lecturn/pull/42",
+    };
+    const command = {
+      type: "thread.pull-request.sync" as const,
+      commandId: CommandId.make("cmd-pull-request-sync"),
+      threadId: ThreadId.make("thread-1"),
+      projectId: pullRequest.projectId,
+      snapshotSequence: 12,
+      expected: {
+        workspaceRoot: "/workspace/project",
+        branch: "feature",
+        worktreePath: null,
+        linkedPullRequest: null,
+        branchPullRequest: null,
+      },
+      branchPullRequest: pullRequest,
+      linkedPullRequest: pullRequest,
+    };
+
+    assert.deepStrictEqual(yield* decodeOrchestrationCommand(command), command);
+    assert.ok(yield* decodeClientOrchestrationCommand(command).pipe(Effect.flip));
+
+    const cleared = { ...command, branchPullRequest: null };
+    assert.deepStrictEqual(yield* decodeOrchestrationCommand(cleared), cleared);
+
+    const metadata = yield* decodeClientOrchestrationCommand({
+      type: "thread.meta.update",
+      commandId: "cmd-forged-branch-pull-request",
+      threadId: "thread-1",
+      branchPullRequest: pullRequest,
+    });
+    assert.isFalse("branchPullRequest" in metadata);
   }),
 );
 

@@ -13,10 +13,8 @@ import {
 import { tryCopyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { LecturnKeyboardCommands } from "../../native/LecturnKeyboardCommands";
 import { useProject, useThreadShell } from "../../state/entities";
-import { useEnvironmentQuery } from "../../state/query";
-import { resolveThreadGitTarget } from "../../state/thread-git-target";
+import { resolveThreadPullRequestRef } from "../../state/thread-pr-presentation";
 import type { GitActionProgress } from "../../state/use-vcs-action-state";
-import { vcsEnvironment } from "../../state/vcs";
 import { GitActionProgressOverlay } from "../threads/GitActionProgressOverlay";
 import {
   dispatchHardwareKeyboardCommand,
@@ -45,42 +43,22 @@ export function HardwareKeyboardCommandProvider({
     () =>
       activeThread === null
         ? null
-        : {
-            environmentId: activeThread.environmentId,
-            projectId: activeThread.projectId,
-          },
+        : { environmentId: activeThread.environmentId, projectId: activeThread.projectId },
     [activeThread],
   );
   const activeProject = useProject(activeProjectRef);
-  const { cwd: activeThreadGitCwd, branch: activeThreadGitBranch } = resolveThreadGitTarget({
-    project: activeProject,
-    thread: activeThread,
-  });
-  const gitStatus = useEnvironmentQuery(
-    activeThread !== null &&
-      activeThread.linkedPullRequest == null &&
-      activeThreadGitBranch !== null &&
-      activeThreadGitCwd !== null
-      ? vcsEnvironment.status({
-          environmentId: activeThread.environmentId,
-          input: { cwd: activeThreadGitCwd },
-        })
-      : null,
-  ).data;
-  const detectedPullRequestUrl =
-    activeThreadGitBranch !== null && gitStatus?.refName === activeThreadGitBranch
-      ? (gitStatus.pr?.url ?? null)
-      : null;
   const copyTarget = useMemo(
     () =>
       activeThreadRef === null
         ? null
         : resolveThreadReferenceCopyTarget({
             threadId: activeThread?.id ?? activeThreadRef.threadId,
-            linkedPullRequestUrl: activeThread?.linkedPullRequest?.url ?? null,
-            detectedPullRequestUrl,
+            linkedPullRequestUrl:
+              activeThread === null
+                ? null
+                : (resolveThreadPullRequestRef(activeThread, activeProject)?.url ?? null),
           }),
-    [activeThread, activeThreadRef, detectedPullRequestUrl],
+    [activeProject, activeThread, activeThreadRef],
   );
   const [copyFeedback, setCopyFeedback] = useState<GitActionProgress>(EMPTY_COPY_FEEDBACK);
   const copyRequestIdRef = useRef(0);

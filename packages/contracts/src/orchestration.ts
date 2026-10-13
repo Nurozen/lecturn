@@ -638,6 +638,7 @@ export const OrchestrationThread = Schema.Struct({
   // Origin of a thread imported from an external provider session. Optional
   // for the same reason as forkedFrom.
   importedFrom: Schema.optional(Schema.NullOr(ThreadImportOrigin)),
+  branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   // Detail-window fork points. Absent on older servers and shell-only snapshots.
   completedTurns: Schema.optional(Schema.Array(OrchestrationCompletedTurn)),
@@ -727,6 +728,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   // Origin of a thread imported from an external provider session. Optional
   // for the same reason as forkedFrom.
   importedFrom: Schema.optional(Schema.NullOr(ThreadImportOrigin)),
+  branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -1474,6 +1476,23 @@ const ProjectRefreshCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadPullRequestSyncCommand = Schema.Struct({
+  type: Schema.Literal("thread.pull-request.sync"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  projectId: ProjectId,
+  snapshotSequence: NonNegativeInt,
+  expected: Schema.Struct({
+    workspaceRoot: TrimmedNonEmptyString,
+    branch: Schema.NullOr(TrimmedNonEmptyString),
+    worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+    linkedPullRequest: Schema.NullOr(ThreadLinkedPullRequest),
+    branchPullRequest: Schema.NullOr(ThreadLinkedPullRequest),
+  }),
+  branchPullRequest: Schema.NullOr(ThreadLinkedPullRequest),
+  linkedPullRequest: Schema.optional(ThreadLinkedPullRequest),
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ProjectRefreshCommand,
   ThreadAutoSettleCommand,
@@ -1486,6 +1505,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
   ThreadTitleRegenerationCompleteCommand,
+  ThreadPullRequestSyncCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -1671,6 +1691,7 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
+  branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   updatedAt: IsoDateTime,
 });
 

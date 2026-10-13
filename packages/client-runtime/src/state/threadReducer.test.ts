@@ -307,50 +307,82 @@ describe("applyThreadDetailEvent", () => {
       }
     });
 
-    it("sets and clears a linked pull request", () => {
-      const linkedPullRequest = {
-        projectId: ProjectId.make("project-1"),
-        repository: "nurozen/lecturn",
-        number: 42,
-        url: "https://github.com/nurozen/lecturn/pull/42",
-      };
-      const linked = applyThreadDetailEvent(baseThread, {
-        ...baseEventFields,
-        sequence: 5,
-        occurredAt: "2026-04-01T05:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
-        type: "thread.meta-updated",
-        payload: {
-          threadId: ThreadId.make("thread-1"),
-          linkedPullRequest,
-          updatedAt: "2026-04-01T05:00:00.000Z",
-        },
-      });
+    it.each(["linkedPullRequest", "branchPullRequest"] as const)(
+      "sets and clears %s without changing the other link",
+      (field) => {
+        const linkedPullRequest = {
+          projectId: ProjectId.make("project-1"),
+          repository: "Nurozen/lecturn",
+          number: 42,
+          url: "https://github.com/Nurozen/lecturn/pull/42",
+        };
+        const otherField =
+          field === "linkedPullRequest" ? "branchPullRequest" : "linkedPullRequest";
+        const otherPullRequest = {
+          ...linkedPullRequest,
+          number: 43,
+          url: "https://github.com/Nurozen/lecturn/pull/43",
+        };
+        const forkedFrom = {
+          threadId: ThreadId.make("parent-thread"),
+          turnId: TurnId.make("parent-turn"),
+          turnCount: 1,
+          messageId: MessageId.make("parent-assistant"),
+        };
+        const completedTurns = [
+          {
+            turnId: forkedFrom.turnId,
+            assistantMessageId: forkedFrom.messageId,
+            hasProviderTurnRef: true,
+          },
+        ];
+        const linked = applyThreadDetailEvent(
+          { ...baseThread, forkedFrom, completedTurns, [otherField]: otherPullRequest },
+          {
+            ...baseEventFields,
+            sequence: 5,
+            occurredAt: "2026-04-01T05:00:00.000Z",
+            aggregateKind: "thread",
+            aggregateId: ThreadId.make("thread-1"),
+            type: "thread.meta-updated",
+            payload: {
+              threadId: ThreadId.make("thread-1"),
+              [field]: linkedPullRequest,
+              updatedAt: "2026-04-01T05:00:00.000Z",
+            },
+          },
+        );
 
-      expect(linked.kind).toBe("updated");
-      if (linked.kind !== "updated") return;
-      expect(linked.thread.linkedPullRequest).toEqual(linkedPullRequest);
+        expect(linked.kind).toBe("updated");
+        if (linked.kind !== "updated") return;
+        expect(linked.thread[field]).toEqual(linkedPullRequest);
+        expect(linked.thread[otherField]).toEqual(otherPullRequest);
+        expect(linked.thread.forkedFrom).toEqual(forkedFrom);
+        expect(linked.thread.completedTurns).toEqual(completedTurns);
 
-      const cleared = applyThreadDetailEvent(linked.thread, {
-        ...baseEventFields,
-        sequence: 6,
-        occurredAt: "2026-04-01T06:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
-        type: "thread.meta-updated",
-        payload: {
-          threadId: ThreadId.make("thread-1"),
-          linkedPullRequest: null,
-          updatedAt: "2026-04-01T06:00:00.000Z",
-        },
-      });
+        const cleared = applyThreadDetailEvent(linked.thread, {
+          ...baseEventFields,
+          sequence: 6,
+          occurredAt: "2026-04-01T06:00:00.000Z",
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          type: "thread.meta-updated",
+          payload: {
+            threadId: ThreadId.make("thread-1"),
+            [field]: null,
+            updatedAt: "2026-04-01T06:00:00.000Z",
+          },
+        });
 
-      expect(cleared.kind).toBe("updated");
-      if (cleared.kind === "updated") {
-        expect(cleared.thread.linkedPullRequest).toBeNull();
-      }
-    });
+        expect(cleared.kind).toBe("updated");
+        if (cleared.kind === "updated") {
+          expect(cleared.thread[field]).toBeNull();
+          expect(cleared.thread[otherField]).toEqual(otherPullRequest);
+          expect(cleared.thread.forkedFrom).toEqual(forkedFrom);
+          expect(cleared.thread.completedTurns).toEqual(completedTurns);
+        }
+      },
+    );
   });
 
   describe("thread.message-sent", () => {

@@ -51,3 +51,5 @@ export function presentThreadGitStatusPr(
   if ((branch !== undefined && status.refName !== branch) || !status.pr) return null;
   return presentThreadPr(status.pr, status.sourceControlProvider);
 }
+
+export { resolveThreadPullRequestRef } from "@lecturn/client-runtime/state/threadPullRequests";

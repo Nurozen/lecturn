@@ -10,6 +10,7 @@ import {
   type ScopedThreadRef,
   type ServerProviderSkill,
   type ToolActivityIcon,
+  type ThreadImportOrigin,
   type TurnId,
 } from "@lecturn/contracts";
 import { parseScopedThreadKey } from "@lecturn/client-runtime/environment";
@@ -228,10 +229,10 @@ interface TimelineRowSharedState {
   workspaceRoot: string | undefined;
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
-  onRevertUserMessage: (messageId: MessageId) => void;
   onForkFromMessage: (messageId: MessageId) => void;
   forkWarning: string | null;
   revertDisabledReason: string | null;
+  onRevertToTurnCount: (targetTurnCount: number) => void;
   onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onFileOpen: (attachment: ChatFileAttachment) => void;
@@ -352,12 +353,10 @@ interface MessagesTimelineProps {
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   latestTurn: TimelineLatestTurn | null;
   runningTurnId: TurnId | null;
-  turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
+  turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
   routeThreadKey: string;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
-  revertTurnCountByUserMessageId: Map<MessageId, number>;
   forkTurnIdByMessageId: ReadonlyMap<MessageId, TurnId>;
-  onRevertUserMessage: (messageId: MessageId) => void;
   onForkFromMessage: (messageId: MessageId) => void;
   forkWarning: string | null;
   revertDisabledReason: string | null;
@@ -366,6 +365,9 @@ interface MessagesTimelineProps {
   importDivider?: { label: string; beforeMessageId: MessageId | null } | null;
   /** The import left earlier history out and the oldest page is on screen. */
   importHistoryTruncated?: boolean;
+  importedFrom?: ThreadImportOrigin | null;
+  supportsConversationRollback: boolean;
+  onRevertToTurnCount: (targetTurnCount: number) => void;
   onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
@@ -419,18 +421,19 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   timelineEntries,
   latestTurn,
   runningTurnId,
-  turnDiffSummaryByAssistantMessageId,
+  turnDiffSummaries,
   routeThreadKey,
   onOpenTurnDiff,
-  revertTurnCountByUserMessageId,
   forkTurnIdByMessageId,
-  onRevertUserMessage,
   onForkFromMessage,
   forkWarning,
   revertDisabledReason,
   forkDividerAfterMessageId,
   importDivider = null,
   importHistoryTruncated = false,
+  importedFrom = null,
+  supportsConversationRollback,
+  onRevertToTurnCount,
   onUseArtifactTemplate = NOOP_USE_ARTIFACT_TEMPLATE,
   isRevertingCheckpoint,
   onImageExpand,
@@ -756,11 +759,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         expandedWorkGroupIds,
         isWorking,
         activeTurnStartedAt,
-        turnDiffSummaryByAssistantMessageId,
-        revertTurnCountByUserMessageId,
         forkTurnIdByMessageId,
         forkDividerAfterMessageId,
         importDivider,
+        turnDiffSummaries,
+        supportsConversationRollback,
+        importedFrom,
       },
       previous?.threadKey === routeThreadKey && previous.workspaceRoot === workspaceRoot
         ? previous.projection
@@ -779,11 +783,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     expandedWorkGroupIds,
     isWorking,
     activeTurnStartedAt,
-    turnDiffSummaryByAssistantMessageId,
-    revertTurnCountByUserMessageId,
     forkTurnIdByMessageId,
     forkDividerAfterMessageId,
     importDivider,
+    turnDiffSummaries,
+    supportsConversationRollback,
+    importedFrom,
   ]);
   const rows = useStableRows(rawRows);
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
@@ -977,10 +982,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       skills,
       activeThreadEnvironmentId,
-      onRevertUserMessage,
       onForkFromMessage,
       forkWarning,
       revertDisabledReason,
+      onRevertToTurnCount,
       onUseArtifactTemplate,
       onImageExpand,
       onFileOpen,
@@ -1008,10 +1013,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       skills,
       activeThreadEnvironmentId,
-      onRevertUserMessage,
       onForkFromMessage,
       forkWarning,
       revertDisabledReason,
+      onRevertToTurnCount,
       onUseArtifactTemplate,
       onImageExpand,
       onFileOpen,
@@ -1621,7 +1626,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   ];
   const previewImages = userImages.filter((image) => image.name.startsWith("preview-annotation-"));
   const regularImages = userImages.filter((image) => !image.name.startsWith("preview-annotation-"));
-  const canRevertAgentWork = typeof row.revertTurnCount === "number";
+  const revertTurnCount = row.revertTurnCount;
 
   return (
     <div className="group flex flex-col items-end gap-1">
@@ -1799,7 +1804,9 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           </Tooltip>
           <div className="flex items-center gap-0.5">
             {row.forkTurnId !== undefined && <ForkFromMessageButton messageId={row.message.id} />}
-            {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
+            {typeof revertTurnCount === "number" && (
+              <RevertUserMessageButton turnCount={revertTurnCount} />
+            )}
             {displayedUserMessage.copyText && (
               <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
             )}
@@ -1810,7 +1817,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   );
 }
 
-function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
+function RevertUserMessageButton({ turnCount }: { turnCount: number }) {
   const ctx = use(TimelineRowCtx);
   const activity = use(TimelineRowActivityCtx);
   // A native disabled attribute would swallow the pointer events, hiding the
@@ -1830,7 +1837,7 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
             className={revertBlocked ? "opacity-50" : undefined}
             onClick={() => {
               if (!revertBlocked) {
-                ctx.onRevertUserMessage(messageId);
+                ctx.onRevertToTurnCount(turnCount);
               }
             }}
             aria-label="Revert to this message"

@@ -549,7 +549,6 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   readonly thread: EnvironmentThreadShell;
   readonly environmentLabel: string | null;
   readonly environmentMachine?: EnvironmentMachineKind;
-  readonly projectCwd: string | null;
   readonly searchMatch?: EnvironmentThreadSearchMatch;
   readonly searchQuery?: string;
   readonly isLast: boolean;
@@ -595,20 +594,12 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
     onRegenerateThreadTitle,
   } = props;
   const status = resolveThreadStatus(thread);
-  // The row only receives the project cwd; the shell is needed so Stave
-  // spaces look up PRs on their primary repo rather than the space root.
   const projectRef = useMemo(
     () => ({ environmentId: thread.environmentId, projectId: thread.projectId }),
     [thread.environmentId, thread.projectId],
   );
   const project = useProject(projectRef);
-  const prProject = useMemo(
-    () =>
-      project ??
-      (props.projectCwd !== null ? { workspaceRoot: props.projectCwd, stave: null } : null),
-    [project, props.projectCwd],
-  );
-  const pr = useThreadPr(thread, prProject);
+  const pr = useThreadPr(thread, project);
   const projects = useProjects();
   const watches = useEnvironmentQuery(
     visible
@@ -622,7 +613,9 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
       thread,
       watches: watches.data?.watches ?? [],
     }),
-    pr ? { ...pr, repository: thread.linkedPullRequest?.repository } : null,
+    pr
+      ? { ...pr, repository: (thread.linkedPullRequest ?? thread.branchPullRequest)?.repository }
+      : null,
   );
   const timestamp = relativeTime(
     thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,

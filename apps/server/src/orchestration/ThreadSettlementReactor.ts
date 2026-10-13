@@ -20,6 +20,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
+import { pullRequestMatchesProject } from "./ThreadPullRequestReactor.ts";
 import {
   isAutoSettlementCandidate,
   resolveAutoSettlementAt,
@@ -55,21 +56,74 @@ export const make = Effect.gen(function* () {
       mergedPullRequest === null && Option.isSome(staveMergeSignal)
         ? yield* staveMergeSignal.value.candidates(snapshot.projects)
         : new Set();
-    // A merge event re-sweeps every candidate, not just the threads linked to
-    // the merged pull request: most threads carry no link and settle from
-    // their branch lookup, which would otherwise wait for the next minute's
-    // sweep on a possibly stale cached answer.
+    // A merge rechecks all candidates, including branches that discovery has
+    // not linked yet. Those lookups can still have cached the PR as open.
     const candidates = snapshot.threads.filter((thread) => isAutoSettlementCandidate(thread, now));
-    // Use the same cwd as the sidebar so both paths share GitManager's PR cache.
-    // Stave spaces resolve pull requests per edit repo below and never read this map.
+
+    // Return the thread when it still needs a pull request decision. A rejected
+    // dispatch skips it for this snapshot instead of retrying through a lookup.
+    const settleThread = Effect.fn("ThreadSettlementReactor.settleThread")(
+      function* (
+        thread: (typeof candidates)[number],
+        pullRequest: SettlementPullRequest | null,
+        sagaMerged = false,
+      ) {
+        const settings = yield* settingsService.getSettings;
+        if (sagaMerged && (!settings.stave.enabled || !settings.stave.lifecycle.settleOnSagaMerge))
+          return null;
+        const decisionNow = DateTime.formatIso(yield* DateTime.now);
+        const settledAt = resolveAutoSettlementAt({
+          thread,
+          pullRequest,
+          now: decisionNow,
+          autoSettleAfterDays: settings.sidebarAutoSettleAfterDays,
+          autoSettleOnMerge: sagaMerged || settings.sidebarAutoSettleOnMerge,
+        });
+        if (settledAt === null) {
+          return thread;
+        }
+        const uuid = yield* crypto.randomUUIDv4;
+        yield* engine.dispatch({
+          type: "thread.auto-settle",
+          commandId: CommandId.make(`server:auto-settle:${thread.id}:${uuid}`),
+          threadId: thread.id,
+          snapshotSequence: snapshot.snapshotSequence,
+          settledAt,
+        });
+        return null;
+      },
+      (effect, thread) =>
+        effect.pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.failCause(cause)
+              : Effect.logWarning("automatic thread settlement skipped", {
+                  threadId: thread.id,
+                  cause: Cause.pretty(cause),
+                }).pipe(Effect.as(null)),
+          ),
+        ),
+    );
+
+    // Inactivity needs no host state. Finish these decisions before any lookup
+    // can fail or wait on the network, including lookups shared by recent threads.
+    const lookupCandidates = (yield* Effect.forEach(
+      candidates,
+      (thread) =>
+        projects.get(thread.projectId)?.stave ? Effect.succeed(thread) : settleThread(thread, null),
+      {
+        concurrency: 8,
+      },
+    )).filter((thread) => thread !== null);
+
+    // Use the same cwd as PR discovery so both paths share GitManager's cache.
     const lookupCwdByThreadId = new Map<string, string>();
     yield* Effect.forEach(
-      candidates,
+      lookupCandidates,
       (thread) =>
         Effect.gen(function* () {
           const project = projects.get(thread.projectId);
-          if (project === undefined || project.stave != null || thread.linkedPullRequest != null)
-            return;
+          if (project === undefined || project.stave != null || thread.branch === null) return;
           const worktreeExists =
             thread.worktreePath !== null &&
             (yield* fileSystem.exists(thread.worktreePath).pipe(Effect.orElseSucceed(() => false)));
@@ -83,12 +137,8 @@ export const make = Effect.gen(function* () {
       { concurrency: 8, discard: true },
     );
     if (mergedPullRequest !== null) {
-      // The merge just confirmed a terminal state the lookup caches can still
-      // call open (branch answers live two minutes, the sweep runs every
-      // minute). Drop the swept checkouts' cached answers so the merge settles
-      // its branch threads now instead of on a later sweep. Threads linked to
-      // the merged pull request settle from the event itself below and need no
-      // lookup, so they are absent from this map by construction.
+      // The merge confirmed a state the branch cache can still call open.
+      // Recheck those branches now instead of waiting for cache expiry.
       const cwds = [...new Set(lookupCwdByThreadId.values())];
       yield* Effect.forEach(cwds, (cwd) => git.invalidateStatus(cwd), {
         concurrency: 8,
@@ -100,13 +150,16 @@ export const make = Effect.gen(function* () {
         return JSON.stringify(["stave-merged", thread.projectId]);
       if (projects.get(thread.projectId)?.stave)
         return JSON.stringify(["stave-space", thread.projectId, thread.linkedPullRequest ?? null]);
-      if (thread.linkedPullRequest != null) {
+      const reference = thread.linkedPullRequest ?? thread.branchPullRequest;
+      if (reference != null) {
         return JSON.stringify([
           "linked",
-          thread.linkedPullRequest.projectId,
-          thread.linkedPullRequest.repository,
-          thread.linkedPullRequest.host ?? null,
-          thread.linkedPullRequest.number,
+          reference.projectId,
+          reference.repository,
+          reference.host ?? null,
+          reference.number,
+          lookupCwdByThreadId.get(thread.id),
+          thread.branch,
         ]);
       }
       if (thread.branch === null) return JSON.stringify(["none", thread.id]);
@@ -115,7 +168,7 @@ export const make = Effect.gen(function* () {
         cwd === undefined ? ["missing-project", thread.id] : ["branch", cwd, thread.branch],
       );
     };
-    const groups = Map.groupBy(candidates, lookupKey);
+    const groups = Map.groupBy(lookupCandidates, lookupKey);
 
     const pullRequestFor = Effect.fn("ThreadSettlementReactor.pullRequestFor")(function* (
       thread: (typeof candidates)[number],
@@ -125,7 +178,7 @@ export const make = Effect.gen(function* () {
         if (staveProject.stave.state !== "live") return null;
         const repos = staveProject.stave.repos.filter((repo) => repo.mode === "edit");
         if (repos.length === 0) return null;
-        const repoPullRequests = yield* Effect.forEach(
+        const repoPullRequests: Array<SettlementPullRequest | null> = yield* Effect.forEach(
           repos,
           (repo) =>
             Effect.gen(function* () {
@@ -169,45 +222,57 @@ export const make = Effect.gen(function* () {
           ? ({ state: "closed", closedAt: terminalAt } satisfies SettlementPullRequest)
           : ({ state: "merged", mergedAt: terminalAt } satisfies SettlementPullRequest);
       }
-      if (thread.linkedPullRequest != null) {
-        // The event carries the merged state, so only the threads linked to
-        // that exact pull request settle from it. Every other linked thread
-        // falls through to a fresh summary lookup below: the merge sweep
-        // covers all candidates, and an unrelated merge must never settle
-        // them. Stave-hosted links must also agree on the host.
+      const reference = thread.linkedPullRequest ?? thread.branchPullRequest;
+      if (reference != null) {
         const linkedHostMatches =
           mergedPullRequest !== null &&
-          (projects.get(thread.linkedPullRequest.projectId)?.stave
-            ? thread.linkedPullRequest.host !== undefined &&
-              thread.linkedPullRequest.host.toLowerCase() === mergedPullRequest.host?.toLowerCase()
-            : thread.linkedPullRequest.host === undefined ||
+          (projects.get(reference.projectId)?.stave
+            ? reference.host !== undefined &&
+              reference.host.toLowerCase() === mergedPullRequest.host?.toLowerCase()
+            : reference.host === undefined ||
               mergedPullRequest.host === undefined ||
-              thread.linkedPullRequest.host.toLowerCase() === mergedPullRequest.host.toLowerCase());
-        if (
+              reference.host.toLowerCase() === mergedPullRequest.host.toLowerCase());
+        const matchesMerge =
           mergedPullRequest !== null &&
-          thread.linkedPullRequest.projectId === mergedPullRequest.projectId &&
-          thread.linkedPullRequest.repository.toLowerCase() ===
-            mergedPullRequest.repository.toLowerCase() &&
-          thread.linkedPullRequest.number === mergedPullRequest.number &&
-          linkedHostMatches
-        ) {
-          return {
-            state: "merged",
-            mergedAt: mergedPullRequest.mergedAt,
-          } satisfies SettlementPullRequest;
-        }
-        if (!projects.has(thread.linkedPullRequest.projectId)) {
+          reference.projectId === mergedPullRequest.projectId &&
+          reference.repository.toLowerCase() === mergedPullRequest.repository.toLowerCase() &&
+          reference.number === mergedPullRequest.number &&
+          linkedHostMatches;
+        if (!matchesMerge && !projects.has(reference.projectId)) {
           return yield* Effect.die(new Error("linked pull request project not found"));
         }
-        const summary = yield* pullRequests.summary(
-          {
-            projectId: thread.linkedPullRequest.projectId,
-            repository: thread.linkedPullRequest.repository,
-            ...(thread.linkedPullRequest.host ? { host: thread.linkedPullRequest.host } : {}),
-            number: thread.linkedPullRequest.number,
-          },
-          { recoverTransientFailure: false },
-        );
+        const summary = matchesMerge
+          ? ({
+              state: "merged",
+              closedAt: null,
+              mergedAt: mergedPullRequest.mergedAt,
+            } satisfies SettlementPullRequest)
+          : yield* pullRequests.summary(
+              {
+                projectId: reference.projectId,
+                repository: reference.repository,
+                ...(reference.host ? { host: reference.host } : {}),
+                number: reference.number,
+              },
+              { recoverTransientFailure: false },
+            );
+        const cwd = lookupCwdByThreadId.get(thread.id);
+        if (summary.state !== "open" && thread.branch !== null && cwd !== undefined) {
+          // A reused branch can already have a new open PR while discovery
+          // is replacing its old link. Do not let settlement win that race.
+          const current = yield* git.branchPullRequest(
+            { cwd, branch: thread.branch },
+            { refresh: true },
+          );
+          const project = projects.get(thread.projectId);
+          if (
+            current?.state === "open" &&
+            project !== undefined &&
+            pullRequestMatchesProject(current, project)
+          ) {
+            return current;
+          }
+        }
         return {
           state: summary.state,
           closedAt: summary.closedAt ?? null,
@@ -234,51 +299,9 @@ export const make = Effect.gen(function* () {
           // inactivity. A live Stave space does not: settling its threads can
           // schedule the whole space for archive while a member PR is in review.
           if (pullRequest?.state === "open" && projects.get(group[0]!.projectId)?.stave) return;
-          yield* Effect.forEach(
-            group,
-            (thread) =>
-              Effect.gen(function* () {
-                const settings = yield* settingsService.getSettings;
-                if (
-                  sagaMerged &&
-                  (!settings.stave.enabled || !settings.stave.lifecycle.settleOnSagaMerge)
-                )
-                  return;
-                const decisionNow = DateTime.formatIso(yield* DateTime.now);
-                const settledAt = resolveAutoSettlementAt({
-                  thread,
-                  pullRequest,
-                  now: decisionNow,
-                  autoSettleAfterDays: settings.sidebarAutoSettleAfterDays,
-                  autoSettleOnMerge:
-                    (sagaMerged &&
-                      settings.stave.enabled &&
-                      settings.stave.lifecycle.settleOnSagaMerge) ||
-                    settings.sidebarAutoSettleOnMerge,
-                });
-                if (settledAt === null) {
-                  return;
-                }
-                const uuid = yield* crypto.randomUUIDv4;
-                yield* engine.dispatch({
-                  type: "thread.auto-settle",
-                  commandId: CommandId.make(`server:auto-settle:${thread.id}:${uuid}`),
-                  threadId: thread.id,
-                  snapshotSequence: snapshot.snapshotSequence,
-                  settledAt,
-                });
-              }).pipe(
-                Effect.catchCause((cause) =>
-                  Cause.hasInterruptsOnly(cause)
-                    ? Effect.failCause(cause)
-                    : Effect.logWarning("automatic thread settlement skipped", {
-                        threadId: thread.id,
-                        cause: Cause.pretty(cause),
-                      }),
-                ),
-              ),
-            { discard: true },
-          );
+          yield* Effect.forEach(group, (thread) => settleThread(thread, pullRequest, sagaMerged), {
+            discard: true,
+          });
         }).pipe(
           Effect.catchCause((cause) =>
             Cause.hasInterruptsOnly(cause)

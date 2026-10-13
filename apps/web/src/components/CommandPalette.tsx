@@ -1,3 +1,4 @@
+import { resolveThreadPullRequestRef } from "@lecturn/client-runtime/state/threadPullRequests";
 import { contextualDraftKey, useContextualDrafts } from "../state/contextualDrafts";
 import { randomUUID } from "../lib/utils";
 import {
@@ -9,11 +10,7 @@ import {
 
 import { useServerConfigs } from "../state/entities";
 
-import {
-  scopedThreadKey,
-  scopeProjectRef,
-  scopeThreadRef,
-} from "@lecturn/client-runtime/environment";
+import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
 import {
   canCreateProjectInEnvironment,
   getCloneDestinationBrowsePath,
@@ -98,19 +95,11 @@ import { openStaveWizard } from "../staveWizard";
 import { addProjectAndOpenThread } from "../lib/addProject";
 import { useEnvironmentQuery } from "../state/query";
 import { sourceControlEnvironment } from "../state/sourceControl";
-import { vcsEnvironment } from "../state/vcs";
-import { resolveThreadGitTarget } from "../lib/threadGitTarget";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import {
-  readEnvironmentSupportsForking,
-  useProject,
-  useProjects,
-  useThreadShells,
-} from "../state/entities";
+import { readEnvironmentSupportsForking, useProjects, useThreadShells } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
-import * as ThreadPr from "./ThreadStatusIndicators";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
   appendBrowsePathSegment,
@@ -650,7 +639,6 @@ function OpenCommandPaletteDialog(props: {
   // through New project → Stave. Path lookups (add, import) keep every project.
   const { projects: listedProjects, archivedProjectKeys } = useListedProjects();
   const decisionConfigs = useServerConfigs();
-  const changeRequestSnapshotByKey = useAtomValue(ThreadPr.threadChangeRequestSnapshotsAtom);
   const contextualTargetEnvironment =
     activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
   const contextualAvailable = useContextualAvailable(contextualTargetEnvironment);
@@ -688,38 +676,7 @@ function OpenCommandPaletteDialog(props: {
   );
   const contextualToggle = useAtomCommand(contextualEnvironment.updateThreadSettings);
   const contextualRefresh = useAtomCommand(contextualEnvironment.refresh);
-  const activeThreadProject = useProject(
-    activeThread === null
-      ? null
-      : scopeProjectRef(activeThread.environmentId, activeThread.projectId),
-  );
-  const activeThreadGitTarget = resolveThreadGitTarget({
-    project: activeThreadProject,
-    thread: activeThread,
-  });
-  const activeThreadCwd = activeThreadGitTarget.cwd;
-  const activeThreadGitStatus = useEnvironmentQuery(
-    activeThread != null &&
-      activeThread.linkedPullRequest == null &&
-      activeThreadGitTarget.statusEnabled &&
-      activeThreadCwd !== null
-      ? vcsEnvironment.status({
-          environmentId: activeThread.environmentId,
-          input: { cwd: activeThreadCwd },
-        })
-      : null,
-  ).data;
-  const detectedPullRequestUrl =
-    activeThread == null || activeThread.linkedPullRequest != null
-      ? null
-      : (ThreadPr.resolveDisplayedThreadPr({
-          threadBranch: activeThreadGitTarget.branch,
-          gitStatus: activeThreadGitStatus ?? null,
-          snapshot: changeRequestSnapshotByKey.get(
-            scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id)),
-          ),
-          retainTerminalOnBranchMismatch: activeThread.worktreePath === null,
-        })?.url ?? null);
+
   const openPanelPullRequestUrl = useOpenPanelPullRequestUrl(
     activeThread ? scopeThreadRef(activeThread.environmentId, activeThread.id) : null,
   );
@@ -729,8 +686,15 @@ function OpenCommandPaletteDialog(props: {
       : resolveThreadReferenceCopyTarget({
           threadId: activeThread.id,
           openPanelPullRequestUrl,
-          linkedPullRequestUrl: activeThread.linkedPullRequest?.url ?? null,
-          detectedPullRequestUrl,
+          linkedPullRequestUrl:
+            resolveThreadPullRequestRef(
+              activeThread,
+              projects.find(
+                (project) =>
+                  project.environmentId === activeThread.environmentId &&
+                  project.id === activeThread.projectId,
+              ) ?? null,
+            )?.url ?? null,
         });
   const copyActiveThreadReference = useCallback(async () => {
     const target = activeThreadReferenceCopyTarget;
