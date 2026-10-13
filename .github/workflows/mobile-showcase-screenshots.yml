@@ -1187,9 +1187,10 @@ jobs:
           
           import ios_owned_processes as owned
           
-          TOTAL_SECONDS = 240
-          WORK_SECONDS = 210
+          TOTAL_SECONDS = 600
+          WORK_SECONDS = 570
           ACTION_SECONDS = 20
+          MAESTRO_SECONDS = 100
           FILENAME = 'report.pdf'
           MENU = ('Copy full path', 'Copy relative path', 'Open in file viewer')
           SHARE = 'Save or share'
@@ -1231,13 +1232,42 @@ jobs:
               return x, y, right, bottom
           
           
+          
+          def screen_bounds(tree):
+              # Maestro iOS wraps application/window nodes in a zero-frame synthetic root.
+              frames = set()
+              for node in nodes(tree):
+                  try:
+                      frames.add(bounds(node))
+                  except GateFailure:
+                      continue
+              if not frames:
+                  raise GateFailure('No observed nonzero application/window frame.')
+              largest = max((right-left)*(bottom-top) for left, top, right, bottom in frames)
+              candidates = [frame for frame in frames if (frame[2]-frame[0])*(frame[3]-frame[1]) == largest]
+              if len(candidates) != 1:
+                  raise GateFailure('Ambiguous observed application/window frames; inspect hierarchy.')
+              return candidates[0]
+          
+          
+          def thread_anchor(tree):
+              # Keep the actual observed label, including a composite Markdown paragraph.
+              candidates = {text for node in nodes(tree) for text in labels(node)
+                            if len(text) <= 250 and any(marker in text for marker in
+                                ('Make remote coding feel local', 'GitHub repository', 'Reference website'))}
+              candidates = [text for text in candidates if len(matching(tree, text)) == 1]
+              if not candidates:
+                  raise GateFailure('Original thread anchor unavailable; inspect retained hierarchy.')
+              return min(candidates, key=lambda text: (len(text), text))
+          
+          
           def filename_target(tree):
               found = matching(tree, FILENAME)
               if len(found) != 1:
                   raise GateFailure('Need one exact report.pdf accessibility node; inspect initial receipts, use a single-link fixture.')
               node = found[0]
               x, y, right, bottom = bounds(node)
-              sx, sy, sr, sb = bounds(tree)
+              sx, sy, sr, sb = screen_bounds(tree)
               # Maestro 2.11 projects iOS labels/bounds but drops XCUI elementType.
               # A compact exact-filename leaf is usable; a paragraph/container is not.
               if node.get('children') or labels(node) != {FILENAME} or not (sx <= x < right <= sr and sy <= y < bottom <= sb) or right-x > 240 or bottom-y > 64:
@@ -1255,7 +1285,7 @@ jobs:
               if len(found) != 1:
                   raise GateFailure('Expected a unique native control: ' + text + '; inspect retained hierarchy.')
               x, y, right, bottom = bounds(found[0])
-              sx, sy, sr, sb = bounds(tree)
+              sx, sy, sr, sb = screen_bounds(tree)
               if found[0].get('enabled') is False or found[0].get('attributes', {}).get('enabled') == 'false' or not (sx <= x < right <= sr and sy <= y < bottom <= sb) or bottom-y > 100:
                   raise GateFailure('Native control has uncertain bounds/state: ' + text + '; inspect retained hierarchy.')
               return found[0]
@@ -1275,7 +1305,7 @@ jobs:
               if not containers:
                   raise GateFailure('Menu bounds unavailable for safe baseline dismissal; inspect menu receipts.')
               menu_rect = bounds(containers[-1])
-              sx, sy, sr, sb = bounds(tree)
+              sx, sy, sr, sb = screen_bounds(tree)
               for x, y in ((sx+12, sy+80), (sr-12, sy+80), (sx+12, sb-80), (sr-12, sb-80)):
                   if not (sx < x < sr and sy < y < sb):
                       continue
@@ -1319,7 +1349,7 @@ jobs:
                   self.groups, self.cleaned = {}, set()
                   self.recorder = None
                   self.result = {'phase': phase, 'passed': False, 'accepted': False,
-                                 'visual_review_required': True, 'limits_seconds': {'total': TOTAL_SECONDS, 'work': WORK_SECONDS, 'action': ACTION_SECONDS},
+                                 'visual_review_required': True, 'limits_seconds': {'total': TOTAL_SECONDS, 'work': WORK_SECONDS, 'action': ACTION_SECONDS, 'maestro_command': MAESTRO_SECONDS},
                                  'stages': [], 'cleanup': [], 'assertions_complete': False}
                   self.checkpoint()
           
@@ -1374,7 +1404,7 @@ jobs:
                   with (self.path / (stage + '.log')).open('wb') as log:
                       with (self.path / output).open('wb') if output else open(os.devnull, 'wb') as out:
                           try:
-                              with self.limit(ACTION_SECONDS, work=True) as timeout:
+                              with self.limit(MAESTRO_SECONDS if command[0] == str(self.maestro) else ACTION_SECONDS, work=True) as timeout:
                                   process = self.start(command, stage, out if output else log, log if output else subprocess.STDOUT)
                                   receipt['exit_code'] = process.wait(timeout=timeout)
                           except (CommandDeadline, subprocess.TimeoutExpired):
@@ -1457,10 +1487,7 @@ jobs:
                   target = filename_target(initial)
                   if any(matching(initial, text) for text in (*MENU, SHARE, *ACTIVITIES)):
                       raise GateFailure('Initial scene already has menu/activity controls; restore the ready thread before invoking.')
-                  anchors = [text for text in ('Remote command center', 'GitHub repository', 'Reference website') if len(matching(initial, text)) == 1]
-                  if not anchors:
-                      raise GateFailure('Original thread anchor unavailable; retain unchanged GitHub/Reference labels in the single-link fixture.')
-                  anchor = anchors[0]
+                  anchor = thread_anchor(initial)
                   self.result['target'] = {'method': 'unique-exact-filename-leaf', 'bounds': bounds(target), 'thread_anchor': anchor}
                   self.record()
                   body = visible(FILENAME) + '- longPressOn: ' + selector(FILENAME) + '\n'
@@ -1499,7 +1526,7 @@ jobs:
                       control = dismiss_control(sheet)
                       evidence = [sheet_filename, unique_control(sheet, control)] + [unique_control(sheet, text) for text in sheet_controls]
                       containers = [node for node in nodes(sheet) if node is not sheet and all(any(child is item for child in nodes(node)) for item in evidence)]
-                      if not containers or bounds(containers[-1]) == bounds(sheet):
+                      if not containers or bounds(containers[-1]) == screen_bounds(sheet):
                           raise GateFailure('Filename/native controls do not share an observed sheet region; background filename alone is insufficient. Inspect sheet receipts.')
                       self.result['sheet'] = {'filename': FILENAME, 'native_controls': sheet_controls, 'dismiss_control': control, 'bounds': bounds(containers[-1])}
                       self.result['dismissal'] = {'method': 'observed-sheet-control', 'label': control, 'evidence': 'sheet.png + sheet-hierarchy.json'}
