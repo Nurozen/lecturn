@@ -94,6 +94,186 @@ static void LecturnMarkdownTextApplyAttachments(
   }
 }
 
+// Diagnostic artifact only; never install this observer in the normal app.
+static BOOL LecturnFileChipDiagnosticVisible(UIView *view, UITextView *textView)
+{
+  if (!NSThread.isMainThread || view.window == nil || textView == nil ||
+      textView.attributedText.length == 0 || textView.attributedText.length > 4096 ||
+      [textView.attributedText.string rangeOfString:@"report.pdf"].location == NSNotFound) {
+    return NO;
+  }
+  for (UIView *parent = view; parent != nil; parent = parent.superview) {
+    if (parent.hidden || parent.alpha <= 0) return NO;
+  }
+  return YES;
+}
+
+static NSMutableDictionary *LecturnFileChipDiagnosticSnapshot(UIView *view, UITextView *tv)
+{
+  NSMutableDictionary *out = [NSMutableDictionary dictionary];
+  NSMutableArray *hosts = [NSMutableArray array];
+  out[@"hosts"] = hosts;
+  @try {
+    if (!LecturnFileChipDiagnosticVisible(view, tv) ||
+        view.window.windowScene.activationState != UISceneActivationStateForegroundActive) return out;
+    Class runClass = [LecturnMarkdownTextRun class];
+    Ivar configIvar = class_getInstanceVariable(runClass, "_contextMenuConfig");
+    if (!configIvar) @throw @"missing_native_ivars";
+    if (view.subviews.count > 256) @throw @"content_limit";
+    NSString *(^safeText)(NSString *) = ^NSString *(NSString *s) {
+      NSString *rest = [s stringByReplacingOccurrencesOfString:@"report.pdf" withString:@""];
+      NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:@" \t\r\n\u00a0\ufffc"];
+      return [rest rangeOfCharacterFromSet:[allowed invertedSet]].location == NSNotFound
+          ? s : @"[redacted-nonfixture-text]";
+    };
+    NSDictionary *(^rangeJSON)(NSRange) = ^NSDictionary *(NSRange r) {
+      return @{@"location": @(r.location), @"length": @(r.length)};
+    };
+    NSArray *knownIDs = @[@"copy-full-path", @"copy-relative-path", @"open-file", @"save"];
+    NSAttributedString *attr = tv.attributedText;
+    NSString *rendered = attr.string ?: @"";
+    NSMutableArray *runs = [NSMutableArray array];
+    NSUInteger offset = 0, runIndex = 0, reportRuns = 0, configUnits = 0;
+    NSRange reportRange = NSMakeRange(0, 0);
+    for (NSUInteger si = 0; si < view.subviews.count; ++si) {
+      UIView *child = view.subviews[si];
+      if (![child isKindOfClass:runClass]) continue;
+      if (![child respondsToSelector:@selector(text)] ||
+          ![child respondsToSelector:@selector(hasContextMenu)]) @throw @"missing_run_selector";
+      NSString *text = [(LecturnMarkdownTextRun *)child text] ?: @"";
+      if (text.length > 4096 - offset) @throw @"content_limit";
+      NSRange runRange = NSMakeRange(offset, text.length);
+      if ([text rangeOfString:@"report.pdf"].location != NSNotFound) {
+        reportRuns++;
+        reportRange = runRange;
+      }
+      NSString *config = (NSString *)object_getIvar(child, configIvar);
+      if (config && ![config isKindOfClass:[NSString class]]) @throw @"unexpected_config_type";
+      NSMutableArray *ids = [NSMutableArray array];
+      NSString *configStatus = @"empty";
+      if (config.length > 65536 - configUnits) @throw @"content_limit";
+      configUnits += config.length;
+      if (config.length) {
+        id parsed = [NSJSONSerialization JSONObjectWithData:[config dataUsingEncoding:NSUTF8StringEncoding]
+                                                   options:0 error:NULL];
+        configStatus = @"invalid";
+        if ([parsed isKindOfClass:[NSDictionary class]] && [parsed[@"actions"] isKindOfClass:[NSArray class]]) {
+          if ([parsed[@"actions"] count] > 256) @throw @"content_limit";
+          configStatus = @"parsed";
+          for (id action in parsed[@"actions"]) {
+            id actionID = [action isKindOfClass:[NSDictionary class]] ? action[@"id"] : nil;
+            [ids addObject:[knownIDs containsObject:actionID ?: @""] ? actionID : @"[redacted-action-id]"];
+          }
+        }
+      }
+      [runs addObject:@{@"index": @(runIndex++), @"subview_index": @(si),
+        @"address": [NSString stringWithFormat:@"%p", child], @"text": safeText(text),
+        @"utf16_length": @(text.length), @"range": rangeJSON(runRange),
+        @"hasContextMenu": @((BOOL)[(LecturnMarkdownTextRun *)child hasContextMenu]),
+        @"config_utf16_length": @(config.length), @"config_status": configStatus, @"action_ids": ids}];
+      offset += text.length;
+    }
+
+    NSMutableArray *attachments = [NSMutableArray array], *filenameLinks = [NSMutableArray array];
+    NSDictionary *(^linkAt)(NSUInteger) = ^NSDictionary *(NSUInteger index) {
+      NSRange effective = NSMakeRange(0, 0);
+      id link = [attr attribute:NSLinkAttributeName atIndex:index effectiveRange:&effective];
+      return @{@"index": @(index), @"link_present": @(link != nil), @"effective_range": rangeJSON(effective)};
+    };
+    // Inspect every actual attachment, including ones outside the proposed run
+    // range: a range mismatch must remain visible rather than be filtered out.
+    for (NSUInteger i = 0; i < attr.length; ++i) {
+      if ([attr attribute:NSAttachmentAttributeName atIndex:i effectiveRange:NULL]) {
+        NSMutableDictionary *entry = [linkAt(i) mutableCopy];
+        entry[@"in_report_run"] = @(reportRuns == 1 && NSLocationInRange(i, reportRange));
+        entry[@"object_replacement_character"] = @([rendered characterAtIndex:i] == 0xfffc);
+        [attachments addObject:entry];
+      }
+    }
+    NSUInteger cursor = 0, filenames = 0;
+    NSMutableArray *filenameRanges = [NSMutableArray array];
+    while (cursor < rendered.length) {
+      NSRange r = [rendered rangeOfString:@"report.pdf" options:0 range:NSMakeRange(cursor, rendered.length-cursor)];
+      if (r.location == NSNotFound) break;
+      filenames++;
+      [filenameRanges addObject:rangeJSON(r)];
+      for (NSUInteger i = r.location; i < NSMaxRange(r); ++i) [filenameLinks addObject:linkAt(i)];
+      cursor = NSMaxRange(r);
+    }
+    id delegate = tv.delegate;
+    [hosts addObject:@{@"address": [NSString stringWithFormat:@"%p", view],
+      @"class": NSStringFromClass([view class]), @"hidden": @(view.hidden), @"alpha": @(view.alpha),
+      @"window_address": [NSString stringWithFormat:@"%p", view.window],
+      @"textview_address": [NSString stringWithFormat:@"%p", tv],
+      @"delegate_class": delegate ? NSStringFromClass([delegate class]) : @"<nil>",
+      @"menu_delegate_selector": @([delegate respondsToSelector:@selector(textView:menuConfigurationForTextItem:defaultMenu:)]),
+      @"runs": runs, @"runs_utf16_length": @(offset), @"report_run_count": @(reportRuns),
+      @"report_run_range": rangeJSON(reportRange), @"attributed_utf16_length": @(attr.length),
+      @"filename_count": @(filenames), @"filename_ranges": filenameRanges,
+      @"filename_links": filenameLinks, @"attachments": attachments}];
+    out[@"views_scanned"] = @(1 + view.subviews.count);
+  } @catch (id exception) {
+    NSArray *errors = @[@"missing_native_ivars", @"missing_run_selector",
+      @"unexpected_config_type", @"content_limit"];
+    out[@"native_error"] = [errors containsObject:exception] ? exception : @"native_exception";
+  }
+  return out;
+}
+
+static void LecturnFileChipDiagnosticSample(
+    UIView *view, UITextView *textView, NSUInteger attempt,
+    NSUInteger reportSamples, NSTimeInterval startedAt)
+{
+  @autoreleasepool {
+    if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
+      NSMutableDictionary *out = LecturnFileChipDiagnosticSnapshot(view, textView);
+      if ([out[@"hosts"] count] > 0) {
+        reportSamples++;
+        out[@"diagnostic_only"] = @YES;
+        out[@"source_tree"] = @"7aac649707d0b2043c0cc7c7444c411abed8f4c0";
+        out[@"source_blob"] = @"25afaf4c62e3ec43ce92828eb9becab9f3e17163";
+        out[@"source_sha256"] = @"dc7b26af086141f70f9ace39814420d34e4f6b58673c9a7103225f76b0135403";
+        out[@"pid"] = @(NSProcessInfo.processInfo.processIdentifier);
+        out[@"sample_attempt"] = @(attempt);
+        out[@"report_sample_count"] = @(reportSamples);
+        out[@"sample_limit"] = @40;
+        out[@"sample_interval_ms"] = @250;
+        out[@"sampling_started_uptime_ms"] = @(startedAt * 1000);
+        out[@"observed_uptime_ms"] = @(NSProcessInfo.processInfo.systemUptime * 1000);
+        out[@"observed_unix_ms"] = @(NSDate.date.timeIntervalSince1970 * 1000);
+        NSData *data = [NSJSONSerialization dataWithJSONObject:out options:0 error:NULL];
+        if (data != nil) {
+          [data writeToFile:[NSTemporaryDirectory()
+              stringByAppendingPathComponent:@"lecturn-filechip-native-diagnostic.json"]
+                   options:NSDataWritingAtomic error:NULL];
+        }
+      }
+    }
+    if (attempt < 40 && view != nil && textView != nil) {
+      __weak UIView *weakView = view;
+      __weak UITextView *weakTextView = textView;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 250 * NSEC_PER_MSEC),
+                     dispatch_get_main_queue(), ^{
+        LecturnFileChipDiagnosticSample(weakView, weakTextView, attempt + 1, reportSamples, startedAt);
+      });
+    }
+  }
+}
+
+static void LecturnFileChipDiagnosticStart(UIView *view, UITextView *textView)
+{
+  static BOOL started = NO;
+  if (started || !LecturnFileChipDiagnosticVisible(view, textView)) return;
+  started = YES;
+  const NSTimeInterval startedAt = NSProcessInfo.processInfo.systemUptime;
+  __weak UIView *weakView = view;
+  __weak UITextView *weakTextView = textView;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 250 * NSEC_PER_MSEC),
+                 dispatch_get_main_queue(), ^{
+    LecturnFileChipDiagnosticSample(weakView, weakTextView, 1, 0, startedAt);
+  });
+}
+
 @protocol LecturnMarkdownOutsideTapTarget <NSObject>
 - (void)clearSelectionForOutsideTapWithHitView:(UIView *)hitView;
 @end
@@ -355,6 +535,7 @@ LecturnMarkdownOutsideTapCoordinatorForWindow(UIWindow *window)
   const BOOL textChanged = ![_textView.attributedText isEqualToAttributedString:convertedAttrString];
   const BOOL frameChanged = !CGRectEqualToRect(_textView.frame, _view.frame);
   if (!textChanged && !frameChanged) {
+    LecturnFileChipDiagnosticStart(self, _textView);
     return;
   }
   if (textChanged) {
@@ -395,6 +576,7 @@ LecturnMarkdownOutsideTapCoordinatorForWindow(UIWindow *window)
     std::dynamic_pointer_cast<const facebook::react::LecturnMarkdownTextEventEmitter>(_eventEmitter)
     ->onTextLayout(facebook::react::LecturnMarkdownTextEventEmitter::OnTextLayout{static_cast<int>(self.tag), lines});
   };
+  LecturnFileChipDiagnosticStart(self, _textView);
 }
 
 - (void)loadAttachmentImages:(const std::vector<LecturnMarkdownTextAttachmentRange> &)attachmentRanges
