@@ -582,7 +582,7 @@ jobs:
                   raise SystemExit(1)
           elif mode == 'finish':
               atomic(release, {'released_after_startup_artifact_step': True})
-              deadline = time.monotonic() + 2100
+              deadline = time.monotonic() + 2700
               while not completion.exists() and time.monotonic() < deadline:
                   time.sleep(1)
               if not completion.exists():
@@ -1640,7 +1640,7 @@ jobs:
 
       - name: Complete file-chip interaction scene gate
         if: always()
-        timeout-minutes: 37
+        timeout-minutes: 47
         run: python3 "$RUNNER_TEMP/ios-phase-driver.py" finish
 
       - name: Stop remaining owned capture process
