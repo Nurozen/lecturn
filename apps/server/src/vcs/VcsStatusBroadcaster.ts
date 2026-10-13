@@ -1,4 +1,6 @@
+import * as NodeUtil from "node:util";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -7,6 +9,7 @@ import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
@@ -16,6 +19,7 @@ import * as Stream from "effect/Stream";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 import type {
   GitManagerServiceError,
+  OrchestrationProjectShell,
   VcsStatusInput,
   VcsStatusLocalResult,
   VcsStatusRemoteResult,
@@ -23,12 +27,16 @@ import type {
   VcsStatusStreamEvent,
 } from "@lecturn/contracts";
 import { mergeGitStatusParts } from "@lecturn/shared/git";
+import { resolveProjectAutoPull } from "@lecturn/shared/serverSettings";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import { makeStaveAutoPullOwnerCheck } from "../stave/StaveAutoPullOwnership.ts";
 
 const DEFAULT_VCS_STATUS_REFRESH_INTERVAL = Duration.seconds(30);
+const STAVE_OWNERSHIP_REFRESH_INTERVAL_MS = 30_000;
 const VCS_STATUS_REFRESH_FAILURE_BASE_DELAY = Duration.seconds(30);
 const VCS_STATUS_REFRESH_FAILURE_MAX_DELAY = Duration.minutes(15);
 const MAX_FAILURE_DIAGNOSTIC_VALUES = 8;
@@ -148,52 +156,62 @@ export class VcsAutoPullPolicy extends Context.Reference<{
   defaultValue: () => ({ isEnabled: () => Effect.succeed(false) }),
 }) {}
 
-// The subset of a project row the auto-pull policy reads. Both
-// OrchestrationProject and OrchestrationProjectShell satisfy it.
-interface AutoPullCandidate {
-  readonly autoPull?: boolean | undefined;
-  readonly stave?: { readonly primaryRepoPath?: string | undefined } | null | undefined;
-}
-
-// Stave owns its edit branches and synchronisation; automatic Git pulls are disabled.
-function autoPullEnabledFor(project: AutoPullCandidate): boolean {
-  if (project.autoPull !== true) return false;
-  if (project.stave != null) return false;
-  return true;
-}
-
 export const autoPullPolicyLayer = Layer.effect(
   VcsAutoPullPolicy,
   Effect.gen(function* () {
     const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
-    // A Stave space's workspace root is a directory of worktrees rather than a
-    // repo, so clients request status (and therefore auto-pull) for
-    // `stave.primaryRepoPath`, which the exact-root query cannot find. Paths
-    // are compared as raw strings, matching that query: the policy layer has no
-    // FileSystem, and clients echo the `primaryRepoPath` string the server
-    // derived, so realPath is unnecessary.
-    const findByPrimaryRepoPath = (cwd: string) =>
-      snapshots
-        .getShellSnapshot()
-        .pipe(
-          Effect.map((snapshot) =>
-            Option.fromUndefinedOr(
-              snapshot.projects.find((project) => project.stave?.primaryRepoPath === cwd),
-            ),
-          ),
-        );
+    const serverSettings = yield* ServerSettings.ServerSettingsService;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const ownershipLock = Semaphore.makeUnsafe(1);
+    let ownership:
+      | {
+          readonly projects: ReadonlyArray<
+            Pick<OrchestrationProjectShell, "workspaceRoot" | "stave">
+          >;
+          readonly expiresAt: number;
+          readonly hasOwner: (cwd: string) => Effect.Effect<boolean>;
+        }
+      | undefined;
     return {
-      isEnabled: (cwd: string) =>
-        snapshots.getActiveProjectByWorkspaceRoot(cwd).pipe(
-          Effect.flatMap(
-            Option.match({
-              onNone: () => findByPrimaryRepoPath(cwd),
-              onSome: (project) => Effect.succeed(Option.some<AutoPullCandidate>(project)),
+      isEnabled: Effect.fn("VcsAutoPullPolicy.isEnabled")(
+        function* (cwd: string) {
+          const project = yield* snapshots.getActiveProjectByWorkspaceRoot(cwd);
+          if (Option.isNone(project) || project.value.stave != null) return false;
+          const settings = yield* serverSettings.getSettings;
+          if (!resolveProjectAutoPull(settings, project.value.id, project.value.autoPull))
+            return false;
+          const hasOwner = yield* ownershipLock.withPermits(1)(
+            Effect.gen(function* () {
+              const snapshot = yield* snapshots.getShellSnapshot();
+              const projects = snapshot.projects.map(({ workspaceRoot, stave }) => ({
+                workspaceRoot,
+                stave,
+              }));
+              const now = yield* Clock.currentTimeMillis;
+              // Project changes invalidate immediately; disk manifests and symlinks refresh
+              // within one poll interval. Candidate paths and manifest ceilings stay live.
+              if (
+                ownership === undefined ||
+                !NodeUtil.isDeepStrictEqual(ownership.projects, projects) ||
+                ownership.expiresAt <= now
+              ) {
+                ownership = {
+                  projects,
+                  expiresAt: now + STAVE_OWNERSHIP_REFRESH_INTERVAL_MS,
+                  hasOwner: yield* makeStaveAutoPullOwnerCheck(snapshot.projects).pipe(
+                    Effect.provideService(FileSystem.FileSystem, fs),
+                    Effect.provideService(Path.Path, path),
+                  ),
+                };
+              }
+              return ownership.hasOwner;
             }),
-          ),
-          Effect.map(Option.exists((project) => autoPullEnabledFor(project))),
-          Effect.orElseSucceed(() => false),
-        ),
+          );
+          return !(yield* hasOwner(cwd));
+        },
+        Effect.orElseSucceed(() => false),
+      ),
     };
   }),
 );
@@ -446,18 +464,18 @@ export const make = Effect.gen(function* () {
     policyCwds: ReadonlyArray<string>,
   ) {
     return yield* Effect.gen(function* () {
-      const autoPullEnabled = (yield* Effect.forEach(policyCwds, autoPullPolicy.isEnabled, {
-        concurrency: "unbounded",
-      })).some(Boolean);
       if (
         remote === null ||
         !remote.hasUpstream ||
         remote.aheadCount > 0 ||
-        remote.behindCount <= 0 ||
-        !autoPullEnabled
+        remote.behindCount <= 0
       ) {
         return null;
       }
+      const autoPullEnabled = (yield* Effect.forEach(policyCwds, autoPullPolicy.isEnabled, {
+        concurrency: "unbounded",
+      })).some(Boolean);
+      if (!autoPullEnabled) return null;
 
       yield* workflow.invalidateLocalStatus(cwd);
       const local = yield* workflow.localStatus({ cwd });

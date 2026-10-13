@@ -1,11 +1,14 @@
 import { EnvironmentId, ProjectId } from "@lecturn/contracts";
+import { parseAccountScopedKey } from "@lecturn/client-runtime/relay";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildPhysicalToLogicalProjectKeyMap,
+  buildSidebarProjectPickerEntries,
   buildSidebarProjectSnapshots,
 } from "../../sidebarProjectGrouping";
 import type { Project } from "../../types";
+import { buildSettingsProjectGroups } from "../settings/ProjectSettingsPanel.logic";
 import {
   namedSnapshotsPerAccount,
   projectKeyMapPerAccount,
@@ -117,6 +120,62 @@ describe("snapshotsPerAccount", () => {
     );
     expect([homeName, workName]).toEqual([`${localName} (grace)`, `${localName} (ada)`]);
     expect(notesName).toBe(bare[1]);
+  });
+
+  it("links the palette's contextual project and fallback to settings for that account alone", () => {
+    const secondWork = EnvironmentId.make("relay-work-2");
+    const owners = new Map([...accountByEnvironmentId, [secondWork, "user_work"]]);
+    const scopedSegmentation = { ...segmentation, accountByEnvironmentId: owners };
+    const scopedInput = {
+      ...input,
+      projects: [...projects, makeProject("lecturn-work", secondWork)],
+    };
+    const groups = namedSnapshotsPerAccount(
+      scopedSegmentation,
+      buildSidebarProjectSnapshots,
+    )(scopedInput);
+    const settingsPicker = buildSettingsProjectGroups({
+      input: scopedInput,
+      accountScope: null,
+      segmentation: scopedSegmentation,
+      segmentAccounts: true,
+    });
+
+    for (const [preferredProjectRef, accountId, expectedEnvironments] of [
+      [{ environmentId: home, projectId: ProjectId.make("lecturn-home") }, "user_home", [home]],
+      [
+        { environmentId: work, projectId: ProjectId.make("lecturn-work") },
+        "user_work",
+        [work, secondWork],
+      ],
+      [
+        { environmentId: secondWork, projectId: ProjectId.make("lecturn-work") },
+        "user_work",
+        [work, secondWork],
+      ],
+      [null, "user_home", [home]],
+    ] as const) {
+      const entries = buildSidebarProjectPickerEntries({ groups, preferredProjectRef });
+      const target = entries[0]!;
+      if (preferredProjectRef) {
+        expect(target.isPreferred).toBe(true);
+        expect(target.targetProject.environmentId).toBe(preferredProjectRef.environmentId);
+        expect(target.targetProject.id).toBe(preferredProjectRef.projectId);
+      }
+      const projectKey = target.group.projectKey;
+      expect(parseAccountScopedKey(projectKey).accountId).toBe(accountId);
+      expect(settingsPicker.some((group) => group.projectKey === projectKey)).toBe(true);
+      const panelGroups = buildSettingsProjectGroups({
+        input: scopedInput,
+        accountScope: { accountId, accountByEnvironmentId: owners, email: null },
+        segmentation: scopedSegmentation,
+        segmentAccounts: false,
+      });
+      const panelGroup = panelGroups.find((group) => group.projectKey === projectKey)!;
+      expect(panelGroup.memberProjects.map((project) => project.environmentId)).toEqual(
+        expectedEnvironments,
+      );
+    }
   });
 });
 

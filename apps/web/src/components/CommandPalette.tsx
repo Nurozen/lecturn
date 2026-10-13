@@ -162,6 +162,7 @@ import { useConnectAccountPaletteItems } from "./clerk/useConnectAccountPaletteI
 import { orderItemsByPreferredIds, sortLogicalProjectsForSidebar } from "./Sidebar.logic";
 import { withoutArchivedStaveProjectThreads } from "./stave/listedProjects.logic";
 import { useListedProjects } from "./stave/useListedProjects";
+import { namedSnapshotsPerAccount, useSidebarSegmentation } from "./sidebar/accountProjectGroups";
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { CommandPaletteContent } from "./CommandPaletteContent";
 import { CommandPaletteResults } from "./CommandPaletteResults";
@@ -870,9 +871,13 @@ function OpenCommandPaletteDialog(props: {
       }),
     [projectOrder, listedProjects],
   );
+  const sidebarSegmentation = useSidebarSegmentation();
   const unsortedProjectGroups = useMemo(
     () =>
-      buildSidebarProjectSnapshots({
+      namedSnapshotsPerAccount(
+        sidebarSegmentation,
+        buildSidebarProjectSnapshots,
+      )({
         projects:
           clientSettings.sidebarProjectSortOrder === "manual" ? orderedProjects : listedProjects,
         settings: projectGroupingSettings,
@@ -886,6 +891,7 @@ function OpenCommandPaletteDialog(props: {
       orderedProjects,
       primaryEnvironmentId,
       projectGroupingSettings,
+      sidebarSegmentation,
     ],
   );
   const projectGroups = useMemo(
@@ -2195,6 +2201,8 @@ function OpenCommandPaletteDialog(props: {
     run: async () => {
       await navigate({
         to: item.to,
+        search: (previous) =>
+          item.to === "/settings/projects" ? { ...previous, project: undefined } : previous,
         hash: item.targetId ?? item.id,
         replace: pathname === item.to,
         hashScrollIntoView: false,

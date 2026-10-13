@@ -16,6 +16,11 @@ results appear as each one responds.
 If recent work is missing or a new model shows no cost, refresh to rescan session history and
 update model pricing.
 
+On mobile, Usage warns when selected environments cannot report or run incompatible server
+versions. Available reports still count, with incomplete coverage called out. If a refresh fails
+or an environment disconnects, saved totals remain visible with a warning that they may be stale.
+Pull to refresh after reconnecting; update incompatible clients or servers to restore coverage.
+
 ## Set custom model prices
 
 On web or desktop, open the environment dropdown on **Usage**, then choose **Model prices** to add,
@@ -39,9 +44,22 @@ the dialog.
 
 ## Track subscription limits
 
-**Usage → Limits** shows how much quota is left in each window and when it resets, for Codex and
-Claude subscriptions. For windows with timing data, each bar also marks how much of the window is
-left, so you can judge your pace before the next reset.
+**Usage → Limits** pools every subscription account it can see per provider, so with several Codex
+or Claude accounts across your environments and hubs you read one number per window rather than a
+list. Each window card shows how much of the pool is left and a bar with one segment per account,
+ordered by which resets soonest; when the provider reports reset times, the card also says when
+the next reset lands and how much it hands back. The hatched
+part of a segment is what that reset restores. Tap a segment or account row for the account's plan,
+where it is signed in, and its reset time. On web, you can hover too. Codex accounts with banked
+reset credits show a ticket count and the **Use reset** action in the account details. On narrow screens, numbered rows below
+the bar show each account's quota, countdown, and credits. Tap a row to open its details.
+
+When the provider and account email match, the same account signed in on more than one environment,
+or reported by a hub as well, counts once. Accounts without a reported email stay separate.
+Filter with the environment dropdown to see what a single machine has.
+
+A notice below the pool counts accounts with no reported limits or a failed quota check. Their unknown
+quota is excluded from the pooled total; refresh Limits to check again.
 
 If a window looks stale, refresh Limits to re-check every provider and hub.
 
