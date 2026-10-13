@@ -220,13 +220,188 @@ static NSMutableDictionary *LecturnFileChipDiagnosticSnapshot(UIView *view, UITe
   return out;
 }
 
+// Closed, diagnostic-only status journal. No content or NSError descriptions.
+#import <math.h>
+static NSMutableArray<NSDictionary *> *LecturnFileChipStatusEvents;
+static double LecturnFileChipStatusTime(double value)
+{
+  return isfinite(value) && value >= 0 ? value : 0;
+}
+
+static NSDictionary *LecturnFileChipStatusEvent(
+    NSString *stage, NSUInteger attempt, NSDictionary *facts, NSString *reason, NSError *error)
+{
+  if (![@[@"initialized", @"start_decision", @"sample", @"snapshot", @"serialize", @"write"]
+      containsObject:stage]) return nil;
+  NSMutableDictionary *event = [@{@"stage": stage,
+    @"unix_ms": @(LecturnFileChipStatusTime(NSDate.date.timeIntervalSince1970 * 1000)),
+    @"uptime_ms": @(LecturnFileChipStatusTime(NSProcessInfo.processInfo.systemUptime * 1000))} mutableCopy];
+  if (attempt <= 40) event[@"attempt"] = @(attempt);
+  NSArray *keys = @[@"main_thread", @"view_alive", @"textview_alive", @"has_window",
+    @"has_report", @"visible", @"app_active", @"scene_active", @"already_started", @"armed",
+    @"hosts_present", @"native_error_present", @"success"];
+  for (NSString *key in keys) {
+    id value = facts[key];
+    if ([value isKindOfClass:NSNumber.class] &&
+        CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID()) event[key] = value;
+  }
+  if ([@[@"none", @"no_state", @"ineligible", @"already_started", @"inactive", @"host_lost",
+      @"empty_snapshot", @"native_exception", @"serialization_failed", @"write_failed"]
+      containsObject:reason]) event[@"reason"] = reason;
+  if (error != nil) {
+    event[@"error_code"] = @(error.code);
+    event[@"error_domain"] = [error.domain isEqual:NSCocoaErrorDomain] ? @"cocoa" :
+        [error.domain isEqual:NSPOSIXErrorDomain] ? @"posix" : @"other";
+  }
+  return event;
+}
+
+static NSDictionary *LecturnFileChipStatusRoot(void)
+{
+  return @{@"schema": @1, @"diagnostic_only": @YES,
+    @"pid": @(NSProcessInfo.processInfo.processIdentifier),
+    @"source_tree": @"7aac649707d0b2043c0cc7c7444c411abed8f4c0",
+    @"source_blob": @"25afaf4c62e3ec43ce92828eb9becab9f3e17163",
+    @"source_sha256": @"dc7b26af086141f70f9ace39814420d34e4f6b58673c9a7103225f76b0135403",
+    @"observed_unix_ms": @(LecturnFileChipStatusTime(NSDate.date.timeIntervalSince1970 * 1000)),
+    @"observed_uptime_ms": @(LecturnFileChipStatusTime(NSProcessInfo.processInfo.systemUptime * 1000)),
+    @"events": [LecturnFileChipStatusEvents copy] ?: @[]};
+}
+
+// Caller holds the journal lock. Failure never recursively journals or logs error text.
+static BOOL LecturnFileChipStatusPersist(NSDictionary *root, NSString *path)
+{
+  @try {
+    NSError *error = nil;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:root options:0 error:&error];
+    if (data != nil && [data writeToFile:path options:NSDataWritingAtomic error:&error]) return YES;
+  } @catch (id exception) {
+    (void)exception;
+  }
+  NSLog(@"Lecturn filechip diagnostic status unavailable");
+  return NO;
+}
+
+static void LecturnFileChipStatusRecord(
+    NSString *stage, NSUInteger attempt, NSDictionary *facts, NSString *reason, NSError *error)
+{
+  NSDictionary *event = LecturnFileChipStatusEvent(stage, attempt, facts, reason, error);
+  if (event == nil) return;
+  @synchronized (NSProcessInfo.processInfo) {
+    if (LecturnFileChipStatusEvents == nil) LecturnFileChipStatusEvents = [NSMutableArray array];
+    [LecturnFileChipStatusEvents addObject:event];
+    if (LecturnFileChipStatusEvents.count > 128) {
+      // Preserve initialization, bounded start decisions, all sample/ snapshot facts.
+      // Evict the oldest intermediate output result; newest terminal results remain.
+      NSUInteger victim = [LecturnFileChipStatusEvents indexOfObjectPassingTest:
+          ^BOOL(NSDictionary *candidate, NSUInteger index, BOOL *stop) {
+        (void)index; (void)stop;
+        return [@[@"serialize", @"write"] containsObject:candidate[@"stage"]];
+      }];
+      [LecturnFileChipStatusEvents removeObjectAtIndex:victim == NSNotFound ? 0 : victim];
+    }
+    LecturnFileChipStatusPersist(LecturnFileChipStatusRoot(), [NSTemporaryDirectory()
+        stringByAppendingPathComponent:@"lecturn-filechip-native-status.json"]);
+  }
+}
+
+static NSDictionary *LecturnFileChipStatusFacts(UIView *view, UITextView *textView)
+{
+  const NSUInteger length = textView.attributedText.length;
+  return @{@"main_thread": @(NSThread.isMainThread), @"view_alive": @(view != nil),
+    @"textview_alive": @(textView != nil), @"has_window": @(view.window != nil),
+    @"has_report": @(length > 0 && length <= 4096 &&
+        [textView.attributedText.string rangeOfString:@"report.pdf"].location != NSNotFound),
+    @"visible": @(LecturnFileChipDiagnosticVisible(view, textView)),
+    @"app_active": @(UIApplication.sharedApplication.applicationState == UIApplicationStateActive),
+    @"scene_active": @(view.window.windowScene.activationState == UISceneActivationStateForegroundActive)};
+}
+
+static void LecturnFileChipStatusStartDecision(NSDictionary *facts, NSString *reason, BOOL armed)
+{
+  // Six distinct rejected decisions, one armed decision, one already-started decision.
+  // Budget <=8 regardless of irrelevant draw count, leaving sample/terminal room.
+  @synchronized (NSProcessInfo.processInfo) {
+    static NSUInteger rejected = 0;
+    static BOOL armedRecorded = NO, alreadyRecorded = NO;
+    static NSDictionary *lastRejected;
+    NSMutableDictionary *decision = [facts mutableCopy];
+    decision[@"armed"] = @(armed);
+    if (![reason isEqual:@"no_state"]) decision[@"already_started"] = @([reason isEqual:@"already_started"]);
+    decision[@"reason"] = reason;
+    if (armed) {
+      if (armedRecorded) return;
+      armedRecorded = YES;
+    } else if ([reason isEqual:@"already_started"]) {
+      if (alreadyRecorded) return;
+      alreadyRecorded = YES;
+    } else {
+      if (rejected >= 6 || [lastRejected isEqual:decision]) return;
+      rejected++;
+      lastRejected = [decision copy];
+    }
+    LecturnFileChipStatusRecord(@"start_decision", 0, decision, reason, nil);
+  }
+}
+
+static void LecturnFileChipStatusDraw(UIView *view, UITextView *textView, BOOL hasState)
+{
+  @synchronized (NSProcessInfo.processInfo) {
+    static BOOL firstDraw = YES;
+    if (firstDraw) {
+      firstDraw = NO;
+      LecturnFileChipStatusRecord(@"initialized", 0, LecturnFileChipStatusFacts(view, textView),
+          hasState ? @"none" : @"no_state", nil);
+    }
+  }
+  if (!hasState) LecturnFileChipStatusStartDecision(
+      LecturnFileChipStatusFacts(view, textView), @"no_state", NO);
+}
+
+static void LecturnFileChipStatusSnapshot(NSDictionary *out, NSUInteger attempt)
+{
+  const BOOL hosts = [out[@"hosts"] count] > 0, error = out[@"native_error"] != nil;
+  LecturnFileChipStatusRecord(@"snapshot", attempt,
+      @{@"hosts_present": @(hosts), @"native_error_present": @(error)},
+      error ? @"native_exception" : hosts ? @"none" : @"empty_snapshot", nil);
+}
+
+static void LecturnFileChipDiagnosticWrite(NSDictionary *out, NSUInteger attempt, NSString *path)
+{
+  NSError *error = nil;
+  NSData *data = nil;
+  @try {
+    data = [NSJSONSerialization dataWithJSONObject:out options:0 error:&error];
+  } @catch (id exception) {
+    (void)exception;
+  }
+  LecturnFileChipStatusRecord(@"serialize", attempt, @{@"success": @(data != nil)},
+      data ? @"none" : @"serialization_failed", error);
+  if (data == nil) return;
+  error = nil;
+  BOOL success = NO;
+  @try {
+    success = [data writeToFile:path options:NSDataWritingAtomic error:&error];
+  } @catch (id exception) {
+    (void)exception;
+  }
+  LecturnFileChipStatusRecord(@"write", attempt, @{@"success": @(success)},
+      success ? @"none" : @"write_failed", error);
+}
+
 static void LecturnFileChipDiagnosticSample(
     UIView *view, UITextView *textView, NSUInteger attempt,
     NSUInteger reportSamples, NSTimeInterval startedAt)
 {
   @autoreleasepool {
+    NSDictionary *facts = LecturnFileChipStatusFacts(view, textView);
+    NSString *reason = view == nil || textView == nil ? @"host_lost" :
+        ![facts[@"app_active"] boolValue] || ![facts[@"scene_active"] boolValue] ? @"inactive" :
+        ![facts[@"visible"] boolValue] ? @"ineligible" : @"none";
+    LecturnFileChipStatusRecord(@"sample", attempt, facts, reason, nil);
     if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
       NSMutableDictionary *out = LecturnFileChipDiagnosticSnapshot(view, textView);
+      LecturnFileChipStatusSnapshot(out, attempt);
       if ([out[@"hosts"] count] > 0) {
         reportSamples++;
         out[@"diagnostic_only"] = @YES;
@@ -241,12 +416,8 @@ static void LecturnFileChipDiagnosticSample(
         out[@"sampling_started_uptime_ms"] = @(startedAt * 1000);
         out[@"observed_uptime_ms"] = @(NSProcessInfo.processInfo.systemUptime * 1000);
         out[@"observed_unix_ms"] = @(NSDate.date.timeIntervalSince1970 * 1000);
-        NSData *data = [NSJSONSerialization dataWithJSONObject:out options:0 error:NULL];
-        if (data != nil) {
-          [data writeToFile:[NSTemporaryDirectory()
-              stringByAppendingPathComponent:@"lecturn-filechip-native-diagnostic.json"]
-                   options:NSDataWritingAtomic error:NULL];
-        }
+        LecturnFileChipDiagnosticWrite(out, attempt, [NSTemporaryDirectory()
+            stringByAppendingPathComponent:@"lecturn-filechip-native-diagnostic.json"]);
       }
     }
     if (attempt < 40 && view != nil && textView != nil) {
@@ -263,7 +434,11 @@ static void LecturnFileChipDiagnosticSample(
 static void LecturnFileChipDiagnosticStart(UIView *view, UITextView *textView)
 {
   static BOOL started = NO;
-  if (started || !LecturnFileChipDiagnosticVisible(view, textView)) return;
+  if (started || !LecturnFileChipDiagnosticVisible(view, textView)) {
+    LecturnFileChipStatusStartDecision(LecturnFileChipStatusFacts(view, textView),
+        started ? @"already_started" : @"ineligible", NO);
+    return;
+  }
   started = YES;
   const NSTimeInterval startedAt = NSProcessInfo.processInfo.systemUptime;
   __weak UIView *weakView = view;
@@ -272,6 +447,7 @@ static void LecturnFileChipDiagnosticStart(UIView *view, UITextView *textView)
                  dispatch_get_main_queue(), ^{
     LecturnFileChipDiagnosticSample(weakView, weakTextView, 1, 0, startedAt);
   });
+  LecturnFileChipStatusStartDecision(LecturnFileChipStatusFacts(view, textView), @"none", YES);
 }
 
 @protocol LecturnMarkdownOutsideTapTarget <NSObject>
@@ -490,6 +666,7 @@ LecturnMarkdownOutsideTapCoordinatorForWindow(UIWindow *window)
 
 - (void)drawRect:(CGRect)rect
 {
+  LecturnFileChipStatusDraw(self, _textView, _state != nullptr);
   if (!_state) {
     return;
   }
