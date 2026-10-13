@@ -1741,13 +1741,16 @@ jobs:
           import fcntl
           import hashlib
           import json
+          import math
           import os
           from pathlib import Path
           import plistlib
           import re
+          import shutil
           import signal
           import subprocess
           import sys
+          import tempfile
           import time
           from contextlib import contextmanager
           
@@ -1756,6 +1759,24 @@ jobs:
           MARKER = 'LECTURN_NATIVE_JSON='
           ATTACH_SECONDS = 40
           EXPR_SECONDS = 8
+          READ_LABELS = frozenset(('simulator_devices', 'simulator_launchctl', 'simulator_container',
+                                   'ps_start', 'ps_exe', 'ps_state', 'debugger_start', 'debugger_exe'))
+          PHASES = frozenset(('bootstrap', 'identity', 'read_simulator_launchctl', 'read_ps_exe',
+                              'read_ps_start', 'attach', 'module_identity', 'main_thread',
+                              'expression_setup', 'compile_or_expression', 'read_json', 'detach'))
+          SAMPLE_SYMBOLS = (
+              'clang::CompilerInstance::compileModuleImpl', 'clang::CompilerInstance::compileModule',
+              'clang::CompilerInstance::loadModule', 'clang::ASTReader::ReadAST',
+              'clang::Sema::ActOnModuleImport', 'clang::ParseAST',
+              'lldb_private::ClangModulesDeclVendor::AddModule',
+              'lldb_private::ClangExpressionParser::Parse',
+              'lldb_private::UserExpression::Evaluate', 'lldb_private::Thread::RunThreadPlan',
+              'lldb::SBFrame::EvaluateExpression', 'lldb::SBTarget::AttachToProcessWithID',
+              'lldb_private::Process::Attach', 'lldb_private::Process::WaitForProcessToStop',
+              'lldb::SBProcess::Detach', 'lldb_private::Process::Detach',
+              '__psynch_mutexwait', '__psynch_cvwait', 'mach_msg_trap', 'mach_msg2_trap',
+              'semaphore_wait_trap', '__ulock_wait',
+          )
           
           # Only getters on existing views; temporary collections belong to the inspector.
           # Never call contextMenu (it constructs UIActions), recursiveDescription, layout,
@@ -1907,10 +1928,19 @@ jobs:
                   signal.setitimer(signal.ITIMER_REAL, 0)
           
           
-          def read(command):
-              result = subprocess.run(command, capture_output=True, text=True, timeout=5, check=False)
+          def read(command, label):
+              if label not in READ_LABELS:
+                  raise InspectionError('invalid_read_label')
+              try:
+                  result = subprocess.run(command, capture_output=True, text=True, timeout=5, check=False)
+              except subprocess.TimeoutExpired:
+                  raise InspectionError('read_command_timeout_' + label) from None
+              except InspectionError as error:
+                  if str(error) == 'deadline':
+                      raise InspectionError('read_command_deadline_' + label) from None
+                  raise
               if result.returncode:
-                  raise InspectionError('read_command_failed')
+                  raise InspectionError('read_command_failed_' + label)
               return result.stdout.strip()
           
           
@@ -1924,13 +1954,13 @@ jobs:
           
           
           def current_service(udid):
-              return service_pid(read(['xcrun', 'simctl', 'spawn', udid, 'launchctl', 'list']))
+              return service_pid(read(['xcrun', 'simctl', 'spawn', udid, 'launchctl', 'list'], 'simulator_launchctl'))
           
           
           def process_info(pid):
-              start = read(['ps', '-p', str(pid), '-o', 'lstart='])
-              executable = read(['ps', '-p', str(pid), '-o', 'comm='])
-              state = read(['ps', '-p', str(pid), '-o', 'stat='])
+              start = read(['ps', '-p', str(pid), '-o', 'lstart='], 'ps_start')
+              executable = read(['ps', '-p', str(pid), '-o', 'comm='], 'ps_exe')
+              state = read(['ps', '-p', str(pid), '-o', 'stat='], 'ps_state')
               if not start or not state or not executable:
                   raise InspectionError('app_identity_missing')
               return {'start': start, 'executable': executable, 'state': state}
@@ -1948,12 +1978,12 @@ jobs:
           
           
           def discover(udid):
-              devices = json.loads(read(['xcrun', 'simctl', 'list', 'devices', '--json']))
+              devices = json.loads(read(['xcrun', 'simctl', 'list', 'devices', '--json'], 'simulator_devices'))
               matches = [d for group in devices['devices'].values() for d in group if d['udid'].upper() == udid]
               if len(matches) != 1 or matches[0]['state'] != 'Booted':
                   raise InspectionError('exact_simulator_not_booted')
               pid, service = current_service(udid)
-              container = Path(read(['xcrun', 'simctl', 'get_app_container', udid, BUNDLE, 'app'])).resolve()
+              container = Path(read(['xcrun', 'simctl', 'get_app_container', udid, BUNDLE, 'app'], 'simulator_container')).resolve()
               if udid not in (part.upper() for part in container.parts):
                   raise InspectionError('container_simulator_mismatch')
               with (container / 'Info.plist').open('rb') as stream:
@@ -1979,43 +2009,88 @@ jobs:
               return now
           
           
-          def debugger_script(pid, start, executable, debug_image, udid, service):
+          def debugger_script(pid, start, executable, debug_image, udid, service, phase_path=None):
               # Verify again inside LLDB immediately before attaching; no PID/name search.
               return '\n'.join([
-                  'import lldb, json, subprocess',
+                  'import json, os, time, subprocess',
                   f'result = {{"attached": False, "detached": False, "pid": {pid}}}',
-                  'target = lldb.debugger.CreateTarget("")',
+                  f'phase_path = {str(phase_path) if phase_path else None!r}',
+                  'checkpoints = []',
+                  'clock_start = time.monotonic()',
+                  'def checkpoint(stage, complete, code=0):',
+                  '    if phase_path is None: return',
+                  '    checkpoints.append({"stage": stage, "seconds": time.monotonic() - clock_start,',
+                  '                        "complete": complete, "attached": result["attached"],',
+                  '                        "detached": result["detached"], "code": int(code)})',
+                  '    try:',
+                  '        descriptor = os.open(phase_path + ".next", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)',
+                  '        with os.fdopen(descriptor, "w") as stream:',
+                  '            json.dump(checkpoints, stream, allow_nan=False)',
+                  '            stream.flush()',
+                  '            os.fsync(stream.fileno())',
+                  '        os.replace(phase_path + ".next", phase_path)',
+                  '    except OSError:',
+                  '        result["checkpoint_write_failed"] = True',
+                  'def checked_read(command, label, seconds):',
+                  '    checkpoint("read_" + label, False)',
+                  '    try:',
+                  '        output = subprocess.check_output(command, text=True, timeout=seconds).strip()',
+                  '    except subprocess.TimeoutExpired:',
+                  '        result["read_error"] = "read_command_timeout_" + label',
+                  '        checkpoint("read_" + label, True, 1)',
+                  '        raise RuntimeError("read_timeout") from None',
+                  '    except subprocess.CalledProcessError:',
+                  '        result["read_error"] = "read_command_failed_" + label',
+                  '        checkpoint("read_" + label, True, 2)',
+                  '        raise RuntimeError("read_failed") from None',
+                  '    checkpoint("read_" + label, True)',
+                  '    return output',
+                  'target = None',
                   'process = None',
-                  'stage = "identity"',
+                  'stage = "bootstrap"',
                   'try:',
-                  f'    services = subprocess.check_output(["xcrun", "simctl", "spawn", {udid!r}, "launchctl", "list"], text=True, timeout=5)',
+                  '    checkpoint("bootstrap", False)',
+                  '    import lldb',
+                  '    target = lldb.debugger.CreateTarget("")',
+                  '    checkpoint("bootstrap", True)',
+                  '    stage = "identity"',
+                  '    checkpoint("identity", False)',
+                  f'    services = checked_read(["xcrun", "simctl", "spawn", {udid!r}, "launchctl", "list"], "simulator_launchctl", 5)',
                   f'    matches = [r.split() for r in services.splitlines() if r.split() and r.split()[-1] == {service!r}]',
                   f'    if len(matches) != 1 or matches[0][0] != "{pid}": raise RuntimeError("service")',
-                  f'    command = subprocess.check_output(["ps", "-p", "{pid}", "-o", "comm="], text=True, timeout=3).strip()',
+                  f'    command = checked_read(["ps", "-p", "{pid}", "-o", "comm="], "ps_exe", 3)',
                   f'    if command != {str(executable)!r}: raise RuntimeError("executable")',
-                  f'    current = subprocess.check_output(["ps", "-p", "{pid}", "-o", "lstart="], text=True, timeout=3).strip()',
+                  f'    current = checked_read(["ps", "-p", "{pid}", "-o", "lstart="], "ps_start", 3)',
                   f'    if current != {start!r}: raise RuntimeError("identity")',
+                  '    checkpoint("identity", True)',
                   '    lldb.debugger.SetAsync(False)',
                   '    stage = "attach"',
                   '    error = lldb.SBError()',
+                  '    checkpoint("attach", False)',
                   f'    process = target.AttachToProcessWithID(lldb.debugger.GetListener(), {pid}, error)',
+                  '    result["attached"] = not error.Fail()',
+                  '    checkpoint("attach", True, error.GetError())',
                   '    if error.Fail():',
                   '        result["lldb_error_code"] = error.GetError()',
                   '        raise RuntimeError("attach")',
-                  '    result["attached"] = True',
                   '    stage = "module_identity"',
+                  '    checkpoint("module_identity", False)',
                   f'    if process.GetProcessID() != {pid}: raise RuntimeError("pid")',
                   '    from pathlib import Path',
                   f'    if Path(str(target.GetExecutable())).resolve() != Path({str(executable)!r}).resolve(): raise RuntimeError("executable")',
                   f'    modules = [m for m in target.modules if Path(str(m.GetFileSpec())).resolve() == Path({str(debug_image)!r}).resolve()]',
                   '    if len(modules) != 1: raise RuntimeError("debug_image")',
                   '    result["debug_image_uuid"] = modules[0].GetUUIDString()',
+                  '    checkpoint("module_identity", True)',
                   '    stage = "main_thread"',
+                  '    checkpoint("main_thread", False)',
                   '    threads = [t for t in process if t.GetIndexID() == 1]',
                   '    if len(threads) != 1: raise RuntimeError("main_thread")',
                   '    thread = threads[0]',
                   '    result["thread_id"] = thread.GetThreadID()',
                   '    process.SetSelectedThread(thread)',
+                  '    checkpoint("main_thread", True)',
+                  '    checkpoint("expression_setup", False)',
                   '    options = lldb.SBExpressionOptions()',
                   '    options.SetLanguage(lldb.eLanguageTypeObjC_plus_plus)',
                   '    options.SetPrefix("#import <UIKit/UIKit.h>\\n#import <objc/runtime.h>\\n@interface NSObject (LecturnInspectionGetters)\\n- (NSString *)text;\\n- (BOOL)hasContextMenu;\\n@end\\n")',
@@ -2026,24 +2101,31 @@ jobs:
                   '    options.SetIgnoreBreakpoints(True)',
                   '    options.SetTrapExceptions(True)',
                   '    options.SetSuppressPersistentResult(True)',
+                  '    checkpoint("expression_setup", True)',
                   '    stage = "expression"',
+                  '    checkpoint("compile_or_expression", False)',
                   f'    value = thread.GetFrameAtIndex(0).EvaluateExpression({EXPRESSION!r}, options)',
+                  '    checkpoint("compile_or_expression", True, value.GetError().GetError())',
                   '    if value.GetError().Fail():',
                   '        result["lldb_error_code"] = value.GetError().GetError()',
                   '        raise RuntimeError("expression")',
                   '    stage = "read_json"',
+                  '    checkpoint("read_json", False)',
                   '    error = lldb.SBError()',
                   '    text = process.ReadCStringFromMemory(value.GetValueAsUnsigned(), 262144, error)',
                   '    if error.Fail(): raise RuntimeError("read_json")',
                   '    result["dump"] = json.loads(text)',
+                  '    checkpoint("read_json", True)',
                   'except BaseException as error:',
                   '    result["error"] = {"stage": stage, "type": type(error).__name__}',
                   'finally:',
-                  '    process = target.GetProcess()',
-                  '    if process.IsValid():',
+                  '    checkpoint("detach", False)',
+                  '    process = target.GetProcess() if target is not None else None',
+                  '    if process is not None and process.IsValid():',
                   '        error = process.Detach()',
                   '        result["detached"] = error.Success()',
                   '        if error.Fail(): result["detach_error_code"] = error.GetError()',
+                  '    checkpoint("detach", True, result.get("detach_error_code", 0))',
                   f'    print({MARKER!r} + json.dumps(result), flush=True)',
               ])
           
@@ -2053,6 +2135,127 @@ jobs:
               if len(lines) != 1:
                   raise InspectionError('missing_or_ambiguous_debugger_receipt')
               return json.loads(lines[0])
+          
+          
+          def phase_receipt(path):
+              if path is None or not path.exists():
+                  return {'status': 'not_observed', 'checkpoints': []}
+              try:
+                  with path.open() as stream:
+                      checkpoints = json.loads(stream.read(16385))
+                  if not isinstance(checkpoints, list) or not 1 <= len(checkpoints) <= 64:
+                      raise ValueError
+                  for row in checkpoints:
+                      if (not isinstance(row, dict)
+                              or set(row) != {'stage', 'seconds', 'complete', 'attached', 'detached', 'code'}
+                              or row['stage'] not in PHASES
+                              or type(row['seconds']) not in (int, float)
+                              or not math.isfinite(row['seconds']) or not 0 <= row['seconds'] <= 3600
+                              or any(type(row[key]) is not bool for key in ('complete', 'attached', 'detached'))
+                              or type(row['code']) is not int or not 0 <= row['code'] <= 2**64 - 1):
+                          raise ValueError
+                  return {'status': 'available', 'checkpoints': checkpoints}
+              except (OSError, ValueError, TypeError):
+                  return {'status': 'invalid_or_unreadable', 'checkpoints': []}
+          
+          
+          def sanitized_sample(path):
+              # Emit only literal allowlisted symbols from stack frames, never raw lines.
+              symbols = []
+              with path.open() as stream:
+                  raw = stream.read(524289)
+              if len(raw) > 524288:
+                  raise InspectionError('sample_output_limit')
+              for line in raw.splitlines():
+                  if not re.match(r'^\s*[+!:| ]*\d+\s+', line) or ' (in ' not in line:
+                      continue
+                  for symbol in SAMPLE_SYMBOLS:
+                      if re.search(r'(?<![\w:])' + re.escape(symbol) + r'(?=[(<\s])', line):
+                          if symbol not in symbols:
+                              symbols.append(symbol)
+              return symbols
+          
+          
+          def debugger_identity_matches(record):
+              if read(['ps', '-p', str(record['pid']), '-o', 'lstart='], 'debugger_start') != record['start']:
+                  return False
+              executable = read(['ps', '-p', str(record['pid']), '-o', 'comm='], 'debugger_exe')
+              if Path(executable).name != 'lldb':
+                  return False
+              return read(['ps', '-p', str(record['pid']), '-o', 'lstart='], 'debugger_start') == record['start']
+          
+          
+          def sample_debugger(owned, record, purpose, directory):
+              result = {'status': 'unavailable', 'symbols': [], 'cleanup_verified': False}
+              process = sampler_record = None
+              spawn_started = False
+              sampler_purpose = purpose + '-timeout-sample'
+              raw_path = directory / 'sample.raw'
+              try:
+                  with bounded(10):
+                      if (type(record.get('pid')) is not int or record['pid'] <= 1
+                              or not record.get('start') or record.get('purpose') != purpose
+                              or record not in owned.records()):
+                          result['status'] = 'unsafe_unregistered_debugger'
+                          return result
+                      if not debugger_identity_matches(record):
+                          result['status'] = 'unsafe_debugger_identity_mismatch'
+                          return result
+                      if not Path('/usr/bin/sample').is_file():
+                          result['status'] = 'unavailable_sampler'
+                          return result
+                      raw_path.touch(mode=0o600)
+                      spawn_started = True
+                      process = owned.spawn(['/usr/bin/sample', str(record['pid']), '1', '10', '-file', str(raw_path)],
+                                            purpose=sampler_purpose, stdin=subprocess.DEVNULL,
+                                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                      sampler_record = next(row for row in owned.records()
+                                            if row['pid'] == process.pid and row['purpose'] == sampler_purpose)
+                      result['sampler_pid'] = sampler_record['pid']
+                      result['sampler_registered'] = True
+                      process.communicate(timeout=3)  # Captured noise is deliberately discarded.
+                      if not debugger_identity_matches(record):
+                          result['status'] = 'unsafe_debugger_identity_changed'
+                      elif process.returncode != 0:
+                          result['status'] = 'sampler_failed'
+                          result['exit_code'] = int(process.returncode)
+                      else:
+                          result['symbols'] = sanitized_sample(raw_path)
+                          result['status'] = 'sampled' if result['symbols'] else 'no_whitelisted_frames'
+              except subprocess.TimeoutExpired:
+                  result['status'] = 'sampler_timeout'
+              except InspectionError as error:
+                  result['status'] = 'sampler_deadline' if str(error) == 'deadline' else str(error)
+              except (Exception, KeyboardInterrupt):
+                  result['status'] = 'sampler_unavailable_or_interrupted'
+              finally:
+                  try:
+                      with bounded(5):
+                          if sampler_record is None and spawn_started:
+                              sampler_record = next((row for row in owned.records()
+                                                     if row['purpose'] == sampler_purpose), None)
+                          if sampler_record:
+                              stopped = owned.terminate(sampler_record, grace=0.5)
+                              if process:
+                                  process.wait(timeout=3)
+                              if not stopped or owned.group_running(sampler_record['pid']):
+                                  raise InspectionError('sampler_group_still_running')
+                              result['cleanup_verified'] = True
+                          elif process is not None:
+                              raise InspectionError('sampler_registration_missing')
+                  except (Exception, KeyboardInterrupt):
+                      result['cleanup_error'] = 'sampler_cleanup_failed'
+                      result['symbols'] = []
+                  if process is not None and process.stdout is not None:
+                      try:
+                          process.stdout.close()
+                      except OSError:
+                          result['capture_close_error'] = True
+                  try:
+                      raw_path.unlink(missing_ok=True)
+                  except OSError:
+                      result['raw_discard_error'] = True
+              return result
           
           
           def dump_complete(result):
@@ -2071,8 +2274,11 @@ jobs:
                          'helper_sha256': sha256(__file__), 'limits_seconds':
                          {'debugger_start_attach_dump': ATTACH_SECONDS, 'expression': EXPR_SECONDS,
                           'discovery': 60, 'debugger_startup': 5, 'read_command': 5,
-                          'debugger_cleanup': 5, 'app_cleanup': 25}}
+                          'debugger_cleanup': 5, 'app_cleanup': 25,
+                          'timeout_sample': 10, 'sampler_command': 3, 'sampler_cleanup': 5}}
               process = record = identity = None
+              directory = phase_path = None
+              communicate_started = False
               pid = None
               purpose = 'filechip-native-inspect-' + str(time.time_ns())
               try:
@@ -2081,13 +2287,17 @@ jobs:
                   receipt['app'] = {'pid': pid, 'start': identity['start'], 'debug_dylib_sha256': image_hash,
                                     'service_sha256': hashlib.sha256(service.encode()).hexdigest()}
                   verify(args.udid, pid, service, identity)
-                  script = debugger_script(pid, identity['start'], identity['executable'], container / 'Lecturn.debug.dylib', args.udid, service)
+                  directory = Path(tempfile.mkdtemp(prefix='filechip-native-phases-'))
+                  phase_path = directory / 'phases.json'
+                  script = debugger_script(pid, identity['start'], identity['executable'], container / 'Lecturn.debug.dylib',
+                                           args.udid, service, phase_path)
                   with bounded(5):
                       process = owned.spawn(['xcrun', 'lldb', '--no-lldbinit', '--batch', '-o', 'script exec(' + repr(script) + ')'],
                                             purpose=purpose, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                             stderr=subprocess.STDOUT, text=True)
                   record = next(row for row in owned.records() if row['pid'] == process.pid and row['purpose'] == purpose)
                   receipt['debugger'] = {'pid': record['pid'], 'start': record['start'], 'purpose': purpose}
+                  communicate_started = True
                   output, _ = process.communicate(timeout=ATTACH_SECONDS)
                   receipt['debugger_exit_code'] = process.returncode
                   receipt['native'] = parse_dump(output)
@@ -2097,10 +2307,18 @@ jobs:
                       receipt['error'] = 'native_dump_incomplete_or_ambiguous'
               except (Exception, KeyboardInterrupt) as error:
                   receipt['error'] = str(error) if isinstance(error, InspectionError) else type(error).__name__
+                  if isinstance(error, subprocess.TimeoutExpired) and communicate_started:
+                      receipt['debugger_outer_timeout'] = True
               finally:
                   # Allow one interrupt to enter cleanup, then finish cleanup before
                   # honoring further termination. SIGALRM still bounds each operation.
                   handlers = {s: signal.signal(s, signal.SIG_IGN) for s in (signal.SIGINT, signal.SIGTERM)}
+                  receipt['phases'] = phase_receipt(phase_path)
+                  if receipt.get('debugger_outer_timeout'):
+                      receipt['phases_at_outer_timeout'] = receipt['phases']
+                      receipt['timeout_sample'] = (sample_debugger(owned, record, purpose, directory) if record and directory
+                                                   else {'status': 'unsafe_missing_debugger_registration', 'symbols': [],
+                                                         'cleanup_verified': False})
                   # A registration failure can still leave a registered launcher. Limit
                   # cleanup to this invocation, never sweep another helper's registry.
                   try:
@@ -2120,13 +2338,14 @@ jobs:
                       # still have its recorded identity before a forced group stop.
                       try:
                           with bounded(5):
-                              if record and read(['ps', '-p', str(record['pid']), '-o', 'lstart=']) == record['start']:
+                              if record and read(['ps', '-p', str(record['pid']), '-o', 'lstart='], 'debugger_start') == record['start']:
                                   os.killpg(record['pid'], signal.SIGKILL)
                                   if process:
                                       process.wait(timeout=3)
                                   receipt['debugger_forced_stop'] = not owned.group_running(record['pid'])
                       except (Exception, KeyboardInterrupt) as recovery_error:
-                          receipt['debugger_recovery_error'] = type(recovery_error).__name__
+                          receipt['debugger_recovery_error'] = (str(recovery_error) if isinstance(recovery_error, InspectionError)
+                                                                 else type(recovery_error).__name__)
                   try:
                       with bounded(25):
                           if pid and identity:
@@ -2147,6 +2366,14 @@ jobs:
                   except (Exception, KeyboardInterrupt) as error:
                       receipt['cleanup_error'] = str(error) if isinstance(error, InspectionError) else type(error).__name__
                   receipt['dump_complete'] = receipt['dump_complete'] and receipt['cleanup_verified']
+                  final_phases = phase_receipt(phase_path)
+                  if final_phases['status'] == 'available' or receipt['phases']['status'] != 'available':
+                      receipt['phases'] = final_phases
+                  if directory is not None:
+                      try:
+                          shutil.rmtree(directory)
+                      except OSError:
+                          receipt['diagnostic_temp_discard_error'] = True
                   for number, handler in handlers.items():
                       signal.signal(number, handler)
               return receipt
