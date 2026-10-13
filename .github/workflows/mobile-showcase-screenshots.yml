@@ -1187,10 +1187,13 @@ jobs:
           
           import ios_owned_processes as owned
           
-          TOTAL_SECONDS = 600
-          WORK_SECONDS = 570
-          ACTION_SECONDS = 20
-          MAESTRO_SECONDS = 100
+          # Eight Maestro invocations on the after path, plus bounded failure capture.
+          TOTAL_SECONDS = 2100
+          WORK_SECONDS = 2040
+          ACTION_SECONDS = 30
+          # Includes CLI startup and teardown; hierarchy teardown exceeded 100s hosted.
+          MAESTRO_SECONDS = 180
+          VISIBILITY_MS = 10000
           FILENAME = 'report.pdf'
           MENU = ('Copy full path', 'Copy relative path', 'Open in file viewer')
           SHARE = 'Save or share'
@@ -1261,17 +1264,33 @@ jobs:
               return min(candidates, key=lambda text: (len(text), text))
           
           
-          def filename_target(tree):
-              found = matching(tree, FILENAME)
+          def normalized_filename(text):
+              return text.strip(' \u00a0')
+          
+          
+          def filename_label(node):
+              attrs = node['attributes']
+              return next(attrs[key] for key in ('accessibilityText', 'text', 'title', 'value') if attrs.get(key))
+          
+          
+          def filename_target(tree, *, normalize=True):
+              # The hosted hierarchy repeats the NBSP-prefixed label on a parent and leaf.
+              if normalize:
+                  found = [node for node in nodes(tree) if not node.get('children')
+                           and {normalized_filename(text) for text in labels(node)} == {FILENAME}]
+              else:
+                  found = matching(tree, FILENAME)
               if len(found) != 1:
-                  raise GateFailure('Need one exact report.pdf accessibility node; inspect initial receipts, use a single-link fixture.')
+                  raise GateFailure('Need one exact normalized report.pdf leaf, excluding paragraph/container nodes; inspect retained hierarchy.')
               node = found[0]
               x, y, right, bottom = bounds(node)
               sx, sy, sr, sb = screen_bounds(tree)
-              # Maestro 2.11 projects iOS labels/bounds but drops XCUI elementType.
-              # A compact exact-filename leaf is usable; a paragraph/container is not.
-              if node.get('children') or labels(node) != {FILENAME} or not (sx <= x < right <= sr and sy <= y < bottom <= sb) or right-x > 240 or bottom-y > 64:
-                  raise GateFailure('Filename bounds are a paragraph/container or offscreen; no long press attempted. Inspect initial receipts for a glyph target.')
+              # Maestro 2.11 drops XCUI elementType; retain compact, onscreen leaf checks.
+              if (node.get('children') or (not normalize and labels(node) != {FILENAME})
+                      or node.get('enabled') is False or node.get('attributes', {}).get('enabled') == 'false'
+                      or not (sx <= x < right <= sr and sy <= y < bottom <= sb)
+                      or right-x > 240 or bottom-y > 64):
+                  raise GateFailure('Filename bounds/state are a paragraph/container, disabled or offscreen; no long press attempted. Inspect initial receipts.')
               return node
           
           
@@ -1349,7 +1368,7 @@ jobs:
                   self.groups, self.cleaned = {}, set()
                   self.recorder = None
                   self.result = {'phase': phase, 'passed': False, 'accepted': False,
-                                 'visual_review_required': True, 'limits_seconds': {'total': TOTAL_SECONDS, 'work': WORK_SECONDS, 'action': ACTION_SECONDS, 'maestro_command': MAESTRO_SECONDS},
+                                 'visual_review_required': True, 'limits_seconds': {'total': TOTAL_SECONDS, 'work': WORK_SECONDS, 'action': ACTION_SECONDS, 'maestro_command': MAESTRO_SECONDS, 'visibility': VISIBILITY_MS / 1000},
                                  'stages': [], 'cleanup': [], 'assertions_complete': False}
                   self.checkpoint()
           
@@ -1488,10 +1507,14 @@ jobs:
                   if any(matching(initial, text) for text in (*MENU, SHARE, *ACTIVITIES)):
                       raise GateFailure('Initial scene already has menu/activity controls; restore the ready thread before invoking.')
                   anchor = thread_anchor(initial)
-                  self.result['target'] = {'method': 'unique-exact-filename-leaf', 'bounds': bounds(target), 'thread_anchor': anchor}
+                  label = filename_label(target)
+                  x, y, right, bottom = bounds(target)
+                  point = f'{(x+right)//2},{(y+bottom)//2}'
+                  self.result['target'] = {'method': 'observed-compact-filename-leaf-point', 'label': label,
+                                           'bounds': bounds(target), 'point': point, 'thread_anchor': anchor}
                   self.record()
-                  body = visible(FILENAME) + '- longPressOn: ' + selector(FILENAME) + '\n'
-                  body += '- extendedWaitUntil:\n    visible: "Copy full path"\n    timeout: 10000\n'
+                  body = visible(label) + '- longPressOn:\n    point: ' + json.dumps(point) + '\n'
+                  body += f'- extendedWaitUntil:\n    visible: "Copy full path"\n    timeout: {VISIBILITY_MS}\n'
                   body += ''.join(visible(text) for text in MENU) + (absent(SHARE) if self.phase == 'before' else visible(SHARE))
                   body += '- takeScreenshot: menu\n'
                   self.flow('menu', body)
@@ -1513,11 +1536,11 @@ jobs:
                       sheet_controls = ()
                   else:
                       unique_control(menu, SHARE)
-                      self.flow('share', '- tapOn: "Save or share"\n- extendedWaitUntil:\n    visible: "Save to Files"\n    timeout: 10000\n' + absent(ERROR) + '- takeScreenshot: sheet\n')
+                      self.flow('share', f'- tapOn: "Save or share"\n- extendedWaitUntil:\n    visible: "Save to Files"\n    timeout: {VISIBILITY_MS}\n' + absent(ERROR) + '- takeScreenshot: sheet\n')
                       sheet = self.snapshot('sheet')
                       if any(matching(sheet, text) for text in (*MENU, SHARE)):
                           raise GateFailure('Menu remains after Save or share; native activity sheet unverified.')
-                      sheet_filename = filename_target(sheet)
+                      sheet_filename = filename_target(sheet, normalize=False)
                       sheet_controls = tuple(text for text in ACTIVITIES if len(matching(sheet, text)) == 1)
                       if 'Save to Files' not in sheet_controls or len(sheet_controls) < 2:
                           raise GateFailure('Sheet lacks report.pdf plus multiple native activity controls; inspect sheet receipts.')
@@ -1528,10 +1551,11 @@ jobs:
                       containers = [node for node in nodes(sheet) if node is not sheet and all(any(child is item for child in nodes(node)) for item in evidence)]
                       if not containers or bounds(containers[-1]) == screen_bounds(sheet):
                           raise GateFailure('Filename/native controls do not share an observed sheet region; background filename alone is insufficient. Inspect sheet receipts.')
-                      self.result['sheet'] = {'filename': FILENAME, 'native_controls': sheet_controls, 'dismiss_control': control, 'bounds': bounds(containers[-1])}
+                      self.result['sheet'] = {'filename': FILENAME, 'label': filename_label(sheet_filename), 'filename_bounds': bounds(sheet_filename),
+                                              'native_controls': sheet_controls, 'dismiss_control': control, 'bounds': bounds(containers[-1])}
                       self.result['dismissal'] = {'method': 'observed-sheet-control', 'label': control, 'evidence': 'sheet.png + sheet-hierarchy.json'}
                       dismiss = '- tapOn: ' + selector(control) + '\n'
-                  dismiss += '- extendedWaitUntil:\n    visible: ' + selector(anchor) + '\n    timeout: 10000\n' + visible(FILENAME)
+                  dismiss += '- extendedWaitUntil:\n    visible: ' + selector(anchor) + f'\n    timeout: {VISIBILITY_MS}\n' + visible(label)
                   gone = (*MENU, SHARE, ERROR, *sheet_controls, *((control,) if control else ()))
                   dismiss += ''.join(absent(text) for text in gone) + '- takeScreenshot: returned\n'
                   self.flow('dismiss', dismiss)
