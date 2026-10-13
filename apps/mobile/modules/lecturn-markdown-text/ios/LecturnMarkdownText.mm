@@ -67,6 +67,9 @@ static void LecturnMarkdownTextApplyAttachments(
     UIColor *foregroundColor = [attributedString attribute:NSForegroundColorAttributeName
                                                    atIndex:attachmentRange.location
                                             effectiveRange:nil];
+    id link = [attributedString attribute:NSLinkAttributeName
+                                 atIndex:attachmentRange.location
+                          effectiveRange:nil];
     if (image != nil && (isSymbol || attachmentRange.tintWithForeground)) {
       image = [image imageWithTintColor:foregroundColor ?: UIColor.labelColor
                           renderingMode:UIImageRenderingModeAlwaysOriginal];
@@ -88,6 +91,11 @@ static void LecturnMarkdownTextApplyAttachments(
     if (foregroundColor != nil) {
       [attachmentString addAttribute:NSForegroundColorAttributeName
                                value:foregroundColor
+                               range:NSMakeRange(0, attachmentString.length)];
+    }
+    if (link != nil) {
+      [attachmentString addAttribute:NSLinkAttributeName
+                               value:link
                                range:NSMakeRange(0, attachmentString.length)];
     }
     [attributedString replaceCharactersInRange:range withAttributedString:attachmentString];
