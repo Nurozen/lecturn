@@ -1190,9 +1190,16 @@ jobs:
           # Eight Maestro invocations on the after path, plus bounded failure capture.
           TOTAL_SECONDS = 2100
           WORK_SECONDS = 2040
+          OUTER_SECONDS = 2700
           ACTION_SECONDS = 30
           # Includes CLI startup and teardown; hierarchy teardown exceeded 100s hosted.
           MAESTRO_SECONDS = 180
+          CLEANUP_SECONDS = 10
+          TERM_GRACE_SECONDS = 0.5
+          RECORDER_SECONDS = 30
+          DIAGNOSTICS_SECONDS = 10
+          # The 60s work reserve covers recorder finalization, two pending group stops,
+          # and diagnostics. Successful command groups are stopped/reaped immediately.
           VISIBILITY_MS = 10000
           FILENAME = 'report.pdf'
           MENU = ('Copy full path', 'Copy relative path', 'Open in file viewer')
@@ -1365,10 +1372,15 @@ jobs:
                   self.path = Path(os.environ['GITHUB_WORKSPACE']) / 'artifacts/ios-validation' / self.prefix
                   self.path.mkdir(parents=True, mode=0o700)
                   self.maestro = Path(os.environ['RUNNER_TEMP']) / 'maestro/bin/maestro'
-                  self.groups, self.cleaned = {}, set()
+                  self.groups, self.cleaned, self.processes = {}, set(), {}
                   self.recorder = None
                   self.result = {'phase': phase, 'passed': False, 'accepted': False,
-                                 'visual_review_required': True, 'limits_seconds': {'total': TOTAL_SECONDS, 'work': WORK_SECONDS, 'action': ACTION_SECONDS, 'maestro_command': MAESTRO_SECONDS, 'visibility': VISIBILITY_MS / 1000},
+                                 'visual_review_required': True, 'limits_seconds': {
+                                     'total': TOTAL_SECONDS, 'work': WORK_SECONDS, 'outer': OUTER_SECONDS,
+                                     'action': ACTION_SECONDS, 'maestro_command': MAESTRO_SECONDS,
+                                     'cleanup_including_reap': CLEANUP_SECONDS, 'term_grace': TERM_GRACE_SECONDS,
+                                     'recorder_finalization': RECORDER_SECONDS, 'diagnostics': DIAGNOSTICS_SECONDS,
+                                     'visibility': VISIBILITY_MS / 1000},
                                  'stages': [], 'cleanup': [], 'assertions_complete': False}
                   self.checkpoint()
           
@@ -1392,8 +1404,10 @@ jobs:
               def start(self, command, stage, stdout, stderr):
                   purpose = self.prefix + '-' + stage
                   try:
-                      return owned.spawn(command, purpose=purpose, stdin=subprocess.DEVNULL,
-                                         stdout=stdout, stderr=stderr, cwd=self.path)
+                      process = owned.spawn(command, purpose=purpose, stdin=subprocess.DEVNULL,
+                                            stdout=stdout, stderr=stderr, cwd=self.path)
+                      self.processes[process.pid] = process
+                      return process
                   finally:
                       # Includes a launcher registered before spawn raised; never sweep the job registry.
                       self.groups.update({row['pid']: row for row in owned.records() if row['purpose'].startswith(self.prefix + '-')})
@@ -1403,19 +1417,40 @@ jobs:
                       return
                   receipt = {'purpose': record['purpose'].removeprefix(self.prefix + '-'), 'stopped': False}
                   self.result['cleanup'].append(receipt)
+                  began = time.monotonic()
                   try:
-                      with self.limit(2):
-                          stopped = owned.terminate(record, grace=0.5)
-                          if stopped:
-                              while owned.group_running(record['pid']):
-                                  time.sleep(0.05)
-                              receipt['stopped'] = True
-                      if receipt['stopped']:
+                      with self.limit(CLEANUP_SECONDS) as timeout:
+                          deadline = time.monotonic() + timeout
+                          if not owned.terminate(record, grace=TERM_GRACE_SECONDS):
+                              raise GateFailure('Owned process identity not confirmed.')
+                          while owned.group_running(record['pid']):
+                              remaining = deadline - time.monotonic()
+                              if remaining <= 0:
+                                  raise CommandDeadline()
+                              time.sleep(min(0.05, remaining))
+                          remaining = deadline - time.monotonic()
+                          if remaining <= 0:
+                              raise CommandDeadline()
+                          process = self.processes.get(record['pid'])
+                          if process is not None:
+                              process.wait(timeout=remaining)
+                              if time.monotonic() >= deadline:
+                                  raise CommandDeadline()
+                              receipt['reaped'] = True
+                          receipt['stopped'] = True
                           self.cleaned.add(record['pid'])
                   except Exception as error:
+                      receipt['stopped'] = False
+                      self.cleaned.discard(record['pid'])
                       receipt['error_type'] = type(error).__name__
+                  finally:
+                      receipt['elapsed_seconds'] = round(time.monotonic()-began, 3)
           
               def command(self, stage, command, output=None):
+                  if (any(row['pid'] not in self.cleaned for row in self.groups.values()
+                          if row['purpose'] != self.prefix + '-recording')
+                          or any(not row['stopped'] for row in self.result['cleanup'])):
+                      raise GateFailure('Owned action group did not stop; refusing another device command.')
                   receipt = {'stage': stage, 'exit_code': None, 'timed_out': False}
                   self.result['stages'].append(receipt)
                   process = None
@@ -1424,8 +1459,9 @@ jobs:
                       with (self.path / output).open('wb') if output else open(os.devnull, 'wb') as out:
                           try:
                               with self.limit(MAESTRO_SECONDS if command[0] == str(self.maestro) else ACTION_SECONDS, work=True) as timeout:
+                                  deadline = time.monotonic() + timeout
                                   process = self.start(command, stage, out if output else log, log if output else subprocess.STDOUT)
-                                  receipt['exit_code'] = process.wait(timeout=timeout)
+                                  receipt['exit_code'] = process.wait(timeout=max(0, deadline-time.monotonic()))
                           except (CommandDeadline, subprocess.TimeoutExpired):
                               receipt['timed_out'] = True
                               raise GateFailure('Deadline at ' + stage + '; inspect retained diagnostics.') from None
@@ -1437,9 +1473,6 @@ jobs:
                               try:
                                   if process:
                                       self.stop(self.groups[process.pid])
-                                      if process.pid in self.cleaned:
-                                          with self.limit(1):
-                                              process.wait(timeout=1)
                               finally:
                                   self.checkpoint()
                   if not self.result['cleanup'][-1]['stopped']:
@@ -1477,15 +1510,17 @@ jobs:
           
               def finalize(self):
                   receipt = self.result['recording'] = {'sigint_sent': False, 'finalized': False}
+                  began = time.monotonic()
                   try:
                       if self.recorder:
-                          with self.limit(8) as timeout:
+                          with self.limit(RECORDER_SECONDS) as timeout:
+                              deadline = time.monotonic() + timeout
                               record = self.groups[self.recorder.pid]
                               current = owned.identity(record['pid'])
                               if current is not None and current != record['start']:
                                   raise GateFailure('Recorder PID identity changed.')
                               receipt['sigint_sent'] = owned.signal_group(record['pid'], signal.SIGINT)
-                              receipt['exit_code'] = self.recorder.wait(timeout=timeout)
+                              receipt['exit_code'] = self.recorder.wait(timeout=max(0, deadline-time.monotonic()))
                               video = self.path / 'interaction.mp4'
                               if video.exists():
                                   with video.open('rb') as stream:
@@ -1493,6 +1528,7 @@ jobs:
                   except Exception as error:
                       receipt['error_type'] = type(error).__name__
                   finally:
+                      receipt['elapsed_seconds'] = round(time.monotonic()-began, 3)
                       for record in reversed(list(self.groups.values())):
                           self.stop(record)
                       if hasattr(self, 'video_log'):
@@ -1581,15 +1617,16 @@ jobs:
                           self.finalize()
                           self.checkpoint()
                           self.result['sha256'] = {}
-                          redact_diagnostics(self.path)
-                          for path in sorted(self.path.rglob('*')):
-                              if path.is_file() and path.name != 'receipt.json':
-                                  digest = hashlib.sha256()
-                                  with path.open('rb') as stream:
-                                      for chunk in iter(lambda: stream.read(1024*1024), b''):
-                                          digest.update(chunk)
-                                  self.result['sha256'][str(path.relative_to(self.path))] = digest.hexdigest()
-                          self.result['sha256']['helper'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+                          with self.limit(DIAGNOSTICS_SECONDS):
+                              redact_diagnostics(self.path)
+                              for path in sorted(self.path.rglob('*')):
+                                  if path.is_file() and path.name != 'receipt.json':
+                                      digest = hashlib.sha256()
+                                      with path.open('rb') as stream:
+                                          for chunk in iter(lambda: stream.read(1024*1024), b''):
+                                              digest.update(chunk)
+                                      self.result['sha256'][str(path.relative_to(self.path))] = digest.hexdigest()
+                              self.result['sha256']['helper'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
                           self.result['passed'] = 'failure' not in self.result and self.result['assertions_complete'] and self.result['recording']['finalized'] and all(row['stopped'] for row in self.result['cleanup'])
                           if not self.result['passed'] and 'failure' not in self.result:
                               self.result['failure'] = 'Recorder finalization or owned cleanup failed; inspect recording/cleanup receipts.'
