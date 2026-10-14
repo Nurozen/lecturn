@@ -12,9 +12,10 @@ Attach up to eight files per message. Images can be up to 10 MB; other files can
 be up to 50 MB, subject to the environment's upload support and limit. The agent
 receives them on the environment's machine.
 
-Uploads begin when you add an attachment. All uploads must finish before the
-message can send. Retry or remove a failed upload. On web and desktop, reloading
-before an upload finishes requires you to attach that file again.
+Uploads begin when you add an attachment. On web and desktop, wait for uploads
+to finish before sending; reloading before an upload finishes requires you to
+attach that file again. On mobile, you can queue the message while uploads are
+still running. Retry or remove a failed upload before sending.
 
 You can drag or paste images into the web or desktop composer. HEIC and HEIF
 photos are converted to JPEG there and when selected from the iOS photo library;
@@ -23,10 +24,13 @@ Lecturn through another app's system share sheet.
 
 See [images and videos](#images-and-videos-in-messages) for previewing and saving media.
 
-## Queue messages offline on mobile
+## Queue messages on mobile
 
 Mobile keeps local copies of draft attachments, so you can preview them and queue
-messages while disconnected. Uploads resume when you reconnect. Drafts and queued
+messages while disconnected or while an attachment is uploading. Queued messages
+send once the environment is connected and their uploads finish. Existing threads
+show an outbox indicator while messages are queued.
+Uploads resume when you reconnect. Drafts and queued
 messages survive app restarts. Signing out of Lecturn Connect keeps that work on your
 device until you sign back into the same account.
 

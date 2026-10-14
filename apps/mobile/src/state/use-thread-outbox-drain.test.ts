@@ -209,6 +209,50 @@ afterEach(() => {
 });
 
 describe("thread outbox attachment preparation", () => {
+  it("keeps queued local attachments when their upload fails after submission", async () => {
+    const message = queuedMessage({
+      messageId: "upload-failed-after-queue",
+      text: "keep me",
+      fileUri: "file:///documents/lecturn-composer-attachments/queued.pdf",
+    });
+    await harness.manager.enqueue(message);
+    harness.prepareTurnAttachments.mockRejectedValueOnce(new Error("Connection lost"));
+    await expect(prepareQueuedMessageAttachments(message, true)).rejects.toThrow("Connection lost");
+    expect(remainingMessages()).toEqual([message]);
+    expect(harness.removePersistedFile).not.toHaveBeenCalled();
+    expect(harness.removeOutboxMessage).not.toHaveBeenCalled();
+  });
+
+  it("abandons a new upload when a newer queued edit wins before references persist", async () => {
+    const message = queuedMessage({
+      messageId: "new-upload-edit-race",
+      text: "before edit",
+      fileUri: "file:///documents/lecturn-composer-attachments/race.pdf",
+    });
+    await harness.manager.enqueue(message);
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    harness.prepareTurnAttachments.mockImplementationOnce(async (input) => {
+      started.resolve();
+      await finish.promise;
+      const attachments = message.attachments.map((attachment) => ({
+        ...attachment,
+        uploadedAttachmentId: "pending-race",
+        uploadEnvironmentId: message.environmentId,
+      }));
+      expect(await input.persistUploadedReferences?.(attachments)).toBe("abandon");
+      return { status: "abandoned" };
+    });
+    const preparing = prepareQueuedMessageAttachments(message, true);
+    await started.promise;
+    const edited = { ...message, text: "after edit" };
+    await harness.manager.update(edited);
+    finish.resolve();
+    await expect(preparing).resolves.toEqual({ status: "abandoned" });
+    expect(remainingMessages()).toEqual([edited]);
+    expect(harness.removePersistedFile).not.toHaveBeenCalled();
+  });
+
   it("abandons reused uploads when an editor saves changed text during verification", async () => {
     const message = withReusedFileUpload(
       queuedMessage({

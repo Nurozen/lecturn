@@ -26,6 +26,9 @@ import {
   toMcpElicitationResponse,
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
+const encodeMcpElicitationResponse = Schema.encodeSync(
+  EffectCodexSchema.McpServerElicitationRequestResponse,
+);
 
 describe("CodexSessionRuntimeIdentifierGenerationError", () => {
   it("retains identifier purpose and the random source failure", () => {
@@ -394,6 +397,28 @@ describe("Codex MCP elicitation approvals", () => {
       _meta: { persist: "always" },
       content: { approval: "always" },
     });
+  });
+
+  it("preserves JSON form defaults in the elicitation wire response", () => {
+    const defaultsRequest = {
+      ...request,
+      requestedSchema: {
+        type: "object",
+        properties: {
+          enabled: { type: "boolean", default: false },
+          limit: { type: "number", default: 0 },
+          label: { type: "string", default: "" },
+        },
+        required: ["enabled", "limit", "label"],
+      },
+    } satisfies EffectCodexSchema.McpServerElicitationRequestParams;
+    NodeAssert.deepStrictEqual(
+      encodeMcpElicitationResponse(toMcpElicitationResponse(defaultsRequest, "accept")),
+      {
+        action: "accept",
+        content: { enabled: false, limit: 0, label: "" },
+      },
+    );
   });
 
   it("declines required form fields that an approval prompt cannot collect", () => {

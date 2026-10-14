@@ -49,16 +49,31 @@ export const make = Effect.gen(function* () {
   const sweep = Effect.fn("ThreadSettlementReactor.sweep")(function* (
     mergedPullRequest: PullRequestService.PullRequestMergeEvent | null,
   ) {
+    const settings = yield* settingsService.getSettings;
+    const ordinarySettlementEnabled =
+      settings.sidebarAutoSettleOnMerge || settings.sidebarAutoSettleAfterDays !== null;
+    const sagaSettlementEnabled =
+      mergedPullRequest === null &&
+      Option.isSome(staveMergeSignal) &&
+      settings.stave.enabled &&
+      settings.stave.lifecycle.settleOnSagaMerge;
+    if (!ordinarySettlementEnabled && !sagaSettlementEnabled) {
+      return;
+    }
     const snapshot = yield* snapshots.getShellSnapshot();
     const now = DateTime.formatIso(yield* DateTime.now);
     const projects = new Map(snapshot.projects.map((project) => [project.id, project]));
     const staveMerged =
-      mergedPullRequest === null && Option.isSome(staveMergeSignal)
+      sagaSettlementEnabled && Option.isSome(staveMergeSignal)
         ? yield* staveMergeSignal.value.candidates(snapshot.projects)
         : new Set();
     // A merge rechecks all candidates, including branches that discovery has
     // not linked yet. Those lookups can still have cached the PR as open.
-    const candidates = snapshot.threads.filter((thread) => isAutoSettlementCandidate(thread, now));
+    const candidates = snapshot.threads.filter(
+      (thread) =>
+        (ordinarySettlementEnabled || staveMerged.has(thread.projectId)) &&
+        isAutoSettlementCandidate(thread, now),
+    );
 
     // Return the thread when it still needs a pull request decision. A rejected
     // dispatch skips it for this snapshot instead of retrying through a lookup.

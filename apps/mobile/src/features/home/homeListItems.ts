@@ -19,6 +19,7 @@ import type { StaveSagaMemberStatus } from "@lecturn/contracts";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
 
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
+import { scopedThreadKey } from "../../lib/scopedEntities";
 import type { HomeThreadGroup } from "./homeThreadList";
 
 /** Threads shown per project before the "Show more" affordance appears. */
@@ -262,6 +263,7 @@ function homeHierarchy(input: {
 export function buildHomeListLayout(input: {
   readonly accountSections?: AccountSectionContext | undefined;
   readonly groups: ReadonlyArray<HomeThreadGroup>;
+  readonly queuedThreadKeys?: ReadonlySet<string>;
   readonly displayStates: ReadonlyMap<string, HomeGroupDisplayState>;
   /**
    * When searching, pagination is suspended so every match stays visible.
@@ -324,29 +326,38 @@ export function buildHomeListLayout(input: {
       continue;
     }
 
-    const activeThreads = group.threads.filter((thread) => thread.settledOverride !== "settled");
-    const settledThreads = group.threads.filter((thread) => thread.settledOverride === "settled");
-    const totalCount = activeThreads.length;
-    // Default to the group's recent-activity window (last few days, or a small
-    // fallback for stale projects), capped at the initial page size. Until the
-    // user taps "Show more", older threads stay hidden to save vertical space;
-    // "Show less" resets visibleCount to the initial constant, which lands back
-    // here at the recency baseline.
-    const baselineCount = Math.min(
-      group.recentThreads.filter((thread) => thread.settledOverride !== "settled").length,
-      HOME_INITIAL_VISIBLE_THREADS,
-      totalCount,
+    const isQueued = (thread: EnvironmentThreadShell) =>
+      input.queuedThreadKeys?.has(scopedThreadKey(thread.environmentId, thread.id)) === true;
+    const activeThreads = group.threads.filter(
+      (thread) => thread.settledOverride !== "settled" || isQueued(thread),
     );
-    const visibleCount = input.showAllThreads
-      ? totalCount
-      : Math.min(
-          display.visibleCount > HOME_INITIAL_VISIBLE_THREADS
-            ? display.visibleCount
-            : baselineCount,
-          totalCount,
-        );
-    const visibleThreads = activeThreads.slice(0, visibleCount);
-    const hiddenCount = totalCount - visibleCount;
+    const settledThreads = group.threads.filter(
+      (thread) => thread.settledOverride === "settled" && !isQueued(thread),
+    );
+    const totalCount = activeThreads.length;
+    const recentKeys = new Set(
+      group.recentThreads.map((thread) => scopedThreadKey(thread.environmentId, thread.id)),
+    );
+    const baselineKeys = new Set(
+      activeThreads
+        .filter((thread) => recentKeys.has(scopedThreadKey(thread.environmentId, thread.id)))
+        .slice(0, HOME_INITIAL_VISIBLE_THREADS)
+        .map((thread) => scopedThreadKey(thread.environmentId, thread.id)),
+    );
+    const baselineCount = activeThreads.filter(
+      (thread) =>
+        baselineKeys.has(scopedThreadKey(thread.environmentId, thread.id)) || isQueued(thread),
+    ).length;
+    // Queued rows stay visible outside the current page, in the group's sort order.
+    const visibleThreads = activeThreads.filter(
+      (thread, index) =>
+        input.showAllThreads ||
+        isQueued(thread) ||
+        (display.visibleCount > HOME_INITIAL_VISIBLE_THREADS
+          ? index < display.visibleCount
+          : baselineKeys.has(scopedThreadKey(thread.environmentId, thread.id))),
+    );
+    const hiddenCount = totalCount - visibleThreads.length;
     const hasShowMoreRow = !input.showAllThreads && totalCount > baselineCount;
 
     // Pending (unsent) tasks lead the group and are never paginated away.
@@ -383,7 +394,7 @@ export function buildHomeListLayout(input: {
         // Compare against the group's own baseline, not the global page size:
         // stale projects start below HOME_INITIAL_VISIBLE_THREADS, and "Show
         // less" must be offered as soon as anything beyond the baseline shows.
-        canShowLess: visibleCount > baselineCount,
+        canShowLess: visibleThreads.length > baselineCount,
       });
     }
     if (settledThreads.length > 0) {
@@ -528,12 +539,12 @@ export function buildHomeHierarchyV2Items(input: {
     });
     if (collapsed) return;
     const owned = rowsByGroup.get(group.key) ?? [];
-    const settled = owned.filter(
-      (row) => row.type === "v2-thread" && row.item.thread.settledOverride === "settled",
-    );
+    // Preserve the partition's queue promotion, snooze priority, and capability gating.
+    const isSettled = (row: ThreadListV2ListItem) =>
+      row.type === "v2-thread" && row.item.variant === "slim" && !row.item.snoozed;
+    const settled = owned.filter(isSettled);
     for (const row of owned) {
-      if (row.type !== "v2-thread" || row.item.thread.settledOverride !== "settled")
-        result.push({ ...row, depth: depth + 1 });
+      if (!isSettled(row)) result.push({ ...row, depth: depth + 1 });
     }
     if (settled.length > 0) {
       const groupKey = `settled:${group.key}`;
