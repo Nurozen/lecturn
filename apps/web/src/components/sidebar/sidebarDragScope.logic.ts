@@ -40,8 +40,8 @@ export function buildScopedSidebarItems(
   marker("pinned-header");
   rows("pinned", lists.pinned);
   marker("pinned-divider");
+  marker("active-placeholder");
   rows("active", lists.active);
-  if (!lists.active.length) marker("active-placeholder");
   if (lists.snoozed.length) {
     marker("snoozed-header");
     rows(
@@ -58,8 +58,8 @@ export function buildScopedSidebarItems(
       ((input.settledExpanded || input.retainCurrentSettled !== false) &&
         keyOf(thread) === input.routeThreadKey),
   );
+  marker("settled-placeholder");
   rows("settled", settled);
-  if (!settled.length) marker("settled-placeholder");
   return items;
 }
 

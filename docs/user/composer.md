@@ -6,6 +6,13 @@ include a skill when the task needs more context.
 Messages can contain up to 120,000 characters. Longer drafts stay in the composer
 so you can shorten them or split them into several messages.
 
+## Answer agent questions
+
+Answer an agent's question in the composer to send your response. For async
+questions, choose **Dismiss without answering** to close the question across your
+connected clients without sending a message to the agent. Questions that block
+the agent need an answer or a stopped turn and cannot be dismissed this way.
+
 ## Attach files
 
 Attach up to eight files per message. Images can be up to 10 MB; other files can

@@ -173,6 +173,7 @@ export interface ThreadDetailScreenProps {
     customAnswer: string,
   ) => void;
   readonly onSubmitUserInput: () => Promise<unknown>;
+  readonly onDismissUserInput: () => Promise<unknown>;
   readonly showContent?: boolean;
 }
 
@@ -1010,6 +1011,7 @@ const ThreadDetailScreenContent = memo(function ThreadDetailScreenContent(
                         onSelectOption={props.onSelectUserInputOption}
                         onChangeCustomAnswer={props.onChangeUserInputCustomAnswer}
                         onSubmit={props.onSubmitUserInput}
+                        onDismiss={props.onDismissUserInput}
                       />
                     ) : null}
                   </Animated.View>

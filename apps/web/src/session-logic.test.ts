@@ -310,6 +310,7 @@ describe("derivePendingUserInputs", () => {
       }),
     ];
     expect(derivePendingUserInputs(activities)[0]?.questions).toEqual([question]);
+    expect(derivePendingUserInputs(activities)[0]?.dismissible).toBe(true);
   });
 
   it("preserves native choice values and the custom-answer restriction", () => {
@@ -334,6 +335,7 @@ describe("derivePendingUserInputs", () => {
     ];
 
     expect(derivePendingUserInputs(activities)[0]?.questions).toEqual([question]);
+    expect(derivePendingUserInputs(activities)[0]?.dismissible).toBe(false);
   });
 
   it("tracks open structured prompts and removes resolved ones", () => {
@@ -405,6 +407,7 @@ describe("derivePendingUserInputs", () => {
       {
         requestId: "req-user-input-1",
         createdAt: "2026-02-23T00:00:01.000Z",
+        dismissible: false,
         questions: [
           {
             id: "sandbox_mode",

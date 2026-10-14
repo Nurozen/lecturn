@@ -1,6 +1,6 @@
 import { ApprovalRequestId } from "@lecturn/contracts";
-import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vite-plus/test";
+import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import type { PendingUserInput } from "../../session-logic";
@@ -20,42 +20,101 @@ const prompt: PendingUserInput = {
       multiSelect: false,
     },
   ],
+  dismissible: true,
 };
 
-function renderPanel() {
-  return renderToStaticMarkup(
+let renderer: ReactTestRenderer;
+const onDismiss = vi.fn();
+
+function panel(responding = false, pendingUserInputs: PendingUserInput[] = [prompt]) {
+  return (
     <ComposerPendingUserInputPanel
-      pendingUserInputs={[prompt]}
-      respondingRequestIds={[]}
+      pendingUserInputs={pendingUserInputs}
+      respondingRequestIds={responding ? [prompt.requestId] : []}
       answers={{}}
       questionIndex={0}
       onToggleOption={() => {}}
       onAdvance={() => {}}
-    />,
+      onDismiss={onDismiss}
+    />
   );
 }
 
+function dismissControl() {
+  return renderer.root.find(
+    (node) => node.type === "span" && node.props["data-pending-user-input-dismiss"],
+  );
+}
+
+beforeEach(async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("document", new EventTarget());
+  onDismiss.mockClear();
+  await act(async () => {
+    renderer = create(panel());
+  });
+});
+
+afterEach(async () => {
+  await act(async () => renderer.unmount());
+  vi.unstubAllGlobals();
+});
+
 describe("ComposerPendingUserInputPanel", () => {
-  it("renders the header as a disclosure control for the question body", () => {
-    const markup = renderPanel();
-
-    const toggle = markup.match(/<button[^>]*data-pending-user-input-toggle="[^"]*"[^>]*>/)?.[0];
-    expect(toggle).toBeDefined();
-    expect(toggle).toContain('data-pending-user-input-toggle="expanded"');
-    expect(toggle).toContain('aria-expanded="true"');
-    expect(toggle).toContain('type="button"');
-
-    const controlledId = toggle?.match(/aria-controls="([^"]+)"/)?.[1];
-    expect(controlledId).toBeDefined();
-    expect(markup).toMatch(new RegExp(`<div[^>]*\\sid="${controlledId}"`));
+  it("offers dismiss only for async questions", async () => {
+    expect(dismissControl()).toBeDefined();
+    await act(async () => {
+      renderer.update(panel(false, [{ ...prompt, dismissible: false }]));
+    });
+    expect(
+      renderer.root.findAll((node) => node.props["data-pending-user-input-dismiss"]),
+    ).toHaveLength(0);
   });
 
-  it("starts expanded so the question and its options are visible", () => {
-    const markup = renderPanel();
-
-    expect(markup).toContain("Approach");
-    expect(markup).toContain("Which approach should the migration take?");
-    expect(markup).toContain("Incremental");
-    expect(markup).toContain("Big bang");
+  it("removes the panel when no question is pending", async () => {
+    await act(async () => renderer.update(panel(false, [])));
+    expect(renderer.toJSON()).toBeNull();
   });
+
+  it.each(["click", "Enter", " "])(
+    "blocks %j dismissal while responding and restores it after the response settles",
+    async (activation) => {
+      const activate = async () => {
+        const event = {
+          key: activation,
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+        };
+        await act(async () => {
+          const control = dismissControl();
+          if (activation === "click") control.props.onClick(event);
+          else control.props.onKeyDown(event);
+        });
+        expect(event.preventDefault).toHaveBeenCalledOnce();
+        expect(event.stopPropagation).toHaveBeenCalledOnce();
+      };
+
+      await activate();
+      expect(onDismiss).toHaveBeenCalledExactlyOnceWith(prompt.requestId);
+      onDismiss.mockClear();
+
+      await act(async () => renderer.update(panel(true)));
+      expect(dismissControl().props["aria-disabled"]).toBe(true);
+      expect(dismissControl().props.tabIndex).toBe(-1);
+      await activate();
+      await activate();
+      expect(onDismiss).not.toHaveBeenCalled();
+      expect(
+        renderer.root.find(
+          (node) => node.type === "button" && node.props["data-pending-user-input-toggle"],
+        ).props["aria-expanded"],
+      ).toBe(true);
+
+      await act(async () => renderer.update(panel()));
+      expect(dismissControl().props["aria-disabled"]).toBe(false);
+      expect(dismissControl().props.tabIndex).toBe(0);
+      await activate();
+      expect(onDismiss).toHaveBeenCalledExactlyOnceWith(prompt.requestId);
+    },
+  );
 });

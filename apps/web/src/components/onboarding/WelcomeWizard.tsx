@@ -195,7 +195,7 @@ export function WelcomeWizard({
   return (
     <div
       ref={phoneAuthViewportRef}
-      className="phone-setup-viewport flex h-dvh min-h-0 flex-col overflow-hidden bg-black text-foreground"
+      className="phone-setup-viewport flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground"
     >
       {isElectron ? (
         <div

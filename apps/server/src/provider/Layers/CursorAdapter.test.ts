@@ -372,6 +372,74 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
     );
   }
 
+  it.effect.each([false, true])(
+    "rejects a Cursor transport error with contextual evidence=%s",
+    (withContext) =>
+      Effect.gen(function* () {
+        const adapter = yield* CursorAdapter;
+        const settings = yield* ServerSettingsService;
+        const threadId = ThreadId.make("cursor-transport-error-answer");
+        const wrapperPath = yield* Effect.promise(() =>
+          makeMockAgentWrapper({
+            LECTURN_ACP_PROMPT_RESPONSE_TEXT: "Error: RetriableError: WritableIterable is closed",
+          }),
+        );
+        yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+        const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => event.type === "session.exited"),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("cursor"),
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+        });
+        const receipts: import("@lecturn/contracts").ContextualDeliveryReceipt[] = [];
+        const error = yield* adapter
+          .sendTurn({
+            threadId,
+            input: "continue",
+            attachments: [],
+            ...(withContext
+              ? {
+                  contextualEvidence: {
+                    preparationId: "prep",
+                    packetId: "packet",
+                    dispatchId: "dispatch",
+                    submissionId: "submission",
+                    providerInstanceId: ProviderInstanceId.make("cursor"),
+                    providerContextEpoch: "epoch",
+                    providerContextId: null,
+                    text: "contextual source",
+                    evidenceIds: ["source"],
+                  },
+                  onContextualReceipt: (
+                    receipt: import("@lecturn/contracts").ContextualDeliveryReceipt,
+                  ) =>
+                    Effect.sync(() => {
+                      receipts.push(receipt);
+                    }),
+                }
+              : {}),
+          })
+          .pipe(Effect.flip);
+        assert.equal(error._tag, "ProviderAdapterRequestError");
+        if (error._tag === "ProviderAdapterRequestError") {
+          assert.equal(error.detail, "Cursor reported a transport failure.");
+          assert.equal(error.cause, "Error: RetriableError: WritableIterable is closed");
+        }
+        assert.deepStrictEqual(
+          receipts.map((receipt) => receipt.acceptance),
+          withContext ? ["unknown"] : [],
+        );
+        yield* adapter.stopSession(threadId);
+        const runtimeEvents = yield* Fiber.join(runtimeEventsFiber);
+        assert.isFalse(runtimeEvents.some((event) => event.type === "turn.completed"));
+      }),
+  );
+
   it.effect("starts a session and maps mock ACP prompt flow to runtime events", () =>
     Effect.gen(function* () {
       const adapter = yield* CursorAdapter;

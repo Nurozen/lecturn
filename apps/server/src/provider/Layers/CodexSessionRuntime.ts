@@ -743,10 +743,10 @@ export const openCodexThread = (input: {
         Effect.flatMap((response) =>
           decodeCodexThreadOpenResponse(response).pipe(
             Effect.mapError((error) =>
-              CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
-                "decode-response-payload",
+              CodexErrors.CodexAppServerRequestError.invalidPayload(
+                method,
+                "decode-payload",
                 error,
-                { method },
               ),
             ),
           ),

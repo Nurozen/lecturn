@@ -1533,7 +1533,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
       }),
     );
 
-    it.effect("shares a 64 MiB full-read budget across providers without hiding projects", () =>
+    it.effect("streams large transcripts across providers without hiding projects", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const fileSystem = yield* FileSystem.FileSystem;
@@ -1630,9 +1630,9 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
           "Importable",
           "Importable",
           "Importable",
-          "Skipped",
+          "Importable",
         ]);
-        expect(fullReadBytes).toBe(64 * 1024 * 1024);
+        expect(fullReadBytes).toBe(80 * 1024 * 1024);
       }),
     );
 
@@ -1846,40 +1846,80 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
       }),
     );
 
-    it.effect("reports an eligible transcript over 16 MiB as skipped", () =>
-      Effect.gen(function* () {
-        const path = yield* Path.Path;
-        const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
-        yield* TestClock.setTime(nowMs);
-        const claudeHomePath = yield* makeTempDir("lecturn-claude-home-");
-        const codexHomePath = yield* makeTempDir("lecturn-codex-home-");
-        const workspace = yield* makeTempDir("lecturn-workspace-");
-        const transcript = [
-          encodeTranscriptRecord({
-            type: "session_meta",
-            payload: { id: "large-session", cwd: workspace },
-          }),
-          encodeTranscriptRecord({
-            type: "event_msg",
-            payload: { type: "user_message", message: "Import this large session" },
-          }),
-        ]
-          .join("\n")
-          .padEnd(16 * 1024 * 1024 + 1, " ");
-        yield* writeTranscript({
-          filePath: path.join(codexHomePath, "sessions", "2026", "08", "24", "rollout-large.jsonl"),
-          contents: transcript,
-          mtimeMs: nowMs,
-        });
+    it.effect.each(["padding", "tool payload"] as const)(
+      "imports visible history across oversized %s",
+      (oversized) =>
+        Effect.gen(function* () {
+          const path = yield* Path.Path;
+          const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
+          yield* TestClock.setTime(nowMs);
+          const claudeHomePath = yield* makeTempDir("lecturn-claude-home-");
+          const codexHomePath = yield* makeTempDir("lecturn-codex-home-");
+          const workspace = yield* makeTempDir("lecturn-workspace-");
+          const toolRecord =
+            oversized === "padding"
+              ? encodeTranscriptRecord({ type: "tool_result", data: "" }).padEnd(
+                  16 * 1024 * 1024 + 1,
+                  " ",
+                )
+              : encodeTranscriptRecord({
+                  type: "response_item",
+                  payload: {
+                    type: "function_call_output",
+                    output: "x".repeat(16 * 1024 * 1024 + 1),
+                  },
+                });
+          const transcript = [
+            encodeTranscriptRecord({
+              type: "session_meta",
+              payload: { id: "large-session", cwd: workspace },
+            }),
+            encodeTranscriptRecord({
+              type: "event_msg",
+              payload: { type: "user_message", message: "Import this large session" },
+            }),
+            toolRecord,
+            encodeTranscriptRecord({
+              type: "response_item",
+              payload: {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "Imported after the tool result 雪" }],
+              },
+            }),
+          ].join("\n");
+          yield* writeTranscript({
+            filePath: path.join(
+              codexHomePath,
+              "sessions",
+              "2026",
+              "08",
+              "24",
+              "rollout-large.jsonl",
+            ),
+            contents: transcript,
+            mtimeMs: nowMs,
+          });
 
-        const outcomes = yield* runRecentThreadOutcomes({
-          claudeHomePath,
-          codexHomePath,
-          workspaceRoot: workspace,
-        });
+          const outcomes = yield* runRecentThreadOutcomes({
+            claudeHomePath,
+            codexHomePath,
+            workspaceRoot: workspace,
+          });
 
-        expect(outcomes).toEqual([{ _tag: "Skipped" }]);
-      }),
+          expect(outcomes).toMatchObject([
+            {
+              _tag: "Importable",
+              thread: {
+                providerSessionId: "large-session",
+                messages: [
+                  { role: "user", text: "Import this large session" },
+                  { role: "assistant", text: "Imported after the tool result 雪" },
+                ],
+              },
+            },
+          ]);
+        }),
     );
 
     it.effect("reports stat, read, and parse failures as skipped", () =>
