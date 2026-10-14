@@ -8,9 +8,22 @@ This document covers the unified release workflow for stable and nightly desktop
 
 - Workflow: `.github/workflows/release.yml`
 - Triggers:
-  - push tag matching `v*.*.*` for stable releases
+  - manual `workflow_dispatch` with `channel=stable`, the normal way to ship stable
+  - push tag matching `v*.*.*` for a stable release of an explicit commit
   - scheduled nightly check once daily at 10:38 UTC
-  - manual `workflow_dispatch` for either channel
+  - manual `workflow_dispatch` with `channel=nightly`
+- A manual stable release builds the commit of the latest published nightly, not `main` HEAD.
+  Nightly is the release candidate: verify the nightly, then promote it. Merges to `main` keep
+  landing while you verify and never leak into the stable build.
+  - The version defaults to the one the nightly previewed (`0.0.39-nightly.*` ships as `0.0.39`).
+    Pass the `version` input to override it, for example for a minor bump.
+  - Every quality check, desktop build, WSL prebuild, CLI package, and GitHub Release uses the
+    resolved commit. Finalization alone checks out current `main` for the version bookkeeping PR.
+  - The stable tag is created on the nightly's commit when the GitHub Release is published.
+  - Without a published nightly, manual stable releases fail even when `version` is supplied.
+    Nightlies are selected from this repository, so Lecturn versions remain independent of upstream.
+  - Pushing a `vX.Y.Z` tag by hand still works and builds exactly the tagged commit. Use it when
+    the commit to ship is not the latest nightly, such as a cherry-picked fix on a release branch.
 - Runs lint, typecheck, and tests alongside artifact builds. Publishing waits for every check.
 - Reads the shared production Lecturn Connect relay URL and Clerk client configuration before packaging clients.
 - Builds four artifacts in parallel for both channels:
@@ -27,22 +40,15 @@ This document covers the unified release workflow for stable and nightly desktop
 - Publishes the CLI package (`apps/server`, npm package `lecturn`) with OIDC trusted publishing from the same workflow file:
   - stable releases publish npm dist-tag `latest`
   - nightly releases publish npm dist-tag `nightly`
-- Deploys the hosted web app to Vercel only after a release is published:
-  - stable releases are aliased to the `latest` hosted app channel
-  - nightly releases are aliased to the `nightly` hosted app channel
 - Signing is optional and auto-detected per platform from secrets.
 
 ## Required release credentials
 
-Stable releases require these GitHub Actions secrets in addition to the platform and deployment
-credentials documented below:
-
-- `RELEASE_APP_ID`
-- `RELEASE_APP_PRIVATE_KEY`
-
-The finalize job uses them to commit and push aligned package versions to `main` as the Release App.
-GitHub Release publication uses the repository-scoped workflow token so it has a rate-limit quota
-independent from the shared Release App installation.
+CLI publishing uses npm OIDC trusted publishing. GitHub Release publication and stable
+finalization use the repository-scoped `GITHUB_TOKEN`; no Release App credentials are required
+for this workflow. Stable finalization opens or reuses a version bump pull request and explicitly
+dispatches CI. Merge that pull request after its required checks pass; see
+[Lecturn release finalization](./lecturn-release.md#stable-release-finalization).
 
 ## Lecturn Connect relay deployment
 
@@ -52,7 +58,9 @@ release channels.
 
 `.github/workflows/deploy-relay.yml` deploys Alchemy stage `prod` on every push to `main`. The
 release workflow reads the relay URL and Clerk client configuration from the existing `production`
-GitHub Actions environment before building desktop, CLI, or hosted web artifacts.
+GitHub Actions environment before building desktop and CLI artifacts. Client packaging uses
+`RELAY_DOMAIN` explicitly; configure it even when the relay deployment derives its domain from
+`RELAY_API_ZONE_NAME`. The release does not read or redeploy Alchemy state.
 
 Required repository variables shared by relay deployments:
 
@@ -102,57 +110,13 @@ Developers deploy personal stages locally rather than through pull-request autom
 vp run --filter lecturn-relay deploy -- --stage "$USER" --env-file .env.local
 ```
 
-## Hosted web app release deployment
+## Hosted web deployment
 
-The hosted app is intentionally not deployed by Vercel's Git integration. The
-web project disables automatic Git deployments in `apps/web/vercel.ts` via
-`git.deploymentEnabled: false`, and `.github/workflows/release.yml` deploys the
-web app with Vercel CLI after the GitHub Release succeeds.
-
-Required GitHub Actions secrets:
-
-- `VERCEL_TOKEN`
-- `VERCEL_ORG_ID`
-- `VERCEL_PROJECT_ID`
-
-Optional GitHub Actions variables:
-
-- `VERCEL_TEAM_SLUG`: overrides the Vercel CLI scope when the team slug is preferred over the `VERCEL_ORG_ID` secret.
-- `LECTURN_WEB_ROUTER_URL`: defaults to `https://lecturn.cloudgatherer.net`.
-- `LECTURN_WEB_LATEST_DOMAIN`: defaults to `latest.lecturn.cloudgatherer.net`.
-- `LECTURN_WEB_NIGHTLY_DOMAIN`: defaults to `nightly.lecturn.cloudgatherer.net`.
-
-Required Vercel domains:
-
-- `lecturn.cloudgatherer.net`: the router domain users open, updated by stable releases.
-- `latest.lecturn.cloudgatherer.net`: channel alias updated by stable releases.
-- `nightly.lecturn.cloudgatherer.net`: channel alias updated by nightly releases.
-
-The router domain uses `apps/web/vercel.ts` routes. Users opt into a channel by
-visiting `/__lecturn/channel?channel=latest` or
-`/__lecturn/channel?channel=nightly`; the router stores the
-`lecturn_web_channel` cookie and rewrites future requests on `lecturn.cloudgatherer.net` to
-the matching channel alias.
-
-The release deploy job rewrites release package versions before upload so the
-hosted app's About panel renders the release version. Stable deploys alias the
-same deployment to both the `latest` channel and the router domain so the router
-rules stay current. Nightly deploys only alias the `nightly` channel. The job
-also passes `VITE_HOSTED_APP_CHANNEL=latest|nightly`, which renders the hosted
-update track selector in the About panel. Changing the selector navigates
-through `/__lecturn/channel` on the router domain so the user's channel cookie is
-updated before redirecting to the hosted app root.
-
-One-time Vercel dashboard setup:
-
-1. Confirm the web project root directory remains `apps/web`.
-2. Add the three domains above to the web project.
-3. Disable automatic Git deployments in the dashboard if desired; the committed
-   `vercel.ts` setting is the source-of-truth, but disconnecting Git in the
-   dashboard is also safe.
-4. Run one stable release deployment, or manually alias the current stable
-   deployment, so `lecturn.cloudgatherer.net` points at a deployment containing the router
-   rules in `apps/web/vercel.ts`. Future stable releases keep this alias current.
+Hosted web deployment is independent of `.github/workflows/release.yml`. The release workflow
+publishes desktop artifacts and the CLI package; it does not deploy Vercel, the relay, or mobile.
+When deploying a hosted client, verify that its exact `lecturn@<version>` is available on npm first.
+See [Lecturn release configuration](./lecturn-release.md#release-configuration) for the fork's
+release boundaries.
 
 ## Nightly builds
 
@@ -183,7 +147,8 @@ The workflow enforces this ordering:
 
 1. `publish_cli` publishes the exact stable or nightly version to npm.
 2. `release` depends on `publish_cli` before exposing desktop artifacts in GitHub Releases.
-3. `deploy_web` depends on `release` before moving the hosted channel to the new client.
+
+Hosted web deployment must separately verify npm availability before exposing a new client version.
 
 Preserve these dependencies when changing the release graph. Publishing a client first would leave
 the **Update server** action targeting a package version that does not exist yet.
@@ -281,18 +246,17 @@ Checklist:
 
 There is no dry-run tag path. Pushing any accepted non-nightly tag, including
 `v0.0.0-test.1`, classifies the run as the stable channel. It publishes `lecturn` with npm dist-tag
-`latest`, creates a real GitHub Release, aliases the hosted app to `latest.lecturn.cloudgatherer.net` and
-`lecturn.cloudgatherer.net`, and can commit a version bump to `main` in the finalize job. Do not push a test tag
-to validate the workflow.
+`latest`, creates a real GitHub Release, and can open a version bump pull request in the finalize job.
+Do not push a test tag to validate the workflow.
 
 The workflow has no non-publishing `workflow_dispatch` mode. Use normal CI or local quality gates to
 validate checks and builds without shipping. To exercise the complete release graph at lower stable
 risk, manually dispatch `channel=nightly`; this still publishes a real nightly npm package, GitHub
-prerelease, desktop updater release, and hosted nightly alias, but it does not update stable aliases or
-commit a version bump to `main`. Only run it when a real nightly release is acceptable.
+prerelease, and desktop updater release. It does not open a version bump pull request. Only run it
+when a real nightly release is acceptable.
 
-Manual `channel=stable` with a version input is also a real stable-channel release. Omitting signing
-secrets only makes platform artifacts unsigned; it does not prevent publication.
+Manual `channel=stable` is also a real stable-channel release. Omitting signing secrets only makes
+platform artifacts unsigned; it does not prevent publication.
 
 ## 2) Apple signing + notarization setup (macOS)
 
@@ -370,17 +334,21 @@ Checklist:
 
 ## 4) Ongoing release checklist
 
-1. Ensure `main` is green in CI.
-2. Bump app version as needed.
-3. Create release tag: `vX.Y.Z`.
-4. Push tag.
-5. Verify workflow steps:
+1. Pick the latest nightly and verify it: run the smoke test above against its artifacts and
+   check the nightly channel for regressions.
+2. Dispatch the Release workflow with `channel=stable`. Leave `version` empty unless the version
+   should differ from the one the nightly previewed.
+3. Confirm the `Resolve release commit` notice names the nightly tag and commit you verified. If a
+   newer nightly published in between, the run builds that one instead. The `version` input only
+   changes the version; it does not select the source commit. Stable rebuilds the selected source
+   with current signing/configuration and the resolved Stave tag; pin `stave_version` when needed.
+4. Verify workflow steps:
    - preflight passes
    - release quality checks pass
    - all matrix builds pass
    - `publish_cli` publishes the exact release version before the release job
    - release job uploads expected files
-6. Smoke test downloaded artifacts.
+5. Smoke test downloaded artifacts.
 
 ## 5) Troubleshooting
 

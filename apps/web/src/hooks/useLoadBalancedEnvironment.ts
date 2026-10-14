@@ -18,12 +18,19 @@ function createSelectionAtom(
         resources: result._tag === "Success" ? result.value : null,
         receivedAt: result._tag === "Success" ? result.timestamp : 0,
         pending: result._tag === "Initial" || result.waiting,
+        failed: result._tag === "Failure",
         weight: weights[environmentId] ?? 50,
       };
     });
+    const pending = resources.some((resource) => resource.pending);
+    const environmentId = chooseLoadBalancedEnvironment(
+      resources,
+      Date.now(),
+    ) as EnvironmentId | null;
     return {
-      pending: resources.some((resource) => resource.pending),
-      environmentId: chooseLoadBalancedEnvironment(resources, Date.now()) as EnvironmentId | null,
+      pending,
+      environmentId,
+      failed: !pending && environmentId === null && resources.some((resource) => resource.failed),
     };
   });
 }
