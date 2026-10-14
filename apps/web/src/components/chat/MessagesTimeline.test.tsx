@@ -335,6 +335,90 @@ describe("MessagesTimeline", () => {
     },
   );
 
+  it("expands a failed label with no separate output using the keyboard", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("requestAnimationFrame", () => 1);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const label = ("Search failed: " + "a detailed provider error ".repeat(12)).trim();
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(() => {
+        renderer = create(
+          <MessagesTimeline
+            {...buildProps()}
+            timelineEntries={[
+              {
+                id: "failed-label",
+                kind: "work",
+                createdAt: MESSAGE_CREATED_AT,
+                entry: {
+                  id: "failed-label",
+                  createdAt: MESSAGE_CREATED_AT,
+                  label,
+                  command: label,
+                  tone: "tool",
+                  itemType: "command_execution",
+                  toolLifecycleStatus: "failed",
+                },
+              },
+            ]}
+          />,
+        );
+      });
+      const toggle = renderer!.root.findByProps({ "aria-expanded": false });
+      const prevented = vi.fn();
+      await act(() => toggle.props.onKeyDown({ key: "Enter", preventDefault: prevented }));
+      expect(prevented).toHaveBeenCalledOnce();
+      expect(renderer!.root.findByProps({ "aria-expanded": true })).toBeDefined();
+      const visibleLabel = renderer!.root
+        .findAllByType("span")
+        .find((node) => node.children.includes(label));
+      expect(visibleLabel?.props.className).toContain("whitespace-pre-wrap");
+      expect(renderer!.root.findAllByType("pre")).toHaveLength(0);
+    } finally {
+      await act(() => renderer?.unmount());
+    }
+  });
+
+  it("does not repeat the visible tool label in expanded output", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("requestAnimationFrame", () => 1);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(() => {
+        renderer = create(
+          <MessagesTimeline
+            {...buildProps()}
+            timelineEntries={[
+              {
+                id: "duplicate-label",
+                kind: "work",
+                createdAt: MESSAGE_CREATED_AT,
+                entry: {
+                  id: "duplicate-label",
+                  createdAt: MESSAGE_CREATED_AT,
+                  label: "Search results",
+                  detail: "Search results",
+                  tone: "tool",
+                },
+              },
+            ]}
+          />,
+        );
+      });
+      await act(() => renderer!.root.findByProps({ "aria-expanded": false }).props.onClick());
+      expect(renderer!.root.findAllByType("pre")).toHaveLength(0);
+      expect(
+        renderer!.root
+          .findAllByType("span")
+          .filter((node) => node.children.includes("Search results")),
+      ).toHaveLength(1);
+    } finally {
+      await act(() => renderer?.unmount());
+    }
+  });
+
   it("renders elapsed time for a completed turn", () => {
     const turnId = TurnId.make("turn-with-fold");
     const assistantEntry = buildAssistantTimelineEntry("Done.");

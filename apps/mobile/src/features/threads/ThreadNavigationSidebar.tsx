@@ -50,6 +50,7 @@ import { useThreadListV2ShelfPreferences } from "./use-thread-list-v2-shelf-pref
 import { usePendingThreadOrder } from "../../state/thread-order";
 import { environmentServerConfigsAtom } from "../../state/server";
 import { usePendingNewTasks } from "../../state/use-pending-new-tasks";
+import { useQueuedThreadKeys } from "../../state/use-thread-outbox";
 import { useWorkspaceState } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
@@ -196,6 +197,7 @@ function ThreadNavigationSidebarPane(
   const threadListV2Enabled = useThreadListV2Enabled();
   const nestSagas = useSidebarNestSagas();
   const pendingTasks = usePendingNewTasks();
+  const queuedThreadKeys = useQueuedThreadKeys();
   const { openPendingTask, confirmDeletePendingTask } = usePendingTaskListActions();
   const environments = useMemo(
     () =>
@@ -341,6 +343,7 @@ function ThreadNavigationSidebarPane(
         projects: scopedProjects,
         threads: scopedThreads,
         pendingTasks: scopedPendingTasks,
+        queuedThreadKeys,
         environmentId: options.selectedEnvironmentId,
         searchQuery: props.searchQuery,
         matchedThreadKeys,
@@ -350,6 +353,7 @@ function ThreadNavigationSidebarPane(
       }),
     [
       accountSections,
+      queuedThreadKeys,
       nestSagas,
       sagaIndex,
       matchedThreadKeys,
@@ -392,11 +396,20 @@ function ThreadNavigationSidebarPane(
         : buildHomeListLayout({
             accountSections,
             groups,
+            queuedThreadKeys,
             displayStates: accountDisplayStates,
             showAllThreads: hasSearchQuery,
             sagaIndex,
           }),
-    [accountSections, threadListV2Enabled, groups, accountDisplayStates, hasSearchQuery, sagaIndex],
+    [
+      accountSections,
+      threadListV2Enabled,
+      groups,
+      queuedThreadKeys,
+      accountDisplayStates,
+      hasSearchQuery,
+      sagaIndex,
+    ],
   );
   const projectByKey = useMemo(() => {
     const map = new Map<string, EnvironmentProject>();
@@ -576,6 +589,7 @@ function ThreadNavigationSidebarPane(
           now: new Date(Math.max(Date.parse(`${nowMinute}:00.000Z`), snoozeWakeTick)).toISOString(),
           settlementEnvironmentIds,
           snoozeEnvironmentIds,
+          queuedThreadKeys,
         }),
       });
     return { pinned: sectionPlanner("pinned"), active: sectionPlanner("active") };
@@ -585,6 +599,7 @@ function ThreadNavigationSidebarPane(
     moveScopes,
     threads,
     pendingOrder,
+    queuedThreadKeys,
     settlementEnvironmentIds,
     snoozeEnvironmentIds,
     nowMinute,
@@ -610,6 +625,7 @@ function ThreadNavigationSidebarPane(
       matchedThreadKeys,
       settlementEnvironmentIds,
       snoozeEnvironmentIds,
+      queuedThreadKeys,
       settledLimit: Number.POSITIVE_INFINITY,
       now: new Date().toISOString(),
       snoozedShelfExpanded,
@@ -618,6 +634,7 @@ function ThreadNavigationSidebarPane(
     });
   }, [
     pendingOrder,
+    queuedThreadKeys,
     nowMinute,
     snoozeWakeTick,
     snoozedShelfExpanded,
@@ -909,6 +926,7 @@ function ThreadNavigationSidebarPane(
   // favicon and fallback title it was first rendered with.
   const listExtraData = useMemo(
     () => ({
+      queuedThreadKeys,
       hierarchyGuides,
       selectedThreadKey: props.selectedThreadKey ?? "",
       projectByKey,
@@ -919,6 +937,7 @@ function ThreadNavigationSidebarPane(
       threadSearchMatchByKey,
     }),
     [
+      queuedThreadKeys,
       hierarchyGuides,
       props.selectedThreadKey,
       projectByKey,
@@ -1044,6 +1063,7 @@ function ThreadNavigationSidebarPane(
               nested
               thread={thread}
               variant={item.item.variant}
+              hasQueuedMessages={queuedThreadKeys.has(`${thread.environmentId}:${thread.id}`)}
               snoozed={item.item.snoozed}
               pinned={item.item.pinned}
               snoozePresetMinute={nowMinute}
@@ -1189,6 +1209,7 @@ function ThreadNavigationSidebarPane(
             <ThreadListRow
               variant="sidebar"
               thread={thread}
+              hasQueuedMessages={queuedThreadKeys.has(`${thread.environmentId}:${thread.id}`)}
               environmentLabel={
                 savedConnectionsById[thread.environmentId]?.environmentLabel ?? null
               }
@@ -1238,6 +1259,7 @@ function ThreadNavigationSidebarPane(
       activeReorderEnvironmentIds,
       threadMovePlanners,
       pendingOrder,
+      queuedThreadKeys,
       confirmDeletePendingTask,
       confirmDeleteThread,
       handleSelectThread,

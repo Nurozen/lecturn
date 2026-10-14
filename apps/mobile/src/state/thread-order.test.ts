@@ -11,6 +11,7 @@ import {
   pendingThreadOrderAtom,
 } from "./thread-order";
 import { environmentThreadShells } from "./threads";
+import { queuedThreadKeysAtom } from "./use-thread-outbox";
 
 vi.mock("./atom-registry", async () => {
   const { AtomRegistry } = await import("effect/unstable/reactivity");
@@ -26,13 +27,26 @@ vi.mock("./projects", async () => {
 });
 vi.mock("./server", async () => {
   const { Atom } = await import("effect/unstable/reactivity");
-  return { environmentServerConfigsAtom: Atom.make(new Map()).pipe(Atom.keepAlive) };
+  return {
+    environmentServerConfigsAtom: Atom.make(
+      new Map([["env", { environment: { capabilities: { threadSettlement: true } } }]]),
+    ).pipe(Atom.keepAlive),
+  };
+});
+vi.mock("./use-thread-outbox", async () => {
+  const { Atom } = await import("effect/unstable/reactivity");
+  return { queuedThreadKeysAtom: Atom.make(new Set<string>()).pipe(Atom.keepAlive) };
 });
 
 // The mocked shell source is writable so tests can deliver canonical upserts.
 const shellsAtom = environmentThreadShells.threadShellsAtom as Atom.Writable<
   readonly EnvironmentThreadShell[],
   readonly EnvironmentThreadShell[]
+>;
+
+const queuedKeysAtom = queuedThreadKeysAtom as Atom.Writable<
+  ReadonlySet<string>,
+  ReadonlySet<string>
 >;
 
 function fixture() {
@@ -150,4 +164,57 @@ it("reconciles only its owning project section and detects new members there", (
   ]);
   expect(move.isPending()).toBe(false);
   expect(appAtomRegistry.get(shellsAtom).find((row) => row.id === "b")?.activeOrderKey).toBe("aa");
+});
+
+it("invalidates a scoped move when a settled member gains a queued message", () => {
+  const { rows } = fixture();
+  const settled = {
+    ...rows[0]!,
+    id: ThreadId.make("settled"),
+    settledOverride: "settled" as const,
+  };
+  appAtomRegistry.set(shellsAtom, [...rows, settled]);
+  const move = beginPendingThreadOrder(
+    createPendingThreadOrder({
+      section: "active",
+      ordered: rows,
+      movedId: "env:b",
+      direction: "up",
+      assignments: [
+        { id: "env:b", orderKey: "aa" },
+        { id: "env:a", orderKey: "bb" },
+      ],
+      scopeProjectKeys: ["env:project"],
+    }),
+  );
+  expect(move.isPending()).toBe(true);
+  appAtomRegistry.set(queuedKeysAtom, new Set(["env:settled"]));
+  expect(appAtomRegistry.get(pendingThreadOrderAtom)).toBeNull();
+  expect(move.isPending()).toBe(false);
+});
+
+it("ignores foreign queued members but invalidates a move when its queued member drains", () => {
+  const { rows } = fixture();
+  const settled = { ...rows[0]!, settledOverride: "settled" as const };
+  const foreign = { ...settled, id: ThreadId.make("foreign"), projectId: ProjectId.make("other") };
+  appAtomRegistry.set(shellsAtom, [settled, rows[1]!, foreign]);
+  appAtomRegistry.set(queuedKeysAtom, new Set(["env:a"]));
+  const move = beginPendingThreadOrder(
+    createPendingThreadOrder({
+      section: "active",
+      ordered: [settled, rows[1]!],
+      movedId: "env:b",
+      direction: "up",
+      assignments: [
+        { id: "env:b", orderKey: "aa" },
+        { id: "env:a", orderKey: "bb" },
+      ],
+      scopeProjectKeys: ["env:project"],
+    }),
+  );
+  appAtomRegistry.set(queuedKeysAtom, new Set(["env:a", "env:foreign"]));
+  expect(move.isPending()).toBe(true);
+  appAtomRegistry.set(queuedKeysAtom, new Set(["env:foreign"]));
+  expect(appAtomRegistry.get(pendingThreadOrderAtom)).toBeNull();
+  expect(move.isPending()).toBe(false);
 });

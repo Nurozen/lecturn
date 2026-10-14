@@ -29,7 +29,7 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Order from "effect/Order";
 
-import { scopedProjectKey } from "../../lib/scopedEntities";
+import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 
 export type HomeProjectSortOrder = Exclude<SidebarProjectSortOrder, "manual">;
@@ -214,12 +214,23 @@ function selectRecentThreads(
   sortedThreads: ReadonlyArray<EnvironmentThreadShell>,
   threadSortOrder: SidebarThreadSortOrder,
   now: number,
+  queuedThreadKeys: ReadonlySet<string> | undefined,
 ): ReadonlyArray<EnvironmentThreadShell> {
   const cutoff = now - RECENT_THREAD_WINDOW_MS;
   const recent = sortedThreads.filter(
     (thread) => getThreadSortTimestamp(thread, threadSortOrder) >= cutoff,
   );
-  return recent.length > 0 ? recent : sortedThreads.slice(0, RECENT_THREAD_FALLBACK_COUNT);
+  const baseline =
+    recent.length > 0 ? recent : sortedThreads.slice(0, RECENT_THREAD_FALLBACK_COUNT);
+  if (!queuedThreadKeys?.size) return baseline;
+  const baselineKeys = new Set(
+    baseline.map((thread) => scopedThreadKey(thread.environmentId, thread.id)),
+  );
+  // Queue admission must not replace the fallback for an otherwise stale project.
+  return sortedThreads.filter((thread) => {
+    const key = scopedThreadKey(thread.environmentId, thread.id);
+    return baselineKeys.has(key) || queuedThreadKeys.has(key);
+  });
 }
 
 export function buildHomeThreadGroups(input: {
@@ -227,6 +238,8 @@ export function buildHomeThreadGroups(input: {
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
   readonly pendingTasks?: ReadonlyArray<PendingNewTask>;
+  /** Thread keys with a message waiting in the outbox; kept in the default view. */
+  readonly queuedThreadKeys?: ReadonlySet<string>;
   readonly environmentId: EnvironmentId | null;
   readonly searchQuery: string;
   readonly matchedThreadKeys?: ReadonlySet<string>;
@@ -386,7 +399,7 @@ export function buildHomeThreadGroups(input: {
     // only trims the default (no-query) view.
     const recentThreads =
       query.length === 0
-        ? selectRecentThreads(sortedThreads, input.threadSortOrder, now)
+        ? selectRecentThreads(sortedThreads, input.threadSortOrder, now, input.queuedThreadKeys)
         : sortedThreads;
 
     // A stale project id still resolves to the canonical member with the same

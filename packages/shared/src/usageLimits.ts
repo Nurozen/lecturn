@@ -9,6 +9,7 @@ import {
   type EnvironmentId,
   type UsageLimitsReport,
   type ProviderInstanceId,
+  type ProviderConsumeResetCreditInput,
   type ServerProviderSlashCommand,
   isProviderAvailable,
   type ServerProvider,
@@ -170,24 +171,44 @@ export interface LimitAccount {
   }>;
   /** The hub that reported it, when no environment has it natively. */
   readonly sourceLabel: string | null;
-  /** Where a reset credit can be redeemed; only native instances can. */
+  /** Where the displayed reset credit can be redeemed. */
   readonly redeem: {
     readonly environmentId: EnvironmentId;
-    readonly instanceId: ProviderInstanceId;
+    readonly input: ProviderConsumeResetCreditInput;
   } | null;
   readonly limits: ServerProviderUsageLimits;
 }
 
 /**
  * Every account with usable windows across the connected environments, one
- * entry per distinct account. Native instances win over hub reports, and the
- * freshest snapshot wins when the same account is reported twice.
+ * entry per distinct account. The freshest reads supply windows and credits;
+ * native instances supply names and environment labels.
  */
 export function collectLimitAccounts(
   presentations: Parameters<typeof collectLimitSources>[0],
 ): readonly LimitAccount[] {
   const accounts = new Map<string, LimitAccount>();
+  const creditSources = new Map<string, LimitAccount>();
+  const hubRedeems = new Map<string, LimitAccount>();
   const merge = (key: string, next: LimitAccount) => {
+    // Hub redemption also clears its routing cooldown. A native redemption
+    // resets the subscription upstream but leaves that cooldown in place.
+    const previousHub = hubRedeems.get(key);
+    if (
+      next.redeem &&
+      "sourceId" in next.redeem.input &&
+      (!previousHub || Date.parse(next.limits.checkedAt) > Date.parse(previousHub.limits.checkedAt))
+    ) {
+      hubRedeems.set(key, next);
+    }
+    const previousCredit = creditSources.get(key);
+    if (
+      (next.limits.resetCredits || (next.redeem && "instanceId" in next.redeem.input)) &&
+      (!previousCredit ||
+        Date.parse(next.limits.checkedAt) > Date.parse(previousCredit.limits.checkedAt))
+    ) {
+      creditSources.set(key, next);
+    }
     const previous = accounts.get(key);
     if (!previous) {
       accounts.set(key, next);
@@ -203,13 +224,9 @@ export function collectLimitAccounts(
       ),
     ];
     const winner = fresher ? next : previous;
-    // Windows come from the freshest snapshot, wherever it was read. Reset
-    // credits only ever come from a native instance, and the redeem must go
-    // to the instance whose credits are on show, so the two travel together:
-    // the freshest native snapshot supplies both, or neither.
-    const native = [previous, next]
-      .filter((candidate) => candidate.redeem !== null)
-      .sort((a, b) => Date.parse(b.limits.checkedAt) - Date.parse(a.limits.checkedAt))[0];
+    // Keep the credit read's timestamp separate from window-only hub reads.
+    // A newer native snapshot still clears an omitted balance, as before.
+    const creditSource = creditSources.get(key);
     accounts.set(key, {
       ...previous,
       displayName: previous.displayName ?? next.displayName,
@@ -218,11 +235,13 @@ export function collectLimitAccounts(
       environments,
       // A hub only names the account when no environment has it natively.
       sourceLabel: environments.length > 0 ? null : (previous.sourceLabel ?? next.sourceLabel),
-      redeem: native?.redeem ?? null,
+      redeem:
+        hubRedeems.get(key)?.redeem ??
+        (creditSource ? creditSource.redeem : (winner.redeem ?? previous.redeem ?? next.redeem)),
       limits: {
         ...winner.limits,
-        ...(native?.limits.resetCredits
-          ? { resetCredits: native.limits.resetCredits }
+        ...(creditSource?.limits.resetCredits
+          ? { resetCredits: creditSource.limits.resetCredits }
           : { resetCredits: undefined }),
       },
     });
@@ -243,7 +262,7 @@ export function collectLimitAccounts(
           accentColor: provider.accentColor,
           environments: [{ environmentId, label }],
           sourceLabel: null,
-          redeem: { environmentId, instanceId: provider.instanceId },
+          redeem: { environmentId, input: { instanceId: provider.instanceId } },
           limits: provider.usageLimits,
         },
       );
@@ -271,7 +290,16 @@ export function collectLimitAccounts(
           accentColor: undefined,
           environments: [],
           sourceLabel,
-          redeem: null,
+          redeem: account.usageLimits.resetCredits?.nextCreditId
+            ? {
+                environmentId,
+                input: {
+                  sourceId: source.id,
+                  accountId: account.id,
+                  creditId: account.usageLimits.resetCredits.nextCreditId,
+                },
+              }
+            : null,
           limits: account.usageLimits,
         });
       }
@@ -637,16 +665,53 @@ export function collectProviderUsageLimits(
   const notices: string[] = [];
   for (const provider of native) {
     if (!provider.usageLimits) continue;
+    const key = accountKey(provider.driver, provider.auth.email);
+    const hubCreditReads = sources
+      .flatMap((source) => source.accounts.map((account) => ({ source, account })))
+      .filter(
+        ({ account }) =>
+          key !== null &&
+          accountKey(account.driver, account.email) === key &&
+          account.usageLimits.resetCredits &&
+          !limitsNotice(account.usageLimits),
+      )
+      .sort(
+        (a, b) =>
+          Date.parse(b.account.usageLimits.checkedAt) - Date.parse(a.account.usageLimits.checkedAt),
+      );
+    const hubCredits = hubCreditReads[0];
+    // Prefer hub routing even when a newer native snapshot supplies the balance.
+    // An already-redeemed hub credit still clears the hub's cooldown.
+    const hubRedeem = hubCreditReads.find(
+      ({ account }) => account.usageLimits.resetCredits?.nextCreditId,
+    );
+    const hubCreditId = hubRedeem?.account.usageLimits.resetCredits?.nextCreditId;
+    // As in the pooled view, native omission clears older balances; window-only
+    // hub reads do not supply a new credit timestamp.
+    const useHubCredits =
+      hubCredits &&
+      Date.parse(hubCredits.account.usageLimits.checkedAt) >
+        Date.parse(provider.usageLimits.checkedAt);
     accounts.push({
       id: provider.instanceId,
       driver: provider.driver,
       label: `${provider.displayName?.trim() || String(provider.driver)} [${provider.instanceId}]`,
       ...(provider.auth.label ? { plan: provider.auth.label } : {}),
       instanceId: provider.instanceId,
+      resetCreditInput:
+        hubCreditId && hubRedeem
+          ? {
+              sourceId: hubRedeem.source.id,
+              accountId: hubRedeem.account.id,
+              creditId: hubCreditId,
+            }
+          : { instanceId: provider.instanceId },
       ...(provider.displayName ? { displayName: provider.displayName } : {}),
       ...(provider.accentColor ? { accentColor: provider.accentColor } : {}),
       ...(provider.auth.email ? { email: provider.auth.email } : {}),
-      limits: provider.usageLimits,
+      limits: useHubCredits
+        ? { ...provider.usageLimits, resetCredits: hubCredits.account.usageLimits.resetCredits }
+        : provider.usageLimits,
     });
   }
   for (const source of sources) {
@@ -659,6 +724,15 @@ export function collectProviderUsageLimits(
         driver: account.driver,
         label: `${source.label} · ${account.id}`,
         sourceLabel: "CLI Proxy",
+        ...(account.usageLimits.resetCredits?.nextCreditId
+          ? {
+              resetCreditInput: {
+                sourceId: source.id,
+                accountId: account.id,
+                creditId: account.usageLimits.resetCredits.nextCreditId,
+              },
+            }
+          : {}),
         ...(account.plan ? { plan: account.plan } : {}),
         ...(account.email ? { email: account.email } : {}),
         limits: account.usageLimits,

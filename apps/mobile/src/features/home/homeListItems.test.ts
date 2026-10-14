@@ -275,6 +275,96 @@ describe("buildHomeListLayout", () => {
   });
 });
 
+describe("queued threads through legacy grouping and layout", () => {
+  const now = Date.parse("2026-06-28T00:00:00Z");
+  const project = makeProject("queued-project", "Queued project");
+  const groupInput = {
+    projects: [project],
+    environmentId: null,
+    searchQuery: "",
+    projectSortOrder: "updated_at" as const,
+    threadSortOrder: "updated_at" as const,
+    projectGroupingMode: "separate" as const,
+    now,
+  };
+
+  it("adds an old queued row without replacing the stale-project fallback", () => {
+    const threads = Array.from({ length: 5 }, (_, index) => ({
+      ...makeThread(`t${index + 1}`, project.id),
+      updatedAt: `2026-06-${16 - index}T00:00:00Z`,
+    }));
+    const queuedThreadKeys = new Set([`${environmentId}:t5`]);
+    const groups = buildHomeThreadGroups({ ...groupInput, threads, queuedThreadKeys });
+    expect(groups[0]?.recentThreads.map((thread) => thread.id)).toEqual(["t1", "t2", "t3", "t5"]);
+    const layout = (display = DEFAULT_GROUP_DISPLAY_STATE, queued = queuedThreadKeys) =>
+      buildHomeListLayout({
+        groups: buildHomeThreadGroups({ ...groupInput, threads, queuedThreadKeys: queued }),
+        queuedThreadKeys: queued,
+        displayStates: new Map([[groups[0]!.key, display]]),
+      }).items;
+    const rows = layout();
+    expect(rows.flatMap((row) => (row.type === "thread" ? [row.thread.id] : []))).toEqual([
+      "t1",
+      "t2",
+      "t3",
+      "t5",
+    ]);
+    expect(rows.at(-1)).toMatchObject({ type: "show-more", hiddenCount: 1, canShowLess: false });
+    const more = nextGroupDisplayState(DEFAULT_GROUP_DISPLAY_STATE, "show-more");
+    expect(layout(more).flatMap((row) => (row.type === "thread" ? [row.thread.id] : []))).toEqual([
+      "t1",
+      "t2",
+      "t3",
+      "t4",
+      "t5",
+    ]);
+    expect(layout(more).at(-1)).toMatchObject({ hiddenCount: 0, canShowLess: true });
+    expect(layout(nextGroupDisplayState(more, "show-less"))).toEqual(rows);
+    expect(
+      layout(DEFAULT_GROUP_DISPLAY_STATE, new Set()).flatMap((row) =>
+        row.type === "thread" ? [row.thread.id] : [],
+      ),
+    ).toEqual(["t1", "t2", "t3"]);
+  });
+
+  it("keeps queued settled rows beyond both the first and expanded pages", () => {
+    const threads = Array.from({ length: 22 }, (_, index) => ({
+      ...makeThread(`t${index + 1}`, project.id),
+      updatedAt: new Date(now - index * 1000).toISOString(),
+      settledOverride: index === 21 ? ("settled" as const) : null,
+    }));
+    const queuedThreadKeys = new Set([`${environmentId}:t22`]);
+    const groups = buildHomeThreadGroups({ ...groupInput, threads, queuedThreadKeys });
+    const layout = (display: HomeGroupDisplayState, showAllThreads = false) =>
+      buildHomeListLayout({
+        groups,
+        queuedThreadKeys,
+        showAllThreads,
+        displayStates: new Map([[groups[0]!.key, display]]),
+      }).items;
+    const first = layout(DEFAULT_GROUP_DISPLAY_STATE);
+    expect(first.flatMap((row) => (row.type === "thread" ? [row.thread.id] : []))).toEqual([
+      "t1",
+      "t2",
+      "t3",
+      "t4",
+      "t5",
+      "t6",
+      "t22",
+    ]);
+    expect(first.at(-1)).toMatchObject({ hiddenCount: 15, canShowLess: false });
+    expect(first.some((row) => row.type === "v2-settled-shelf")).toBe(false);
+    const expanded = layout(nextGroupDisplayState(DEFAULT_GROUP_DISPLAY_STATE, "show-more"));
+    const expandedThreads = expanded.filter((row) => row.type === "thread");
+    expect(expandedThreads).toHaveLength(17);
+    expect(expandedThreads.at(-1)?.thread.id).toBe("t22");
+    expect(expanded.at(-1)).toMatchObject({ hiddenCount: 5, canShowLess: true });
+    const searching = layout({ collapsed: true, visibleCount: 6 }, true);
+    expect(searching.filter((row) => row.type === "thread")).toHaveLength(22);
+    expect(new Set(searching.map((row) => row.key)).size).toBe(searching.length);
+  });
+});
+
 describe("saga list layout", () => {
   const sagaGroup = (id: string, isSaga = false) => {
     const group = makeGroup(id, 1);
@@ -414,6 +504,159 @@ describe("saga list layout", () => {
       settledShelfExpanded: extra.settledShelfExpanded,
     });
   };
+
+  it("preserves queue promotion through account and saga recursion using scoped identities", () => {
+    const foreignEnvironment = EnvironmentId.make("environment-2");
+    const accountSections = {
+      accounts: [
+        {
+          accountId: "work",
+          label: "Work",
+          email: "work@example.test",
+          preset: "jade",
+          signedIn: true,
+        },
+        {
+          accountId: "personal",
+          label: "Personal",
+          email: "personal@example.test",
+          preset: "jade",
+          signedIn: true,
+        },
+      ],
+      owners: new Map([
+        [environmentId, "work"],
+        [foreignEnvironment, "personal"],
+      ]),
+    };
+    const source = [sagaGroup("saga", true), sagaGroup("a")];
+    const memberThread = {
+      ...makeThread("queued", ProjectId.make("a")),
+      settledOverride: "settled" as const,
+    };
+    const projects = [
+      ...source.flatMap((group) => group.projects),
+      { ...makeProject("a", "Foreign project"), environmentId: foreignEnvironment },
+    ];
+    const threads = [memberThread, { ...memberThread, environmentId: foreignEnvironment }];
+    const queuedThreadKeys = new Set([`${environmentId}:queued`]);
+    const render = (queued = queuedThreadKeys) => {
+      const groups = buildHomeThreadGroups({
+        accountSections,
+        projects,
+        threads,
+        queuedThreadKeys: queued,
+        environmentId: null,
+        searchQuery: "",
+        projectSortOrder: "created_at",
+        threadSortOrder: "created_at",
+        projectGroupingMode: "separate",
+        includeStaveProjects: true,
+        sagaIndex: index,
+        now: Date.parse("2026-09-10T00:00:00Z"),
+      });
+      const input = { accountSections, groups, sagaIndex: index, displayStates: new Map() };
+      return [
+        buildHomeListLayout({ ...input, queuedThreadKeys: queued }).items,
+        buildHomeHierarchyV2Items({
+          ...input,
+          items: v2Rows(groups, { queuedThreadKeys: queued }),
+        }),
+      ];
+    };
+    for (const rows of render()) {
+      const visible = rows.flatMap((row) =>
+        row.type === "thread" ? [row.thread] : row.type === "v2-thread" ? [row.item.thread] : [],
+      );
+      expect(visible).toEqual([memberThread]);
+      expect(rows.find((row) => row.type === "thread" || row.type === "v2-thread")).toMatchObject({
+        depth: 2,
+      });
+      const shelves = rows.filter((row) => row.type === "v2-settled-shelf");
+      expect(shelves).toHaveLength(1);
+      expect(shelves[0]).toMatchObject({ count: 1, expanded: false });
+      expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
+    }
+    for (const rows of render(new Set())) {
+      expect(rows.filter((row) => row.type === "thread" || row.type === "v2-thread")).toHaveLength(
+        0,
+      );
+      expect(rows.filter((row) => row.type === "v2-settled-shelf")).toHaveLength(2);
+    }
+  });
+
+  it("preserves snooze priority for queued settled rows until they wake", () => {
+    const group = makeGroup("snoozed-project", 1);
+    const thread = {
+      ...group.threads[0]!,
+      settledOverride: "settled" as const,
+      snoozedUntil: "2026-10-01T00:00:00Z",
+    };
+    const groups = buildHomeThreadGroups({
+      projects: group.projects,
+      threads: [thread],
+      environmentId: null,
+      searchQuery: "",
+      projectSortOrder: "created_at",
+      threadSortOrder: "created_at",
+      projectGroupingMode: "separate",
+      now: Date.parse("2026-09-10T00:00:00Z"),
+    });
+    const queuedThreadKeys = new Set([`${environmentId}:${thread.id}`]);
+    const render = (extra: Partial<Parameters<typeof buildThreadListV2Items>[0]>) =>
+      buildHomeHierarchyV2Items({
+        groups,
+        displayStates: new Map(),
+        items: v2Rows(groups, { queuedThreadKeys, ...extra }),
+      });
+    expect(render({}).filter((row) => row.type === "v2-thread")).toHaveLength(0);
+    const expanded = render({ snoozedShelfExpanded: true });
+    expect(expanded.find((row) => row.type === "v2-thread")).toMatchObject({
+      item: { variant: "slim", snoozed: true },
+    });
+    expect(expanded.some((row) => row.type === "v2-settled-shelf")).toBe(false);
+    const awake = render({ now: "2026-10-02T00:00:00Z" });
+    expect(awake.find((row) => row.type === "v2-thread")).toMatchObject({
+      item: { variant: "card", snoozed: false },
+    });
+    const unsupported = render({
+      queuedThreadKeys: new Set(),
+      settlementEnvironmentIds: new Set(),
+      snoozeEnvironmentIds: new Set(),
+    });
+    expect(unsupported.find((row) => row.type === "v2-thread")).toMatchObject({
+      item: { variant: "card", snoozed: false },
+    });
+  });
+
+  it("retains queued settled rows beyond the settled partition page", () => {
+    const project = makeProject("settled-project", "Settled project");
+    const threads = Array.from({ length: 12 }, (_, index) => ({
+      ...makeThread(`settled-${index}`, project.id),
+      settledOverride: "settled" as const,
+      settledAt: new Date(Date.parse("2026-09-10T00:00:00Z") - index * 1000).toISOString(),
+    }));
+    const queuedThreadKeys = new Set([`${environmentId}:settled-11`]);
+    const groups = buildHomeThreadGroups({
+      projects: [project],
+      threads,
+      queuedThreadKeys,
+      environmentId: null,
+      searchQuery: "",
+      projectSortOrder: "created_at",
+      threadSortOrder: "created_at",
+      projectGroupingMode: "separate",
+      now: Date.parse("2026-09-10T00:00:00Z"),
+    });
+    const rows = buildHomeHierarchyV2Items({
+      groups,
+      displayStates: new Map(),
+      items: v2Rows(groups, { queuedThreadKeys, settledLimit: 1 }),
+    });
+    expect(rows.flatMap((row) => (row.type === "v2-thread" ? [row.item.thread.id] : []))).toEqual([
+      "settled-11",
+    ]);
+  });
 
   it("keeps coordinator, member and standalone threads in a single V2 hierarchy", () => {
     const groups = [
