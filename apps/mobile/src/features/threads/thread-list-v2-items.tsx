@@ -369,7 +369,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly canMovePinnedDown?: boolean;
   readonly onSwipeableWillOpen: (methods: SwipeableMethods) => void;
   readonly onSwipeableClose: (methods: SwipeableMethods) => void;
-  readonly projectCwd?: string | null;
   readonly searchMatch?: EnvironmentThreadSearchMatch;
   readonly searchQuery?: string;
   readonly simultaneousSwipeGesture?: ComponentProps<
@@ -398,16 +397,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const [visible, setVisible] = useRecyclingState(false);
   useViewabilityAmount(useCallback((token) => setVisible(token.sizeVisible > 0), [setVisible]));
 
-  // Rows without a loaded project shell (pending tasks) still know the
-  // project cwd, which is enough for ordinary repos; Stave redirection needs
-  // the shell itself.
-  const prProject = useMemo(
-    () =>
-      props.project ??
-      (props.projectCwd != null ? { workspaceRoot: props.projectCwd, stave: null } : null),
-    [props.project, props.projectCwd],
-  );
-  const pr = useThreadPr(thread, prProject);
+  const pr = useThreadPr(thread, props.project ?? null);
 
   const theme = useUniwindTheme();
   const glass = useGlassPalette();

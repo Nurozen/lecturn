@@ -1,5 +1,21 @@
-import type { PullRequestWatch, ThreadLinkedPullRequest } from "@lecturn/contracts";
+import type {
+  OrchestrationProjectShell,
+  OrchestrationThreadShell,
+  PullRequestWatch,
+  ThreadLinkedPullRequest,
+} from "@lecturn/contracts";
+import { resolveProjectGitTargets } from "./projectGit.ts";
 import { isRepositoryWatchManagerEligible } from "./repositoryScope.ts";
+
+/** Durable links remain explicit; inferred PRs require one editable Stave checkout. */
+export function resolveThreadPullRequestRef(
+  thread: Pick<OrchestrationThreadShell, "linkedPullRequest" | "branchPullRequest">,
+  project: Pick<OrchestrationProjectShell, "workspaceRoot" | "stave"> | null,
+) {
+  if (thread.linkedPullRequest != null) return thread.linkedPullRequest;
+  if (project?.stave != null && resolveProjectGitTargets({ project }).length !== 1) return null;
+  return thread.branchPullRequest ?? null;
+}
 
 type Scope = Parameters<typeof isRepositoryWatchManagerEligible>[0];
 

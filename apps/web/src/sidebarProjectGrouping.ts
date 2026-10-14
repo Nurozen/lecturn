@@ -21,11 +21,12 @@ export interface SidebarProjectSnapshot extends Project {
   groupedProjectCount: number;
   environmentPresence: EnvironmentPresence;
   // True iff every non-primary member of this group lives in a
-  // desktopLocal env (today: the WSL backend). The sidebar uses this
+  // desktop-local environment. The sidebar uses this
   // to differentiate "lives on this machine but in a sandbox" from
   // "lives on a real remote" so the project header can pick a
-  // container icon instead of the generic cloud icon.
+  // local-device treatment instead of the generic remote treatment.
   allRemoteMembersAreDesktopLocal: boolean;
+  allRemoteMembersAreWsl: boolean;
   memberProjects: readonly SidebarProjectGroupMember[];
   memberProjectRefs: readonly ScopedProjectRef[];
   remoteEnvironmentLabels: readonly string[];
@@ -77,11 +78,12 @@ export function buildSidebarProjectSnapshots(input: {
   settings: ProjectGroupingSettings;
   primaryEnvironmentId: EnvironmentId | null;
   resolveEnvironmentLabel: (environmentId: EnvironmentId) => string | null;
-  // Returns true when an env id maps to a desktopLocal saved-env
-  // record (today: the WSL backend). Defaults to "false for every
+  // Returns true when an env id maps to a desktop-local saved-env
+  // record. Defaults to "false for every
   // env" so callers that don't care about the distinction get the
   // legacy behavior.
   isDesktopLocalEnvironment?: (environmentId: EnvironmentId) => boolean;
+  isWslEnvironment?: (environmentId: EnvironmentId) => boolean;
 }): SidebarProjectSnapshot[] {
   return buildProjectGroups({
     projects: input.projects,
@@ -113,6 +115,7 @@ export function buildSidebarProjectSnapshots(input: {
         ...(input.isDesktopLocalEnvironment
           ? { isDesktopLocalEnvironment: input.isDesktopLocalEnvironment }
           : {}),
+        ...(input.isWslEnvironment ? { isWslEnvironment: input.isWslEnvironment } : {}),
       }),
       memberProjects: members,
       memberProjectRefs: group.memberProjectRefs,
@@ -125,9 +128,13 @@ export function deriveSidebarEnvironmentMetadata(input: {
   members: readonly Pick<SidebarProjectGroupMember, "environmentId" | "environmentLabel">[];
   primaryEnvironmentId: EnvironmentId | null;
   isDesktopLocalEnvironment?: (environmentId: EnvironmentId) => boolean;
+  isWslEnvironment?: (environmentId: EnvironmentId) => boolean;
 }): Pick<
   SidebarProjectSnapshot,
-  "environmentPresence" | "allRemoteMembersAreDesktopLocal" | "remoteEnvironmentLabels"
+  | "environmentPresence"
+  | "allRemoteMembersAreDesktopLocal"
+  | "allRemoteMembersAreWsl"
+  | "remoteEnvironmentLabels"
 > {
   const { members } = input;
   const hasLocal =
@@ -149,9 +156,14 @@ export function deriveSidebarEnvironmentMetadata(input: {
     remoteMembers.length > 0 &&
     remoteMembers.every((member) => isDesktopLocal(member.environmentId));
 
+  const allRemoteMembersAreWsl =
+    remoteMembers.length > 0 &&
+    remoteMembers.every((member) => input.isWslEnvironment?.(member.environmentId) === true);
+
   return {
     environmentPresence: hasLocal && hasRemote ? "mixed" : hasRemote ? "remote-only" : "local-only",
     allRemoteMembersAreDesktopLocal,
+    allRemoteMembersAreWsl,
     remoteEnvironmentLabels,
   };
 }

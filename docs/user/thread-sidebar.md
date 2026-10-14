@@ -59,10 +59,23 @@ offline environments and older servers keep their previous values. If connected
 environments disagree, **Apply to all** copies your current settings to those named
 in the warning. Changing a rule does not reopen already settled threads.
 
+Answered questions and resolved approvals stay closed if a provider replays the
+request or delivers its events out of order. A stale or unknown request no longer
+blocks settlement or snoozing; a temporary reply failure keeps it open for retry.
+
 ## Link a pull request
 
+The server finds the PR for each unsettled thread's saved branch, even when your
+apps are closed. Settled threads keep their saved links. Update the server if
+automatic branch links do not appear.
+
+In a Stave space with one editable checkout, automatic links follow that
+checkout's current branch. Spaces with several editable checkouts need an
+explicit thread link; per-repository PR watches remain available.
+
 On web and desktop, right-click a pull request link in a thread and choose
-**Link to thread**. Use **Unlink from thread** on the same link to remove it.
+**Link to thread** to select a different PR. Use **Unlink from thread** on the
+same link to return to the branch PR, if one exists.
 The linked pull request participates in automatic settlement.
 
 ## Find and reference work

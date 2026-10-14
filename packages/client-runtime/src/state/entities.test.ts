@@ -26,6 +26,7 @@ import { createEnvironmentProjectAtoms } from "./projectEntities.ts";
 import { createEnvironmentSnapshotAtom } from "./snapshots.ts";
 import { createEnvironmentThreadDetailAtoms } from "./threadDetail.ts";
 import { mergeEnvironmentThread } from "./threadDetail.ts";
+import { resolveThreadPullRequestRef } from "./threadPullRequests.ts";
 import { createEnvironmentThreadShellAtoms } from "./threadShell.ts";
 import { applyShellStreamEvent } from "./shellReducer.ts";
 
@@ -201,6 +202,112 @@ function makeHarness(environmentIds: ReadonlyArray<EnvironmentId> = [ENVIRONMENT
 }
 
 describe("environment entity projections", () => {
+  it("suppresses a cached inferred PR when project metadata adds a second editable checkout", () => {
+    const harness = makeHarness();
+    const reference = {
+      projectId: PROJECT_ID,
+      repository: "fixture/project",
+      host: "gitlab.example.test",
+      number: 42,
+      url: "https://gitlab.example.test/fixture/project/-/merge_requests/42",
+    };
+    const shell = { ...THREAD_SHELL, branchPullRequest: reference };
+    const detail = {
+      ...shell,
+      environmentId: ENVIRONMENT_ID,
+      deletedAt: null,
+      messages: [],
+      proposedPlans: [],
+      activities: [],
+      checkpoints: [],
+    } satisfies OrchestrationThread & { readonly environmentId: EnvironmentId };
+    const stave = {
+      spaceId: "fixture",
+      isSaga: false,
+      repos: [{ name: "app", path: "app", mode: "edit" as const }],
+      memories: [],
+    };
+    const updateProject = (repos: typeof stave.repos) =>
+      harness.registry.set(
+        harness.shellStateAtom,
+        AsyncResult.success(
+          shellState({
+            ...SNAPSHOT,
+            projects: SNAPSHOT.projects.map((project) =>
+              project.id === PROJECT_ID ? { ...project, stave: { ...stave, repos } } : project,
+            ),
+            threads: [shell],
+          }),
+        ),
+      );
+    const projectAtom = harness.projects.projectAtom({
+      environmentId: ENVIRONMENT_ID,
+      projectId: PROJECT_ID,
+    });
+    const shellAtom = harness.threadShells.threadShellAtom({
+      environmentId: ENVIRONMENT_ID,
+      threadId: THREAD_ID,
+    });
+    const selectedAtom = Atom.make((get) => {
+      const current = mergeEnvironmentThread(detail, get(shellAtom));
+      return current === null ? null : resolveThreadPullRequestRef(current, get(projectAtom));
+    });
+    const unmount = harness.registry.mount(selectedAtom);
+    updateProject(stave.repos);
+    expect(harness.registry.get(selectedAtom)).toEqual(reference);
+    const previousShell = harness.registry.get(shellAtom);
+    updateProject([...stave.repos, { name: "api", path: "api", mode: "edit" }]);
+    expect(harness.registry.get(shellAtom)).toBe(previousShell);
+    expect(detail.branchPullRequest).toBe(reference);
+    expect(harness.registry.get(selectedAtom)).toBeNull();
+    updateProject(stave.repos);
+    expect(harness.registry.get(selectedAtom)).toEqual(reference);
+    unmount();
+    harness.registry.dispose();
+  });
+
+  it.each([
+    null,
+    undefined,
+    {
+      projectId: PROJECT_ID,
+      repository: "fixture/project",
+      host: "gitlab.example.test",
+      number: 42,
+      url: "https://gitlab.example.test/fixture/project/-/merge_requests/42",
+    },
+  ])("uses current shell PR metadata when a detail subscription is stale: %j", (reference) => {
+    const stale = {
+      projectId: PROJECT_ID,
+      repository: "fixture/old-project",
+      number: 12,
+      url: "https://github.com/fixture/old-project/pull/12",
+    };
+    const messages: OrchestrationThread["messages"] = [];
+    const detail = {
+      ...THREAD_SHELL,
+      environmentId: ENVIRONMENT_ID,
+      linkedPullRequest: stale,
+      branchPullRequest: stale,
+      deletedAt: null,
+      messages,
+      proposedPlans: [],
+      activities: [],
+      checkpoints: [],
+    } satisfies OrchestrationThread & { readonly environmentId: EnvironmentId };
+    const shell = {
+      ...THREAD_SHELL,
+      environmentId: ENVIRONMENT_ID,
+      linkedPullRequest: reference,
+      branchPullRequest: reference,
+    };
+
+    const merged = mergeEnvironmentThread(detail, shell);
+    expect(merged?.linkedPullRequest).toEqual(reference);
+    expect(merged?.branchPullRequest).toEqual(reference);
+    expect(merged?.messages).toBe(messages);
+  });
+
   it("composes detail collections with authoritative shell workspace metadata", () => {
     const messages: OrchestrationThread["messages"] = [];
     const detail = {

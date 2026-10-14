@@ -169,6 +169,7 @@ function reduceThreadDetailEvent(
           interactionMode: event.payload.interactionMode,
           branch: event.payload.branch,
           worktreePath: event.payload.worktreePath,
+          branchPullRequest: null,
           latestTurn: null,
           createdAt: event.payload.createdAt,
           updatedAt: event.payload.updatedAt,
@@ -312,6 +313,9 @@ function reduceThreadDetailEvent(
             : {}),
           ...(event.payload.linkedPullRequest !== undefined
             ? { linkedPullRequest: event.payload.linkedPullRequest }
+            : {}),
+          ...(event.payload.branchPullRequest !== undefined
+            ? { branchPullRequest: event.payload.branchPullRequest }
             : {}),
           updatedAt: event.payload.updatedAt,
         },

@@ -38,6 +38,14 @@ import { makeCursorAdapter } from "./CursorAdapter.ts";
 import { execScriptSource, writeFakeCli } from "../../testUtils/fakeCli.ts";
 import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 const decodeCursorSettings = Schema.decodeSync(CursorSettings);
+const decodeCompactionPrompt = Schema.decodeUnknownSync(
+  Schema.Struct({
+    method: Schema.Literal("session/prompt"),
+    params: Schema.Struct({
+      prompt: Schema.Array(Schema.Struct({ type: Schema.Literal("text"), text: Schema.String })),
+    }),
+  }),
+);
 
 // Test-local service tag so the rest of the file can keep using `yield* CursorAdapter`.
 class CursorAdapter extends Context.Service<CursorAdapter, CursorAdapterShape>()(
@@ -167,6 +175,34 @@ const cursorAdapterTestLayer = it.layer(
 );
 
 cursorAdapterTestLayer("CursorAdapterLive", (it) => {
+  it.effect("dispatches manual compaction through Cursor's native compression command", () =>
+    Effect.gen(function* () {
+      const tempDir = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "cursor-compaction-")),
+      );
+      const requestLogPath = NodePath.join(tempDir, "requests.ndjson");
+      const settings = yield* ServerSettingsService;
+      const adapter = yield* CursorAdapter;
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({ LECTURN_ACP_REQUEST_LOG_PATH: requestLogPath }),
+      );
+      yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+      const threadId = ThreadId.make("cursor-compaction");
+      yield* adapter.startSession({ threadId, cwd: tempDir, runtimeMode: "full-access" });
+      const strategy = adapter.compaction;
+      if (strategy?.type !== "slash-command") {
+        return yield* Effect.die("Cursor must support slash-command compaction");
+      }
+      yield* adapter.sendTurn({ threadId, input: strategy.command });
+      const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
+      const prompt = decodeCompactionPrompt(
+        requests.find((request) => request.method === "session/prompt"),
+      );
+      assert.deepStrictEqual(prompt.params.prompt[0], { type: "text", text: "/compress" });
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect(
     "contextual fresh native prompt includes evidence and acknowledges its exact dispatch",
     () =>

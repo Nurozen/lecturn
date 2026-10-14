@@ -51,6 +51,7 @@ export const ProjectionThread = Schema.Struct({
   // Server-only cursor of the fork an imported thread runs on; never exposed
   // on wire shapes.
   importSource: Schema.optional(Schema.NullOr(ThreadImportSource)),
+  branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   latestTurnId: Schema.NullOr(TurnId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,

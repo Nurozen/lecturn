@@ -59,6 +59,10 @@ origin, linked pull request, latest turn, proposed plans); message and activity 
 there because the in-memory model mirrors post-boot hydration, which seeds those arrays empty.
 Migration [`048_ProjectionThreadForkLineage.ts`][mig048] adds `forked_from_json` and
 `fork_source_json` to `projection_threads` and `provider_turn_ref` to `projection_turns`.
+Upstream published a different migration 048 for branch PR links. Both ledger identities
+remain unchanged: [migration 064](../../apps/server/src/persistence/Migrations/064_ProjectionThreadMigrationCompatibility.ts)
+adds whichever columns are missing after either upgrade path. Do not rewrite migration 048
+or its ledger entry; the runner skips IDs below the last applied migration.
 [`ProjectionSnapshotQuery.ts`][snapshot] exposes the lineage via `getThreadForkContextById` and
 the turn rows via `listThreadTurnsById`. Inherited rows keep their original timestamps; only the
 child thread's `createdAt` is the fork time.

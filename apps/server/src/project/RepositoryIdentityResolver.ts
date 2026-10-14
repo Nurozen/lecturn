@@ -28,7 +28,10 @@ export interface RepositoryIdentityResolverOptions {
 export class RepositoryIdentityResolver extends Context.Service<
   RepositoryIdentityResolver,
   {
-    readonly resolve: (cwd: string) => Effect.Effect<RepositoryIdentity | null>;
+    readonly resolve: (
+      cwd: string,
+      options?: { readonly refresh?: boolean },
+    ) => Effect.Effect<RepositoryIdentity | null>;
   }
 >()("lecturn/project/RepositoryIdentityResolver") {}
 
@@ -180,13 +183,15 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
 
   const resolve: RepositoryIdentityResolver["Service"]["resolve"] = Effect.fn(
     "RepositoryIdentityResolver.resolve",
-  )(function* (cwd) {
+  )(function* (cwd, options) {
+    if (options?.refresh) yield* Cache.invalidate(repositoryRootCache, cwd);
     // A Stave space root is a directory of checkouts, not a checkout: it must
     // never take its primary repo's (or an ancestor repo's) identity, or the
     // space would collapse into that repository's project group.
     if (yield* hasStaveManifest(cwd)) return null;
     const cacheKey = yield* Cache.get(repositoryRootCache, cwd);
     if (cacheKey === null) return null;
+    if (options?.refresh) yield* Cache.invalidate(repositoryIdentityCache, cacheKey);
     return yield* Cache.get(repositoryIdentityCache, cacheKey);
   });
 

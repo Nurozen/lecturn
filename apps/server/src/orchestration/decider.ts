@@ -1,6 +1,7 @@
 import {
   EventId,
   MessageId,
+  ThreadLinkedPullRequest,
   UserInputRequestedPayload,
   isImportedAgentSessionMessageId,
   type OrchestrationCommand,
@@ -38,29 +39,39 @@ import { threadHasQueuedTurnStart } from "./ThreadSettlementPolicy.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const decodeUserInputRequestedPayload = Schema.decodeUnknownOption(UserInputRequestedPayload);
+const threadPullRequestLinksEqual = Schema.toEquivalence(Schema.NullOr(ThreadLinkedPullRequest));
 
 /**
  * Blocked-on-you work derived from the thread's retained activities: an
- * approval or user-input request with no later resolution for the same
- * requestId. The server-side twin of the shell's hasPendingApprovals /
+ * approval or user-input request with no terminal activity for the same
+ * kind and requestId. The server-side twin of the shell's hasPendingApprovals /
  * hasPendingUserInput flags, which the decider read model does not carry.
  * The clearing rules MUST match ProjectionPipeline's pending accounting —
  * resolved activities always clear, respond.failed clears only when the
  * failure detail marks the request stale/unknown — or settle would be
  * rejected on threads whose shell flags read as clear.
  */
-function isStaleRequestFailureDetail(payload: Record<string, unknown> | null): boolean {
-  const detail = typeof payload?.detail === "string" ? payload.detail.toLowerCase() : null;
-  if (detail === null) return false;
-  return (
-    detail.includes("stale pending approval request") ||
-    detail.includes("unknown pending approval request") ||
-    detail.includes("unknown pending permission request") ||
-    detail.includes("stale pending user-input request") ||
-    detail.includes("unknown pending user-input request") ||
-    detail.includes("unknown pending user input request") ||
-    detail.includes("unknown pending codex user input request")
-  );
+const staleRequestFailureDetails = {
+  "provider.approval.respond.failed": [
+    "stale pending approval request",
+    "unknown pending approval request",
+    "unknown pending permission request",
+    "unknown pending codex approval request",
+  ],
+  "provider.user-input.respond.failed": [
+    "stale pending user-input request",
+    "unknown pending user-input request",
+    "unknown pending user input request",
+    "unknown pending codex user input request",
+  ],
+} as const;
+
+function isStaleRequestFailureDetail(
+  kind: keyof typeof staleRequestFailureDetails,
+  payload: Record<string, unknown>,
+): boolean {
+  const detail = typeof payload.detail === "string" ? payload.detail.toLowerCase() : "";
+  return staleRequestFailureDetails[kind].some((fragment) => detail.includes(fragment));
 }
 
 // Scans the read model's activities, which the projector caps at the most
@@ -69,27 +80,37 @@ function isStaleRequestFailureDetail(payload: Record<string, unknown> | null): b
 function hasOpenBlockingRequest(thread: {
   readonly activities: ReadonlyArray<{ readonly kind: string; readonly payload: unknown }>;
 }): boolean {
-  const openRequestIds = new Set<string>();
+  const openApprovalIds = new Set<string>();
+  const openUserInputIds = new Set<string>();
+  const closedApprovalIds = new Set<string>();
+  const closedUserInputIds = new Set<string>();
+  // Terminal activities remain final across reordered or replayed requests.
+  // Approval and question IDs belong to separate namespaces.
   for (const activity of thread.activities) {
-    const payload =
-      typeof activity.payload === "object" && activity.payload !== null
-        ? (activity.payload as Record<string, unknown>)
-        : null;
+    const payload = Predicate.isObject(activity.payload) ? activity.payload : null;
     const requestId = typeof payload?.requestId === "string" ? payload.requestId : null;
-    if (requestId === null) continue;
-    if (activity.kind === "approval.requested" || activity.kind === "user-input.requested") {
-      openRequestIds.add(requestId);
-    } else if (activity.kind === "approval.resolved" || activity.kind === "user-input.resolved") {
-      openRequestIds.delete(requestId);
+    if (requestId === null || payload === null) continue;
+    if (activity.kind === "approval.requested") {
+      if (!closedApprovalIds.has(requestId)) openApprovalIds.add(requestId);
+    } else if (activity.kind === "user-input.requested") {
+      if (!closedUserInputIds.has(requestId)) openUserInputIds.add(requestId);
     } else if (
-      (activity.kind === "provider.approval.respond.failed" ||
-        activity.kind === "provider.user-input.respond.failed") &&
-      isStaleRequestFailureDetail(payload)
+      activity.kind === "approval.resolved" ||
+      (activity.kind === "provider.approval.respond.failed" &&
+        isStaleRequestFailureDetail(activity.kind, payload))
     ) {
-      openRequestIds.delete(requestId);
+      closedApprovalIds.add(requestId);
+      openApprovalIds.delete(requestId);
+    } else if (
+      activity.kind === "user-input.resolved" ||
+      (activity.kind === "provider.user-input.respond.failed" &&
+        isStaleRequestFailureDetail(activity.kind, payload))
+    ) {
+      closedUserInputIds.add(requestId);
+      openUserInputIds.delete(requestId);
     }
   }
-  return openRequestIds.size > 0;
+  return openApprovalIds.size > 0 || openUserInputIds.size > 0;
 }
 
 /** Apply the shared shell-level rule to the detailed command read model. */
@@ -880,6 +901,63 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             ? { linkedPullRequest: command.linkedPullRequest }
             : {}),
           updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.pull-request.sync": {
+      const thread = yield* requireThreadNotArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (thread.deletedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `thread ${command.threadId} was deleted before pull request discovery`,
+        });
+      }
+      if (
+        thread.projectId !== command.projectId ||
+        thread.branch !== command.expected.branch ||
+        thread.worktreePath !== command.expected.worktreePath ||
+        !threadPullRequestLinksEqual(
+          thread.linkedPullRequest ?? null,
+          command.expected.linkedPullRequest,
+        ) ||
+        !threadPullRequestLinksEqual(
+          thread.branchPullRequest ?? null,
+          command.expected.branchPullRequest,
+        )
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `thread ${command.threadId} changed before pull request discovery`,
+        });
+      }
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      if (project.deletedAt !== null || project.workspaceRoot !== command.expected.workspaceRoot) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `project ${command.projectId} changed before pull request discovery`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: command.threadId,
+          branchPullRequest: command.branchPullRequest,
+          ...(command.linkedPullRequest !== undefined
+            ? { linkedPullRequest: command.linkedPullRequest }
+            : {}),
+          updatedAt: thread.updatedAt,
         },
       };
     }

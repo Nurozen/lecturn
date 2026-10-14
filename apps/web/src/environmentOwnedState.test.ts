@@ -46,7 +46,7 @@ function seed() {
     pendingVisitsByThreadKey: {},
     pendingTitlesByThreadKey: {},
   });
-  useRightPanelStore.setState({ byThreadKey: {} });
+  useRightPanelStore.setState({ byThreadKey: {}, userActionRevisionByThreadKey: {} });
   useDiffPanelStore.setState({ byThreadKey: {}, branchBaseRefByThreadKey: {} });
   for (const id of environments) {
     useDiffPanelStore.getState().selectBranchBaseRef(refIn(id), "main");
@@ -91,6 +91,9 @@ describe("clearEnvironmentOwnedState", () => {
     expect(useRightPanelStore.getState().byThreadKey).toEqual({
       [threadKey(KEPT)]: keptPanel,
       [PULL_REQUESTS_PANEL_KEY]: keptPanel,
+    });
+    expect(useRightPanelStore.getState().userActionRevisionByThreadKey).toEqual({
+      [threadKey(KEPT)]: 1,
     });
     const diff = useDiffPanelStore.getState();
     expect(Object.keys(diff.byThreadKey)).toEqual([threadKey(KEPT)]);

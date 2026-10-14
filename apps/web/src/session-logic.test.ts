@@ -1,3 +1,9 @@
+import { derivePendingRequests } from "@lecturn/client-runtime/pending-requests";
+import {
+  workEntryIndicatesToolFailure,
+  workEntryIndicatesToolSuccess,
+} from "@lecturn/client-runtime/work-log/presentation";
+
 import {
   classifyTaskAgentKind,
   EventId,
@@ -13,8 +19,6 @@ import {
   createMessageAttachmentPreviewProjector,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
-  derivePendingApprovals,
-  derivePendingUserInputs,
   deriveTimelineEntries,
   deriveTimelineEntriesWithState,
   deriveWorkLogEntries,
@@ -23,10 +27,13 @@ import {
   isLatestTurnSettled,
   selectHandoffImageResources,
   selectMessageImageResources,
-  workEntryIndicatesToolFailure,
   workEntryIndicatesToolNeutralStatus,
-  workEntryIndicatesToolSuccess,
 } from "./session-logic";
+
+const derivePendingApprovals = (activities: ReadonlyArray<OrchestrationThreadActivity>) =>
+  derivePendingRequests(activities).approvals;
+const derivePendingUserInputs = (activities: ReadonlyArray<OrchestrationThreadActivity>) =>
+  derivePendingRequests(activities).userInputs;
 
 let nextActivityId = 0;
 
@@ -923,6 +930,84 @@ describe("workEntryIndicatesToolFailure", () => {
         detail: "File not found in conversation",
       }),
     ).toBe(false);
+  });
+});
+
+describe("workEntryIndicatesToolNeutralStatus", () => {
+  it("keeps active tools neutral and agent spawns visible", () => {
+    const entry = {
+      id: "work-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      label: "Read",
+      tone: "tool" as const,
+      toolLifecycleStatus: "inProgress" as const,
+    };
+    expect(workEntryIndicatesToolNeutralStatus(entry)).toBe(true);
+    expect(
+      workEntryIndicatesToolNeutralStatus({
+        ...entry,
+        agentSpawn: { workflowId: null, agentTaskIds: ["agent-1"] },
+      }),
+    ).toBe(false);
+    expect(
+      workEntryIndicatesToolNeutralStatus({ ...entry, toolLifecycleStatus: "completed" }),
+    ).toBe(false);
+  });
+
+  it.each(["waiting", "cancelled", "interrupted"])(
+    "keeps the status of a %s background task",
+    (status) => {
+      const entries = deriveWorkLogEntries([
+        makeActivity({
+          kind: "task.progress",
+          payload: { taskId: "background-1", agentKind: "background", status },
+        }),
+      ]);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        toolLifecycleStatus: status === "waiting" ? "inProgress" : "stopped",
+      });
+      expect(workEntryIndicatesToolNeutralStatus(entries[0]!)).toBe(true);
+    },
+  );
+});
+
+describe("user request activity presentation", () => {
+  it.each(["codex", "claude", "cursor", "grok", "github-copilot", "opencode", "antigravity"])(
+    "keeps requested and resolved user input visible for %s",
+    (driverKind) => {
+      const entries = deriveWorkLogEntries([
+        makeActivity({
+          kind: "user-input.requested",
+          summary: "Choose a direction",
+          tone: "approval",
+          payload: { requestId: "question-1", driverKind },
+          sequence: 1,
+        }),
+        makeActivity({
+          kind: "user-input.resolved",
+          summary: "Answer sent",
+          tone: "info",
+          payload: { requestId: "question-1", driverKind },
+          sequence: 2,
+        }),
+      ]);
+      expect(entries).toMatchObject([
+        { sourceActivityKind: "user-input.requested", label: "Choose a direction", tone: "info" },
+        { sourceActivityKind: "user-input.resolved", label: "Answer sent", tone: "info" },
+      ]);
+    },
+  );
+  it("preserves a direct MCP elicitation request kind in the web activity row", () => {
+    expect(
+      deriveWorkLogEntries([
+        makeActivity({
+          kind: "approval.requested",
+          tone: "approval",
+          payload: { requestId: "mcp-1", requestKind: "mcp-elicitation" },
+        }),
+      ]),
+    ).toMatchObject([{ sourceActivityKind: "approval.requested", requestKind: "mcp-elicitation" }]);
   });
 });
 

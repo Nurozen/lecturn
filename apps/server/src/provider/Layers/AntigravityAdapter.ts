@@ -1316,6 +1316,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
   return {
     provider: PROVIDER,
     capabilities: ANTIGRAVITY_ADAPTER_CAPABILITIES,
+    compaction: { type: "slash-command", command: "/compact" },
     startSession,
     sendTurn,
     interruptTurn,

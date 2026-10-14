@@ -64,6 +64,10 @@ export function clearEnvironmentOwnedState(environmentId: EnvironmentId): void {
   }));
   sweep(useRightPanelStore, (state) => ({
     byThreadKey: withoutEnvironment(state.byThreadKey, environmentId),
+    userActionRevisionByThreadKey: withoutEnvironment(
+      state.userActionRevisionByThreadKey,
+      environmentId,
+    ),
   }));
   sweep(useDiffPanelStore, (state) => ({
     byThreadKey: withoutEnvironment(state.byThreadKey, environmentId),

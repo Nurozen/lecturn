@@ -15,7 +15,10 @@ import {
   type SidebarProjectSnapshot,
 } from "../../sidebarProjectGrouping";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
-import { isDesktopLocalConnectionTarget } from "../../connection/desktopLocal";
+import {
+  isDesktopLocalConnectionTarget,
+  isWslConnectionTarget,
+} from "../../connection/desktopLocal";
 import { staveSagaStatus, staveStatus } from "../../state/stave";
 import { serverEnvironment } from "../../state/server";
 import { subscribeStaveMutation } from "../../staveMutation";
@@ -28,6 +31,15 @@ export function useSagaSidebarTree(projects: readonly SidebarProjectSnapshot[]) 
       new Set(
         environments
           .filter((environment) => isDesktopLocalConnectionTarget(environment.entry.target))
+          .map((environment) => environment.environmentId),
+      ),
+    [environments],
+  );
+  const wslEnvironmentIds = useMemo(
+    () =>
+      new Set(
+        environments
+          .filter((environment) => isWslConnectionTarget(environment.entry.target))
           .map((environment) => environment.environmentId),
       ),
     [environments],
@@ -160,12 +172,13 @@ export function useSagaSidebarTree(projects: readonly SidebarProjectSnapshot[]) 
               primaryEnvironmentId,
               isDesktopLocalEnvironment: (environmentId) =>
                 desktopLocalEnvironmentIds.has(environmentId),
+              isWslEnvironment: (environmentId) => wslEnvironmentIds.has(environmentId),
             }),
             memberProjects: members,
             memberProjectRefs: node.group.memberProjectRefs,
           };
         }),
-    [tree, projects, primaryEnvironmentId, desktopLocalEnvironmentIds],
+    [tree, projects, primaryEnvironmentId, desktopLocalEnvironmentIds, wslEnvironmentIds],
   );
   return { tree, navigationProjects, enabledKeys, availableKeys, nest };
 }

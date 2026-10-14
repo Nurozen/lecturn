@@ -1,6 +1,8 @@
+import { resolveThreadPullRequestRef } from "@lecturn/client-runtime/state/threadPullRequests";
+import { Atom } from "effect/unstable/reactivity";
 import {
-  scopeProjectRef,
   scopedThreadKey,
+  scopeProjectRef,
   scopeThreadRef,
 } from "@lecturn/client-runtime/environment";
 import { pullRequestDetailToVcsStatus } from "@lecturn/client-runtime/state/pull-requests";
@@ -10,18 +12,14 @@ import {
   type ThreadLinkedPullRequest,
   type VcsStatusResult,
 } from "@lecturn/contracts";
-import { Atom } from "effect/unstable/reactivity";
 import { FolderGit2Icon, TerminalIcon } from "lucide-react";
 import { useMemo } from "react";
-import { appAtomRegistry } from "../rpc/atomRegistry";
+import { useProject } from "../state/entities";
 import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
-import { useProject } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { linkedPullRequestDetailAtom, useSharedPullRequestSummary } from "../state/pullRequests";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
-import { vcsEnvironment } from "../state/vcs";
-import { resolveThreadGitTarget } from "../lib/threadGitTarget";
 import { useUiStateStore } from "../uiStateStore";
 import { resolveChangeRequestPresentation } from "../sourceControlPresentation";
 import { resolveThreadStatusPill, type ThreadStatusPill } from "./Sidebar.logic";
@@ -52,12 +50,14 @@ export interface LinkedThreadPullRequestStatus {
   readonly sourceControlProvider: NonNullable<VcsStatusResult["sourceControlProvider"]>;
 }
 
+/** Keep cached summaries visible when an offscreen row stops live queries. */
 export function useLinkedThreadPullRequest(
   environmentId: EnvironmentId | null,
   linkedPullRequest: ThreadLinkedPullRequest | null | undefined,
+  enabled = true,
 ): LinkedThreadPullRequestStatus | null {
   const queried = useEnvironmentQuery(
-    environmentId === null || linkedPullRequest == null
+    !enabled || environmentId === null || linkedPullRequest == null
       ? null
       : linkedPullRequestDetailAtom({
           environmentId,
@@ -256,27 +256,6 @@ export function threadChangeRequestSnapshotsEqual(
     sourceControlProvidersEqual(left.sourceControlProvider, right.sourceControlProvider) &&
     linkedPullRequestsEqual(left.linkedPullRequest, right.linkedPullRequest)
   );
-}
-
-export function setThreadChangeRequestSnapshot(
-  threadKey: string,
-  snapshot: ThreadChangeRequestSnapshot | null,
-): void {
-  appAtomRegistry.modify(threadChangeRequestSnapshotsAtom, (current) => {
-    const existing = current.get(threadKey);
-    if (snapshot === null) {
-      if (existing === undefined) return [false, current];
-      const next = new Map(current);
-      next.delete(threadKey);
-      return [true, next];
-    }
-    if (existing !== undefined && threadChangeRequestSnapshotsEqual(existing, snapshot)) {
-      return [false, current];
-    }
-    const next = new Map(current);
-    next.set(threadKey, snapshot);
-    return [true, next];
-  });
 }
 
 /**
@@ -559,28 +538,12 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
       [thread.environmentId, thread.projectId],
     ),
   );
-  const gitTarget = resolveThreadGitTarget({ project: threadProject, thread });
-  const gitCwd = gitTarget.cwd;
-  const linkedPullRequest = useLinkedThreadPullRequest(
+  const pullRequest = useLinkedThreadPullRequest(
     thread.environmentId,
-    thread.linkedPullRequest,
+    resolveThreadPullRequestRef(thread, threadProject),
   );
-  const gitStatus = useEnvironmentQuery(
-    thread.linkedPullRequest == null && gitTarget.statusEnabled && gitCwd !== null
-      ? vcsEnvironment.status({
-          environmentId: thread.environmentId,
-          input: { cwd: gitCwd },
-        })
-      : null,
-  );
-  const pr =
-    thread.linkedPullRequest == null
-      ? resolveThreadPr({ threadBranch: gitTarget.branch, gitStatus: gitStatus.data })
-      : (linkedPullRequest?.pr ?? null);
-  const prStatus = prStatusIndicator(
-    pr,
-    linkedPullRequest?.sourceControlProvider ?? gitStatus.data?.sourceControlProvider,
-  );
+  const pr = pullRequest?.pr ?? null;
+  const prStatus = prStatusIndicator(pr, pullRequest?.sourceControlProvider);
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,

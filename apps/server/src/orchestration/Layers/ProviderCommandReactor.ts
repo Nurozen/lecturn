@@ -1359,13 +1359,17 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const thread = yield* resolveThreadDetail(event.payload.threadId);
+    const thread = yield* resolveThreadShell(event.payload.threadId);
     if (!thread) {
       return;
     }
-    if (queued && (thread.deletedAt !== null || thread.archivedAt !== null)) return;
-    const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
-    if (!message || message.role !== "user") {
+    if (queued && thread.archivedAt !== null) return;
+    const turnStart = yield* projectionSnapshotQuery.getTurnStartMessage({
+      threadId: thread.id,
+      messageId: event.payload.messageId,
+      ...(thread.forkedFrom != null ? { titleHistoryAfter: thread.createdAt } : {}),
+    });
+    if (Option.isNone(turnStart) || turnStart.value.message.role !== "user") {
       yield* appendProviderFailureActivity({
         threadId: event.payload.threadId,
         kind: "provider.turn.start.failed",
@@ -1377,6 +1381,7 @@ const make = Effect.gen(function* () {
       });
       return;
     }
+    const { message, hasOtherUserMessages } = turnStart.value;
     const appendTurnStartFailure = (summary: string, detail: string) =>
       appendProviderFailureActivity({
         threadId: event.payload.threadId,
@@ -1471,16 +1476,11 @@ const make = Effect.gen(function* () {
     // Inherited messages predate the child; generate a title on its first new turn.
     // Compaction commands never count as a conversation turn.
     const isCompactCommand = isCompactCommandMessage(message);
-    const userMessages = thread.messages.filter(
-      (entry) => entry.role === "user" && !isCompactCommandMessage(entry),
-    );
-    const nonCompactUserMessageCount = userMessages.length;
-    const threadCreatedAtMs = Date.parse(thread.createdAt);
     const isFirstUserMessageTurn =
-      userMessages.length === 1 ||
+      !hasOtherUserMessages ||
       (thread.forkedFrom != null &&
-        userMessages.filter((entry) => Date.parse(entry.createdAt) > threadCreatedAtMs).length ===
-          1);
+        Date.parse(message.createdAt) > Date.parse(thread.createdAt) &&
+        turnStart.value.hasOtherUserMessagesAfter === false);
 
     let compactionSessionEnsured = false;
     const handleCompactionFailure = (cause: Cause.Cause<unknown>) => {
@@ -1524,7 +1524,7 @@ const make = Effect.gen(function* () {
         ),
       );
     if (isCompactCommand) {
-      if (nonCompactUserMessageCount === 0) {
+      if (!hasOtherUserMessages) {
         return yield* appendTurnStartFailure(
           "Context compaction failed",
           "Context compaction requires an existing conversation.",
@@ -1592,14 +1592,16 @@ const make = Effect.gen(function* () {
         (getContextualProviderCapabilities(instance.driverKind).delivery !== "unsupported" &&
           live?.status !== "running")
       ) {
-        const messageIndex = thread.messages.findIndex((entry) => entry.id === message.id);
+        const contextThread = yield* resolveThreadDetail(thread.id);
+        if (!contextThread) return;
+        const messageIndex = contextThread.messages.findIndex((entry) => entry.id === message.id);
         contextualDecision = yield* contextualCoordinator.value.prepare(queued, {
           threadId: thread.id,
           submissionId: event.eventId,
           messageId: message.id,
           providerInstanceId: instanceId,
           newestMessage: message.text,
-          recentContext: thread.messages
+          recentContext: contextThread.messages
             .slice(0, messageIndex)
             .slice(-12)
             .map((entry) => `${entry.role}: ${entry.text}`)

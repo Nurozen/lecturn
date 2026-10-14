@@ -1,7 +1,7 @@
+import { Effect } from "effect";
+import { AtomRegistry } from "effect/unstable/reactivity";
 import { ProjectId, type PullRequestSummary, type VcsStatusResult } from "@lecturn/contracts";
 import { describe, expect, it } from "@effect/vitest";
-import * as Effect from "effect/Effect";
-import { AtomRegistry } from "effect/unstable/reactivity";
 import {
   GitMergeIcon,
   GitPullRequestClosedIcon,
@@ -10,16 +10,16 @@ import {
 } from "lucide-react";
 
 import {
-  ChangeRequestStatusIcon,
-  nextThreadChangeRequestSnapshot,
-  prStatusIndicator,
+  resolveThreadPr,
   resolveDisplayedThreadPr,
   resolveDisplayedThreadPrProvider,
-  resolveThreadPr,
-  settledPrHoverColorClass,
+  nextThreadChangeRequestSnapshot,
   threadChangeRequestSnapshotsEqual,
   threadChangeRequestSnapshotsAtom,
   type ThreadChangeRequestSnapshot,
+  ChangeRequestStatusIcon,
+  prStatusIndicator,
+  settledPrHoverColorClass,
 } from "./ThreadStatusIndicators";
 import { newestPullRequestSummary } from "../state/pullRequests";
 
