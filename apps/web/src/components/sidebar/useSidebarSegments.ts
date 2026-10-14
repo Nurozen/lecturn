@@ -12,7 +12,6 @@ import {
   NO_ACCOUNT_SEGMENT_ID,
   NO_SEGMENT_SHELVES,
   NO_SEGMENTS_COLLAPSED,
-  reorderIdsWithinSegment,
   resetSegmentSettledPages,
   SEGMENT_COLLAPSED_KEY,
   SegmentCollapsedSchema,
@@ -65,22 +64,6 @@ type UseSidebarSegments = <Node extends SegmentSagaNode>(
 
 const threadKeyOf = (thread: EnvironmentThreadShell) =>
   scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-
-/** `reorderIdsWithinSegment` over the sidebar's scoped thread keys. */
-export function pinnedReorderKeysWithinSegment(
-  segments: ReadonlyArray<{
-    readonly pinnedThreads: ReadonlyArray<EnvironmentThreadShell>;
-  }> | null,
-  orderedKeys: ReadonlyArray<string>,
-  movedKey: string,
-): ReadonlyArray<string> {
-  return reorderIdsWithinSegment({
-    segments,
-    orderedIds: orderedKeys,
-    movedId: movedKey,
-    idOf: threadKeyOf,
-  });
-}
 
 const statusOf = (thread: EnvironmentThreadShell) => resolveThreadStatusPill({ thread });
 
