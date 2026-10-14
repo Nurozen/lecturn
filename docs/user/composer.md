@@ -30,6 +30,24 @@ messages while disconnected. Uploads resume when you reconnect. Drafts and queue
 messages survive app restarts. Signing out of Lecturn Connect keeps that work on your
 device until you sign back into the same account.
 
+If the connection drops while a queued task is sending, it stays queued and retries
+after reconnecting. A rejected new-task send restores a separate draft without
+replacing another draft you are writing.
+
+## Keep several new-task drafts on mobile
+
+Start another new task to keep several drafts in the same project. Drafts with text
+or attachments appear alongside queued tasks in that project's thread list. Open
+one to resume it, or choose **Discard** to remove only that draft. Drafts stay on
+your device until you send them.
+
+## Send Codex feedback
+
+In a Codex thread, send `/feedback` with an optional explanation. Progress and the
+result appear beside the composer. After a successful upload, copy the thread ID
+to reference the report. You can dismiss a finished notice; feedback does not add
+messages to the conversation.
+
 ## Custom models
 
 On web and desktop, use Settings → Providers → **Models** to add an unlisted model with a custom

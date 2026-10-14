@@ -139,6 +139,53 @@ function activityOrders(
 }
 
 it.layer(NodeServices.layer)("pending request decider", (it) => {
+  it.effect("message-mode questions cannot overwrite an approval with the same ID", () =>
+    Effect.gen(function* () {
+      const approval = activity("approval.requested", "same");
+      const question = {
+        ...activity("user-input.requested", "same"),
+        payload: { requestId: "same", responseMode: "message" },
+      };
+      const settle = commands[0];
+      for (const activities of [
+        [approval, question],
+        [question, approval],
+        [approval, activity("user-input.resolved", "same"), question],
+      ]) {
+        const error = yield* decideOrchestrationCommand({
+          command: settle,
+          readModel: makeReadModel(activities),
+        }).pipe(Effect.flip);
+        expect(error).toMatchObject({ _tag: "OrchestrationThreadSettleBlockedError" });
+      }
+      for (const activities of activityOrders(approval, activity("approval.resolved", "same"))) {
+        const result = yield* decideOrchestrationCommand({
+          command: settle,
+          readModel: makeReadModel([...activities, question]),
+        });
+        const events = Array.isArray(result) ? result : [result];
+        expect(events.map((event) => event.type)).toEqual([
+          "thread.settled",
+          "thread.activity-appended",
+        ]);
+        expect(events[1]?.payload).toMatchObject({
+          activity: {
+            kind: "user-input.resolved",
+            payload: { requestId: "same", responseMode: "message" },
+          },
+        });
+      }
+      for (const activities of activityOrders(question, activity("user-input.resolved", "same"))) {
+        const result = yield* decideOrchestrationCommand({
+          command: settle,
+          readModel: makeReadModel(activities),
+        });
+        expect((Array.isArray(result) ? result : [result]).map((event) => event.type)).toEqual([
+          "thread.settled",
+        ]);
+      }
+    }),
+  );
   for (const command of commands) {
     const expectedEvent = command.type === "thread.settle" ? "thread.settled" : "thread.snoozed";
     const expectedError =

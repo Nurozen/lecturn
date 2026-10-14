@@ -6,7 +6,7 @@ export interface AccountRow {
   readonly account?: { readonly preset: string } | null;
   readonly thread?: { readonly environmentId: string };
   readonly item?: { readonly thread: { readonly environmentId: string } };
-  readonly pendingTask?: { readonly message: { readonly environmentId: string } };
+  readonly pendingTask?: { readonly environmentId: string };
   readonly group?: { readonly projects: ReadonlyArray<{ readonly environmentId: string }> };
 }
 
@@ -31,7 +31,7 @@ export function accountRowColors(
     const environment =
       item.thread?.environmentId ??
       item.item?.thread.environmentId ??
-      item.pendingTask?.message.environmentId;
+      item.pendingTask?.environmentId;
     const color = environment ? colorForEnvironment(environment) : inherited;
     if (color) result.set(item.key, color);
   }

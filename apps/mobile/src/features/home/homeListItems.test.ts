@@ -1,3 +1,5 @@
+import { buildPendingNewTasks } from "../../state/pending-new-tasks-model";
+import { threadMoveScopes } from "./threadMoveScopes";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -379,6 +381,9 @@ describe("saga list layout", () => {
       displayStates: new Map(),
     }).items;
     const headers = rows.filter((row) => row.type === "header");
+    const scopes = threadMoveScopes([mixed, sagaGroup("saga", true)], index);
+    expect(scopes.get(`${environmentId}:a`)).toEqual([`${environmentId}:a`]);
+    expect(scopes.get(`${environmentId}:clone`)).toEqual([`${environmentId}:clone`]);
     expect(headers.find((row) => row.group.representative.id === "a")).toMatchObject({ depth: 1 });
     expect(headers.find((row) => row.group.representative.id === "clone")).toMatchObject({
       depth: 0,
@@ -539,6 +544,14 @@ describe("saga list layout", () => {
       worktreePath: null,
     };
     const task: PendingNewTask = {
+      kind: "pending",
+      key: "pending-task:offline-message",
+      environmentId,
+      projectId: creation.projectId,
+      projectTitle: undefined,
+      projectCwd: undefined,
+      branch: null,
+      createdAt: "2026-09-01T00:00:00Z",
       title: "offline task",
       creation,
       message: {
@@ -728,5 +741,128 @@ describe("account sections", () => {
     });
     expect(layout).toHaveLength(2);
     expect(layout[0]).toMatchObject({ type: "account-header", account: { signedIn: false } });
+  });
+});
+
+describe("draft ownership through the mobile hierarchy", () => {
+  it("keeps several drafts and queued work in their account/project, including missing project shells", () => {
+    const environments = ["work", "personal", "direct"].map((id) => EnvironmentId.make(id));
+    const projects = environments.map((environmentId) => ({
+      ...makeProject("shared", "Shared"),
+      environmentId,
+      repositoryIdentity: {
+        canonicalKey: "github:owner/repo",
+        locator: {
+          source: "git-remote" as const,
+          remoteName: "origin",
+          remoteUrl: "git@github.com:owner/repo.git",
+        },
+      },
+    }));
+    const accounts = ["work-user", "personal-user"].map((accountId) => ({
+      accountId,
+      label: accountId,
+      email: `${accountId}@test.example`,
+      preset: "jade",
+      signedIn: true,
+    }));
+    const accountSections = {
+      accounts,
+      owners: new Map([
+        [environments[0]!, accounts[0]!.accountId],
+        [environments[1]!, accounts[1]!.accountId],
+      ]),
+    };
+    const drafts = Object.fromEntries(
+      [0, 0, 1, 2].map((owner, index) => [
+        `new-task:draft-${index}`,
+        {
+          text: `idea-${index}`,
+          attachments: [],
+          project: {
+            environmentId: environments[owner]!,
+            projectId: ProjectId.make("shared"),
+            createdAt: "2026-09-01T00:00:00Z",
+          },
+        },
+      ]),
+    );
+    const tasks = buildPendingNewTasks({
+      drafts,
+      queuedMessages: [
+        {
+          environmentId: environments[1]!,
+          threadId: ThreadId.make("pending"),
+          messageId: MessageId.make("pending"),
+          commandId: CommandId.make("pending"),
+          text: "queued",
+          attachments: [],
+          createdAt: "2026-09-01T00:00:00Z",
+          creation: {
+            projectId: ProjectId.make("shared"),
+            workspaceMode: "local",
+            branch: null,
+            worktreePath: null,
+          },
+        },
+      ],
+    });
+    // Personal is offline: synthetic project grouping must still own its work.
+    const groups = buildHomeThreadGroups({
+      accountSections,
+      projects: projects.filter((p) => p.environmentId !== environments[1]),
+      threads: [],
+      pendingTasks: tasks,
+      environmentId: null,
+      searchQuery: "",
+      projectSortOrder: "created_at",
+      threadSortOrder: "created_at",
+      projectGroupingMode: "repository",
+    });
+    expect(groups.map((group) => group.pendingTasks.length).sort()).toEqual([1, 2, 2]);
+    const scopes = threadMoveScopes(groups, []);
+    for (const project of projects)
+      expect(scopes.get(`${project.environmentId}:${project.id}`)).toEqual([
+        `${project.environmentId}:${project.id}`,
+      ]);
+    const layouts = [
+      buildHomeListLayout({ groups, accountSections, displayStates: new Map() }).items,
+      buildHomeHierarchyV2Items({
+        groups,
+        accountSections,
+        displayStates: new Map(),
+        items: buildThreadListV2ListItems({ items: [], pendingTasks: tasks }),
+      }),
+    ];
+    for (const rows of layouts) {
+      const owned = new Map<string | null, string[]>();
+      let accountId: string | null = null;
+      for (const row of rows) {
+        if (row.type === "account-header") accountId = row.account?.accountId ?? null;
+        if (row.type === "pending-task" || row.type === "v2-pending")
+          owned.set(accountId, [...(owned.get(accountId) ?? []), row.pendingTask.key]);
+      }
+      expect(owned.get("work-user")?.sort()).toEqual([
+        "draft-task:new-task:draft-0",
+        "draft-task:new-task:draft-1",
+      ]);
+      expect(owned.get("personal-user")?.sort()).toEqual([
+        "draft-task:new-task:draft-2",
+        "pending-task:pending",
+      ]);
+      expect(owned.get(null)).toEqual(["draft-task:new-task:draft-3"]);
+      expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
+    }
+    const collapsed = buildHomeHierarchyV2Items({
+      groups,
+      accountSections,
+      displayStates: new Map([["connect-account:work-user", { collapsed: true, visibleCount: 6 }]]),
+      items: buildThreadListV2ListItems({ items: [], pendingTasks: tasks }),
+    });
+    expect(
+      collapsed
+        .filter((row) => row.type === "v2-pending")
+        .map((row) => row.pendingTask.environmentId),
+    ).not.toContain(environments[0]);
   });
 });

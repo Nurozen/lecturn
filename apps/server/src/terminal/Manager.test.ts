@@ -15,6 +15,7 @@ import {
 } from "@lecturn/contracts";
 import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import * as Data from "effect/Data";
+import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as StaveRuntimeFence from "../stave/StaveRuntimeFence.ts";
 import * as Duration from "effect/Duration";
@@ -28,6 +29,7 @@ import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
+import * as Queue from "effect/Queue";
 import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -223,6 +225,13 @@ interface CreateManagerOptions {
     readonly childCommand: string | null;
     readonly processIds: ReadonlyArray<number>;
   }>;
+  processTable?: Effect.Effect<
+    ReadonlyArray<{ readonly pid: number; readonly ppid: number; readonly name: string }>,
+    TerminalManager.TerminalSubprocessCheckError
+  >;
+  registerTerminalProcesses?: Parameters<
+    typeof TerminalManager.makeWithOptions
+  >[0]["registerTerminalProcesses"];
   subprocessPollIntervalMs?: number;
   processKillGraceMs?: number;
   maxRetainedInactiveSessions?: number;
@@ -268,6 +277,10 @@ const createManager = (
         ...(options.env !== undefined ? { env: options.env } : {}),
         ...(options.subprocessInspector !== undefined
           ? { subprocessInspector: options.subprocessInspector }
+          : {}),
+        ...(options.processTable !== undefined ? { processTable: options.processTable } : {}),
+        ...(options.registerTerminalProcesses
+          ? { registerTerminalProcesses: options.registerTerminalProcesses }
           : {}),
         ...(options.subprocessPollIntervalMs !== undefined
           ? { subprocessPollIntervalMs: options.subprocessPollIntervalMs }
@@ -1247,6 +1260,187 @@ it.layer(
     }),
   );
 
+  it("calculates snapshot failure backoff and success reset delays", () => {
+    assert.equal(TerminalManager.subprocessSnapshotPollDelayMs(1_000, 0), 1_000);
+    assert.equal(TerminalManager.subprocessSnapshotPollDelayMs(1_000, 1), 2_000);
+    assert.equal(TerminalManager.subprocessSnapshotPollDelayMs(1_000, 2), 4_000);
+    assert.equal(TerminalManager.subprocessSnapshotPollDelayMs(1_000, 30), 60_000);
+  });
+
+  it.effect("shares one native Windows process snapshot across running terminals", () =>
+    Effect.gen(function* () {
+      const registered = yield* Queue.unbounded<ReadonlyArray<number>>();
+      let snapshotCalls = 0;
+      const { manager, getEvents } = yield* createManager(5, {
+        subprocessPollIntervalMs: 20,
+        processKillGraceMs: 0,
+        processTable: Effect.sync(() => {
+          snapshotCalls += 1;
+          return [
+            { pid: 100, ppid: 9000, name: "ping.exe" },
+            { pid: 101, ppid: 9001, name: "vim.exe" },
+          ];
+        }),
+        registerTerminalProcesses: ({ processIds }) =>
+          Queue.offer(registered, processIds).pipe(Effect.asVoid),
+      }).pipe(Effect.provide(withHostPlatform("win32")));
+      yield* manager.open(openInput());
+      yield* manager.open(openInput({ terminalId: "second" }));
+      yield* TestClock.adjust("20 millis");
+      const ids = [yield* Queue.take(registered), yield* Queue.take(registered)];
+      expect(ids).toEqual(
+        expect.arrayContaining([
+          [9000, 100],
+          [9001, 101],
+        ]),
+      );
+      expect(snapshotCalls).toBe(1);
+      expect(
+        (yield* getEvents).filter((event) => event.type === "activity").map((event) => event.label),
+      ).toEqual(expect.arrayContaining(["ping", "vim"]));
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect(
+    "backs off fallback failures, preserves registrations and resets on native recovery",
+    () =>
+      Effect.gen(function* () {
+        const snapshots = yield* Queue.unbounded<number>();
+        const registered = yield* Queue.unbounded<ReadonlyArray<number>>();
+        const snapshotTimes: number[] = [];
+        let nativeAvailable = false;
+        let fallbackAvailable = true;
+        const processRunner: ProcessRunner.ProcessRunner["Service"] = {
+          run: () =>
+            Effect.sync(() => ({
+              stdout: "  100  9000 vim",
+              stderr: "",
+              code: ChildProcessSpawner.ExitCode(fallbackAvailable ? 0 : 1),
+              timedOut: false,
+              stdoutTruncated: false,
+              stderrInvalidUtf8: false,
+              stdoutInvalidUtf8: false,
+              stderrTruncated: false,
+            })),
+        };
+        const { manager, getEvents } = yield* createManager(5, {
+          subprocessPollIntervalMs: 20,
+          processKillGraceMs: 0,
+          processTable: Clock.currentTimeMillis.pipe(
+            Effect.flatMap((now) =>
+              Queue.offer(snapshots, now).pipe(
+                Effect.andThen(
+                  Effect.suspend(() => {
+                    snapshotTimes.push(now);
+                    return nativeAvailable
+                      ? Effect.succeed([{ pid: 101, ppid: 9000, name: "node" }])
+                      : Effect.fail(
+                          new TerminalManager.TerminalSubprocessCheckError({
+                            command: "resource-monitor",
+                          }),
+                        );
+                  }),
+                ),
+              ),
+            ),
+          ),
+          registerTerminalProcesses: ({ processIds }) =>
+            Queue.offer(registered, processIds).pipe(Effect.asVoid),
+        }).pipe(
+          Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
+          Effect.provide(withHostPlatform("linux")),
+        );
+        yield* manager.open(openInput());
+        yield* TestClock.adjust("20 millis");
+        yield* Queue.take(snapshots);
+        expect(yield* Queue.take(registered)).toEqual([9000, 100]);
+        yield* TestClock.adjust("40 millis");
+        yield* Queue.take(snapshots);
+        expect(yield* Queue.take(registered)).toEqual([9000, 100]);
+        fallbackAvailable = false;
+        yield* TestClock.adjust("80 millis");
+        yield* Queue.take(snapshots);
+        expect(yield* Queue.size(registered)).toBe(0);
+        expect(
+          (yield* getEvents)
+            .filter((event) => event.type === "activity")
+            .every((event) => event.hasRunningSubprocess),
+        ).toBe(true);
+        nativeAvailable = true;
+        yield* TestClock.adjust("160 millis");
+        yield* Queue.take(snapshots);
+        expect(yield* Queue.take(registered)).toEqual([9000, 101]);
+        yield* TestClock.adjust("20 millis");
+        yield* Queue.take(snapshots);
+        expect(yield* Queue.take(registered)).toEqual([9000, 101]);
+        expect(snapshotTimes.slice(1).map((now, index) => now - snapshotTimes[index]!)).toEqual([
+          40, 80, 160, 20,
+        ]);
+      }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("rejects an empty native Windows table without clearing terminal activity", () =>
+    Effect.gen(function* () {
+      const registered = yield* Queue.unbounded<ReadonlyArray<number>>();
+      const snapshots = yield* Queue.unbounded<number>();
+      let nativeAvailable = false;
+      let fallbackAvailable = true;
+      const fallbackCommands: string[] = [];
+      const processRunner: ProcessRunner.ProcessRunner["Service"] = {
+        run: (input) =>
+          Effect.sync(() => {
+            fallbackCommands.push(input.command);
+            return {
+              stdout: "100|9000|vim.exe",
+              stderr: "",
+              code: ChildProcessSpawner.ExitCode(fallbackAvailable ? 0 : 1),
+              timedOut: false,
+              stdoutTruncated: false,
+              stderrTruncated: false,
+              stdoutInvalidUtf8: false,
+              stderrInvalidUtf8: false,
+            };
+          }),
+      };
+      const { manager, getEvents } = yield* createManager(5, {
+        subprocessPollIntervalMs: 20,
+        processKillGraceMs: 0,
+        processTable: Clock.currentTimeMillis.pipe(
+          Effect.flatMap((now) =>
+            Queue.offer(snapshots, now).pipe(
+              Effect.andThen(
+                Effect.sync(() =>
+                  nativeAvailable ? [{ pid: 101, ppid: 9000, name: "node.exe" }] : [],
+                ),
+              ),
+            ),
+          ),
+        ),
+        registerTerminalProcesses: ({ processIds }) =>
+          Queue.offer(registered, processIds).pipe(Effect.asVoid),
+      }).pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
+        Effect.provide(withHostPlatform("win32")),
+      );
+      yield* manager.open(openInput());
+      yield* TestClock.adjust("20 millis");
+      expect(yield* Queue.take(snapshots)).toBe(20);
+      expect(yield* Queue.take(registered)).toEqual([9000, 100]);
+      fallbackAvailable = false;
+      yield* TestClock.adjust("40 millis");
+      expect(yield* Queue.take(snapshots)).toBe(60);
+      expect(yield* Queue.size(registered)).toBe(0);
+      expect((yield* getEvents).filter((event) => event.type === "activity")).toEqual([
+        expect.objectContaining({ hasRunningSubprocess: true, label: "vim" }),
+      ]);
+      nativeAvailable = true;
+      yield* TestClock.adjust("80 millis");
+      expect(yield* Queue.take(snapshots)).toBe(140);
+      expect(yield* Queue.take(registered)).toEqual([9000, 101]);
+      expect(fallbackCommands).toEqual(["powershell.exe", "powershell.exe"]);
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
   it.effect("caps persisted history to configured line limit", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter } = yield* createManager(3);
@@ -1302,7 +1496,7 @@ it.layer(
       expect(events.filter((event) => event.type === "output").map((event) => event.data)).toEqual(
         writes,
       );
-      const snapshot = events.filter((event) => event.type === "snapshot").at(-1)?.snapshot;
+      const snapshot = events.findLast((event) => event.type === "snapshot")?.snapshot;
       expect(snapshot?.history).toBe("aa😀\rEND");
       expect(snapshot?.sequence).toBe(reopened.sequence);
     }),

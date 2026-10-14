@@ -77,13 +77,11 @@ function isStaleRequestFailureDetail(
 // Scans the read model's activities, which the projector caps at the most
 // recent 500 plus pending async questions. Async questions remain actionable
 // while the agent works, so they must not expire with the activity window.
-function hasOpenBlockingRequest(thread: {
-  readonly activities: ReadonlyArray<{ readonly kind: string; readonly payload: unknown }>;
-}): boolean {
-  const openApprovalIds = new Set<string>();
-  const openUserInputIds = new Set<string>();
-  const closedApprovalIds = new Set<string>();
-  const closedUserInputIds = new Set<string>();
+function openRequests(thread: Pick<OrchestrationThread, "activities">) {
+  const approvals = new Map<string, OrchestrationThreadActivity>();
+  const questions = new Map<string, OrchestrationThreadActivity>();
+  const closedApprovals = new Set<string>();
+  const closedQuestions = new Set<string>();
   // Terminal activities remain final across reordered or replayed requests.
   // Approval and question IDs belong to separate namespaces.
   for (const activity of thread.activities) {
@@ -91,26 +89,26 @@ function hasOpenBlockingRequest(thread: {
     const requestId = typeof payload?.requestId === "string" ? payload.requestId : null;
     if (requestId === null || payload === null) continue;
     if (activity.kind === "approval.requested") {
-      if (!closedApprovalIds.has(requestId)) openApprovalIds.add(requestId);
+      if (!closedApprovals.has(requestId)) approvals.set(requestId, activity);
     } else if (activity.kind === "user-input.requested") {
-      if (!closedUserInputIds.has(requestId)) openUserInputIds.add(requestId);
+      if (!closedQuestions.has(requestId)) questions.set(requestId, activity);
     } else if (
       activity.kind === "approval.resolved" ||
       (activity.kind === "provider.approval.respond.failed" &&
         isStaleRequestFailureDetail(activity.kind, payload))
     ) {
-      closedApprovalIds.add(requestId);
-      openApprovalIds.delete(requestId);
+      closedApprovals.add(requestId);
+      approvals.delete(requestId);
     } else if (
       activity.kind === "user-input.resolved" ||
       (activity.kind === "provider.user-input.respond.failed" &&
         isStaleRequestFailureDetail(activity.kind, payload))
     ) {
-      closedUserInputIds.add(requestId);
-      openUserInputIds.delete(requestId);
+      closedQuestions.add(requestId);
+      questions.delete(requestId);
     }
   }
-  return openApprovalIds.size > 0 || openUserInputIds.size > 0;
+  return [...approvals.entries(), ...questions.entries()];
 }
 
 /** Apply the shared shell-level rule to the detailed command read model. */
@@ -523,10 +521,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (thread.session?.status === "starting" || thread.session?.status === "running") {
         return yield* new OrchestrationThreadSettleBlockedError({ threadId: command.threadId });
       }
-      // Pending approval / user-input requests are blocked-on-you work: a
-      // raced or stale client must not park them behind a settled override
-      // that would surface only after the request resolves.
-      if (hasOpenBlockingRequest(thread)) {
+      const pendingRequests = openRequests(thread);
+      // Manual settlement dismisses async questions without answering them.
+      // Native callbacks and approvals still need a response or interruption.
+      if (
+        pendingRequests.some(
+          ([, activity]) =>
+            command.type === "thread.auto-settle" ||
+            activity.kind !== "user-input.requested" ||
+            !Predicate.isObject(activity.payload) ||
+            activity.payload.responseMode !== "message",
+        )
+      ) {
         return yield* new OrchestrationThreadSettleBlockedError({ threadId: command.threadId });
       }
       const occurredAt = yield* nowIso;
@@ -562,6 +568,29 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       // Settling is "I'm done with this": clear states that would keep the
       // row pinned or snoozed instead of showing the new settled state.
       const companionEvents: Array<Omit<OrchestrationEvent, "sequence">> = [];
+      for (const [requestId, request] of pendingRequests) {
+        companionEvents.push({
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: command.threadId,
+            activity: {
+              id: EventId.make(`settle:${command.commandId}:${requestId}`),
+              kind: "user-input.resolved",
+              summary: "User input dismissed",
+              tone: "info",
+              turnId: request.turnId,
+              createdAt: occurredAt,
+              payload: { requestId, responseMode: "message" },
+            },
+          },
+        });
+      }
       if (thread.pinnedAt != null) {
         companionEvents.push({
           ...(yield* withEventBase({
@@ -648,7 +677,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       // user-input request is the agent waiting on the user, and hiding it
       // defeats the request. (A running session IS snoozable — snooze only
       // affects visibility, never the agent.)
-      if (hasOpenBlockingRequest(thread)) {
+      if (openRequests(thread).length > 0) {
         return yield* Effect.fail(
           new OrchestrationCommandInvariantError({
             commandType: command.type,
@@ -851,6 +880,42 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           orderKey: command.orderKey,
           updatedAt: keyUnchanged ? thread.updatedAt : occurredAt,
+        },
+      };
+    }
+
+    case "thread.active.reorder": {
+      const thread = yield* requireThreadNotArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const occurredAt = yield* nowIso;
+      // Snooze retains this slot. Changing it cannot wake the thread, and
+      // accepting it handles races with snooze and retained wake timestamps.
+      if (
+        thread.deletedAt !== null ||
+        thread.pinnedAt != null ||
+        thread.settledOverride === "settled"
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `thread ${command.threadId} is not active and cannot be reordered`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: command.threadId,
+          activeOrderKey: command.orderKey,
+          // Arranging the list is not thread activity or a lifecycle transition.
+          updatedAt: thread.updatedAt,
         },
       };
     }
@@ -1505,7 +1570,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         thread.messages.length > 0 ||
         thread.latestTurn !== null ||
         thread.session !== null ||
-        hasOpenBlockingRequest(thread)
+        openRequests(thread).length > 0
       ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,

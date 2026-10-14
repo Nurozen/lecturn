@@ -582,7 +582,109 @@ describe("thread outbox delivered creation recovery", () => {
 });
 
 describe("thread outbox recovery rollback", () => {
-  it("restores a rejected new task into its durable project draft", async () => {
+  it("recovers several tasks for one project without overwriting its other drafts", async () => {
+    await composerDrafts.waitForComposerDraftsLoaded();
+    const project = {
+      environmentId: EnvironmentId.make("environment-1"),
+      projectId: ProjectId.make("project-1"),
+    };
+    appAtomRegistry.set(composerDrafts.composerDraftsAtom, {
+      "new-task:already-writing": {
+        text: "keep this draft",
+        attachments: [],
+        project: { ...project, createdAt: "2026-08-24T11:00:00.000Z" },
+      },
+    });
+    const messages: QueuedThreadMessage[] = [true, false].map((enabled, index) => ({
+      ...queuedMessage({ messageId: `rejected-${index}`, text: `task ${index}` }),
+      threadId: ThreadId.make(`thread-${index}`),
+      creation: {
+        projectId: project.projectId,
+        workspaceMode: "local",
+        branch: null,
+        worktreePath: null,
+        contextual: { enabled, sourceIds: enabled ? ["project-source"] : [] },
+      },
+    }));
+    for (const message of messages) await harness.manager.enqueue(message);
+    for (const message of messages) {
+      await expect(restoreRejectedQueuedMessage(message, "rejected")).resolves.toBe("restored");
+      expect(
+        composerDrafts.getComposerDraftSnapshot(`new-task:restored-${message.messageId}`),
+      ).toMatchObject({ text: message.text, project, contextual: message.creation!.contextual });
+    }
+    expect(composerDrafts.getComposerDraftSnapshot("new-task:already-writing").text).toBe(
+      "keep this draft",
+    );
+    expect(Object.keys(appAtomRegistry.get(composerDrafts.composerDraftsAtom))).toHaveLength(3);
+    expect(remainingMessages()).toEqual([]);
+  });
+
+  it.each([false, true])(
+    "preserves a retarget during recovery persistence (editor=%s)",
+    async (editing) => {
+      const message: QueuedThreadMessage = {
+        ...queuedMessage({ messageId: "retarget-recovery", text: "rejected text" }),
+        creation: {
+          projectId: ProjectId.make("project-1"),
+          workspaceMode: "local",
+          branch: null,
+          worktreePath: null,
+          contextual: { enabled: true, sourceIds: ["source-project-1"] },
+        },
+      };
+      const draftKey = `new-task:restored-${message.messageId}`;
+      const target = {
+        environmentId: EnvironmentId.make("environment-2"),
+        projectId: ProjectId.make("project-2"),
+      };
+      const published = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const merge = composerDrafts.mergeComposerDraftContent;
+      const spy = vi
+        .spyOn(composerDrafts, "mergeComposerDraftContent")
+        .mockImplementation(async (...args) => {
+          const result = await merge(...args);
+          published.resolve();
+          await release.promise;
+          return result;
+        });
+      try {
+        await harness.manager.enqueue(message);
+        const recovery = restoreRejectedQueuedMessage(message, "rejected");
+        await published.promise;
+        composerDrafts.retargetNewTaskDraft(draftKey, target);
+        composerDrafts.setComposerDraftText(draftKey, "rejected text\n\nnew target work");
+        if (editing)
+          appAtomRegistry.set(editingQueuedMessageIdsAtom, { [message.messageId]: true });
+        release.resolve();
+        await expect(recovery).resolves.toBe("deferred");
+        expect(composerDrafts.getComposerDraftSnapshot(draftKey)).toMatchObject({
+          text: "\n\nnew target work",
+          project: target,
+        });
+        expect(composerDrafts.getComposerDraftSnapshot(draftKey).contextual).toBeUndefined();
+        expect(
+          composerDrafts.getComposerDraftSnapshot(draftKey).workspaceSelection,
+        ).toBeUndefined();
+        expect(remainingMessages()).toEqual([message]);
+        spy.mockRestore();
+        appAtomRegistry.set(editingQueuedMessageIdsAtom, {});
+        await expect(restoreRejectedQueuedMessage(message, "rejected")).resolves.toBe("restored");
+        expect(composerDrafts.getComposerDraftSnapshot(draftKey).project).toMatchObject(target);
+        expect(composerDrafts.getComposerDraftSnapshot(draftKey).contextual).toBeUndefined();
+        expect(
+          composerDrafts.getComposerDraftSnapshot(draftKey).workspaceSelection,
+        ).toBeUndefined();
+        expect(remainingMessages()).toEqual([]);
+      } finally {
+        release.resolve();
+        spy.mockRestore();
+      }
+    },
+  );
+
+  it("restores a rejected new task as its own draft for the project", async () => {
     const message: QueuedThreadMessage = {
       ...queuedMessage({ messageId: "message-creation-restore", text: "new task text" }),
       modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" },
@@ -599,14 +701,19 @@ describe("thread outbox recovery rollback", () => {
       "restored",
     );
 
+    // The draft is keyed by the message so a retry lands on the same one, and
+    // stamped with the project so it shows up as a Draft row for that project.
     expect(
-      composerDrafts.getComposerDraftSnapshot(
-        `new-task:${message.environmentId}:${message.creation!.projectId}`,
-      ),
+      composerDrafts.getComposerDraftSnapshot(`new-task:restored-${message.messageId}`),
     ).toMatchObject({
       text: message.text,
       attachments: message.attachments,
       modelSelection: message.modelSelection,
+      project: {
+        environmentId: message.environmentId,
+        projectId: message.creation!.projectId,
+        createdAt: message.createdAt,
+      },
     });
     expect(remainingMessages()).toEqual([]);
     expect(harness.setPendingConnectionError).toHaveBeenCalledWith("rejected by server");

@@ -496,6 +496,48 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       yield* sql`DROP TRIGGER count_thread_shell_updates`;
       yield* sql`DROP TABLE thread_shell_updates`;
 
+      // Replayed order events must survive later lifecycle upserts, whose
+      // complete SQL row writes otherwise risk dropping the placement.
+      const orderUpdatedAt = "2026-01-01T00:00:00.200Z";
+      const orderEvents = [
+        { type: "thread.meta-updated", payload: { activeOrderKey: "gm" } },
+        { type: "thread.pinned", payload: { pinnedAt: now, pinOrderKey: "m" } },
+        {
+          type: "thread.snoozed",
+          payload: { snoozedAt: now, snoozedUntil: "2026-01-02T00:00:00.000Z" },
+        },
+        { type: "thread.unsnoozed", payload: { reason: "user" } },
+        { type: "thread.unpinned", payload: {} },
+        { type: "thread.meta-updated", payload: { title: "Renamed" } },
+      ] as const;
+      for (const [index, event] of orderEvents.entries()) {
+        yield* eventStore.append({
+          type: event.type,
+          eventId: EventId.make(`evt-active-order-${index}`),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          occurredAt: "2026-01-01T00:00:00.500Z",
+          commandId: CommandId.make(`cmd-active-order-${index}`),
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          payload: {
+            ...event.payload,
+            threadId: ThreadId.make("thread-1"),
+            updatedAt: orderUpdatedAt,
+          },
+        });
+        yield* projectionPipeline.bootstrap;
+        const rows = yield* sql<{
+          readonly activeOrderKey: string | null;
+          readonly updatedAt: string;
+        }>`
+          SELECT active_order_key AS "activeOrderKey", updated_at AS "updatedAt"
+          FROM projection_threads WHERE thread_id = 'thread-1'
+        `;
+        assert.deepEqual(rows, [{ activeOrderKey: "gm", updatedAt: orderUpdatedAt }]);
+      }
+
       // Settled lifecycle through the DB pipeline: thread.settled writes the
       // override + timestamp, thread.unsettled(user) flips to the active pin.
       yield* eventStore.append({
@@ -520,16 +562,23 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         readonly settledOverride: string | null;
         readonly settledAt: string | null;
         readonly unsettledAt: string | null;
+        readonly activeOrderKey: string | null;
       }>`
         SELECT
           settled_override AS "settledOverride",
           settled_at AS "settledAt",
-          unsettled_at AS "unsettledAt"
+          unsettled_at AS "unsettledAt",
+          active_order_key AS "activeOrderKey"
         FROM projection_threads
         WHERE thread_id = 'thread-1'
       `;
       assert.deepEqual(settledRows, [
-        { settledOverride: "settled", settledAt: "2026-01-01T00:00:01.000Z", unsettledAt: null },
+        {
+          settledOverride: "settled",
+          settledAt: "2026-01-01T00:00:01.000Z",
+          unsettledAt: null,
+          activeOrderKey: null,
+        },
       ]);
 
       yield* eventStore.append({
@@ -554,11 +603,13 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         readonly settledOverride: string | null;
         readonly settledAt: string | null;
         readonly unsettledAt: string | null;
+        readonly activeOrderKey: string | null;
       }>`
         SELECT
           settled_override AS "settledOverride",
           settled_at AS "settledAt",
-          unsettled_at AS "unsettledAt"
+          unsettled_at AS "unsettledAt",
+          active_order_key AS "activeOrderKey"
         FROM projection_threads
         WHERE thread_id = 'thread-1'
       `;
@@ -569,6 +620,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           settledOverride: "active",
           settledAt: null,
           unsettledAt: "2026-01-01T00:00:02.000Z",
+          activeOrderKey: null,
         },
       ]);
     }),
@@ -4945,6 +4997,13 @@ it.layer(
         },
       });
 
+      yield* appendEvent({
+        eventId: "evt-fork-parent-active-order",
+        type: "thread.meta-updated",
+        aggregateKind: "thread",
+        aggregateId: parentThreadId,
+        payload: { threadId: parentThreadId, activeOrderKey: "gm", updatedAt: now },
+      });
       yield* projectionPipeline.bootstrap;
       const parentRowsBefore = yield* readThreadRows(parentThreadId);
 
@@ -5089,6 +5148,12 @@ it.layer(
       const childShell = Option.getOrThrow(yield* snapshotQuery.getThreadShellById(childThreadId));
       assert.deepEqual(childShell.linkedPullRequest, linkedPullRequest);
       assert.deepEqual(childShell.forkedFrom, forkedFrom);
+      assert.strictEqual(childShell.activeOrderKey, null);
+      assert.strictEqual(
+        Option.getOrThrow(yield* snapshotQuery.getThreadShellById(parentThreadId)).activeOrderKey,
+        "gm",
+      );
+
       assert.strictEqual(childShell.latestUserMessageAt, "2026-06-01T00:20:00.000Z");
       const childThreadRows = yield* sql<{ readonly latestTurnId: string | null }>`
         SELECT latest_turn_id AS "latestTurnId"
@@ -5139,6 +5204,49 @@ it.layer(
       const parentRowsReplayed = yield* readThreadRows(parentThreadId);
       assert.deepEqual(parentRowsReplayed, parentRowsBefore);
       assert.deepEqual(childRowsReplayed, childRowsBeforeReplay);
+      for (const [eventId, type, payload, expectedKey] of [
+        [
+          "child-order",
+          "thread.meta-updated",
+          { threadId: childThreadId, activeOrderKey: "gt", updatedAt: forkAt },
+          "gt",
+        ],
+        [
+          "child-settle",
+          "thread.settled",
+          { threadId: childThreadId, settledAt: forkAt, updatedAt: forkAt },
+          null,
+        ],
+        [
+          "child-reopen",
+          "thread.unsettled",
+          { threadId: childThreadId, reason: "user", updatedAt: forkAt },
+          null,
+        ],
+      ] as const) {
+        yield* appendEvent({
+          eventId,
+          type,
+          aggregateKind: "thread",
+          aggregateId: childThreadId,
+          payload,
+        });
+        yield* projectionPipeline.bootstrap;
+        const shell = Option.getOrThrow(yield* snapshotQuery.getThreadShellById(childThreadId));
+        assert.strictEqual(shell.activeOrderKey, expectedKey);
+        assert.deepEqual(shell.forkedFrom, forkedFrom);
+        const detail = Option.getOrThrow(
+          yield* snapshotQuery.getThreadDetailSnapshot(childThreadId, { turnLimit: 1 }),
+        );
+        assert.strictEqual(detail.thread.activeOrderKey, expectedKey);
+        assert.deepEqual(detail.thread.forkedFrom, forkedFrom);
+        assert.isFalse("forkSource" in detail.thread);
+        assert.deepEqual(
+          Option.getOrThrow(yield* snapshotQuery.getThreadForkContextById(childThreadId)),
+          forkContext,
+        );
+        assert.deepEqual(yield* readThreadRows(parentThreadId), parentRowsBefore);
+      }
     }),
   );
 
@@ -5251,3 +5359,116 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-refr
     );
   },
 );
+
+engineLayer("OrchestrationProjectionPipeline retained async settlement", (it) => {
+  it.effect(
+    "manual settle dismisses retained async questions and replay cannot reopen pending flags",
+    () =>
+      Effect.gen(function* () {
+        const engine = yield* OrchestrationEngineService;
+        const query = yield* ProjectionSnapshotQuery;
+        const projectId = ProjectId.make("project-retained-dismiss");
+        const threadId = ThreadId.make("thread-retained-dismiss");
+        const createdAt = "1969-12-30T00:00:00.000Z";
+        yield* engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("retained-project"),
+          projectId,
+          title: "Retained question",
+          workspaceRoot: "/tmp/retained-dismiss",
+          defaultModelSelection: null,
+          createdAt,
+        });
+        yield* engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make("retained-thread"),
+          threadId,
+          projectId,
+          title: "Question",
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "fixture" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        });
+        const question = {
+          id: EventId.make("retained-question"),
+          kind: "user-input.requested",
+          summary: "Question",
+          tone: "approval" as const,
+          turnId: null,
+          createdAt,
+          payload: {
+            requestId: "retained-question",
+            responseMode: "message",
+            questions: [
+              {
+                id: "q",
+                header: "Next",
+                question: "Next step?",
+                options: [],
+                multiSelect: false,
+                allowCustomAnswer: true,
+              },
+            ],
+          },
+        };
+        yield* engine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.make("retained-request"),
+          threadId,
+          activity: question,
+          createdAt,
+        });
+        for (let index = 0; index < 501; index += 1) {
+          yield* engine.dispatch({
+            type: "thread.activity.append",
+            commandId: CommandId.make(`retained-noise-${index}`),
+            threadId,
+            createdAt: "1969-12-31T00:00:00.000Z",
+            activity: {
+              ...question,
+              id: EventId.make(`noise-${index}`),
+              kind: "runtime.info",
+              payload: {},
+              createdAt: "1969-12-31T00:00:00.000Z",
+            },
+          });
+        }
+        assert.isTrue(
+          Option.getOrThrow(yield* query.getThreadShellById(threadId)).hasPendingUserInput,
+        );
+        yield* engine.dispatch({
+          type: "thread.settle",
+          commandId: CommandId.make("retained-settle"),
+          threadId,
+        });
+        const settled = Option.getOrThrow(yield* query.getThreadShellById(threadId));
+        assert.isFalse(settled.hasPendingUserInput);
+        yield* engine.dispatch({
+          type: "thread.settle",
+          commandId: CommandId.make("retained-settle-repeat"),
+          threadId,
+        });
+        const repeated = Option.getOrThrow(yield* query.getThreadShellById(threadId));
+        assert.strictEqual(repeated.settledAt, settled.settledAt);
+        assert.strictEqual(repeated.updatedAt, settled.updatedAt);
+        const sql = yield* SqlClient.SqlClient;
+        assert.deepEqual(
+          yield* sql`SELECT COUNT(*) AS count FROM projection_thread_activities WHERE thread_id = ${threadId} AND kind = 'user-input.resolved'`,
+          [{ count: 1 }],
+        );
+        yield* engine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.make("retained-replay"),
+          threadId,
+          activity: { ...question, id: EventId.make("retained-replayed") },
+          createdAt,
+        });
+        assert.isFalse(
+          Option.getOrThrow(yield* query.getThreadShellById(threadId)).hasPendingUserInput,
+        );
+      }),
+  );
+});

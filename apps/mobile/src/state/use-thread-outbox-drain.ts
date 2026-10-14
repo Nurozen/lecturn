@@ -18,7 +18,7 @@ import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert } from "react-native";
 
-import { scopedProjectKey, scopedThreadKey } from "../lib/scopedEntities";
+import { scopedThreadKey } from "../lib/scopedEntities";
 import { buildProjectThreadStartTurnInput } from "../lib/projectThreadStartTurn";
 import { prepareTurnAttachments, type PreparedTurnAttachments } from "../lib/attachmentUpload";
 import { randomHex } from "../lib/uuid";
@@ -54,6 +54,7 @@ import {
   type ComposerDraft,
   getComposerDraftSnapshot,
   mergeComposerDraftContent,
+  newTaskDraftKey,
   replaceComposerDraftAttachments,
   removeDeliveredCloudQueuedMessage,
   undoComposerDraftMerge,
@@ -368,23 +369,23 @@ export async function restoreRejectedQueuedMessage(
       return "blocked";
     }
 
-    let mergedDraft: ComposerDraft;
-    try {
-      await mergeComposerDraftContent(draftKey, {
+    let mergedDraft = originalDraft;
+    stampRecoveryDraftProject(queuedMessage, draftKey);
+    await mergeComposerDraftContent(
+      draftKey,
+      {
         text: queuedMessage.text,
         attachments: queuedMessage.attachments,
-      });
-    } finally {
-      // Snapshots for the rollbacks below: undoComposerDraftMerge restores
-      // the original draft only while it is untouched, and otherwise takes
-      // out just what this recovery inserted so edits typed during the awaits
-      // survive. Captured in a finally because mergeComposerDraftContent
-      // publishes before its persistence await: even its failure leaves the
-      // merged content in the draft.
-      mergedDraft = getComposerDraftSnapshot(draftKey);
-      rollback = { snapshot: originalDraft, merged: mergedDraft };
-    }
-    if (appAtomRegistry.get(editingQueuedMessageIdsAtom)[queuedMessage.messageId]) {
+      },
+      (published) => {
+        mergedDraft = published;
+        rollback = { snapshot: originalDraft, merged: published };
+      },
+    );
+    if (
+      appAtomRegistry.get(editingQueuedMessageIdsAtom)[queuedMessage.messageId] ||
+      getComposerDraftSnapshot(draftKey).project !== mergedDraft.project
+    ) {
       await undoComposerDraftMerge(draftKey, originalDraft, mergedDraft);
       return "deferred";
     }
@@ -392,7 +393,9 @@ export async function restoreRejectedQueuedMessage(
       ...(queuedMessage.modelSelection ? { modelSelection: queuedMessage.modelSelection } : {}),
       ...(queuedMessage.runtimeMode ? { runtimeMode: queuedMessage.runtimeMode } : {}),
       ...(queuedMessage.interactionMode ? { interactionMode: queuedMessage.interactionMode } : {}),
-      ...(queuedMessage.creation
+      ...(queuedMessage.creation &&
+      mergedDraft.project?.environmentId === queuedMessage.environmentId &&
+      mergedDraft.project.projectId === queuedMessage.creation.projectId
         ? {
             ...(queuedMessage.creation.contextual
               ? { contextual: queuedMessage.creation.contextual }
@@ -455,10 +458,29 @@ export async function restoreRejectedQueuedMessage(
   }
 }
 
+/**
+ * A rejected creation becomes its own new-task draft rather than merging into
+ * whatever the user is typing for that project. The key derives from the
+ * message id so a retry after a mid-recovery failure lands on the same draft
+ * instead of minting another.
+ */
 function recoveryDraftKey(queuedMessage: QueuedThreadMessage): string {
   return queuedMessage.creation
-    ? `new-task:${scopedProjectKey(queuedMessage.environmentId, queuedMessage.creation.projectId)}`
+    ? newTaskDraftKey(`restored-${queuedMessage.messageId}`)
     : scopedThreadKey(queuedMessage.environmentId, queuedMessage.threadId);
+}
+
+function stampRecoveryDraftProject(queuedMessage: QueuedThreadMessage, draftKey: string): void {
+  if (!queuedMessage.creation || getComposerDraftSnapshot(draftKey).project !== undefined) {
+    return;
+  }
+  updateComposerDraftSettings(draftKey, {
+    project: {
+      environmentId: queuedMessage.environmentId,
+      projectId: queuedMessage.creation.projectId,
+      createdAt: queuedMessage.createdAt,
+    },
+  });
 }
 
 async function preserveUploadedAttachmentsForEditor(

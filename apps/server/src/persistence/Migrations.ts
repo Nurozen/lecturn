@@ -1,3 +1,4 @@
+import Migration0065 from "./Migrations/065_ProjectionThreadsActiveOrderCompatibility.ts";
 import Migration0064 from "./Migrations/064_ProjectionThreadMigrationCompatibility.ts";
 import Migration0063 from "./Migrations/063_ContextualDisplaySummaries.ts";
 import Migration0062 from "./Migrations/062_ContextualInvalidations.ts";
@@ -21,6 +22,7 @@ import Migration0054 from "./Migrations/054_ThreadNotes.ts";
 
 import * as Migrator from "effect/unstable/sql/Migrator";
 import * as Effect from "effect/Effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 // Import all migrations statically
 import Migration0001 from "./Migrations/001_OrchestrationEvents.ts";
@@ -76,6 +78,17 @@ import Migration0050 from "./Migrations/050_StaveLifecycleRecovery.ts";
 import Migration0051 from "./Migrations/051_SagaWorkbench.ts";
 import Migration0052 from "./Migrations/052_PullRequestWatches.ts";
 import Migration0053 from "./Migrations/053_ProjectionThreadImportOrigin.ts";
+
+// Upstream published a different migration 49. Its ledger skips Lecturn's
+// lifecycle schema, which must exist before pending migration 50 can run.
+// Keep both published ledger identities and create only the missing schema.
+const StaveLifecycleRecoveryCompatibility = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const tables =
+    yield* sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'stave_project_lifecycle'`;
+  if (tables.length === 0) yield* Migration0049;
+  yield* Migration0050;
+});
 
 /**
  * Migration loader with all migrations defined inline.
@@ -137,7 +150,7 @@ export const migrationEntries = [
   [47, "ProjectionProjectIcon", Migration0047],
   [48, "ProjectionThreadForkLineage", Migration0048],
   [49, "StaveProjectLifecycle", Migration0049],
-  [50, "StaveLifecycleRecovery", Migration0050],
+  [50, "StaveLifecycleRecovery", StaveLifecycleRecoveryCompatibility],
   [51, "SagaWorkbench", Migration0051],
   [52, "PullRequestWatches", Migration0052],
   [53, "ProjectionThreadImportOrigin", Migration0053],
@@ -152,6 +165,7 @@ export const migrationEntries = [
   [62, "ContextualInvalidations", Migration0062],
   [63, "ContextualDisplaySummaries", Migration0063],
   [64, "ProjectionThreadMigrationCompatibility", Migration0064],
+  [65, "ProjectionThreadsActiveOrderCompatibility", Migration0065],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
