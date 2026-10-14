@@ -7,6 +7,7 @@ import {
   getProjectScopeSelectionTarget,
   resolveDraftProjectSelection,
   resolveEnvironmentProjectMatch,
+  resolveNewTaskDraftProject,
 } from "./new-task-project-selection";
 
 function makeProject(
@@ -66,6 +67,18 @@ describe("getProjectScopeSelectionTarget", () => {
     expect(getProjectScopeSelectionTarget(makeScope(projects), EnvironmentId.make("other"))).toBe(
       projects[0],
     );
+  });
+});
+
+describe("resolveNewTaskDraftProject", () => {
+  it("waits for the stamped environment even when other accounts have projects", () => {
+    const other = makeProject("shared-id", "other-account");
+    const target = makeProject("shared-id", "draft-account");
+    const stamp = { environmentId: target.environmentId, projectId: target.id };
+    expect(resolveNewTaskDraftProject([other], stamp)).toBeNull();
+    expect(resolveNewTaskDraftProject([other, target], stamp)).toBe(target);
+    // Losing the target after opening must never silently switch the draft.
+    expect(resolveNewTaskDraftProject([other], stamp)).toBeNull();
   });
 });
 

@@ -1,5 +1,5 @@
 import type { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
-import type { EnvironmentId } from "@lecturn/contracts";
+import type { EnvironmentId, ProjectId } from "@lecturn/contracts";
 
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import type { HomeProjectScope } from "../home/homeThreadList";
@@ -8,6 +8,18 @@ type DraftProjectSelectionResolution =
   | { readonly kind: "preserve" }
   | { readonly kind: "select"; readonly project: EnvironmentProject }
   | { readonly kind: "pick" };
+
+/** A resumed draft's stamp stays authoritative when its project goes offline. */
+export function resolveNewTaskDraftProject(
+  projects: ReadonlyArray<EnvironmentProject>,
+  stamp: { readonly environmentId: EnvironmentId; readonly projectId: ProjectId },
+): EnvironmentProject | null {
+  return (
+    projects.find(
+      (project) => project.environmentId === stamp.environmentId && project.id === stamp.projectId,
+    ) ?? null
+  );
+}
 
 export function getProjectScopeSelectionTarget(
   scope: HomeProjectScope,

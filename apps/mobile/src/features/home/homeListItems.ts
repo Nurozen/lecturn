@@ -176,7 +176,7 @@ export function homeListItemsAreEqual(previous: HomeListItem, item: HomeListItem
 }
 
 /** Split only physical saga members; keep the original thread and pending-task objects. */
-function hierarchyGroups(
+export function hierarchyGroups(
   groups: ReadonlyArray<HomeThreadGroup>,
   index: ReadonlyArray<SagaProjectIndexEntry>,
 ) {
@@ -225,7 +225,7 @@ function hierarchyGroups(
       threads: source.threads.filter(belongs),
       recentThreads: source.recentThreads.filter(belongs),
       pendingTasks: source.pendingTasks.filter((task) =>
-        refs.has(JSON.stringify([task.message.environmentId, task.creation.projectId])),
+        refs.has(JSON.stringify([task.environmentId, task.projectId])),
       ),
       newThreadTarget: source.newThreadTarget === null ? null : group.representative,
     };
@@ -354,7 +354,7 @@ export function buildHomeListLayout(input: {
       items.push({
         type: "pending-task",
         depth: depth + 1,
-        key: `pending-task:${pendingTask.message.messageId}`,
+        key: pendingTask.key,
         pendingTask,
         isLast:
           pendingIndex === group.pendingTasks.length - 1 &&
@@ -446,7 +446,7 @@ export function buildHomeHierarchyV2Items(input: {
           item.type === "v2-thread"
             ? item.item.thread.environmentId
             : item.type === "v2-pending"
-              ? item.pendingTask.message.environmentId
+              ? item.pendingTask.environmentId
               : undefined;
         return (
           environmentId !== undefined && accountForEnvironment(context, environmentId) === accountId
@@ -489,7 +489,7 @@ export function buildHomeHierarchyV2Items(input: {
       row.type === "v2-thread"
         ? [row.item.thread.environmentId, row.item.thread.projectId]
         : row.type === "v2-pending"
-          ? [row.pendingTask.message.environmentId, row.pendingTask.creation.projectId]
+          ? [row.pendingTask.environmentId, row.pendingTask.projectId]
           : null;
     const key = ref === null ? undefined : groupByProject.get(JSON.stringify(ref));
     if (key === undefined) {

@@ -7,7 +7,8 @@ describe("native hierarchy account ownership", () => {
     const colors = accountRowColors(
       [
         { key: "thread", type: "thread", thread: { environmentId: "a" } },
-        { key: "queued", type: "v2-pending", pendingTask: { message: { environmentId: "b" } } },
+        { key: "queued", type: "v2-pending", pendingTask: { environmentId: "b" } },
+        { key: "draft", type: "pending-task", pendingTask: { environmentId: "a" } },
         { key: "local", type: "thread", thread: { environmentId: "local" } },
       ],
       owner,
@@ -15,6 +16,7 @@ describe("native hierarchy account ownership", () => {
     expect([...colors]).toEqual([
       ["thread", "#14b8a6"],
       ["queued", "#a78bfa"],
+      ["draft", "#14b8a6"],
     ]);
   });
   it("keeps headers, hierarchy and cards neutral when account colors are disabled", () => {

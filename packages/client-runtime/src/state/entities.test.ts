@@ -317,6 +317,8 @@ describe("environment entity projections", () => {
       branch: "stale-branch",
       worktreePath: "/repo/stale-worktree",
       forkedFrom: null,
+      activeOrderKey: "t",
+      unsettledAt: "2026-03-09T10:00:00.000Z",
       deletedAt: null,
       messages,
       proposedPlans: [],
@@ -335,6 +337,8 @@ describe("environment entity projections", () => {
         turnCount: 3,
         messageId: null,
       },
+      activeOrderKey: "f",
+      unsettledAt: "2026-03-09T12:00:00.000Z",
     };
 
     const merged = mergeEnvironmentThread(detail, shell);
@@ -349,6 +353,8 @@ describe("environment entity projections", () => {
         turnCount: 3,
         messageId: null,
       },
+      activeOrderKey: "f",
+      unsettledAt: "2026-03-09T12:00:00.000Z",
     });
     expect(merged?.messages).toBe(messages);
   });
