@@ -3524,7 +3524,9 @@ export default function ChatView(props: ChatViewProps) {
       ? "Auto balance"
       : loadBalancing.pending
         ? "Checking machines…"
-        : "Auto balance unavailable"
+        : loadBalancing.failed
+          ? "Auto balance unavailable"
+          : "Auto balance"
     : undefined;
 
   // Handle environment change for draft threads.  When the user picks a
@@ -7981,7 +7983,7 @@ export default function ChatView(props: ChatViewProps) {
           threadRef={activeThreadRef}
           tabId={renderedRightPanelSurface.resourceId}
           configuredUrls={configuredPreviewUrls}
-          visible
+          visible={rightPanelOpen}
           onSendAnnotation={(annotation, image) => {
             void onSend(undefined, "foreground", { annotation, image });
           }}

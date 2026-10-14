@@ -4,13 +4,18 @@ The [release runbook](./release.md) describes packaging and publishing. This pag
 
 ## Branch model
 
-- `main` is the product line; releases are cut from it.
+- `main` is the product line. Nightlies build the triggering commit; manual stable releases
+  rebuild the latest published Lecturn nightly's commit. Explicit stable tags build the tagged commit.
 - `upstream-mirror` holds the configured upstream source for reviewed integration. See [upstream integration](./upstream-integration.md) for the current checkpoint workflow.
 - Upstream tags are never fetched or pushed here, because matching release tags trigger the release pipeline.
 
 ## Release configuration
 
 The workflow uses GitHub-hosted runners and publishes desktop artifacts and the `lecturn` CLI package. Hosted-app, relay, and Clerk configuration comes from repository variables and the production environment. Review `.github/workflows/release.yml` for required configuration before dispatching a release.
+Desktop/CLI publication remains independent of upstream releases and hosted web, relay, and mobile
+deployments. Manual stable dispatch defaults to the nightly's previewed version; `version` overrides
+only the version, and does not change the selected commit. A published nightly is required even
+with an override. See the [release checklist](./release.md#4-ongoing-release-checklist).
 
 ## Stable release finalization
 

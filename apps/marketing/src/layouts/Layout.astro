@@ -4,12 +4,7 @@ import appIcon from "../assets/icon.webp";
 import desktopScreenshot from "../../public/updated-screenshot.webp";
 import dmSansLatinUrl from "../assets/fonts/dm-sans-latin.woff2?url";
 import "../styles/fonts.css";
-import {
-
-  GITHUB_REPOSITORY_URL,
-
-
-} from "../lib/site";
+import { GITHUB_REPOSITORY_URL } from "../lib/site";
 
 interface Props {
   title?: string;
@@ -76,6 +71,7 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site);
             <span class="nav-brand-name">Lecturn</span>
           </a>
           <div class="nav-right">
+            <a class="nav-link" href="/download">Download</a>
             <a
               class="nav-stars"
               href={GITHUB_REPOSITORY_URL}
@@ -115,7 +111,7 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site);
           <div class="footer-links">
             <a href={GITHUB_REPOSITORY_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
             <a href="/download">Download</a>
-            <span>iOS · TestFlight coming soon</span>
+            <a href={`${GITHUB_REPOSITORY_URL}/blob/main/docs/user/lecturn-installation.md#iphone-and-ipad`}>iOS · TestFlight</a>
             <span>Android · coming soon</span>
             <a href="/terms-of-service">Terms</a>
             <a href="/privacy-policy">Privacy</a>
@@ -379,6 +375,19 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site);
     display: inline-flex;
     align-items: center;
     gap: 8px;
+  }
+
+  .nav-link {
+    padding: 0 10px;
+    color: var(--fg-muted);
+    font-size: 13px;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+    transition: color 0.18s ease;
+  }
+
+  .nav-link:hover {
+    color: var(--fg);
   }
 
   .nav-stars {

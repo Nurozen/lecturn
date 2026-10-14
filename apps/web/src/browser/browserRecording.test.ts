@@ -28,7 +28,7 @@ const {
         value.tabIds.size === 0 ? "clear" : `publish:${Array.from(value.tabIds).join(",")}`,
       );
     }),
-    save: vi.fn(async (tabId: string) => ({
+    save: vi.fn(async (tabId: string, _mimeType: string, _bytes: Uint8Array) => ({
       id: "recording-test",
       tabId,
       path: "/tmp/recording-test.webm",
@@ -95,6 +95,7 @@ class FakeMediaRecorder {
   readonly mimeType: string;
   readonly stream: MediaStream;
   readonly options: MediaRecorderOptions | undefined;
+  finalData: Blob | undefined;
   private readonly listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
 
   constructor(stream: MediaStream, options?: MediaRecorderOptions) {
@@ -118,9 +119,18 @@ class FakeMediaRecorder {
   stop(): void {
     if (FakeMediaRecorder.stopError !== undefined) throw FakeMediaRecorder.stopError;
     this.state = "inactive";
+    if (this.finalData !== undefined) this.emitData(this.finalData);
     for (const listener of this.listeners.get("stop") ?? []) {
       if (typeof listener === "function") listener(new Event("stop"));
       else listener.handleEvent(new Event("stop"));
+    }
+  }
+
+  emitData(data: Blob): void {
+    const event = Object.assign(new Event("dataavailable"), { data });
+    for (const listener of this.listeners.get("dataavailable") ?? []) {
+      if (typeof listener === "function") listener(event);
+      else listener.handleEvent(event);
     }
   }
 }
@@ -146,6 +156,7 @@ describe("browser recording", () => {
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     vi.stubGlobal("MediaRecorder", FakeMediaRecorder as unknown as typeof MediaRecorder);
     getDisplayMedia.mockResolvedValue({
+      getVideoTracks: () => [],
       getTracks: () => [{ stop: vi.fn() }],
     });
     requestDisplayMediaCapture.mockImplementation((tabId: string) => {
@@ -187,7 +198,7 @@ describe("browser recording", () => {
     getDisplayMedia.mockImplementationOnce(async () => {
       expect(animationFrameCount).toBe(2);
       expect(useBrowserSurfaceStore.getState().activityByTabId["background-tab"]).toBe(1);
-      return { getTracks: () => [{ stop: vi.fn() }] };
+      return { getVideoTracks: () => [], getTracks: () => [{ stop: vi.fn() }] };
     });
 
     await startBrowserRecording("background-tab");
@@ -214,21 +225,31 @@ describe("browser recording", () => {
     await stopBrowserRecording("hidden-window-tab");
   });
 
-  it("records the native tab stream armed by the main process", async () => {
+  it.each([
+    { width: 1280, height: 720, frameRate: 60, bitrate: 2_764_800 },
+    { width: 320, height: 240, frameRate: 30, bitrate: 2_500_000 },
+    { width: 3840, height: 2160, frameRate: 60, bitrate: 24_883_200 },
+    { width: 7680, height: 4320, frameRate: 60, bitrate: 50_000_000 },
+  ])("records the native $width x $height stream at $frameRate fps", async (settings) => {
     const stopTrack = vi.fn();
-    const stream = { getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream;
+    const stream = {
+      getVideoTracks: () => [{ getSettings: () => settings }],
+      getTracks: () => [{ stop: stopTrack }],
+    } as unknown as MediaStream;
     getDisplayMedia.mockResolvedValueOnce(stream);
 
     await startBrowserRecording("recording-tab");
 
     expect(getDisplayMedia).toHaveBeenCalledWith({
       audio: false,
-      video: { frameRate: { max: 30 } },
+      video: { frameRate: { ideal: 30, max: 30 } },
     });
     expect(FakeMediaRecorder.instances[0]?.stream).toBe(stream);
+    expect(FakeMediaRecorder.instances[0]?.options?.videoBitsPerSecond).toBe(settings.bitrate);
 
     await stopBrowserRecording("recording-tab");
     expect(stopTrack).toHaveBeenCalledOnce();
+    expect(stopTrack.mock.invocationCallOrder[0]).toBeLessThan(save.mock.invocationCallOrder[0]!);
   });
 
   it("uses the configured recording frame rate", async () => {
@@ -238,9 +259,47 @@ describe("browser recording", () => {
 
     expect(getDisplayMedia).toHaveBeenCalledWith({
       audio: false,
-      video: { frameRate: { max: 60 } },
+      video: { frameRate: { ideal: 60, max: 60 } },
     });
     await stopBrowserRecording("recording-tab");
+  });
+
+  it("saves the final encoded chunk after releasing capture tracks", async () => {
+    const stopVideoTrack = vi.fn();
+    const stopAudioTrack = vi.fn();
+    getDisplayMedia.mockResolvedValueOnce({
+      getVideoTracks: () => [],
+      getTracks: () => [{ stop: stopVideoTrack }, { stop: stopAudioTrack }],
+    });
+
+    await startBrowserRecording("recording-tab");
+    const recorder = FakeMediaRecorder.instances[0]!;
+    recorder.emitData(new Blob([new Uint8Array([1, 2])], { type: recorder.mimeType }));
+    recorder.finalData = new Blob([new Uint8Array([3, 4, 5])], { type: recorder.mimeType });
+    save.mockImplementationOnce(async (tabId, mimeType, bytes) => {
+      expect(stopVideoTrack).toHaveBeenCalledOnce();
+      expect(stopAudioTrack).toHaveBeenCalledOnce();
+      expect(mimeType).toBe(recorder.mimeType);
+      expect(bytes).toEqual(new Uint8Array([1, 2, 3, 4, 5]));
+      return {
+        id: "recording-test",
+        tabId,
+        path: "/tmp/recording-test.webm",
+        mimeType: "video/webm" as const,
+        sizeBytes: bytes.byteLength,
+        createdAt: "2026-06-26T00:00:00.000Z",
+      };
+    });
+
+    await expect(stopBrowserRecording("recording-tab")).resolves.toMatchObject({ sizeBytes: 5 });
+    expect(save).toHaveBeenCalledOnce();
+    expect(save).toHaveBeenCalledWith(
+      "recording-tab",
+      recorder.mimeType,
+      new Uint8Array([1, 2, 3, 4, 5]),
+    );
+    expect(stopVideoTrack).toHaveBeenCalledOnce();
+    expect(stopAudioTrack).toHaveBeenCalledOnce();
   });
 
   it("clears a failed settings read before retrying recording", async () => {
@@ -263,7 +322,7 @@ describe("browser recording", () => {
 
     expect(getDisplayMedia).toHaveBeenCalledWith({
       audio: false,
-      video: { frameRate: { max: 60 } },
+      video: { frameRate: { ideal: 60, max: 60 } },
     });
     await stopBrowserRecording(tabId);
 
@@ -275,6 +334,7 @@ describe("browser recording", () => {
   it("stops the native stream when MediaRecorder cleanup fails", async () => {
     const stopTrack = vi.fn();
     getDisplayMedia.mockResolvedValueOnce({
+      getVideoTracks: () => [],
       getTracks: () => [{ stop: stopTrack }],
     });
 
@@ -290,6 +350,7 @@ describe("browser recording", () => {
 
   it("uses the best supported encoder and saves the recorder's actual format", async () => {
     FakeMediaRecorder.supportedTypes = new Set([
+      "video/mp4;codecs=avc1",
       "video/mp4;codecs=avc1.42e01e",
       "video/webm;codecs=vp9",
       "video/webm;codecs=av1",
@@ -300,7 +361,8 @@ describe("browser recording", () => {
     await stopBrowserRecording("recording-tab");
 
     expect(FakeMediaRecorder.instances[0]?.options).toEqual({
-      mimeType: "video/webm;codecs=av1",
+      mimeType: "video/mp4;codecs=avc1",
+      videoBitsPerSecond: 3_110_400,
     });
     expect(save).toHaveBeenCalledWith(
       "recording-tab",
@@ -316,7 +378,7 @@ describe("browser recording", () => {
     await startBrowserRecording("recording-tab");
     await stopBrowserRecording("recording-tab");
 
-    expect(FakeMediaRecorder.instances[0]?.options).toBeUndefined();
+    expect(FakeMediaRecorder.instances[0]?.options).toEqual({ videoBitsPerSecond: 3_110_400 });
     expect(save).toHaveBeenCalledWith(
       "recording-tab",
       "video/platform-default",
@@ -375,7 +437,10 @@ describe("browser recording", () => {
     expect(readActiveBrowserRecordingTabIds()).toEqual(new Set());
     expect(useBrowserSurfaceStore.getState().activityByTabId["recording-tab"]).toBeUndefined();
 
-    finishCapture({ getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream);
+    finishCapture({
+      getVideoTracks: () => [],
+      getTracks: () => [{ stop: stopTrack }],
+    } as unknown as MediaStream);
     await vi.advanceTimersByTimeAsync(0);
     expect(stopTrack).toHaveBeenCalledOnce();
   });
@@ -411,7 +476,10 @@ describe("browser recording", () => {
 
   it("serializes display media grants for concurrent recording starts", async () => {
     let finishFirstCapture!: (stream: MediaStream) => void;
-    const stream = { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream;
+    const stream = {
+      getVideoTracks: () => [],
+      getTracks: () => [{ stop: vi.fn() }],
+    } as unknown as MediaStream;
     getDisplayMedia
       .mockImplementationOnce(
         () =>
@@ -440,7 +508,10 @@ describe("browser recording", () => {
 
   it("cancels a queued recording when stopped before its media grant", async () => {
     let finishFirstCapture!: (stream: MediaStream) => void;
-    const stream = { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream;
+    const stream = {
+      getVideoTracks: () => [],
+      getTracks: () => [{ stop: vi.fn() }],
+    } as unknown as MediaStream;
     getDisplayMedia.mockImplementationOnce(
       () =>
         new Promise<MediaStream>((resolve) => {
@@ -477,7 +548,10 @@ describe("browser recording", () => {
       }),
     );
     let finishBlockingCapture!: (stream: MediaStream) => void;
-    const stream = { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream;
+    const stream = {
+      getVideoTracks: () => [],
+      getTracks: () => [{ stop: vi.fn() }],
+    } as unknown as MediaStream;
     getDisplayMedia.mockImplementationOnce(
       () =>
         new Promise<MediaStream>((resolve) => {
