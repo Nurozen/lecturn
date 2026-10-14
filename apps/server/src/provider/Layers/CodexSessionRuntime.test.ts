@@ -811,6 +811,110 @@ describe("isRecoverableThreadResumeError", () => {
 });
 
 describe("openCodexThread", () => {
+  it.effect.each(["thread/resume", "thread/fork"] as const)(
+    "opens %s metadata when historical turns contain unknown error values",
+    (method) =>
+      Effect.gen(function* () {
+        const response = makeThreadOpenResponse("saved-thread");
+        const calls: unknown[] = [];
+        const opened = yield* openCodexThread({
+          client: {
+            request: () => Effect.die("A valid stored thread must not start fresh"),
+            raw: {
+              request: (method, payload) => {
+                calls.push({ method, payload });
+                return Effect.succeed({
+                  ...response,
+                  thread: {
+                    ...response.thread,
+                    turns: [
+                      {
+                        id: "old-turn",
+                        status: "failed",
+                        items: [],
+                        error: {
+                          message: "Historical provider error",
+                          codexErrorInfo: "misalignment_policy_violation",
+                        },
+                      },
+                    ],
+                  },
+                });
+              },
+            },
+          },
+          threadId: ThreadId.make("thread-1"),
+          runtimeMode: "auto",
+          cwd: "/tmp/project",
+          requestedModel: "gpt-5.3-codex",
+          serviceTier: "fast",
+          resumeThreadId: method === "thread/resume" ? "saved-thread" : undefined,
+          ...(method === "thread/fork"
+            ? { fork: { sourceThreadId: "saved-thread", lastTurnId: "fork-point" } }
+            : {}),
+        });
+
+        NodeAssert.deepStrictEqual(opened, {
+          cwd: response.cwd,
+          model: response.model,
+          thread: { id: "saved-thread" },
+        });
+        NodeAssert.deepStrictEqual(calls, [
+          {
+            method,
+            payload: {
+              threadId: "saved-thread",
+              ...(method === "thread/fork" ? { lastTurnId: "fork-point" } : {}),
+              cwd: "/tmp/project",
+              model: "gpt-5.3-codex",
+              serviceTier: "fast",
+              approvalPolicy: "on-request",
+              sandbox: "workspace-write",
+              approvalsReviewer: "auto_review",
+              excludeTurns: true,
+            },
+          },
+        ]);
+      }),
+  );
+
+  it.effect.each(["thread/resume", "thread/fork"] as const)(
+    "rejects malformed required %s metadata without starting a fresh thread",
+    (method) =>
+      Effect.gen(function* () {
+        for (const invalidMetadata of [
+          { cwd: null },
+          { model: 42 },
+          { thread: { id: null } },
+          { thread: {} },
+        ]) {
+          const error = yield* openCodexThread({
+            client: {
+              request: () =>
+                Effect.die("Invalid stored thread metadata must not start a fresh thread"),
+              raw: {
+                request: () =>
+                  Effect.succeed({ ...makeThreadOpenResponse("saved-thread"), ...invalidMetadata }),
+              },
+            },
+            threadId: ThreadId.make("thread-1"),
+            runtimeMode: "full-access",
+            cwd: "/tmp/project",
+            requestedModel: "gpt-5.3-codex",
+            serviceTier: undefined,
+            resumeThreadId: method === "thread/resume" ? "saved-thread" : undefined,
+            ...(method === "thread/fork"
+              ? { fork: { sourceThreadId: "saved-thread", lastTurnId: "fork-point" } }
+              : {}),
+          }).pipe(Effect.flip);
+
+          NodeAssert.ok(isCodexAppServerRequestError(error));
+          NodeAssert.equal(error.operation, "decode-payload");
+          NodeAssert.equal(error.method, method);
+        }
+      }),
+  );
+
   it.effect("resumes a replacement thread without requesting its paginated history", () =>
     Effect.gen(function* () {
       const calls: Array<{ method: string; payload: unknown }> = [];

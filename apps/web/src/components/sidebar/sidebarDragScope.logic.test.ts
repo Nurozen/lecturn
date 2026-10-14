@@ -147,6 +147,7 @@ it("excludes inert rows, retains the selected flat-shelf row in place, and provi
     sidebarMarkerId("pinned-divider"),
     sidebarMarkerId("active-placeholder"),
     sidebarMarkerId("settled-header"),
+    sidebarMarkerId("settled-placeholder"),
     key(rows[1]!),
   ]);
   const hierarchy = buildScopedSidebarItems(
