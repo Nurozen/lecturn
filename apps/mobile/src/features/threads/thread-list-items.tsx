@@ -31,7 +31,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
-import { Pressable, useWindowDimensions, View, type ColorValue } from "react-native";
+import { Platform, Pressable, useWindowDimensions, View, type ColorValue } from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import Svg, { Circle, Path } from "react-native-svg";
@@ -586,6 +586,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
   readonly onArchiveThread: (thread: EnvironmentThreadShell) => void;
   readonly onDeleteThread: (thread: EnvironmentThreadShell) => void;
+  readonly onNewThreadOnBranch: (thread: EnvironmentThreadShell) => void;
   readonly onRegenerateThreadTitle: (thread: EnvironmentThreadShell) => void;
   readonly titleRegenerationSupported: boolean;
   /** False on servers without the forking capability or when the thread's
@@ -619,6 +620,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
     onDeleteThread,
     onForkThread,
     onRegenerateThreadTitle,
+    onNewThreadOnBranch,
   } = props;
   const status = resolveThreadStatus(thread);
   const projectRef = useMemo(
@@ -682,6 +684,16 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   );
   const menuActions = useMemo<MenuAction[]>(
     () => [
+      ...(thread.branch
+        ? [
+            {
+              id: "new-thread-on-branch",
+              title:
+                Platform.OS === "ios" ? "New thread on branch" : `New thread on ${thread.branch}`,
+              image: "square.and.pencil",
+            },
+          ]
+        : []),
       THREAD_ROW_MENU_ACTIONS[0]!,
       ...buildThreadForkMenuItems({
         supported: props.forkSupported,
@@ -698,6 +710,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
       props.forkSupported,
       props.titleRegenerationSupported,
       thread.latestTurn,
+      thread.branch,
       thread.titleRegeneration,
     ],
   );
@@ -712,12 +725,13 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   );
   const handleMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {
+      if (nativeEvent.event === "new-thread-on-branch") onNewThreadOnBranch(thread);
       if (nativeEvent.event === "archive") handleArchive();
       if (nativeEvent.event === "fork-thread") handleFork();
       if (nativeEvent.event === "regenerate-title") handleRegenerateTitle();
       if (nativeEvent.event === "delete") handleDelete();
     },
-    [handleArchive, handleDelete, handleFork, handleRegenerateTitle],
+    [handleArchive, handleDelete, handleFork, handleRegenerateTitle, onNewThreadOnBranch, thread],
   );
 
   const statusPill =
@@ -920,6 +934,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
 
   return (
     <ThreadSwipeable
+      threadKey={`${thread.environmentId}:${thread.id}`}
       backgroundColor="transparent"
       containerStyle={{
         borderRadius: SIDEBAR_ROW_RADIUS,

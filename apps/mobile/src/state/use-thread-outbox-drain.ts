@@ -1,4 +1,5 @@
 import { contextualBootstrap } from "../features/contextual/contextualDraft";
+import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
 import { useAtomValue } from "@effect/atom-react";
 import type {
   EnvironmentProject,
@@ -23,8 +24,18 @@ import { buildProjectThreadStartTurnInput } from "../lib/projectThreadStartTurn"
 import { prepareTurnAttachments, type PreparedTurnAttachments } from "../lib/attachmentUpload";
 import { randomHex } from "../lib/uuid";
 import { isModelSelectionUnavailable } from "../lib/modelOptions";
+import {
+  retainAcknowledgedThreadMessage,
+  forgetAcknowledgedThreadMessage,
+} from "./acknowledged-thread-messages";
 import { appAtomRegistry } from "./atom-registry";
+import { restoredNewTaskDraftKey } from "./new-task-draft-key";
 import { useProjects, useServerConfigs, useThreadShells } from "./entities";
+import {
+  clearPendingThreadCreationOutcome,
+  pendingThreadCreationOutcomesAtom,
+  recordPendingThreadCreationOutcome,
+} from "./pending-thread-creation";
 import { serverEnvironment } from "./server";
 import {
   confirmThreadOutboxMessageQueued,
@@ -54,7 +65,6 @@ import {
   type ComposerDraft,
   getComposerDraftSnapshot,
   mergeComposerDraftContent,
-  newTaskDraftKey,
   replaceComposerDraftAttachments,
   removeDeliveredCloudQueuedMessage,
   undoComposerDraftMerge,
@@ -197,6 +207,7 @@ export async function completeQueuedMessageDelivery(
     if (appAtomRegistry.get(editingQueuedMessageIdsAtom)[queuedMessage.messageId]) {
       return "edited";
     }
+    retainAcknowledgedThreadMessage(queuedMessage);
     // Removal also releases the message's local attachment files.
     const removed = await removeThreadOutboxMessage(
       queuedMessage,
@@ -204,6 +215,7 @@ export async function completeQueuedMessageDelivery(
       () => !appAtomRegistry.get(editingQueuedMessageIdsAtom)[queuedMessage.messageId],
     );
     if (!removed) {
+      forgetAcknowledgedThreadMessage(queuedMessage);
       console.warn(
         "[thread-outbox] delivered message was edited before cleanup; keeping the newer message",
         {
@@ -216,6 +228,7 @@ export async function completeQueuedMessageDelivery(
     }
     return "removed";
   } catch (error) {
+    forgetAcknowledgedThreadMessage(queuedMessage);
     console.warn("[thread-outbox] failed to remove delivered queued message", {
       environmentId: queuedMessage.environmentId,
       threadId: queuedMessage.threadId,
@@ -231,27 +244,14 @@ export async function removeAcknowledgedExistingThreadMessage(
   queuedMessage: QueuedThreadMessage,
   acknowledgedMessageIds: Set<MessageId>,
 ): Promise<boolean> {
-  try {
-    await removeDeliveredCloudQueuedMessage(queuedMessage).catch((error) => {
-      console.warn("[thread-outbox] could not update sign-out snapshot after delivery", {
-        messageId: queuedMessage.messageId,
-        error,
-      });
-    });
-    const removed = await removeThreadOutboxMessage(queuedMessage);
-    if (removed) {
-      acknowledgedMessageIds.delete(queuedMessage.messageId);
-    }
-    return removed;
-  } catch (error) {
-    console.warn("[thread-outbox] failed to remove acknowledged queued message", {
-      environmentId: queuedMessage.environmentId,
-      threadId: queuedMessage.threadId,
-      messageId: queuedMessage.messageId,
-      error,
-    });
-    return false;
+  const revision = threadOutboxRevision(queuedMessage.messageId);
+  if (!(await confirmThreadOutboxMessageQueued(queuedMessage))) {
+    acknowledgedMessageIds.delete(queuedMessage.messageId);
+    return true;
   }
+  const outcome = await completeQueuedMessageDelivery(queuedMessage, revision);
+  if (outcome === "removed") acknowledgedMessageIds.delete(queuedMessage.messageId);
+  return outcome === "removed";
 }
 
 /**
@@ -437,6 +437,15 @@ export async function restoreRejectedQueuedMessage(
     // The queued message is gone; from here the draft owns the content and
     // must never be rolled back.
     rollback = null;
+    if (queuedMessage.creation) {
+      // The thread screen for this creation is likely open; it reads the
+      // outcome to offer reopening the restored draft.
+      recordPendingThreadCreationOutcome({
+        kind: "failed",
+        message: queuedMessage,
+        reason: message,
+      });
+    }
     setPendingConnectionError(message);
     return "restored";
   } catch (error) {
@@ -466,7 +475,7 @@ export async function restoreRejectedQueuedMessage(
  */
 function recoveryDraftKey(queuedMessage: QueuedThreadMessage): string {
   return queuedMessage.creation
-    ? newTaskDraftKey(`restored-${queuedMessage.messageId}`)
+    ? restoredNewTaskDraftKey(queuedMessage.messageId)
     : scopedThreadKey(queuedMessage.environmentId, queuedMessage.threadId);
 }
 
@@ -536,6 +545,7 @@ export function useThreadOutboxDrain(): void {
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
   const shellStatuses = useThreadOutboxShellStatuses();
   const threads = useThreadShells();
+  const creationOutcomes = useAtomValue(pendingThreadCreationOutcomesAtom);
   const projects = useProjects();
   const serverConfigs = useServerConfigs();
   const { connectedEnvironments } = useRemoteConnectionStatus();
@@ -659,7 +669,9 @@ export function useThreadOutboxDrain(): void {
       });
       return {
         action,
-        message: error instanceof Error ? error.message : "The message could not be sent.",
+        message:
+          staveAdmissionErrorMessage(error) ??
+          (error instanceof Error ? error.message : "The message could not be sent."),
       };
     };
     return { reportFailure };
@@ -944,6 +956,9 @@ export function useThreadOutboxDrain(): void {
       if (failure?.action === "restore") {
         return restoreQueuedMessage(persistedMessage, failure.message);
       }
+      // Recorded before the queue entry goes so the thread screen never sees a
+      // gap between the queued creation and the server's shell.
+      recordPendingThreadCreationOutcome({ kind: "delivered", message: persistedMessage });
       const outcome = await completeQueuedMessageDelivery(persistedMessage, deliveryRevision);
       if (outcome === "edited") {
         if (appAtomRegistry.get(editingQueuedMessageIdsAtom)[queuedMessage.messageId]) {
@@ -960,6 +975,30 @@ export function useThreadOutboxDrain(): void {
     },
     [makeDeliveryHelpers, restoreQueuedMessage, startTurn],
   );
+
+  // A creation outcome bridges setup until the server's shell has a turn.
+  // Drop it once that happens so the map cannot grow for a whole session; a
+  // failed outcome stays until its thread screen consumes it.
+  // Subscribed, not read once: the shell often lands before the outcome is
+  // recorded, and a non-reactive read would leave that entry uncollected
+  // because `threads` never changes again.
+  useEffect(() => {
+    for (const [threadKey, outcome] of Object.entries(creationOutcomes)) {
+      if (
+        outcome.kind === "delivered" &&
+        threads.some(
+          (thread) =>
+            scopedThreadKey(thread.environmentId, thread.id) === threadKey &&
+            (thread.latestTurn !== null ||
+              thread.session?.status === "error" ||
+              thread.session?.status === "stopped" ||
+              thread.session?.status === "interrupted"),
+        )
+      ) {
+        clearPendingThreadCreationOutcome(threadKey);
+      }
+    }
+  }, [creationOutcomes, threads]);
 
   useEffect(() => {
     if (dispatchingQueuedMessageId !== null) {

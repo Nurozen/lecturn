@@ -1,5 +1,4 @@
 import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
-import { resolveProjectGitCwd } from "@lecturn/client-runtime/state/projectGit";
 import type { VcsRef } from "@lecturn/client-runtime/state/vcs";
 import { resolveEnvironmentMachineKind } from "@lecturn/contracts";
 import { LegendList } from "@legendapp/list/react-native";
@@ -37,7 +36,7 @@ import {
   NATIVE_MAIL_SEARCH_TOOLBAR_SUPPORTED,
 } from "../layout/native-mail-search-toolbar";
 import { branchBadgeLabel, useNewTaskFlow } from "./new-task-flow-provider";
-import { shouldCheckoutNewTaskBranch } from "./new-task-context-presentation";
+import { checkoutNewTaskBranch } from "./checkout-new-task-branch";
 
 function SelectionRow(props: {
   readonly icon?: "arrow.triangle.branch" | ReactNode;
@@ -211,6 +210,7 @@ export function NewTaskBranchPickerRouteScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const switchRef = useAtomCommand(vcsEnvironment.switchRef, { reportFailure: false });
+  const refreshStatus = useAtomCommand(vcsEnvironment.refreshStatus, { reportFailure: false });
   const [switchingBranchName, setSwitchingBranchName] = useState<string | null>(null);
   const selectingBranchNameRef = useRef<string | null>(null);
   const allowSelectionNavigationRef = useRef(false);
@@ -262,48 +262,31 @@ export function NewTaskBranchPickerRouteScreen() {
       void Haptics.selectionAsync();
 
       try {
-        let selectedBranch = branch;
-        const needsCheckout = shouldCheckoutNewTaskBranch({
-          staveProject: flow.selectedProject?.stave != null,
-          branchIsCurrent: branch.current,
-          branchWorktreePath: branch.worktreePath,
+        if (!flow.selectedProject) return;
+        setSwitchingBranchName(branch.name);
+        const result = await checkoutNewTaskBranch({
+          branch,
+          project: flow.selectedProject,
           workspaceMode: flow.workspaceMode,
+          refreshStatus,
+          switchRef,
         });
-        // Checkouts run where the branches were listed: the primary repo for
-        // a Stave space, the workspace root otherwise.
-        const checkoutCwd = resolveProjectGitCwd({ project: flow.selectedProject });
-        if (needsCheckout && flow.selectedProject && checkoutCwd) {
-          setSwitchingBranchName(branch.name);
-          const result = await switchRef({
-            environmentId: flow.selectedProject.environmentId,
-            input: {
-              cwd: checkoutCwd,
-              refName: branch.name,
-            },
-          });
-          if (result._tag === "Failure") {
-            if (mountedRef.current && navigation.isFocused() && !isAtomCommandInterrupted(result)) {
-              const error = squashAtomCommandFailure(result);
-              Alert.alert(
-                "Could not switch branch",
-                staveAdmissionErrorMessage(error) ??
-                  (error instanceof Error ? error.message : "The branch could not be checked out."),
-              );
-            }
-            return;
+        if (result._tag === "Failure") {
+          if (mountedRef.current && navigation.isFocused() && !isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            Alert.alert(
+              "Could not switch branch",
+              staveAdmissionErrorMessage(error) ??
+                (error instanceof Error ? error.message : "The branch could not be checked out."),
+            );
           }
-          selectedBranch = {
-            ...branch,
-            current: true,
-            isRemote: false,
-            name: result.value.refName ?? branch.name,
-          };
+          return;
         }
 
         // The checkout has already changed the repository. Persist the matching
         // draft selection even if the native sheet was dismissed while the
         // command was in flight; only visible-screen work is focus-gated below.
-        flow.selectBranch(selectedBranch);
+        flow.selectBranch(result.value);
         if (!mountedRef.current || !navigation.isFocused()) {
           return;
         }
@@ -324,6 +307,7 @@ export function NewTaskBranchPickerRouteScreen() {
       flow.setBranchQuery,
       flow.workspaceMode,
       navigation,
+      refreshStatus,
       switchRef,
     ],
   );

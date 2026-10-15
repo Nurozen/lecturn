@@ -33,6 +33,18 @@ export const AgentSessionScanInput = Schema.Struct({});
 export type AgentSessionScanInput = typeof AgentSessionScanInput.Type;
 
 /**
+ * Git identity of a candidate directory, read from `.git/config` without
+ * spawning git. `remoteKey` is the normalized origin URL, shared by every
+ * clone of the same repository so the client can group them. `repository`
+ * is the GitHub `owner/name` when the origin is on GitHub.
+ */
+export const AgentSessionProjectGit = Schema.Struct({
+  remoteKey: Schema.NullOr(Schema.String),
+  repository: Schema.NullOr(Schema.String),
+});
+export type AgentSessionProjectGit = typeof AgentSessionProjectGit.Type;
+
+/**
  * A directory that at least one agent CLI has run in, suitable for import as a
  * Lecturn project. `alreadyImported` marks candidates that already have an
  * active project rooted at the same path.
@@ -45,6 +57,12 @@ export const AgentSessionProjectCandidate = Schema.Struct({
   threadCount: NonNegativeInt,
   lastActiveAt: Schema.NullOr(IsoDateTime),
   alreadyImported: Schema.Boolean,
+  /**
+   * `null` when the directory is not the root of a git repository. Missing on
+   * servers that predate the git scan, where the client cannot tell repositories
+   * from plain folders and should treat every candidate as a standalone project.
+   */
+  git: Schema.optionalKey(Schema.NullOr(AgentSessionProjectGit)),
 });
 export type AgentSessionProjectCandidate = typeof AgentSessionProjectCandidate.Type;
 

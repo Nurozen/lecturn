@@ -1,6 +1,8 @@
 import type { EnvironmentId } from "@lecturn/contracts";
 
 import { appAtomRegistry } from "./atom-registry";
+import { acknowledgedThreadMessagesAtom } from "./acknowledged-thread-messages";
+import { pendingThreadCreationOutcomesAtom } from "./pending-thread-creation";
 import { threadOutboxManager } from "./thread-outbox";
 import type { QueuedThreadMessage } from "./thread-outbox-model";
 import {
@@ -87,5 +89,21 @@ export async function clearThreadOutboxEnvironment(environmentId: EnvironmentId)
   // what it actually removed, so the release set cannot miss messages a
   // failed earlier hydration would have hidden.
   const removed = await threadOutboxManager.clearEnvironment(environmentId);
+  // Environment removal also ends its transient timeline ownership. A later
+  // connection under another account must not inherit these local prompts.
+  appAtomRegistry.set(
+    acknowledgedThreadMessagesAtom,
+    appAtomRegistry
+      .get(acknowledgedThreadMessagesAtom)
+      .filter((message) => message.environmentId !== environmentId),
+  );
+  appAtomRegistry.set(
+    pendingThreadCreationOutcomesAtom,
+    Object.fromEntries(
+      Object.entries(appAtomRegistry.get(pendingThreadCreationOutcomesAtom)).filter(
+        ([, outcome]) => outcome.message.environmentId !== environmentId,
+      ),
+    ),
+  );
   await cleanUpRemovedMessages(removed);
 }

@@ -25,15 +25,18 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { ConnectionStatusDot } from "../ConnectionStatusDot";
 import { AccountMark } from "../sidebar/AccountMark";
 import { ITEM_ROW_CLASSNAME, ITEM_ROW_INNER_CLASSNAME } from "../settings/itemRows";
+import { Checkbox } from "../ui/checkbox";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
+import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { presentSavedCloudEnvironmentConnection } from "./cloudEnvironmentConnectionPresentation";
 
 const EMPTY_DISCOVERY_REFRESH_INTERVAL_MS = 5_000;
 
 export interface SavedCloudEnvironmentConnection {
   readonly environmentId: EnvironmentId;
+  readonly label: string;
   readonly connection: EnvironmentConnectionPresentation;
 }
 
@@ -64,12 +67,20 @@ export function CloudEnvironmentConnectRows({
   showSavedEnvironments = false,
   refreshWhileEmpty = false,
   empty = null,
+  selection,
+  onDiscoveryReady,
 }: {
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly savedEnvironments: ReadonlyArray<SavedCloudEnvironmentConnection>;
   readonly showSavedEnvironments?: boolean;
   readonly refreshWhileEmpty?: boolean;
   readonly empty?: ReactNode;
+  readonly onDiscoveryReady?: () => void;
+  readonly selection?: {
+    readonly autoSelectedComputers?: Set<EnvironmentId>;
+    readonly selectedIds: ReadonlySet<EnvironmentId>;
+    readonly onChange: (environmentId: EnvironmentId, selected: boolean) => void;
+  };
 }) {
   const environmentsState = useRelayEnvironmentDiscovery();
   const registerEnvironment = useAtomCommand(environmentCatalog.register, {
@@ -116,33 +127,43 @@ export function CloudEnvironmentConnectRows({
     },
     [accountStates, registerEnvironment],
   );
-  const [connectingEnvironmentId, setConnectingEnvironmentId] = useState<EnvironmentId | null>(
-    null,
-  );
+  const [connectingEnvironmentIds, setConnectingEnvironmentIds] = useState<
+    ReadonlySet<EnvironmentId>
+  >(new Set());
   const savedById = new Map(
     savedEnvironments.map((environment) => [environment.environmentId, environment]),
   );
 
   useEffect(() => {
-    if (!refreshWhileEmpty || document.visibilityState === "visible") {
-      void refreshRelayEnvironments();
+    let active = true;
+    if (onDiscoveryReady || !refreshWhileEmpty || document.visibilityState === "visible") {
+      void refreshRelayEnvironments().then(() => {
+        if (active) onDiscoveryReady?.();
+      });
     }
-  }, [refreshRelayEnvironments, refreshWhileEmpty]);
+    return () => {
+      active = false;
+    };
+  }, [refreshRelayEnvironments, refreshWhileEmpty, onDiscoveryReady]);
 
   const connectEnvironment = async (environment: RelayClientEnvironmentRecord) => {
-    setConnectingEnvironmentId(environment.environmentId);
+    setConnectingEnvironmentIds((current) => new Set([...current, environment.environmentId]));
     const result = await connectRelayEnvironment(environment);
-    setConnectingEnvironmentId(null);
+    setConnectingEnvironmentIds((current) => {
+      const next = new Set(current);
+      next.delete(environment.environmentId);
+      return next;
+    });
     if (result._tag === "Success") {
       toastManager.add({
         type: "success",
         title: "Environment added",
         description: `Connecting to ${environment.label} through Lecturn Connect.`,
       });
-      return;
+      return true;
     }
     if (isAtomCommandInterrupted(result)) {
-      return;
+      return false;
     }
     const cause = squashAtomCommandFailure(result);
     const message =
@@ -162,16 +183,53 @@ export function CloudEnvironmentConnectRows({
           }
         : undefined,
     });
+    return false;
   };
 
-  const visibleEnvironments = [...environmentsState.environments.values()].filter(
+  const discoveredEnvironments = [...environmentsState.environments.values()].filter(
     ({ environment }) =>
       environment.environmentId !== primaryEnvironmentId &&
       (showSavedEnvironments || !savedById.has(environment.environmentId)),
   );
+  // Saved selections must remain editable when their account cannot list them.
+  const visibleEnvironments = [
+    ...discoveredEnvironments,
+    ...(showSavedEnvironments && selection
+      ? savedEnvironments
+          .filter(
+            ({ environmentId }) =>
+              environmentId !== primaryEnvironmentId &&
+              !environmentsState.environments.has(environmentId),
+          )
+          .map(({ environmentId, label }) => ({
+            environment: { environmentId, label },
+            availability: "offline" as const,
+            error: Option.none(),
+          }))
+      : []),
+  ];
+  const selectNewComputers = useEffectEvent(() => {
+    const seen = selection?.autoSelectedComputers;
+    if (!selection || !seen) return;
+    for (const { environment } of discoveredEnvironments) {
+      const id = environment.environmentId;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      selection.onChange(id, true);
+      if (!savedById.has(id)) {
+        void connectEnvironment(environment).then((connected) => {
+          if (!connected) selection.onChange(id, false);
+        });
+      }
+    }
+  });
+  useEffect(() => {
+    selectNewComputers();
+  }, [environmentsState.environments]);
+
   // Discovery clears its list on refresh, so poll only until a machine appears.
   const shouldRefreshWhileEmpty =
-    refreshWhileEmpty && visibleEnvironments.length === 0 && !environmentsState.offline;
+    refreshWhileEmpty && discoveredEnvironments.length === 0 && !environmentsState.offline;
 
   useEffect(() => {
     if (!shouldRefreshWhileEmpty) return;
@@ -285,6 +343,50 @@ export function CloudEnvironmentConnectRows({
           : availability === "checking"
             ? "Available · Checking relay status…"
             : (Option.getOrNull(error)?.message ?? "Available · Relay status unavailable");
+    if (selection) {
+      return (
+        <label
+          key={environment.environmentId}
+          className="flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 has-disabled:cursor-default"
+        >
+          <Checkbox
+            checked={selection.selectedIds.has(environment.environmentId)}
+            disabled={connectingEnvironmentIds.has(environment.environmentId)}
+            onCheckedChange={async (checked) => {
+              selection.onChange(environment.environmentId, checked);
+              const discovered = environmentsState.environments.get(environment.environmentId);
+              if (checked && !savedEnvironment && discovered) {
+                const connected = await connectEnvironment(discovered.environment);
+                if (!connected) selection.onChange(environment.environmentId, false);
+              }
+            }}
+          />
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">{environment.label}</span>
+          <AccountMark environmentId={environment.environmentId} />
+          <Tooltip>
+            <TooltipTrigger
+              render={<span tabIndex={0} />}
+              className={cn(
+                "max-w-[45%] shrink-0 truncate text-xs",
+                savedConnection?.tone === "error" ? "text-destructive" : "text-muted-foreground",
+              )}
+            >
+              {connectingEnvironmentIds.has(environment.environmentId)
+                ? "Connecting…"
+                : (savedConnection?.buttonLabel ??
+                  (availability === "online"
+                    ? "Available"
+                    : availability === "offline"
+                      ? "Offline"
+                      : availability === "error"
+                        ? "Unavailable"
+                        : "Checking…"))}
+            </TooltipTrigger>
+            <TooltipPopup className="max-w-80 break-words">{statusText}</TooltipPopup>
+          </Tooltip>
+        </label>
+      );
+    }
     return (
       <div key={environment.environmentId} className={ITEM_ROW_CLASSNAME}>
         <div className={ITEM_ROW_INNER_CLASSNAME}>
@@ -333,10 +435,13 @@ export function CloudEnvironmentConnectRows({
           ) : (
             <Button
               size="sm"
-              disabled={connectingEnvironmentId !== null}
-              onClick={() => void connectEnvironment(environment)}
+              disabled={connectingEnvironmentIds.size > 0}
+              onClick={() => {
+                const discovered = environmentsState.environments.get(environment.environmentId);
+                if (discovered) void connectEnvironment(discovered.environment);
+              }}
             >
-              {connectingEnvironmentId === environment.environmentId ? "Connecting…" : "Connect"}
+              {connectingEnvironmentIds.has(environment.environmentId) ? "Connecting…" : "Connect"}
             </Button>
           )}
         </div>

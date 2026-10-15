@@ -146,6 +146,7 @@ interface HomeScreenProps {
   readonly onForkThread: (thread: EnvironmentThreadShell) => void;
   readonly onSelectPendingTask: (pendingTask: PendingNewTask) => void;
   readonly onDeletePendingTask: (pendingTask: PendingNewTask) => void;
+  readonly onNewThreadOnBranch: (thread: EnvironmentThreadShell) => void;
   readonly onNewThreadInProject: (project: EnvironmentProject) => void;
 }
 
@@ -960,6 +961,7 @@ export function HomeScreen(props: HomeScreenProps) {
       return (
         <ThreadListV2Row
           nested
+          onNewThreadOnBranch={props.onNewThreadOnBranch}
           thread={thread}
           variant={item.item.variant}
           hasQueuedMessages={queuedThreadKeys.has(movedId)}
@@ -1045,6 +1047,7 @@ export function HomeScreen(props: HomeScreenProps) {
       props.onDeletePendingTask,
       props.onSelectPendingTask,
       props.onSelectThread,
+      props.onNewThreadOnBranch,
       props.savedConnectionsById,
       serverConfigs,
       shelfPreferencesLoaded,
@@ -1204,6 +1207,7 @@ export function HomeScreen(props: HomeScreenProps) {
             );
           return (
             <ThreadListRow
+              onNewThreadOnBranch={props.onNewThreadOnBranch}
               variant="compact"
               thread={thread}
               hasQueuedMessages={queuedThreadKeys.has(`${thread.environmentId}:${thread.id}`)}
@@ -1260,6 +1264,7 @@ export function HomeScreen(props: HomeScreenProps) {
       props.onNewThreadInProject,
       props.onSelectPendingTask,
       props.onSelectThread,
+      props.onNewThreadOnBranch,
       props.searchQuery,
       props.savedConnectionsById,
       serverConfigs,
