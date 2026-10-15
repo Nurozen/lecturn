@@ -1,63 +1,66 @@
 name: Mobile Showcase Screenshots
-
 on:
   workflow_dispatch:
     inputs:
       platform:
-        description: Device platforms to capture
-        required: true
-        default: all
         type: choice
-        options:
-          - all
-          - ios
-          - android
+        options: [ios]
+        default: ios
       appearance:
-        description: System appearances to capture
-        required: true
-        default: both
         type: choice
-        options:
-          - both
-          - dark
-          - light
+        options: [light]
+        default: light
       theme:
-        description: Palette to capture (all multiplies the run by six)
-        required: true
-        default: lecturn
         type: choice
-        options:
-          - lecturn
-          - lecturn-chat
-          - grove
-          - ocean
-          - ember
-          - iris
-          - all
-
+        options: [lecturn]
+        default: lecturn
 permissions:
   contents: read
-
+  actions: read
 env:
   NODE_OPTIONS: --max-old-space-size=8192
-
+  EXPO_NO_DOTENV: '1'
 jobs:
   ios:
-    name: iPhone 6.9, iPhone 6.5, and iPad 13
-    if: inputs.platform == 'all' || inputs.platform == 'ios'
-    runs-on: blacksmith-12vcpu-macos-26
-    # Capturing every palette multiplies the device matrix by six, and only the
-    # one native build is shared between them.
-    timeout-minutes: ${{ inputs.theme == 'all' && 300 || 60 }}
+    name: Fresh ${{ matrix.phase }} native simulator build
+    runs-on: macos-26
+    timeout-minutes: 65
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - phase: before
+            source: 27ceac9214b306508070161df61f85291fbcdfca
+            tree: 0c7212f49f0a9ac908928a496f5158b434c78682
+          - phase: after
+            source: 65318f080902a00d1b421ff86755f1a4a75e8b5b
+            tree: 7874152fdc79ba9ab7112a7bc3717b9d81815c56
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
-
+      - name: Checkout immutable exact public source without submodule traversal
+        env:
+          EXPECT_SOURCE: ${{ matrix.source }}
+        run: |
+          git init .
+          git remote add origin https://github.com/Nurozen/lecturn.git
+          git config core.sparseCheckout true
+          git sparse-checkout set --no-cone '/*' '!/.repos/'
+          git -c protocol.file.allow=never -c submodule.recurse=false fetch --no-tags --depth=1 --filter=blob:none origin "$EXPECT_SOURCE"
+          git -c submodule.recurse=false checkout --detach FETCH_HEAD
+      - name: Assert source and safe checkout
+        env:
+          EXPECT_SOURCE: ${{ matrix.source }}
+          EXPECT_TREE: ${{ matrix.tree }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECT_SOURCE"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECT_TREE"
+          test ! -e .env
+          test ! -e .env.local
+          test ! -e apps/mobile/.env
+          test ! -e apps/mobile/.env.local
+          mkdir -p artifacts/ios-native-build
+          git rev-parse HEAD > artifacts/ios-native-build/product-commit.txt
+          git rev-parse HEAD^{tree} > artifacts/ios-native-build/product-tree.txt
+          git ls-files apps/mobile packages/contracts packages/shared packages/client-runtime patches pnpm-lock.yaml pnpm-workspace.yaml scripts | while IFS= read -r path; do test ! -f "$path" || shasum -a 256 "$path"; done > artifacts/ios-native-build/source-inputs.sha256
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
@@ -68,102 +71,50 @@ jobs:
               - --filter=@lecturn/mobile...
               - --filter=@lecturn/scripts...
               - --filter=lecturn...
-
       - name: Expose pnpm
         run: |
           pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
           vp_pnpm_bin="$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin"
           echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
           "$vp_pnpm_bin/pnpm" --version
-
-      - name: Capture iOS showcase
-        run: pnpm screenshots:mobile --platform ios --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}"
-
-      - name: Validate App Store Connect assets
-        run: pnpm screenshots:mobile --platform ios --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}" --validate-only
-
-      - name: Upload iOS screenshots
+      - name: Build exact uninstrumented native app
+        timeout-minutes: 50
+        working-directory: apps/mobile
+        env:
+          APP_VARIANT: production
+          EXPO_NO_GIT_STATUS: '1'
+          LECTURN_SHOWCASE_CAPTURE_BUILD: '1'
+          EXPO_PUBLIC_SHOWCASE: '1'
+          NODE_ENV: development
+        run: |
+          pnpm exec expo prebuild --clean --platform ios
+          xcodebuild -workspace ios/Lecturn.xcworkspace -scheme Lecturn -configuration Debug -sdk iphonesimulator -derivedDataPath .showcase/ios-derived-data -quiet ARCHS=arm64 ONLY_ACTIVE_ARCH=YES build
+      - name: Retain app and native/dependency provenance
+        if: always()
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          mkdir -p artifacts/ios-native-build
+          git status --porcelain > artifacts/ios-native-build/post-build-status.txt
+          cp apps/mobile/modules/lecturn-review-diff/ios/LecturnReviewDiffView.swift artifacts/ios-native-build/LecturnReviewDiffView.swift
+          cp 'patches/@legendapp__list@3.3.5.patch' artifacts/ios-native-build/legend-list.patch
+          cp apps/mobile/node_modules/@legendapp/list/react-native.js artifacts/ios-native-build/LegendList.installed.js
+          cp apps/mobile/node_modules/@legendapp/list/react-native.mjs artifacts/ios-native-build/LegendList.installed.mjs
+          shasum -a 256 artifacts/ios-native-build/LecturnReviewDiffView.swift artifacts/ios-native-build/legend-list.patch artifacts/ios-native-build/LegendList.installed.js artifacts/ios-native-build/LegendList.installed.mjs > artifacts/ios-native-build/native-and-list.sha256
+          xcodebuild -version > artifacts/ios-native-build/xcode-version.txt
+          ios_products=apps/mobile/.showcase/ios-derived-data/Build/Products/Debug-iphonesimulator
+          if [ -d "$ios_products/Lecturn.app" ]; then
+            cp "$ios_products/Lecturn.app/EXUpdates.bundle/fingerprint" artifacts/ios-native-build/native-runtime.txt
+            shasum -a 256 "$ios_products/Lecturn.app/Lecturn.debug.dylib" > artifacts/ios-native-build/native-dylib.sha256
+            /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$ios_products/Lecturn.app/Info.plist" > artifacts/ios-native-build/bundle-id.txt
+            tar -czf "artifacts/ios-native-build/Lecturn-$PHASE-simulator.app.tgz" -C "$ios_products" Lecturn.app
+            shasum -a 256 "artifacts/ios-native-build/Lecturn-$PHASE-simulator.app.tgz" > artifacts/ios-native-build/app-archive.sha256
+          fi
+      - name: Upload fresh native build
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: app-store-connect-screenshots
-          path: artifacts/app-store/screenshots/apple/
-          if-no-files-found: warn
-          retention-days: 14
-
-  android:
-    name: Android phone, 7-inch tablet, and 10-inch tablet
-    if: inputs.platform == 'all' || inputs.platform == 'android'
-    runs-on: blacksmith-16vcpu-ubuntu-2404
-    # Capturing every palette multiplies the device matrix by six, and only the
-    # one native build is shared between them.
-    timeout-minutes: ${{ inputs.theme == 'all' && 300 || 60 }}
-    env:
-      LECTURN_SHOWCASE_ANDROID_ABI: x86_64
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
-        with:
-          node-version-file: package.json
-          cache: true
-          run-install: |
-            args:
-              - --filter=@lecturn/mobile...
-              - --filter=@lecturn/scripts...
-              - --filter=lecturn...
-
-      - name: Expose pnpm
-        run: |
-          pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
-          vp_pnpm_bin="$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin"
-          echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
-          "$vp_pnpm_bin/pnpm" --version
-
-      - name: Setup Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - name: Setup Gradle cache
-        uses: gradle/actions/setup-gradle@v5
-
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Capture Android showcase
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 36
-          target: google_apis
-          arch: x86_64
-          profile: pixel_7_pro
-          avd-name: Pixel_10_Pro
-          cores: 8
-          ram-size: 4096M
-          disable-animations: false
-          script: pnpm screenshots:mobile --platform android --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}"
-
-      - name: Validate Google Play assets
-        run: pnpm screenshots:mobile --platform android --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}" --validate-only
-
-      - name: Upload Android screenshots
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: google-play-screenshots
-          path: artifacts/app-store/screenshots/google-play/
-          if-no-files-found: warn
+          name: ios-${{ matrix.phase }}-native-build
+          path: artifacts/ios-native-build/
+          if-no-files-found: error
           retention-days: 14
