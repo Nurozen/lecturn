@@ -5,12 +5,12 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: C30-mvcp-diagnostic-${{ github.ref }}
+  group: C32-original-control-recovery-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   capture:
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/validation/') && github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
-    name: C30 changed MVCP diagnostic ${{ matrix.ARM }}
+    name: C32 original control recovery ${{ matrix.ARM }}
     runs-on: macos-26
     timeout-minutes: 75
     strategy:
@@ -19,15 +19,6 @@ jobs:
         include:
           - VARIANT: after
             ARM: after-original
-            CAPTURE_SCENARIOS: 'ownership'
-            SOURCE_COMMIT: '65318f080902a00d1b421ff86755f1a4a75e8b5b'
-            SOURCE_TREE: 7874152fdc79ba9ab7112a7bc3717b9d81815c56
-            BUILD_RUN_ID: '38680507825'
-            BUILD_COMMIT: 'ac51e13f2c0e287fd58261b2c82ffcbea2e98bfa'
-            BUILD_ARCHIVE_HASH: 'a52ff786672cddeddd8731b89952300bcbfc06ded4e8712df421973005b83349'
-            BUILD_ARTIFACT: ios-after-native-build
-          - VARIANT: after
-            ARM: after-retain-js
             CAPTURE_SCENARIOS: 'ownership'
             SOURCE_COMMIT: '65318f080902a00d1b421ff86755f1a4a75e8b5b'
             SOURCE_TREE: 7874152fdc79ba9ab7112a7bc3717b9d81815c56
@@ -57,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$VARIANT" = after
-          case "$ARM" in after-original|after-retain-js) ;; *) exit 1 ;; esac
+          case "$ARM" in after-original) ;; *) exit 1 ;; esac
           test "$DIAGNOSTIC_PROTOCOL" = C30-changed-mvcp-v1
           test "$CAPTURE_SCENARIOS" = ownership
           test "$SOURCE_COMMIT" = 65318f080902a00d1b421ff86755f1a4a75e8b5b
