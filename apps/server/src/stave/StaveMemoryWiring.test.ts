@@ -102,6 +102,61 @@ describe("StaveMemoryWiring", () => {
       }),
     ),
   );
+  it.effect(
+    "resolves a saga member's generated entry only through a saga that records the den",
+    () =>
+      harness((root, fs, wiring) =>
+        Effect.gen(function* () {
+          const path = yield* Path.Path;
+          const config = {
+            command: path.join(root, "marmot"),
+            args: ["serve", "--den", "saga-den"],
+          };
+          const document = yield* encodeJson({ mcpServers: { "context-marmot": config } });
+          const saga = path.join(root, "rewrite");
+          const member = path.join(root, "api");
+          const roster = "version: 2\nid: rewrite\nkind: saga\nsaga:\n  members:\n    - id: api\n";
+          const memories = "memories:\n  - name: notes\n    provider: marmot\n    id: saga-den\n";
+          yield* fs.makeDirectory(saga);
+          yield* fs.makeDirectory(member);
+          yield* fs.writeFileString(path.join(member, ".stave.yaml"), "version: 2\nid: api\n");
+          yield* fs.writeFileString(path.join(member, ".mcp.json"), document);
+
+          // A stray config with no saga, a saga without the den, and another saga's den all stay absent.
+          expect(yield* wiring.resolve(member)).toEqual({ state: "absent" });
+          yield* fs.writeFileString(path.join(saga, ".stave.yaml"), roster);
+          expect(yield* wiring.resolve(member)).toEqual({ state: "absent" });
+          yield* fs.writeFileString(
+            path.join(saga, ".stave.yaml"),
+            roster.replace("id: api", "id: web") + memories,
+          );
+          expect(yield* wiring.resolve(member)).toEqual({ state: "absent" });
+          // An unreadable saga manifest cannot prove the attachment.
+          yield* fs.writeFileString(path.join(saga, ".stave.yaml"), `${roster}${memories}\t: [`);
+          expect(yield* wiring.resolve(member)).toEqual({ state: "absent" });
+
+          yield* fs.writeFileString(path.join(saga, ".stave.yaml"), roster + memories);
+          expect(yield* wiring.resolve(member)).toEqual({ state: "configured", config });
+          yield* fs.writeFileString(path.join(member, ".mcp.json"), "bad json");
+          expect(yield* wiring.resolve(member)).toEqual({
+            state: "unavailable",
+            code: "invalid_config",
+          });
+          yield* fs.remove(path.join(member, ".mcp.json"));
+          expect(yield* wiring.resolve(member)).toEqual({ state: "absent" });
+
+          // A member that attached its own den keeps the ordinary single-space behaviour.
+          yield* fs.writeFileString(path.join(saga, ".stave.yaml"), roster);
+          yield* fs.writeFileString(path.join(member, ".stave.yaml"), manifest);
+          expect(yield* wiring.resolve(member)).toEqual({
+            state: "unavailable",
+            code: "missing_config",
+          });
+          yield* fs.writeFileString(path.join(member, ".mcp.json"), document);
+          expect(yield* wiring.resolve(member)).toEqual({ state: "configured", config });
+        }),
+      ),
+  );
   it.effect("disabled integration returns absent before reading a manifest", () =>
     harness(
       (root, fs, wiring) =>
