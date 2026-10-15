@@ -28,3 +28,11 @@ hit slop inside clipped cards.
 The accessibility store initially chooses opaque material until native preferences are known.
 This favors legibility on startup. Test preference changes in both directions, as well as theme
 changes while accessibility preferences remain enabled.
+
+## Composer clearance
+
+On iOS, the measured composer overlay owns timeline clearance. Let its bottom-anchored outer host
+follow that height without a separate layout transition; animate the inner surfaces instead.
+Independent outer interpolation can cover space the timeline considers clear after sending.
+Verify acknowledged messages, growing replies, and reader-position preservation with native
+screenshots and motion evidence.

@@ -998,11 +998,11 @@ const ThreadDetailScreenContent = memo(function ThreadDetailScreenContent(
           style={{ position: "absolute", bottom: 0, left: 0, right: 0, top: 0 }}
           offset={{ closed: 0, opened: 0 }}
         >
-          {/* The fixed sticky host gives this bottom-anchored child a stable
-              coordinate space. Its top and height can then animate together
-              instead of the auto-sized host jumping to Yoga's destination. */}
+          {/* Let the measured overlay size the iOS dock without a second frame
+              transition. KeyboardStickyView moves the dock; inner composer
+              surfaces keep their layout transitions. */}
           <Animated.View
-            layout={COMPOSER_LAYOUT_TRANSITION}
+            layout={Platform.OS === "ios" ? undefined : COMPOSER_LAYOUT_TRANSITION}
             pointerEvents="box-none"
             style={{ position: "absolute", bottom: 0, left: 0, right: 0 }}
           >
