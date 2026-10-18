@@ -3,7 +3,7 @@ import type { AtomCommandResult } from "@lecturn/client-runtime/state/runtime";
 import { EnvironmentId } from "@lecturn/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/unstable/reactivity";
-import { act, type ButtonHTMLAttributes } from "react";
+import { act, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -21,6 +21,10 @@ const discovery = vi.hoisted(() => ({
   knownAccountsAtom: Symbol("knownAccounts"),
   accountProfilesAtom: Symbol("accountProfiles"),
   accountByEnvironmentIdAtom: Symbol("accountByEnvironmentId"),
+  accountIds: [] as string[],
+  accountStates: new Map<string, Discovery.RelayEnvironmentDiscoveryState>(),
+  accountOwners: new Map<EnvironmentId, string>(),
+  profiles: new Map<string, { label: string }>(),
 }));
 
 vi.mock("~/state/relay", () => ({
@@ -29,7 +33,7 @@ vi.mock("~/state/relay", () => ({
     accountStatesValueAtom: discovery.accountStatesAtom,
   },
 }));
-// Single-account fixtures: rows render flat, without account headings or marks.
+// Fixtures default to a single account unless a test supplies account discovery.
 vi.mock("~/cloud/knownAccounts", () => ({
   knownConnectAccountsAtom: discovery.knownAccountsAtom,
 }));
@@ -41,10 +45,18 @@ vi.mock("@effect/atom-react", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@effect/atom-react")>()),
   useAtomValue: (atom: unknown) =>
     atom === discovery.knownAccountsAtom
-      ? { accountIds: [], needsSignIn: [], synced: true }
-      : new Map(),
+      ? { accountIds: discovery.accountIds, needsSignIn: [], synced: true }
+      : atom === discovery.accountStatesAtom
+        ? discovery.accountStates
+        : atom === discovery.accountByEnvironmentIdAtom
+          ? discovery.accountOwners
+          : discovery.profiles,
 }));
-vi.mock("../sidebar/AccountMark", () => ({ AccountMark: () => null }));
+vi.mock("../sidebar/AccountMark", () => ({
+  AccountMark: ({ environmentId }: { environmentId: EnvironmentId }) => (
+    <span data-account-mark={environmentId} />
+  ),
+}));
 vi.mock("~/connection/catalog", () => ({
   environmentCatalog: { register: discovery.registerCommand },
 }));
@@ -65,6 +77,25 @@ vi.mock("~/state/environments", async () => {
   return { useRelayEnvironmentDiscovery: () => useSyncExternalStore(subscribe, read, read) };
 });
 vi.mock("../ConnectionStatusDot", () => ({ ConnectionStatusDot: () => null }));
+vi.mock("../ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => children,
+  TooltipTrigger: ({ children }: { children: ReactNode }) => <span>{children}</span>,
+  TooltipPopup: () => null,
+}));
+vi.mock("../ui/checkbox", () => ({
+  Checkbox: (props: {
+    checked: boolean;
+    disabled: boolean;
+    onCheckedChange: (checked: boolean) => void;
+  }) => (
+    <input
+      type="checkbox"
+      checked={props.checked}
+      disabled={props.disabled}
+      onChange={(event) => props.onCheckedChange(event.target.checked)}
+    />
+  ),
+}));
 vi.mock("../ui/button", () => ({
   Button: ({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button {...props}>{children}</button>
@@ -73,6 +104,7 @@ vi.mock("../ui/button", () => ({
 vi.mock("../ui/toast", () => ({ toastManager: { add: vi.fn() } }));
 
 import { CloudEnvironmentConnectRows } from "./CloudEnvironmentConnectList";
+import { areOnboardingComputersReady } from "~/onboarding/computerSelection.logic";
 
 const newMachineId = EnvironmentId.make("new-computer");
 const linkedMachines: DiscoveredEnvironments = new Map([
@@ -134,6 +166,10 @@ beforeEach(() => {
   vi.stubGlobal("window", browserWindow);
   renderer = null;
   discovery.listeners.clear();
+  discovery.accountIds = [];
+  discovery.accountStates = new Map();
+  discovery.accountOwners = new Map();
+  discovery.profiles = new Map();
   discovery.state = {
     environments: new Map(),
     refreshing: false,
@@ -141,6 +177,7 @@ beforeEach(() => {
     error: Option.none(),
   };
   discovery.listEnvironments.mockReset().mockResolvedValue(new Map());
+  discovery.register.mockReset().mockResolvedValue(AsyncResult.success(undefined));
   discovery.refresh.mockReset().mockImplementation(async () => {
     publish({ environments: new Map(), refreshing: true, offline: false, error: Option.none() });
     const environments = await discovery.listEnvironments();
@@ -156,6 +193,185 @@ afterEach(async () => {
 });
 
 describe("cloud onboarding discovery", () => {
+  it.each(["expired session", "unlisted computer", "offline discovery", "loading discovery"])(
+    "keeps saved selections editable with %s and preserves ownership on rediscovery",
+    async (scenario) => {
+      const localId = EnvironmentId.make("local-computer");
+      const local = { environmentId: localId, connection: { phase: "connected" } };
+      const saved = {
+        environmentId: newMachineId,
+        label: "Saved work laptop",
+        connection: { phase: "available", error: null, traceId: null } as const,
+      };
+      discovery.accountIds = ["first-account", "expired-account"];
+      discovery.profiles = new Map([
+        ["first-account", { label: "Personal" }],
+        ["expired-account", { label: "Work" }],
+      ]);
+      discovery.accountOwners.set(newMachineId, "expired-account");
+      discovery.refresh.mockImplementation(async () => {
+        publish({
+          ...discovery.state!,
+          refreshing: scenario === "loading discovery",
+          offline: scenario === "offline discovery",
+        });
+        return AsyncResult.success(undefined);
+      });
+      const autoSelectedComputers = new Set([localId, newMachineId]);
+      function Setup() {
+        const [selectedIds, setSelectedIds] = useState<ReadonlySet<EnvironmentId>>(
+          new Set([localId, newMachineId]),
+        );
+        return (
+          <>
+            <CloudEnvironmentConnectRows
+              primaryEnvironmentId={localId}
+              savedEnvironments={[saved]}
+              showSavedEnvironments
+              selection={{
+                autoSelectedComputers,
+                selectedIds,
+                onChange: (id, checked) =>
+                  setSelectedIds((current) => {
+                    const next = new Set(current);
+                    if (checked) next.add(id);
+                    else next.delete(id);
+                    return next;
+                  }),
+              }}
+            />
+            <button disabled={!areOnboardingComputersReady(selectedIds, [local, saved])}>
+              Continue
+            </button>
+          </>
+        );
+      }
+      await act(async () => {
+        renderer = create(<Setup />);
+      });
+      const checkbox = () => renderer!.root.findByType("input");
+      expect(checkbox().props.checked).toBe(true);
+      expect(checkbox().props.disabled).toBe(false);
+      expect(renderer!.root.findByType("button").props.disabled).toBe(true);
+      expect(renderer!.root.findByType("section").props["aria-label"]).toBe("Work");
+      expect(renderer!.root.findByProps({ "data-account-mark": newMachineId })).toBeDefined();
+      expect(renderer!.root.findAllByType("span").map((node) => node.children)).toContainEqual([
+        "Saved work laptop",
+      ]);
+      await act(async () => checkbox().props.onChange({ target: { checked: false } }));
+      expect(checkbox().props.checked).toBe(false);
+      expect(renderer!.root.findByType("button").props.disabled).toBe(false);
+
+      // Another account lists the same computer; its saved catalog owner still wins.
+      discovery.accountStates.set("first-account", {
+        ...discovery.state!,
+        environments: linkedMachines,
+      });
+      await act(async () => publish({ ...discovery.state!, environments: linkedMachines }));
+      expect(renderer!.root.findAllByType("input")).toHaveLength(1);
+      expect(checkbox().props.checked).toBe(false);
+      expect(renderer!.root.findByType("section").props["aria-label"]).toBe("Work");
+      expect(renderer!.root.findByType("button").props.disabled).toBe(false);
+      expect(discovery.register).not.toHaveBeenCalled();
+      expect(discovery.accountOwners.get(newMachineId)).toBe("expired-account");
+    },
+  );
+
+  it("signals that the section can expand after initial discovery settles", async () => {
+    let finishDiscovery!: (environments: DiscoveredEnvironments) => void;
+    discovery.listEnvironments.mockReturnValue(
+      new Promise((resolve) => {
+        finishDiscovery = resolve;
+      }),
+    );
+    const onDiscoveryReady = vi.fn();
+    await act(async () => {
+      renderer = create(
+        <CloudEnvironmentConnectRows
+          primaryEnvironmentId={null}
+          savedEnvironments={[]}
+          onDiscoveryReady={onDiscoveryReady}
+        />,
+      );
+    });
+    expect(onDiscoveryReady).not.toHaveBeenCalled();
+    await act(async () => {
+      finishDiscovery(linkedMachines);
+    });
+    expect(onDiscoveryReady).toHaveBeenCalledTimes(1);
+    expect(renderer!.root.findByType("button").children).toEqual(["Connect"]);
+  });
+
+  it("connects and selects discovered computers by default without overwriting deselection", async () => {
+    discovery.listEnvironments.mockResolvedValue(linkedMachines);
+    const autoSelectedComputers = new Set<EnvironmentId>();
+    function Setup() {
+      const [selectedIds, setSelectedIds] = useState<ReadonlySet<EnvironmentId>>(new Set());
+      return (
+        <CloudEnvironmentConnectRows
+          primaryEnvironmentId={null}
+          savedEnvironments={[]}
+          showSavedEnvironments
+          selection={{
+            autoSelectedComputers,
+            selectedIds,
+            onChange: (id, checked) =>
+              setSelectedIds((current) => {
+                const next = new Set(current);
+                if (checked) next.add(id);
+                else next.delete(id);
+                return next;
+              }),
+          }}
+        />
+      );
+    }
+    await act(async () => {
+      renderer = create(<Setup />);
+    });
+
+    expect(discovery.register).toHaveBeenCalledTimes(1);
+    expect(renderer!.root.findByType("input").props.checked).toBe(true);
+    await act(async () => {
+      await renderer!.root.findByType("input").props.onChange({ target: { checked: false } });
+    });
+    await act(async () => {
+      publish({ ...discovery.state!, environments: new Map(linkedMachines) });
+    });
+    expect(renderer!.root.findByType("input").props.checked).toBe(false);
+    expect(discovery.register).toHaveBeenCalledTimes(1);
+  });
+
+  it("auto-connects a computer under the account that discovered it", async () => {
+    discovery.accountIds = ["first-account", "second-account"];
+    discovery.accountStates = new Map([
+      ["first-account", { ...discovery.state!, environments: new Map() }],
+      ["second-account", { ...discovery.state!, environments: linkedMachines }],
+    ]);
+    discovery.listEnvironments.mockResolvedValue(linkedMachines);
+    const onChange = vi.fn();
+    await act(async () => {
+      renderer = create(
+        <CloudEnvironmentConnectRows
+          primaryEnvironmentId={null}
+          savedEnvironments={[]}
+          showSavedEnvironments
+          selection={{
+            autoSelectedComputers: new Set(),
+            selectedIds: new Set(),
+            onChange,
+          }}
+        />,
+      );
+    });
+
+    expect(onChange).toHaveBeenCalledWith(newMachineId, true);
+    expect(discovery.register).toHaveBeenCalledTimes(1);
+    expect(discovery.register.mock.calls[0]?.[0]).toMatchObject({
+      target: { environmentId: newMachineId, accountId: "second-account" },
+    });
+  });
+
   it("shows a newly linked computer without remounting and stops polling once found", async () => {
     discovery.listEnvironments
       .mockResolvedValueOnce(new Map())
@@ -173,6 +389,32 @@ describe("cloud onboarding discovery", () => {
     expect(renderer!.root.findByType("button").children).toEqual(["Connect"]);
     await advance(30_000);
     expect(discovery.listEnvironments).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a discovered computer visible when it is added to the browser", async () => {
+    discovery.listEnvironments.mockResolvedValue(linkedMachines);
+    await mount();
+    expect(renderer!.root.findByType("button").children).toEqual(["Connect"]);
+    await act(async () => {
+      renderer!.update(
+        <CloudEnvironmentConnectRows
+          primaryEnvironmentId={null}
+          savedEnvironments={[
+            {
+              environmentId: newMachineId,
+              label: "Work laptop",
+              connection: { phase: "connected", error: null, traceId: null },
+            },
+          ]}
+          showSavedEnvironments
+          refreshWhileEmpty
+        />,
+      );
+    });
+    expect(renderer!.root.findAllByType("p").map((node) => node.children)).toContainEqual([
+      "Work laptop",
+    ]);
+    expect(renderer!.root.findByType("button").children).toEqual(["Connected"]);
   });
 
   it("waits while hidden and refreshes immediately when visible again", async () => {

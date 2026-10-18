@@ -13,6 +13,11 @@ an existing worktree, use **New thread in this worktree** from the branch toolba
 When you change a new thread's project, Lecturn stays in the current environment
 if that project exists there. Otherwise it selects an environment that has it.
 
+On mobile, use a thread's branch action to start a task on the same branch.
+Submitting a task opens its conversation immediately while
+Lecturn creates the thread. If creation fails, retry from the conversation or
+return to the draft to edit it; your message and attachments remain available.
+
 ### Start in the background
 
 In a desktop browser or the desktop app, press `Cmd+Enter` on macOS or `Ctrl+Enter`

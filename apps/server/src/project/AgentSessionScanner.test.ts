@@ -17,11 +17,21 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
+import * as ChildProcess from "effect/unstable/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import { afterEach, vi } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as AgentSessionScanner from "./AgentSessionScanner.ts";
+
+vi.mock("node:os", async (importOriginal) => {
+  const os = await importOriginal<typeof import("node:os")>();
+  return { ...os, homedir: vi.fn(os.homedir) };
+});
+
+afterEach(() => vi.mocked(NodeOS.homedir).mockReset());
 
 const makeProjectShell = (workspaceRoot: string): OrchestrationProjectShell => ({
   id: ProjectId.make("project-1"),
@@ -222,6 +232,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
             threadCount: 1,
             lastActiveAt: "2026-03-01T00:00:00.000Z",
             alreadyImported: false,
+            git: null,
           },
           {
             path: olderWorkspace,
@@ -230,6 +241,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
             threadCount: 2,
             lastActiveAt: "2026-01-02T00:00:00.000Z",
             alreadyImported: false,
+            git: null,
           },
         ]);
       }),
@@ -272,6 +284,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
             threadCount: 1,
             lastActiveAt: "2026-02-09T11:00:00.000Z",
             alreadyImported: false,
+            git: null,
           },
           {
             path: workspace,
@@ -280,6 +293,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
             threadCount: 2,
             lastActiveAt: "2026-02-09T10:00:00.000Z",
             alreadyImported: false,
+            git: null,
           },
         ]);
       }),
@@ -398,6 +412,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
             threadCount: 2,
             lastActiveAt: "2026-04-01T09:00:00.000Z",
             alreadyImported: true,
+            git: null,
           },
         ]);
       }),
@@ -430,6 +445,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
           path: workspace,
           projectId: ProjectId.make("project-1"),
           alreadyImported: true,
+          git: null,
         });
       }),
     );
@@ -461,6 +477,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
           path: workspaceAlias,
           projectId: ProjectId.make("project-1"),
           alreadyImported: true,
+          git: null,
         });
       }),
     );
@@ -507,6 +524,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
             threadCount: 2,
             lastActiveAt: "2026-01-02T00:00:00.000Z",
             alreadyImported: true,
+            git: null,
           },
         ]);
       }),
@@ -823,13 +841,10 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
         const codexHomePath = yield* makeTempDir("lecturn-codex-home-");
         const configBaseDir = yield* makeTempDir("lecturn-scanner-base-");
         const workspace = yield* makeTempDir("lecturn-workspace-");
+        const home = yield* makeTempDir("lecturn-scanner-home-");
+        vi.mocked(NodeOS.homedir).mockReturnValue(home);
 
-        for (const [index, cwd] of [
-          NodeOS.homedir(),
-          NodeOS.tmpdir(),
-          configBaseDir,
-          workspace,
-        ].entries()) {
+        for (const [index, cwd] of [home, NodeOS.tmpdir(), configBaseDir, workspace].entries()) {
           yield* writeTranscript({
             filePath: path.join(claudeHomePath, "projects", `-slug-${index}`, "session.jsonl"),
             contents: claudeSessionLine(cwd),
@@ -862,6 +877,310 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
 
         expect(result.candidates).toEqual([]);
       }),
+    );
+
+    it.effect("excludes Codex scratch directories and Downloads", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const claudeHomePath = yield* makeTempDir("lecturn-claude-home-");
+        const codexHomePath = yield* makeTempDir("lecturn-codex-home-");
+        const home = yield* makeTempDir("lecturn-scanner-home-");
+        vi.mocked(NodeOS.homedir).mockReturnValue(home);
+        const scratchRoot = path.join(home, "Documents", "Codex");
+        const scratch = path.join(scratchRoot, "2026-09-01", "some-conversation");
+        const downloadsRoot = path.join(home, "Downloads");
+        const downloads = path.join(downloadsRoot, "unpacked-project");
+        const keep = path.join(home, "Documents", "Codex-project");
+        yield* fileSystem.makeDirectory(scratch, { recursive: true });
+        yield* fileSystem.makeDirectory(downloads, { recursive: true });
+        yield* fileSystem.makeDirectory(keep, { recursive: true });
+
+        for (const [index, cwd] of [
+          scratchRoot,
+          scratch,
+          downloadsRoot,
+          downloads,
+          keep,
+        ].entries()) {
+          yield* writeTranscript({
+            filePath: path.join(
+              codexHomePath,
+              "sessions",
+              "2026",
+              "09",
+              "01",
+              `rollout-${index}.jsonl`,
+            ),
+            contents: codexRolloutLine(cwd),
+            mtimeMs: Date.parse("2026-09-01T00:00:00.000Z"),
+          });
+        }
+
+        const result = yield* runScan({ claudeHomePath, codexHomePath });
+
+        expect(result.candidates.map((candidate) => candidate.path)).toEqual([keep]);
+      }),
+    );
+
+    for (const linkHome of [true, false]) {
+      it.effect.skipIf(!symlinksSupported)(
+        `excludes physical home paths with symlinked ${linkHome ? "home" : "exclusion roots"}`,
+        () =>
+          Effect.gen(function* () {
+            const path = yield* Path.Path;
+            const fileSystem = yield* FileSystem.FileSystem;
+            const claudeHomePath = yield* makeTempDir("lecturn-claude-home-");
+            const codexHomePath = yield* makeTempDir("lecturn-codex-home-");
+            const fixture = yield* makeTempDir("lecturn-home-links-");
+            const home = path.join(fixture, "home");
+            const physicalHome = path.join(fixture, "physical-home");
+            const downloads = path.join(physicalHome, "Downloads", "repo");
+            const scratch = path.join(physicalHome, "Documents", "Codex", "session");
+            const keep = path.join(physicalHome, "Documents", "Codex-project");
+            for (const directory of [downloads, scratch, keep]) {
+              yield* fileSystem.makeDirectory(directory, { recursive: true });
+            }
+            if (linkHome) {
+              yield* fileSystem.symlink(physicalHome, home);
+            } else {
+              yield* fileSystem.makeDirectory(path.join(home, "Documents"), { recursive: true });
+              yield* fileSystem.symlink(path.dirname(downloads), path.join(home, "Downloads"));
+              yield* fileSystem.symlink(
+                path.dirname(scratch),
+                path.join(home, "Documents", "Codex"),
+              );
+            }
+            vi.mocked(NodeOS.homedir).mockReturnValue(home);
+            const now = Date.parse("2026-09-01T00:00:00.000Z");
+            yield* TestClock.setTime(now);
+            const excluded = [downloads, scratch, ...(linkHome ? [physicalHome] : [])];
+            for (const [index, cwd] of [...excluded, keep].entries()) {
+              yield* writeTranscript({
+                filePath: path.join(
+                  claudeHomePath,
+                  "projects",
+                  `project-${index}`,
+                  "session.jsonl",
+                ),
+                contents:
+                  encodeTranscriptRecord({
+                    type: "user",
+                    cwd,
+                    sessionId: `s${index}`,
+                    message: { content: "Continue work" },
+                  }) + "\n",
+                mtimeMs: now,
+              });
+            }
+            const input = { claudeHomePath, codexHomePath };
+            const result = yield* runScan(input);
+            expect(result.candidates.map((candidate) => candidate.path)).toEqual([keep]);
+            for (const workspaceRoot of excluded) {
+              expect(yield* runRecentThreads({ ...input, workspaceRoot })).toEqual([]);
+            }
+            expect(yield* runRecentThreads({ ...input, workspaceRoot: keep })).toHaveLength(1);
+          }),
+      );
+    }
+
+    for (const metadata of [
+      "separate",
+      "linked relative",
+      "linked absolute",
+      "common alias",
+    ] as const) {
+      it.effect.skipIf(metadata === "common alias" && !symlinksSupported)(
+        `classifies git directories by common directory identity: ${metadata}`,
+        () =>
+          Effect.gen(function* () {
+            const path = yield* Path.Path;
+            const fileSystem = yield* FileSystem.FileSystem;
+            const claudeHomePath = yield* makeTempDir("lecturn-claude-home-");
+            const codexHomePath = yield* makeTempDir("lecturn-codex-home-");
+            const fixture = yield* makeTempDir("lecturn-git-metadata-");
+            const checkout = path.join(fixture, "checkout");
+            const gitDir = path.join(
+              fixture,
+              metadata === "linked absolute" ? "metadata" : "worktrees",
+              "repo",
+            );
+            const linked = metadata.startsWith("linked");
+            const commonDir = linked ? path.join(fixture, "main.git") : gitDir;
+            yield* fileSystem.makeDirectory(checkout);
+            for (const directory of [gitDir, commonDir]) {
+              yield* fileSystem.makeDirectory(path.join(directory, "objects"), { recursive: true });
+              yield* fileSystem.makeDirectory(path.join(directory, "refs", "heads"), {
+                recursive: true,
+              });
+              yield* fileSystem.writeFileString(
+                path.join(directory, "HEAD"),
+                "ref: refs/heads/main\n",
+              );
+            }
+            yield* fileSystem.writeFileString(path.join(checkout, ".git"), `gitdir: ${gitDir}\n`);
+            yield* fileSystem.writeFileString(
+              path.join(commonDir, "config"),
+              '[core]\nrepositoryformatversion = 0\nbare = false\n[remote "origin"]\nurl = https://github.com/Nurozen/lecturn.git\n',
+            );
+            if (linked) {
+              yield* fileSystem.writeFileString(
+                path.join(gitDir, "commondir"),
+                (metadata === "linked relative" ? path.relative(gitDir, commonDir) : commonDir) +
+                  "\n",
+              );
+              yield* fileSystem.writeFileString(
+                path.join(gitDir, "gitdir"),
+                path.join(checkout, ".git") + "\n",
+              );
+            } else if (metadata === "common alias") {
+              const alias = path.join(fixture, "git-alias");
+              yield* fileSystem.symlink(gitDir, alias);
+              yield* fileSystem.writeFileString(path.join(gitDir, "commondir"), alias + "\n");
+            }
+            const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+            const gitOutput = yield* spawner.string(
+              ChildProcess.make("git", [
+                "-C",
+                checkout,
+                "rev-parse",
+                "--is-inside-work-tree",
+                "--git-dir",
+                "--git-common-dir",
+              ]),
+            );
+            const gitFacts = gitOutput.trim().split("\n");
+            expect(gitFacts[0]).toBe("true");
+            expect(
+              yield* Effect.forEach(gitFacts.slice(1), (directory) =>
+                fileSystem.realPath(path.resolve(checkout, directory)),
+              ),
+            ).toEqual([yield* fileSystem.realPath(gitDir), yield* fileSystem.realPath(commonDir)]);
+            yield* writeTranscript({
+              filePath: path.join(claudeHomePath, "projects", "project", "session.jsonl"),
+              contents: claudeSessionLine(checkout),
+              mtimeMs: Date.parse("2026-01-01T00:00:00.000Z"),
+            });
+            const result = yield* runScan({ claudeHomePath, codexHomePath });
+            if (linked) {
+              expect(result.candidates).toEqual([]);
+            } else {
+              expect(result.candidates).toHaveLength(1);
+              expect(result.candidates[0]).toMatchObject({
+                path: checkout,
+                git: { remoteKey: "github.com/nurozen/lecturn", repository: "Nurozen/lecturn" },
+              });
+            }
+          }),
+      );
+    }
+
+    it.effect("skips linked git worktrees and reports the origin of real checkouts", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const claudeHomePath = yield* makeTempDir("lecturn-claude-home-");
+        const codexHomePath = yield* makeTempDir("lecturn-codex-home-");
+        const repo = yield* makeTempDir("lecturn-workspace-repo-");
+        const worktree = yield* makeTempDir("lecturn-workspace-worktree-");
+        const plain = yield* makeTempDir("lecturn-workspace-plain-");
+        const noRemote = yield* makeTempDir("lecturn-workspace-noremote-");
+        const submodule = yield* makeTempDir("lecturn-workspace-submodule-");
+
+        yield* fileSystem.makeDirectory(path.join(repo, ".git"));
+        yield* fileSystem.writeFileString(
+          path.join(repo, ".git", "config"),
+          '[core]\n\tbare = false\n[remote "origin"]\n\turl = git@github.com:Nurozen/lecturn.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n',
+        );
+        yield* fileSystem.makeDirectory(path.join(repo, ".git", "worktrees", "wt"), {
+          recursive: true,
+        });
+        yield* fileSystem.writeFileString(
+          path.join(repo, ".git", "worktrees", "wt", "commondir"),
+          "../..\n",
+        );
+        yield* fileSystem.writeFileString(
+          path.join(worktree, ".git"),
+          `gitdir: ${path.join(repo, ".git", "worktrees", "wt")}\n`,
+        );
+        yield* fileSystem.makeDirectory(path.join(noRemote, ".git"));
+        yield* fileSystem.writeFileString(path.join(noRemote, ".git", "config"), "[core]\n");
+        // Submodules also use a gitdir pointer, but into `modules/`, not `worktrees/`.
+        const submoduleGitDir = path.join(repo, ".git", "modules", "vendor");
+        yield* fileSystem.makeDirectory(submoduleGitDir, { recursive: true });
+        yield* fileSystem.writeFileString(
+          path.join(submoduleGitDir, "config"),
+          '[remote "origin"]\n\turl = ssh://github.com/Nurozen/vendor.git\n',
+        );
+        yield* fileSystem.writeFileString(
+          path.join(submodule, ".git"),
+          `gitdir: ${submoduleGitDir}\n`,
+        );
+
+        for (const [index, cwd] of [repo, worktree, plain, noRemote, submodule].entries()) {
+          yield* writeTranscript({
+            filePath: path.join(claudeHomePath, "projects", `-slug-${index}`, "a.jsonl"),
+            contents: claudeSessionLine(cwd),
+            mtimeMs: Date.parse(`2026-01-0${index + 1}T00:00:00.000Z`),
+          });
+        }
+
+        const result = yield* runScan({ claudeHomePath, codexHomePath });
+
+        expect(
+          result.candidates.map((candidate) => ({ path: candidate.path, git: candidate.git })),
+        ).toEqual([
+          {
+            path: submodule,
+            git: { remoteKey: "github.com/nurozen/vendor", repository: "Nurozen/vendor" },
+          },
+          { path: noRemote, git: { remoteKey: null, repository: null } },
+          { path: plain, git: null },
+          {
+            path: repo,
+            git: { remoteKey: "github.com/nurozen/lecturn", repository: "Nurozen/lecturn" },
+          },
+        ]);
+      }),
+    );
+
+    it.effect.skipIf(!symlinksSupported)(
+      "reads relative gitdir pointers through a project alias",
+      () =>
+        Effect.gen(function* () {
+          const path = yield* Path.Path;
+          const fileSystem = yield* FileSystem.FileSystem;
+          const claudeHomePath = yield* makeTempDir("lecturn-claude-home-");
+          const codexHomePath = yield* makeTempDir("lecturn-codex-home-");
+          const fixture = yield* makeTempDir("lecturn-git-alias-");
+          const workspace = path.join(fixture, "checkout", "vendor");
+          const gitDir = path.join(fixture, "checkout", ".git", "modules", "vendor");
+          const alias = path.join(fixture, "vendor-alias");
+          yield* fileSystem.makeDirectory(workspace, { recursive: true });
+          yield* fileSystem.makeDirectory(gitDir, { recursive: true });
+          yield* fileSystem.writeFileString(
+            path.join(workspace, ".git"),
+            "gitdir: ../.git/modules/vendor\n",
+          );
+          yield* fileSystem.writeFileString(
+            path.join(gitDir, "config"),
+            '[remote "origin"]\n\turl = git@github.com:Nurozen/vendor.git\n',
+          );
+          yield* fileSystem.symlink(workspace, alias);
+          yield* writeTranscript({
+            filePath: path.join(claudeHomePath, "projects", "-alias", "a.jsonl"),
+            contents: claudeSessionLine(alias),
+            mtimeMs: Date.parse("2026-01-01T00:00:00.000Z"),
+          });
+
+          const result = yield* runScan({ claudeHomePath, codexHomePath });
+
+          expect(result.candidates).toHaveLength(1);
+          expect(result.candidates[0]).toMatchObject({
+            path: alias,
+            git: { remoteKey: "github.com/nurozen/vendor", repository: "Nurozen/vendor" },
+          });
+        }),
     );
 
     it.effect(
@@ -1242,6 +1561,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
             threadCount: 1,
             lastActiveAt: "2026-05-03T00:00:00.000Z",
             alreadyImported: false,
+            git: null,
           },
         ]);
       }),

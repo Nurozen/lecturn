@@ -127,6 +127,7 @@ interface ThreadNavigationSidebarProps {
   readonly selectedThreadKey: string | null;
   readonly onOpenSettings: () => void;
   readonly onOpenEnvironmentSettings: () => void;
+  readonly onNewThreadOnBranch: (thread: EnvironmentThreadShell) => void;
   readonly onNewThreadInProject: (project: EnvironmentProject) => void;
   readonly onSearchQueryChange: (query: string) => void;
   /** Only the scoping fields are needed: forking selects a child thread whose
@@ -1061,6 +1062,7 @@ function ThreadNavigationSidebarPane(
           return (
             <ThreadListV2Row
               nested
+              onNewThreadOnBranch={props.onNewThreadOnBranch}
               thread={thread}
               variant={item.item.variant}
               hasQueuedMessages={queuedThreadKeys.has(`${thread.environmentId}:${thread.id}`)}
@@ -1207,6 +1209,7 @@ function ThreadNavigationSidebarPane(
             );
           return (
             <ThreadListRow
+              onNewThreadOnBranch={props.onNewThreadOnBranch}
               variant="sidebar"
               thread={thread}
               hasQueuedMessages={queuedThreadKeys.has(`${thread.environmentId}:${thread.id}`)}
@@ -1277,6 +1280,7 @@ function ThreadNavigationSidebarPane(
       projectTitleByProjectKey,
       regenerateThreadTitle,
       props.onNewThreadInProject,
+      props.onNewThreadOnBranch,
       props.searchQuery,
       props.selectedThreadKey,
       props.width,

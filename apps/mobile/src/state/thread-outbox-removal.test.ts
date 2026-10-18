@@ -39,6 +39,8 @@ vi.mock("./use-composer-drafts", async (importOriginal) => {
 });
 
 import { appAtomRegistry } from "./atom-registry";
+import { acknowledgedThreadMessagesAtom } from "./acknowledged-thread-messages";
+import { pendingThreadCreationOutcomesAtom } from "./pending-thread-creation";
 import { clearThreadOutboxEnvironment, removeThreadOutboxMessage } from "./thread-outbox-removal";
 import type { QueuedThreadMessage } from "./thread-outbox-model";
 import { composerDraftsAtom } from "./use-composer-drafts";
@@ -80,6 +82,8 @@ function queuedMessage(input: {
 }
 
 afterEach(() => {
+  appAtomRegistry.set(acknowledgedThreadMessagesAtom, []);
+  appAtomRegistry.set(pendingThreadCreationOutcomesAtom, {});
   appAtomRegistry.set(harness.manager.queuedMessagesByThreadKeyAtom, {});
   appAtomRegistry.set(composerDraftsAtom, {});
   harness.cleanup.mockClear();
@@ -196,9 +200,22 @@ describe("thread outbox removal", () => {
     });
     await harness.manager.enqueue(cleared);
     await harness.manager.enqueue(kept);
+    appAtomRegistry.set(acknowledgedThreadMessagesAtom, [cleared, kept]);
+    appAtomRegistry.set(pendingThreadCreationOutcomesAtom, {
+      [`${cleared.environmentId}:${cleared.threadId}`]: {
+        kind: "failed",
+        message: cleared,
+        reason: "Rejected",
+      },
+      [`${kept.environmentId}:${kept.threadId}`]: { kind: "delivered", message: kept },
+    });
 
     await clearThreadOutboxEnvironment(cleared.environmentId);
 
+    expect(appAtomRegistry.get(acknowledgedThreadMessagesAtom)).toEqual([kept]);
+    expect(Object.values(appAtomRegistry.get(pendingThreadCreationOutcomesAtom))).toEqual([
+      { kind: "delivered", message: kept },
+    ]);
     expect(harness.cleanup).toHaveBeenCalledExactlyOnceWith(cleared.attachments);
     const remaining = Object.values(
       appAtomRegistry.get(harness.manager.queuedMessagesByThreadKeyAtom),

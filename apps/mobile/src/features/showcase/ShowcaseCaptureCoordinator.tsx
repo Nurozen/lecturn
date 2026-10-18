@@ -40,6 +40,8 @@ import {
 const SHOWCASE_ENABLED = process.env.EXPO_PUBLIC_SHOWCASE === "1";
 const SHOWCASE_THREAD_ID = "remote-command-center";
 
+type ShowcaseSceneRequest = Readonly<{ scene: ShowcaseScene }>;
+
 type ShowcaseResetRoute = PartialState<NavigationState>["routes"][number];
 
 function sceneFromPathname(pathname: string): ShowcaseScene | null {
@@ -71,12 +73,14 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
   const seededPendingTaskIdsRef = useRef(new Set<string>());
   const [pairingUrls, setPairingUrls] = useState<ReadonlyArray<string>>([]);
   const [pendingTasksReady, setPendingTasksReady] = useState(false);
-  const [requestedScene, setRequestedScene] = useState<ShowcaseScene | null>(null);
+  const [sceneRequest, setSceneRequest] = useState<ShowcaseSceneRequest | null>(null);
+  const requestedScene = sceneRequest?.scene ?? null;
   const [requestedTheme, setRequestedTheme] = useState<MobileThemeId | null>(null);
   const [themeRequestSettled, setThemeRequestSettled] = useState(false);
   const [readyScene, setReadyScene] = useState<ShowcaseScene | null>(null);
   const [orientationSettled, setOrientationSettled] = useState(false);
-  const requestedSceneRef = useRef<ShowcaseScene | null>(null);
+  const sceneRequestRef = useRef<ShowcaseSceneRequest | null>(null);
+  const consumedSceneRequestRef = useRef<ShowcaseSceneRequest | null>(null);
   const renderSignal = useSyncExternalStore(
     subscribeToShowcaseRenderSignal,
     getShowcaseRenderSignal,
@@ -125,12 +129,14 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
 
     const readRequestedScene = () => {
       const value = getNativeShowcaseScene();
-      if (!value || requestedSceneRef.current === value) return;
-      requestedSceneRef.current = value;
+      if (!value || sceneRequestRef.current?.scene === value) return;
+      const request: ShowcaseSceneRequest = { scene: value };
+      sceneRequestRef.current = request;
+      setSceneRequest(request);
+      setReadyScene(null);
       // A native draw belongs only to the scene request that produced it. In
       // particular, revisiting review must wait for its newly mounted surface.
       clearShowcaseRenderSignal();
-      setRequestedScene(value);
     };
     readRequestedScene();
     const interval = setInterval(readRequestedScene, 250);
@@ -219,7 +225,13 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
 
   useEffect(() => {
     if (!SHOWCASE_ENABLED || requestedScene === null || !hasFixture || !showcaseThread) return;
-    if (scene === requestedScene) return;
+    if (
+      sceneRequestRef.current !== sceneRequest ||
+      consumedSceneRequestRef.current === sceneRequest ||
+      scene === requestedScene
+    ) {
+      return;
+    }
 
     const params = {
       environmentId: String(showcaseThread.environmentId),
@@ -268,13 +280,14 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
         routes,
       }),
     );
-  }, [hasFixture, navigation, requestedScene, scene, showcaseThread]);
+  }, [hasFixture, navigation, requestedScene, scene, sceneRequest, showcaseThread]);
 
   useEffect(() => {
     if (
       !SHOWCASE_ENABLED ||
       scene === null ||
       requestedScene === null ||
+      sceneRequestRef.current !== sceneRequest ||
       scene !== requestedScene ||
       !hasFixture ||
       // Never report a scene ready while the capture orientation is still
@@ -294,7 +307,10 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
     const settleTimer = setTimeout(() => {
       renderFrame = requestAnimationFrame(() => {
         readyFrame = requestAnimationFrame(() => {
+          if (sceneRequestRef.current !== sceneRequest) return;
           markNativeShowcaseReady(scene);
+          // Readiness releases this request so subsequent user navigation can leave it.
+          consumedSceneRequestRef.current = sceneRequest;
           setReadyScene(scene);
         });
       });
@@ -304,7 +320,16 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
       if (renderFrame !== null) cancelAnimationFrame(renderFrame);
       if (readyFrame !== null) cancelAnimationFrame(readyFrame);
     };
-  }, [hasFixture, orientationSettled, renderSignal, requestedScene, scene, themeApplied, themeId]);
+  }, [
+    hasFixture,
+    orientationSettled,
+    renderSignal,
+    requestedScene,
+    scene,
+    sceneRequest,
+    themeApplied,
+    themeId,
+  ]);
 
   if (!SHOWCASE_ENABLED || readyScene === null) return null;
 
