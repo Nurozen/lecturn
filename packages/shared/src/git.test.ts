@@ -1,5 +1,11 @@
 import type { VcsStatusRemoteResult, VcsStatusResult } from "@lecturn/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import * as ChildProcess from "effect/unstable/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
 import {
   applyGitStatusStreamEvent,
@@ -7,6 +13,7 @@ import {
   isTemporaryWorktreeBranch,
   normalizeGitRemoteUrl,
   parseGitHubRepositoryNameWithOwnerFromRemoteUrl,
+  parseOriginUrlFromGitConfig,
   WORKTREE_BRANCH_PREFIX,
 } from "./git.ts";
 
@@ -51,6 +58,129 @@ describe("normalizeGitRemoteUrl", () => {
   });
 });
 
+describe("parseOriginUrlFromGitConfig", () => {
+  it("reads the origin url and ignores other remotes", () => {
+    const config = [
+      "[core]",
+      "\trepositoryformatversion = 0",
+      '[remote "upstream"]',
+      "\turl = https://github.com/other/repo.git",
+      '[remote "origin"]',
+      "\turl = git@github.com:Nurozen/lecturn.git",
+      "\tfetch = +refs/heads/*:refs/remotes/origin/*",
+      '[branch "main"]',
+      "\tremote = origin",
+    ].join("\n");
+    expect(parseOriginUrlFromGitConfig(config)).toBe("git@github.com:Nurozen/lecturn.git");
+  });
+
+  it("strips inline comments and quotes from the url value", () => {
+    expect(
+      parseOriginUrlFromGitConfig(
+        '[remote "origin"]\n\turl = https://github.com/acme/repo.git # mirror\n',
+      ),
+    ).toBe("https://github.com/acme/repo.git");
+    expect(
+      parseOriginUrlFromGitConfig('[remote "origin"]\n\turl = "git@github.com:acme/repo.git"\n'),
+    ).toBe("git@github.com:acme/repo.git");
+  });
+
+  it("accepts legacy dotted headers, header comments, and line continuations", () => {
+    expect(parseOriginUrlFromGitConfig("[remote.origin]\n\turl = git@github.com:a/b.git\n")).toBe(
+      "git@github.com:a/b.git",
+    );
+    // Git folds the dotted form to lowercase but keeps quoted names as written.
+    expect(parseOriginUrlFromGitConfig("[remote.Origin]\n\turl = git@github.com:a/b.git\n")).toBe(
+      "git@github.com:a/b.git",
+    );
+    expect(
+      parseOriginUrlFromGitConfig(
+        '[remote "Origin"]\n\turl = git@github.com:x/y.git\n[remote "origin"]\n\turl = git@github.com:a/b.git\n',
+      ),
+    ).toBe("git@github.com:a/b.git");
+    expect(
+      parseOriginUrlFromGitConfig('[remote "origin"] # primary\n\turl = git@github.com:a/b.git\n'),
+    ).toBe("git@github.com:a/b.git");
+    expect(
+      parseOriginUrlFromGitConfig(
+        '[remote "origin"]\n\turl = https://github.com/acme/\\\n\t\trepo.git\n',
+      ),
+    ).toBe("https://github.com/acme/\t\trepo.git");
+  });
+
+  it.effect.each([
+    {
+      name: "full-line hash comment",
+      config: '# comment " \\\n[remote "origin"]\nurl = https://github.com/Nurozen/lecturn.git\n',
+    },
+    {
+      name: "full-line semicolon comment with CRLF",
+      config:
+        '; comment \\\r\n[remote "origin"]\r\nurl = https://github.com/Nurozen/lecturn.git\r\n',
+    },
+    {
+      name: "inline value comment",
+      config:
+        '[remote "upstream"]\nurl = https://example.com/other # comment " \\\n[remote "origin"]\nurl = https://github.com/Nurozen/lecturn.git\n',
+    },
+    {
+      name: "header comment",
+      config:
+        '[remote "upstream"] ; comment \\\n[remote "origin"]\nurl = https://github.com/Nurozen/lecturn.git\n',
+    },
+    {
+      name: "quoted comment markers and continuation",
+      config: '[remote "origin"]\nurl = "https://example.com/#;\\\nrepo.git"\n',
+    },
+    {
+      name: "escaped quote before a comment",
+      config:
+        '[remote "upstream"]\nurl = "https://example.com/\\"repo" # comment \\\n[remote "origin"]\nurl = https://github.com/Nurozen/lecturn.git\n',
+    },
+    {
+      name: "escaped backslash before newline",
+      config:
+        '[remote "upstream"]\nurl = https://example.com/\\\\\n[remote "origin"]\nurl = https://github.com/Nurozen/lecturn.git\n',
+    },
+    {
+      name: "continuation indentation",
+      config: '[remote "origin"]\nurl = https://github.com/Nurozen/\\\n\t\tlecturn.git\n',
+    },
+    {
+      name: "quoted CRLF continuation",
+      config: '[remote "origin"]\r\nurl = "https://github.com/Nurozen/\\\r\nlecturn.git"\r\n',
+    },
+  ])("matches Git for $name", ({ config }) =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const fixture = yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-git-config-" });
+      const configPath = path.join(fixture, "config");
+      yield* fileSystem.writeFileString(configPath, config);
+      const gitUrl = yield* spawner.string(
+        ChildProcess.make("git", ["config", "--file", configPath, "--get", "remote.origin.url"]),
+      );
+      expect(parseOriginUrlFromGitConfig(config)).toBe(gitUrl.trim());
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
+  it("falls back to the first remote when there is no origin", () => {
+    const config = [
+      '[remote "upstream"]',
+      "\turl = https://github.com/acme/repo.git",
+      '[remote "fork"]',
+      "\turl = https://github.com/me/repo.git",
+    ].join("\n");
+    expect(parseOriginUrlFromGitConfig(config)).toBe("https://github.com/acme/repo.git");
+  });
+
+  it("returns null when there is no remote section", () => {
+    expect(parseOriginUrlFromGitConfig("[core]\n\tbare = false\n")).toBeNull();
+    expect(parseOriginUrlFromGitConfig("")).toBeNull();
+  });
+});
+
 describe("parseGitHubRepositoryNameWithOwnerFromRemoteUrl", () => {
   it("extracts the owner and repository from common GitHub remote shapes", () => {
     expect(
@@ -58,6 +188,9 @@ describe("parseGitHubRepositoryNameWithOwnerFromRemoteUrl", () => {
     ).toBe("Nurozen/Lecturn");
     expect(
       parseGitHubRepositoryNameWithOwnerFromRemoteUrl("https://github.com/Nurozen/Lecturn.git"),
+    ).toBe("Nurozen/Lecturn");
+    expect(
+      parseGitHubRepositoryNameWithOwnerFromRemoteUrl("ssh://github.com/Nurozen/Lecturn.git"),
     ).toBe("Nurozen/Lecturn");
   });
 });

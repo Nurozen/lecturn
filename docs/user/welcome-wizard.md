@@ -3,17 +3,27 @@
 Lecturn shows a setup flow when you open a new installation or connect to the
 hosted app for the first time. Existing workspaces skip this flow.
 
-## Choose a connection
+## Connect your computers
 
-- **This computer** runs agents on the computer that hosts Lecturn. It does not
-  require an account.
+Select one or more computers to set up. If you opened Lecturn directly from a
+server or the desktop app, that computer is already connected and selected.
+It is identified by its name, which may differ from the device running your
+browser.
+
+You can add more computers before continuing:
+
 - **Lecturn Connect** connects computers that are signed in to your account. Run
   `npx lecturn connect` on each computer you want to add, then start Lecturn or run
   `npx lecturn serve` so the computer stays available.
-- **Pair a server** connects directly to a server on your network or tailnet.
+- **Add a computer** connects directly to a server on your network or tailnet.
   Start the server with `npx lecturn serve`, then run `npx lecturn pair --tailscale` and
   paste the pairing link. You can also run `npx lecturn serve --host <address>` and
   use `npx lecturn pair` when the server is already reachable on your network.
+
+Saved computers and computers discovered through Lecturn Connect are selected by
+default. Uncheck any you do not want to set up; this does not disconnect them.
+Continue when your selected computers are connected. Setup checks
+agents across the selected computers, then offers project import grouped by computer.
 
 If Lecturn cannot confirm the workspace during startup, the setup flow shows
 **Still connecting** instead of opening the app. Select **Reload** to try again.
@@ -24,7 +34,7 @@ unreadable settings with defaults.
 
 ## Check your agents
 
-Lecturn checks the selected computer for Claude Code and Codex. If an agent is
+Lecturn checks each selected computer for Claude Code and Codex. If an agent is
 not installed or signed in, select its action to open a terminal with the
 correct command ready to run. Install uses the vendor's standalone installer,
 which does not need Node or npm and keeps **Update now** working in Settings.
@@ -36,9 +46,16 @@ terminal metadata while the terminal process can use them.
 
 ## Import your projects
 
-Lecturn finds directories that Claude Code or Codex has used. The default
-selection includes projects active within the last 30 days. Select **Choose**
-to include older projects or change the selection.
+Lecturn finds directories that Claude Code or Codex has used. Git repositories
+are listed first, newest activity on top. When the remote is on GitHub, the
+group shows the repository as `owner/name`. Clones with the same remote share
+one group. Directories that are not git repositories sit under "Other folders".
+
+The default selection includes git repositories active within the last 30 days
+with at least three conversations. Use the checkboxes, or "Select all" and
+"Select none", to change the selection. Linked git worktrees, Codex scratch
+directories under `Documents/Codex`, and anything under `Downloads` are not
+offered.
 
 A large or malformed history can reach the scan limit. Lecturn keeps the
 projects it found and warns when projects or conversations may be missing.
@@ -60,8 +77,9 @@ with up to 100,000 input records. Run import again to continue a large batch.
 Completed conversations are not imported again. You can continue without the
 remaining history.
 
-You can skip agent setup and project import. Select **Back** to return to a
-previous step.
+You can continue without configuring agents or importing projects, or return to
+an earlier step using the setup progress bar. Navigation pauses while an import
+is running.
 
 To bring in a single session later, or to continue a session with the agent's
 full context rather than a history snapshot, see
