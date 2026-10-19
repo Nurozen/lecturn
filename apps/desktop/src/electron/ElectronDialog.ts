@@ -117,6 +117,7 @@ export class ElectronDialog extends Context.Service<
   }
 >()("@lecturn/desktop/electron/ElectronDialog") {}
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = ElectronDialog.of({
   saveFile: Effect.fn("desktop.electron.dialog.saveFile")(function* (input) {
     const options: Electron.SaveDialogOptions = {

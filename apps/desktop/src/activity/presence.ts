@@ -26,7 +26,7 @@ export function isCurrentActivityAnnouncement(
 }
 
 /** Matches the web client's 45s interaction window for background activity reporting. */
-export const ACTIVITY_PRESENCE_IDLE_SECONDS = 45;
+const ACTIVITY_PRESENCE_IDLE_SECONDS = 45;
 
 /** The user is looking at Lecturn: alerts from the notch would only repeat what is on screen. */
 export function isUserPresent(input: {

@@ -15,8 +15,8 @@ const repoRoot = NodePath.resolve(desktopDir, "..", "..");
 const devBundleIdSuffix = NodePath.basename(repoRoot)
   .toLowerCase()
   .replaceAll(/[^a-z0-9]+/g, "");
-export const APP_DISPLAY_NAME = isDevelopment ? "Lecturn (Dev)" : "Lecturn";
-export const APP_BUNDLE_ID = isDevelopment
+const APP_DISPLAY_NAME = isDevelopment ? "Lecturn (Dev)" : "Lecturn";
+const APP_BUNDLE_ID = isDevelopment
   ? `com.cloudgatherer.lecturn.dev.${devBundleIdSuffix || "local"}`
   : "com.cloudgatherer.lecturn";
 const APP_PROTOCOL_SCHEMES = isDevelopment ? ["lecturn-dev"] : ["lecturn"];
@@ -387,7 +387,7 @@ function resolveLinuxSandboxArgs(electronBinaryPath) {
   return ["--no-sandbox"];
 }
 
-export function resolveElectronPath() {
+function resolveElectronPath() {
   const electronBinaryPath = resolveElectronBinaryPath();
 
   if (hostPlatform !== "darwin") {
