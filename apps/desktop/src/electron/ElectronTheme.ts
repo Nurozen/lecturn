@@ -28,6 +28,7 @@ export class ElectronTheme extends Context.Service<
   }
 >()("@lecturn/desktop/electron/ElectronTheme") {}
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = ElectronTheme.of({
   shouldUseDarkColors: Effect.sync(() => Electron.nativeTheme.shouldUseDarkColors),
   setSource: (theme) =>
