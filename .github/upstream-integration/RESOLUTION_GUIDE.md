@@ -129,8 +129,9 @@ usually resolve as the **union** of both sides:
 - `apps/mobile/src/features/{home,threads,layout}/**`
 
 **Managed services**: `infra/auth-email/**`, `infra/relay/src/{db,observability}.ts`,
-`infra/relay/scripts/alchemy-output.test.ts`, plus the alchemy patch pinned
-through `patches/alchemy@2.0.0-beta.65.patch` and `pnpm-workspace.yaml`.
+`infra/relay/scripts/alchemy-output.test.ts` (guards the alchemy output fixes
+that beta.76 ships upstream; the former beta.65 patch is gone), and the alchemy
+pin in `pnpm-workspace.yaml`.
 
 **Connect multiple accounts** sits behind the `connectMultiAccount` constant in
 `apps/web/src/cloud/publicConfig.ts`. Fork-only files:

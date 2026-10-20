@@ -95,7 +95,7 @@ Source in `apps/desktop/gnome-extension`, UUID `snap-shot@lecturn.cloudgatherer.
 installed extension at login, so setup distinguishes "installed, needs logout" from "discovered but
 disabled" and compares loaded and installed versions.
 
-The extension trusts callers that own `com.cloudgatherer.lecturn.SnapShot` (or the `.Development`
+The extension trusts callers that own `com.cloudgatherer.lecturn.SnapShot` (or the `.dev`
 variant) on the same connection. This is GNOME's trusted-session-client pattern, not authentication
 against a hostile process on the user's bus.
 
