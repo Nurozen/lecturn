@@ -70,6 +70,7 @@ function thread(id: string, environmentId: string, pinned = false): EnvironmentT
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     hasActionableProposedPlan: false,
+    pullRequests: [],
     createdAt: "2026-03-09T10:00:00Z",
     updatedAt: "2026-03-09T10:00:00Z",
     archivedAt: null,

@@ -1,4 +1,5 @@
 import { StaveMemoryWiring } from "../../stave/StaveMemoryWiring.ts";
+import { withAgentDeviceEnvironment } from "../../mcp/McpProviderSession.ts";
 import { AntigravitySettings, ProviderDriverKind, ProviderSetupError } from "@lecturn/contracts";
 import { HostProcessPlatform } from "@lecturn/shared/hostProcess";
 import * as Crypto from "effect/Crypto";
@@ -165,7 +166,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
             installation: executable,
             profile,
             cwd: input.cwd,
-            baseEnv: processEnvironment,
+            baseEnv: withAgentDeviceEnvironment(processEnvironment, input),
             auth,
           }),
         }).pipe(Effect.provideService(Crypto.Crypto, crypto));

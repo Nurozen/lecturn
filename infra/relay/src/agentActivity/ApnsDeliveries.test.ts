@@ -96,7 +96,7 @@ const apnsSigningKeyPair = NodeCrypto.generateKeyPairSync("ec", {
 const signingConfig = RelayConfiguration.RelayConfiguration.of({
   ...config,
   apns: {
-    ...config.apns,
+    ...config.apns!,
     privateKey: Redacted.make(apnsSigningKeyPair.privateKey),
   },
 });
@@ -331,6 +331,61 @@ function makeLayer(input: {
 }
 
 describe("ApnsDeliveries", () => {
+  it.effect("skips Apple delivery when an Android-only relay disables APNs", () => {
+    const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
+    const queuedJobs: Array<SignedApnsDeliveryJob> = [];
+    return Effect.gen(function* () {
+      const service = yield* ApnsDeliveries.ApnsDeliveries;
+      expect(
+        yield* service.sendForTarget({
+          target,
+          aggregate,
+          nowMs: 0,
+          publishingEnvironmentId: state.environmentId,
+        }),
+      ).toBeNull();
+      expect(
+        yield* service.sendPushNotificationForTarget({
+          target,
+          aggregate,
+          publishingEnvironmentId: state.environmentId,
+        }),
+      ).toBeNull();
+      expect(
+        yield* service.sendLiveActivity({
+          target,
+          token: "activity-token",
+          kind: "live_activity_update",
+          aggregate,
+        }),
+      ).toMatchObject({ ok: false, apnsReason: "APNs is disabled for this relay." });
+      expect(
+        yield* service.sendPushNotification({
+          target,
+          token: "push-token",
+          notification: {
+            title: "Finished",
+            body: "Thread",
+            environmentId: state.environmentId,
+            threadId: state.threadId,
+            deepLink: state.deepLink,
+          },
+        }),
+      ).toMatchObject({ ok: false, apnsReason: "APNs is disabled for this relay." });
+      expect(queuedJobs).toHaveLength(0);
+      expect(attempts).toHaveLength(0);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          attempts,
+          queuedJobs,
+          config: { ...config, apns: null },
+          execute: () => Effect.die("Disabled APNs must not make HTTP requests"),
+        }),
+      ),
+    );
+  });
+
   it.effect("never starts an activity remotely when no update token is registered", () => {
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
     const queuedJobs: Array<SignedApnsDeliveryJob> = [];
@@ -585,7 +640,14 @@ describe("ApnsDeliveries", () => {
         makeLayer({
           attempts,
           currentTargets: [
-            { ...target, account_label: "Work", account_color: "#123456", ios_major_version: 26 },
+            {
+              ...target,
+              account_label: "Work",
+              account_color: "#123456",
+              ios_major_version: 26,
+              bundle_id: "com.cloudgatherer.lecturn.preview",
+              aps_environment: "sandbox",
+            },
           ],
           config: signingConfig,
           execute,
@@ -3528,4 +3590,79 @@ describe("company notification authorization", () => {
       ),
     );
   });
+});
+
+describe("signed APNs registration metadata", () => {
+  for (const kind of ["live_activity_update", "push_notification"] as const) {
+    for (const changed of ["bundle", "environment", "legacy"] as const) {
+      it.effect(`routes ${kind} using current registration with ${changed} job metadata`, () => {
+        const attempts: DeliveryAttempts.DeliveryAttemptInput[] = [];
+        const requests: HttpClientRequest.HttpClientRequest[] = [];
+        const payload = makeApnsDeliveryJobPayload({
+          kind,
+          userId: target.user_id,
+          deviceId: target.device_id,
+          token: "unchanged-token",
+          ...(changed === "legacy"
+            ? {}
+            : { bundleId: "com.cloudgatherer.lecturn.dev", apsEnvironment: "sandbox" as const }),
+          aggregate: kind === "live_activity_update" ? aggregate : null,
+          ...(kind === "push_notification"
+            ? {
+                notification: {
+                  title: "Thread",
+                  body: "Input: Project",
+                  environmentId: "env",
+                  threadId: "thread",
+                  deepLink: "/",
+                },
+              }
+            : {}),
+          createdAt: "1970-01-01T00:00:00.000Z",
+          expiresAt: "1970-01-01T00:10:00.000Z",
+          jobId: `metadata-${kind}-${changed}`,
+        });
+        const signed = signApnsDeliveryJob({
+          secret: config.apnsDeliveryJobSigningSecret,
+          payload,
+        });
+        return Effect.gen(function* () {
+          const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+          const result = yield* deliveries.processSignedJob(signed);
+          expect(result.ok).toBe(true);
+          expect(requests).toHaveLength(1);
+          expect(requests[0]?.url).toBe(
+            `${changed === "environment" ? "https://api.push.apple.com" : "https://api.sandbox.push.apple.com"}/3/device/unchanged-token`,
+          );
+          expect(requests[0]?.headers["apns-topic"]).toBe(
+            `${changed === "bundle" ? "com.cloudgatherer.lecturn.preview" : "com.cloudgatherer.lecturn.dev"}${kind === "live_activity_update" ? ".push-type.liveactivity" : ""}`,
+          );
+        }).pipe(
+          Effect.provide(
+            makeLayer({
+              attempts,
+              config: signingConfig,
+              currentTargets: [
+                {
+                  ...target,
+                  push_token: "unchanged-token",
+                  activity_push_token: "unchanged-token",
+                  bundle_id:
+                    changed === "bundle"
+                      ? "com.cloudgatherer.lecturn.preview"
+                      : "com.cloudgatherer.lecturn.dev",
+                  aps_environment: changed === "environment" ? "production" : "sandbox",
+                },
+              ],
+              execute: (request) =>
+                Effect.sync(() => {
+                  requests.push(request);
+                  return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+                }),
+            }),
+          ),
+        );
+      });
+    }
+  }
 });

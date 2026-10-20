@@ -4,6 +4,7 @@ import {
   changeRequestRepositoryUrl,
   findProjectForChangeRequest,
   findChangeRequestTarget,
+  findProjectOnChangeRequestHost,
   gitHubPullRequestBrowserUrl,
   matchesLinkedPullRequestUrl,
   parseChangeRequestUrl,
@@ -296,6 +297,81 @@ describe("parseChangeRequestUrl", () => {
   });
 });
 
+describe("findProjectOnChangeRequestHost", () => {
+  const project = (id: string, identity: Record<string, unknown>) =>
+    ({ id, workspaceRoot: `/repos/${id}`, repositoryIdentity: identity }) as never;
+  const frontend = project("frontend", {
+    canonicalKey: "github.com/acme/frontend",
+    provider: "github",
+    owner: "acme",
+    name: "frontend",
+  });
+  const backend = project("backend", {
+    canonicalKey: "github.com/acme/backend",
+    provider: "github",
+    owner: "acme",
+    name: "backend",
+  });
+
+  it.each([
+    "ssh.dev.azure.com/v3/org-a/project/web",
+    "vs-ssh.visualstudio.com/v3/org-a/project/web",
+    "org-a.visualstudio.com/defaultcollection/project/_git/web",
+    "dev.azure.com/org-a/project/_git/web",
+  ])("matches Azure browser references against %s", (canonicalKey) => {
+    const checkout = project("azure", {
+      canonicalKey,
+      provider: "azure-devops",
+      displayName: canonicalKey.split("/").slice(1).join("/"),
+    });
+    const reference = { host: "dev.azure.com", repository: "org-a/project/_git/web", number: 42 };
+    expect(findProjectForChangeRequest([checkout], reference)).toBe(checkout);
+    expect(findProjectOnChangeRequestHost([checkout], reference)).toBe(checkout);
+    expect(
+      findProjectOnChangeRequestHost([checkout], {
+        ...reference,
+        repository: "org-b/project/_git/web",
+      }),
+    ).toBeUndefined();
+    expect(
+      findProjectOnChangeRequestHost([checkout], {
+        ...reference,
+        repository: "org-a/other-project/_git/web",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("prefers the project checked out from the link's own repository", () => {
+    expect(
+      findProjectOnChangeRequestHost([frontend, backend], {
+        host: "github.com",
+        repository: "acme/backend",
+        number: 7,
+      }),
+    ).toBe(backend);
+  });
+
+  it("lends any project on the host to a repository nobody has checked out", () => {
+    expect(
+      findProjectOnChangeRequestHost([frontend], {
+        host: "github.com",
+        repository: "acme/backend",
+        number: 7,
+      }),
+    ).toBe(frontend);
+  });
+
+  it("finds nothing on a host nothing is checked out from", () => {
+    expect(
+      findProjectOnChangeRequestHost([frontend], {
+        host: "gitlab.com",
+        repository: "acme/backend",
+        number: 7,
+      }),
+    ).toBeUndefined();
+  });
+});
+
 describe("findProjectForChangeRequest", () => {
   const project = (identity: Record<string, unknown>) =>
     ({ id: "p1", workspaceRoot: "/repo", repositoryIdentity: identity }) as never;
@@ -326,7 +402,7 @@ describe("findProjectForChangeRequest", () => {
       project({
         canonicalKey: "github.com/nurozen/lecturn",
         provider: "github",
-        owner: "pingdotgg",
+        owner: "nurozen",
         name: "lecturn",
       }),
     ];
@@ -344,7 +420,7 @@ describe("findProjectForChangeRequest", () => {
       project({
         canonicalKey: "github.com/nurozen/lecturn",
         provider: "github",
-        owner: "pingdotgg",
+        owner: "nurozen",
         name: "lecturn",
       }),
     ];

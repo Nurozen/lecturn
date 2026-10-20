@@ -2966,8 +2966,10 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
               entry.type === "message" ? `message:${entry.message.role}` : entry.type
             }
             getFixedItemSize={getFixedItemSize}
-            // Keep Android geometry synchronous; iOS keeps stable animated containers
-            // across disclosure toggles so the feed does not remount.
+            // Android can retain stale native row positions when layout transitions
+            // race the measurements arriving during sync, even with duration 0.
+            // Keep its rows on LegendList's non-animated positioning path. On iOS,
+            // keep a transition installed between disclosures so containers don't remount.
             itemLayoutAnimation={
               Platform.OS === "android"
                 ? undefined

@@ -1,6 +1,9 @@
 import { themeColorWithAlpha } from "../../lib/mobileTheme";
 import { GlassCard } from "../../components/GlassCard";
 import { useGlassPalette } from "../../lib/useGlassPalette";
+import { appAtomRegistry } from "../../state/atom-registry";
+import { threadArrangementOpenAtom } from "../../state/thread-order";
+import type { ThreadMoveDestination } from "./threadOrder";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -384,7 +387,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly onForkThread: (thread: EnvironmentThreadShell) => void;
   /** Server supports reordering this card's section. */
   readonly reorderSupported?: boolean;
-  readonly onMoveThread?: (thread: EnvironmentThreadShell, direction: "up" | "down") => void;
+  readonly onMoveThread?: (
+    thread: EnvironmentThreadShell,
+    direction: ThreadMoveDestination,
+  ) => void;
   /** Position flags for the card's section so the menu disables the move that
       would fall off the end of the list. */
   readonly canMoveUp?: boolean;
@@ -498,8 +504,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   // hides the card until wake with the pin intact.)
   const arrangementMenuItems = useMemo<MenuAction[]>(
     () => [
-      ...(variant === "card" && props.reorderSupported === true
+      ...(props.reorderSupported === true
         ? [
+            { id: "arrange", title: "Arrange threads…", image: "line.3.horizontal" },
             {
               id: "move-up",
               title: "Move up",
@@ -577,12 +584,14 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const slimMenuActions = useMemo<MenuAction[]>(
     () => [
       SLIM_MENU_ACTIONS[0]!,
-      ...(thread.pinnedAt != null ? arrangementMenuItems : []),
+      ...arrangementMenuItems.filter(
+        (action) => action.id !== "move-up" && action.id !== "move-down",
+      ),
       ...threadForkMenuItems,
       ...titleRegenerationMenuItems,
       SLIM_MENU_ACTIONS[1]!,
     ],
-    [arrangementMenuItems, thread.pinnedAt, threadForkMenuItems, titleRegenerationMenuItems],
+    [arrangementMenuItems, threadForkMenuItems, titleRegenerationMenuItems],
   );
   const snoozedMenuActions = useMemo<MenuAction[]>(
     () => [
@@ -611,6 +620,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       if (nativeEvent.event === "unsnooze") handleUnsnooze();
       if (nativeEvent.event === "pin") handlePin();
       if (nativeEvent.event === "unpin") handleUnpin();
+      if (nativeEvent.event === "arrange") appAtomRegistry.set(threadArrangementOpenAtom, true);
       if (nativeEvent.event === "move-up") handleMoveUp();
       if (nativeEvent.event === "move-down") handleMoveDown();
       if (nativeEvent.event === "archive") handleArchive();
@@ -807,13 +817,30 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           <View className="flex-1" />
         )}
         {pr ? (
-          <Text
-            accessibilityLabel={pr.accessibilityLabel}
-            className={cn("text-xs", pr.textClassName)}
-            style={{ fontFamily: MONO_FONT }}
-          >
-            #{pr.label}
-          </Text>
+          <View className="flex-row items-center gap-1" accessibilityLabel={pr.accessibilityLabel}>
+            {pr.kind === "stack" || pr.others > 0 ? (
+              <SymbolView
+                name={pr.kind === "stack" ? "square.3.layers.3d" : "arrow.triangle.pull"}
+                size={12}
+                tintColorClassName={
+                  pr.state === null || pr.isDraft
+                    ? "accent-foreground-muted"
+                    : pr.state === "open"
+                      ? "accent-adaptive-emerald-600-400"
+                      : pr.state === "closed"
+                        ? "accent-adaptive-rose-600-400"
+                        : "accent-adaptive-violet-600-400"
+                }
+              />
+            ) : null}
+            <Text
+              accessibilityLabel={pr.accessibilityLabel}
+              className={cn("text-xs", pr.textClassName)}
+              style={{ fontFamily: MONO_FONT }}
+            >
+              {pr.kind === "stack" || pr.others > 0 ? pr.label : `#${pr.label}`}
+            </Text>
+          </View>
         ) : null}
         {props.providerInstance ? (
           <ProviderInstanceIcon

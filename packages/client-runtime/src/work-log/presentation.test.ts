@@ -235,6 +235,19 @@ describe("resolveWorkEntryToolPresentation", () => {
     });
   });
 
+  it("labels device tools with the device icon", () => {
+    expect(
+      resolveWorkEntryToolPresentation({
+        label: "mcp__lecturn__device_open",
+        toolLifecycleStatus: "completed",
+      }),
+    ).toEqual({ displayName: "Opened a device in the Device panel", icon: "device" });
+    expect(resolveWorkEntryToolPresentation({ label: "lecturn · device_screenshot" })).toEqual({
+      displayName: "Taking a screenshot of the device",
+      icon: "device",
+    });
+  });
+
   it("uses structured MCP identity when the provider supplies a custom title", () => {
     expect(
       resolveWorkEntryToolPresentation({
@@ -583,5 +596,131 @@ describe("resolveViewedImageAsset", () => {
       srcFragment: "#mark",
     });
     expect(resolveViewedImageAsset("https://example.com/logo.png", { threadId })).toBeNull();
+  });
+});
+
+describe("pull request tool presentation", () => {
+  it.each([
+    "mcp__lecturn__link_pull_request",
+    "mcp__lecturn_code__link_pull_request",
+    "Lecturn-code · link_pull_request",
+    "lecturn/link_pull_request",
+    "link_pull_request",
+  ])("recognizes the native linking tool: %s", (label) => {
+    const entry = { label, tone: "tool" as const, toolLifecycleStatus: "completed" };
+    expect(resolveWorkEntryToolPresentation(entry)).toMatchObject({
+      displayName: "Linked a pull request",
+      icon: "pull-request",
+    });
+    expect(toolGroupAction(entry)).toBe("link-pr");
+  });
+
+  it.each([
+    ["inProgress", "Linking PR #42"],
+    ["completed", "Linked PR #42"],
+    ["failed", "Failed to link PR #42"],
+    ["declined", "Declined to link PR #42"],
+    ["stopped", "Stopped linking PR #42"],
+  ])("describes the target and %s status", (toolLifecycleStatus, displayName) => {
+    expect(
+      resolveWorkEntryToolPresentation({
+        label: "MCP tool call",
+        toolTitle: "Custom title",
+        toolLifecycleStatus,
+        toolData: {
+          server: "lecturn",
+          tool: "link_pull_request",
+          arguments: { url: "https://github.com/acme/web/pull/42" },
+        },
+      })?.displayName,
+    ).toBe(displayName);
+  });
+
+  it("recognizes unlink targets supplied as repository and number", () => {
+    expect(
+      resolveWorkEntryToolPresentation({
+        label: "MCP tool call",
+        toolLifecycleStatus: "completed",
+        toolData: {
+          toolName: "mcp__lecturn__unlink_pull_request",
+          rawInput: { repository: "acme/web", number: 42 },
+        },
+      }),
+    ).toMatchObject({ displayName: "Unlinked PR #42", icon: "pull-request", action: "unlink-pr" });
+  });
+
+  it("summarizes native PR work separately from ordinary tools and integration metadata", () => {
+    const link: WorkLogPresentationEntry = {
+      label: "Lecturn-code · link_pull_request",
+      tone: "tool",
+      itemType: "mcp_tool_call",
+      toolLifecycleStatus: "completed",
+      toolSource: { key: "lecturn", name: "Lecturn", kind: "integration" },
+    };
+    const list: WorkLogPresentationEntry = {
+      ...link,
+      label: "Lecturn-code · list_thread_pull_requests",
+    };
+    expect(summarizeToolGroup([link, link, list])).toBe(
+      "Linked 2 pull requests and checked linked pull requests",
+    );
+    expect(summarizeToolGroup([{ ...link, label: "Lecturn-code · unlink_pull_request" }])).toBe(
+      "Unlinked 1 pull request",
+    );
+    expect(toolGroupSummaryKind([link, link, list])).toBe("pull-request");
+    expect(summarizeToolGroup([list, list])).toBe("Checked linked pull requests 2 times");
+    expect(
+      resolveWorkEntryToolPresentation({ label: "mcp__another-server__link_pull_request" }),
+    ).toBeNull();
+  });
+});
+
+describe("device group summaries", () => {
+  const deviceEntry = (tool: string): WorkLogPresentationEntry => ({
+    label: "MCP tool call",
+    toolData: { server: "lecturn", tool },
+    itemType: "mcp_tool_call",
+    toolLifecycleStatus: "completed",
+    tone: "tool",
+  });
+
+  it.each(["device_list", "device_open", "device_screenshot", "device_close"])(
+    "recognizes %s as device controls",
+    (tool) => {
+      const entry = deviceEntry(tool);
+      expect(summarizeToolGroup([entry])).toBe("Used device controls 1 time");
+      expect(toolGroupSummaryKind([entry])).toBe("device");
+    },
+  );
+
+  it("summarizes device calls alongside shell commands", () => {
+    expect(
+      summarizeToolGroup([
+        { label: "Ran command", itemType: "command_execution", command: "pwd", tone: "tool" },
+        deviceEntry("device_list"),
+        deviceEntry("device_open"),
+      ]),
+    ).toBe("Ran 1 command and used device controls 2 times");
+  });
+
+  it("recognizes Claude tool names and preserves screenshot previews", () => {
+    const entry = {
+      ...deviceEntry("device_screenshot"),
+      toolData: { toolName: "mcp__lecturn_code__device_screenshot" },
+      viewedImagePath: "/workspace/device.png",
+    };
+    expect(summarizeToolGroup([entry])).toBe("Used device controls 1 time");
+    expect(workEntryViewedImagePath(entry)).toBe("/workspace/device.png");
+  });
+
+  it("does not classify another server's tools as Lecturn device controls", () => {
+    expect(
+      summarizeToolGroup([
+        {
+          ...deviceEntry("device_open"),
+          toolData: { server: "another-server", tool: "device_open" },
+        },
+      ]),
+    ).toBe("Used 1 tool");
   });
 });

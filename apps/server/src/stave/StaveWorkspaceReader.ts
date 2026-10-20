@@ -189,7 +189,7 @@ function mapMemoryEntry(
 }
 
 /** Attach the resolved identity only when present (`optionalKey` field). */
-export function withPrimaryRepositoryIdentity(
+function withPrimaryRepositoryIdentity(
   info: Omit<StaveProjectInfo, "primaryRepositoryIdentity">,
   primaryRepositoryIdentity: RepositoryIdentity | null,
 ): StaveProjectInfo {

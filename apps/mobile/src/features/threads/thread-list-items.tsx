@@ -108,7 +108,7 @@ export function ThreadHierarchyChevron({
 }
 
 function pullRequestTintColor(
-  pr: Pick<ThreadPrPresentation, "state" | "isDraft">,
+  pr: Pick<ThreadPrPresentation, "state" | "isDraft" | "others" | "kind">,
   colorScheme: "light" | "dark",
 ) {
   const dark = colorScheme === "dark";
@@ -121,6 +121,11 @@ function pullRequestTintColor(
     case "merged":
       return dark ? "#a78bfa" : "#7c3aed";
     case "closed":
+      if (pr.kind === "stack" || pr.others > 0) {
+        return dark ? "#fb7185" : "#e11d48";
+      }
+      return dark ? "#a1a1aa" : "#71717a";
+    case null:
       return dark ? "#a1a1aa" : "#71717a";
   }
 }
@@ -635,6 +640,11 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
       ? pullRequestWatchEnvironment.list({ environmentId: thread.environmentId, input: {} })
       : null,
   );
+  // Several linked pull requests (or one awaiting its first host sync) read as
+  // one summary badge; a single known pull request joins the tappable chips.
+  const prSummary =
+    pr !== null && (pr.kind === "stack" || pr.others > 0 || pr.state === null) ? pr : null;
+  const singlePr = prSummary === null ? pr : null;
   const requests = threadPullRequestLinks(
     selectThreadPullRequestWatches({
       projects,
@@ -642,8 +652,12 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
       thread,
       watches: watches.data?.watches ?? [],
     }),
-    pr
-      ? { ...pr, repository: (thread.linkedPullRequest ?? thread.branchPullRequest)?.repository }
+    singlePr !== null && singlePr.state !== null
+      ? {
+          ...singlePr,
+          state: singlePr.state,
+          repository: (thread.linkedPullRequest ?? thread.branchPullRequest)?.repository,
+        }
       : null,
   );
   const timestamp = relativeTime(
@@ -652,6 +666,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   const threadAccessibilityLabel = [
     thread.title,
     thread.settledOverride === "settled" ? "Settled" : status?.label,
+    prSummary?.accessibilityLabel,
     ...requests.map((request) => `${request.repository} #${request.number} ${request.state}`),
     props.hasQueuedMessages ? "messages queued to send" : null,
   ]
@@ -744,7 +759,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
     ) : null;
 
   const subtitleRow =
-    subtitleParts.length > 0 || requests.length > 0 ? (
+    subtitleParts.length > 0 || requests.length > 0 || prSummary !== null ? (
       <View className="mt-px flex-row items-center gap-1.5">
         {subtitleParts.length > 0 ? (
           <>
@@ -779,6 +794,40 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
           </>
         ) : null}
         <View className="flex-1 flex-row flex-wrap items-center gap-1.5">
+          {prSummary !== null ? (
+            <View
+              className="flex-row items-center gap-0.5"
+              accessibilityLabel={prSummary.accessibilityLabel}
+            >
+              {prSummary.kind === "stack" ? (
+                <SymbolView
+                  name="square.3.layers.3d"
+                  size={compact ? 13 : 11}
+                  tintColor={
+                    selected
+                      ? String(selectedForegroundColor)
+                      : pullRequestTintColor(prSummary, colorScheme)
+                  }
+                />
+              ) : (
+                <PullRequestIcon
+                  size={compact ? 13 : 11}
+                  color={
+                    selected
+                      ? String(selectedForegroundColor)
+                      : pullRequestTintColor(prSummary, colorScheme)
+                  }
+                />
+              )}
+              <Text
+                className={`${compact ? "text-sm" : "text-xs"} font-lecturn-medium ${
+                  selected ? "text-foreground" : prSummary.textClassName
+                }`}
+              >
+                {prSummary.label}
+              </Text>
+            </View>
+          ) : null}
           {requests.map((request) => (
             <Pressable
               key={request.key}
@@ -799,7 +848,12 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
                     : request.state === "unknown"
                       ? "#a1a1aa"
                       : pullRequestTintColor(
-                          { state: request.state, isDraft: request.isDraft },
+                          {
+                            state: request.state,
+                            isDraft: request.isDraft,
+                            others: 0,
+                            kind: "pull-request",
+                          },
                           colorScheme,
                         )
                 }

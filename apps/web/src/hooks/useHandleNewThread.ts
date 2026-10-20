@@ -12,12 +12,7 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@lecturn/client-runtime/environment";
-import {
-  DEFAULT_RUNTIME_MODE,
-  DEFAULT_SERVER_SETTINGS,
-  type ScopedProjectRef,
-  type ThreadId,
-} from "@lecturn/contracts";
+import { DEFAULT_SERVER_SETTINGS, type ScopedProjectRef, type ThreadId } from "@lecturn/contracts";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import {
@@ -35,6 +30,7 @@ import {
   getProjectOrderKey,
   selectProjectGroupingSettings,
 } from "../logicalProject";
+import { resolveProjectSettings } from "@lecturn/shared/projectSettings";
 import { resolveDefaultThreadEnvMode } from "@lecturn/shared/threadEnvMode";
 import { readProjects, readThreadShell, useProjects, useThread } from "../state/entities";
 import {
@@ -45,7 +41,7 @@ import {
   resolveNewThreadModelSelectionOverride,
 } from "../lib/chatThreadActions";
 import { readLecturnProjectFileDefaultThreadEnvMode } from "../lib/lecturnProjectFileDefaults";
-import { environmentServerConfigsAtom, primaryServerSettingsAtom } from "../state/server";
+import { environmentServerConfigsAtom } from "../state/server";
 import { resolveThreadRouteTarget, type ThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
@@ -90,7 +86,6 @@ export function readThreadCarrySources(routeTarget: ThreadRouteTarget | null) {
 export function useNewThreadHandler() {
   const composerHandleRef = useComposerHandleContext();
   const environmentServerConfigs = useAtomValue(environmentServerConfigsAtom);
-  const primaryServerSettings = useAtomValue(primaryServerSettingsAtom);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const router = useRouter();
   const getCurrentRouteTarget = useCallback(() => {
@@ -129,8 +124,8 @@ export function useNewThreadHandler() {
       const routeChangedSinceRequest = () => router.state.location.href !== requestingRouteHref;
       const currentRouteTarget = getCurrentRouteTarget();
       // A new thread carries the user's working mode from the thread being
-      // viewed. The target project's configured model still wins; runtime and
-      // interaction modes carry independently. Branch, worktree, and env mode
+      // viewed. The target project's configured model still wins; interaction
+      // mode carries independently. Permissions, branch, worktree, and env mode
       // come from configured defaults unless the caller passes them explicitly.
       const carrySources = readThreadCarrySources(currentRouteTarget);
       const composerActiveProvider = carrySources.composer?.activeProvider ?? null;
@@ -139,8 +134,7 @@ export function useNewThreadHandler() {
         : null;
       const carryModelSelection =
         composerModelSelection ?? carrySources.shell?.modelSelection ?? null;
-      const { runtimeMode: carryRuntimeMode, interactionMode: carryInteractionMode } =
-        resolveCarriedThreadModes(carrySources);
+      const { interactionMode: carryInteractionMode } = resolveCarriedThreadModes(carrySources);
       const project = projects.find(
         (candidate) =>
           candidate.id === projectRef.projectId &&
@@ -155,10 +149,22 @@ export function useNewThreadHandler() {
         });
         return Promise.resolve(null);
       }
+      // The resolver applies project overrides and, until the server has
+      // folded them, the aggregate's own legacy fields.
+      const projectSettings = resolveProjectSettings(
+        targetServerSettings,
+        project?.id ?? null,
+        project,
+      );
+      const projectDefaultModelSelection = projectSettings.settings.defaultModelSelection;
+      const defaultRuntimeMode = projectSettings.settings.defaultRuntimeMode;
+      const projectThreadEnvMode =
+        projectSettings.sources.defaultThreadEnvMode === "project"
+          ? projectSettings.settings.defaultThreadEnvMode
+          : undefined;
       const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
         resolveNewThreadModelSelectionOverride({
-          projectDefaultSelection:
-            project?.defaultModelSelection ?? targetServerSettings.defaultModelSelection ?? null,
+          projectDefaultSelection: projectDefaultModelSelection ?? null,
           carrySelection: carryModelSelection,
           carrySourceDraftId:
             currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
@@ -169,11 +175,14 @@ export function useNewThreadHandler() {
       // space forces local, then the per-project setting), and its query
       // atom caches per project after the first call.
       const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
-        const { forcedMode, projectSetting, consultProjectFile } =
-          resolveNewThreadEnvModeSources(project);
+        // A Stave space forces its mode; otherwise only a project-scoped
+        // override counts as the project setting.
+        const { forcedMode } = resolveNewThreadEnvModeSources(project);
+        const consultProjectFile =
+          project !== undefined && forcedMode === undefined && projectThreadEnvMode == null;
         return resolveDefaultThreadEnvMode({
           forcedMode,
-          projectSetting,
+          projectSetting: projectThreadEnvMode,
           projectFile:
             consultProjectFile && project !== undefined
               ? await readLecturnProjectFileDefaultThreadEnvMode(
@@ -181,7 +190,7 @@ export function useNewThreadHandler() {
                   project.workspaceRoot,
                 )
               : null,
-          globalDefault: targetServerSettings.defaultThreadEnvMode,
+          globalDefault: projectSettings.settings.defaultThreadEnvMode,
         });
       };
       const logicalProjectKey = project
@@ -292,14 +301,14 @@ export function useNewThreadHandler() {
               envMode: defaultEnvMode,
               startFromOrigin: resolveNewDraftStartFromOrigin({
                 envMode: defaultEnvMode,
-                newWorktreesStartFromOrigin: primaryServerSettings.newWorktreesStartFromOrigin,
+                newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
               }),
             };
           }
           if (workspaceContext) {
             setDraftThreadContext(emptyStoredDraftThread.draftId, {
               ...workspaceContext,
-              ...(carryRuntimeMode ? { runtimeMode: carryRuntimeMode } : {}),
+              ...(!isDraftAlreadyOpen ? { runtimeMode: defaultRuntimeMode } : {}),
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             });
           }
@@ -336,7 +345,7 @@ export function useNewThreadHandler() {
             {
               threadId: emptyStoredDraftThread.threadId,
               ...workspaceContext,
-              ...(carryRuntimeMode ? { runtimeMode: carryRuntimeMode } : {}),
+              ...(!isDraftAlreadyOpen ? { runtimeMode: defaultRuntimeMode } : {}),
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             },
           );
@@ -458,9 +467,9 @@ export function useNewThreadHandler() {
               options?.startFromOrigin ??
               resolveNewDraftStartFromOrigin({
                 envMode: initialEnvMode,
-                newWorktreesStartFromOrigin: primaryServerSettings.newWorktreesStartFromOrigin,
+                newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
               }),
-            runtimeMode: carryRuntimeMode ?? DEFAULT_RUNTIME_MODE,
+            runtimeMode: defaultRuntimeMode,
             ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
           }),
         );
@@ -483,7 +492,6 @@ export function useNewThreadHandler() {
       composerHandleRef,
       environmentServerConfigs,
       getCurrentRouteTarget,
-      primaryServerSettings.newWorktreesStartFromOrigin,
       projectGroupingSettings,
       router,
     ],

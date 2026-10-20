@@ -41,7 +41,10 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 import { buildCodexInitializeParams } from "./CodexProvider.ts";
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import { codexSpawnEnvironment } from "./codexMcpInventory.ts";
-import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
+import {
+  buildCodexDeveloperInstructions,
+  type LecturnToolAvailability,
+} from "../CodexDeveloperInstructions.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
 
 const PROVIDER = ProviderDriverKind.make("codex");
@@ -72,6 +75,16 @@ export function hasT3BrowserMcpServer(appServerArgs: ReadonlyArray<string> | und
 
 export function hasConfiguredMcpServer(appServerArgs: ReadonlyArray<string> | undefined): boolean {
   return appServerArgs?.some((argument) => argument.includes("mcp_servers.")) === true;
+}
+
+function configuredMcpToolAvailability(
+  appServerArgs: ReadonlyArray<string> | undefined,
+  mcpCapabilities: ReadonlySet<string> | undefined,
+): LecturnToolAvailability {
+  if (!hasT3BrowserMcpServer(appServerArgs)) return { browser: false, device: false };
+  // Callers predating the capability set attached the browser toolkit only.
+  if (mcpCapabilities === undefined) return { browser: true, device: false };
+  return { browser: mcpCapabilities.has("preview"), device: mcpCapabilities.has("device") };
 }
 
 export const CodexResumeCursorSchema = Schema.Struct({
@@ -182,6 +195,8 @@ export interface CodexSessionRuntimeOptions {
     readonly lastTurnId: string | null;
   };
   readonly appServerArgs?: ReadonlyArray<string>;
+  /** Capabilities the session's `lecturn` MCP credential grants; drives the prompt blocks. */
+  readonly mcpCapabilities?: ReadonlySet<string>;
 }
 
 export interface CodexSessionRuntimeSendTurnInput extends Pick<
@@ -588,7 +603,7 @@ function buildCodexCollaborationMode(input: {
   readonly interactionMode?: ProviderInteractionMode;
   readonly model?: string;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
-  readonly browserToolsAvailable?: boolean;
+  readonly browserToolsAvailable?: boolean | LecturnToolAvailability;
 }): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined {
   if (input.interactionMode === undefined) {
     return undefined;
@@ -622,7 +637,7 @@ export function buildTurnStartParams(input: {
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly interactionMode?: ProviderInteractionMode;
   /** Defaults to true so callers that predate the agent-access gate are unchanged. */
-  readonly browserToolsAvailable?: boolean;
+  readonly browserToolsAvailable?: boolean | LecturnToolAvailability;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -1367,7 +1382,7 @@ export const dispatchCodexContextualTurn = Effect.fn("dispatchCodexContextualTur
     readonly providerInstanceId: ProviderInstanceId;
     readonly runtimeMode: RuntimeMode;
     readonly normalizedModel: string | undefined;
-    readonly browserToolsAvailable: boolean;
+    readonly browserToolsAvailable: boolean | LecturnToolAvailability;
     readonly readActiveTurnId: Effect.Effect<TurnId | undefined>;
     readonly request: (
       params: EffectCodexSchema.V2TurnStartParams,
@@ -2595,7 +2610,13 @@ export const makeCodexSessionRuntime = (
             providerInstanceId: options.providerInstanceId ?? ProviderInstanceId.make("codex"),
             runtimeMode: options.runtimeMode,
             normalizedModel,
-            browserToolsAvailable: hasT3BrowserMcpServer(options.appServerArgs),
+            // Derived from the session's own credential rather than the
+            // setting, so the prompt describes the tools this turn actually
+            // has even if the setting changed after the session started.
+            browserToolsAvailable: configuredMcpToolAvailability(
+              options.appServerArgs,
+              options.mcpCapabilities,
+            ),
             readActiveTurnId: Ref.get(sessionRef).pipe(
               Effect.map((session) => session.activeTurnId),
             ),

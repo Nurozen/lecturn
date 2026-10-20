@@ -24,7 +24,10 @@ import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
 import { supportsAgentAwarenessPush } from "../agent-awareness/capabilities";
 import { setLiveActivityUpdatesEnabled } from "../agent-awareness/liveActivityPreferences";
-import { enableAgentNotifications } from "../agent-awareness/notificationPermissions";
+import {
+  enableAgentNotifications,
+  requestAgentNotificationPermission,
+} from "../agent-awareness/notificationPermissions";
 import {
   getAgentAwarenessRegistrationStatus,
   getAgentNotificationRegistrationEnabled,
@@ -44,14 +47,8 @@ import {
   DEFAULT_SERVER_SETTINGS,
   MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
   MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
-  type ServerSettingsPatch,
 } from "@lecturn/contracts";
-import {
-  filterSharedServerPatch,
-  findSharedSettingsMismatches,
-  pickSharedServerSettings,
-  supportsSharedSettingsSync,
-} from "@lecturn/client-runtime/state/shared-settings";
+import { supportsSharedSettingsSync } from "@lecturn/client-runtime/state/shared-settings";
 import { useThreadListV2Enabled } from "../threads/use-thread-list-v2-enabled";
 import {
   type AppUpdateCheckState,
@@ -69,6 +66,7 @@ import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 import { resolveAgentAwarenessPlatformPresentation } from "./SettingsRouteScreen.logic";
+import { planAutoSettleSettingsSync, type AutoSettleSettings } from "./autoSettleSettingsSync";
 
 type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
 type LiveActivityStatus = "checking" | "enabled" | "disabled" | "signed-out" | "linking";
@@ -169,6 +167,10 @@ function ConfiguredSettingsRouteScreen() {
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const agentAwarenessPushAvailable = supportsAgentAwarenessPush();
   const agentAwarenessPlatform = resolveAgentAwarenessPlatformPresentation(Platform.OS);
+  const agentAwarenessSubtitle =
+    Platform.OS === "android" && !agentAwarenessPushAvailable
+      ? "Install a newer app build to enable notifications"
+      : agentAwarenessPlatform.subtitle;
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { sessionId, isLoaded } = useAuth({ treatPendingAsSignedOut: false });
@@ -203,7 +205,7 @@ function ConfiguredSettingsRouteScreen() {
   const connections = useMemo(() => Object.values(savedConnectionsById), [savedConnectionsById]);
   const environmentCount = connections.length;
   const refreshNotifications = useCallback(async () => {
-    if (process.env.EXPO_OS !== "ios") {
+    if (Platform.OS !== "ios" && Platform.OS !== "android") {
       setNotificationStatus("unsupported");
       return;
     }
@@ -298,7 +300,7 @@ function ConfiguredSettingsRouteScreen() {
       } else {
         Alert.alert(
           "Couldn't finish enabling notifications",
-          "iOS permission is allowed, but push notification setup hasn't completed. Check your internet connection and reopen Settings to retry. Push delivery will start once Lecturn Connect accepts this device's push token.",
+          "Notification permission is allowed, but push notification setup hasn't completed. Check your internet connection and reopen Settings to retry. Push delivery will start once Lecturn Connect accepts this device's push token.",
         );
       }
       return;
@@ -307,7 +309,7 @@ function ConfiguredSettingsRouteScreen() {
       setNotificationStatus("unsupported");
       Alert.alert(
         "Notifications unavailable",
-        "Live Activity notifications are only available on iOS.",
+        "Agent notifications are unavailable on this platform.",
       );
       return;
     }
@@ -333,13 +335,40 @@ function ConfiguredSettingsRouteScreen() {
     }
 
     setLiveActivityStatus("linking");
+    if (Platform.OS === "android") {
+      const permission = await settleAsyncResult(() =>
+        runtime.runPromiseExit(requestAgentNotificationPermission),
+      );
+      if (permission._tag === "Failure") {
+        setLiveActivityStatus("disabled");
+        const error = squashAtomCommandFailure(permission);
+        Alert.alert(
+          "Ongoing activity unavailable",
+          error instanceof Error ? error.message : "Could not enable agent notifications.",
+        );
+        return;
+      }
+      if (permission.value.type !== "granted") {
+        setLiveActivityStatus("disabled");
+        Alert.alert(
+          "Notification permission needed",
+          "Enable notifications in system Settings to show ongoing agent activity.",
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "Open Settings", onPress: () => void Linking.openSettings() },
+          ],
+        );
+        return;
+      }
+      setNotificationStatus("enabled");
+    }
     const tokenResult = await settlePromise(() => getRelayToken());
     if (tokenResult._tag === "Failure") {
       setLiveActivityStatus("disabled");
       const error = squashAtomCommandFailure(tokenResult);
       Alert.alert(
-        "Live Activities unavailable",
-        error instanceof Error ? error.message : "Could not enable Live Activity updates.",
+        Platform.OS === "android" ? "Ongoing activity unavailable" : "Live Activities unavailable",
+        error instanceof Error ? error.message : "Could not enable agent activity updates.",
       );
       return;
     }
@@ -365,8 +394,10 @@ function ConfiguredSettingsRouteScreen() {
       if (!isAtomCommandInterrupted(updateResult)) {
         const error = squashAtomCommandFailure(updateResult);
         Alert.alert(
-          "Live Activities unavailable",
-          error instanceof Error ? error.message : "Could not enable Live Activity updates.",
+          Platform.OS === "android"
+            ? "Ongoing activity unavailable"
+            : "Live Activities unavailable",
+          error instanceof Error ? error.message : "Could not enable agent activity updates.",
         );
       }
       return;
@@ -380,15 +411,15 @@ function ConfiguredSettingsRouteScreen() {
     // Activities are live until the device is actually registered.
     if (getAgentAwarenessRegistrationStatus() === "registered") {
       Alert.alert(
-        "Live Activities enabled",
+        Platform.OS === "android" ? "Ongoing activity enabled" : "Live Activities enabled",
         environmentCount > 0
-          ? `${environmentCount} environment${environmentCount === 1 ? "" : "s"} linked for Live Activity updates.`
-          : "Live Activity updates are enabled. Add an environment to start receiving updates.",
+          ? `${environmentCount} environment${environmentCount === 1 ? "" : "s"} linked for agent activity updates.`
+          : "Agent activity updates are enabled. Add an environment to start receiving updates.",
       );
     } else {
       Alert.alert(
-        "Couldn't finish enabling Live Activities",
-        "This device could not be registered with Lecturn Connect, so Live Activities won't appear yet. They'll start once registration succeeds.",
+        "Couldn't finish enabling activity updates",
+        "This device could not be registered with Lecturn Connect, so activity updates won't appear yet. They'll start once registration succeeds.",
       );
     }
   }, [
@@ -405,20 +436,24 @@ function ConfiguredSettingsRouteScreen() {
   const handleDeviceNotificationsChange = useCallback(
     (enabled: boolean) => {
       if (enabled) {
+        if (!isSignedIn) {
+          promptSignIn();
+          return;
+        }
         void requestNotifications();
         return;
       }
 
       Alert.alert(
         "Disable notifications",
-        "Notification permission is controlled by iOS. Open Settings to disable notifications for Lecturn.",
+        "Open system Settings to disable notifications for Lecturn.",
         [
           { text: "Cancel", style: "cancel" },
           { text: "Open Settings", onPress: () => void Linking.openSettings() },
         ],
       );
     },
-    [requestNotifications],
+    [isSignedIn, promptSignIn, requestNotifications],
   );
 
   const handleLiveActivitiesChange = useCallback(
@@ -523,14 +558,14 @@ function ConfiguredSettingsRouteScreen() {
               notificationStatus === "unsupported"
             }
             subtitle={
-              agentAwarenessPlatform.subtitle ??
+              agentAwarenessSubtitle ??
               (requestingNotifications
                 ? "Enabling notifications…"
                 : notificationStatus === "enabled" && !notificationsRegistered
                   ? "Notification permission allowed. Push delivery setup is still pending."
                   : undefined)
             }
-            // This is the iOS permission switch. Relay delivery readiness is
+            // This is the system permission switch. Relay delivery readiness is
             // shown separately so allowing permission responds immediately.
             value={agentAwarenessPushAvailable && notificationStatus === "enabled"}
             onValueChange={handleDeviceNotificationsChange}
@@ -544,8 +579,8 @@ function ConfiguredSettingsRouteScreen() {
               liveActivityStatus === "linking"
             }
             icon="bolt.circle"
-            label="Live Activity Updates"
-            subtitle={agentAwarenessPlatform.subtitle}
+            label={Platform.OS === "android" ? "Ongoing Agent Activity" : "Live Activity Updates"}
+            subtitle={agentAwarenessSubtitle}
             // Same gate: a saved preference is meaningless until the device
             // registration the relay needs to push updates has succeeded.
             value={
@@ -587,10 +622,9 @@ function GeneralSettingsSection() {
 const AUTO_SETTLE_DEFAULT_DAYS = DEFAULT_SERVER_SETTINGS.sidebarAutoSettleAfterDays ?? 3;
 
 /**
- * Auto-settlement is a user preference that every server has to hold. Mobile
- * has no primary environment, so the first eligible sync target provides the
- * reference value. Edits fan out to every eligible target, and a mismatch row
- * lets the user push the reference out.
+ * Mobile edits auto-settle defaults across connected, capable environments.
+ * The first target supplies the displayed values. Applying them leaves each
+ * environment's other defaults and overrides intact.
  */
 function AutoSettleSettingsRows() {
   const { environments } = useEnvironments();
@@ -609,24 +643,20 @@ function AutoSettleSettingsRows() {
     return null;
   }
 
-  const writeToAll = (patch: ServerSettingsPatch) => {
+  const writeToAll = (patch: Partial<AutoSettleSettings>) => {
     for (const environment of syncTargets) {
       void updateSettings({ environmentId: environment.environmentId, input: { patch } });
     }
   };
 
-  const mismatches = findSharedSettingsMismatches({
-    primaryEnvironmentId: reference.environmentId,
-    primarySettings: referenceSettings,
-    primaryCapabilities: reference.serverConfig?.environment.capabilities,
-    environments: environments.map((environment) => ({
+  const { patch: autoSettlePatch, mismatches } = planAutoSettleSettingsSync(
+    { environmentId: reference.environmentId, settings: referenceSettings },
+    syncTargets.map((environment) => ({
       environmentId: environment.environmentId,
       label: environment.label,
-      syncEligible: supportsSharedSettingsSync(environment),
       settings: environment.serverConfig?.settings ?? null,
-      capabilities: environment.serverConfig?.environment.capabilities,
     })),
-  });
+  );
 
   const afterDays = referenceSettings.sidebarAutoSettleAfterDays;
   const commitDays = () => {
@@ -680,7 +710,7 @@ function AutoSettleSettingsRows() {
       {mismatches.length > 0 ? (
         <View className="flex-row items-center gap-4 border-t border-border-subtle p-4">
           <View className="min-w-0 flex-1">
-            <Text className="text-lg text-foreground">Settings differ</Text>
+            <Text className="text-lg text-foreground">Auto-settle defaults differ</Text>
             <Text className="text-sm text-foreground-muted">
               {mismatches.map((mismatch) => mismatch.label).join(", ")}
             </Text>
@@ -688,28 +718,18 @@ function AutoSettleSettingsRows() {
           <Pressable
             accessibilityRole="button"
             onPress={() => {
-              const patch = pickSharedServerSettings(
-                referenceSettings,
-                reference.serverConfig?.environment.capabilities,
-              );
               for (const mismatch of mismatches) {
-                const target = environments.find(
-                  (candidate) => candidate.environmentId === mismatch.environmentId,
-                );
                 void updateSettings({
                   environmentId: mismatch.environmentId,
-                  input: {
-                    patch: filterSharedServerPatch(
-                      patch,
-                      target?.serverConfig?.environment.capabilities,
-                    ),
-                  },
+                  input: { patch: autoSettlePatch },
                 });
               }
             }}
             className="rounded-full bg-subtle px-4 py-2 active:opacity-70"
           >
-            <Text className="text-base font-lecturn-medium text-foreground">Apply to all</Text>
+            <Text className="text-base font-lecturn-medium text-foreground">
+              Apply auto-settle defaults
+            </Text>
           </Pressable>
         </View>
       ) : null}
@@ -841,6 +861,11 @@ function AppSettingsSection() {
   return (
     <SettingsSection title="App">
       <SettingsRow icon="internaldrive" label="Client Storage" target="SettingsClientStorage" />
+      <SettingsRow
+        icon="doc.on.doc"
+        label="Open source licenses"
+        target="SettingsOpenSourceLicenses"
+      />
       <SettingsRow icon="doc.text" label="Legal" fullScreenTarget="SettingsLegal" />
       <Pressable
         accessibilityRole="button"

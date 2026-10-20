@@ -107,6 +107,10 @@
       "types": "./src/projectScripts.ts",
       "import": "./src/projectScripts.ts"
     },
+    "./projectSettings": {
+      "types": "./src/projectSettings.ts",
+      "import": "./src/projectSettings.ts"
+    },
     "./threadEnvMode": {
       "types": "./src/threadEnvMode.ts",
       "import": "./src/threadEnvMode.ts"
@@ -182,6 +186,14 @@
     "./threadReference": {
       "types": "./src/threadReference.ts",
       "import": "./src/threadReference.ts"
+    },
+    "./threadPullRequests": {
+      "types": "./src/threadPullRequests.ts",
+      "import": "./src/threadPullRequests.ts"
+    },
+    "./changeRequestUrl": {
+      "types": "./src/changeRequestUrl.ts",
+      "import": "./src/changeRequestUrl.ts"
     },
     "./composerTrigger": {
       "types": "./src/composerTrigger.ts",
@@ -270,6 +282,10 @@
     "./desktopAppControl": {
       "types": "./src/desktopAppControl.ts",
       "import": "./src/desktopAppControl.ts"
+    },
+    "./thirdPartyLicenses": {
+      "types": "./src/thirdPartyLicenses.ts",
+      "import": "./src/thirdPartyLicenses.ts"
     },
     "./claudeCompaction": {
       "types": "./src/claudeCompaction.ts",

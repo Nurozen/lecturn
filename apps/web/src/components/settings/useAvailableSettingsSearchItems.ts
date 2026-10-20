@@ -6,18 +6,21 @@ import { knownConnectAccountsAtom } from "~/cloud/knownAccounts";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { isElectron } from "~/env";
 import { desktopWslStateAtom } from "~/state/desktopWslState";
-import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
+import { useEnvironments } from "~/state/environments";
 import { useEnvironmentQuery } from "~/state/query";
 import { usePrimarySessionState } from "~/environments/primary";
 import { primaryServerConfigAtom } from "~/state/server";
 import { isWslSettingsRowVisible } from "./ConnectionsSettings.logic";
 import { isProviderSettingsEnvironmentAvailable } from "./ProviderSettingsPanel.logic";
-import { filterAvailableSettingsSearchItems } from "./settingsSearch";
+import {
+  filterAvailableSettingsSearchItems,
+  getThreadAutoSettlementSearchAvailability,
+} from "./settingsSearch";
 
 export function useAvailableSettingsSearchItems() {
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { environments } = useEnvironments();
   const primarySessionState = usePrimarySessionState();
+  // Stave settings live on the primary server, so its rows follow that config.
   const primaryServerConfig = useAtomValue(primaryServerConfigAtom);
   const hasConnectAccountMenu = useAtomValue(knownConnectAccountsAtom).accountIds.length > 0;
   const desktopWsl = useEnvironmentQuery(isElectron ? desktopWslStateAtom : null);
@@ -31,7 +34,7 @@ export function useAvailableSettingsSearchItems() {
     () =>
       filterAvailableSettingsSearchItems({
         hasCloudPublicConfig: hasCloudPublicConfig(),
-        hasPrimaryEnvironment: primaryEnvironmentId !== null,
+        hasEnvironment: environments.some((environment) => environment.serverConfig !== null),
         hasProviderSettingsEnvironment: environments.some((environment) =>
           isProviderSettingsEnvironmentAvailable({
             connectionPhase: environment.connection.phase,
@@ -44,7 +47,7 @@ export function useAvailableSettingsSearchItems() {
           error: desktopWsl.error,
         }),
         hasThreadAutoSettlement:
-          primaryServerConfig?.environment.capabilities.threadAutoSettlement === true,
+          getThreadAutoSettlementSearchAvailability(environments).eligibleEnvironmentIds.length > 0,
         hasStave: primaryServerConfig?.environment.capabilities.stave !== undefined,
         hasConnectAccountMenu,
         hasStaveLifecycle: primaryServerConfig?.settings.stave.enabled === true,
@@ -62,7 +65,6 @@ export function useAvailableSettingsSearchItems() {
       desktopWsl.error,
       environments,
       hasConnectAccountMenu,
-      primaryEnvironmentId,
       primaryServerConfig,
     ],
   );

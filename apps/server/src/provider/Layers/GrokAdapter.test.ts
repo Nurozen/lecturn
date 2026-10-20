@@ -298,7 +298,8 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
             providerSessionId: "stave-test-session",
             providerInstanceId: ProviderInstanceId.make("grok"),
             endpoint: "http://127.0.0.1:3999/mcp",
-            authorizationHeader: "Bearer t3-test-token",
+            authorizationHeader: "Bearer lecturn-test-token",
+            capabilities: new Set(["pull-requests"]),
           });
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
@@ -348,7 +349,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
                   type: "http",
                   name: "lecturn",
                   url: "http://127.0.0.1:3999/mcp",
-                  headers: [{ name: "Authorization", value: "Bearer t3-test-token" }],
+                  headers: [{ name: "Authorization", value: "Bearer lecturn-test-token" }],
                 },
               ]
             : []),
@@ -379,6 +380,26 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       }),
     );
   }
+
+  it.effect("rejects rollback without discarding the provider conversation", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-unsupported-rollback");
+      const wrapperPath = yield* Effect.promise(() => makeMockGrokWrapper());
+      const adapter = yield* makeTestAdapter(wrapperPath);
+      yield* adapter.startSession({
+        threadId,
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId, input: "Remember this turn" });
+      const originalTurns = [...(yield* adapter.readThread(threadId)).turns];
+      assert.isFalse(adapter.capabilities.supportsConversationRollback);
+      const error = yield* adapter.rollbackThread(threadId, 1).pipe(Effect.flip);
+      assert.equal(error._tag, "ProviderAdapterRequestError");
+      assert.deepStrictEqual((yield* adapter.readThread(threadId)).turns, originalTurns);
+      yield* adapter.stopSession(threadId);
+    }),
+  );
 
   it.effect("sends runtime context with the current model without changing saved prompts", () =>
     Effect.gen(function* () {

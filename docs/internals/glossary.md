@@ -110,6 +110,14 @@ An opt-in, project-scoped note derived from conversation evidence. Review state 
 
 **Extensions** is the optional private implementation boundary for desktop capture and fixed-policy evaluation; public contracts, consent, accounting and clients stay in Lecturn. **Contextual** selects relevant source evidence for a thread at submission. A **preparation** is its durable pending assessment, a **packet** is the bounded selected evidence, and a **delivery receipt** records the provider's proven or unknown acceptance. The **supply ledger** prevents repeatedly attaching unchanged guidance. A **context epoch** changes only with proven continuity loss such as native compaction or an explicit refresh. See [Extensions architecture](extensions.md).
 
+## Pull requests
+
+| Term                 | Meaning                                                                                                                                                                                  |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pull request link    | A persisted thread association identified by host, repository, and number. Links can cross projects within an environment and carry a server-maintained snapshot.                        |
+| Pull request sync    | The reactor that refreshes each distinct linked review once per cadence and discovers native stack layers. Explicit refreshes and failed stack reads trigger another read.               |
+| Current pull request | The link used by single-review controls and older clients. Open work takes precedence; a completed single chain points at its top layer. Unrelated terminal links use the latest update. |
+
 ## Teams terminology
 
 - **Company / organization**: a Clerk organization with a relay Teams account for centralized Connect purchasing and policy. It is not a shared environment.

@@ -1,7 +1,7 @@
 import type { StaveFeatureCommand, StaveFeatures, StaveOperation } from "@lecturn/contracts";
 
 /** Flags used by Lecturn, including inherited global flags shown in nested help. */
-export const STAVE_COMMAND_FLAGS = {
+const STAVE_COMMAND_FLAGS = {
   "config show": [],
   "repos list": [],
   "space list": ["archived"],
@@ -78,7 +78,7 @@ const OPERATION_COMMANDS = {
   lifecycleAction: [],
 } satisfies Record<StaveOperation["kind"], ReadonlyArray<StaveFeatureVerb>>;
 
-export const requiredFlags = (verb: StaveFeatureVerb): ReadonlyArray<string> => [
+const requiredFlags = (verb: StaveFeatureVerb): ReadonlyArray<string> => [
   "config",
   "json",
   ...STAVE_COMMAND_FLAGS[verb],

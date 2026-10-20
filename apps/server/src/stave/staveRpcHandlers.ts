@@ -87,7 +87,7 @@ import { StaveWorkspaceReader } from "./StaveWorkspaceReader.ts";
 import { STAVE_MANIFEST_FILE_NAME } from "./staveManifest.ts";
 
 /** How long one `space status` answer is reused for a root before Stave is asked again. */
-export const STAVE_SPACE_STATUS_CACHE_TTL = Duration.seconds(15);
+const STAVE_SPACE_STATUS_CACHE_TTL = Duration.seconds(15);
 const STAVE_SPACE_STATUS_CACHE_CAPACITY = 256;
 
 /** Provider row consulted when the config names no memory provider. */
@@ -98,7 +98,7 @@ const NO_MARMOT: StaveMarmotStatus = { available: false, version: null };
 // ── Pure mappings ──────────────────────────────────────────────
 
 /** `runnableError.code` for the two ways the settings-independent walk can fail. */
-export function runnableErrorCode(error: StaveBinaryError): string {
+function runnableErrorCode(error: StaveBinaryError): string {
   switch (error._tag) {
     case "StaveBinaryNotFound":
       return "binary_missing";
@@ -109,7 +109,7 @@ export function runnableErrorCode(error: StaveBinaryError): string {
   }
 }
 
-export function toStaveCommandError(error: StaveError): StaveCommandError {
+function toStaveCommandError(error: StaveError): StaveCommandError {
   return new StaveCommandError({ verb: error.verb, code: error.code, message: error.message });
 }
 
@@ -117,7 +117,7 @@ export function toStaveCommandError(error: StaveError): StaveCommandError {
  * Marmot availability from `memory providers`: the row for the configured
  * provider (default `marmot`), else the provider Stave marks as default.
  */
-export function marmotStatusFromProviders(
+function marmotStatusFromProviders(
   rows: StaveMemoryProviders,
   configuredProvider: string | undefined,
 ): StaveMarmotStatus {
@@ -129,7 +129,7 @@ export function marmotStatusFromProviders(
   return { available: row.available, version: row.version ?? null };
 }
 
-export function rootsFromSnapshot(snapshot: StaveConfigSnapshot): StaveStatus["roots"] {
+function rootsFromSnapshot(snapshot: StaveConfigSnapshot): StaveStatus["roots"] {
   if (
     snapshot.root === undefined ||
     snapshot.bareReposDir === undefined ||
@@ -148,7 +148,7 @@ const optionalString = <K extends string>(key: K, value: string | undefined) =>
   value === undefined ? {} : ({ [key]: value } as { readonly [P in K]: string });
 
 /** camelCase wire shape of `space status --json`, minus the manifest clients already hold. */
-export function toSpaceStatusDto(json: StaveSpaceStatusJson): StaveSpaceStatus {
+function toSpaceStatusDto(json: StaveSpaceStatusJson): StaveSpaceStatus {
   return {
     spaceId: json.spaceId,
     spacePath: json.spacePath,
@@ -180,7 +180,7 @@ export function toSpaceStatusDto(json: StaveSpaceStatusJson): StaveSpaceStatus {
 }
 
 /** `repos list --json` rows already carry the wire shape; the copy pins the DTO type. */
-export function toRepoRows(rows: StaveReposList): ReadonlyArray<StaveRepoRow> {
+function toRepoRows(rows: StaveReposList): ReadonlyArray<StaveRepoRow> {
   return rows.map((row) => ({
     name: row.name,
     url: row.url,
@@ -216,7 +216,7 @@ export function sagaRosterFromManifest(text: string): StaveSpaceListRow["sagaMem
 }
 
 /** `space list [--archived] --json` rows; v0.4 identity fields pass through. */
-export function toSpaceRows(rows: StaveSpaceList): ReadonlyArray<StaveSpaceListRow> {
+function toSpaceRows(rows: StaveSpaceList): ReadonlyArray<StaveSpaceListRow> {
   return rows.map((row) => ({
     id: row.id,
     path: row.path,
@@ -240,7 +240,7 @@ export function toSpaceRows(rows: StaveSpaceList): ReadonlyArray<StaveSpaceListR
   }));
 }
 
-export function toSagaRows(rows: StaveSagaList): ReadonlyArray<StaveSagaListRow> {
+function toSagaRows(rows: StaveSagaList): ReadonlyArray<StaveSagaListRow> {
   return rows.map((row) => ({
     id: row.id,
     ...optionalString("kind", row.kind),
@@ -253,7 +253,7 @@ export function toSagaRows(rows: StaveSagaList): ReadonlyArray<StaveSagaListRow>
   }));
 }
 
-export function toProviderRows(rows: StaveMemoryProviders): ReadonlyArray<StaveMemoryProvider> {
+function toProviderRows(rows: StaveMemoryProviders): ReadonlyArray<StaveMemoryProvider> {
   return rows.map((row) => ({
     name: row.name,
     ...optionalString("binary", row.binary),

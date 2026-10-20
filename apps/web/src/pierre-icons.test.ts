@@ -14,18 +14,21 @@ describe("Pierre file icons", () => {
     assert.equal(resolvePierreIconForEntry("vite.config.ts", "file")?.token, "vite");
   });
 
-  it("extends Pierre with Lecturn-specific exact filename icons", () => {
-    assert.equal(
-      resolvePierreIconForEntry("package.json", "file")?.name,
-      "lecturn-file-icon-package-json",
-    );
+  it("uses built-in Pierre icons where available", () => {
+    assert.equal(resolvePierreIconForEntry("package.json", "file")?.name, "file-tree-builtin-npm");
     assert.equal(
       resolvePierreIconForEntry("config/tsconfig.json", "file")?.name,
-      "lecturn-file-icon-tsconfig",
+      "file-tree-builtin-typescript",
     );
+    assert.equal(
+      resolvePierreIconForEntry("README.md", "file")?.name,
+      "file-tree-builtin-markdown",
+    );
+  });
+
+  it("extends Pierre with Lecturn-specific exact filename icons", () => {
     assert.equal(resolvePierreIconForEntry("AGENTS.md", "file")?.name, "lecturn-file-icon-agents");
     assert.equal(resolvePierreIconForEntry("CLAUDE.md", "file")?.name, "lecturn-file-icon-claude");
-    assert.equal(resolvePierreIconForEntry("README.md", "file")?.name, "lecturn-file-icon-readme");
     assert.equal(
       resolvePierreIconForEntry("pnpm-lock.yaml", "file")?.name,
       "lecturn-file-icon-pnpm",
@@ -37,7 +40,9 @@ describe("Pierre file icons", () => {
   });
 
   it("ships every custom icon referenced by the extended resolver", () => {
-    const customIconNames = new Set(Object.values(LECTURN_PIERRE_ICONS.byFileName));
+    const customIconNames = new Set(
+      Object.values(LECTURN_PIERRE_ICONS.byFileName).filter((name) => name.startsWith("lecturn-")),
+    );
     for (const iconName of customIconNames) {
       assert.include(LECTURN_PIERRE_ICONS.spriteSheet, `id="${iconName}"`);
     }

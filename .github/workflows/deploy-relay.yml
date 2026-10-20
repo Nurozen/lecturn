@@ -134,6 +134,7 @@ jobs:
           STRIPE_TEAM_WEBHOOK_SECRET: ${{ secrets.STRIPE_TEAM_WEBHOOK_SECRET }}
           CLERK_TEAM_WEBHOOK_SECRET: ${{ secrets.CLERK_TEAM_WEBHOOK_SECRET }}
           CLERK_BILLING_WEBHOOK_SECRET: ${{ secrets.CLERK_BILLING_WEBHOOK_SECRET }}
+          FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
 
       - name: Publish relay deploy commit status
         uses: actions/github-script@v8

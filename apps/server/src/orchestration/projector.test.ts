@@ -86,6 +86,7 @@ describe("orchestration projector", () => {
         interactionMode: "default",
         branch: null,
         worktreePath: null,
+        pullRequests: [],
         branchPullRequest: null,
         latestTurn: null,
         createdAt: now,
@@ -117,7 +118,31 @@ describe("orchestration projector", () => {
         commandId: null,
       };
       let model = yield* projectEvent(
-        createEmptyReadModel(now),
+        {
+          ...createEmptyReadModel(now),
+          projects: [
+            {
+              id: ProjectId.make("project-1"),
+              title: "Lecturn",
+              workspaceRoot: "/repo",
+              defaultModelSelection: null,
+              scripts: [],
+              createdAt: now,
+              updatedAt: now,
+              deletedAt: null,
+              repositoryIdentity: {
+                canonicalKey: "github.com/nurozen/lecturn",
+                provider: "github",
+                displayName: "nurozen/lecturn",
+                locator: {
+                  source: "git-remote",
+                  remoteName: "origin",
+                  remoteUrl: "https://github.com/nurozen/lecturn.git",
+                },
+              },
+            },
+          ],
+        },
         makeEvent({
           ...eventFields,
           sequence: 1,

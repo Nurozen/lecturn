@@ -213,6 +213,7 @@ function withFakeCodexEnv<A, E, R>(
     launchArgs?: string;
     homePath?: string;
     environment?: NodeJS.ProcessEnv;
+    models?: ReadonlyArray<string>;
   },
   effectFn: (textGeneration: TextGeneration.TextGeneration["Service"]) => Effect.Effect<A, E, R>,
 ) {
@@ -225,7 +226,18 @@ function withFakeCodexEnv<A, E, R>(
       launchArgs: input.launchArgs,
       homePath: input.homePath,
     });
-    const textGeneration = yield* makeCodexTextGeneration(config, input.environment);
+    const textGeneration = yield* makeCodexTextGeneration(
+      config,
+      input.environment,
+      Effect.succeed(
+        (input.models ?? []).map((slug) => ({
+          slug,
+          name: slug,
+          isCustom: false,
+          capabilities: null,
+        })),
+      ),
+    );
     return yield* effectFn(textGeneration);
   }).pipe(Effect.scoped);
 }
@@ -466,6 +478,27 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
         }),
     ),
   );
+  for (const selectedModel of ["gpt-5.6-luna", "openai.gpt-5.6-luna"]) {
+    it.effect(`dispatches the qualified live model for ${selectedModel}`, () =>
+      withFakeCodexEnv(
+        {
+          output: JSON.stringify({ title: "Bedrock title" }),
+          models: ["openai.gpt-5.6-luna"],
+          requireArg: "--model openai.gpt-5.6-luna",
+          forbidArg: "--model gpt-5.6-luna",
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const result = yield* textGeneration.generateThreadTitle({
+              cwd: process.cwd(),
+              message: "Describe this change",
+              modelSelection: createModelSelection(ProviderInstanceId.make("codex"), selectedModel),
+            });
+            expect(result.title).toBe("Bedrock title");
+          }),
+      ),
+    );
+  }
   it.effect("generates and sanitizes commit messages without branch by default", () =>
     withFakeCodexEnv(
       {

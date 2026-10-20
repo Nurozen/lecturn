@@ -234,7 +234,8 @@ export const make = Effect.gen(function* () {
                 accountLabel: registration.accountLabel ?? null,
                 accountColor: registration.accountColor ?? null,
                 platform: registration.platform,
-                iosMajorVersion: registration.iosMajorVersion,
+                iosMajorVersion: registration.iosMajorVersion ?? null,
+                androidApiLevel: registration.androidApiLevel ?? null,
                 appVersion: registration.appVersion ?? null,
                 bundleId: registration.bundleId ?? null,
                 apsEnvironment: registration.apsEnvironment ?? null,
@@ -251,7 +252,8 @@ export const make = Effect.gen(function* () {
                   label: registration.label,
                   accountLabel: sql`coalesce(excluded.account_label, ${relayMobileDevices.accountLabel})`,
                   accountColor: sql`coalesce(excluded.account_color, ${relayMobileDevices.accountColor})`,
-                  iosMajorVersion: registration.iosMajorVersion,
+                  iosMajorVersion: registration.iosMajorVersion ?? null,
+                  androidApiLevel: registration.androidApiLevel ?? null,
                   appVersion: registration.appVersion ?? null,
                   // Preserve routing from newer app builds when an older build
                   // re-registers without these fields.
@@ -347,6 +349,7 @@ export const make = Effect.gen(function* () {
           label: relayMobileDevices.label,
           platform: relayMobileDevices.platform,
           iosMajorVersion: relayMobileDevices.iosMajorVersion,
+          androidApiLevel: relayMobileDevices.androidApiLevel,
           appVersion: relayMobileDevices.appVersion,
           preferences: relayMobileDevices.preferencesJson,
           updatedAt: relayMobileDevices.updatedAt,
@@ -363,6 +366,7 @@ export const make = Effect.gen(function* () {
         label: row.label,
         platform: row.platform,
         iosMajorVersion: row.iosMajorVersion,
+        androidApiLevel: row.androidApiLevel,
         appVersion: row.appVersion,
         notifications: {
           enabled: row.preferences.notificationsEnabled,

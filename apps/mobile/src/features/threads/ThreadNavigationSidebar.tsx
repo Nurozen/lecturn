@@ -1,3 +1,4 @@
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { threadMoveScopes } from "../home/threadMoveScopes";
 import { HierarchyRow } from "../home/HierarchyRow";
 import { accountSectionFrames } from "../home/accountSectionFrames";
@@ -16,7 +17,7 @@ import { GlassCard } from "../../components/GlassCard";
 import { buildSidebarHierarchy } from "./sidebar-hierarchy";
 import { useMobileSagaIndex, useSidebarNestSagas } from "../../state/stave";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
-import { createScopedThreadMovePlanner } from "./threadOrder";
+import { createScopedThreadMovePlanner, type ThreadMoveDestination } from "./threadOrder";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -172,6 +173,11 @@ function ThreadNavigationSidebarPane(
 ) {
   const accountSections = useAccountSections();
   const attention = useAccountAttention(accountSections);
+  const { materialYouStyleLayoutActive, themeVariables: materialTheme } =
+    useAppearancePreferences();
+  const screenColor = materialTheme["--color-screen"];
+  const mutedColor = materialTheme["--color-foreground-muted"];
+
   const insets = useSafeAreaInsets();
   const projects = useListedProjects();
   const threads = useListedThreadShells();
@@ -562,7 +568,7 @@ function ThreadNavigationSidebarPane(
   );
   const pendingOrder = usePendingThreadOrder(nowMinute, snoozeWakeTick, moveScopes);
   const handleMoveThread = useCallback(
-    (thread: EnvironmentThreadShell, direction: "up" | "down") => {
+    (thread: EnvironmentThreadShell, direction: ThreadMoveDestination) => {
       const scope = moveScopes.get(scopedProjectKey(thread.environmentId, thread.projectId));
       if (scope) void moveThread(thread, direction, scope);
     },
@@ -1086,7 +1092,7 @@ function ThreadNavigationSidebarPane(
                 }),
               )}
               searchQuery={props.searchQuery}
-              pane="sidebar"
+              pane={materialYouStyleLayoutActive ? "screen" : "sidebar"}
               selected={
                 scopedThreadKey(thread.environmentId, thread.id) === props.selectedThreadKey
               }
@@ -1131,7 +1137,7 @@ function ThreadNavigationSidebarPane(
               disabled={!shelfPreferencesLoaded}
               expanded={item.expanded}
               onToggle={toggleSnoozedShelf}
-              pane="sidebar"
+              pane={materialYouStyleLayoutActive ? "screen" : "sidebar"}
             />
           );
         case "v2-settled-shelf":
@@ -1145,7 +1151,7 @@ function ThreadNavigationSidebarPane(
                   ? () => updateGroupDisplay(item.groupKey!, "toggle-collapsed")
                   : toggleSettledShelf
               }
-              pane="sidebar"
+              pane={materialYouStyleLayoutActive ? "screen" : "sidebar"}
             />
           );
         case "v2-show-more":
@@ -1165,7 +1171,7 @@ function ThreadNavigationSidebarPane(
         case "header":
           return (
             <ThreadListGroupHeader
-              variant="sidebar"
+              variant={materialYouStyleLayoutActive ? "compact" : "sidebar"}
               collapsed={item.collapsed}
               isFirst={item.isFirst}
               depth={0}
@@ -1187,7 +1193,7 @@ function ThreadNavigationSidebarPane(
         case "pending-task":
           return (
             <PendingTaskListRow
-              variant="sidebar"
+              variant={materialYouStyleLayoutActive ? "compact" : "sidebar"}
               pendingTask={item.pendingTask}
               environmentLabel={
                 savedConnectionsById[item.pendingTask.environmentId]?.environmentLabel ?? null
@@ -1248,7 +1254,7 @@ function ThreadNavigationSidebarPane(
         case "show-more":
           return (
             <ThreadListShowMoreRow
-              variant="sidebar"
+              variant={materialYouStyleLayoutActive ? "compact" : "sidebar"}
               hiddenCount={item.hiddenCount}
               canShowLess={item.canShowLess}
               groupKey={item.groupKey}
@@ -1258,6 +1264,7 @@ function ThreadNavigationSidebarPane(
       }
     },
     [
+      materialYouStyleLayoutActive,
       archiveThread,
       activeReorderEnvironmentIds,
       threadMovePlanners,
@@ -1445,6 +1452,7 @@ function ThreadNavigationSidebarPane(
                 }
                 contentContainerStyle={[
                   styles.threadListContent,
+                  materialYouStyleLayoutActive ? { paddingHorizontal: 0 } : null,
                   {
                     paddingBottom: Math.max(insets.bottom, 16) + 16,
                     paddingTop: 6,
@@ -1466,6 +1474,45 @@ function ThreadNavigationSidebarPane(
     );
   }
 
+  // Material You keeps its pill search field; the glass layout keeps the
+  // account glass card. Both share the same input and clear affordance.
+  const searchField = (
+    <>
+      <SymbolView
+        name="magnifyingglass"
+        size={15}
+        tintColorClassName={"accent-foreground-muted"}
+        type="monochrome"
+      />
+      <TextInput
+        ref={searchInputRef}
+        accessibilityLabel="Search threads"
+        autoCapitalize="none"
+        autoCorrect={false}
+        clearButtonMode={materialYouStyleLayoutActive ? "never" : "while-editing"}
+        onChangeText={props.onSearchQueryChange}
+        placeholder="Search"
+        placeholderTextColorClassName={"accent-placeholder"}
+        returnKeyType="search"
+        className={
+          materialYouStyleLayoutActive
+            ? "flex-1 px-0 py-2.5 font-sans text-base text-foreground"
+            : "h-[34px] flex-1 px-0 py-0 font-sans text-base text-foreground"
+        }
+        value={props.searchQuery}
+      />
+      {materialYouStyleLayoutActive && props.searchQuery.length > 0 ? (
+        <Pressable
+          accessibilityLabel="Clear search"
+          hitSlop={10}
+          onPress={() => props.onSearchQueryChange("")}
+        >
+          <SymbolView name="xmark.circle.fill" size={17} tintColor={mutedColor} type="monochrome" />
+        </Pressable>
+      ) : null}
+    </>
+  );
+
   return (
     <View
       testID="thread-navigation-sidebar"
@@ -1473,7 +1520,21 @@ function ThreadNavigationSidebarPane(
       style={{ width: props.width }}
     >
       <ArcaneBackdrop emphasis="sidebar" />
-      <View className="flex-1" style={{ paddingBottom: insets.bottom }}>
+      <View
+        className="flex-1"
+        style={
+          materialYouStyleLayoutActive
+            ? {
+                marginTop: stickyHeaderHeight,
+                paddingBottom: insets.bottom,
+                backgroundColor: screenColor,
+                borderTopLeftRadius: 28,
+                borderTopRightRadius: 28,
+                overflow: "hidden",
+              }
+            : { paddingBottom: insets.bottom }
+        }
+      >
         <SwipeableScrollGateProvider enabled={swipeEnabled}>
           <GestureDetector gesture={sidebarScrollGesture}>
             <AnimatedLegendList
@@ -1489,12 +1550,13 @@ function ThreadNavigationSidebarPane(
               renderItem={renderListItem}
               contentContainerStyle={[
                 styles.threadListContent,
+                materialYouStyleLayoutActive ? { paddingHorizontal: 0 } : null,
                 {
                   paddingBottom:
                     Platform.OS === "android"
                       ? Math.max(insets.bottom, 16) + 88 - insets.bottom
                       : 16 + insets.bottom,
-                  paddingTop: topListInset,
+                  paddingTop: materialYouStyleLayoutActive ? 6 : topListInset,
                 },
               ]}
               keyboardDismissMode="on-drag"
@@ -1543,30 +1605,18 @@ function ThreadNavigationSidebarPane(
           </View>
         </View>
 
-        <GlassCard
-          radius={22}
-          className="mx-4 mt-[9px] h-[42px] flex-row items-center gap-2 pr-3 pl-3"
-        >
-          <SymbolView
-            name="magnifyingglass"
-            size={15}
-            tintColorClassName={"accent-foreground-muted"}
-            type="monochrome"
-          />
-          <TextInput
-            ref={searchInputRef}
-            accessibilityLabel="Search threads"
-            autoCapitalize="none"
-            autoCorrect={false}
-            clearButtonMode="while-editing"
-            onChangeText={props.onSearchQueryChange}
-            placeholder="Search"
-            placeholderTextColorClassName={"accent-placeholder"}
-            returnKeyType="search"
-            className="h-[34px] flex-1 px-0 py-0 font-sans text-base text-foreground"
-            value={props.searchQuery}
-          />
-        </GlassCard>
+        {materialYouStyleLayoutActive ? (
+          <View className="mx-4 mt-[9px] min-h-12 flex-row items-center gap-2.5 rounded-full border border-input-border bg-input px-3.5">
+            {searchField}
+          </View>
+        ) : (
+          <GlassCard
+            radius={22}
+            className="mx-4 mt-[9px] h-[42px] flex-row items-center gap-2 pr-3 pl-3"
+          >
+            {searchField}
+          </GlassCard>
+        )}
       </View>
     </View>
   );

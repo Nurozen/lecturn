@@ -9,6 +9,10 @@ import {
   requiresDefaultBranchConfirmation,
 } from "@lecturn/client-runtime/state/vcs";
 import { isStaveProject, type ProjectGitTarget } from "@lecturn/client-runtime/state/projectGit";
+import {
+  resolveThreadPullRequestChains,
+  threadPullRequestKeyOf,
+} from "@lecturn/shared/threadPullRequests";
 import { EnvironmentId, ThreadId, type ProjectId, WS_METHODS } from "@lecturn/contracts";
 import {
   CommonActions,
@@ -169,7 +173,8 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
   const isInspector = presentation === "inspector";
   const environmentId = EnvironmentId.make(props.route.params.environmentId);
   const threadId = ThreadId.make(props.route.params.threadId);
-  const { selectedThread, selectedThreadProject } = useThreadSelection();
+  const { selectedThread, selectedThreadProject, selectedEnvironmentRuntime } =
+    useThreadSelection();
   const {
     selectedThreadGitCwd,
     selectedThreadWorktreePath,
@@ -177,6 +182,15 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
     selectedThreadGitRepository,
     selectGitRepository,
   } = useSelectedThreadWorktree();
+  const supportsLinkedPrSnapshots =
+    selectedEnvironmentRuntime?.serverConfig?.environment.capabilities.threadPullRequests === true;
+  const linkedPrChains = useMemo(
+    () =>
+      resolveThreadPullRequestChains(
+        supportsLinkedPrSnapshots ? (selectedThread?.pullRequests ?? []) : [],
+      ),
+    [selectedThread?.pullRequests, supportsLinkedPrSnapshots],
+  );
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
   const theme = useUniwindTheme();
@@ -470,6 +484,47 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
           }
         />
       </GlassCard>
+
+      {linkedPrChains.length > 0 ? (
+        <View className="gap-2">
+          <Text className="px-1 text-xs font-lecturn-bold text-foreground-muted">
+            Linked pull requests
+          </Text>
+          {linkedPrChains.map((chain) => (
+            <GlassCard key={threadPullRequestKeyOf(chain.layers[0]!)} className="px-3 py-1">
+              {chain.layers.length > 1 ? (
+                <View className="flex-row items-center gap-2 px-1 pt-2 pb-1">
+                  <SymbolView
+                    name="square.3.layers.3d"
+                    size={14}
+                    tintColorClassName="accent-foreground-muted"
+                  />
+                  <Text className="text-xs text-foreground-muted">
+                    {chain.kind === "native" ? "Stack" : "Branch stack"} · {chain.layers.length} PRs
+                    · bottom to top
+                  </Text>
+                </View>
+              ) : null}
+              {chain.layers.map((link, index) => (
+                <View key={threadPullRequestKeyOf(link)}>
+                  {index > 0 ? <View className="ml-12 h-px bg-border" /> : null}
+                  <SheetListRow
+                    icon="arrow.triangle.pull"
+                    title={`#${link.number} ${link.snapshot?.title ?? "Pull request"}`}
+                    subtitle={`${link.repository} · ${link.snapshot === null ? "Status pending" : link.snapshot.isDraft && link.snapshot.state === "open" ? "Draft" : link.snapshot.state}`}
+                    onPress={() => {
+                      void tryOpenExternalUrl(link.url, "pull-request").then((opened) => {
+                        if (!opened)
+                          Alert.alert("Unable to open PR", "The pull request could not be opened.");
+                      });
+                    }}
+                  />
+                </View>
+              ))}
+            </GlassCard>
+          ))}
+        </View>
+      ) : null}
 
       {selectedThreadProject ? (
         <ProjectPullRequests

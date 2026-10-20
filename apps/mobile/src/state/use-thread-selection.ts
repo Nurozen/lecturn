@@ -68,6 +68,7 @@ function threadDetailToShell(
     // so a detail-only thread must keep it.
     forkedFrom: thread.forkedFrom ?? null,
     importedFrom: thread.importedFrom ?? null,
+    pullRequests: thread.pullRequests,
     branchPullRequest: thread.branchPullRequest ?? null,
     latestTurn: thread.latestTurn,
     createdAt: thread.createdAt,

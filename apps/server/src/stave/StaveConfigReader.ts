@@ -76,12 +76,12 @@ export class StaveConfigReader extends Context.Service<
   }
 >()("lecturn/stave/StaveConfigReader") {}
 
-export const STAVE_CONFIG_CACHE_TTL = Duration.seconds(15);
+const STAVE_CONFIG_CACHE_TTL = Duration.seconds(15);
 
 /** Stave's `DefaultBase` when the config omits it. */
-export const STAVE_DEFAULT_BASE = "main";
+const STAVE_DEFAULT_BASE = "main";
 /** Stave's `DefaultMemoryConfig`: inert provider settings, ambient memory off. */
-export const STAVE_DEFAULT_MEMORY = {
+const STAVE_DEFAULT_MEMORY = {
   provider: "marmot",
   binary: "marmot",
   default: false,
@@ -177,7 +177,7 @@ export interface SnapshotFromYamlInput {
  * the wrong type are ignored rather than failing, so a hand-edited config
  * still yields the directories Stave would derive.
  */
-export function snapshotFromYaml(input: SnapshotFromYamlInput): StaveConfigSnapshot {
+function snapshotFromYaml(input: SnapshotFromYamlInput): StaveConfigSnapshot {
   const { homeDir, path } = input;
   const expand = (raw: string) => expandStavePath(raw, homeDir, path);
   const mapping: YamlMapping = isMapping(input.document) ? input.document : {};

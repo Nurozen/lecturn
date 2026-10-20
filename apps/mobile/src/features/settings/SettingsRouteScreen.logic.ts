@@ -2,9 +2,9 @@ export function resolveAgentAwarenessPlatformPresentation(platform: string): {
   readonly supported: boolean;
   readonly subtitle: string | undefined;
 } {
-  return platform === "ios"
+  return platform === "ios" || platform === "android"
     ? { supported: true, subtitle: undefined }
-    : { supported: false, subtitle: "iOS only" };
+    : { supported: false, subtitle: "Unavailable on this platform" };
 }
 
 /** First sign-in works on older relays; only adding another iOS account needs push fan-out. */

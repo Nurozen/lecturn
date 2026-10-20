@@ -1,16 +1,29 @@
-import type { VcsStatusResult } from "@lecturn/contracts";
+import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
+import { resolveThreadPullRequestRef } from "@lecturn/client-runtime/state/threadPullRequests";
+import type {
+  ExecutionEnvironmentCapabilities,
+  OrchestrationProjectShell,
+  ThreadPullRequestLink,
+  VcsStatusResult,
+} from "@lecturn/contracts";
 import { resolveChangeRequestPresentation } from "@lecturn/shared/sourceControl";
+import {
+  resolveThreadCurrentPullRequestLink,
+  resolveThreadPullRequestBadge,
+} from "@lecturn/shared/threadPullRequests";
 
 export type ThreadPr = NonNullable<VcsStatusResult["pr"]>;
 
 export interface ThreadPrPresentation {
   readonly number: number;
-  readonly state: ThreadPr["state"];
+  readonly state: ThreadPr["state"] | null;
+  readonly kind: "pull-request" | "stack";
+  readonly others: number;
   readonly isDraft: boolean;
   /** Provider-side last activity, bounding when a terminal state landed. */
   readonly updatedAt: string | null;
   readonly url: string;
-  /** Compact pull request number label, e.g. "3774". */
+  /** Compact pull request number or linked count, e.g. "3774" or "+2". */
   readonly label: string;
   /** Full, provider-aware label for assistive technologies. */
   readonly accessibilityLabel: string;
@@ -30,6 +43,8 @@ export function presentThreadPr(
   const presentation = resolveChangeRequestPresentation(provider);
   const isDraft = pr.state === "open" && pr.isDraft === true;
   return {
+    kind: "pull-request",
+    others: 0,
     number: pr.number,
     state: pr.state,
     isDraft,
@@ -52,4 +67,79 @@ export function presentThreadGitStatusPr(
   return presentThreadPr(status.pr, status.sourceControlProvider);
 }
 
-export { resolveThreadPullRequestRef } from "@lecturn/client-runtime/state/threadPullRequests";
+export { resolveThreadPullRequestRef };
+
+/** Persisted links render immediately, including links awaiting their first host sync. */
+export function presentThreadLinkedPullRequests(
+  links: ReadonlyArray<ThreadPullRequestLink>,
+): ThreadPrPresentation | null {
+  const link = resolveThreadCurrentPullRequestLink(links);
+  const badge = resolveThreadPullRequestBadge(links);
+  if (link === null || badge === null) return null;
+  const snapshot = link.snapshot;
+  const linkedCount = badge.kind === "pull-request" && badge.others > 0 ? badge.others + 1 : null;
+  const isMultiple = badge.kind === "stack" || linkedCount !== null;
+  const state = isMultiple
+    ? badge.state === "draft"
+      ? "open"
+      : badge.state
+    : (snapshot?.state ?? null);
+  const isDraft = isMultiple
+    ? badge.state === "draft"
+    : snapshot?.isDraft === true && state === "open";
+  const label =
+    badge.kind === "stack"
+      ? String(badge.layers)
+      : linkedCount !== null
+        ? `+${linkedCount}`
+        : String(link.number);
+  return {
+    kind: badge.kind,
+    others: badge.kind === "pull-request" ? badge.others : 0,
+    number: link.number,
+    state,
+    isDraft,
+    updatedAt: snapshot?.updatedAt ?? null,
+    url: link.url,
+    label,
+    accessibilityLabel:
+      badge.kind === "stack"
+        ? `${badge.layers} pull requests in stack, ${isDraft ? "draft" : (state ?? "status pending")}`
+        : linkedCount !== null
+          ? `${linkedCount} linked pull requests, overall ${badge.state}`
+          : `#${link.number} pull request ${state === null ? "status pending" : isDraft ? "draft" : state}`,
+    textClassName:
+      state === null || isDraft
+        ? "text-foreground-muted"
+        : isMultiple && state === "closed"
+          ? "text-adaptive-rose-600-400"
+          : PR_STATE_TEXT_CLASS[state],
+  };
+}
+
+/**
+ * Only the array capability replaces legacy references with persisted snapshots.
+ * Branch fallback and legacy references still require one editable Stave checkout.
+ */
+export function resolveThreadPrSource(
+  thread: Pick<EnvironmentThreadShell, "pullRequests" | "linkedPullRequest" | "branchPullRequest">,
+  capabilities:
+    | Pick<ExecutionEnvironmentCapabilities, "threadPullRequests" | "threadPullRequestLinking">
+    | undefined,
+  project: Pick<OrchestrationProjectShell, "workspaceRoot" | "stave"> | null = null,
+) {
+  const supportsSnapshots = capabilities?.threadPullRequests === true;
+  const linkedPresentation = supportsSnapshots
+    ? presentThreadLinkedPullRequests(thread.pullRequests)
+    : null;
+  const pullRequestRef =
+    linkedPresentation !== null
+      ? null
+      : resolveThreadPullRequestRef(
+          supportsSnapshots
+            ? { linkedPullRequest: null, branchPullRequest: thread.branchPullRequest }
+            : thread,
+          project,
+        );
+  return { linkedPresentation, pullRequestRef };
+}

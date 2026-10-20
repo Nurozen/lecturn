@@ -1,5 +1,6 @@
 import { accountScopedKey } from "@lecturn/client-runtime/relay";
 import { accountForEnvironment, type AccountSectionContext } from "./accountSections";
+import { threadPullRequestSearchTerms } from "@lecturn/shared/threadPullRequests";
 import {
   buildProjectGroups,
   derivePhysicalProjectKey,
@@ -371,6 +372,9 @@ export function buildHomeThreadGroups(input: {
       : group.threads.filter(
           (thread) =>
             thread.title.toLocaleLowerCase().includes(query) ||
+            threadPullRequestSearchTerms(thread).some((term) =>
+              term.toLocaleLowerCase().includes(query),
+            ) ||
             input.matchedThreadKeys?.has(
               threadSearchMatchKey({
                 environmentId: thread.environmentId,

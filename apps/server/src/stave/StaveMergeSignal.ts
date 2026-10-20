@@ -12,7 +12,7 @@ import { StaveBinary } from "./StaveBinary.ts";
 import { StaveCli } from "./StaveCli.ts";
 import { sameManifestIncarnation } from "./StaveOperations.ts";
 
-export function isMergedSagaMember(
+function isMergedSagaMember(
   member: StaveSagaMemberStatus,
   notes: StaveSagaStatus["notes"],
 ): boolean {

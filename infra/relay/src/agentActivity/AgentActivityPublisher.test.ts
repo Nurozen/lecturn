@@ -7,9 +7,19 @@ import * as AgentActivityRows from "./AgentActivityRows.ts";
 import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
 import * as LiveActivities from "./LiveActivities.ts";
 import * as AgentActivityPublisher from "./AgentActivityPublisher.ts";
+import { FcmDeliveries } from "./FcmDeliveries.ts";
 import * as ApnsDeliveries from "./ApnsDeliveries.ts";
 import { TeamRuntime } from "../teams/TeamRuntime.ts";
 import { TeamError } from "../teams/TeamStore.ts";
+
+const publisherLayer = AgentActivityPublisher.layer.pipe(
+  Layer.provide(
+    Layer.succeed(FcmDeliveries, {
+      enqueue: () => Effect.succeed(null),
+      process: () => Effect.void,
+    }),
+  ),
+);
 
 const state: RelayAgentActivityState = {
   environmentId: "env" as RelayAgentActivityState["environmentId"],
@@ -134,6 +144,64 @@ function makeApnsDeliveries(
 }
 
 describe("AgentActivityPublisher", () => {
+  it.effect("routes Android publication and registration replay to FCM alongside iOS", () => {
+    const android = { ...target("android"), platform: "android" as const, ios_major_version: null };
+    const ios = target("ios");
+    const fcmCalls: Array<Parameters<FcmDeliveries["Service"]["enqueue"]>[0]> = [];
+    const appleDevices: string[] = [];
+    return Effect.gen(function* () {
+      const publisher = yield* AgentActivityPublisher.AgentActivityPublisher;
+      yield* publisher.publish({
+        environmentId: state.environmentId,
+        environmentPublicKey: "key",
+        threadId: state.threadId,
+        state,
+      });
+      yield* publisher.replayForLiveActivityRegistration({
+        userId: android.user_id,
+        deviceId: android.device_id,
+      });
+      expect(fcmCalls).toEqual([
+        { target: android, state },
+        { target: android, state: null, replay: true },
+      ]);
+      expect(appleDevices).toEqual(["ios"]);
+    }).pipe(
+      Effect.provide(
+        AgentActivityPublisher.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
+              Layer.succeed(EnvironmentLinks.EnvironmentLinks, makeEnvironmentLinks()),
+              Layer.succeed(
+                LiveActivities.LiveActivities,
+                makeLiveActivities({ listTargets: () => Effect.succeed([android, ios]) }),
+              ),
+              Layer.succeed(
+                ApnsDeliveries.ApnsDeliveries,
+                makeApnsDeliveries({
+                  sendForTarget: (input) =>
+                    Effect.sync(() => {
+                      appleDevices.push(input.target.device_id);
+                      return null;
+                    }),
+                }),
+              ),
+              Layer.succeed(FcmDeliveries, {
+                enqueue: (input) =>
+                  Effect.sync(() => {
+                    fcmCalls.push(input);
+                    return null;
+                  }),
+                process: () => Effect.void,
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+  });
+
   it.effect("replays the latest aggregate when a Live Activity token registers", () => {
     const registeredTarget: LiveActivities.TargetRow = {
       ...target("device-1"),
@@ -162,7 +230,7 @@ describe("AgentActivityPublisher", () => {
         });
       }).pipe(
         Effect.provide(
-          AgentActivityPublisher.layer.pipe(
+          publisherLayer.pipe(
             Layer.provide(
               Layer.mergeAll(
                 Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
@@ -236,7 +304,7 @@ describe("AgentActivityPublisher", () => {
         });
       }).pipe(
         Effect.provide(
-          AgentActivityPublisher.layer.pipe(
+          publisherLayer.pipe(
             Layer.provide(
               Layer.mergeAll(
                 Layer.succeed(
@@ -330,7 +398,7 @@ describe("AgentActivityPublisher", () => {
         });
       }).pipe(
         Effect.provide(
-          AgentActivityPublisher.layer.pipe(
+          publisherLayer.pipe(
             Layer.provide(
               Layer.mergeAll(
                 Layer.succeed(
@@ -442,7 +510,7 @@ describe("AgentActivityPublisher", () => {
       ]);
     }).pipe(
       Effect.provide(
-        AgentActivityPublisher.layer.pipe(
+        publisherLayer.pipe(
           Layer.provide(
             Layer.mergeAll(
               Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
@@ -511,7 +579,7 @@ describe("AgentActivityPublisher", () => {
         });
       }).pipe(
         Effect.provide(
-          AgentActivityPublisher.layer.pipe(
+          publisherLayer.pipe(
             Layer.provide(
               Layer.mergeAll(
                 Layer.succeed(
@@ -623,7 +691,7 @@ describe("AgentActivityPublisher", () => {
           });
         }).pipe(
           Effect.provide(
-            AgentActivityPublisher.layer.pipe(
+            publisherLayer.pipe(
               Layer.provide(
                 Layer.mergeAll(
                   Layer.succeed(
@@ -892,7 +960,7 @@ describe("company activity ingestion", () => {
   function fixture(policy: TeamRuntime["Service"]["policy"], owners = ["owner"]) {
     const writes: string[] = [];
     const ownerQueries: unknown[] = [];
-    const service = AgentActivityPublisher.layer.pipe(
+    const service = publisherLayer.pipe(
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(

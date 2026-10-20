@@ -303,7 +303,7 @@ export const outOfBandOAuthLogin = Effect.fn("cloud.cli_token.out_of_band_oauth_
 });
 
 /** The same hosted PKCE protocol, split for an authenticated local UI. */
-export const beginOutOfBandOAuthLogin = Effect.gen(function* () {
+const beginOutOfBandOAuthLogin = Effect.gen(function* () {
   const metadata = yield* cloudCliOAuthConfig;
   const hostedAppUrl = yield* hostedAppUrlConfig;
   const { verifier, challenge, state } = yield* makePkceRequest;
@@ -329,7 +329,7 @@ export const beginOutOfBandOAuthLogin = Effect.gen(function* () {
   };
 });
 
-export const refreshOAuthToken = Effect.fn("cloud.cli_token.refresh_oauth")(function* (
+const refreshOAuthToken = Effect.fn("cloud.cli_token.refresh_oauth")(function* (
   token: PersistedToken,
 ) {
   const metadata = yield* cloudCliOAuthConfig;
@@ -343,6 +343,7 @@ export const refreshOAuthToken = Effect.fn("cloud.cli_token.refresh_oauth")(func
     : refreshed;
 });
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   // Capture exactly the services the login/refresh flows need at build time
   // (matching the behavior before the out-of-band flow captured the instances), not

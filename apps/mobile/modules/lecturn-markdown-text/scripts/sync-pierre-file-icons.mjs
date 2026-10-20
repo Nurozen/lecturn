@@ -82,10 +82,7 @@ const colors = {
 const customIcons = {
   agents: "lecturn-file-icon-agents",
   claude: "lecturn-file-icon-claude",
-  package: "lecturn-file-icon-package-json",
   pnpm: "lecturn-file-icon-pnpm",
-  readme: "lecturn-file-icon-readme",
-  tsconfig: "lecturn-file-icon-tsconfig",
   video: "lecturn-file-icon-video",
 };
 

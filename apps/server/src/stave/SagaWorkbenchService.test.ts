@@ -176,6 +176,7 @@ const harness = Effect.fn("harness")(function* (
     latestTurn: null,
     createdAt: at,
     updatedAt: at,
+    pullRequests: [],
     archivedAt: null,
     settledOverride: null,
     settledAt: null,

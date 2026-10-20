@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import { parseChangeRequestUrl } from "@lecturn/shared/changeRequestUrl";
 
 import {
   PullRequestDetail,
@@ -11,6 +12,7 @@ import {
   type PullRequestCommit,
   type PullRequestDetailView,
   type PullRequestMergeability,
+  type PullRequestMergeMethod,
   type PullRequestReaction,
   type PullRequestReviewThread,
   type PullRequestState,
@@ -20,6 +22,37 @@ import {
 } from "@lecturn/contracts";
 
 import { inferReviewCommentFenceLanguage, type ReviewCommentContext } from "~/reviewCommentContext";
+
+export const PULL_REQUEST_MERGE_METHOD_LABELS: Record<PullRequestMergeMethod, string> = {
+  merge: "Merge",
+  squash: "Squash and merge",
+  rebase: "Rebase and merge",
+};
+
+/** Old environments keep their existing actions; new ones must finish stack discovery first. */
+export function allowsSinglePullRequestMerge(input: {
+  supportsStackActions: boolean;
+  hasStack: boolean;
+  stackPending: boolean;
+  stackError: string | null;
+}): boolean {
+  return (
+    !input.supportsStackActions ||
+    (!input.hasStack && !input.stackPending && input.stackError === null)
+  );
+}
+
+export function resolvePullRequestMergeMethod(
+  allowed: ReadonlyArray<PullRequestMergeMethod>,
+  current: PullRequestMergeMethod | null,
+  projectDefault: PullRequestMergeMethod | undefined,
+  lastSelected: PullRequestMergeMethod,
+): PullRequestMergeMethod {
+  for (const method of [current, projectDefault, lastSelected]) {
+    if (method && allowed.includes(method)) return method;
+  }
+  return allowed[0] ?? "merge";
+}
 
 const safeShellArgument = /^[A-Za-z0-9._/@+=,-]+$/;
 const bitbucketRepositoryName = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
@@ -1022,7 +1055,9 @@ const pullRequestDetailSnapshotKey = (
   environmentId: string,
   reference: PullRequestDetailSnapshotRef,
 ) =>
-  `lecturn.pullRequests.detail:${environmentId}:${reference.projectId}:${reference.host?.toLowerCase() ?? ""}:${reference.repository}#${reference.number}`;
+  reference.host
+    ? `lecturn.pullRequests.detail:${JSON.stringify([environmentId, reference.projectId, reference.host.toLowerCase(), reference.repository.toLowerCase(), reference.number])}`
+    : `lecturn.pullRequests.detail:${environmentId}:${reference.projectId}:${reference.repository}#${reference.number}`;
 
 const decodeDetailSnapshot = Schema.decodeUnknownOption(PullRequestDetail);
 
@@ -1041,7 +1076,9 @@ export function readPullRequestDetailSnapshot(
     const raw = storage?.getItem(pullRequestDetailSnapshotKey(environmentId, reference));
     if (!raw) return null;
     const decoded = decodeDetailSnapshot(JSON.parse(raw));
-    return decoded._tag === "Some" ? decoded.value : null;
+    return decoded._tag === "Some"
+      ? resolveDisplayedPullRequestDetail({ live: null, cached: decoded.value, reference })
+      : null;
   } catch {
     return null;
   }
@@ -1076,7 +1113,9 @@ export function resolveDisplayedPullRequestDetail(input: {
     input.cached.projectId === input.reference.projectId &&
     input.cached.repository.toLowerCase() === input.reference.repository.toLowerCase() &&
     input.cached.number === input.reference.number &&
-    (input.cached.host?.toLowerCase() ?? "") === (input.reference.host?.toLowerCase() ?? "")
+    (input.reference.host === undefined ||
+      (input.cached.host ?? parseChangeRequestUrl(input.cached.url)?.host)?.toLowerCase() ===
+        input.reference.host.toLowerCase())
   ) {
     return input.cached;
   }

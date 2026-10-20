@@ -103,6 +103,7 @@ function makeReadModel(
         latestTurn: null,
         createdAt: NOW,
         updatedAt: NOW,
+        pullRequests: [],
         archivedAt: null,
         settledOverride: null,
         settledAt: null,

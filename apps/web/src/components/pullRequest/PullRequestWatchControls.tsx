@@ -253,11 +253,13 @@ function WatchCard({
                 {project.stave ? <StaveIcon className="size-3.5 text-primary" /> : null}
                 {!project.stave || project.projectIcon || project.faviconPath ? (
                   <ProjectFavicon
-                    environmentId={environmentId}
-                    cwd={project.workspaceRoot}
-                    projectName={project.title}
-                    faviconPath={project.faviconPath}
-                    projectIcon={project.projectIcon}
+                    project={{
+                      environmentId,
+                      workspaceRoot: project.workspaceRoot,
+                      title: project.title,
+                      faviconPath: project.faviconPath,
+                      projectIcon: project.projectIcon,
+                    }}
                     className="size-3.5"
                   />
                 ) : null}

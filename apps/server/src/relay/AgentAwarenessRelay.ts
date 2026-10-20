@@ -223,7 +223,7 @@ const makePublishProof = Effect.fn("makePublishProof")(function* (input: {
 });
 
 // Compact, log-safe view of the fields the awareness phase ladder reads.
-export function describeThreadShellForAwareness(
+function describeThreadShellForAwareness(
   thread: Option.Option<OrchestrationThreadShell>,
 ): Record<string, unknown> {
   if (Option.isNone(thread)) {
@@ -370,6 +370,7 @@ const RING_ELIGIBLE_PHASES: ReadonlySet<RelayAgentActivityState["phase"]> = new 
 // a completed state skips the first-state confirmation delay.
 const REDELIVER_PUBLISH_IDENTITY = "redeliver";
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const teamPolicy = yield* TeamPolicy;
   const backgroundPolicy = yield* BackgroundPolicy;

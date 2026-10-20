@@ -89,13 +89,13 @@ import {
 export const STAVE_READ_TIMEOUT = Duration.seconds(60);
 export const STAVE_MUTATION_TIMEOUT = Duration.minutes(15);
 /** Kept at the ProcessRunner default; output is truncated, never fatal. */
-export const STAVE_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
+const STAVE_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 /** How much of stderr a `StaveError.stderrTail` keeps. */
-export const STAVE_STDERR_TAIL_CHARS = 2_000;
+const STAVE_STDERR_TAIL_CHARS = 2_000;
 /** Dropped from the child's env so Stave never writes a chdir handoff to the server's fd 3. */
-export const STAVE_UNSET_ENV = ["STAVE_CD_FD"] as const;
+const STAVE_UNSET_ENV = ["STAVE_CD_FD"] as const;
 /** Forwarded verbatim when the host has it, so memory providers see the same home. */
-export const STAVE_PASSTHROUGH_ENV = ["MARMOT_HOME"] as const;
+const STAVE_PASSTHROUGH_ENV = ["MARMOT_HOME"] as const;
 
 export type StaveVerb =
   | "version"
@@ -483,7 +483,7 @@ export type StaveArgvBuilder<Input> = (
 ) => Result.Result<ReadonlyArray<string>, string>;
 
 /** Prefix shared by every call: `--config <path>` only when the setting is non-empty. */
-export function staveGlobalArgs(configPath: string): ReadonlyArray<string> {
+function staveGlobalArgs(configPath: string): ReadonlyArray<string> {
   const trimmed = configPath.trim();
   return trimmed.length === 0 ? [] : ["--config", trimmed];
 }
@@ -849,6 +849,7 @@ const isNotFoundCause = (cause: unknown): boolean => {
   return Predicate.hasProperty(cause, "code") && cause.code === "ENOENT";
 };
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.fn("StaveCli.make")(function* () {
   const staveBinary = yield* StaveBinary;
   const processRunner = yield* ProcessRunner;

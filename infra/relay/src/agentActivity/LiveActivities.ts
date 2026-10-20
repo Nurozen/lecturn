@@ -75,8 +75,8 @@ export interface DeviceRow {
   readonly account_color?: string | null;
   readonly user_id: string;
   readonly device_id: string;
-  readonly platform: "ios";
-  readonly ios_major_version: number;
+  readonly platform: "ios" | "android";
+  readonly ios_major_version: number | null;
   readonly app_version: string | null;
   readonly bundle_id: string | null;
   readonly aps_environment: "sandbox" | "production" | null;

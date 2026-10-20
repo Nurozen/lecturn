@@ -1,3 +1,4 @@
+import Migration0066 from "./Migrations/066_ProjectionThreadPullRequestsCompatibility.ts";
 import Migration0065 from "./Migrations/065_ProjectionThreadsActiveOrderCompatibility.ts";
 import Migration0064 from "./Migrations/064_ProjectionThreadMigrationCompatibility.ts";
 import Migration0063 from "./Migrations/063_ContextualDisplaySummaries.ts";
@@ -100,7 +101,7 @@ const StaveLifecycleRecoveryCompatibility = Effect.gen(function* () {
  * Uses Migrator.fromRecord which parses the key format and
  * returns migrations sorted by ID.
  */
-export const migrationEntries = [
+const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
   [2, "OrchestrationCommandReceipts", Migration0002],
   [3, "CheckpointDiffBlobs", Migration0003],
@@ -166,11 +167,12 @@ export const migrationEntries = [
   [63, "ContextualDisplaySummaries", Migration0063],
   [64, "ProjectionThreadMigrationCompatibility", Migration0064],
   [65, "ProjectionThreadsActiveOrderCompatibility", Migration0065],
+  [66, "ProjectionThreadPullRequestsCompatibility", Migration0066],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
 
-export const makeMigrationLoader = (throughId?: number) =>
+const makeMigrationLoader = (throughId?: number) =>
   Migrator.fromRecord(
     Object.fromEntries(
       migrationEntries

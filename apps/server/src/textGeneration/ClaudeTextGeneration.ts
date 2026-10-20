@@ -242,6 +242,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
                 "Classify the supplied conversation and return the requested JSON. You have no tools or external context.",
               ]
             : []),
+          "--permission-mode",
+          "dontAsk",
         ],
         { env: claudeEnvironment },
       );

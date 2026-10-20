@@ -1,4 +1,5 @@
-import { CommandId } from "@lecturn/contracts";
+import { CommandId, type ServerSettings as ServerSettingsValue } from "@lecturn/contracts";
+import { resolveProjectSettings } from "@lecturn/shared/projectSettings";
 import { makeDrainableWorker } from "@lecturn/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -35,6 +36,55 @@ export class ThreadSettlementReactor extends Context.Service<
   }
 >()("lecturn/orchestration/ThreadSettlementReactor") {}
 
+/** @public Service construction is part of the canonical Effect module API. */
+/** Whether any environment default or project override can settle a thread. */
+function autoSettlementConfigured(settings: ServerSettingsValue): boolean {
+  if (settings.sidebarAutoSettleOnMerge || settings.sidebarAutoSettleAfterDays !== null) {
+    return true;
+  }
+  return Object.values(settings.projectSettingsOverrides).some(
+    (entry) =>
+      entry.sidebarAutoSettleOnMerge === true ||
+      (entry.sidebarAutoSettleAfterDays !== undefined && entry.sidebarAutoSettleAfterDays !== null),
+  );
+}
+
+/** Identity of every settlement input, so unrelated settings edits do not trigger a sweep. */
+/** @internal Exported for tests. */
+export function autoSettlementSettingsKey(settings: ServerSettingsValue): string {
+  return JSON.stringify([
+    settings.sidebarAutoSettleOnMerge,
+    settings.sidebarAutoSettleAfterDays,
+    // Only entries that touch settlement, in a stable order, so a project
+    // override on an unrelated key does not queue a sweep. JSON drops
+    // undefined, so inherit (absent) and never (null) need distinct marks.
+    Object.entries(settings.projectSettingsOverrides)
+      .filter(
+        ([, entry]) =>
+          entry.sidebarAutoSettleOnMerge !== undefined ||
+          entry.sidebarAutoSettleAfterDays !== undefined,
+      )
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([projectId, entry]) => [
+        projectId,
+        entry.sidebarAutoSettleOnMerge ?? "inherit",
+        entry.sidebarAutoSettleAfterDays === undefined
+          ? "inherit"
+          : entry.sidebarAutoSettleAfterDays,
+      ]),
+  ]);
+}
+
+/** Settlement inputs plus the Stave saga-merge toggles that also drive a sweep. */
+function settlementSweepKey(settings: ServerSettingsValue): string {
+  return JSON.stringify([
+    autoSettlementSettingsKey(settings),
+    settings.stave.enabled,
+    settings.stave.lifecycle.settleOnSagaMerge,
+  ]);
+}
+
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
   const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
@@ -50,8 +100,7 @@ export const make = Effect.gen(function* () {
     mergedPullRequest: PullRequestService.PullRequestMergeEvent | null,
   ) {
     const settings = yield* settingsService.getSettings;
-    const ordinarySettlementEnabled =
-      settings.sidebarAutoSettleOnMerge || settings.sidebarAutoSettleAfterDays !== null;
+    const ordinarySettlementEnabled = autoSettlementConfigured(settings);
     const sagaSettlementEnabled =
       mergedPullRequest === null &&
       Option.isSome(staveMergeSignal) &&
@@ -83,7 +132,10 @@ export const make = Effect.gen(function* () {
         pullRequest: SettlementPullRequest | null,
         sagaMerged = false,
       ) {
-        const settings = yield* settingsService.getSettings;
+        const settings = resolveProjectSettings(
+          yield* settingsService.getSettings,
+          thread.projectId,
+        ).settings;
         if (sagaMerged && (!settings.stave.enabled || !settings.stave.lifecycle.settleOnSagaMerge))
           return null;
         const decisionNow = DateTime.formatIso(yield* DateTime.now);
@@ -129,7 +181,15 @@ export const make = Effect.gen(function* () {
       {
         concurrency: 8,
       },
-    )).filter((thread) => thread !== null);
+    ))
+      .filter((thread) => thread !== null)
+      // Linked pull requests already decided above through the policy. Stave
+      // spaces still resolve their member checkouts below.
+      .filter(
+        (thread) =>
+          projects.get(thread.projectId)?.stave != null ||
+          !thread.pullRequests.some((link) => link.source !== "stack-dismissed"),
+      );
 
     // Use the same cwd as PR discovery so both paths share GitManager's cache.
     const lookupCwdByThreadId = new Map<string, string>();
@@ -349,10 +409,7 @@ export const make = Effect.gen(function* () {
     const settingsChanges = yield* settingsService.subscribeChanges;
     const mergedPullRequests = yield* pullRequests.subscribeMerges;
     const initialSettings = yield* settingsService.getSettings.pipe(Effect.orDie);
-    let lastAfterDays = initialSettings.sidebarAutoSettleAfterDays;
-    let lastOnMerge = initialSettings.sidebarAutoSettleOnMerge;
-    let lastStaveEnabled = initialSettings.stave.enabled;
-    let lastStaveMerge = initialSettings.stave.lifecycle.settleOnSagaMerge;
+    let lastSettlementSettings = settlementSweepKey(initialSettings);
     yield* forkParked(
       Effect.gen(function* () {
         yield* worker.enqueue(undefined);
@@ -361,18 +418,11 @@ export const make = Effect.gen(function* () {
     );
     yield* forkParked(
       Stream.runForEach(settingsChanges, (settings) => {
-        if (
-          settings.sidebarAutoSettleAfterDays === lastAfterDays &&
-          settings.sidebarAutoSettleOnMerge === lastOnMerge &&
-          settings.stave.enabled === lastStaveEnabled &&
-          settings.stave.lifecycle.settleOnSagaMerge === lastStaveMerge
-        ) {
+        const key = settlementSweepKey(settings);
+        if (key === lastSettlementSettings) {
           return Effect.void;
         }
-        lastAfterDays = settings.sidebarAutoSettleAfterDays;
-        lastOnMerge = settings.sidebarAutoSettleOnMerge;
-        lastStaveEnabled = settings.stave.enabled;
-        lastStaveMerge = settings.stave.lifecycle.settleOnSagaMerge;
+        lastSettlementSettings = key;
         return worker.enqueue(undefined);
       }),
     );

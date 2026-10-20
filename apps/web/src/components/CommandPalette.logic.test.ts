@@ -1,17 +1,180 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@lecturn/contracts";
-import type { Thread } from "../types";
+import type { Project, Thread } from "../types";
 import {
   buildBrowseGroups,
+  buildCommandPaletteProjectMetadata,
+  buildProjectActionItems,
   buildStaveAddProjectItems,
   buildThreadActionItems,
+  buildLinkedThreadActionItems,
   enumerateCommandPaletteItems,
   filterPinnedBrowseEntries,
   filterCommandPaletteGroups,
   reduceCommandPaletteUiState,
   type CommandPaletteGroup,
 } from "./CommandPalette.logic";
+
+describe("linked pull request thread navigation", () => {
+  it("keeps archived relations searchable and routes them through the PR environment", async () => {
+    const environmentId = EnvironmentId.make("remote");
+    const id = ThreadId.make("archived-thread");
+    const runThread = vi.fn(async () => {});
+    const query = "https://github.com/acme/web/pull/42";
+    const linkedThreads = {
+      environmentId,
+      threads: [
+        {
+          id,
+          projectId: ProjectId.make("project"),
+          title: "Completed work",
+          archivedAt: "2026-09-01T00:00:00.000Z",
+        },
+      ],
+    };
+    const state = reduceCommandPaletteUiState(
+      { open: false, mode: "command", openIntent: null },
+      {
+        _tag: "OpenSearch",
+        query,
+        linkedThreads,
+      },
+    );
+    expect(state.openIntent).toEqual({ kind: "search", query, linkedThreads });
+    const items = buildLinkedThreadActionItems({ ...linkedThreads, query, icon: null, runThread });
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      query,
+      isInSubmenu: false,
+      projectSearchItems: [],
+      settingsSearchItems: [],
+      threadSearchItems: items,
+    });
+    expect(groups.flatMap((group) => group.items)).toEqual(items);
+    expect(items[0]?.description).toBe("Archived thread");
+    await items[0]?.run();
+    expect(runThread).toHaveBeenCalledWith({ environmentId, id });
+  });
+});
+
+describe("buildCommandPaletteProjectMetadata", () => {
+  const localEnvironmentId = EnvironmentId.make("environment-local");
+  const remoteEnvironmentId = EnvironmentId.make("environment-build-box");
+  const locations = new Map([
+    [localEnvironmentId, { kind: "local" as const, label: "Local", machine: "laptop" as const }],
+    [
+      remoteEnvironmentId,
+      { kind: "remote" as const, label: "Build box", machine: "server" as const },
+    ],
+  ]);
+
+  it("makes every member environment and path searchable", () => {
+    const metadata = buildCommandPaletteProjectMetadata({
+      projects: [
+        {
+          environmentId: localEnvironmentId,
+          title: "Lecturn",
+          workspaceRoot: "/Users/theo/Projects/lecturn",
+        },
+        {
+          environmentId: remoteEnvironmentId,
+          title: "lecturn",
+          workspaceRoot: "/srv/lecturn",
+        },
+      ],
+      locationByEnvironmentId: locations,
+    });
+
+    expect(metadata.searchTerms).toEqual([
+      "Lecturn",
+      "/Users/theo/Projects/lecturn",
+      "Local",
+      "lecturn",
+      "/srv/lecturn",
+      "Build box",
+    ]);
+    expect(metadata.environmentLabels).toEqual(["Local", "Build box"]);
+
+    const [filteredGroup] = filterCommandPaletteGroups({
+      activeGroups: [],
+      query: "build box",
+      isInSubmenu: false,
+      projectSearchItems: [
+        {
+          kind: "action",
+          value: "project:lecturn",
+          title: "Lecturn",
+          searchTerms: metadata.searchTerms,
+          icon: null,
+          run: async () => undefined,
+        },
+      ],
+      threadSearchItems: [],
+    });
+    expect(filteredGroup?.items).toHaveLength(1);
+  });
+
+  it("deduplicates grouped checkouts by environment", () => {
+    const metadata = buildCommandPaletteProjectMetadata({
+      projects: [
+        {
+          environmentId: remoteEnvironmentId,
+          title: "Lecturn",
+          workspaceRoot: "/srv/lecturn",
+        },
+        {
+          environmentId: remoteEnvironmentId,
+          title: "Lecturn worktree",
+          workspaceRoot: "/srv/lecturn-feature",
+        },
+      ],
+      locationByEnvironmentId: locations,
+    });
+
+    expect(metadata.environmentLabels).toEqual(["Build box"]);
+  });
+
+  it("deduplicates distinct environments with the same label", () => {
+    const secondRemoteEnvironmentId = EnvironmentId.make("environment-build-box-2");
+    const metadata = buildCommandPaletteProjectMetadata({
+      projects: [
+        {
+          environmentId: remoteEnvironmentId,
+          title: "Lecturn",
+          workspaceRoot: "/srv/lecturn",
+        },
+        {
+          environmentId: secondRemoteEnvironmentId,
+          title: "Lecturn mirror",
+          workspaceRoot: "/srv/mirror/lecturn",
+        },
+      ],
+      locationByEnvironmentId: new Map([
+        [remoteEnvironmentId, { label: "Build box" }],
+        [secondRemoteEnvironmentId, { label: "Build box" }],
+      ]),
+    });
+
+    expect(metadata.environmentLabels).toEqual(["Build box"]);
+  });
+
+  it("uses a human-readable fallback when presentation data is unavailable", () => {
+    const metadata = buildCommandPaletteProjectMetadata({
+      projects: [
+        {
+          environmentId: remoteEnvironmentId,
+          title: "Lecturn",
+          workspaceRoot: "/srv/lecturn",
+        },
+      ],
+      locationByEnvironmentId: new Map(),
+    });
+
+    expect(metadata.searchTerms).toContain("Remote");
+    expect(metadata.environmentLabels).toEqual(["Remote"]);
+  });
+});
 
 describe("reduceCommandPaletteUiState", () => {
   const closedState = { open: false, mode: "command", openIntent: null } as const;
@@ -62,6 +225,32 @@ describe("reduceCommandPaletteUiState", () => {
         openIntent: null,
       },
     );
+  });
+
+  it("opens PR search from another overlay and replaces an earlier search", () => {
+    const first = reduceCommandPaletteUiState(
+      { open: true, mode: "files", openIntent: null },
+      {
+        _tag: "OpenSearch",
+        query: "https://github.com/acme/web/pull/7",
+      },
+    );
+    expect(first).toEqual({
+      open: true,
+      mode: "command",
+      openIntent: { kind: "search", query: "https://github.com/acme/web/pull/7" },
+    });
+    const second = reduceCommandPaletteUiState(first, {
+      _tag: "OpenSearch",
+      query: "https://github.com/acme/web/pull/8",
+    });
+    expect(second.openIntent).toEqual({
+      kind: "search",
+      query: "https://github.com/acme/web/pull/8",
+    });
+    expect(
+      reduceCommandPaletteUiState(second, { _tag: "SetOpen", open: false }).openIntent,
+    ).toBeNull();
   });
 
   it("routes open intents to command mode", () => {
@@ -130,6 +319,20 @@ describe("enumerateCommandPaletteItems", () => {
 const LOCAL_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const PROJECT_ID = ProjectId.make("project-1");
 
+function makeProject(overrides: Partial<Project> = {}): Project {
+  return {
+    id: PROJECT_ID,
+    environmentId: LOCAL_ENVIRONMENT_ID,
+    title: "Project",
+    workspaceRoot: "/workspace/project",
+    defaultModelSelection: null,
+    scripts: [],
+    createdAt: "2026-03-01T00:00:00.000Z",
+    updatedAt: "2026-03-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: ThreadId.make("thread-1"),
@@ -152,10 +355,33 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     branch: null,
     worktreePath: null,
     checkpoints: [],
+    pullRequests: [],
     activities: [],
     ...overrides,
   };
 }
+
+describe("buildProjectActionItems", () => {
+  it("shows the grouped display name but keeps the real title for icons", () => {
+    const project = makeProject({ title: "fleet", workspaceRoot: "/Users/theo/Code/p/fleet" });
+    const iconTitles: string[] = [];
+    const [item] = buildProjectActionItems({
+      projects: [{ ...project, displayName: "nurozen/fleet" }],
+      valuePrefix: "project",
+      icon: (candidate) => {
+        iconTitles.push(candidate.title);
+        return null;
+      },
+      runProject: async () => undefined,
+    });
+
+    expect(item?.title).toBe("nurozen/fleet");
+    expect(item?.searchTerms).toEqual(
+      expect.arrayContaining(["nurozen/fleet", "fleet", "/Users/theo/Code/p/fleet"]),
+    );
+    expect(iconTitles).toEqual(["fleet"]);
+  });
+});
 
 describe("buildThreadActionItems", () => {
   it("orders threads by most recent activity and formats timestamps from updatedAt", () => {
@@ -537,4 +763,46 @@ describe("buildStaveAddProjectItems", () => {
     await items[1]?.run();
     expect(launched).toEqual(["stave-saga"]);
   });
+});
+
+it.each([
+  "#10839",
+  "10839",
+  "nurozen/lecturn#10839",
+  "https://github.com/nurozen/lecturn/pull/10839",
+])("finds linked threads from PR query %s", (query) => {
+  const items = buildThreadActionItems({
+    threads: [
+      makeThread({
+        title: "Implementation",
+        pullRequests: [
+          {
+            host: "github.com",
+            repository: "nurozen/lecturn",
+            number: 10839,
+            url: "https://github.com/nurozen/lecturn/pull/10839",
+            source: "manual",
+            linkedAt: "2026-09-08T00:00:00Z",
+            snapshot: null,
+            stack: null,
+          },
+        ],
+      }),
+      makeThread({ id: ThreadId.make("unrelated"), title: "Other work" }),
+    ],
+    projectTitleById: new Map(),
+    sortOrder: "updated_at",
+    icon: null,
+    runThread: async () => undefined,
+  });
+  const groups = filterCommandPaletteGroups({
+    activeGroups: [],
+    query,
+    isInSubmenu: false,
+    projectSearchItems: [],
+    threadSearchItems: items,
+  });
+  expect(groups.flatMap((group) => group.items.map((item) => item.title))).toEqual([
+    "Implementation",
+  ]);
 });

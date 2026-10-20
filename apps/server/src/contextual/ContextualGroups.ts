@@ -24,7 +24,7 @@ const decodeUndo = Schema.decodeUnknownEffect(Schema.fromJsonString(Undo));
 const GroupReceipt = Schema.Struct({ projectId: C.ProjectId, groupId: Schema.String });
 const encodeGroupReceipt = Schema.encodeSync(Schema.fromJsonString(GroupReceipt));
 const decodeGroupReceipt = Schema.decodeUnknownEffect(Schema.fromJsonString(GroupReceipt));
-export const occurrence = (note: C.ThreadDecision): C.ContextualDecisionOccurrence => ({
+const occurrence = (note: C.ThreadDecision): C.ContextualDecisionOccurrence => ({
   decisionId: note.id,
   threadId: note.threadId,
   revision: note.revision,

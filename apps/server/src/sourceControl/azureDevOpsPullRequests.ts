@@ -5,7 +5,7 @@ import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { PositiveInt, TrimmedNonEmptyString } from "@lecturn/contracts";
-import { decodeJsonResult, formatSchemaError } from "@lecturn/shared/schemaJson";
+import { decodeJsonResult } from "@lecturn/shared/schemaJson";
 
 export interface NormalizedAzureDevOpsPullRequestRecord {
   readonly number: number;
@@ -189,8 +189,6 @@ function normalizeAzureDevOpsPullRequestRecord(
 const decodeAzureDevOpsPullRequestList = decodeJsonResult(Schema.Array(Schema.Unknown));
 const decodeAzureDevOpsPullRequest = decodeJsonResult(AzureDevOpsPullRequestSchema);
 const decodeAzureDevOpsPullRequestEntry = Schema.decodeUnknownExit(AzureDevOpsPullRequestSchema);
-
-export const formatAzureDevOpsJsonDecodeError = formatSchemaError;
 
 export function decodeAzureDevOpsPullRequestListJson(
   raw: string,

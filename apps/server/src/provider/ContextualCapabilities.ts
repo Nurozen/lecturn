@@ -28,7 +28,7 @@ const unsupported: ContextualProviderCapabilities = {
   automaticContinuity: false,
 };
 
-export const contextualProviderCapabilities = {
+const contextualProviderCapabilities = {
   codex: {
     ...unsupported,
     delivery: "receipt-hook",

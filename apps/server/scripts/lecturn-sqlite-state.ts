@@ -245,7 +245,7 @@ export const runSqliteState = Effect.fn("runSqliteState")(function* (
   );
 });
 
-export const lecturnSqliteStateCommand = Command.make(
+const lecturnSqliteStateCommand = Command.make(
   "lecturn-sqlite-state",
   {
     operation: Argument.choice("operation", SqliteStateOperation.literals).pipe(

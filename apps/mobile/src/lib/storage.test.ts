@@ -205,6 +205,31 @@ describe("mobile connection storage", () => {
     });
   });
 
+  it("persists Material You independently for each appearance", async () => {
+    const themes = { lightThemeId: "material-you", darkThemeId: "ocean" } as const;
+    await savePreferencesPatch(themes);
+    await expect(loadPreferences()).resolves.toEqual(themes);
+    await savePreferencesPatch({ lightThemeId: "iris" });
+    await expect(loadPreferences()).resolves.toEqual({ ...themes, lightThemeId: "iris" });
+  });
+
+  it("persists the Material You layout independently of the selected theme", async () => {
+    await savePreferencesPatch({
+      lightThemeId: "material-you",
+      materialYouStyleLayoutEnabled: true,
+    });
+    await savePreferencesPatch({ lightThemeId: "iris" });
+    await expect(loadPreferences()).resolves.toEqual({
+      lightThemeId: "iris",
+      materialYouStyleLayoutEnabled: true,
+    });
+    await savePreferencesPatch({ materialYouStyleLayoutEnabled: false });
+    await expect(loadPreferences()).resolves.toEqual({
+      lightThemeId: "iris",
+      materialYouStyleLayoutEnabled: false,
+    });
+  });
+
   it("drops the removed theme transition preference", async () => {
     mocks.setPreferencesJson(JSON.stringify({ themeTransition: "circle-bottom-left" }), 10);
 

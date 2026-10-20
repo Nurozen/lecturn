@@ -14,9 +14,23 @@ export function glassAccessibilityVariables(variables: MobileThemeVariables, opa
   };
 }
 
-/** Update every registered palette so changing themes never flashes transparent controls. */
+/**
+ * Full palette with the accessibility override applied. The root ScopedVariables
+ * re-applies the active palette over every theme, so it must carry the override too.
+ */
+export function withGlassAccessibility(
+  variables: MobileThemeVariables,
+  opaque: boolean,
+): MobileThemeVariables {
+  return { ...variables, ...glassAccessibilityVariables(variables, opaque) };
+}
+
+/**
+ * Update every registered palette so changing themes never flashes transparent controls.
+ * Material You shares the default Uniwind theme, so each theme name is updated once.
+ */
 export function glassAccessibilityThemeUpdates(opaque: boolean) {
-  return MOBILE_THEME_IDS.flatMap((id) =>
+  const updates = MOBILE_THEME_IDS.flatMap((id) =>
     (["light", "dark"] as const).map((appearance) => ({
       themeName: getMobileUniwindThemeName(id, appearance),
       variables: glassAccessibilityVariables(
@@ -24,5 +38,8 @@ export function glassAccessibilityThemeUpdates(opaque: boolean) {
         opaque,
       ),
     })),
+  );
+  return updates.filter(
+    (update, index) => updates.findIndex((other) => other.themeName === update.themeName) === index,
   );
 }
