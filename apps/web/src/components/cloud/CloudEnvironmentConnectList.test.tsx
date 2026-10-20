@@ -299,7 +299,7 @@ describe("cloud onboarding discovery", () => {
       finishDiscovery(linkedMachines);
     });
     expect(onDiscoveryReady).toHaveBeenCalledTimes(1);
-    expect(renderer!.root.findByType("button").children).toEqual(["Connect"]);
+    expect(renderer!.root.findByType("button").children).toEqual(["Add"]);
   });
 
   it("connects and selects discovered computers by default without overwriting deselection", async () => {
@@ -386,7 +386,7 @@ describe("cloud onboarding discovery", () => {
     expect(renderer!.root.findAllByType("p").map((node) => node.children)).toContainEqual([
       "Work laptop",
     ]);
-    expect(renderer!.root.findByType("button").children).toEqual(["Connect"]);
+    expect(renderer!.root.findByType("button").children).toEqual(["Add"]);
     await advance(30_000);
     expect(discovery.listEnvironments).toHaveBeenCalledTimes(2);
   });
@@ -394,7 +394,7 @@ describe("cloud onboarding discovery", () => {
   it("keeps a discovered computer visible when it is added to the browser", async () => {
     discovery.listEnvironments.mockResolvedValue(linkedMachines);
     await mount();
-    expect(renderer!.root.findByType("button").children).toEqual(["Connect"]);
+    expect(renderer!.root.findByType("button").children).toEqual(["Add"]);
     await act(async () => {
       renderer!.update(
         <CloudEnvironmentConnectRows

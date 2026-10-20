@@ -5,6 +5,7 @@ import { AuthAccessWriteScope } from "@lecturn/contracts";
 import { knownConnectAccountsAtom } from "~/cloud/knownAccounts";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { isElectron } from "~/env";
+import { isLocalEnvironmentDisabled } from "~/localEnvironment";
 import { desktopWslStateAtom } from "~/state/desktopWslState";
 import { useEnvironments } from "~/state/environments";
 import { useEnvironmentQuery } from "~/state/query";
@@ -23,16 +24,21 @@ export function useAvailableSettingsSearchItems() {
   // Stave settings live on the primary server, so its rows follow that config.
   const primaryServerConfig = useAtomValue(primaryServerConfigAtom);
   const hasConnectAccountMenu = useAtomValue(knownConnectAccountsAtom).accountIds.length > 0;
-  const desktopWsl = useEnvironmentQuery(isElectron ? desktopWslStateAtom : null);
+  const localEnvironmentDisabled = isLocalEnvironmentDisabled();
+  const desktopWsl = useEnvironmentQuery(
+    isElectron && !localEnvironmentDisabled ? desktopWslStateAtom : null,
+  );
   const canManageLocalBackend =
-    isElectron ||
-    ((primarySessionState.data?.authenticated &&
-      primarySessionState.data.scopes?.includes(AuthAccessWriteScope)) ??
-      false);
+    !localEnvironmentDisabled &&
+    (isElectron ||
+      ((primarySessionState.data?.authenticated &&
+        primarySessionState.data.scopes?.includes(AuthAccessWriteScope)) ??
+        false));
 
   return useMemo(
     () =>
       filterAvailableSettingsSearchItems({
+        localEnvironmentDisabled,
         hasCloudPublicConfig: hasCloudPublicConfig(),
         hasEnvironment: environments.some((environment) => environment.serverConfig !== null),
         hasProviderSettingsEnvironment: environments.some((environment) =>
@@ -65,6 +71,7 @@ export function useAvailableSettingsSearchItems() {
       desktopWsl.error,
       environments,
       hasConnectAccountMenu,
+      localEnvironmentDisabled,
       primaryServerConfig,
     ],
   );

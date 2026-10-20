@@ -242,7 +242,7 @@ export function staveArchiveUndo(result: StaveOperationResult): StaveArchiveUndo
       .filter((member) => member.action === "archived" && member.archivedPath !== undefined)
       .map((member) => member.archivedPath!)
       // Teardown ran in reverse dependency order; restore runs forward.
-      .toReversed();
+      .reverse();
     return {
       title: "Saga archived",
       description: STAVE_ARCHIVE_RESTORE_HINT,

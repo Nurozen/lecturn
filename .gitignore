@@ -5,6 +5,7 @@ node_modules
 *.log
 *.tsbuildinfo
 apps/*/dist
+apps/*/dist-exe
 infra/*/dist
 .astro
 packages/*/dist
@@ -51,3 +52,6 @@ node_modules/
 
 # Python bytecode from the upstream-integration controller tests
 __pycache__/
+
+# pnpm content-addressable store; never belongs in the repo.
+.pnpm-store/

@@ -5,8 +5,10 @@ desktop, web, or mobile app. Set up the machine where the agents will work first
 
 ## Requirements
 
-Command-line use, SSH hosts, and WSL backends need Node.js 22.16+ (22.x), 23.11+
-(23.x), or 24.10 and later. The native desktop app includes its server runtime.
+`npx lecturn` needs Node.js 22.16+ (22.x), 23.11+ (23.x), or 24.10 and later.
+The native desktop app and its WSL backends include their own server runtime. SSH
+hosts on Apple Silicon macOS or Linux x64 need no Node.js; other SSH hosts need a
+compatible Node.js and npm.
 
 You need an installed, authenticated provider before starting a thread. You can
 launch Lecturn and configure providers afterwards.
@@ -16,6 +18,34 @@ launch Lecturn and configure providers afterwards.
 Start with the [Lecturn installation guide](./lecturn-installation.md) for desktop downloads,
 mobile access, and runtime distribution. The standalone CLI command is `lecturn`.
 
+To install the self-contained CLI without Node.js, run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Nurozen/lecturn/main/scripts/install.sh | sh
+```
+
+On Windows, run
+`irm https://raw.githubusercontent.com/Nurozen/lecturn/main/scripts/install.ps1 | iex`
+in PowerShell.
+
+The script downloads the executable from a Lecturn release and is unavailable
+until Lecturn publishes standalone CLI release archives. The executable is built
+for Apple Silicon Macs, Linux x64, and Windows x64; on other platforms the script
+tells you to use `npx lecturn` instead. Intel Macs have no build because Node
+cannot produce a single executable there; the Intel desktop app is unaffected.
+You can also build a standalone server from source with Node.js 24 and `vp` (see
+[Vite+](https://viteplus.dev/guide/)):
+
+```bash
+git clone https://github.com/Nurozen/lecturn
+cd lecturn && vp i && vp run build:desktop
+node apps/server/dist/bin.mjs
+```
+
+A server run this way is a plain Node program: `lecturn update` and the background
+service do not apply, so update it with `git pull` and a rebuild, and start it
+however you run other Node processes.
+
 ## Desktop app
 
 Download a Lecturn installer from [GitHub Releases](https://github.com/Nurozen/lecturn/releases).
@@ -23,9 +53,9 @@ Download a Lecturn installer from [GitHub Releases](https://github.com/Nurozen/l
 ### Windows Subsystem for Linux
 
 Choose a WSL distro in **Settings → Connections** to run agents and projects
-there. Install Node.js and provider CLIs inside that distro. Lecturn installs its
-matching server runtime there automatically; the first launch after an app
-update can take longer.
+there. Install provider CLIs inside that distro. Lecturn installs its matching
+server runtime there automatically; the first launch after an app update can
+take longer.
 
 ### Open a project from a terminal
 
@@ -45,6 +75,12 @@ command cannot reach the app, start or update the desktop app and try again.
 The phone connects to a server on another machine. See the
 [Lecturn installation guide](./lecturn-installation.md#iphone-and-ipad) for how to get the mobile app, then follow
 [remote access](./remote-access.md) to link it through Lecturn Connect or a pairing URL.
+
+If the app crashes during launch, open Settings → Diagnostics on the next launch
+that succeeds. It lists startup crashes from the last 7 days with the error and
+component stack that store crash reports leave out. Copy the report and paste it
+into a GitHub issue. Error messages can quote values from the app, so read it over
+before sharing.
 
 ## Providers
 

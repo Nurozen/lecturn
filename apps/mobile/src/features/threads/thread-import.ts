@@ -98,7 +98,7 @@ export function mergeExternalSessionResults(
 } {
   const sessions = results
     .flatMap((result) => (result.ok ? result.sessions : []))
-    .toSorted(
+    .sort(
       (left, right) =>
         Date.parse(right.updatedAt) - Date.parse(left.updatedAt) ||
         left.sessionId.localeCompare(right.sessionId),

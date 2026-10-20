@@ -104,11 +104,13 @@ const makeHarness = Effect.fn("TestDiscoveryRegistry.makeHarness")(function* () 
       Persistence.ConnectionTargetStore,
       Persistence.ConnectionTargetStore.of({
         list: Ref.get(storedTargets).pipe(Effect.map((targets) => [...targets.values()])),
+        listDisabled: Effect.succeed([]),
       }),
     ),
     Layer.succeed(
       Persistence.ConnectionRegistrationStore,
       Persistence.ConnectionRegistrationStore.of({
+        setEnabled: () => Effect.void,
         register: (registration) =>
           Ref.update(storedTargets, (current) =>
             registration.target._tag === "RelayConnectionTarget"

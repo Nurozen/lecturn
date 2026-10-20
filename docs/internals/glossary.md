@@ -144,6 +144,17 @@ See [Teams architecture](teams.md) for enforcement boundaries.
 
 See [Lecturn Connect](lecturn-connect.md#multiple-signed-in-accounts) for the mechanics.
 
+## Composer context
+
+| Term                 | Meaning                                                                                                                             |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Context record       | The typed payload behind a composer chip, keyed by `contextId` in `message.context.records`. It never holds bytes.                  |
+| Context reference    | One occurrence of a record in message text: `[label](t3-context://v1/<kind>/<contextId>)`. Several references can share one record. |
+| Attachment binding   | The link from an image or file record to its server-owned attachment. Its attachment ID can change without changing `contextId`.    |
+| Attachment inventory | The ordered image records shown as thumbnails above the prose, including images with no inline references.                          |
+
+See [composer context references](./composer-context-references.md) for the contract and lifecycle.
+
 [1]: ../../packages/contracts/src/orchestration.ts
 [4]: ../../apps/server/src/orchestration/projector.ts
 [10]: ../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts

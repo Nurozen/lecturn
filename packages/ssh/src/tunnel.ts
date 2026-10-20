@@ -6,6 +6,10 @@ import {
   describeReadinessCause,
   waitForHttpReady as waitForHttpReadyShared,
 } from "@lecturn/shared/httpReadiness";
+import {
+  CLI_PUBLISHED_ARCHIVE_PLATFORM_KEYS,
+  cliReleaseDownloadBaseUrl,
+} from "@lecturn/shared/cliRelease";
 import * as NetService from "@lecturn/shared/Net";
 import { extractJsonObject, fromLenientJson } from "@lecturn/shared/schemaJson";
 import { satisfiesSemverRange } from "@lecturn/shared/semver";
@@ -56,16 +60,41 @@ const SSH_READY_PROBE_TIMEOUT_MS = 1_000;
 const TUNNEL_SHUTDOWN_TIMEOUT_MS = 2_000;
 const REMOTE_READY_TIMEOUT_MS = 60_000;
 const REMOTE_LAUNCH_TIMEOUT_MS = 90_000;
+// A cold archive launch also downloads and unpacks a ~70 MB release archive
+// and may wait on another installer's lock. The budgets nest: the checksum
+// file is tiny and the archive download is bounded; a waiter outlasts both
+// downloads plus extraction so it can reuse the result; and the SSH command
+// outlasts an install (own or waited-for) plus readiness, with slack for
+// verification and extraction, which have no timeout of their own.
+const REMOTE_ARCHIVE_CHECKSUMS_SECONDS = 30;
+const REMOTE_ARCHIVE_DOWNLOAD_SECONDS = 240;
+const REMOTE_ARCHIVE_LOCK_WAIT_SECONDS = 360;
+const REMOTE_ARCHIVE_LAUNCH_TIMEOUT_MS = 900_000;
 const REMOTE_REUSE_READY_TIMEOUT_MS = 2_000;
 
 export interface RemoteLecturnRunnerOptions {
-  readonly packageSpec?: string;
+  /**
+   * Dev mode: run `node <path>` on the remote instead of a release archive.
+   * The only mode that needs Node on the remote.
+   */
   readonly nodeScriptPath?: string | null;
   readonly nodeEngineRange?: string | null;
+  /**
+   * Exact version whose self-contained release archive the remote installs
+   * and runs. The remote then needs neither Node nor npm, as long as a
+   * release publishes an archive for its platform.
+   */
+  readonly archiveVersion?: string | null;
+  readonly releaseBaseUrl?: string | null;
+  /**
+   * npm package the remote runs through npx when no release archive exists
+   * for its platform. Needs Node on the remote. Defaults to
+   * `lecturn@<archiveVersion>`.
+   */
+  readonly packageSpec?: string | null;
 }
 
 export interface SshEnvironmentManagerOptions {
-  readonly resolveCliPackageSpec?: () => string;
   readonly resolveCliRunner?: Effect.Effect<RemoteLecturnRunnerOptions>;
 }
 
@@ -107,14 +136,25 @@ function sshTargetLogFields(target: DesktopSshEnvironmentTarget) {
   };
 }
 
+function isNodeScriptRunner(runner: RemoteLecturnRunnerOptions | undefined): boolean {
+  return Boolean(runner?.nodeScriptPath?.trim());
+}
+
+// A cold archive install gets the archive budget; npx keeps the budget it
+// always had.
+function remoteRunnerMayInstallArchive(runner: RemoteLecturnRunnerOptions | undefined): boolean {
+  return !isNodeScriptRunner(runner) && Boolean(runner?.archiveVersion?.trim());
+}
+
 function sshRunnerLogFields(runner: RemoteLecturnRunnerOptions | undefined) {
   if (runner?.nodeScriptPath?.trim()) {
     return { runner: "node-script", nodeScriptPath: runner.nodeScriptPath.trim() };
   }
-  if (runner?.packageSpec?.trim()) {
-    return { runner: "package", packageSpec: runner.packageSpec.trim() };
-  }
-  return { runner: "default" };
+  return {
+    runner: "archive-or-package",
+    ...(runner?.archiveVersion?.trim() ? { archiveVersion: runner.archiveVersion.trim() } : {}),
+    ...(runner?.packageSpec?.trim() ? { packageSpec: runner.packageSpec.trim() } : {}),
+  };
 }
 
 interface SshAuthOperationInput<T> {
@@ -402,49 +442,161 @@ ensure_remote_node_path() {
 }
 `;
 
+// Release archives exist only for the platforms a Lecturn release publishes;
+// every other remote runs the npm package instead of downloading a URL that
+// would 404.
+const REMOTE_ARCHIVE_SELECT_SCRIPT = `LECTURN_PLATFORM_KEY="$(uname -s)-$(uname -m)"
+case "$LECTURN_PLATFORM_KEY" in
+  Darwin-arm64 | Darwin-aarch64) LECTURN_PLATFORM_KEY="darwin-arm64" ;;
+  Darwin-x86_64 | Darwin-amd64) LECTURN_PLATFORM_KEY="darwin-x64" ;;
+  Linux-arm64 | Linux-aarch64) LECTURN_PLATFORM_KEY="linux-arm64" ;;
+  Linux-x86_64 | Linux-amd64) LECTURN_PLATFORM_KEY="linux-x64" ;;
+esac
+LECTURN_USE_ARCHIVE=0
+if [ -n "$LECTURN_ARCHIVE_VERSION" ]; then
+  for LECTURN_PUBLISHED_KEY in @@LECTURN_PUBLISHED_ARCHIVE_KEYS@@; do
+    if [ "$LECTURN_PUBLISHED_KEY" = "$LECTURN_PLATFORM_KEY" ]; then
+      LECTURN_USE_ARCHIVE=1
+    fi
+  done
+fi`;
+
 const REMOTE_RUNNER_SCRIPT = `#!/bin/sh
 set -eu
 @@LECTURN_NODE_ENV_SCRIPT@@
-ensure_remote_node_path || true
 LECTURN_NODE_SCRIPT_PATH=@@LECTURN_NODE_SCRIPT_PATH@@
 if [ -n "$LECTURN_NODE_SCRIPT_PATH" ]; then
+  # Dev mode: a source checkout on the remote. This is the only path that
+  # needs Node, so Node discovery runs here and nowhere else.
+  ensure_remote_node_path || true
   if ! command -v node >/dev/null 2>&1; then
     printf 'Remote host is missing node on PATH. Install Node or configure a supported version manager for non-interactive shells.\\n' >&2
     exit 1
   fi
   exec node "$LECTURN_NODE_SCRIPT_PATH" "$@"
 fi
-if command -v lecturn >/dev/null 2>&1; then
-  exec lecturn "$@"
-fi
-# npm extracts a package before it runs the native builds of its dependencies,
-# so a failed build (lecturn depends on node-pty, which needs a C toolchain) leaves
-# the npx cache without a lecturn executable. \`npx --yes\` then exits 0 without
-# running anything at all, which the caller only ever sees as a server that
-# never becomes ready. Resolve the CLI once up front so that install failure is
-# reported here, with npm's own output on stderr.
-require_installed_lecturn_cli() {
-  if ! LECTURN_CLI_PATH="$("$@" -- sh -c 'command -v lecturn')"; then
-    printf 'Remote host could not install %s. See npm output above for the cause.\\n' @@LECTURN_PACKAGE_SPEC@@ >&2
+LECTURN_ARCHIVE_VERSION=@@LECTURN_ARCHIVE_VERSION@@
+@@LECTURN_ARCHIVE_SELECT_SCRIPT@@
+if [ "$LECTURN_USE_ARCHIVE" != "1" ]; then
+  # No release archive for this remote's platform: run the npm package, which
+  # needs Node on the remote.
+  ensure_remote_node_path || true
+  if command -v lecturn >/dev/null 2>&1; then
+    exec lecturn "$@"
+  fi
+  # npm extracts a package before it runs the native builds of its dependencies,
+  # so a failed build (lecturn depends on node-pty, which needs a C toolchain) leaves
+  # the npx cache without a lecturn executable. \`npx --yes\` then exits 0 without
+  # running anything at all, which the caller only ever sees as a server that
+  # never becomes ready. Resolve the CLI once up front so that install failure is
+  # reported here, with npm's own output on stderr.
+  require_installed_lecturn_cli() {
+    if ! LECTURN_CLI_PATH="$("$@" -- sh -c 'command -v lecturn')"; then
+      printf 'Remote host could not install %s. See npm output above for the cause.\\n' @@LECTURN_PACKAGE_SPEC@@ >&2
+      return 1
+    fi
+    if [ -n "$LECTURN_CLI_PATH" ]; then
+      return 0
+    fi
+    printf 'Remote host installed %s but npm produced no lecturn executable, which usually means a native dependency (node-pty) failed to build. Install a C toolchain on the remote host (Debian/Ubuntu: build-essential, Fedora/RHEL: gcc-c++ make, macOS: xcode-select --install) and try again.\\n' @@LECTURN_PACKAGE_SPEC@@ >&2
     return 1
+  }
+  # The launcher records this PID, so exec the CLI without an npm wrapper process.
+  if command -v npx >/dev/null 2>&1; then
+    require_installed_lecturn_cli npx --yes --package @@LECTURN_PACKAGE_SPEC@@ || exit 1
+    exec "$LECTURN_CLI_PATH" "$@"
   fi
-  if [ -n "$LECTURN_CLI_PATH" ]; then
-    return 0
+  if command -v npm >/dev/null 2>&1; then
+    require_installed_lecturn_cli npm exec --yes --package @@LECTURN_PACKAGE_SPEC@@ || exit 1
+    exec "$LECTURN_CLI_PATH" "$@"
   fi
-  printf 'Remote host installed %s but npm produced no lecturn executable, which usually means a native dependency (node-pty) failed to build. Install a C toolchain on the remote host (Debian/Ubuntu: build-essential, Fedora/RHEL: gcc-c++ make, macOS: xcode-select --install) and try again.\\n' @@LECTURN_PACKAGE_SPEC@@ >&2
-  return 1
+  printf 'Remote host %s has no lecturn release archive and could not install %s because node/npm/npx are unavailable on PATH. Install Node or configure a supported version manager for non-interactive shells.\\n' "$LECTURN_PLATFORM_KEY" @@LECTURN_PACKAGE_SPEC@@ >&2
+  exit 1
+fi
+# Self-contained release archive: no Node, npm, or compiler on the remote.
+# Unpacked into the pinned-runtime layout so \`lecturn service install\` reuses it.
+LECTURN_RELEASE_BASE_URL=@@LECTURN_RELEASE_BASE_URL@@
+LECTURN_RUNTIME_DIR="$HOME/.lecturn/runtime/versions/$LECTURN_ARCHIVE_VERSION"
+lecturn_runtime_ready() {
+  [ -x "$LECTURN_RUNTIME_DIR/lecturn" ] && [ "$(cat "$LECTURN_RUNTIME_DIR/.install-complete" 2>/dev/null)" = "$LECTURN_ARCHIVE_VERSION" ]
 }
-# The launcher records this PID, so exec the CLI without an npm wrapper process.
-if command -v npx >/dev/null 2>&1; then
-  require_installed_lecturn_cli npx --yes --package @@LECTURN_PACKAGE_SPEC@@ || exit 1
-  exec "$LECTURN_CLI_PATH" "$@"
+if ! lecturn_runtime_ready; then
+  mkdir -p "$HOME/.lecturn/runtime/versions"
+  # Concurrent launches (two clients, a retry racing a slow first run) must
+  # not both install: mkdir is the atomic lock and the ready check repeats
+  # under it.
+  LECTURN_LOCK="$HOME/.lecturn/runtime/versions/.$LECTURN_ARCHIVE_VERSION.install.lock"
+  # mkdir is the only portable atomic exclusive create (mv would silently
+  # nest a candidate inside an existing lock). The owner publishes its pid
+  # right after, so a lock with a live owner is never reclaimed however
+  # slow its download is, and a lock whose owner is dead is reclaimed at
+  # once. A lock with no pid at all is a crash between mkdir and the pid
+  # write; it is reclaimed after a short grace so a live owner has time to
+  # publish.
+  LECTURN_LOCK_WAITED=0
+  LECTURN_LOCK_UNOWNED=0
+  while ! mkdir "$LECTURN_LOCK" 2>/dev/null; do
+    LECTURN_LOCK_OWNER="$(cat "$LECTURN_LOCK/pid" 2>/dev/null || true)"
+    if [ -n "$LECTURN_LOCK_OWNER" ]; then
+      LECTURN_LOCK_UNOWNED=0
+      if ! kill -0 "$LECTURN_LOCK_OWNER" 2>/dev/null; then
+        rm -rf "$LECTURN_LOCK"
+        continue
+      fi
+    else
+      LECTURN_LOCK_UNOWNED=$((LECTURN_LOCK_UNOWNED + 1))
+      if [ "$LECTURN_LOCK_UNOWNED" -ge 5 ]; then
+        rm -rf "$LECTURN_LOCK"
+        continue
+      fi
+    fi
+    if [ "$LECTURN_LOCK_WAITED" -ge @@LECTURN_ARCHIVE_LOCK_WAIT_SECONDS@@ ]; then
+      printf 'Another lecturn %s installation has held %s for too long.\\n' "$LECTURN_ARCHIVE_VERSION" "$LECTURN_LOCK" >&2
+      exit 1
+    fi
+    sleep 1
+    LECTURN_LOCK_WAITED=$((LECTURN_LOCK_WAITED + 1))
+  done
+  printf '%s\\n' "$$" > "$LECTURN_LOCK/pid.tmp" && mv "$LECTURN_LOCK/pid.tmp" "$LECTURN_LOCK/pid"
+  trap 'rm -rf "$LECTURN_LOCK"' EXIT
 fi
-if command -v npm >/dev/null 2>&1; then
-  require_installed_lecturn_cli npm exec --yes --package @@LECTURN_PACKAGE_SPEC@@ || exit 1
-  exec "$LECTURN_CLI_PATH" "$@"
+if ! lecturn_runtime_ready; then
+  LECTURN_ARCHIVE="lecturn-$LECTURN_ARCHIVE_VERSION-$LECTURN_PLATFORM_KEY.tar.gz"
+  LECTURN_STAGING="$(mktemp -d "$HOME/.lecturn/runtime/versions/.staging-XXXXXX")"
+  trap 'rm -rf "$LECTURN_STAGING" "$LECTURN_LOCK"' EXIT
+  lecturn_fetch() {
+    if command -v curl >/dev/null 2>&1; then curl -fsSL --connect-timeout 30 --max-time "$3" "$1" -o "$2"
+    elif command -v wget >/dev/null 2>&1; then wget -q --timeout=30 --tries=1 "$1" -O "$2"
+    else printf 'Remote host needs curl or wget to download %s.\\n' "$LECTURN_ARCHIVE" >&2; exit 1
+    fi
+  }
+  lecturn_fetch "$LECTURN_RELEASE_BASE_URL/v$LECTURN_ARCHIVE_VERSION/SHA256SUMS" "$LECTURN_STAGING/SHA256SUMS" @@LECTURN_ARCHIVE_CHECKSUMS_SECONDS@@
+  lecturn_fetch "$LECTURN_RELEASE_BASE_URL/v$LECTURN_ARCHIVE_VERSION/$LECTURN_ARCHIVE" "$LECTURN_STAGING/$LECTURN_ARCHIVE" @@LECTURN_ARCHIVE_DOWNLOAD_SECONDS@@
+  LECTURN_EXPECTED="$(grep " \\*\\{0,1\\}$LECTURN_ARCHIVE$" "$LECTURN_STAGING/SHA256SUMS" | cut -d' ' -f1)"
+  if command -v sha256sum >/dev/null 2>&1; then
+    LECTURN_ACTUAL="$(sha256sum "$LECTURN_STAGING/$LECTURN_ARCHIVE" | cut -d' ' -f1)"
+  else
+    LECTURN_ACTUAL="$(shasum -a 256 "$LECTURN_STAGING/$LECTURN_ARCHIVE" | cut -d' ' -f1)"
+  fi
+  if [ -z "$LECTURN_EXPECTED" ] || [ "$LECTURN_ACTUAL" != "$LECTURN_EXPECTED" ]; then
+    printf 'Checksum mismatch for %s.\\n' "$LECTURN_ARCHIVE" >&2; exit 1
+  fi
+  tar -xzf "$LECTURN_STAGING/$LECTURN_ARCHIVE" -C "$LECTURN_STAGING" --strip-components=1
+  rm -f "$LECTURN_STAGING/$LECTURN_ARCHIVE" "$LECTURN_STAGING/SHA256SUMS"
+  # Prove the binary runs here (libc, arch) before marking it ready, or every
+  # later launch would exec a broken install instead of retrying.
+  if ! "$LECTURN_STAGING/lecturn" --version >/dev/null 2>&1; then
+    printf 'The lecturn %s executable does not run on this host.\\n' "$LECTURN_ARCHIVE_VERSION" >&2; exit 1
+  fi
+  printf '%s\\n' "$LECTURN_ARCHIVE_VERSION" > "$LECTURN_STAGING/.install-complete"
+  rm -rf "$LECTURN_RUNTIME_DIR"
+  mv "$LECTURN_STAGING" "$LECTURN_RUNTIME_DIR"
 fi
-printf 'Remote host is missing the lecturn CLI and could not install @@LECTURN_PACKAGE_SPEC@@ because node/npm/npx are unavailable on PATH. Install Node or configure a supported version manager for non-interactive shells.\\n' >&2
-exit 1
+if [ -n "\${LECTURN_LOCK:-}" ]; then
+  rm -rf "$LECTURN_LOCK"
+  trap - EXIT
+fi
+exec "$LECTURN_RUNTIME_DIR/lecturn" "$@"
 `;
 
 const REMOTE_LAUNCH_SCRIPT = `set -eu
@@ -457,7 +609,7 @@ PORT_FILE="$STATE_DIR/port"
 PID_FILE="$STATE_DIR/pid"
 MANAGED_FILE="$STATE_DIR/managed"
 LOG_FILE="$STATE_DIR/server.log"
-RUNNER_FILE="$STATE_DIR/run-example.test"
+RUNNER_FILE="$STATE_DIR/run-lecturn.sh"
 RUNNER_NEXT="$STATE_DIR/run-lecturn.next.$$"
 mkdir -p "$STATE_DIR"
 cleanup_runner_next() {
@@ -473,16 +625,32 @@ if [ ! -f "$RUNNER_FILE" ] || ! cmp -s "$RUNNER_NEXT" "$RUNNER_FILE"; then
 fi
 mv "$RUNNER_NEXT" "$RUNNER_FILE"
 chmod 700 "$RUNNER_FILE"
-if ! ensure_remote_node_path; then
+LECTURN_ARCHIVE_VERSION=@@LECTURN_ARCHIVE_VERSION@@
+@@LECTURN_ARCHIVE_SELECT_SCRIPT@@
+LECTURN_ARCHIVE_MODE="$LECTURN_USE_ARCHIVE"
+if [ "$LECTURN_ARCHIVE_MODE" = "1" ]; then
+  # The archive ships the helpers below inside the executable; the remote
+  # needs no Node at all. Resolving the runner once here also downloads the
+  # archive before the port and readiness probes rely on it.
+  "$RUNNER_FILE" --version >/dev/null
+elif ! ensure_remote_node_path; then
   printf 'Remote host is missing node on PATH. Install Node or configure a supported version manager for non-interactive shells.\\n' >&2
   exit 1
 fi
 pick_port() {
+  if [ "$LECTURN_ARCHIVE_MODE" = "1" ]; then
+    "$RUNNER_FILE" __ssh-helper pick-port "$PORT_FILE" "@@LECTURN_DEFAULT_REMOTE_PORT@@" "@@LECTURN_REMOTE_PORT_SCAN_WINDOW@@"
+    return
+  fi
   node - "$PORT_FILE" "@@LECTURN_DEFAULT_REMOTE_PORT@@" "@@LECTURN_REMOTE_PORT_SCAN_WINDOW@@" <<'NODE'
 @@LECTURN_PICK_PORT_SCRIPT@@
 NODE
 }
 wait_ready() {
+  if [ "$LECTURN_ARCHIVE_MODE" = "1" ]; then
+    "$RUNNER_FILE" __ssh-helper wait-ready "$REMOTE_PORT" "$1" "@@LECTURN_READY_PROBE_TIMEOUT_MS@@"
+    return
+  fi
   node - "$REMOTE_PORT" "$1" "@@LECTURN_READY_PROBE_TIMEOUT_MS@@" <<'NODE'
 @@LECTURN_WAIT_READY_SCRIPT@@
 NODE
@@ -496,6 +664,10 @@ wait_for_pid_exit() {
   done
 }
 resolve_default_runtime_port() {
+  if [ "$LECTURN_ARCHIVE_MODE" = "1" ]; then
+    "$RUNNER_FILE" __ssh-helper runtime-port "$DEFAULT_RUNTIME_FILE"
+    return
+  fi
   node - "$DEFAULT_RUNTIME_FILE" <<'NODE'
 const fs = require("node:fs");
 const runtimePath = process.argv[2] ?? "";
@@ -582,7 +754,11 @@ fi
 if [ -z "$REMOTE_PORT" ]; then
   REMOTE_PORT="$(pick_port)" || true
   if [ -z "$REMOTE_PORT" ]; then
-    printf 'Failed to find an available port on the remote host. Ensure node is available on PATH.\\n' >&2
+    if [ "$LECTURN_ARCHIVE_MODE" = "1" ]; then
+      printf 'Failed to find an available port on the remote host.\\n' >&2
+    else
+      printf 'Failed to find an available port on the remote host. Ensure node is available on PATH.\\n' >&2
+    fi
     exit 1
   fi
   nohup env LECTURN_NO_BROWSER=1 "$RUNNER_FILE" serve --host 127.0.0.1 --port "$REMOTE_PORT" --base-dir "$DEFAULT_SERVER_HOME" >>"$LOG_FILE" 2>&1 < /dev/null &
@@ -609,7 +785,7 @@ printf '{"remotePort":%s,"serverKind":"%s"}\\n' "$REMOTE_PORT" "\${REMOTE_MANAGE
 const REMOTE_PAIRING_SCRIPT = `set -eu
 STATE_DIR="$HOME/.lecturn/ssh-launch/@@LECTURN_STATE_KEY@@"
 DEFAULT_SERVER_HOME="$HOME/.lecturn"
-RUNNER_FILE="$STATE_DIR/run-example.test"
+RUNNER_FILE="$STATE_DIR/run-lecturn.sh"
 mkdir -p "$STATE_DIR"
 cat >"$RUNNER_FILE" <<'SH'
 @@LECTURN_RUNNER_SCRIPT@@
@@ -650,13 +826,57 @@ if [ -f "$LOG_FILE" ]; then
 fi
 `;
 
+export class SshInvalidArchiveVersionError extends Schema.TaggedError<SshInvalidArchiveVersionError>()(
+  "SshInvalidArchiveVersionError",
+  { archiveVersion: Schema.String },
+) {
+  override get message(): string {
+    return `'${this.archiveVersion}' is not an exact Lecturn version and cannot name a runtime directory.`;
+  }
+}
+
+// The version becomes a directory name the runner removes and recreates, so
+// it must be one exact SemVer segment: no separators, no `..`, no shell
+// metacharacters beyond what SemVer allows.
+const EXACT_ARCHIVE_VERSION =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
+
+export class SshMissingRunnerError extends Schema.TaggedError<SshMissingRunnerError>()(
+  "SshMissingRunnerError",
+  {},
+) {
+  override get message(): string {
+    return "A remote lecturn runner needs an archive version, a package spec, or a node script path.";
+  }
+}
+
 export function buildRemoteLecturnRunnerScript(input?: RemoteLecturnRunnerOptions): string {
-  const packageSpec = shellSingleQuote(input?.packageSpec?.trim() || "lecturn@latest");
   const nodeScriptPath = input?.nodeScriptPath?.trim() || "";
+  const archiveVersion = input?.archiveVersion?.trim() || "";
+  const packageSpec =
+    input?.packageSpec?.trim() || (archiveVersion === "" ? "" : `lecturn@${archiveVersion}`);
+  if (nodeScriptPath === "" && archiveVersion === "" && packageSpec === "") {
+    throw new SshMissingRunnerError();
+  }
+  if (archiveVersion !== "" && !EXACT_ARCHIVE_VERSION.test(archiveVersion)) {
+    throw new SshInvalidArchiveVersionError({ archiveVersion });
+  }
+  // Strip the `/v<version>` the helper appends: the script builds URLs itself.
+  const releaseBaseUrl = cliReleaseDownloadBaseUrl("", input?.releaseBaseUrl ?? undefined).replace(
+    /\/v$/u,
+    "",
+  );
   return stripTrailingNewlines(
     applyScriptPlaceholders(REMOTE_RUNNER_SCRIPT, {
-      LECTURN_PACKAGE_SPEC: packageSpec,
       LECTURN_NODE_SCRIPT_PATH: shellSingleQuote(nodeScriptPath),
+      LECTURN_ARCHIVE_VERSION: shellSingleQuote(archiveVersion),
+      LECTURN_ARCHIVE_SELECT_SCRIPT: REMOTE_ARCHIVE_SELECT_SCRIPT,
+      LECTURN_PUBLISHED_ARCHIVE_KEYS: CLI_PUBLISHED_ARCHIVE_PLATFORM_KEYS.join(" "),
+      LECTURN_PACKAGE_SPEC: shellSingleQuote(packageSpec),
+      LECTURN_RELEASE_BASE_URL: shellSingleQuote(releaseBaseUrl),
+      LECTURN_ARCHIVE_LOCK_WAIT_SECONDS: String(REMOTE_ARCHIVE_LOCK_WAIT_SECONDS),
+      LECTURN_ARCHIVE_DOWNLOAD_SECONDS: String(REMOTE_ARCHIVE_DOWNLOAD_SECONDS),
+      LECTURN_ARCHIVE_CHECKSUMS_SECONDS: String(REMOTE_ARCHIVE_CHECKSUMS_SECONDS),
       LECTURN_NODE_ENV_SCRIPT: buildRemoteNodeEnvScript(input),
     }),
   );
@@ -673,6 +893,12 @@ export function buildRemoteNodeEnvScript(input?: RemoteLecturnRunnerOptions): st
 
 export function buildRemoteLaunchScript(input?: RemoteLecturnRunnerOptions): string {
   return applyScriptPlaceholders(REMOTE_LAUNCH_SCRIPT, {
+    // The node-script runner never uses an archive, so its launch never does.
+    LECTURN_ARCHIVE_VERSION: shellSingleQuote(
+      isNodeScriptRunner(input) ? "" : input?.archiveVersion?.trim() || "",
+    ),
+    LECTURN_ARCHIVE_SELECT_SCRIPT: REMOTE_ARCHIVE_SELECT_SCRIPT,
+    LECTURN_PUBLISHED_ARCHIVE_KEYS: CLI_PUBLISHED_ARCHIVE_PLATFORM_KEYS.join(" "),
     LECTURN_NODE_ENV_SCRIPT: buildRemoteNodeEnvScript(input),
     LECTURN_RUNNER_SCRIPT: stripTrailingNewlines(buildRemoteLecturnRunnerScript(input)),
     LECTURN_PICK_PORT_SCRIPT: stripTrailingNewlines(REMOTE_PICK_PORT_SCRIPT),
@@ -725,7 +951,9 @@ export const launchOrReuseRemoteServer = Effect.fn("ssh/tunnel.launchOrReuseRemo
     const result = yield* runSshCommand(target, {
       remoteCommandArgs: ["sh", "-l", "-s", "--", remoteStateKey(target)],
       stdin: buildRemoteLaunchScript(runner),
-      timeoutMs: REMOTE_LAUNCH_TIMEOUT_MS,
+      timeoutMs: remoteRunnerMayInstallArchive(runner)
+        ? REMOTE_ARCHIVE_LAUNCH_TIMEOUT_MS
+        : REMOTE_LAUNCH_TIMEOUT_MS,
       ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
       ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
       ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
@@ -783,6 +1011,11 @@ export const issueRemotePairingToken = Effect.fn("ssh/tunnel.issueRemotePairingT
   const result = yield* runSshCommand(target, {
     remoteCommandArgs: ["sh", "-s"],
     stdin: buildRemotePairingScript(target, runner),
+    // Pairing may be the first command on a cold remote, so it can install
+    // the archive on the way.
+    ...(remoteRunnerMayInstallArchive(runner)
+      ? { timeoutMs: REMOTE_ARCHIVE_LAUNCH_TIMEOUT_MS }
+      : {}),
     ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
     ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
     ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
@@ -1513,13 +1746,8 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       ...sshTargetLogFields(resolvedTarget),
       key,
     });
-    const packageSpec = options.resolveCliPackageSpec?.();
     const runner =
-      options.resolveCliRunner === undefined
-        ? packageSpec === undefined
-          ? undefined
-          : { packageSpec }
-        : yield* options.resolveCliRunner;
+      options.resolveCliRunner === undefined ? undefined : yield* options.resolveCliRunner;
     yield* Effect.logDebug("ssh.environment.runner.resolved", {
       ...sshTargetLogFields(resolvedTarget),
       ...sshRunnerLogFields(runner),

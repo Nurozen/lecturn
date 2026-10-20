@@ -1,5 +1,5 @@
 import { useAuth, useClerk } from "@clerk/expo";
-import { UserProfileView } from "@clerk/expo/native";
+import { type UserProfileCustomPage, UserProfileView } from "@clerk/expo/native";
 import { StackActions, useNavigation } from "@react-navigation/native";
 import { useCallback, useEffect, useState } from "react";
 import { View } from "react-native";
@@ -10,7 +10,13 @@ import {
   selectMobileProfileAccount,
 } from "./mobileAccountProfile.logic";
 
-export function MobileAccountProfile({ accountId }: { readonly accountId: string }) {
+export function MobileAccountProfile({
+  accountId,
+  customPages,
+}: {
+  readonly accountId: string;
+  readonly customPages?: UserProfileCustomPage[];
+}) {
   const clerk = useClerk();
   const { isLoaded, userId } = useAuth({ treatPendingAsSignedOut: false });
   const navigation = useNavigation();
@@ -59,7 +65,12 @@ export function MobileAccountProfile({ accountId }: { readonly accountId: string
     );
   return (
     <View collapsable={false} className="flex-1 overflow-hidden bg-sheet">
-      <UserProfileView key={accountId} isDismissible={false} onHostBack={close} />
+      <UserProfileView
+        key={accountId}
+        {...(customPages ? { customPages } : {})}
+        isDismissible={false}
+        onHostBack={close}
+      />
     </View>
   );
 }

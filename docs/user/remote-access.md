@@ -21,8 +21,9 @@ server with `npx lecturn serve`. Saving your sign-in alone does not make the mac
 reachable.
 
 On your other device, sign in to the same Lecturn Connect account and choose the
-environment. Over SSH, the CLI prints a browser link and accepts the returned
-authorization code, so you do not need to forward an OAuth callback port.
+environment. Over SSH, the CLI prints a browser link and a short code. Open the
+link on any device, confirm the code matches, and approve. The CLI continues on
+its own, so you do not need to forward an OAuth callback port.
 
 Lecturn Connect renews access credentials when needed without disconnecting a healthy
 connection. Pull request diffs and provider settings keep working after the
@@ -65,7 +66,8 @@ another link to share.
 
 Auto balance is off by default. On web and desktop, enable it in
 **Settings → Connections → Load balancing** to automatically choose a machine for
-new threads in projects grouped across connected environments.
+new threads in projects grouped across connected environments. The section
+appears once two or more machines are switched on.
 Each machine starts at **Normal**. Choose **Prefer** to favor it when it has CPU and
 memory available, **Less often** to reduce its share, or **Manual only** to exclude
 it from automatic selection. These are preferences, not fixed traffic percentages.
@@ -127,9 +129,12 @@ In the desktop app, open **Settings → Connections → Add environment**, choos
 or reuses a server there and opens the port forward for you. Projects, provider
 credentials, and agent work stay on the remote machine.
 
-The remote host needs a compatible [Node.js installation](./install.md#requirements)
-and [provider setup](./install.md#providers). If launch cannot find Node or reports
-an incompatible version, check it through a non-interactive SSH session:
+The remote host needs [provider setup](./install.md#providers). On Apple Silicon
+macOS and Linux x64 hosts, Lecturn downloads its matching server runtime, so they
+need no Node.js. Other hosts run Lecturn through `npx` and need a compatible
+[Node.js installation](./install.md#requirements) and npm. If launch cannot find
+Node or reports an incompatible version, check it through a non-interactive SSH
+session:
 
 ```bash
 ssh user@example.com 'sh -lc "command -v node && node --version"'
@@ -219,3 +224,14 @@ Include the diagnostic message and trace ID when reporting a persistent failure.
 
 For a connection that still fails after linking, check the date and time on both
 devices. For server version warnings, follow [Updating Lecturn](./updating.md).
+
+## Using the Desktop App as a Remote Only
+
+If a computer should only drive work running elsewhere, turn off its local environment. In the
+desktop app, open **Settings → Connections** and switch off **Local
+environment**. Lecturn restarts without a local server: no local agents or terminals run, WSL
+backends stay off, and other devices can no longer connect to this computer. Your projects,
+history, and saved connections are kept, and you keep working through pairing, Lecturn Connect, or SSH.
+
+Switch **Local environment** back on in the same place to restart with your previous local
+settings.

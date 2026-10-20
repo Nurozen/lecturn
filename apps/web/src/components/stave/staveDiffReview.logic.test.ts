@@ -1,10 +1,9 @@
 import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
 import { describe, expect, it } from "vite-plus/test";
-import {
-  appendReviewCommentsToPrompt,
-  buildDiffReviewComment,
-  parseReviewCommentMessageSegments,
-} from "../../reviewCommentContext";
+import { upgradeLegacyContextMessage } from "@lecturn/shared/composerContextLegacy";
+import { serializeLegacyContextMessage } from "@lecturn/shared/composerContextLegacySend";
+import { buildMessageContext } from "../../lib/composerContextRecords";
+import { buildDiffReviewComment } from "../../reviewCommentContext";
 import { scopeStaveDiffReview } from "./staveDiffReview.logic";
 
 const fileDiff = parsePatchFiles(
@@ -51,11 +50,14 @@ it("serializes both repository paths and distinct identities into the submitted 
       text: "Check this change.",
     })!,
   );
-  const prompt = appendReviewCommentsToPrompt("Apply the feedback.", comments);
+  const records =
+    buildMessageContext({ terminalContexts: [], reviewComments: comments, previewAnnotations: [] })
+      ?.records ?? [];
+  const prompt = serializeLegacyContextMessage({ text: "Apply the feedback.", records });
   expect(prompt).toContain('filePath="a/src/main.ts"');
   expect(prompt).toContain('filePath="nested/b/src/main.ts"');
-  const parsed = parseReviewCommentMessageSegments(prompt);
-  expect(parsed.filter((segment) => segment.kind === "review-comment")).toHaveLength(2);
+  const parsed = upgradeLegacyContextMessage(prompt);
+  expect(parsed.records.filter((record) => record.kind === "review-comment")).toHaveLength(2);
   expect(comments.filter((comment) => comment.sectionId === reviews[0]!.sectionId)).toHaveLength(1);
 });
 

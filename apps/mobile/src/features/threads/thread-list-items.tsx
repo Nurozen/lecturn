@@ -36,6 +36,7 @@ import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSw
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import Svg, { Circle, Path } from "react-native-svg";
 
+import { RowPressable } from "../../components/RowPressable";
 import { AppText as Text } from "../../components/AppText";
 import { ControlPillMenu } from "../../components/ControlPill";
 import { EnvironmentMachineSymbol } from "../../components/EnvironmentMachineSymbol";
@@ -43,7 +44,6 @@ import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { cn } from "../../lib/cn";
 import { HOME_HORIZONTAL_INSET } from "../../lib/layoutMetrics";
 import { relativeTime } from "../../lib/time";
-import { themeColorWithAlpha } from "../../lib/mobileTheme";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { useProject, useProjects } from "../../state/entities";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
@@ -486,12 +486,17 @@ export const PendingTaskListRow = memo(function PendingTaskListRow(props: {
     : "Sends when the environment reconnects. Opens the task for editing";
 
   const rowContent = compact ? (
-    <Pressable
+    <RowPressable
+      key={pendingTask.key}
       accessibilityHint={accessibilityHint}
       accessibilityLabel={pendingTask.title}
       accessibilityRole="button"
-      className="active:opacity-70"
-      style={{ marginHorizontal: 14, marginBottom: 8 }}
+      style={{
+        borderRadius: SIDEBAR_ROW_RADIUS,
+        borderCurve: "continuous",
+        marginHorizontal: 14,
+        marginBottom: 8,
+      }}
       onPress={() => onSelectPendingTask(pendingTask)}
     >
       <GlassCard radius={SIDEBAR_ROW_RADIUS} className="px-4 py-3">
@@ -516,17 +521,16 @@ export const PendingTaskListRow = memo(function PendingTaskListRow(props: {
           {subtitleRow}
         </View>
       </GlassCard>
-    </Pressable>
+    </RowPressable>
   ) : (
-    <Pressable
+    <RowPressable
+      key={pendingTask.key}
       accessibilityHint={accessibilityHint}
       accessibilityLabel={pendingTask.title}
       accessibilityRole="button"
-      className="active:bg-subtle"
       onPress={() => onSelectPendingTask(pendingTask)}
       style={{
         borderRadius: SIDEBAR_ROW_RADIUS,
-        cursor: "pointer",
         minHeight: 64,
         justifyContent: "center",
         marginBottom: 8,
@@ -553,7 +557,7 @@ export const PendingTaskListRow = memo(function PendingTaskListRow(props: {
           {subtitleRow}
         </View>
       </GlassCard>
-    </Pressable>
+    </RowPressable>
   );
 
   return (
@@ -571,6 +575,7 @@ export const PendingTaskListRow = memo(function PendingTaskListRow(props: {
 
 const THREAD_ROW_MENU_ACTIONS: MenuAction[] = [
   { id: "archive", title: "Archive", image: "archivebox" },
+  { id: "rename", title: "Rename", image: "square.and.pencil" },
   { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
 ];
 
@@ -592,6 +597,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   readonly onArchiveThread: (thread: EnvironmentThreadShell) => void;
   readonly onDeleteThread: (thread: EnvironmentThreadShell) => void;
   readonly onNewThreadOnBranch: (thread: EnvironmentThreadShell) => void;
+  readonly onRenameThread: (thread: EnvironmentThreadShell) => void;
   readonly onRegenerateThreadTitle: (thread: EnvironmentThreadShell) => void;
   readonly titleRegenerationSupported: boolean;
   /** False on servers without the forking capability or when the thread's
@@ -608,14 +614,10 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   const { themeAppearance: colorScheme } = useAppearancePreferences();
   const compact = props.variant === "compact";
   const selected = props.selected === true;
-  // Recycling-safe: resets when the list container is reused for another
-  // thread, so a hover highlight can't leak across rows.
-  const [hovered, setHovered] = useRecyclingState(false);
   const [visible, setVisible] = useRecyclingState(false);
   useViewabilityAmount(useCallback((token) => setVisible(token.sizeVisible > 0), [setVisible]));
 
   const theme = useUniwindTheme();
-  const glass = useGlassPalette();
   const selectedForegroundColor = theme["--color-foreground"];
 
   const {
@@ -624,6 +626,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
     onArchiveThread,
     onDeleteThread,
     onForkThread,
+    onRenameThread,
     onRegenerateThreadTitle,
     onNewThreadOnBranch,
   } = props;
@@ -678,9 +681,6 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
     thread.branch,
   ].filter((part): part is string => Boolean(part));
 
-  const effectivePressedBackground = glass.opaque
-    ? theme["--color-subtle"]
-    : themeColorWithAlpha(glass.accent, 0.12);
   const effectiveStatus =
     selected && status
       ? {
@@ -693,6 +693,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   const handleDelete = useCallback(() => onDeleteThread(thread), [onDeleteThread, thread]);
   const handleArchive = useCallback(() => onArchiveThread(thread), [onArchiveThread, thread]);
   const handleFork = useCallback(() => onForkThread(thread), [onForkThread, thread]);
+  const handleRename = useCallback(() => onRenameThread(thread), [onRenameThread, thread]);
   const handleRegenerateTitle = useCallback(
     () => onRegenerateThreadTitle(thread),
     [onRegenerateThreadTitle, thread],
@@ -715,11 +716,12 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
         inFlight: false,
         canForkNow: thread.latestTurn?.state === "completed",
       }),
+      THREAD_ROW_MENU_ACTIONS[1]!,
       ...buildThreadTitleRegenerationMenuItems({
         supported: props.titleRegenerationSupported,
         isRegenerating: thread.titleRegeneration != null,
       }),
-      THREAD_ROW_MENU_ACTIONS[1]!,
+      THREAD_ROW_MENU_ACTIONS[2]!,
     ],
     [
       props.forkSupported,
@@ -743,10 +745,19 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
       if (nativeEvent.event === "new-thread-on-branch") onNewThreadOnBranch(thread);
       if (nativeEvent.event === "archive") handleArchive();
       if (nativeEvent.event === "fork-thread") handleFork();
+      if (nativeEvent.event === "rename") handleRename();
       if (nativeEvent.event === "regenerate-title") handleRegenerateTitle();
       if (nativeEvent.event === "delete") handleDelete();
     },
-    [handleArchive, handleDelete, handleFork, handleRegenerateTitle, onNewThreadOnBranch, thread],
+    [
+      handleArchive,
+      handleDelete,
+      handleFork,
+      handleRegenerateTitle,
+      handleRename,
+      onNewThreadOnBranch,
+      thread,
+    ],
   );
 
   const statusPill =
@@ -874,15 +885,12 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
 
   const rowContent = (close: () => void) =>
     compact ? (
-      <Pressable
+      <RowPressable
+        key={`${thread.environmentId}:${thread.id}`}
         accessibilityHint="Swipe left for archive and delete actions"
         accessibilityLabel={threadAccessibilityLabel}
         accessibilityRole="button"
-        className="active:opacity-90"
-        style={({ pressed }) => ({
-          backgroundColor: pressed ? effectivePressedBackground : "transparent",
-          borderRadius: SIDEBAR_ROW_RADIUS,
-        })}
+        style={{ borderRadius: SIDEBAR_ROW_RADIUS, borderCurve: "continuous" }}
         onPress={() => {
           close();
           onSelectThread(thread);
@@ -931,26 +939,24 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
             </View>
           </View>
         </GlassCard>
-      </Pressable>
+      </RowPressable>
     ) : (
-      <Pressable
+      <RowPressable
+        key={`${thread.environmentId}:${thread.id}`}
         accessibilityHint="Opens the thread"
         accessibilityLabel={threadAccessibilityLabel}
         accessibilityRole="button"
         accessibilityState={{ selected }}
-        onHoverIn={() => setHovered(true)}
-        onHoverOut={() => setHovered(false)}
         onPress={() => {
           close();
           onSelectThread(thread);
         }}
-        style={({ pressed }) => ({
-          backgroundColor: pressed || hovered ? effectivePressedBackground : "transparent",
+        style={{
           borderRadius: SIDEBAR_ROW_RADIUS,
-          cursor: "pointer",
+          borderCurve: "continuous",
           minHeight: 64,
           justifyContent: "center",
-        })}
+        }}
       >
         <GlassCard tone={selected ? "accent" : "default"} radius={SIDEBAR_ROW_RADIUS}>
           {status?.kind === "working" ? (
@@ -983,7 +989,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
             {subtitleRow}
           </View>
         </GlassCard>
-      </Pressable>
+      </RowPressable>
     );
 
   return (

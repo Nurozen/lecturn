@@ -6,6 +6,8 @@ import { assert, describe, it } from "@effect/vitest";
 import {
   HostProcessArchitecture,
   HostProcessEnvironment,
+  HostProcessExecutablePath,
+  HostProcessIsExecutable,
   HostProcessPlatform,
   HostProcessWorkingDirectory,
 } from "@lecturn/shared/hostProcess";
@@ -61,6 +63,8 @@ interface HarnessOptions {
   readonly stavePath?: string;
   readonly settingsBinaryPath?: string;
   readonly bundledBaseDir?: string;
+  /** Simulates the single-executable launched from this path. */
+  readonly executablePath?: string;
   readonly runner?: ReturnType<typeof makeFakeRunner>;
 }
 
@@ -90,6 +94,8 @@ const makeHarness = Effect.fn(function* (baseDir: string, options: HarnessOption
     Effect.provideService(HostProcessArchitecture, "x64"),
     Effect.provideService(HostProcessEnvironment, options.env ?? {}),
     Effect.provideService(HostProcessWorkingDirectory, options.workingDirectory ?? process.cwd()),
+    Effect.provideService(HostProcessIsExecutable, options.executablePath !== undefined),
+    Effect.provideService(HostProcessExecutablePath, options.executablePath ?? process.execPath),
     Effect.provideService(CommandResolutionCache, new Map()),
   );
   const settings = Context.get(context, ServerSettings.ServerSettingsService);
@@ -267,6 +273,29 @@ it.layer(NodeServices.layer)("StaveBinary", (it) => {
         );
 
         const { service } = yield* makeHarness(baseDir, { bundledBaseDir });
+        const resolution = yield* service.resolve;
+
+        assert.equal(resolution.path, bundled);
+        assert.equal(resolution.source, "bundled");
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("single-executable finds stave/<platformKey> beside the executable", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const baseDir = yield* withTempDir();
+        const runtimeDir = path.join(baseDir, "runtime", "versions", "1.2.3");
+        const bundled = yield* writeExecutable(
+          path.join(runtimeDir, "stave", "linux-x64", "stave"),
+        );
+        const pathBin = path.join(baseDir, "path-bin");
+        yield* writeExecutable(path.join(pathBin, "stave"));
+
+        const { service } = yield* makeHarness(baseDir, {
+          env: { PATH: pathBin },
+          bundledBaseDir: path.join(baseDir, "embedded"),
+          executablePath: path.join(runtimeDir, "lecturn"),
+        });
         const resolution = yield* service.resolve;
 
         assert.equal(resolution.path, bundled);

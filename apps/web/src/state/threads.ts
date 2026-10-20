@@ -16,7 +16,7 @@ import { connectionAtomRuntime } from "../connection/runtime";
 import { withAndroidAccess } from "./androidAccessCommand";
 import { environmentSnapshotAtom } from "./shell";
 
-const commands = createThreadEnvironmentAtoms(connectionAtomRuntime);
+const commands = createThreadEnvironmentAtoms(connectionAtomRuntime, environmentSnapshotAtom);
 export const threadEnvironment = {
   ...commands,
   create: withAndroidAccess(commands.create),
@@ -40,7 +40,7 @@ export const environmentThreadDetails = createEnvironmentThreadDetailAtoms(
 );
 export const environmentThreadShells = createEnvironmentThreadShellAtoms({
   catalogValueAtom: environmentCatalog.catalogValueAtom,
-  snapshotAtom: environmentSnapshotAtom,
+  snapshotAtom: threadEnvironment.snapshotAtom,
 });
 
 const EMPTY_THREAD_STATE_ATOM = Atom.make(AsyncResult.success(EMPTY_ENVIRONMENT_THREAD_STATE)).pipe(

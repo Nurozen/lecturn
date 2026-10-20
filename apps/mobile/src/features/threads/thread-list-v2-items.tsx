@@ -1,6 +1,6 @@
-import { themeColorWithAlpha } from "../../lib/mobileTheme";
 import { GlassCard } from "../../components/GlassCard";
-import { useGlassPalette } from "../../lib/useGlassPalette";
+import { RowPressable } from "../../components/RowPressable";
+import { CustomSnoozeSheet } from "./CustomSnoozeSheet";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { threadArrangementOpenAtom } from "../../state/thread-order";
 import type { ThreadMoveDestination } from "./threadOrder";
@@ -300,7 +300,7 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
         onPressAction={handleMenuAction}
         shouldOpenOnLongPress
       >
-        <Pressable
+        <RowPressable
           accessibilityHint={
             isDraft
               ? "Opens the draft in the new task composer"
@@ -308,12 +308,14 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
           }
           accessibilityLabel={pendingTask.title}
           accessibilityRole="button"
+          key={pendingTask.key}
           onPress={() => onSelectPendingTask(pendingTask)}
-          style={({ pressed }) => ({
-            opacity: pressed ? 0.7 : 1,
+          style={{
+            borderRadius: SIDEBAR_V2_ROW_RADIUS,
+            borderCurve: "continuous",
             marginHorizontal: sidebarPane ? 0 : 14,
             marginBottom: 8,
-          })}
+          }}
         >
           <GlassCard
             radius={SIDEBAR_V2_ROW_RADIUS}
@@ -321,7 +323,7 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
           >
             {rowContent}
           </GlassCard>
-        </Pressable>
+        </RowPressable>
       </ControlPillMenu>
     </>
   );
@@ -364,6 +366,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
   readonly onDeleteThread: (thread: EnvironmentThreadShell) => void;
   readonly onNewThreadOnBranch: (thread: EnvironmentThreadShell) => void;
+  readonly onRenameThread: (thread: EnvironmentThreadShell) => void;
   readonly onRegenerateThreadTitle: (thread: EnvironmentThreadShell) => void;
   readonly onSettleThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
   readonly onSnoozeThread: (thread: EnvironmentThreadShell, snoozedUntil: string) => void;
@@ -410,6 +413,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     onSelectThread,
     onDeleteThread,
     onForkThread,
+    onRenameThread,
     onRegenerateThreadTitle,
     onNewThreadOnBranch,
     onSettleThread,
@@ -429,7 +433,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const pr = useThreadPr(thread, props.project ?? null);
 
   const theme = useUniwindTheme();
-  const glass = useGlassPalette();
   const selectedBackgroundColor = theme["--color-card"];
   const sidebarPane = props.pane === "sidebar";
   const selected = props.selected === true;
@@ -449,11 +452,13 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
 
   const handleDelete = useCallback(() => onDeleteThread(thread), [onDeleteThread, thread]);
   const handleFork = useCallback(() => onForkThread(thread), [onForkThread, thread]);
+  const handleRename = useCallback(() => onRenameThread(thread), [onRenameThread, thread]);
   const handleRegenerateTitle = useCallback(
     () => onRegenerateThreadTitle(thread),
     [onRegenerateThreadTitle, thread],
   );
   const handleSettle = useCallback(() => onSettleThread(thread), [onSettleThread, thread]);
+  const [customSnoozeOpen, setCustomSnoozeOpen] = useState(false);
   const handleSnooze = useCallback(
     (snoozedUntil: string) => onSnoozeThread(thread, snoozedUntil),
     [onSnoozeThread, thread],
@@ -491,12 +496,14 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     [props.snoozePresetMinute, swipeActions.secondary],
   );
   const snoozePresetActions = useMemo<MenuAction[]>(
-    () =>
-      snoozePresets.map((preset) => ({
+    () => [
+      ...snoozePresets.map((preset) => ({
         id: `snooze:${preset.id}`,
         title: preset.label,
         subtitle: preset.whenLabel,
       })),
+      { id: "snooze:custom", title: "Custom…" },
+    ],
     [snoozePresets],
   );
   // Pinned cards keep the full lifecycle menu; only the pin item flips to
@@ -538,12 +545,14 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       variant,
     ],
   );
-  const titleRegenerationMenuItems = useMemo<MenuAction[]>(
-    () =>
-      buildThreadTitleRegenerationMenuItems({
+  const titleMenuItems = useMemo<MenuAction[]>(
+    () => [
+      { id: "rename", title: "Rename", image: "square.and.pencil" },
+      ...buildThreadTitleRegenerationMenuItems({
         supported: props.titleRegenerationSupported,
         isRegenerating: thread.titleRegeneration != null,
       }),
+    ],
     [props.titleRegenerationSupported, thread.titleRegeneration],
   );
   const threadForkMenuItems = useMemo<MenuAction[]>(
@@ -566,20 +575,20 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       },
       ...arrangementMenuItems,
       ...threadForkMenuItems,
-      ...titleRegenerationMenuItems,
+      ...titleMenuItems,
       { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
     ],
-    [arrangementMenuItems, snoozePresetActions, threadForkMenuItems, titleRegenerationMenuItems],
+    [arrangementMenuItems, snoozePresetActions, threadForkMenuItems, titleMenuItems],
   );
   const cardMenuActions = useMemo<MenuAction[]>(
     () => [
       CARD_MENU_ACTIONS[0]!,
       ...arrangementMenuItems,
       ...threadForkMenuItems,
-      ...titleRegenerationMenuItems,
+      ...titleMenuItems,
       ...CARD_MENU_ACTIONS.slice(1),
     ],
-    [arrangementMenuItems, threadForkMenuItems, titleRegenerationMenuItems],
+    [arrangementMenuItems, threadForkMenuItems, titleMenuItems],
   );
   const slimMenuActions = useMemo<MenuAction[]>(
     () => [
@@ -588,29 +597,29 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         (action) => action.id !== "move-up" && action.id !== "move-down",
       ),
       ...threadForkMenuItems,
-      ...titleRegenerationMenuItems,
+      ...titleMenuItems,
       SLIM_MENU_ACTIONS[1]!,
     ],
-    [arrangementMenuItems, threadForkMenuItems, titleRegenerationMenuItems],
+    [arrangementMenuItems, threadForkMenuItems, titleMenuItems],
   );
   const snoozedMenuActions = useMemo<MenuAction[]>(
     () => [
       SNOOZED_MENU_ACTIONS[0]!,
       ...threadForkMenuItems,
-      ...titleRegenerationMenuItems,
+      ...titleMenuItems,
       SNOOZED_MENU_ACTIONS[1]!,
     ],
-    [threadForkMenuItems, titleRegenerationMenuItems],
+    [threadForkMenuItems, titleMenuItems],
   );
   const legacyMenuActions = useMemo<MenuAction[]>(
     () => [
       LEGACY_MENU_ACTIONS[0]!,
       ...arrangementMenuItems,
       ...threadForkMenuItems,
-      ...titleRegenerationMenuItems,
+      ...titleMenuItems,
       LEGACY_MENU_ACTIONS[1]!,
     ],
-    [arrangementMenuItems, threadForkMenuItems, titleRegenerationMenuItems],
+    [arrangementMenuItems, threadForkMenuItems, titleMenuItems],
   );
   const handleMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {
@@ -625,8 +634,13 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       if (nativeEvent.event === "move-down") handleMoveDown();
       if (nativeEvent.event === "archive") handleArchive();
       if (nativeEvent.event === "fork-thread") handleFork();
+      if (nativeEvent.event === "rename") handleRename();
       if (nativeEvent.event === "regenerate-title") handleRegenerateTitle();
       if (nativeEvent.event === "delete") handleDelete();
+      if (nativeEvent.event === "snooze:custom") {
+        setCustomSnoozeOpen(true);
+        return;
+      }
       const snoozeSelection = resolveThreadListV2SnoozeMenuSelection({
         event: nativeEvent.event,
         displayedPresets: snoozePresets,
@@ -645,6 +659,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       handleDelete,
       handleFork,
       handleRegenerateTitle,
+      handleRename,
       handleMoveDown,
       handleMoveUp,
       handlePin,
@@ -858,7 +873,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
 
   const rowContent = (close: () => void) =>
     variant === "card" ? (
-      <Pressable
+      <RowPressable
+        key={`${thread.environmentId}:${thread.id}`}
         accessibilityHint={swipeAccessibilityHint}
         accessibilityLabel={[
           thread.title,
@@ -873,12 +889,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           close();
           onSelectThread(thread);
         }}
-        style={({ pressed }) => ({
-          backgroundColor:
-            pressed && !glass.opaque ? themeColorWithAlpha(glass.accent, 0.12) : "transparent",
-          borderRadius: SIDEBAR_V2_ROW_RADIUS,
-          opacity: pressed ? 0.9 : 1,
-        })}
+        style={{ borderRadius: SIDEBAR_V2_ROW_RADIUS, borderCurve: "continuous" }}
       >
         <GlassCard
           tone={selected ? "accent" : "default"}
@@ -890,9 +901,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             <ActiveThreadBorder visible={visible} radius={SIDEBAR_V2_ROW_RADIUS} />
           ) : null}
         </GlassCard>
-      </Pressable>
+      </RowPressable>
     ) : (
-      <Pressable
+      <RowPressable
+        key={`${thread.environmentId}:${thread.id}`}
         accessibilityHint={swipeAccessibilityHint}
         accessibilityLabel={[
           thread.title,
@@ -907,12 +919,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           close();
           onSelectThread(thread);
         }}
-        style={({ pressed }) => ({
-          backgroundColor:
-            pressed && !glass.opaque ? themeColorWithAlpha(glass.accent, 0.12) : "transparent",
-          borderRadius: SIDEBAR_V2_ROW_RADIUS,
-          opacity: pressed ? 0.9 : 1,
-        })}
+        style={{ borderRadius: SIDEBAR_V2_ROW_RADIUS, borderCurve: "continuous" }}
       >
         <GlassCard tone={selected ? "accent" : "default"} radius={SIDEBAR_V2_ROW_RADIUS}>
           {/* Settled history recedes: dimmed favicon + muted title. */}
@@ -964,11 +971,14 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             </Text>
           </View>
         </GlassCard>
-      </Pressable>
+      </RowPressable>
     );
 
   return (
     <>
+      {customSnoozeOpen && (
+        <CustomSnoozeSheet onClose={() => setCustomSnoozeOpen(false)} onSnooze={handleSnooze} />
+      )}
       <ThreadSwipeable
         threadKey={`${thread.environmentId}:${thread.id}`}
         backgroundColor="transparent"

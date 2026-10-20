@@ -338,9 +338,7 @@ export function contextualActivityRows(
         thread?.session?.status === "interrupted" ||
         thread?.session?.status === "stopped",
       ...(label ? { projectLabel: label.slice(0, 300) } : {}),
-      ...(project && label
-        ? { projectIcon: activityProjectIcon(label, project.workspaceRoot, project.projectIcon) }
-        : {}),
+      ...(project && label ? { projectIcon: activityProjectIcon(label, project.projectIcon) } : {}),
       projectKind: project?.stave ? (project.stave.isSaga ? "saga" : "space") : "project",
       excerpt: (row.status === "Action failed"
         ? (row.mergeStatus ?? "Action failed")

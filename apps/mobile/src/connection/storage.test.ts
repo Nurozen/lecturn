@@ -135,7 +135,11 @@ describe("mobile connection catalog storage", () => {
       expect(document.remoteDpopTokens[0]?.accountId).toBe("user_a");
 
       yield* catalog.update((current) => ({ ...current }));
-      expect(JSON.parse(memory.values.get(CONNECTION_CATALOG_KEY)!)).toEqual(tagged);
+      expect(JSON.parse(memory.values.get(CONNECTION_CATALOG_KEY)!)).toEqual({
+        ...tagged,
+        // The catalog now persists which saved environments are switched off.
+        disabledEnvironmentIds: [],
+      });
     }),
   );
 });

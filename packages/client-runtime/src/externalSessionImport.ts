@@ -112,7 +112,7 @@ export function groupExternalSessionsByFolder<
     else sessionsByPath.set(path, [session]);
   }
   const folders = [...sessionsByPath].map(([path, sessions]) => {
-    const sorted = sessions.toSorted(newestFirst);
+    const sorted = [...sessions].sort(newestFirst);
     const newest = sorted[0]!;
     const countByInstance = new Map<ProviderInstanceId, ExternalSessionFolderProviderCount>();
     for (const session of sorted) {
@@ -128,7 +128,7 @@ export function groupExternalSessionsByFolder<
       name: inferProjectTitleFromPath(newest.cwd),
       latestUpdatedAt: newest.updatedAt,
       sessionCount: sorted.length,
-      providerCounts: [...countByInstance.values()].toSorted(
+      providerCounts: [...countByInstance.values()].sort(
         (left, right) =>
           right.count - left.count ||
           left.providerInstanceId.localeCompare(right.providerInstanceId),
@@ -136,7 +136,7 @@ export function groupExternalSessionsByFolder<
       project: projectByPath.get(path) ?? null,
     } satisfies ExternalSessionFolder<TProject>;
   });
-  return folders.toSorted(
+  return folders.sort(
     (left, right) =>
       Date.parse(right.latestUpdatedAt) - Date.parse(left.latestUpdatedAt) ||
       left.cwd.localeCompare(right.cwd),
@@ -155,7 +155,7 @@ export function sessionsInFolder<TSession extends ExternalSessionSummary>(
   const path = normalizeProjectPathForComparison(folder);
   return sessions
     .filter((session) => normalizeProjectPathForComparison(session.cwd) === path)
-    .toSorted(newestFirst);
+    .sort(newestFirst);
 }
 
 /**
@@ -262,6 +262,6 @@ export function latestImported<
   imported: ReadonlyArray<{ readonly session: TSession; readonly value: TResult }>,
 ): TResult | null {
   return (
-    imported.toSorted((left, right) => newestFirst(left.session, right.session))[0]?.value ?? null
+    [...imported].sort((left, right) => newestFirst(left.session, right.session))[0]?.value ?? null
   );
 }

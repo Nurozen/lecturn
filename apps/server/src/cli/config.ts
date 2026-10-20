@@ -1,4 +1,5 @@
 import * as NetService from "@lecturn/shared/Net";
+import { OtlpHeadersFromString, OtlpProtocol } from "@lecturn/shared/observability";
 import { parsePersistedServerObservabilitySettings } from "@lecturn/shared/serverSettings";
 import { DesktopBackendBootstrap, PortSchema } from "@lecturn/contracts";
 import * as Config from "effect/Config";
@@ -8,6 +9,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as LogLevel from "effect/LogLevel";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import * as SchemaTransformation from "effect/SchemaTransformation";
@@ -100,6 +102,13 @@ const EnvServerConfig = Config.all({
   otlpServiceName: Config.string("LECTURN_OTLP_SERVICE_NAME").pipe(
     Config.withDefault("lecturn-server"),
   ),
+  otlpHeaders: Config.schema(OtlpHeadersFromString, "LECTURN_OTLP_HEADERS").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  otlpProtocol: Config.schema(OtlpProtocol, "LECTURN_OTLP_PROTOCOL").pipe(
+    Config.withDefault("http/json"),
+  ),
   mode: Config.schema(ServerConfig.RuntimeMode, "LECTURN_MODE").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -146,6 +155,26 @@ const EnvServerConfig = Config.all({
   threadForkingEnabled: Config.boolean("LECTURN_THREAD_FORKING").pipe(Config.withDefault(true)),
   staveEnabled: Config.boolean("LECTURN_STAVE").pipe(Config.withDefault(true)),
 });
+
+const DevAuthTokenConfig = Config.redacted("LECTURN_DEV_AUTH_TOKEN").pipe(
+  Config.map((token) => Redacted.make(Redacted.value(token).trim())),
+  Config.mapOrFail((token) =>
+    Redacted.value(token).length === 0 || Redacted.value(token).length >= 32
+      ? Effect.succeed(token)
+      : Effect.fail(
+          new Config.ConfigError(
+            new Schema.SchemaError(
+              new SchemaIssue.InvalidValue({
+                message: "LECTURN_DEV_AUTH_TOKEN must contain at least 32 characters.",
+              }),
+            ),
+          ),
+        ),
+  ),
+  Config.option,
+  Config.map(Option.filter((token) => Redacted.value(token).length > 0)),
+  Config.map(Option.getOrUndefined),
+);
 
 export interface CliServerFlags {
   readonly mode: Option.Option<ServerConfig.RuntimeMode>;
@@ -274,6 +303,8 @@ export const resolveServerConfig = (
       resolveOptionPrecedence(normalizedFlags.devUrl, Option.fromUndefinedOr(env.devUrl)),
       () => undefined,
     );
+    const devAuthToken =
+      mode === "web" && devUrl !== undefined ? yield* DevAuthTokenConfig : undefined;
     const explicitBaseDir = resolveOptionPrecedence(
       normalizedFlags.baseDir,
       Option.fromUndefinedOr(env.lecturnHome),
@@ -371,6 +402,8 @@ export const resolveServerConfig = (
         persistedObservabilitySettings.otlpMetricsUrl,
       otlpExportIntervalMs: env.otlpExportIntervalMs,
       otlpServiceName: env.otlpServiceName,
+      otlpHeaders: env.otlpHeaders,
+      otlpProtocol: env.otlpProtocol,
       mode,
       port,
       cwd,
@@ -380,6 +413,7 @@ export const resolveServerConfig = (
       host,
       staticDir,
       devUrl,
+      ...(devAuthToken === undefined ? {} : { devAuthToken }),
       devAllowedOrigins: env.devAllowedOrigins,
       noBrowser,
       startupPresentation,

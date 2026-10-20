@@ -2,6 +2,7 @@ import {
   ApprovalRequestId,
   CheckpointRef,
   CommandId,
+  ComposerContextId,
   CorrelationId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
@@ -896,6 +897,39 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("lecturn-projection
         yield* projectionPipeline.bootstrap;
         assert.deepEqual(yield* readLinks(), []);
         assert.deepEqual(yield* readThreadUpdatedAt(), [{ updatedAt: "2026-01-01T00:00:05.000Z" }]);
+
+        // Older Forgejo rows stored a portless host; unlink by their URL's authority.
+        yield* eventStore.append({
+          ...base("2026-01-01T00:00:05.100Z"),
+          type: "thread.pull-request-linked",
+          payload: {
+            threadId,
+            link: {
+              host: "forge.example",
+              repository: "team/repo",
+              number: 42,
+              url: "http://forge.example:3000/team/repo/pulls/42",
+              source: "agent",
+              linkedAt: "2026-01-01T00:00:05.100Z",
+              snapshot: null,
+              stack: null,
+            },
+            updatedAt: "2026-01-01T00:00:05.100Z",
+          },
+        });
+        yield* eventStore.append({
+          ...base("2026-01-01T00:00:05.200Z"),
+          type: "thread.pull-request-unlinked",
+          payload: {
+            threadId,
+            host: "forge.example:3000",
+            repository: "team/repo",
+            number: 42,
+            updatedAt: "2026-01-01T00:00:05.200Z",
+          },
+        });
+        yield* projectionPipeline.bootstrap;
+        assert.deepEqual(yield* readLinks(), []);
 
         // Deleting the thread clears whatever links it still had.
         yield* eventStore.append({
@@ -4694,6 +4728,50 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
     }),
   );
 
+  it.effect("persists and clears a project monogram", () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const sql = yield* SqlClient.SqlClient;
+      const projectId = ProjectId.make("project-monogram");
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-monogram-create"),
+        projectId,
+        title: "Monogram",
+        workspaceRoot: "/tmp/project-monogram",
+        defaultModelSelection: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      yield* engine.dispatch({
+        type: "project.meta.update",
+        commandId: CommandId.make("cmd-monogram-save"),
+        projectId,
+        projectIcon: { kind: "monogram", text: "LE", color: "violet" },
+      });
+      const saved = yield* sql<{
+        readonly icon: string | null;
+      }>`SELECT project_icon_json AS icon FROM projection_projects WHERE project_id = ${projectId}`;
+      assert.deepEqual(saved, [
+        { icon: '{"kind":"lucide","name":"folder-code","color":"violet","monogramText":"LE"}' },
+      ]);
+      const persisted = yield* sql<{ readonly icon: string }>`
+        SELECT json_extract(payload_json, '$.projectIcon') AS icon FROM orchestration_events
+        WHERE command_id = ${CommandId.make("cmd-monogram-save")}
+      `;
+      assert.deepEqual(persisted, saved);
+      yield* engine.dispatch({
+        type: "project.meta.update",
+        commandId: CommandId.make("cmd-monogram-clear"),
+        projectId,
+        projectIcon: null,
+      });
+      const cleared = yield* sql<{
+        readonly icon: string | null;
+      }>`SELECT project_icon_json AS icon FROM projection_projects WHERE project_id = ${projectId}`;
+      assert.deepEqual(cleared, [{ icon: null }]);
+    }),
+  );
+
   it.effect("re-creating a deleted thread id starts from an empty projection", () =>
     Effect.gen(function* () {
       const engine = yield* OrchestrationEngineService;
@@ -5016,6 +5094,22 @@ it.layer(
   const childActivityId = EventId.make("00000000-0000-4000-8000-000000000c05");
   const childPlanId = "plan-child-1";
 
+  const childMessageContext = {
+    version: 1 as const,
+    records: [
+      {
+        version: 1 as const,
+        kind: "terminal" as const,
+        contextId: ComposerContextId.make("fork-terminal-1"),
+        label: "build",
+        terminalId: "terminal-1",
+        terminalLabel: "Build",
+        lineStart: 7,
+        lineEnd: 7,
+        text: "compiled successfully",
+      },
+    ],
+  };
   const childAttachment = {
     type: "image" as const,
     id: "thread-fork-child-00000000-0000-4000-8000-000000000c10-png",
@@ -5059,6 +5153,7 @@ it.layer(
           role: "user" as const,
           text: "inherited first ask",
           attachments: [childAttachment],
+          context: childMessageContext,
           turnId: parentTurn1,
           streaming: false,
           createdAt: "2026-06-01T00:10:00.000Z",
@@ -5407,6 +5502,10 @@ it.layer(
       assert.deepEqual(
         childDetail.messages.find((message) => message.id === childUser1MessageId)?.attachments,
         [childAttachment],
+      );
+      assert.deepEqual(
+        childDetail.messages.find((message) => message.id === childUser1MessageId)?.context,
+        childMessageContext,
       );
 
       const childPlans = yield* sql<{ readonly planId: string; readonly turnId: string | null }>`

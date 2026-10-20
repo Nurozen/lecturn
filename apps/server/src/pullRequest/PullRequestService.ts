@@ -26,6 +26,7 @@ import {
   pullRequestProviderRequirement,
   resolvePullRequestAuthorFilter,
   type OrchestrationProjectShell,
+  type ProjectId,
   type PullRequestAction,
   type PullRequestActionInput,
   type PullRequestActivity,
@@ -48,6 +49,9 @@ import {
   type PullRequestProviderSummary,
   type PullRequestReactionInput,
   type PullRequestRef,
+  type PullRequestRoutingResult,
+  type PullRequestRoutingIdentityInput,
+  type PullRequestRoutingIdentityResult,
   type PullRequestReviewVerdict,
   type PullRequestReviewerCandidateList,
   type PullRequestReviewerRequestInput,
@@ -68,8 +72,10 @@ import { normalizeProjectPathForComparison } from "@lecturn/shared/path";
 import {
   canonicalRepositoryKey,
   detectSourceControlProviderFromRemoteUrl,
+  isSshRemoteUrl,
 } from "@lecturn/shared/sourceControl";
 
+import { AllowGitHubReserve } from "../sourceControl/GitHubCli.ts";
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as SourceControlRateLimit from "../sourceControl/SourceControlRateLimit.ts";
@@ -144,6 +150,14 @@ const VIEWER_CACHE_CAPACITY = 32;
 
 export type PullRequestError = PullRequestUnavailableError | PullRequestOperationError;
 
+const routingCredential = Context.Reference<{
+  readonly credentialFingerprint: string;
+  readonly viewer: string;
+} | null>("lecturn/PullRequestService/routingCredential", { defaultValue: () => null });
+// Internal only: the client cannot choose its cache's credential namespace.
+const credentialNamespace = Symbol("pullRequestCredentialNamespace");
+type CredentialRef = PullRequestRef & { readonly [credentialNamespace]?: string };
+
 export class PullRequestService extends Context.Service<
   PullRequestService,
   {
@@ -154,6 +168,16 @@ export class PullRequestService extends Context.Service<
     readonly listStats: (
       input: PullRequestListStatsInput,
     ) => Effect.Effect<PullRequestListStatsResult, PullRequestError>;
+    readonly routing: (
+      input: PullRequestRef,
+    ) => Effect.Effect<PullRequestRoutingResult, PullRequestError>;
+    readonly routingIdentity: (
+      input: PullRequestRoutingIdentityInput,
+    ) => Effect.Effect<PullRequestRoutingIdentityResult, PullRequestError>;
+    readonly withRoutingCredential: <A, E, R>(
+      input: PullRequestRef,
+      operation: Effect.Effect<A, E, R>,
+    ) => Effect.Effect<A, E | PullRequestError, R>;
     readonly summary: (
       input: PullRequestRef,
       options?: { readonly recoverTransientFailure?: boolean },
@@ -172,7 +196,7 @@ export class PullRequestService extends Context.Service<
       Scope.Scope
     >;
     readonly subscribeRefreshes: Stream.Stream<number>;
-    readonly refreshAfterTurn: Effect.Effect<void>;
+    readonly refreshAfterTurn: (projectId: ProjectId) => Effect.Effect<void>;
     readonly detail: (input: PullRequestRef) => Effect.Effect<PullRequestDetail, PullRequestError>;
     readonly activity: (
       input: PullRequestRef,
@@ -458,6 +482,7 @@ export function withRateLimitBackoff(
       ),
       Effect.flatMap((lease) =>
         effect.pipe(
+          Effect.provideService(AllowGitHubReserve, allowPaused),
           Effect.tap(() => limits.recordSuccess({ ...key, lease })),
           Effect.tapError((error) =>
             error.reason === "rate-limited"
@@ -488,6 +513,10 @@ export function withRateLimitBackoff(
     kind: api.kind,
     capabilities: api.capabilities,
     getViewer: wrap("getViewer", api.getViewer),
+    ...(api.getRoutingIdentity === undefined ? {} : { getRoutingIdentity: api.getRoutingIdentity }),
+    ...(api.withVerifiedCredential === undefined
+      ? {}
+      : { withVerifiedCredential: api.withVerifiedCredential }),
     listChangeRequests: wrap("listChangeRequests", api.listChangeRequests),
     ...(api.listChangeRequestsAcross === undefined
       ? {}
@@ -720,11 +749,22 @@ export const make = Effect.gen(function* () {
     for (const { project, identity, cwd } of targets) {
       if (filter.projectId !== undefined && project.id !== filter.projectId) continue;
       if (filter.projectIds !== undefined && !filter.projectIds.includes(project.id)) continue;
-      if (identity.provider !== "unknown" || repositorySelector(identity) === null) continue;
+      if (
+        (identity.provider !== "unknown" &&
+          !(identity.provider === "forgejo" && isSshRemoteUrl(identity.locator.remoteUrl))) ||
+        repositorySelector(identity) === null
+      )
+        continue;
       const host = pullRequestHostOf(identity, "unknown");
       // A legacy identity has no canonical host until its provider is refined, so it must reach
       // the refinement before a host filter can decide whether it belongs in the result.
-      if (filter.host !== undefined && host !== "unknown" && host !== filter.host.toLowerCase()) {
+      if (
+        filter.host !== undefined &&
+        host !== "unknown" &&
+        host !== filter.host.toLowerCase() &&
+        pullRequestHostOf(identity, "forgejo") !== filter.host.toLowerCase() &&
+        !isSshRemoteUrl(identity.locator.remoteUrl)
+      ) {
         continue;
       }
       const { remoteName, remoteUrl } = identity.locator;
@@ -745,20 +785,28 @@ export const make = Effect.gen(function* () {
             Effect.suspend(() =>
               sourceControlProviders.resolveHandle({
                 cwd,
-                context: { provider, remoteName, remoteUrl },
+                context: {
+                  provider:
+                    provider.kind === "forgejo" ? { ...provider, kind: "unknown" } : provider,
+                  remoteName,
+                  remoteUrl,
+                  ...(filter.host !== undefined && isSshRemoteUrl(remoteUrl)
+                    ? { requestedHost: filter.host }
+                    : {}),
+                },
               }),
             ).pipe(
               Effect.flatMap((handle) => {
-                const kind = handle.context?.provider.kind;
-                return kind === undefined || kind === "unknown"
+                const refined = handle.context?.provider;
+                return refined === undefined || refined.kind === "unknown"
                   ? Effect.fail(undefined)
-                  : Effect.succeed(kind);
+                  : Effect.succeed(refined);
               }),
             ),
           ),
         ).pipe(
-          Effect.map((kind) => [baseUrl, kind] as const),
-          Effect.orElseSucceed(() => [baseUrl, "unknown"] as const),
+          Effect.map((provider) => [baseUrl, provider] as const),
+          Effect.orElseSucceed(() => [baseUrl, null] as const),
         ),
       { concurrency: REPOSITORY_CONCURRENCY },
     ).pipe(Effect.map((resolved) => new Map(resolved)));
@@ -769,7 +817,10 @@ export const make = Effect.gen(function* () {
     deduplicate = true,
     allRemotes = false,
   ): Effect.Effect<WorkspaceProjects, PullRequestError> =>
-    projections.getShellSnapshot().pipe(
+    (filter.projectId === undefined
+      ? projections.getProjectShells(filter.projectIds)
+      : projections.getProjectShellById(filter.projectId).pipe(Effect.map(Option.toArray))
+    ).pipe(
       Effect.mapError(
         (error) =>
           new PullRequestOperationError({
@@ -778,9 +829,9 @@ export const make = Effect.gen(function* () {
             cause: error,
           }),
       ),
-      Effect.flatMap((snapshot) =>
+      Effect.flatMap((shells) =>
         Effect.gen(function* () {
-          const projects = snapshot.projects.filter(
+          const projects = shells.filter(
             (project) =>
               (filter.projectId === undefined || project.id === filter.projectId) &&
               (filter.projectIds === undefined || filter.projectIds.includes(project.id)),
@@ -790,11 +841,11 @@ export const make = Effect.gen(function* () {
             (project) => resolveProjectRepositories(project, path, vcs, allRemotes),
             { concurrency: REPOSITORY_CONCURRENCY },
           )).flat();
-          const refinedKinds = yield* refineUnknownProjectKinds(targets, filter);
-          return { refinedKinds, targets };
+          const refinedProviders = yield* refineUnknownProjectKinds(targets, filter);
+          return { refinedProviders, targets };
         }),
       ),
-      Effect.map(({ refinedKinds, targets }) => {
+      Effect.map(({ refinedProviders, targets }) => {
         const supported: SupportedProject[] = [];
         const identities: Array<
           Pick<PullRequestListEntry, "projectId" | "repository" | "host" | "provider">
@@ -814,12 +865,22 @@ export const make = Effect.gen(function* () {
           // Worktrees of one repository are separate projects; reading the remote once keeps
           // the page from repeating every change request per local checkout. The host is part
           // of the key, so the same `owner/repo` on two hosts stays two repositories.
-          if (kind === "unknown") {
+          let refinedProvider: SourceControlProviderInfo | null | undefined;
+          if (
+            kind === "unknown" ||
+            (kind === "forgejo" && isSshRemoteUrl(identity.locator.remoteUrl))
+          ) {
             const provider = detectSourceControlProviderFromRemoteUrl(identity.locator.remoteUrl);
-            kind = provider === null ? kind : (refinedKinds.get(provider.baseUrl) ?? kind);
+            refinedProvider = provider === null ? null : refinedProviders.get(provider.baseUrl);
+            kind = refinedProvider?.kind ?? kind;
           }
-          const host = pullRequestHostOf(identity, kind);
-          if (filter.host !== undefined && host !== filter.host.toLowerCase()) continue;
+          const host =
+            refinedProvider?.kind === "forgejo"
+              ? new URL(refinedProvider.baseUrl).host.toLowerCase()
+              : pullRequestHostOf(identity, kind);
+          if (filter.host !== undefined && host !== filter.host.toLowerCase()) {
+            continue;
+          }
           identities.push({ projectId: project.id, repository, host, provider: kind });
           const api = registry.get(kind);
           // Recorded before the de-duplication below, so the viewer lookup keeps the alternates
@@ -966,6 +1027,18 @@ export const make = Effect.gen(function* () {
       ),
     );
 
+  const canonicalRef = Effect.fn("PullRequestService.canonicalRef")(function* <
+    I extends PullRequestRef,
+  >(input: I) {
+    const project = yield* requireProject(input);
+    return {
+      ...input,
+      projectId: project.project.id,
+      host: project.host,
+      repository: project.repository,
+    };
+  });
+
   /**
    * What the signed-in account may do with this change request, asked of the host itself. Every
    * write goes through it: the page hides what a viewer may not do, and a request that arrived
@@ -973,13 +1046,19 @@ export const make = Effect.gen(function* () {
    * handed to a provider on the client's word. Read freshly for that reason, rather than taken
    * from whatever the detail said when the page loaded.
    */
-  const viewerPermissionsOf = (project: SupportedProject, ref: PullRequestRef, operation: string) =>
+  const viewerPermissionsOf = (
+    project: SupportedProject,
+    ref: PullRequestRef,
+    operation: string,
+    includeUpdateBranch = false,
+  ) =>
     project.api
       .getViewerPermissions({
         cwd: project.cwd,
         repository: project.repository,
         host: project.host,
         number: ref.number,
+        includeUpdateBranch,
       })
       .pipe(Effect.mapError(toPullRequestError(operation)));
 
@@ -1039,7 +1118,7 @@ export const make = Effect.gen(function* () {
         return Effect.die(new Error(`Missing pull request provider: ${kind}`));
       }
       const api = withRateLimitBackoff(registered, host, rateLimits);
-      return Effect.firstSuccessOf(roots.map((cwd) => api.getViewer({ cwd }))).pipe(
+      return Effect.firstSuccessOf(roots.map((cwd) => api.getViewer({ cwd, host }))).pipe(
         Effect.map((viewer) => ({
           host,
           kind,
@@ -1505,7 +1584,90 @@ export const make = Effect.gen(function* () {
    * and a host that cannot say leaves it null rather than failing the read it decorates.
    */
   const viewerOf = (project: SupportedProject): Effect.Effect<string | null> =>
-    resolveViewers([project], new Map()).pipe(Effect.map(([resolved]) => resolved?.viewer ?? null));
+    routingCredential.pipe(
+      Effect.flatMap((credential) =>
+        credential !== null
+          ? Effect.succeed(credential.viewer)
+          : resolveViewers([project], new Map()).pipe(
+              Effect.map(([resolved]) => resolved?.viewer ?? null),
+            ),
+      ),
+    );
+
+  const routingIdentity: PullRequestService["Service"]["routingIdentity"] = Effect.fn(
+    "PullRequestService.routingIdentity",
+  )(function* (input) {
+    const host = input.host.toLowerCase();
+    const { supported } = yield* listWorkspaceProjects({ host });
+    const project = supported.find((candidate) => candidate.api.kind === "github");
+    const api = registry.get("github");
+    if (project === undefined || api?.getRoutingIdentity === undefined) {
+      return yield* new PullRequestUnavailableError({ reason: "provider-unsupported" });
+    }
+    const identity = yield* api
+      .getRoutingIdentity({
+        cwd: project.cwd,
+        host,
+      })
+      .pipe(Effect.mapError(toPullRequestError("routeIdentity")));
+    return { ...identity, host, provider: "github" as const };
+  });
+
+  const withRoutingCredential: PullRequestService["Service"]["withRoutingCredential"] = (
+    input,
+    operation,
+  ) =>
+    Effect.gen(function* () {
+      if (input.expectedAccountId === undefined) return yield* operation;
+      const rejected = () =>
+        new PullRequestOperationError({
+          operation: "routeIdentity",
+          detail: "The GitHub account could not be verified before starting the operation.",
+        });
+      const project = yield* requireProject(input).pipe(Effect.mapError(rejected));
+      const api = project.api.kind === "github" ? registry.get("github") : null;
+      if (
+        api?.withVerifiedCredential === undefined ||
+        input.host?.toLowerCase() !== project.host.toLowerCase()
+      ) {
+        return yield* rejected();
+      }
+      const result = yield* api
+        .withVerifiedCredential({ cwd: project.cwd, host: project.host }, (identity) =>
+          identity.accountId === input.expectedAccountId
+            ? operation.pipe(Effect.provideService(routingCredential, identity), Effect.result)
+            : Effect.fail(rejected()),
+        )
+        .pipe(Effect.catchTag("PullRequestProviderError", () => Effect.fail(rejected())));
+      return yield* Effect.fromResult(result);
+    });
+
+  const routing = Effect.fn("PullRequestService.routing")(function* (input: PullRequestRef) {
+    const project = yield* requireProject(input);
+    const api = project.api.kind === "github" ? registry.get("github") : null;
+    if (api?.getRoutingIdentity === undefined) {
+      return yield* new PullRequestUnavailableError({ reason: "provider-unsupported" });
+    }
+    const identity = yield* api
+      .getRoutingIdentity({
+        cwd: project.cwd,
+        host: project.host,
+      })
+      .pipe(Effect.mapError(toPullRequestError("routeIdentity")));
+    if (!identity.viewer.trim() || !identity.accountId.trim()) {
+      return yield* new PullRequestOperationError({
+        operation: "routeIdentity",
+        detail: "The signed-in account could not be verified.",
+      });
+    }
+    return {
+      host: project.host,
+      provider: project.api.kind,
+      ...identity,
+      projectTitle: project.project.title,
+      workspaceRoot: project.project.workspaceRoot,
+    };
+  });
 
   const summaryUncached: PullRequestService["Service"]["summary"] = (input) =>
     requireProject(input).pipe(
@@ -1847,7 +2009,12 @@ export const make = Effect.gen(function* () {
           // What the host can do and what this account may ask of it are two questions, and both
           // have to say yes. The second is asked last, because it costs a request and the checks
           // above do not.
-          return viewerPermissionsOf(project, input, "runAction").pipe(
+          return viewerPermissionsOf(
+            project,
+            input,
+            "runAction",
+            input.action === "update-branch",
+          ).pipe(
             Effect.flatMap(
               (viewer): Effect.Effect<{ repository: string; host: string }, PullRequestError> => {
                 const stackRebase =
@@ -1897,7 +2064,9 @@ export const make = Effect.gen(function* () {
                     // Once the authorized provider action starts, a failure may leave partial
                     // remote updates. Validation and permission failures above changed nothing.
                     Effect.ensuring(
-                      input.stackNumber === undefined ? Effect.void : refreshAfterTurn,
+                      input.stackNumber === undefined
+                        ? Effect.void
+                        : refreshAfterTurn(project.project.id),
                     ),
                     Effect.mapError(toPullRequestError("runAction")),
                     Effect.as({ repository: project.repository, host: project.host }),
@@ -2439,6 +2608,12 @@ export const make = Effect.gen(function* () {
 
   const context = yield* Effect.context<never>();
   const runFork = Effect.runForkWith(context);
+  const revalidate = <A, E>(read: Effect.Effect<A, E>) =>
+    Effect.context<never>().pipe(
+      Effect.flatMap((caller) =>
+        Effect.sync(() => runFork(Effect.ignore(read).pipe(Effect.provideContext(caller)))),
+      ),
+    );
 
   /**
    * The diff is not live-polled and is expensive enough to keep its stale-while-revalidate path.
@@ -2464,7 +2639,7 @@ export const make = Effect.gen(function* () {
         // Run as its own fiber rather than a child: the caller is answered and gone before the
         // refresh lands. The read still coalesces on the cache key, so ten stale reads in one
         // window cost one host request — and a failed refresh costs nothing but the retry.
-        return Effect.sync(() => runFork(Effect.ignore(recorded))).pipe(Effect.as(snapshot.value));
+        return revalidate(recorded).pipe(Effect.as(snapshot.value));
       });
     };
   })();
@@ -2522,9 +2697,7 @@ export const make = Effect.gen(function* () {
       const snapshot = held.get(key);
       if (snapshot === undefined) return read(key, effect);
       if (mode === "reuse") return Effect.succeed(snapshot.value);
-      return Effect.sync(() => runFork(Effect.ignore(read(key, effect)))).pipe(
-        Effect.as(snapshot.value),
-      );
+      return revalidate(read(key, effect)).pipe(Effect.as(snapshot.value));
     };
     return { peek: (key: string) => held.get(key)?.value, read, record, serveHeld };
   };
@@ -2537,8 +2710,9 @@ export const make = Effect.gen(function* () {
   // scope re-entering `refEpochs` after eviction can never mint a key an old entry still has.
   let epochCounter = 0;
   let listingsEpoch = 0;
-  let turnRefreshEpoch = 0;
   const refEpochs = new Map<string, number>();
+  const projectEpochs = new Map<ProjectId, number>();
+  let projectEpochFloor = 0;
   const REF_EPOCH_CAPACITY = 2_048;
   // Invalidation covers hostless and legacy bare Azure aliases. Full paths and hosts
   // still distinguish cached values; another same-named repo may only be re-read.
@@ -2549,28 +2723,31 @@ export const make = Effect.gen(function* () {
       ref.number,
     ]);
   const refEpoch = (ref: PullRequestRef) =>
-    Math.max(turnRefreshEpoch, refEpochs.get(refScope(ref)) ?? 0);
+    Math.max(
+      projectEpochs.get(ref.projectId) ?? projectEpochFloor,
+      refEpochs.get(refScope(ref)) ?? 0,
+    );
   // Keys carry the reference back out of the cache loader, so the slot layout is shared with
   // `refOfCacheKey` rather than read positionally at every loader.
-  const refCacheKey = (ref: PullRequestRef) =>
+  const refCacheKey = (ref: CredentialRef) =>
     JSON.stringify([
       refEpoch(ref),
       ref.projectId,
       ref.host?.toLowerCase() ?? null,
       ref.repository.toLowerCase(),
       ref.number,
+      ref.expectedAccountId ?? null,
+      ref[credentialNamespace] ?? null,
     ]);
   const refOfCacheKey = (key: string): PullRequestRef => {
-    const [, projectId, host, repository, number] = JSON.parse(key) as [
-      number,
-      string,
-      string | null,
-      string,
-      number,
-    ];
+    const [, projectId, host, repository, number, expectedAccountId, fingerprint] = JSON.parse(
+      key,
+    ) as [number, string, string | null, string, number, string | null, string | null];
     return {
       projectId,
       ...(host === null ? {} : { host }),
+      ...(expectedAccountId === null ? {} : { expectedAccountId }),
+      ...(fingerprint === null ? {} : { [credentialNamespace]: fingerprint }),
       repository,
       number,
     } as PullRequestRef;
@@ -2617,7 +2794,7 @@ export const make = Effect.gen(function* () {
   };
 
   const persistedRead = Effect.fn("PullRequestService.persistedRead")(function* <A>(
-    input: PullRequestRef,
+    input: CredentialRef,
     operation: string,
     codec: Schema.Codec<A, string>,
     read: Effect.Effect<A, PullRequestError>,
@@ -2631,6 +2808,8 @@ export const make = Effect.gen(function* () {
       project.project.id,
       project.project.workspaceRoot,
       String(input.number),
+      input.expectedAccountId ?? "",
+      input[credentialNamespace] ?? "",
     ]
       .map(encodeURIComponent)
       .join(":");
@@ -2649,7 +2828,10 @@ export const make = Effect.gen(function* () {
         ),
       ),
     );
-    const payload = yield* readCache.get(key, encodedRead);
+    const payload = yield* readCache.get(key, encodedRead, [
+      `project:${input.projectId}`,
+      refScope(input),
+    ]);
     const decoded = yield* Schema.decodeUnknownEffect(codec)(payload).pipe(Effect.option);
     return Option.isSome(decoded) ? decoded.value : yield* lookup;
   });
@@ -2661,6 +2843,7 @@ export const make = Effect.gen(function* () {
     const cached = persistedRead(input, "summary", summaryCodec, summaryUncached(input));
     const held = lastGoodSummary.peek(key);
     return held !== undefined &&
+      input.allowStale !== false &&
       (options?.recoverTransientFailure !== false || held.state === "merged")
       ? Effect.succeed(held)
       : cached.pipe(
@@ -2821,18 +3004,17 @@ export const make = Effect.gen(function* () {
     // `serveHeld` returns immediately. Skip the write when that read is older
     // than a later strict summary — display reuse would otherwise keep the
     // regression and never ask the host again.
-    return lastGoodDetail.serveHeld(
-      key,
-      Cache.get(detailCache, key).pipe(
-        Effect.tap((value) => {
-          const summary = summaryFromDetail(value, lastGoodSummary.peek(key));
-          return shouldReplaceHeldSummary(key, summary)
-            ? lastGoodSummary.record(key, summary)
-            : Effect.void;
-        }),
-      ),
-      "revalidate",
+    const read = Cache.get(detailCache, key).pipe(
+      Effect.tap((value) => {
+        const summary = summaryFromDetail(value, lastGoodSummary.peek(key));
+        return shouldReplaceHeldSummary(key, summary)
+          ? lastGoodSummary.record(key, summary)
+          : Effect.void;
+      }),
     );
+    return input.allowStale === false
+      ? read.pipe(Effect.tap((value) => lastGoodDetail.record(key, value)))
+      : lastGoodDetail.serveHeld(key, read, "revalidate");
   };
 
   const activityCache = yield* Cache.makeWith(
@@ -2851,21 +3033,9 @@ export const make = Effect.gen(function* () {
 
   const diffCache = yield* Cache.makeWith(
     (key: string) => {
-      const [, projectId, host, repository, number, cursor, commit] = JSON.parse(key) as [
-        number,
-        string,
-        string | null,
-        string,
-        number,
-        string | null,
-        string | null,
-        string | null,
-      ];
+      const [reference, cursor, commit] = JSON.parse(key) as [string, string | null, string | null];
       return diffUncached({
-        projectId,
-        ...(host === null ? {} : { host }),
-        repository,
-        number,
+        ...refOfCacheKey(reference),
         ...(cursor === null ? {} : { cursor }),
         ...(commit === null ? {} : { commit }),
       } as PullRequestDiffInput);
@@ -2874,18 +3044,14 @@ export const make = Effect.gen(function* () {
       capacity: DIFF_CACHE_CAPACITY,
       timeToLive: (exit, key) => {
         if (!Exit.isSuccess(exit)) return Duration.zero;
-        const commit = (JSON.parse(key) as ReadonlyArray<unknown>)[6];
+        const commit = (JSON.parse(key) as ReadonlyArray<unknown>)[2];
         return commit === null ? DIFF_CACHE_TTL : COMMIT_DIFF_CACHE_TTL;
       },
     },
   );
   const diff: PullRequestService["Service"]["diff"] = (input) => {
     const key = JSON.stringify([
-      refEpoch(input),
-      input.projectId,
-      input.host?.toLowerCase() ?? null,
-      input.repository.toLowerCase(),
-      input.number,
+      refCacheKey(input),
       input.cursor ?? null,
       input.commit ?? null,
       input.commit === undefined
@@ -2965,7 +3131,14 @@ export const make = Effect.gen(function* () {
   const invalidate: PullRequestService["Service"]["invalidate"] = (input) => {
     const reference = input.reference;
     if (reference !== undefined) {
-      return readCache.invalidate.pipe(Effect.andThen(Effect.sync(() => bumpRefEpoch(reference))));
+      return canonicalRef(reference).pipe(
+        Effect.flatMap((ref) =>
+          readCache
+            .invalidate(refScope(ref))
+            .pipe(Effect.andThen(Effect.sync(() => bumpRefEpoch(ref)))),
+        ),
+        Effect.ignore,
+      );
     }
     return Effect.sync(() => {
       listingsEpoch = ++epochCounter;
@@ -2973,12 +3146,22 @@ export const make = Effect.gen(function* () {
     }).pipe(Effect.andThen(Cache.invalidateAll(viewerFlights)));
   };
 
-  const refreshAfterTurn: PullRequestService["Service"]["refreshAfterTurn"] = Effect.suspend(() => {
-    turnRefreshEpoch = listingsEpoch = ++epochCounter;
-    return readCache.invalidate.pipe(
-      Effect.andThen(SubscriptionRef.set(pullRequestRefreshes, turnRefreshEpoch)),
-    );
-  });
+  const refreshAfterTurn: PullRequestService["Service"]["refreshAfterTurn"] = (projectId) =>
+    Effect.suspend(() => {
+      listingsEpoch = ++epochCounter;
+      projectEpochs.delete(projectId);
+      if (projectEpochs.size >= REF_EPOCH_CAPACITY) {
+        const oldest = projectEpochs.keys().next().value;
+        if (oldest !== undefined) {
+          projectEpochFloor = projectEpochs.get(oldest)!;
+          projectEpochs.delete(oldest);
+        }
+      }
+      projectEpochs.set(projectId, listingsEpoch);
+      return readCache
+        .invalidate(`project:${projectId}`)
+        .pipe(Effect.andThen(SubscriptionRef.set(pullRequestRefreshes, listingsEpoch)));
+    });
 
   // A mutation's own client re-reads right after it, and every other client's next read must
   // see the action too — so a write forgets the change request it touched and the listings its
@@ -2988,24 +3171,28 @@ export const make = Effect.gen(function* () {
       method: (input: I) => Effect.Effect<void, PullRequestError>,
     ): ((input: I) => Effect.Effect<void, PullRequestError>) =>
     (input) =>
-      readCache.invalidate.pipe(
-        Effect.andThen(method(input)),
-        Effect.ensuring(readCache.invalidate),
-        Effect.tap(() =>
-          Effect.sync(() => {
-            bumpRefEpoch(input);
-            listingsEpoch = ++epochCounter;
-          }),
-        ),
-      );
+      Effect.gen(function* () {
+        const ref = yield* canonicalRef(input);
+        yield* readCache.invalidate(refScope(ref)).pipe(
+          Effect.andThen(method(input)),
+          Effect.ensuring(readCache.invalidate(refScope(ref))),
+          Effect.tap(() =>
+            Effect.sync(() => {
+              bumpRefEpoch(ref);
+              listingsEpoch = ++epochCounter;
+            }),
+          ),
+        );
+      });
   const runActionAndInvalidate: PullRequestService["Service"]["runAction"] = Effect.fn(
     "PullRequestService.runActionAndInvalidate",
   )(function* (input, options) {
-    yield* readCache.invalidate;
+    const ref = yield* canonicalRef(input);
+    yield* readCache.invalidate(refScope(ref));
     const { repository, host } = yield* runAction(input, options).pipe(
-      Effect.ensuring(readCache.invalidate),
+      Effect.ensuring(readCache.invalidate(refScope(ref))),
     );
-    bumpRefEpoch({ ...input, repository, host });
+    bumpRefEpoch({ ...ref, repository, host });
     listingsEpoch = ++epochCounter;
     if (input.action === "merge") {
       // A successful merge action can merely enqueue the PR or enable auto-merge.
@@ -3027,11 +3214,36 @@ export const make = Effect.gen(function* () {
     }
   });
 
+  const credentialCached =
+    <I extends PullRequestRef, Args extends ReadonlyArray<unknown>, A, E>(
+      read: (input: I, ...args: Args) => Effect.Effect<A, E>,
+    ) =>
+    (input: I, ...args: Args) =>
+      Effect.gen(function* () {
+        const ref = yield* canonicalRef(input);
+        const credential = yield* routingCredential;
+        return yield* read(
+          credential === null
+            ? ref
+            : { ...ref, [credentialNamespace]: credential.credentialFingerprint },
+          ...args,
+        );
+      });
+
   return PullRequestService.of({
+    routing,
+    routingIdentity,
+    withRoutingCredential,
     list,
-    listStats,
-    summary,
-    stack,
+    listStats: (input) =>
+      // Each canonical ref resolves the project's checkout remotes, so resolve them together.
+      Effect.forEach(input.refs, (ref) => canonicalRef(ref).pipe(Effect.option), {
+        concurrency: REPOSITORY_CONCURRENCY,
+      }).pipe(
+        Effect.flatMap((refs) => listStats({ ...input, refs: refs.flatMap(Option.toArray) })),
+      ),
+    summary: credentialCached(summary),
+    stack: credentialCached(stack),
     subscribeMerges: PubSub.subscribe(mergedPullRequests).pipe(
       Effect.map((subscription) => Stream.fromSubscription(subscription)),
     ),
@@ -3039,10 +3251,10 @@ export const make = Effect.gen(function* () {
       Stream.filter((revision) => revision > 0),
     ),
     refreshAfterTurn,
-    detail,
-    activity,
+    detail: credentialCached(detail),
+    activity: credentialCached(activity),
     threadComments,
-    diff,
+    diff: credentialCached(diff),
     diffFileContents,
     runAction: runActionAndInvalidate,
     update: invalidatedByMutation(update),

@@ -374,9 +374,10 @@ describe("DesktopBackendConfiguration", () => {
       runtimeId: string;
       sha256: string;
     }> = [];
-    const observedNodePtyRoots: string[] = [];
+    const observedProbeRoots: string[] = [];
     let legacyCleanupCount = 0;
     const linuxAppRoot = "/home/test/.lecturn/wsl-runtime/1.2.3-x64";
+    const resolvedPath = "/home/test/.local/bin:/usr/bin:/bin";
 
     return withPackagedWslHarness(
       {
@@ -394,9 +395,14 @@ describe("DesktopBackendConfiguration", () => {
             });
             return { ok: true, linuxAppRoot };
           },
-          ensureNodePty: (_distro, root) => {
-            observedNodePtyRoots.push(root);
-            return { ok: true, nodePath: "/usr/bin/node", resolvedPath: "/usr/bin:/bin" };
+          probeRuntime: (_distro, root) => {
+            observedProbeRoots.push(root);
+            return { ok: true, resolvedPath };
+          },
+          // The staged runtime carries its own Node and node-pty, so it must
+          // not require the mounted server tree's native dependency check.
+          ensureNodePty: () => {
+            throw new Error("the staged runtime must not probe for node-pty");
           },
         }),
       },
@@ -413,12 +419,22 @@ describe("DesktopBackendConfiguration", () => {
               sha256: archiveHash,
             },
           ]);
-          assert.deepEqual(observedNodePtyRoots, [linuxAppRoot]);
+          assert.deepEqual(observedProbeRoots, [linuxAppRoot]);
           assert.equal(
             config.entryPath,
             path.join(baseDir, "server.asar/apps/server/dist/bin.mjs"),
           );
-          assert.include(config.args, `${linuxAppRoot}/apps/server/dist/bin.mjs`);
+          assert.deepEqual(config.args, [
+            "-d",
+            "Ubuntu",
+            "--exec",
+            "env",
+            `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${resolvedPath}`,
+            `${linuxAppRoot}/lecturn`,
+            "--bootstrap-fd",
+            "0",
+          ]);
+          assert.notInclude(config.args, "/usr/bin/node");
           assert.equal(config.wslRuntimeId, `sha256-${archiveHash}`);
           assert.equal(legacyCleanupCount, 1);
           assert.isTrue(Option.isNone(config.preflightFailure));
@@ -457,8 +473,11 @@ describe("DesktopBackendConfiguration", () => {
 
           assert.deepEqual(observedRuntimeIds, [`sha256-${firstHash}`, `sha256-${secondHash}`]);
           assert.equal(first.wslRuntimeId, observedRuntimeIds[0]);
+          assert.include(first.args, `/runtime/sha256-${firstHash}/lecturn`);
           assert.equal(second.wslRuntimeId, observedRuntimeIds[1]);
+          assert.include(second.args, `/runtime/sha256-${secondHash}/lecturn`);
           assert.isUndefined(invalidIdentity.wslRuntimeId);
+          assert.include(invalidIdentity.args, "/usr/bin/node");
           assert.include(invalidIdentity.args, `${mountedAppRoot}/apps/server/dist/bin.mjs`);
         }),
     );
@@ -484,6 +503,7 @@ describe("DesktopBackendConfiguration", () => {
 
           assert.deepEqual(observedNodePtyRoots, [mountedAppRoot]);
           assert.equal(config.entryPath, mountedEntryPath);
+          assert.include(config.args, "/usr/bin/node");
           assert.include(config.args, `${mountedAppRoot}/apps/server/dist/bin.mjs`);
           assert.isUndefined(config.wslRuntimeId);
           assert.isTrue(Option.isNone(config.preflightFailure));
@@ -491,9 +511,10 @@ describe("DesktopBackendConfiguration", () => {
     );
   });
 
-  it.effect("resolveWsl retires a staged runtime that cannot load node-pty", () => {
+  it.effect("resolveWsl retires a staged runtime whose executable does not start", () => {
     const archiveHash = "c".repeat(64);
     const stagedAppRoot = `/home/test/.lecturn/wsl-runtime/sha256-${archiveHash}`;
+    const observedProbeRoots: string[] = [];
     const observedNodePtyRoots: string[] = [];
     const invalidatedRuntimeIds: string[] = [];
     return withPackagedWslHarness(
@@ -505,11 +526,13 @@ describe("DesktopBackendConfiguration", () => {
             Effect.sync(() => {
               invalidatedRuntimeIds.push(runtimeId);
             }),
+          probeRuntime: (_distro, root) => {
+            observedProbeRoots.push(root);
+            return { ok: false, reason: `${root}/lecturn --version failed (exit 127)` };
+          },
           ensureNodePty: (_distro, root) => {
             observedNodePtyRoots.push(root);
-            return root === stagedAppRoot
-              ? { ok: false, reason: "pty.node could not be loaded", fatal: true }
-              : { ok: true, nodePath: "/usr/bin/node", resolvedPath: "/usr/bin:/bin" };
+            return { ok: true, nodePath: "/usr/bin/node", resolvedPath: "/usr/bin:/bin" };
           },
         }),
       },
@@ -518,8 +541,11 @@ describe("DesktopBackendConfiguration", () => {
           const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
           const config = yield* configuration.resolveWsl({ port: 5000, distro: "Ubuntu" });
 
-          assert.deepEqual(observedNodePtyRoots, [stagedAppRoot, mountedAppRoot]);
+          assert.deepEqual(observedProbeRoots, [stagedAppRoot]);
+          assert.deepEqual(observedNodePtyRoots, [mountedAppRoot]);
+          assert.include(config.args, "/usr/bin/node");
           assert.include(config.args, `${mountedAppRoot}/apps/server/dist/bin.mjs`);
+          assert.notInclude(config.args, `${stagedAppRoot}/lecturn`);
           assert.equal(config.entryPath, mountedEntryPath);
           assert.isUndefined(config.wslRuntimeId);
           assert.isTrue(Option.isNone(config.preflightFailure));
@@ -540,12 +566,13 @@ describe("DesktopBackendConfiguration", () => {
             Effect.sync(() => {
               invalidatedRuntimeIds.push(runtimeId);
             }),
-          ensureNodePty: (_distro, root) => ({
+          probeRuntime: () => ({
             ok: false,
-            reason:
-              root === stagedAppRoot
-                ? "unsupported CPU architecture or incompatible system libraries"
-                : "mounted tree is broken in some other way",
+            reason: "unsupported CPU architecture or incompatible system libraries",
+          }),
+          ensureNodePty: () => ({
+            ok: false,
+            reason: "mounted tree is broken in some other way",
             fatal: true,
           }),
         }),
@@ -575,51 +602,11 @@ describe("DesktopBackendConfiguration", () => {
             Effect.sync(() => {
               invalidatedRuntimeIds.push(runtimeId);
             }),
-          ensureNodePty: (_distro, root) =>
-            root === stagedAppRoot
-              ? { ok: false, reason: "pty.node could not be loaded", fatal: true }
-              : {
-                  ok: false,
-                  reason: "WSL backend preflight timed out while probing for Node.js.",
-                  fatal: false,
-                },
-        }),
-      },
-      () =>
-        Effect.gen(function* () {
-          const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
-          const config = yield* configuration.resolveWsl({ port: 5000, distro: "Ubuntu" });
-          const failure = Option.getOrThrow(config.preflightFailure);
-
-          assert.isFalse(failure.fatal);
-          assert.equal(failure.retryLimit, 12);
-          assert.include(failure.reason, "timed out");
-          assert.deepEqual(invalidatedRuntimeIds, []);
-        }),
-    );
-  });
-
-  it.effect("resolveWsl retries the staged runtime after a transient probe failure", () => {
-    const invalidatedRuntimeIds: string[] = [];
-    return withPackagedWslHarness(
-      {
-        archiveHash: "e".repeat(64),
-        forbidFallback: "A transient probe failure must not extract the fallback",
-        forbidCleanup: "A transient probe failure must not clean the fallback tree",
-        wsl: () => ({
-          prepareRuntime: () => ({
-            ok: true,
-            linuxAppRoot: "/home/test/.lecturn/wsl-runtime/cache",
-          }),
-          invalidateRuntime: (_distro, runtimeId) =>
-            Effect.sync(() => {
-              invalidatedRuntimeIds.push(runtimeId);
-            }),
+          probeRuntime: () => ({ ok: false, reason: "lecturn --version failed (exit 1)" }),
           ensureNodePty: () => ({
             ok: false,
             reason: "WSL backend preflight timed out while probing for Node.js.",
             fatal: false,
-            retryLimit: 12,
           }),
         }),
       },
@@ -866,10 +853,14 @@ describe("DesktopBackendConfiguration", () => {
       const previousWslEnv = process.env.WSLENV;
       const previousOpenAiKey = process.env.OPENAI_API_KEY;
       const previousAnthropicKey = process.env.ANTHROPIC_API_KEY;
+      const previousOtlpHeaders = process.env.LECTURN_OTLP_HEADERS;
+      const previousOtlpProtocol = process.env.LECTURN_OTLP_PROTOCOL;
       try {
         process.env.WSLENV = "GOPATH/p:OPENAI_API_KEY/u:EMPTY::AZURE_DEVOPS_EXT_PAT/u";
         process.env.OPENAI_API_KEY = "openai-key";
         process.env.ANTHROPIC_API_KEY = "anthropic-key";
+        process.env.LECTURN_OTLP_HEADERS = 'authorization="Bearer%20my-token"';
+        process.env.LECTURN_OTLP_PROTOCOL = "http/protobuf";
 
         yield* Effect.gen(function* () {
           const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
@@ -889,13 +880,14 @@ describe("DesktopBackendConfiguration", () => {
           assert.equal(config.httpBaseUrl.href, "http://172.27.0.99:5050/");
           assert.equal(config.env.OPENAI_API_KEY, "openai-key");
           assert.equal(config.env.ANTHROPIC_API_KEY, "anthropic-key");
+          assert.equal(config.env.LECTURN_OTLP_PROTOCOL, "http/protobuf");
           // The existing WSLENV is preserved byte-for-byte (note the empty
           // "::" segment survives — WSL ignores it, so we don't normalize
           // it away) and ANTHROPIC_API_KEY is appended. OPENAI_API_KEY is
           // already declared, so it isn't forwarded twice.
           assert.equal(
             config.env.WSLENV,
-            "GOPATH/p:OPENAI_API_KEY/u:EMPTY::AZURE_DEVOPS_EXT_PAT/u:ANTHROPIC_API_KEY",
+            "GOPATH/p:OPENAI_API_KEY/u:EMPTY::AZURE_DEVOPS_EXT_PAT/u:ANTHROPIC_API_KEY:LECTURN_OTLP_HEADERS:LECTURN_OTLP_PROTOCOL",
           );
         }).pipe(
           Effect.provide(
@@ -918,6 +910,8 @@ describe("DesktopBackendConfiguration", () => {
         restoreEnv("WSLENV", previousWslEnv);
         restoreEnv("OPENAI_API_KEY", previousOpenAiKey);
         restoreEnv("ANTHROPIC_API_KEY", previousAnthropicKey);
+        restoreEnv("LECTURN_OTLP_HEADERS", previousOtlpHeaders);
+        restoreEnv("LECTURN_OTLP_PROTOCOL", previousOtlpProtocol);
       }
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -1280,7 +1274,7 @@ describe("DesktopBackendConfiguration", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-backend-config-test-",
+        prefix: "lecturn-desktop-backend-config-test-",
       });
       const resourcesPath = path.join(baseDir, "resources");
       const stavePath = path.join(resourcesPath, "stave/stave");
@@ -1327,7 +1321,7 @@ describe("DesktopBackendConfiguration", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-backend-config-test-",
+        prefix: "lecturn-desktop-backend-config-test-",
       });
       const goBinStavePath = path.join(baseDir, "custom-gobin/stave");
       const homeGoStavePath = path.join(baseDir, "go/bin/stave");
@@ -1371,43 +1365,24 @@ describe("DesktopBackendConfiguration", () => {
   );
 
   it.effect("resolveWsl points stavePath at the Linux binary inside the staged runtime", () => {
-    const linuxAppRoot = "/home/test/.t3/wsl-runtime/1.2.3-x64";
+    const linuxAppRoot = "/home/test/.lecturn/wsl-runtime/1.2.3-x64";
     return withPackagedWslHarness(
       {
         archiveHash: "c".repeat(64),
         forbidFallback: "A valid WSL archive must not extract the Windows fallback",
         wsl: () => ({
           prepareRuntime: () => ({ ok: true, linuxAppRoot }),
-          ensureNodePty: () => ({
-            ok: true,
-            nodePath: "/usr/bin/node",
-            resolvedPath: "/usr/bin:/bin",
-          }),
+          probeRuntime: () => ({ ok: true, resolvedPath: "/usr/bin:/bin" }),
         }),
       },
-      ({ baseDir }) =>
+      () =>
         Effect.gen(function* () {
-          const fileSystem = yield* FileSystem.FileSystem;
-          const path = yield* Path.Path;
           const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+          const config = yield* configuration.resolveWsl({ port: 5000, distro: "Ubuntu" });
 
-          const absent = yield* configuration.resolveWsl({ port: 5000, distro: "Ubuntu" });
-          assert.notProperty(absent.bootstrap, "stavePath");
-
-          // The archive is built from server.asar, so the Windows-side copy
-          // there is the witness that the staged runtime carries the binary.
-          const windowsStavePath = path.join(
-            baseDir,
-            "server.asar/apps/server/dist/stave/linux-x64/stave",
-          );
-          yield* fileSystem.makeDirectory(path.dirname(windowsStavePath), { recursive: true });
-          yield* fileSystem.writeFileString(windowsStavePath, "stave");
-
-          const present = yield* configuration.resolveWsl({ port: 5000, distro: "Ubuntu" });
-          assert.equal(
-            present.bootstrap.stavePath,
-            `${linuxAppRoot}/apps/server/dist/stave/linux-x64/stave`,
-          );
+          // The Linux CLI release archive carries Stave at
+          // stave/<platformKey>/stave beside the `lecturn` executable.
+          assert.equal(config.bootstrap.stavePath, `${linuxAppRoot}/stave/linux-x64/stave`);
         }),
     );
   });
@@ -1454,7 +1429,7 @@ describe("DesktopBackendConfiguration", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-desktop-backend-config-test-",
+        prefix: "lecturn-desktop-backend-config-test-",
       });
 
       const previousWslEnv = process.env.WSLENV;

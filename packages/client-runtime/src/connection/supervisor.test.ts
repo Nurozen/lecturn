@@ -56,16 +56,19 @@ const RELAY_TARGET = new RelayConnectionTarget({
 const TARGET_ENTRY: ConnectionCatalogEntry = {
   target: TARGET,
   profile: Option.none(),
+  enabled: true,
 };
 
 const RELAY_ENTRY: ConnectionCatalogEntry = {
   target: RELAY_TARGET,
   profile: Option.none(),
+  enabled: true,
 };
 
 const RETAGGED_RELAY_ENTRY: ConnectionCatalogEntry = {
   target: new RelayConnectionTarget({ ...RELAY_TARGET, accountId: "account-a" }),
   profile: Option.none(),
+  enabled: true,
 };
 
 const PREPARED_CONNECTION: PreparedConnection = {
@@ -736,6 +739,7 @@ describe("EnvironmentSupervisor", () => {
       yield* supervisor.retarget({
         target: new RelayConnectionTarget({ ...RELAY_TARGET }),
         profile: Option.none(),
+        enabled: true,
       });
       yield* TestClock.adjust("1 second");
       expect(yield* Ref.get(harness.releaseCount)).toBe(0);
@@ -838,6 +842,7 @@ describe("EnvironmentSupervisor", () => {
       const relinkedEntry: ConnectionCatalogEntry = {
         target: new RelayConnectionTarget({ ...RELAY_TARGET, accountId: "account-b" }),
         profile: Option.none(),
+        enabled: true,
       };
       const targets: Array<ConnectionTarget> = [];
       const harness = yield* makeHarness({

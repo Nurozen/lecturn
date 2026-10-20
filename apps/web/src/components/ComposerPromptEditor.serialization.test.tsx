@@ -41,11 +41,10 @@ function composer(value: string, onChange = (_value: string) => {}) {
     <ComposerPromptEditor
       value={value}
       cursor={collapseExpandedComposerCursor(value, value.length)}
-      terminalContexts={[]}
+      contextRecords={new Map()}
       skills={[]}
       disabled={false}
       placeholder="Write a prompt"
-      onRemoveTerminalContext={() => {}}
       onChange={onChange}
       onPaste={() => {}}
       editorRef={editorRef}

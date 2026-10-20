@@ -1,5 +1,6 @@
 import {
   EnvironmentId,
+  ORCHESTRATION_PROTOCOL_VERSION,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   type ExecutionEnvironmentDescriptor,
 } from "@lecturn/contracts";
@@ -218,6 +219,7 @@ export const make = Effect.gen(function* () {
       ...(machine === null ? {} : { machine }),
     },
     serverVersion: packageJson.version,
+    orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
     capabilities: {
       repositoryIdentity: true,
       connectionProbe: true,
@@ -225,6 +227,7 @@ export const make = Effect.gen(function* () {
       questionAttachments: true,
       fileAttachments: { maxUploadBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES },
       pullRequests: true,
+      inlineMessageContext: true,
       threadSettlement: true,
       threadAutoSettlement: true,
       threadRestartContinuation: true,
@@ -249,6 +252,7 @@ export const make = Effect.gen(function* () {
       ...(serverConfig.threadForkingEnabled ? { threadForking: true } : {}),
       ...(serverConfig.staveEnabled ? { stave: { protocolVersion: STAVE_PROTOCOL_VERSION } } : {}),
       environmentIcon: true,
+      projectCloneTracking: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
       ...(serverSelfUpdate === "boot-service" || desktopAppUpdate
         ? {

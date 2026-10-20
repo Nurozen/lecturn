@@ -55,6 +55,7 @@ import { useQueuedThreadKeys } from "../../state/use-thread-outbox";
 import { useWorkspaceState } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
+import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
 import {
   hasCustomHomeListOptions,
   PROJECT_SORT_OPTIONS,
@@ -198,6 +199,7 @@ function ThreadNavigationSidebarPane(
     pinThread,
     unpinThread,
     moveThread,
+    renameThread,
     regenerateThreadTitle,
     forkThread,
   } = useThreadListActions();
@@ -955,6 +957,7 @@ function ThreadNavigationSidebarPane(
       threadSearchMatchByKey,
     ],
   );
+  useThreadJumpShortcuts(listItems, handleSelectThread);
   const sidebarItemsAreEqual = useCallback(
     (previous: SidebarListItem, item: SidebarListItem): boolean => {
       if (previous.depth !== item.depth) return false;
@@ -1105,6 +1108,7 @@ function ThreadNavigationSidebarPane(
                 forkingEnvironmentIds.has(thread.environmentId) &&
                 provider?.conversationFork === "native"
               }
+              onRenameThread={renameThread}
               onRegenerateThreadTitle={regenerateThreadTitle}
               titleRegenerationSupported={titleRegenerationEnvironmentIds.has(thread.environmentId)}
               settlementSupported={settlementEnvironmentIds.has(thread.environmentId)}
@@ -1242,6 +1246,7 @@ function ThreadNavigationSidebarPane(
                 forkingEnvironmentIds.has(thread.environmentId) &&
                 provider?.conversationFork === "native"
               }
+              onRenameThread={renameThread}
               onRegenerateThreadTitle={regenerateThreadTitle}
               titleRegenerationSupported={titleRegenerationEnvironmentIds.has(thread.environmentId)}
               onSelectThread={handleSelectThread}
@@ -1286,6 +1291,7 @@ function ThreadNavigationSidebarPane(
       projectByKey,
       projectTitleByProjectKey,
       regenerateThreadTitle,
+      renameThread,
       props.onNewThreadInProject,
       props.onNewThreadOnBranch,
       props.searchQuery,

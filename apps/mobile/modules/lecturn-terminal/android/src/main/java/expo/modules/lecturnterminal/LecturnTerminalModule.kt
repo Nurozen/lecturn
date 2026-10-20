@@ -54,7 +54,10 @@ class LecturnTerminalModule : Module() {
         view.mutedForegroundColorHex = mutedForegroundColor
       }
 
-      Events("onInput", "onResize")
+      Prop("captureRequest") { view: LecturnTerminalView, request: Double ->
+        view.captureRequest = request
+      }
+      Events("onInput", "onResize", "onCapture")
 
       OnViewDestroys { view: LecturnTerminalView ->
         view.cleanup()

@@ -397,11 +397,15 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
         ...buildThreadTitlePrompt({
           message: input.message,
           previousTitle: input.previousTitle,
+          linkedContext: input.linkedContext,
           attachments: input.attachments,
         }),
         modelSelection: input.modelSelection,
       });
-      return { title: sanitizeThreadTitle(generated.title) };
+      return {
+        title: sanitizeThreadTitle(generated.title),
+        ...(generated.needsRefinement ? { needsRefinement: true } : {}),
+      };
     });
 
   const generateWorkflowSummary: TextGeneration.TextGeneration["Service"]["generateWorkflowSummary"] =

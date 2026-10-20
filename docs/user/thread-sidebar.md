@@ -204,3 +204,10 @@ Stave spaces and sagas carry a staff icon in their parent heading. Nested conver
 When multiple Connect accounts are available, each account has its own section. Projects from different accounts stay separate even when they use the same repository. Collapse a section to hide its conversations; its approval, input, and plan attention summary remains visible. Direct connections appear after the account sections.
 
 Use the account menu’s **Label and color** action to distinguish personal and work accounts. Labels and color choices follow the account across devices. The conversation and composer use that account’s tint; the sidebar keeps your chosen base theme.
+
+## Snooze until later
+
+Choose **Snooze → Custom…** from a thread's menu to pick a date and time in your
+local time zone, or a duration in minutes, hours, or days. Durations start when
+you confirm; one day means 24 hours. On web and desktop, you can also snooze
+several selected threads together. Choose **Wake thread** to bring a thread back early.

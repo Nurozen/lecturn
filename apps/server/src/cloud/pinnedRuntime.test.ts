@@ -1,4 +1,3 @@
-import { RuntimeDistributionPackage } from "./pinnedRuntime.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -6,29 +5,59 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Path from "effect/Path";
-import * as PlatformError from "effect/PlatformError";
+import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+
+import { cliArchiveFileName } from "@lecturn/shared/cliRelease";
 
 import * as ProcessRunner from "../processRunner.ts";
 import {
   ensurePinnedRuntimeInstalled as installRuntime,
+  pinnedRuntimeCommand,
   pinnedRuntimePaths,
   PinnedRuntimeInstallError,
+  RuntimeReleaseArchivesPublished,
 } from "./pinnedRuntime.ts";
 
+// Lecturn keeps standalone runtimes gated until its release archives are
+// published; these tests exercise the archive path with the gate open.
 const ensurePinnedRuntimeInstalled = (input: Parameters<typeof installRuntime>[0]) =>
-  installRuntime(input).pipe(Effect.provideService(RuntimeDistributionPackage, "lecturn"));
+  installRuntime(input).pipe(Effect.provideService(RuntimeReleaseArchivesPublished, true));
 
-const successfulRunner = (fs: FileSystem.FileSystem, path: Path.Path) =>
+// Every install fetches the release archive, checks it against SHA256SUMS,
+// and unpacks it with tar. The fake client serves both files; the fake runner
+// stands in for tar and drops the executable where extraction would.
+const version = "1.2.3";
+const archiveName = cliArchiveFileName(version, "linux-x64");
+const archiveBytes = new TextEncoder().encode("not really a tarball");
+const archiveHex = (bytes: Uint8Array) =>
+  Effect.promise(() => crypto.subtle.digest("SHA-256", bytes)).pipe(
+    Effect.map((digest) =>
+      Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(""),
+    ),
+  );
+const validChecksums = archiveHex(archiveBytes).pipe(
+  Effect.map((hex) => `${hex}  ${archiveName}\n`),
+);
+const releaseHttpClient = (checksums: string, requests: string[] = []) =>
+  HttpClient.make((request) => {
+    requests.push(request.url);
+    const body = request.url.endsWith("/SHA256SUMS") ? checksums : archiveBytes;
+    return Effect.succeed(HttpClientResponse.fromWeb(request, new Response(body)));
+  });
+const extractingRunner = (fs: FileSystem.FileSystem, path: Path.Path, commands: string[] = []) =>
   ProcessRunner.ProcessRunner.of({
     run: (input) =>
       Effect.gen(function* () {
-        const prefixIndex = input.args.indexOf("--prefix");
-        const stagingDir = input.args[prefixIndex + 1];
-        if (stagingDir === undefined) return yield* Effect.die("missing npm --prefix");
-        const entry = path.join(stagingDir, "node_modules", "lecturn", "dist", "bin.mjs");
-        yield* fs.makeDirectory(path.dirname(entry), { recursive: true }).pipe(Effect.orDie);
-        yield* fs.writeFileString(entry, "export {};\n").pipe(Effect.orDie);
+        commands.push(input.command);
+        const targetIndex = input.args.indexOf("-C");
+        const stagingDir = input.args[targetIndex + 1];
+        if (input.command !== "tar" || stagingDir === undefined) {
+          return yield* Effect.die(`unexpected command ${input.command}`);
+        }
+        yield* fs
+          .writeFileString(path.join(stagingDir, "lecturn"), "#!/bin/sh\n")
+          .pipe(Effect.orDie);
         return {
           stdout: "",
           stderr: "",
@@ -43,81 +72,85 @@ const successfulRunner = (fs: FileSystem.FileSystem, path: Path.Path) =>
   });
 
 it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
-  it.effect("installs through pnpm when its Node runtime has no npm executable", () =>
+  it.effect("installs the verified release archive as the runtime executable", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-pinned-pnpm-" });
-      const commands: Array<ProcessRunner.ProcessRunInput> = [];
-      const install = successfulRunner(fs, path);
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-pinned-archive-" });
+      const requests: string[] = [];
+      const commands: string[] = [];
       const paths = yield* ensurePinnedRuntimeInstalled({
         baseDir,
-        version: "1.2.3",
+        version,
         fs,
         path,
-        runner: ProcessRunner.ProcessRunner.of({
-          run: (input) => {
-            commands.push(input);
-            return input.command === "npm"
-              ? Effect.fail(
-                  new ProcessRunner.ProcessSpawnError({
-                    command: "npm",
-                    argumentCount: input.args.length,
-                    cause: PlatformError.systemError({
-                      _tag: "NotFound",
-                      module: "ChildProcess",
-                      method: "spawn",
-                    }),
-                  }),
-                )
-              : install.run(input);
-          },
-        }),
+        platform: "linux",
+        arch: "x64",
+        httpClient: releaseHttpClient(yield* validChecksums, requests),
+        releaseBaseUrl: "https://releases.example/download",
+        runner: extractingRunner(fs, path, commands),
         validate: (staging) =>
           fs.exists(staging.entryPath).pipe(
             Effect.flatMap((exists) => (exists ? Effect.void : Effect.die("missing runtime"))),
             Effect.orDie,
           ),
       });
-      assert.deepEqual(
-        commands.map((command) => command.command),
-        ["npm", "pnpm"],
-      );
-      assert.deepEqual(commands[1]!.args, ["--package=npm@11", "dlx", "npm", ...commands[0]!.args]);
-      assert.equal(yield* fs.readFileString(paths.sentinelPath), "1.2.3\n");
+      assert.equal(paths.entryPath, path.join(paths.versionDir, "lecturn"));
+      assert.deepEqual(pinnedRuntimeCommand(paths), { command: paths.entryPath, args: [] });
+      assert.deepEqual(requests, [
+        `https://releases.example/download/v${version}/SHA256SUMS`,
+        `https://releases.example/download/v${version}/${archiveName}`,
+      ]);
+      assert.deepEqual(commands, ["tar"]);
+      assert.equal(yield* fs.readFileString(paths.sentinelPath), `${version}\n`);
+      assert.isFalse(yield* fs.exists(path.join(paths.versionDir, "lecturn-runtime-archive")));
     }),
   );
 
-  it.effect("does not try a different installer for npm permission failures", () =>
+  it.effect("refuses an archive whose checksum does not match the release", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-pinned-permission-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-pinned-archive-bad-" });
       const commands: string[] = [];
-      yield* ensurePinnedRuntimeInstalled({
+      const error = yield* ensurePinnedRuntimeInstalled({
         baseDir,
-        version: "1.2.3",
+        version,
         fs,
         path,
-        runner: ProcessRunner.ProcessRunner.of({
-          run: (input) => {
-            commands.push(input.command);
-            return Effect.fail(
-              new ProcessRunner.ProcessSpawnError({
-                command: input.command,
-                argumentCount: input.args.length,
-                cause: PlatformError.systemError({
-                  _tag: "PermissionDenied",
-                  module: "ChildProcess",
-                  method: "spawn",
-                }),
-              }),
-            );
-          },
-        }),
-        validate: () => Effect.die("must not validate a failed install"),
+        platform: "linux",
+        arch: "x64",
+        httpClient: releaseHttpClient(`${"0".repeat(64)}  ${archiveName}\n`),
+        runner: extractingRunner(fs, path, commands),
+        validate: () => Effect.die("must not validate an unverified archive"),
       }).pipe(Effect.flip);
-      assert.deepEqual(commands, ["npm"]);
+      assert.instanceOf(error, PinnedRuntimeInstallError);
+      assert.equal(error.step, "verifying the lecturn release archive checksum");
+      assert.deepEqual(commands, []);
+      assert.deepEqual(yield* fs.readDirectory(path.join(baseDir, "runtime", "versions")), []);
+    }),
+  );
+
+  it.effect("never requests an archive the release does not publish for the host", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-pinned-archive-arm-" });
+      const requests: string[] = [];
+      const error = yield* ensurePinnedRuntimeInstalled({
+        baseDir,
+        version,
+        fs,
+        path,
+        platform: "linux",
+        arch: "arm64",
+        httpClient: releaseHttpClient(yield* validChecksums, requests),
+        runner: extractingRunner(fs, path),
+        validate: () => Effect.die("must not validate a missing archive"),
+      }).pipe(Effect.flip);
+      assert.instanceOf(error, PinnedRuntimeInstallError);
+      assert.equal(error.step, "selecting a lecturn release archive for linux-arm64");
+      assert.deepEqual(requests, []);
     }),
   );
 
@@ -126,15 +159,18 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-pinned-runtime-test-" });
-      const finalPaths = pinnedRuntimePaths(path, baseDir, "1.2.3");
+      const finalPaths = pinnedRuntimePaths(path, baseDir, version, "linux");
       let validatedDirectory = "";
 
       const installed = yield* ensurePinnedRuntimeInstalled({
         baseDir,
-        version: "1.2.3",
+        version,
         fs,
         path,
-        runner: successfulRunner(fs, path),
+        platform: "linux",
+        arch: "x64",
+        httpClient: releaseHttpClient(yield* validChecksums),
+        runner: extractingRunner(fs, path),
         validate: (staging) =>
           Effect.gen(function* () {
             validatedDirectory = staging.versionDir;
@@ -146,7 +182,7 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       assert.notEqual(validatedDirectory, finalPaths.versionDir);
       assert.deepEqual(installed, finalPaths);
       assert.isTrue(yield* fs.exists(finalPaths.entryPath));
-      assert.equal(yield* fs.readFileString(finalPaths.sentinelPath), "1.2.3\n");
+      assert.equal(yield* fs.readFileString(finalPaths.sentinelPath), `${version}\n`);
     }),
   );
 
@@ -155,14 +191,17 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-pinned-runtime-test-" });
-      const finalPaths = pinnedRuntimePaths(path, baseDir, "1.2.3");
+      const finalPaths = pinnedRuntimePaths(path, baseDir, version, "linux");
 
       yield* ensurePinnedRuntimeInstalled({
         baseDir,
-        version: "1.2.3",
+        version,
         fs,
         path,
-        runner: successfulRunner(fs, path),
+        platform: "linux",
+        arch: "x64",
+        httpClient: releaseHttpClient(yield* validChecksums),
+        runner: extractingRunner(fs, path),
         validate: () =>
           Effect.fail(new PinnedRuntimeInstallError({ step: "validating the staged runtime" })),
       }).pipe(Effect.flip);
@@ -184,16 +223,19 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       const baseDir = yield* fs.makeTempDirectoryScoped({
         prefix: "lecturn-pinned-runtime-repair-",
       });
-      const finalPaths = pinnedRuntimePaths(path, baseDir, "1.2.3");
+      const finalPaths = pinnedRuntimePaths(path, baseDir, version, "linux");
       yield* fs.makeDirectory(finalPaths.versionDir, { recursive: true });
       yield* fs.writeFileString(path.join(finalPaths.versionDir, "partial"), "incomplete\n");
 
       yield* ensurePinnedRuntimeInstalled({
         baseDir,
-        version: "1.2.3",
+        version,
         fs,
         path,
-        runner: successfulRunner(fs, path),
+        platform: "linux",
+        arch: "x64",
+        httpClient: releaseHttpClient(yield* validChecksums),
+        runner: extractingRunner(fs, path),
         validate: () => Effect.void,
       });
 
@@ -209,18 +251,22 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       const baseDir = yield* fs.makeTempDirectoryScoped({
         prefix: "lecturn-pinned-runtime-repair-",
       });
-      const finalPaths = pinnedRuntimePaths(path, baseDir, "1.2.3");
+      const finalPaths = pinnedRuntimePaths(path, baseDir, version, "linux");
       yield* fs.makeDirectory(path.dirname(finalPaths.entryPath), { recursive: true });
       yield* fs.writeFileString(finalPaths.entryPath, "broken\n");
-      yield* fs.writeFileString(finalPaths.sentinelPath, "1.2.3\n");
+      yield* fs.writeFileString(finalPaths.sentinelPath, `${version}\n`);
 
       let validations = 0;
+      const requests: string[] = [];
       yield* ensurePinnedRuntimeInstalled({
         baseDir,
-        version: "1.2.3",
+        version,
         fs,
         path,
-        runner: successfulRunner(fs, path),
+        platform: "linux",
+        arch: "x64",
+        httpClient: releaseHttpClient(yield* validChecksums, requests),
+        runner: extractingRunner(fs, path),
         validate: (paths) =>
           Effect.gen(function* () {
             validations += 1;
@@ -232,6 +278,7 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       }).pipe(Effect.flip);
 
       assert.equal(validations, 1);
+      assert.deepEqual(requests, []);
       assert.equal(yield* fs.readFileString(finalPaths.entryPath), "broken\n");
     }),
   );
@@ -249,9 +296,12 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       });
       const install = yield* ensurePinnedRuntimeInstalled({
         baseDir,
-        version: "1.2.3",
+        version,
         fs,
         path,
+        platform: "linux",
+        arch: "x64",
+        httpClient: releaseHttpClient(yield* validChecksums),
         runner,
         validate: () => Effect.void,
       }).pipe(Effect.forkScoped);
@@ -264,28 +314,28 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
   );
 });
 
-it.effect("refuses an unpublished Lecturn runtime before touching disk or invoking npm", () =>
+it.effect("refuses an unpublished Lecturn runtime before touching disk or the network", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-no-upstream-install-" });
-    let called = false;
+    const requests: string[] = [];
+    const commands: string[] = [];
     const error = yield* installRuntime({
       baseDir,
-      version: "1.2.3",
+      version,
       fs,
       path,
-      runner: ProcessRunner.ProcessRunner.of({
-        run: () => {
-          called = true;
-          return Effect.die("unexpected npm");
-        },
-      }),
+      platform: "linux",
+      arch: "x64",
+      httpClient: releaseHttpClient("", requests),
+      runner: extractingRunner(fs, path, commands),
       validate: () => Effect.void,
     }).pipe(Effect.flip);
     assert.equal(error._tag, "PinnedRuntimeInstallError");
     assert.include(error.message, "until a Lecturn runtime is published");
-    assert.isFalse(called);
+    assert.deepEqual(requests, []);
+    assert.deepEqual(commands, []);
     assert.deepEqual(yield* fs.readDirectory(baseDir), []);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );

@@ -136,6 +136,19 @@ export default defineConfig({
         rules: { "lecturn/no-mobile-uniwind-theme-escape-hatches": "error" },
       },
       {
+        // Shared client code must not call APIs missing from Hermes. Our ESNext
+        // TypeScript target accepts them even when they would crash mobile at launch.
+        // Tests run on Node and are exempt.
+        files: [
+          "apps/mobile/src/**",
+          "packages/client-runtime/src/**",
+          "packages/contracts/src/**",
+          "packages/shared/src/**",
+        ],
+        excludeFiles: ["**/*.test.ts", "**/*.test.tsx"],
+        rules: { "lecturn/no-hermes-unsupported-apis": "error" },
+      },
+      {
         // Reviewed native and third-party interop boundaries that cannot consume a className.
         files: [
           // React Native gradient strings require resolved palette colors.
@@ -147,6 +160,7 @@ export default defineConfig({
           "apps/mobile/src/features/connection/ConnectionsNewRouteScreen.tsx",
           "apps/mobile/src/features/files/FileMarkdownPreview.tsx",
           "apps/mobile/src/features/files/SourceFileSurface.tsx",
+          "apps/mobile/src/features/files/AttachmentFileScreen.tsx",
           "apps/mobile/src/features/files/ThreadFilesRouteScreen.tsx",
           "apps/mobile/src/features/files/thread-file-navigator-pane.tsx",
           "apps/mobile/src/features/home/HomeHeader.tsx",
@@ -158,6 +172,7 @@ export default defineConfig({
           "apps/mobile/src/features/threads/NewTaskDraftScreen.tsx",
           "apps/mobile/src/features/threads/ThreadComposer.tsx",
           "apps/mobile/src/features/threads/ThreadFeed.tsx",
+          "apps/mobile/src/features/review/ReviewCommentCard.tsx",
           "apps/mobile/src/features/threads/ThreadSettingsSheet.tsx",
           "apps/mobile/src/features/threads/git/GitOverviewSheet.tsx",
           "apps/mobile/src/features/threads/thread-list-items.tsx",

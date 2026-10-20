@@ -86,6 +86,11 @@ const desktopEnvironmentLayer = Layer.unwrap(
   }),
 );
 
+// The remote runs the exact release this app is on, from its self-contained
+// archive where a release publishes one for the remote's platform (no Node or
+// npm needed), and otherwise from the npm package through npx. Development
+// points the remote at a source checkout instead so the two sides can be
+// iterated together.
 const resolveDesktopSshCliRunner = (
   environment: DesktopEnvironment.DesktopEnvironment["Service"],
   settings: DesktopAppSettings.DesktopSettings,
@@ -98,6 +103,8 @@ const resolveDesktopSshCliRunner = (
     };
   }
   return {
+    // A development build has no release of its own to download.
+    ...(environment.isDevelopment ? {} : { archiveVersion: environment.appVersion }),
     packageSpec: resolveRemoteLecturnCliPackageSpec({
       appVersion: environment.appVersion,
       updateChannel: settings.updateChannel,

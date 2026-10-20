@@ -322,6 +322,8 @@ const makePairServerConfig = Effect.fn(function* (input: {
     otlpMetricsUrl: undefined,
     otlpExportIntervalMs: 10_000,
     otlpServiceName: "lecturn-server",
+    otlpHeaders: undefined,
+    otlpProtocol: "http/json",
     mode: "web",
     port: state.port,
     host: state.host,

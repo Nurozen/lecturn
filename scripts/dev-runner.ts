@@ -388,6 +388,7 @@ export function createDevRunnerEnv({
       delete output.LECTURN_MODE;
       delete output.LECTURN_NO_BROWSER;
       delete output.LECTURN_HOST;
+      delete output.LECTURN_DEV_AUTH_TOKEN;
     }
 
     if (!isDesktopMode && host !== undefined) {

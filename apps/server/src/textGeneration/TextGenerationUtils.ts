@@ -10,7 +10,7 @@ const decodeJsonThreadTitle = Schema.decodeOption(
 
 /** Convert an Effect Schema to a flat JSON Schema object, inlining `$defs` when present. */
 export function toJsonSchemaObject(schema: Schema.Top): unknown {
-  const document = Schema.toJsonSchemaDocument(schema);
+  const document = Schema.toJsonSchemaDocument(Schema.toType(schema));
   if (document.definitions && Object.keys(document.definitions).length > 0) {
     return { ...document.schema, $defs: document.definitions };
   }
@@ -36,7 +36,8 @@ export function toCodexJsonSchemaObject(schema: Schema.Top): unknown {
       );
       if (nonFinite) return convert(variants.find((variant) => variant !== nonFinite));
     }
-    // Refinements can introduce allOf (for example Number.between). These remain
+    // Refinements can introduce allOf (for example Number.between) and string
+    // length bounds (toJsonSchemaObject emits the decoded type). These remain
     // enforced by the original Effect schema after receiving the final output.
     return Object.fromEntries(
       Object.entries(value)
@@ -44,6 +45,8 @@ export function toCodexJsonSchemaObject(schema: Schema.Top): unknown {
           ([key]) =>
             ![
               "allOf",
+              "minLength",
+              "maxLength",
               "not",
               "if",
               "then",
@@ -109,7 +112,11 @@ export function sanitizePrTitle(raw: string): string {
   return "Update project changes";
 }
 
-/** Normalise a raw thread title to a compact single-line sidebar-safe label. */
+// Prompts ask for under 40 characters. This cap only stops a runaway model
+// from pushing a paragraph into the sidebar, header, and window title.
+const MAX_THREAD_TITLE_CHARS = 120;
+
+/** Normalise a raw thread title to a single line. Clients truncate for display. */
 export function sanitizeThreadTitle(raw: string): string {
   // Unwrap a JSON-formatted title before truncation can cut off the closing brace.
   const decoded = decodeJsonThreadTitle(raw);
@@ -126,11 +133,11 @@ export function sanitizeThreadTitle(raw: string): string {
     return "New thread";
   }
 
-  if (normalized.length <= 50) {
+  if (normalized.length <= MAX_THREAD_TITLE_CHARS) {
     return normalized;
   }
 
-  return `${normalized.slice(0, 47).trimEnd()}...`;
+  return `${normalized.slice(0, MAX_THREAD_TITLE_CHARS - 3).trimEnd()}...`;
 }
 
 /** CLI name to human-readable label, e.g. "codex" → "Codex CLI (`codex`)" */
