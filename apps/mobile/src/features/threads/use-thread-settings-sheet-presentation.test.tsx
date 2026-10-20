@@ -99,19 +99,27 @@ describe("composer settings presentation", () => {
     expect(focus).toHaveBeenCalledTimes(1);
   });
 
-  it("cancels a pending focus restore when settings reopens from compact metadata", async () => {
+  it("cancels a pending focus restore when settings reopens during the dismissal handoff", async () => {
     await render(true);
     await act(() => presentation.open());
     await render(false);
     await nextFrame();
     await act(() => presentation.onDismissed());
+    // The card stays expanded across the handoff back to its editor, so the
+    // reopen comes from the expanded toolbar rather than compact metadata.
+    expect(expanded).toBe(true);
     await act(() => presentation.open());
     await nextFrame();
     await act(() => vi.advanceTimersByTime(500));
     await act(() => presentation.onStackTransitionsFinished());
     await nextFrame();
     expect(presentation.isVisible).toBe(true);
-    expect(expanded).toBe(false);
+    expect(expanded).toBe(true);
     expect(focus).not.toHaveBeenCalled();
+    // The reopened sheet keeps the editor's restore and hands focus back once.
+    await act(() => presentation.onDismissed());
+    await act(() => presentation.onStackTransitionsFinished());
+    await nextFrame();
+    expect(focus).toHaveBeenCalledTimes(1);
   });
 });

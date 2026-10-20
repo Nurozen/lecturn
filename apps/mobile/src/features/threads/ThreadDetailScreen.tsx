@@ -949,10 +949,12 @@ const ThreadDetailScreenContent = memo(function ThreadDetailScreenContent(
     feedTouchStartRef.current = null;
   }, []);
   const feedBlurTarget = useRef<View>(null);
+  const arcaneBackdrop = (
+    <ArcaneBackdrop transitionKey={`${props.environmentId}:${props.selectedThread.projectId}`} />
+  );
 
   return (
     <View className="flex-1">
-      <ArcaneBackdrop transitionKey={`${props.environmentId}:${props.selectedThread.projectId}`} />
       {showContent ? (
         <BlurTargetView
           ref={feedBlurTarget}
@@ -970,6 +972,9 @@ const ThreadDetailScreenContent = memo(function ThreadDetailScreenContent(
                 : "absolute inset-0 bg-screen"
             }
           />
+          {/* Lecturn backdrop sits above the opaque canvas inside the blur target so
+              glass surfaces sample it and the solid layer cannot hide it. */}
+          {arcaneBackdrop}
           <ThreadFeed
             key={selectedThreadKey}
             environmentId={props.environmentId}
@@ -1004,7 +1009,7 @@ const ThreadDetailScreenContent = memo(function ThreadDetailScreenContent(
           />
         </BlurTargetView>
       ) : (
-        <View className="flex-1" />
+        <View className="flex-1">{arcaneBackdrop}</View>
       )}
 
       {/* Floating composer — sticks to keyboard via KeyboardStickyView */}
